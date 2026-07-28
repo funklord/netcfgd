@@ -1,0 +1,104 @@
+// This crate is section 1 constraint 4's single audited exception: the only
+// place in netcfgd where `unsafe` is permitted. It is not forbidden here, and
+// the absence of the usual attribute is deliberate rather than an oversight.
+//
+// Everything that touches bytes off the wire lives in `wire` and `dump`, both
+// of which are entirely safe. The `unsafe` is six syscalls in `socket`, each
+// with a SAFETY comment naming the invariant that makes it sound.
+
+//! rtnetlink: a socket, a codec, and the dumps netcfgd needs.
+//!
+//! Depends on libc and the kernel and nothing else, which is why its record
+//! types are its own rather than `netcfgd-model`'s -- turning them into an
+//! `Observed` belongs to `netcfgd-observe`.
+
+pub mod dump;
+pub mod socket;
+pub mod wire;
+
+pub use dump::{AddressRecord, LinkRecord, RouteRecord};
+pub use socket::Netlink;
+
+use std::io;
+
+/// Everything the kernel currently reports, in one round of dumps.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Snapshot {
+	/// Every link.
+	pub links: Vec<LinkRecord>,
+	/// Every address.
+	pub addresses: Vec<AddressRecord>,
+	/// Every route.
+	pub routes: Vec<RouteRecord>,
+	/// Whether any address in this dump carried `IFA_PROTO`.
+	///
+	/// **A lower bound, not a kernel capability check.** `false` means "no
+	/// evidence seen", not "the kernel cannot do this".
+	///
+	/// The tempting reading is that a 5.18-or-later kernel tags its own
+	/// addresses -- `IFAPROT_KERNEL_LO` on loopback, `IFAPROT_KERNEL_LL` on a
+	/// link-local -- so a plain dump would answer the question for free. It
+	/// does not. Checked against a 6.12 kernel: neither `127.0.0.1` nor a
+	/// kernel-generated `fe80::/64` carried the attribute, and `ip -d addr`
+	/// agreed, so a passive probe reports `false` on a kernel that supports
+	/// the feature completely.
+	///
+	/// What actually works is decision 0002's read-back, folded into ordinary
+	/// operation rather than run as a separate probe: netcfgd sets
+	/// `IFA_PROTO` on every address it installs, an older kernel ignores the
+	/// unknown attribute, and the next dump says which happened. So this flag
+	/// starts `false` on a fresh system and becomes `true` once netcfgd owns
+	/// its first address. Until then the weaker recorded-state fallback
+	/// applies, which is the conservative direction and costs only
+	/// convenience.
+	pub address_proto_supported: bool,
+}
+
+/// Take one round of dumps.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error` from the socket, or from a netlink error
+/// reply.
+pub fn snapshot() -> io::Result<Snapshot> {
+	let mut socket = Netlink::open()?;
+	socket.set_timeout(5)?;
+	snapshot_with(&mut socket)
+}
+
+/// Take one round of dumps over an existing socket.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error`.
+pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
+	let (body, attrs) = dump::link_request();
+	let links: Vec<LinkRecord> = socket
+		.request(dump::requests::LINK, dump::dump_flags(), &body, &attrs)?
+		.iter()
+		.filter_map(|payload| dump::decode_link(payload))
+		.collect();
+
+	let (body, attrs) = dump::address_request();
+	let addresses: Vec<AddressRecord> = socket
+		.request(dump::requests::ADDRESS, dump::dump_flags(), &body, &attrs)?
+		.iter()
+		.filter_map(|payload| dump::decode_address(payload))
+		.collect();
+
+	let (body, attrs) = dump::route_request();
+	let routes: Vec<RouteRecord> = socket
+		.request(dump::requests::ROUTE, dump::dump_flags(), &body, &attrs)?
+		.iter()
+		.filter_map(|payload| dump::decode_route(payload))
+		.collect();
+
+	let address_proto_supported = addresses.iter().any(|address| address.proto.is_some());
+
+	Ok(Snapshot {
+		links,
+		addresses,
+		routes,
+		address_proto_supported,
+	})
+}
