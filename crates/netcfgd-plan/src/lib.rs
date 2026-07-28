@@ -785,15 +785,24 @@ impl Builder {
 
 /// Whether a desired route and an observed one are the same route.
 ///
-/// Compared on the fields the kernel keys a route by. `onlink` is excluded
-/// because it is an instruction for installation rather than a property that
-/// comes back out, so including it would make every onlink route look absent
-/// and be re-added on every run -- which is exactly the idempotence failure
-/// section 6 gates against.
+/// Compared on the fields the kernel keys a route by, after normalising the
+/// two places where "unset" and "the default" are the same thing. Both
+/// exclusions were idempotence failures rather than theory:
+///
+/// - `onlink` is an instruction for installation, not a property that comes
+///   back out of a dump, so comparing it makes every onlink route look absent.
+/// - `table` is absent in a config that does not name one and always present
+///   in a dump, so comparing them raw makes every ordinary route look absent.
+///   This one got past the fixture harness and was caught by running `ncfg
+///   apply` twice against a real kernel, because the simulated executor copied
+///   the desired table through instead of defaulting it the way the kernel
+///   does.
 fn route_matches(desired: &Route, observed: &netcfgd_model::ObservedRoute) -> bool {
+	let desired_table = desired.table.unwrap_or(netcfgd_model::route::MAIN_TABLE);
+	let observed_table = observed.table.unwrap_or(netcfgd_model::route::MAIN_TABLE);
 	desired.destination == observed.destination
 		&& desired.via == observed.via
-		&& desired.table == observed.table
+		&& desired_table == observed_table
 		&& desired.src == observed.src
 		&& (desired.metric.is_none() || desired.metric == observed.metric)
 }
