@@ -27,6 +27,7 @@ fn iface(name: &str) -> Interface {
 		dot1x: None,
 		advertise: None,
 		forwarding: None,
+		guard: None,
 	}
 }
 

@@ -207,6 +207,23 @@ pub struct RaPolicy {
 	pub lifetime: Option<u32>,
 }
 
+/// Why an interface must not be disrupted.
+///
+/// Something outside netcfgd depends on this interface -- an NFS root, a
+/// replicating database, the session the operator is connected over. netcfgd
+/// refuses to plan a disruptive action against it, and reports what it
+/// declined instead (`docs/decisions/0010`).
+///
+/// The reason is a string rather than a boolean because the refusal text is
+/// the whole value: "eth0 is critical" sends the reader looking for what is
+/// critical about it, and "eth0: nfs root" tells them what to go and stop.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Guard {
+	/// What depends on this interface, in the operator's own words.
+	pub reason: String,
+}
+
 /// An interface and everything netcfgd configures on it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -252,4 +269,7 @@ pub struct Interface {
 	/// into a ruleset it does not own.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub forwarding: Option<bool>,
+	/// Something outside netcfgd depends on this interface.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub guard: Option<Guard>,
 }

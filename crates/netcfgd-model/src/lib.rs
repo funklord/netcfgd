@@ -38,7 +38,7 @@ pub use address::{AddressSource, Dhcp4, Dhcp6, PdRequest, PrefixRef, Slaac, Stat
 pub use device::{Device, DeviceMatch, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
-pub use interface::{Interface, InterfaceKind, RaPolicy, WgPeer};
+pub use interface::{Guard, Interface, InterfaceKind, RaPolicy, WgPeer};
 pub use observed::{
 	AppliedDns, BackendKind, Observed, ObservedAddress, ObservedBackend, ObservedLink,
 	ObservedRoute, Origin, Ownership,
