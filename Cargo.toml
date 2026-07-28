@@ -3,6 +3,7 @@ resolver = "2"
 members = [
 	"crates/netcfgd-model",
 	"crates/netcfgd-compile",
+	"crates/netcfgd-plan",
 ]
 
 [workspace.package]
