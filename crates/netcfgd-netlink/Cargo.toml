@@ -1,0 +1,32 @@
+[package]
+name        = "netcfgd-netlink"
+description = "rtnetlink transport and codec. The only netcfgd crate permitted `unsafe`."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+# Deliberately NOT `[lints] workspace = true`: the workspace forbids unsafe, and
+# forbid cannot be relaxed by a crate that inherits it. This crate is section 1
+# constraint 4's single audited exception, so it states its own lints and keeps
+# every other one the workspace sets.
+[lints.rust]
+missing_docs     = "warn"
+unreachable_pub  = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+all                     = { level = "warn", priority = -1 }
+pedantic                = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+struct_excessive_bools  = "allow"
+# Every `unsafe` block here has a SAFETY comment; the gate in the Makefile
+# checks that, and this makes the compiler check it too.
+undocumented_unsafe_blocks = "warn"
+
+[dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+libc = "0.2"

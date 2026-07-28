@@ -1,0 +1,15 @@
+[package]
+name        = "netcfgd-observe"
+description = "Kernel dumps plus recorded prior state -> the observed model."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lints]
+workspace = true
+
+[dependencies]
+netcfgd-model   = { path = "../netcfgd-model" }
+netcfgd-netlink = { path = "../netcfgd-netlink" }
