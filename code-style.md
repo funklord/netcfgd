@@ -38,11 +38,12 @@ lints do not cover is the part that matters:
   in `ncfg explain` output and then in somebody's grep, where it can no
   longer be renamed. Names in `netcfgd-model` are a public interface even
   before the schema freezes at M4.
-- **One word per concept, everywhere.** The desired/observed pair (or
-  whatever §8 question 5 settles on) is the clearest case: whichever pair
-  wins, it is the same word in the type name, the `/run` path, the CLI
-  subcommand and the documentation. A synonym introduced for variety is a
-  second concept as far as any reader is concerned.
+- **One word per concept, everywhere.** `desired` and `observed` are the
+  clearest case: the same word in the type name, the `/run` path, the CLI
+  subcommand and the documentation, and no synonym anywhere. A synonym
+  introduced for variety is a second concept as far as any reader is
+  concerned. `docs/decisions/0005-state-vocabulary.md` settles which pair,
+  and rules out carrying both as aliases.
 - **Prefer the plain descriptive name over the redundant one.** The type a
   planner returns is `Plan`, not `PlanStruct` or `PlanResult`;
   `netcfgd_plan::Plan` already reads correctly at the call site, and

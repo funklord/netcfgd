@@ -75,12 +75,30 @@ Globals {
   hostname_policy  : enum { None, FromDhcp, Static(string) }
 }
 
-DnsPolicy {
-  mode    : enum { None, WriteResolvConf, Resolvconf, Exec(string) }
-  servers : [IpAddr]                  // global; per-interface merges on top
-  search  : [string]
-  options : [string]
+DnsPolicy {                           // see docs/decisions/0007
+  mode      : enum { None, WriteResolvConf, Resolvconf, Openresolv,
+                     Resolved, Dnsmasq, Unbound, Exec(string) }
+                                      // no Auto: never guess where queries go
+  servers   : [DnsServer]
+  search    : [string]                // suffix completion; every mode
+  domains   : [RoutingDomain]         // query routing; scope-capable modes only
+  options   : [string]
+  dnssec    : enum { No, Allow, Yes }?
+  transport : enum { Plain, Tls, Https }?
 }
+
+DnsServer     { addr: IpAddr, port: u16?, sni: string? }
+RoutingDomain { suffix: string, exclusive: bool = false }   // "." = catch-all
+```
+
+A per-interface `DnsPolicy` is a **scope**, not an overlay: globals are the
+fallback scope and the most specific matching domain wins. It is never merged
+into one flat list at compile time. A mode that cannot express routing domains
+is a compile error when the config uses them, never a silent flattening — 0007
+explains why that distinction is a security property rather than a stylistic
+one.
+
+```
 
 Device {                              // per-device policy, not addressing
   name     : string                   // "wlan0"
@@ -116,6 +134,9 @@ Interface {
   hooks       : [HookRef]             // references only, never inline shell
   on_drift    : DriftPolicy?          // overrides globals
   master      : string?               // bridge/bond membership
+  dot1x       : EapConfig?            // wired 802.1X; see 0008
+  advertise   : RaPolicy?             // RA handoff to odhcpd/radvd; see 0009
+  forwarding  : bool?                 // sysctl only, never a firewall rule
 }
 
 InterfaceKind =
@@ -126,6 +147,8 @@ InterfaceKind =
   | Vxlan     { id: u32, local: IpAddr?, remote: IpAddr?, port: u16? }
   | WireGuard { private_key: SecretRef, listen_port: u16?, fwmark: u32?,
                 peers: [WgPeer] }
+  | Pppoe     { parent: string, username: string, password: SecretRef,
+                service: string?, ac: string? }        // see 0009
   | Dummy
   | Veth      { peer: string }
 
@@ -139,18 +162,24 @@ WgPeer {
 }
 
 AddressSource =
-  | Static { address: string,          // CIDR, e.g. "192.168.1.10/24"
-             peer: string?,
-             preferred_lifetime: u32?,
-             valid_lifetime: u32? }
-  | Dhcp4  { hostname_mode: enum { None, Send, SendFqdn },
-             client_id: string?,
-             metric: u32?,
-             request_options: [u8],
-             backend: enum { Auto, Dhcpcd, Udhcpc, Builtin } = Auto }
-  | Dhcp6  { mode: enum { Managed, OtherConf }, rapid_commit: bool }
-  | Slaac  { privacy: enum { None, PreferTemporary } }
+  | Static    { address: string,       // CIDR, e.g. "192.168.1.10/24"
+                peer: string?,
+                preferred_lifetime: u32?,
+                valid_lifetime: u32? }
+  | Delegated { prefix: PrefixRef, suffix: string }   // see 0009
+  | Dhcp4     { hostname_mode: enum { None, Send, SendFqdn },
+                client_id: string?,
+                metric: u32?,
+                request_options: [u8],
+                backend: enum { Auto, Dhcpcd, Udhcpc, Builtin } = Auto }
+  | Dhcp6     { mode: enum { Managed, OtherConf },
+                rapid_commit: bool,
+                prefix_delegation: PdRequest? }
+  | Slaac     { privacy: enum { None, PreferTemporary } }
   | LinkLocal
+
+PrefixRef { source: string, index: u8 = 0, subnet: u16 = 0 }  // NEVER a value
+PdRequest { hint: string?, length: u8? }
 
 Route {
   destination : string                // CIDR or "default"
@@ -161,6 +190,15 @@ Route {
   scope       : enum { Global, Link, Host }?
   onlink      : bool = false
   proto       : u8?                   // rt protocol tag; see §2.3
+}
+
+RaPolicy {                            // policy only; netcfgd never sends RAs
+  backend      : enum { Auto, Odhcpd, Radvd, Exec(string) } = Auto
+  prefixes     : [PrefixRef]
+  managed      : bool = false         // M flag
+  other_config : bool = false         // O flag
+  dns          : bool = true          // RDNSS/DNSSL from the interface DnsPolicy
+  lifetime     : u32?
 }
 
 WifiNetwork {                         // an SSID profile, not bound to a device
@@ -178,16 +216,22 @@ WifiNetwork {                         // an SSID profile, not bound to a device
   hooks       : [HookRef]
 }
 
-Security =
+Security =                            // wifi only; wired uses Interface.dot1x
   | Open
   | Psk { passphrase: SecretRef, proto: enum { Wpa2, Wpa3, Wpa2Wpa3 } }
-  | Eap { method: enum { Peap, Ttls, Tls, Pwd },
-          identity: string,
-          anonymous_identity: string?,
-          password: SecretRef?,
-          ca_cert: string?, client_cert: string?, private_key: SecretRef?,
-          phase2: string? }
+  | Eap(EapConfig)
   | Owe
+
+EapConfig {                           // top-level: EAP is not a wifi concept
+  method             : enum { Peap, Ttls, Tls, Pwd }
+  identity           : string
+  anonymous_identity : string?
+  password           : SecretRef?
+  ca_cert            : string?
+  client_cert        : string?
+  private_key        : SecretRef?
+  phase2             : string?
+}
 
 SecretRef {                           // NEVER a value
   provider : enum { File, Keyring, Pass, Exec }
@@ -368,7 +412,7 @@ netcfgd/
     netcfgd-daemon/             # `netcfgd` binary
     netcfgd-cli/                # `ncfg` binary (incl. `ncfg tui`)
   backends/
-    netcfgd-dhcp/  netcfgd-wifi/  netcfgd-wg/
+    netcfgd-dhcp/  netcfgd-supplicant/  netcfgd-wg/  netcfgd-dns/  netcfgd-ppp/
   adapters/
     netcfgd-nm/                 # milestone M7
     netcfgd-restconf/           # milestone M9 — LAST
@@ -405,10 +449,10 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 
 | # | Milestone | Contents |
 |---|---|---|
-| **M1** | Walking skeleton | `netcfgd-model` + DSL compiler + rtnetlink observe + planner + `ncfg apply --oneshot`. Wired static and DHCP only. Fixture test harness. Size/footprint CI live. |
-| **M2** | Daemon and safety | `netcfgd` daemon, control socket, inotify reload, drift detection, hook runner, **commit-confirm**, `ncfg explain`, `ncfg monitor`. |
-| **M3** | Wifi | iwd backend (wpa_supplicant fallback), secret providers, `ncfg wifi *`. |
-| **M4** | Link types and imports | WireGuard, bridge/bond/VLAN/VXLAN polish, DNS handoff, netifrc compat + `ncfg convert`, importers (`nm`, `networkd`, `uci`). **Model, document schema and socket API freeze here.** |
+| **M1** | Walking skeleton | `netcfgd-model` + DSL compiler + rtnetlink observe + planner + `ncfg apply --oneshot`. Wired static and DHCP only. Fixture test harness. Size/footprint CI live. **The whole model lands here in types, including the parts nothing implements until M3–M4** — DNS scopes (0007), `EapConfig` (0008), `Delegated`/`PrefixRef`/`RaPolicy` (0009) — because M4 is the freeze and a structural change after it is a major bump. |
+| **M2** | Daemon and safety | `netcfgd` daemon, control socket, inotify reload, drift detection, hook runner, **commit-confirm**, `ncfg explain`, `ncfg monitor`. Flat DNS backends (`WriteResolvConf`, `Resolvconf`) so ordinary single-link hosts resolve long before scopes matter. |
+| **M3** | Wifi and 802.1X | iwd backend (wpa_supplicant fallback), secret providers, `ncfg wifi *`. **Wired 802.1X shares the supplicant backend** (0008) — `iwd` has no wired driver, so this path is wpa_supplicant regardless of device policy. |
+| **M4** | Link types, DNS scopes, router side | WireGuard, bridge/bond/VLAN/VXLAN polish, netifrc compat + `ncfg convert`, importers (`nm`, `networkd`, `uci`). Scope-capable DNS backends (0007). DHCPv6-PD, `Delegated` resolution and RA handoff (0009). PPPoE via `netcfgd-ppp`. **Model, document schema and socket API freeze here.** |
 | **M5** | Embedded | Build tiers, procd integration, read-only-root support, nano consumer without compiler. |
 | **M6** | TUI | `ncfg tui` including the interactive plan-preview pane. |
 | **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). |
@@ -419,16 +463,25 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 
 ---
 
-## 8. Questions that block implementation
+## 8. Decisions that were blocking implementation
 
-Answer before or during M1; the rest of the design doc's open questions can wait.
+All six are answered. Each has a record under `docs/decisions/` carrying the reasoning, the consequences and the alternatives that lost; those records are the reference, and this section is the summary. A decision is changed by writing a superseding record, not by editing the one that stands.
 
-1. **Native syntax shape.** Blocks as written above (`interface eth0 { config = ... }`) versus literal netifrc-style variables (`config_eth0="..."`) in the native dialect too. The grammar in §3 assumes blocks.
-2. **Route protocol constant.** Which `rtm_protocol` value identifies netcfgd-installed routes (§2.3)? Needs picking once and documenting forever.
-3. **Nano tier at all?** It is the one place "state is observable with `cat`" bends — stored config is a compiled document rather than readable text. Worth the build-matrix complexity as a differentiator against netifd, or should the floor be `netcfgd-embedded` with the DSL always present?
-4. **Built-in DHCPv4?** Ship a minimal client for the zero-dependency story, or always delegate to dhcpcd/udhcpc?
-5. **Vocabulary.** Keep `desired`/`observed`, or adopt NMDA's `intended`/`operational` (RFC 8342) so the eventual RESTCONF mapping is self-documenting? This propagates into `/run` paths, so it is cheapest to settle now.
-6. **`addressing` list semantics.** Confirm that multiple sources compose as intended — e.g. `[Static, Dhcp4]` meaning a fixed address plus a lease, with the planner emitting both. The design assumes composition, not exclusivity.
+| # | Question | Answer | Record |
+|---|---|---|---|
+| 1 | Native syntax shape | **Blocks.** netifrc syntax is a compat front end only, behind its own feature flag; `ncfg convert` transpiles one way. What transfers from netifrc is vocabulary, not syntax. | [0001](docs/decisions/0001-native-config-syntax.md) |
+| 2 | Route protocol constant | **110** (`0x6e`), used for both `rtm_protocol` and `IFA_PROTO`, defined once in `netcfgd-model`. Minimum kernel 5.10; `IFA_PROTO` (5.18+) detected by read-back, never by version, with the `/run` fallback below that. | [0002](docs/decisions/0002-object-ownership-tagging.md) |
+| 3 | Nano tier at all | **Kept, opt-in, floor is `netcfgd-embedded`.** Nothing before M5 may be shaped by it. Ship/no-ship is re-decided at M5 against measured compiler size, not against the current budget guess. | [0003](docs/decisions/0003-nano-tier.md) |
+| 4 | Built-in DHCPv4 | **No.** Delegate to dhcpcd/udhcpc. The `Builtin` backend variant stays in the schema — unimplemented but recognised — because adding it after the M4 freeze is a major version bump. | [0004](docs/decisions/0004-dhcpv4-client-sourcing.md) |
+| 5 | Vocabulary | **`desired`/`observed`.** Decided by constraint §1.6: adopting NMDA's `intended`/`operational` would be justified solely by an adapter's convenience. `netcfgd-restconf` translates at its own boundary. | [0005](docs/decisions/0005-state-vocabulary.md) |
+| 6 | `addressing` list semantics | **Composition, with seven rules** covering multiplicity, what order is and is not for, metric derivation from list position, DNS merge, `LinkLocal` coexistence, the empty list, and per-source reconcile behaviour. | [0006](docs/decisions/0006-addressing-list-semantics.md) |
+
+Two of these carry work that has to happen at a specific time rather than whenever it is convenient:
+
+- **The `Builtin` DHCP variant must exist in the schema before M4** (§7), because §2 has consumers reject documents containing fields they do not recognise.
+- **Per-address source attribution in `/run`** is needed by both the pre-5.18 `IFA_PROTO` fallback (0002) and rule 7 of the addressing semantics (0006). It is one mechanism with two consumers, and the second should be known about before the first one's design is fixed.
+
+The design doc's remaining open questions (§19.2) are not blocking and can wait.
 
 ---
 
