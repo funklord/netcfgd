@@ -228,6 +228,10 @@ mod tests {
 	#[test]
 	fn the_two_copies_of_the_protocol_constant_agree() {
 		assert_eq!(NETCFGD_PROTO, netcfgd_netlink::wire::netcfgd_proto());
+		assert_eq!(
+			netcfgd_model::route::MAIN_TABLE,
+			netcfgd_netlink::ops::RT_TABLE_MAIN
+		);
 	}
 
 	#[test]
