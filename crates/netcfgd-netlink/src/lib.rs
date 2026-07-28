@@ -13,10 +13,12 @@
 //! `Observed` belongs to `netcfgd-observe`.
 
 pub mod dump;
+pub mod ops;
 pub mod socket;
 pub mod wire;
 
 pub use dump::{AddressRecord, LinkRecord, RouteRecord};
+pub use ops::{parse_mac, NewLink, RouteSpec};
 pub use socket::Netlink;
 
 use std::io;

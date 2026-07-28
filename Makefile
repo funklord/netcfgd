@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii deny clean
+.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii size deny clean
 
 all: build
 
@@ -14,7 +14,7 @@ build:
 	$(CARGO) build --workspace
 
 # Ordered cheapest first, so a formatting slip does not wait on a full test run.
-check: fmt ascii clippy unsafe-policy test
+check: fmt ascii clippy unsafe-policy test size
 
 fmt:
 	$(CARGO) fmt --check
@@ -68,6 +68,26 @@ ascii:
 		exit 1; \
 	fi; \
 	echo "ascii: ok"
+
+# section 6 size budget. There is one binary and one tier so far, so this gates
+# what exists: `ncfg` against the 1 MB netcfgd-embedded budget. The nano tier's
+# 400 KB gate arrives with the build profiles in M5, and the RSS and
+# filesystem-footprint gates need a daemon and an install fixture respectively.
+#
+# Constraint 8 is why this is here at 785 KB rather than later at 1.2 MB.
+SIZE_BUDGET_EMBEDDED ?= 1048576
+
+size:
+	@$(CARGO) build --release --quiet
+	@bin=target/release/ncfg; \
+	actual=$$(stat -c%s "$$bin"); \
+	printf 'size: ncfg %s bytes of %s budget (%s%% used)\n' \
+		"$$actual" "$(SIZE_BUDGET_EMBEDDED)" \
+		"$$(( actual * 100 / $(SIZE_BUDGET_EMBEDDED) ))"; \
+	if [ "$$actual" -gt "$(SIZE_BUDGET_EMBEDDED)" ]; then \
+		echo "size: over budget"; \
+		exit 1; \
+	fi
 
 # Supply chain. Both are optional installs, so this reports rather than failing
 # when they are absent -- a gate nobody can run locally is a gate that rots.

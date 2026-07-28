@@ -15,6 +15,14 @@ use std::net::IpAddr;
 /// ordinary knob.
 pub const NETCFGD_PROTO: u8 = 110;
 
+/// `RT_TABLE_MAIN`: the table a route goes into when the config names none.
+///
+/// The kernel always reports a table, so an absent `table` in the desired
+/// state and a reported 254 in the observed state are the same table. Anything
+/// comparing the two has to normalise through this constant or every
+/// unqualified route looks absent and gets reinstalled on every run.
+pub const MAIN_TABLE: u32 = 254;
+
 /// Route scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

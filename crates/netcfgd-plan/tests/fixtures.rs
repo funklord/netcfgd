@@ -121,7 +121,10 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 				destination: route.destination.clone(),
 				via: route.via,
 				metric: route.metric,
-				table: route.table,
+				// The kernel reports a table on every route, defaulting an
+				// unqualified one to main. Copying the desired value through
+				// is what let a real idempotence bug past this harness.
+				table: Some(route.table.unwrap_or(netcfgd_model::route::MAIN_TABLE)),
 				src: route.src,
 				scope: route.scope,
 				proto: Some(netcfgd_model::route::NETCFGD_PROTO),
