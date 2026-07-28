@@ -28,6 +28,7 @@ pub mod device;
 pub mod dns;
 pub mod hook;
 pub mod interface;
+pub mod observed;
 pub mod route;
 pub mod secret;
 pub mod security;
@@ -38,6 +39,10 @@ pub use device::{Device, DeviceMatch, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
 pub use interface::{Interface, InterfaceKind, RaPolicy, WgPeer};
+pub use observed::{
+	AppliedDns, BackendKind, Observed, ObservedAddress, ObservedBackend, ObservedLink,
+	ObservedRoute, Origin, Ownership,
+};
 pub use route::{Route, RouteScope};
 pub use secret::{SecretProvider, SecretRef};
 pub use security::{EapConfig, EapMethod, Security};
