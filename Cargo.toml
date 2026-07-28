@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+	"crates/netcfgd-model",
+]
+
+[workspace.package]
+version      = "0.0.0"
+edition      = "2021"
+rust-version = "1.85"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/netcfgd/netcfgd"
+
+[workspace.lints.rust]
+unsafe_code           = "forbid"
+missing_docs          = "warn"
+unreachable_pub       = "warn"
+rust_2018_idioms      = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all      = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# The model is a schema. Its enums are wide by design and its field names are
+# the wire format, so two pedantic lints fight the spec rather than improving it.
+module_name_repetitions = "allow"
+struct_excessive_bools  = "allow"
+
+[workspace.dependencies]
+# std for now: the IpAddr serde impls live behind serde's std feature. The nano
+# tier's concern is serde_json rather than serde, and section 6 already plans to
+# hand-roll CBOR there; revisit at M5 rather than guessing now.
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Size posture, project.md section 6. These are gates, not preferences: the nano tier
+# budget is 400 KB and a budget adopted later is a budget already blown.
+[profile.release]
+opt-level        = "z"
+lto              = true
+codegen-units    = 1
+panic            = "abort"
+strip            = true
+overflow-checks  = true
+
+# Tests need unwinding, so they cannot inherit panic = "abort" above.
+[profile.test]
+opt-level = 0
