@@ -1,0 +1,464 @@
+# netcfgd — implementation brief
+
+**Status:** pre-implementation. Nothing is built yet. This document is the working brief; `netcfgd-design.md` is the reference design and holds all rationale. Where the two disagree, this document wins for *what to build*, the design doc wins for *why*.
+
+**What it is, in one line:** a Linux network configuration daemon whose plain-text config is the single source of truth, whose runtime state is greppable files in `/run`, and whose behaviour is a visible reconcile loop (`plan` then `apply`, like Terraform for interfaces).
+
+**Names:** project and daemon `netcfgd`; CLI `ncfg`; TUI is `ncfg tui` (a subcommand, not a separate binary); adapters `netcfgd-nm` and `netcfgd-restconf`; build tiers `netcfgd-nano` / `netcfgd-embedded` / `netcfgd-full`; hook env prefix `NCFG_`. Language: **Rust**.
+
+---
+
+## 0. Do this first: reserve the names
+
+Verified free on 2026-07-28: `netcfgd` and `ncfg` on both crates.io and GitHub. Crate names are **first-come and unreclaimable** — yanking removes a version, it does not free the name. Reserve before any public mention.
+
+```bash
+# 1. GitHub: create org (or user repo) `netcfgd`, repo `netcfgd`.
+
+# 2. crates.io: publish minimal placeholders.
+#    Requires a verified email on crates.io and `cargo login`.
+cargo new --lib ncfg && cd ncfg
+# Cargo.toml must have: description, license, repository, readme
+#   description = "Reserved for the netcfgd network configuration tool (CLI). Not yet released."
+#   license = "MIT OR Apache-2.0"
+#   repository = "https://github.com/netcfgd/netcfgd"
+cargo publish
+cd .. && cargo new --lib netcfgd && cd netcfgd   # same treatment
+cargo publish
+```
+
+Also cheap and worth taking while you are there: `netcfgd-nm`, `netcfgd-restconf`, `netcfgd-model`. Publishing a placeholder for a project you are actually starting is accepted practice on crates.io; publishing names you have no intent to use is not, so keep the list short and the descriptions honest.
+
+Note the crate name and the installed binary name need not match — if anything is ever contested, the binary can still be `/usr/bin/ncfg` while the crate is `netcfgd-cli`.
+
+---
+
+## 1. Hard constraints (violating these is a bug, not a tradeoff)
+
+1. **Config files are the only authority.** Anything netcfgd does traces to a file under `/etc/netcfgd/`. Runtime state in `/run/netcfgd/` is derived and disposable.
+2. **The filesystem reflects use, not capability.** A default install is `netcfgd.conf` plus `conf.d/`. Nothing else appears until a feature is actually used. CI enforces this against a fixture (§6).
+3. **Core has no mandatory dependencies** beyond libc and the kernel. No D-Bus, no glib, no polkit, no systemd. Adapters carry their own dependencies in their own packages.
+4. **`#![forbid(unsafe_code)]` everywhere except `netcfgd-netlink`**, which is the sole audited exception and carries its own fuzz targets and review bar.
+5. **The desired-state document never contains secret material.** Only `SecretRef` indirections. This is invariant across local files, `/run` state, and any future wire transmission.
+6. **The one-way rule.** No change to the model, config language or socket API may be justified *solely* by an adapter's needs (NM, RESTCONF/YANG, or anything else). If an adapter wants a concept, it must independently be something a local user would want in their own config file.
+7. **`ncfg plan` survives to the smallest build.** Not being a black box is the product; a black box on an embedded device with no console is worse than one on a laptop.
+8. **Size budgets are CI gates from commit 1.** Budgets adopted later are budgets already blown.
+
+---
+
+## 2. The desired-state document
+
+This is the load-bearing artifact. Everything hangs off it: the compiler emits it, the reconciler consumes it, the NM and RESTCONF adapters project onto it, the nano build ships a consumer without a producer.
+
+**Encoding.** JSON for humans and `/run` introspection; CBOR for compact/embedded storage. Identical schema. The canonical form is whole-host; the per-interface files in `/run/netcfgd/desired/` are projections for convenience, not separate documents.
+
+**Determinism.** The same config must produce a byte-identical document. All lists sort by their declared key; field order is fixed by the schema; integers canonical; no floats anywhere; no map types with unordered iteration. This is what makes plan diffs and caching trustworthy.
+
+**Versioning.** `schema_version` is `{major, minor}`. A consumer **rejects** a document whose major differs from its own, and **rejects any document containing a field it does not recognise** — silent field-dropping is forbidden. Adding a field bumps minor. A remote producer must negotiate the consumer's version and emit at or below it.
+
+### 2.1 Types
+
+```
+Document {
+  schema_version : Version            // {major: u16, minor: u16}
+  generated_by   : string?            // informational only, excluded from equality
+  globals        : Globals
+  devices        : [Device]           // sorted by name
+  interfaces     : [Interface]        // sorted by name
+  networks       : [WifiNetwork]      // sorted by id
+}
+
+Globals {
+  dns              : DnsPolicy
+  on_drift_default : DriftPolicy      // = Report
+  confirm_default  : u32?             // seconds; commit-confirm default window
+  hostname_policy  : enum { None, FromDhcp, Static(string) }
+}
+
+DnsPolicy {
+  mode    : enum { None, WriteResolvConf, Resolvconf, Exec(string) }
+  servers : [IpAddr]                  // global; per-interface merges on top
+  search  : [string]
+  options : [string]
+}
+
+Device {                              // per-device policy, not addressing
+  name     : string                   // "wlan0"
+  match    : DeviceMatch?             // prefer matching over naming; see note
+  managed  : bool = true              // false => netcfgd never touches it
+  wifi     : WifiDevicePolicy?
+}
+
+DeviceMatch {                         // all present fields must match
+  mac        : string?
+  path       : string?                // e.g. "pci-0000:03:00.0"
+  driver     : string?
+  name_glob  : string?
+}
+
+WifiDevicePolicy {
+  backend      : enum { Auto, Iwd, WpaSupplicant } = Auto
+  autoconnect  : bool = true
+  portal_check : bool = false
+  regdom       : string?              // ISO 3166-1 alpha-2
+  powersave    : enum { Default, On, Off } = Default
+}
+
+Interface {
+  name        : string
+  kind        : InterfaceKind
+  enabled     : bool = true
+  mtu         : u32?
+  mac         : string?
+  addressing  : [AddressSource]       // ordered; may be empty
+  routes      : [Route]               // sorted canonically
+  dns         : DnsPolicy?            // merges over globals
+  hooks       : [HookRef]             // references only, never inline shell
+  on_drift    : DriftPolicy?          // overrides globals
+  master      : string?               // bridge/bond membership
+}
+
+InterfaceKind =
+  | Physical
+  | Bridge    { members: [string], stp: bool, forward_delay: u32? }
+  | Bond      { members: [string], mode: string, miimon: u32? }
+  | Vlan      { parent: string, id: u16, protocol: enum { Dot1q, Dot1ad } }
+  | Vxlan     { id: u32, local: IpAddr?, remote: IpAddr?, port: u16? }
+  | WireGuard { private_key: SecretRef, listen_port: u16?, fwmark: u32?,
+                peers: [WgPeer] }
+  | Dummy
+  | Veth      { peer: string }
+
+WgPeer {
+  name         : string               // local label, for diagnostics
+  public_key   : string
+  preshared_key: SecretRef?
+  endpoint     : string?
+  allowed_ips  : [string]
+  keepalive    : u16?
+}
+
+AddressSource =
+  | Static { address: string,          // CIDR, e.g. "192.168.1.10/24"
+             peer: string?,
+             preferred_lifetime: u32?,
+             valid_lifetime: u32? }
+  | Dhcp4  { hostname_mode: enum { None, Send, SendFqdn },
+             client_id: string?,
+             metric: u32?,
+             request_options: [u8],
+             backend: enum { Auto, Dhcpcd, Udhcpc, Builtin } = Auto }
+  | Dhcp6  { mode: enum { Managed, OtherConf }, rapid_commit: bool }
+  | Slaac  { privacy: enum { None, PreferTemporary } }
+  | LinkLocal
+
+Route {
+  destination : string                // CIDR or "default"
+  via         : IpAddr?
+  metric      : u32?
+  table       : u32?
+  src         : IpAddr?
+  scope       : enum { Global, Link, Host }?
+  onlink      : bool = false
+  proto       : u8?                   // rt protocol tag; see §2.3
+}
+
+WifiNetwork {                         // an SSID profile, not bound to a device
+  id          : string                // stable key, usually the SSID as text
+  ssid        : bytes                 // 0..32 octets; NOT guaranteed UTF-8
+  hidden      : bool = false
+  security    : Security
+  priority    : i32 = 0               // higher wins
+  autoconnect : bool = true
+  metered     : bool = false
+  bssid_pin   : string?
+  addressing  : [AddressSource]
+  routes      : [Route]
+  dns         : DnsPolicy?
+  hooks       : [HookRef]
+}
+
+Security =
+  | Open
+  | Psk { passphrase: SecretRef, proto: enum { Wpa2, Wpa3, Wpa2Wpa3 } }
+  | Eap { method: enum { Peap, Ttls, Tls, Pwd },
+          identity: string,
+          anonymous_identity: string?,
+          password: SecretRef?,
+          ca_cert: string?, client_cert: string?, private_key: SecretRef?,
+          phase2: string? }
+  | Owe
+
+SecretRef {                           // NEVER a value
+  provider : enum { File, Keyring, Pass, Exec }
+  name     : string
+}
+
+HookRef {                             // NEVER inline shell; see §2.2
+  phase   : enum { PreUp, Up, PostUp, PreDown, Down, PostDown,
+                   Carrier, Lease, Roam, Portal, Drift }
+  path    : string                    // absolute
+  sha256  : string                    // content hash at compile time
+  run_as  : string?                   // user; default from globals
+  timeout : u32?                      // seconds
+}
+
+DriftPolicy = enum { Report, Reconcile, Ignore }
+```
+
+### 2.2 Why hooks are references, never inline shell
+
+The DSL lets you write inline shell in a `post_up { ... }` block. The **compiler materialises those blocks into files** under `/run/netcfgd/hooks/` (tmpfs, regenerated on every compile) and the document carries only `{phase, path, sha256}`.
+
+Three payoffs. The document becomes safe to transmit — a document that can carry shell is remote code execution with extra steps, and this closes that door structurally rather than by policy. The `sha256` lets drift detection notice that a hook script changed underneath you. And the nano tier, which has no hook runner, simply ignores hook entries rather than needing to parse something it cannot execute.
+
+A received (non-local) document may reference only paths that already exist on the device, and the receiving side refuses hook entries entirely unless local policy opts in.
+
+### 2.3 Knowing which objects are ours
+
+Drift detection is meaningless if netcfgd cannot distinguish objects it installed from objects someone else installed. Two mechanisms:
+
+**Routes:** set the netlink route protocol field (`rtm_protocol`) to a netcfgd-specific value on every route we install, and filter on it when computing observed state. Pick one constant, define it in `netcfgd-model`, and document it. Anything not carrying our tag is somebody else's route and is reported as foreign rather than reconciled away.
+
+**Addresses:** modern kernels expose an address protocol attribute (`IFA_PROTO`); use it where available. Where it is not available, fall back to reconciling against our own recorded prior state in `/run`. Be explicit in `ncfg explain` about which mechanism produced the answer, because the fallback is weaker and the operator should know.
+
+This needs verifying against the minimum kernel you intend to support — treat the exact attribute availability as an implementation question, not a settled fact.
+
+---
+
+## 3. Config DSL grammar
+
+Lexically simple by design: no significant indentation, no expression language, no interpolation in the local dialect.
+
+```ebnf
+config        = { statement } ;
+statement     = include | block | hook_block | assignment | comment | NL ;
+
+include       = "include" , ws , string , terminator ;
+
+block         = block_head , ws? , "{" , NL , { statement } , "}" , terminator ;
+block_head    = identifier , [ ws , block_label ] ;
+block_label   = string | identifier ;
+
+assignment    = identifier , ws? , "=" , ws? , value , terminator ;
+
+value         = string | number | boolean | secret_ref | list ;
+string        = '"' , { char - '"' | escape } , '"' ;
+number        = [ "-" ] , digit , { digit } ;
+boolean       = "true" | "false" ;
+secret_ref    = '"' , "@secret:" , [ provider , ":" ] , name , '"' ;
+list          = "[" , [ value , { "," , ws? , value } ] , "]" ;
+
+terminator    = NL | ";" ;
+comment       = "#" , { char - NL } , NL ;
+identifier    = letter , { letter | digit | "_" | "-" } ;
+```
+
+**Hook bodies are the one irregular production.** They contain arbitrary shell, so brace-counting would require parsing shell. Instead:
+
+```ebnf
+hook_block    = hook_phase , ws? , "{" , NL , shell_body , close_line ;
+hook_phase    = "pre_up" | "up" | "post_up" | "pre_down" | "down" | "post_down"
+              | "on" , ws , event_name ;
+shell_body    = { any_line - close_line } ;
+close_line    = "}" , NL ;          (* a line consisting solely of "}" *)
+```
+
+A hook body ends at **the first line consisting solely of `}`**. Unambiguous, requires no shell knowledge, and is trivially explained in documentation. Nested braces inside the shell are irrelevant.
+
+**Top-level blocks:** `interface`, `network`, `device`, `global`.
+**Nested blocks:** `wifi`, `dhcp`, `vlan`, `wireguard`, `peer` (inside `wireguard`), `bridge`, `bond`, plus hook blocks.
+
+**Drop-in precedence:** `/etc/netcfgd/netcfgd.conf` first, then `conf.d/*.conf` in lexical filename order. Later wins for scalar keys. Lists replace rather than append unless the key is declared additive in the schema. An explicit `override` keyword before a block makes replacement intent visible; without it, redefining a block that already exists is a compile **error**, not a silent win. That last rule is deliberate — silent last-wins is where every config system becomes unpredictable.
+
+**netifrc compatibility** is a separate front end producing the same model: read `config_<iface>`, `routes_<iface>`, `dns_servers_<iface>`, and `preup()`/`postup()` style functions from a `conf.d/net`-shaped file. It is a compatibility path, not a dialect of the native grammar, and lives behind its own feature flag.
+
+---
+
+## 4. Reconciler action taxonomy
+
+A plan is an ordered DAG of typed actions. Every action is idempotent by construction, carries the reason it exists, and declares its inverse so commit-confirm can revert.
+
+```
+Action {
+  id         : u32
+  op         : Op
+  reason     : Reason        // which desired field differs from which observed field
+  depends_on : [u32]
+  inverse    : Op?           // None => irreversible; plan warns loudly
+}
+
+Reason {
+  interface : string?
+  field     : string         // dotted path into the document, e.g. "addressing[0]"
+  desired   : string         // rendered value
+  observed  : string         // rendered value, or "<absent>"
+}
+```
+
+**Ops:**
+
+```
+link.create      { name, kind, params }
+link.delete      { name }
+link.set_mtu     { name, mtu }
+link.set_mac     { name, mac }
+link.set_master  { name, master }
+link.unset_master{ name }
+link.up          { name }
+link.down        { name }
+
+addr.add         { iface, addr, lifetimes }
+addr.del         { iface, addr }
+
+route.add        { route }
+route.del        { route }
+
+backend.start    { kind, iface, params }      // dhcp4/dhcp6/wifi/wireguard
+backend.stop     { kind, iface }
+backend.reload   { kind, iface, params }
+
+wifi.set_profiles{ device, profiles }
+wifi.associate   { device, network_id }
+wifi.disassociate{ device }
+wifi.set_regdom  { device, country }
+
+wg.set_device    { iface, private_key_ref, listen_port, fwmark }
+wg.set_peers     { iface, peers }
+
+dns.apply        { policy }
+
+hook.run         { iface, phase, path, env }
+
+commit.arm       { window_seconds }
+commit.confirm   { }
+commit.revert    { to_document_hash }
+```
+
+**Ordering rules** (the DAG edges the planner must emit):
+
+1. `link.create` before any action referencing that link.
+2. `link.set_master` before addressing the master, and before bringing the master up.
+3. `link.up` before `backend.start` for DHCP — a lease needs a live link. Addresses may be added to a down link, so `addr.add` does not require `link.up`.
+4. `addr.add` before `route.add` for routes whose next hop lies in that address's subnet. Routes marked `onlink` are exempt.
+5. `wifi.associate` before any DHCP backend start on that interface.
+6. `hook.run(pre_up)` before `link.up`; `hook.run(post_up)` after the last addressing action for that interface completes.
+7. **Teardown is the reverse dependency order**: routes, then addresses, then backends, then links.
+8. `commit.arm` is emitted first when a confirm window is requested, and `commit.revert` is precomputed at plan time — not derived after failure, when the network may already be unreachable.
+
+**Failure semantics.** Execution stops at the first failed action. Progress is recorded to `/run/netcfgd/plan.last.json` with each action marked done, failed or skipped. The remainder is re-runnable: `ncfg apply` recomputes from current observed state and resumes cleanly. There is no rollback-on-failure by default — that is what commit-confirm is for, and conflating the two produces surprising behaviour.
+
+**Empty plan is the normal case.** Applying an already-correct state produces zero actions, runs zero hooks, and touches nothing.
+
+---
+
+## 5. Repo layout
+
+```
+netcfgd/
+  Cargo.toml                    # workspace
+  crates/
+    netcfgd-model/              # document types, serde, canonical encode. NO I/O.
+    netcfgd-compile/            # DSL + netifrc front ends -> model. Pure.
+    netcfgd-netlink/            # rtnetlink. ONLY crate permitted `unsafe`.
+    netcfgd-observe/            # netlink + backend reports -> observed model
+    netcfgd-plan/               # diff(desired, observed) -> Plan. Pure.
+    netcfgd-apply/              # executes a Plan
+    netcfgd-proto/              # control socket types
+    netcfgd-daemon/             # `netcfgd` binary
+    netcfgd-cli/                # `ncfg` binary (incl. `ncfg tui`)
+  backends/
+    netcfgd-dhcp/  netcfgd-wifi/  netcfgd-wg/
+  adapters/
+    netcfgd-nm/                 # milestone M7
+    netcfgd-restconf/           # milestone M9 — LAST
+  tests/
+    fixtures/                   # config + observed snapshots -> expected plans
+    footprint/                  # §6 filesystem-footprint fixture
+  fuzz/
+```
+
+The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are **pure and hardware-free**. The entire planner is unit-testable by feeding fixture configs plus fake observed snapshots and asserting on the action list. Build that harness first; it is what makes the rest safe to write.
+
+---
+
+## 6. CI gates — establish before writing features
+
+| Gate | What it checks |
+|---|---|
+| Size budget | stripped static binary per tier: nano ≤ 400 KB, embedded ≤ 1 MB |
+| RSS budget | nano steady-state < 4 MB |
+| Filesystem footprint | `find /etc/netcfgd` on a fixture install with no optional features used must match a build compiled without those features |
+| Unsafe policy | `forbid(unsafe_code)` holds everywhere except `netcfgd-netlink` |
+| Supply chain | `cargo-deny`, `cargo-audit`, pinned lockfile, stated MSRV |
+| Fuzzing | every parser — DSL, netifrc, netlink messages, backend IPC — has a `cargo-fuzz` target running in CI |
+| Determinism | same config compiles to byte-identical document across runs and platforms |
+| Plan idempotence | applying a plan twice produces an empty second plan |
+
+Size posture in `Cargo.toml`: `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, static musl target. Avoid `serde_json` in the nano tier — hand-roll a minimal CBOR codec there; the ergonomic path is fine for full builds.
+
+---
+
+## 7. Milestones
+
+Order matters: the model freezes before any adapter exists, so no adapter can shape it.
+
+| # | Milestone | Contents |
+|---|---|---|
+| **M1** | Walking skeleton | `netcfgd-model` + DSL compiler + rtnetlink observe + planner + `ncfg apply --oneshot`. Wired static and DHCP only. Fixture test harness. Size/footprint CI live. |
+| **M2** | Daemon and safety | `netcfgd` daemon, control socket, inotify reload, drift detection, hook runner, **commit-confirm**, `ncfg explain`, `ncfg monitor`. |
+| **M3** | Wifi | iwd backend (wpa_supplicant fallback), secret providers, `ncfg wifi *`. |
+| **M4** | Link types and imports | WireGuard, bridge/bond/VLAN/VXLAN polish, DNS handoff, netifrc compat + `ncfg convert`, importers (`nm`, `networkd`, `uci`). **Model, document schema and socket API freeze here.** |
+| **M5** | Embedded | Build tiers, procd integration, read-only-root support, nano consumer without compiler. |
+| **M6** | TUI | `ncfg tui` including the interactive plan-preview pane. |
+| **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). |
+| **M8** | Desktop | GUI + tray applet; NM shim tier 2. |
+| **M9** | **RESTCONF — last** | `netcfgd-restconf`: `ietf-interfaces`/`ietf-ip` mapping plus a netcfgd augment module, hooks read-only. Full NETCONF (SSH/XML) only if sites ask. |
+
+**Consequence of M9 being last, stated plainly:** multi-host management arrives at the very end, because conforming to RESTCONF *is* the multi-host answer (design doc §11.1). That is a deliberate choice — this is a single-host tool first, and nothing before M9 should be shaped by fleet considerations.
+
+---
+
+## 8. Questions that block implementation
+
+Answer before or during M1; the rest of the design doc's open questions can wait.
+
+1. **Native syntax shape.** Blocks as written above (`interface eth0 { config = ... }`) versus literal netifrc-style variables (`config_eth0="..."`) in the native dialect too. The grammar in §3 assumes blocks.
+2. **Route protocol constant.** Which `rtm_protocol` value identifies netcfgd-installed routes (§2.3)? Needs picking once and documenting forever.
+3. **Nano tier at all?** It is the one place "state is observable with `cat`" bends — stored config is a compiled document rather than readable text. Worth the build-matrix complexity as a differentiator against netifd, or should the floor be `netcfgd-embedded` with the DSL always present?
+4. **Built-in DHCPv4?** Ship a minimal client for the zero-dependency story, or always delegate to dhcpcd/udhcpc?
+5. **Vocabulary.** Keep `desired`/`observed`, or adopt NMDA's `intended`/`operational` (RFC 8342) so the eventual RESTCONF mapping is self-documenting? This propagates into `/run` paths, so it is cheapest to settle now.
+6. **`addressing` list semantics.** Confirm that multiple sources compose as intended — e.g. `[Static, Dhcp4]` meaning a fixed address plus a lease, with the planner emitting both. The design assumes composition, not exclusivity.
+
+---
+
+## 9. Working in this repo
+
+### Code style
+
+Three rules, applying to every crate in the workspace — pure core, netlink, binaries, backends and adapters alike:
+
+- **`snake_case`, not `camelCase`,** for identifiers this project defines. Rust's own lints give most of this for free; what they do not give is the rest of the rule — no abbreviations, and one word per concept everywhere. Model field names become JSON keys, `/run` filenames and the dotted paths in a `Reason`, so a name invented inside a struct ends up in somebody's grep and can no longer be changed.
+- **Tabs for indentation, spaces for alignment** — one tab per nesting level, spaces after the tabs for anything lined up within a line, so alignment survives at any tab width. No tab width is prescribed.
+- **Lowercase filenames.** `snake_case.rs` for modules, kebab-case for prose, except where a tool insists otherwise (`Cargo.toml`, `README.md`).
+
+Source, comments and commit messages are **ASCII**; write `--` where prose would use an em dash. Markdown documents are exempt and this one already is. That governs the repository, not the wire — an SSID is arbitrary octets (§2.1) and the parser must keep treating it that way.
+
+**Full detail is in `code-style.md` at the repo root**, including why `rustfmt` *is* used here when the sibling C and Python projects ban their formatters: `hard_tabs` is a stable option and the default block indent style leaves nothing to align, so the rule survives the tool. `rustfmt.toml` is load-bearing — dropping `hard_tabs` converts the entire tree to spaces on the next `cargo fmt` and buries whatever change it rode in on.
+
+### Build and commit conventions
+
+- **`cargo fmt --check` and `cargo clippy -- -D warnings` before committing**, alongside the §6 gates. They are cheap and they are the two that produce noise in someone else's diff when skipped.
+- **Commit subject: capitalised, imperative, no trailing period,** 72 columns. No conventional-commit prefixes, no type tags, no emoji. Body is prose wrapped at 72 explaining *why* the change is right and what was learned making it — including wrong turns, tests that passed for the wrong reason, and numbers that turned out to be guessed. `git diff` already lists what changed.
+- **The message ends at its real content.** No trailers, no sign-offs, no tooling or assistant attribution (`Co-Authored-By:` for anything that is not a person, `Generated with ...` footers). The author field carries the attribution git needs.
+- **No docs-only commits.** Documentation rides along with the code commit it describes. Folding an accumulated session's findings back into this file is the standing exception.
+- **Stage named paths; never `git add -A`.** That is the mechanism by which local editor state, scratch files and untracked notes end up in history. `.gitignore` covers the predictable cases and is not a substitute for reading `git status --short`.
+- **Nothing containing real secret material is committed** — not in fixtures, not in test data, not temporarily. §2 makes the desired-state document secret-free by construction; the repository holds to the same rule, and a test fixture is the easiest place to forget it.
+
+Changing any of the above is a convention change: raise it rather than adjusting the default in passing.
+
+---
+
+## 10. Reference
+
+Full rationale, principles, comparisons, security model, migration paths and the northbound-adapter discipline are in **`netcfgd-design.md`** (v0.6). Read §2 (principles), §4 (architecture and the compiler/reconciler seam), §9.2 (the one-way rule) and §10 (embedded tiers) before making structural decisions.

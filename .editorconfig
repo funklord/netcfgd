@@ -1,0 +1,22 @@
+# code-style.md section 2: tabs carry structural indent, spaces carry
+# alignment within a line. No tab width is prescribed anywhere -- the viewer
+# decides. rustfmt.toml is the enforcement for Rust sources; this file is
+# for everything an editor touches before rustfmt sees it.
+
+root = true
+
+[*]
+charset                  = utf-8
+end_of_line              = lf
+insert_final_newline     = true
+trim_trailing_whitespace = true
+indent_style             = tab
+
+[*.md]
+indent_style             = space
+indent_size              = 2
+trim_trailing_whitespace = false
+
+[*.{toml,yml,yaml,json}]
+indent_style             = space
+indent_size              = 2

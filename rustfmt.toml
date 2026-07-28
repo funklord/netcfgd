@@ -1,0 +1,9 @@
+# code-style.md section 2: tabs carry structural indent, spaces carry
+# alignment within a line. hard_tabs is what makes rustfmt honour that, and
+# the default indent_style = "Block" is what keeps it from needing to align
+# anything to an open paren. Dropping hard_tabs converts the whole tree to
+# spaces on the next `cargo fmt`.
+
+hard_tabs     = true
+max_width     = 100
+newline_style = "Unix"
