@@ -1,0 +1,18 @@
+[package]
+name        = "netcfgd-plan"
+description = "diff(desired, observed) -> an ordered plan of typed, idempotent actions. Pure."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lints]
+workspace = true
+
+[dependencies]
+netcfgd-model = { path = "../netcfgd-model" }
+serde.workspace = true
+
+[dev-dependencies]
+netcfgd-compile = { path = "../netcfgd-compile" }
