@@ -1,0 +1,12 @@
+target/
+**/*.rs.bk
+*.swp
+
+# fuzz corpora and artifacts: the targets are tracked, what they find is not
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+
+# Local editor and tooling state. Nothing under these belongs in history.
+.vscode/
+.idea/
