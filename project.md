@@ -134,6 +134,7 @@ Interface {
   hooks       : [HookRef]             // references only, never inline shell
   on_drift    : DriftPolicy?          // overrides globals
   master      : string?               // bridge/bond membership
+  guard       : Guard?                // something depends on this; see 0010
   dot1x       : EapConfig?            // wired 802.1X; see 0008
   advertise   : RaPolicy?             // RA handoff to odhcpd/radvd; see 0009
   forwarding  : bool?                 // sysctl only, never a firewall rule
@@ -190,6 +191,10 @@ Route {
   scope       : enum { Global, Link, Host }?
   onlink      : bool = false
   proto       : u8?                   // rt protocol tag; see §2.3
+}
+
+Guard {                               // see docs/decisions/0010
+  reason : string                     // what depends on it, in the operator's words
 }
 
 RaPolicy {                            // policy only; netcfgd never sends RAs

@@ -258,6 +258,7 @@ fn lower_interface(
 		dot1x: None,
 		advertise: None,
 		forwarding: None,
+		guard: None,
 	};
 	let mut dns = DnsPolicy::default();
 	let mut dns_touched = false;
@@ -289,6 +290,10 @@ fn lower_interface(
 				"master" => interface.master = as_string(&assignment.value, diags),
 				"forwarding" => interface.forwarding = as_bool(&assignment.value, diags),
 				"on_drift" => interface.on_drift = as_drift(&assignment.value, diags),
+				"guard" => {
+					interface.guard = as_string(&assignment.value, diags)
+						.map(|reason| netcfgd_model::Guard { reason });
+				}
 				"dns" | "dns_search" | "dns_mode" | "dns_domains" => {
 					dns_touched = true;
 					lower_dns_key(&mut dns, assignment, diags);

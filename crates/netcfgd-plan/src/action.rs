@@ -226,6 +226,49 @@ impl Op {
 		}
 	}
 
+	/// Whether this action can interrupt traffic on the interface it touches.
+	///
+	/// A guard blocks the disruptive ones (`docs/decisions/0010`). The list is
+	/// wider than "removes the link" on purpose: changing the address on an
+	/// interface carrying an NFS mount breaks it exactly as thoroughly as
+	/// downing it, and enslaving an interface to a bridge moves its addresses.
+	///
+	/// `link.set_mtu` counts as disruptive deliberately. Lowering an MTU
+	/// interrupts traffic in flight and raising it can black-hole a path until
+	/// PMTU discovery catches up; a guard that allowed it for convenience
+	/// would be a guard nobody could rely on.
+	#[must_use]
+	pub fn is_disruptive(&self) -> bool {
+		match self {
+			Self::LinkDelete { .. }
+			| Self::LinkDown { .. }
+			| Self::LinkSetMaster { .. }
+			| Self::LinkUnsetMaster { .. }
+			| Self::LinkSetMac { .. }
+			| Self::LinkSetMtu { .. }
+			| Self::AddrDel { .. }
+			| Self::RouteDel { .. }
+			| Self::BackendStop { .. }
+			| Self::BackendReload { .. }
+			| Self::WifiDisassociate { .. }
+			| Self::WifiAssociate { .. }
+			| Self::WgSetDevice { .. }
+			| Self::WgSetPeers { .. } => true,
+			Self::LinkCreate { .. }
+			| Self::LinkUp { .. }
+			| Self::AddrAdd { .. }
+			| Self::RouteAdd { .. }
+			| Self::BackendStart { .. }
+			| Self::WifiSetProfiles { .. }
+			| Self::WifiSetRegdom { .. }
+			| Self::DnsApply { .. }
+			| Self::HookRun { .. }
+			| Self::CommitArm { .. }
+			| Self::CommitConfirm
+			| Self::CommitRevert { .. } => false,
+		}
+	}
+
 	/// Which interface this acts on, where it acts on one.
 	#[must_use]
 	pub fn interface(&self) -> Option<&str> {

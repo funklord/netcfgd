@@ -38,6 +38,12 @@ pub struct PlanOptions {
 	pub confirm_window: Option<u32>,
 	/// Hash of the document to revert to, precomputed at plan time.
 	pub revert_to: Option<String>,
+	/// Interfaces the operator has explicitly consented to disrupt.
+	///
+	/// Named rather than a blanket `--force`, because a blanket override is
+	/// the flag people alias and stop reading, and it consents to disrupting
+	/// the interfaces they had not thought about as well.
+	pub allow_disruption: Vec<String>,
 }
 
 /// Something the operator should know that is not an action.
@@ -49,6 +55,27 @@ pub struct Warning {
 	/// Which interface it concerns, where it concerns one.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub interface: Option<String>,
+}
+
+/// An action netcfgd declined to plan, and why.
+///
+/// First-class rather than a warning string, because "what did it decline?"
+/// is a question a script has to answer as well as a human, and because
+/// burying it among warnings is how it gets ignored
+/// (`docs/decisions/0010`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Refusal {
+	/// Which interface.
+	pub interface: String,
+	/// The op that was not planned.
+	pub op: String,
+	/// What the guard says depends on this interface.
+	pub guard: String,
+	/// Why the action existed, so the reader knows what is not happening.
+	pub reason: Reason,
+	/// The exact invocation that consents to it.
+	pub override_with: String,
 }
 
 /// An ordered DAG of actions, plus what could not be planned.
@@ -65,6 +92,9 @@ pub struct Plan {
 	/// Things worth saying that are not actions.
 	#[serde(default)]
 	pub warnings: Vec<Warning>,
+	/// Actions a guard prevented, and how to consent to them.
+	#[serde(default)]
+	pub refusals: Vec<Refusal>,
 }
 
 impl Plan {
@@ -78,12 +108,32 @@ impl Plan {
 	pub fn irreversible(&self) -> impl Iterator<Item = &Action> {
 		self.actions.iter().filter(|a| a.inverse.is_none())
 	}
+
+	/// Whether a guard stopped anything being planned.
+	#[must_use]
+	pub fn was_refused(&self) -> bool {
+		!self.refusals.is_empty()
+	}
 }
 
 /// Compute what would have to change for `observed` to satisfy `desired`.
 #[must_use]
 pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> Plan {
-	let mut builder = Builder::default();
+	let mut builder = Builder {
+		consented: options.allow_disruption.clone(),
+		..Builder::default()
+	};
+
+	// Collected before anything is planned, because a guard on one interface
+	// has to be known when an action against it is considered, whatever order
+	// the interfaces sort in.
+	for interface in &desired.interfaces {
+		if let Some(guard) = &interface.guard {
+			builder
+				.guards
+				.push((interface.name.clone(), guard.reason.clone()));
+		}
+	}
 
 	// Rule 8: the confirm window is armed first, and the revert is computed
 	// now rather than after a failure, when the network may already be
@@ -136,6 +186,11 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 struct Builder {
 	actions: Vec<Action>,
 	warnings: Vec<Warning>,
+	refusals: Vec<Refusal>,
+	/// `(interface, reason)` for every guarded interface.
+	guards: Vec<(String, String)>,
+	/// Interfaces the operator consented to disrupt.
+	consented: Vec<String>,
 	/// Ids every later action on an interface must wait for: its creation.
 	gates: Vec<(String, u32)>,
 	/// `link.set_master` ids, keyed by the master they enslave to.
@@ -149,7 +204,45 @@ struct Builder {
 }
 
 impl Builder {
+	/// Whether a guard forbids this action, recording the refusal if it does.
+	///
+	/// Every action passes through here, so there is one place that decides
+	/// and no planner path can route around it -- the same reasoning that puts
+	/// `Ownership::may_remove` in one function.
+	fn refused(&mut self, op: &Op, reason: &Reason) -> bool {
+		if !op.is_disruptive() {
+			return false;
+		}
+		let Some(interface) = op.interface() else {
+			return false;
+		};
+		if self.consented.iter().any(|name| name == interface) {
+			return false;
+		}
+		let Some((_, guard)) = self
+			.guards
+			.iter()
+			.find(|(name, _)| name == interface)
+			.cloned()
+		else {
+			return false;
+		};
+		self.refusals.push(Refusal {
+			interface: interface.to_owned(),
+			op: op.name().to_owned(),
+			guard,
+			reason: reason.clone(),
+			override_with: format!("ncfg apply --allow-disruption {interface}"),
+		});
+		true
+	}
+
 	fn push(&mut self, op: Op, reason: Reason, depends_on: Vec<u32>, inverse: Option<Op>) -> u32 {
+		if self.refused(&op, &reason) {
+			// Nothing is emitted, so nothing downstream can depend on it. The
+			// refusal carries what would have happened.
+			return u32::MAX;
+		}
 		let id = u32::try_from(self.actions.len()).unwrap_or(u32::MAX);
 		if inverse.is_none() {
 			self.warnings.push(Warning {
@@ -779,6 +872,7 @@ impl Builder {
 		Plan {
 			actions: self.actions,
 			warnings: self.warnings,
+			refusals: self.refusals,
 		}
 	}
 }

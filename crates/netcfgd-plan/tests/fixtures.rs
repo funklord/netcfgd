@@ -411,6 +411,7 @@ fn commit_arm_comes_first_and_carries_its_revert() {
 		&PlanOptions {
 			confirm_window: Some(120),
 			revert_to: Some("abc123".to_owned()),
+			..PlanOptions::default()
 		},
 	);
 
@@ -638,4 +639,127 @@ impl netcfgd_compile::HookSink for TestHooks {
 			timeout: None,
 		})
 	}
+}
+
+/// Decision 0010: a guarded interface refuses disruptive actions, and says so
+/// in the plan rather than at apply time. A plan that lies is worse than no
+/// plan.
+#[test]
+fn a_guard_refuses_a_disruptive_action_at_plan_time() {
+	// The config no longer wants the address, so teardown would remove it --
+	// which is exactly what breaks an NFS mount on that interface.
+	let desired = document(
+		r#"
+		interface eth0 {
+			config = "10.0.0.1/24"
+			guard  = "nfs root"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+	observed.addresses.push(ObservedAddress {
+		interface: "eth0".to_owned(),
+		address: "10.0.0.99/24".to_owned(),
+		proto: Some(netcfgd_model::route::NETCFGD_PROTO),
+		ownership: Ownership::Ours,
+		origin: Some(Origin::Static),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+
+	assert!(
+		!names(&plan).contains(&"addr.del"),
+		"a guarded interface must not be disrupted: {:?}",
+		names(&plan)
+	);
+	assert_eq!(plan.refusals.len(), 1);
+	let refusal = &plan.refusals[0];
+	assert_eq!(refusal.op, "addr.del");
+	assert_eq!(refusal.guard, "nfs root");
+	assert_eq!(refusal.override_with, "ncfg apply --allow-disruption eth0");
+}
+
+/// The guard blocks only what can interrupt traffic. Adding an address to a
+/// guarded interface is safe and still happens, or a guard would freeze the
+/// interface entirely.
+#[test]
+fn a_guard_does_not_block_additive_work() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config = "10.0.0.1/24
+10.0.0.2/24"
+			guard  = "nfs root"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(
+		names(&plan),
+		["addr.add", "addr.add"],
+		"additive work must survive a guard"
+	);
+	assert!(plan.refusals.is_empty());
+}
+
+/// Consent is per interface, and it unblocks exactly that one.
+#[test]
+fn consent_unblocks_the_named_interface_and_no_other() {
+	let desired = document(
+		r#"
+		interface eth0 { config = "10.0.0.1/24"; guard = "nfs root" }
+		interface eth1 { config = "10.0.1.1/24"; guard = "database replication" }
+		"#,
+	);
+	let mut observed = observed_with(&["eth0", "eth1"]);
+	observed.links[0].up = true;
+	observed.links[1].up = true;
+	for (interface, address) in [("eth0", "10.0.0.99/24"), ("eth1", "10.0.1.99/24")] {
+		observed.addresses.push(ObservedAddress {
+			interface: interface.to_owned(),
+			address: address.to_owned(),
+			proto: Some(netcfgd_model::route::NETCFGD_PROTO),
+			ownership: Ownership::Ours,
+			origin: Some(Origin::Static),
+		});
+	}
+
+	let plan = plan(
+		&desired,
+		&observed,
+		&PlanOptions {
+			allow_disruption: vec!["eth0".to_owned()],
+			..PlanOptions::default()
+		},
+	);
+
+	// eth0's stale address goes; eth1's is still protected.
+	let removed: Vec<&str> = plan
+		.actions
+		.iter()
+		.filter(|a| a.op.name() == "addr.del")
+		.filter_map(|a| a.op.interface())
+		.collect();
+	assert_eq!(removed, ["eth0"]);
+	assert_eq!(plan.refusals.len(), 1);
+	assert_eq!(plan.refusals[0].interface, "eth1");
+}
+
+/// The case that motivated this: an interface dropped from the config is not
+/// torn down while something depends on it.
+#[test]
+fn a_guarded_interface_is_not_torn_down_when_it_leaves_the_config() {
+	// The bridge netcfgd created is gone from the config, so teardown would
+	// delete it.
+	let desired = document("interface eth0 { config = \"10.0.0.1/24\"; guard = \"nfs root\" }");
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+	observed.links[0].ownership = Ownership::Ours;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(!names(&plan).contains(&"link.delete"));
 }

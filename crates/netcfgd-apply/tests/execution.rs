@@ -72,6 +72,7 @@ fn sample_plan() -> Plan {
 			),
 		],
 		warnings: Vec::new(),
+		refusals: Vec::new(),
 	}
 }
 
