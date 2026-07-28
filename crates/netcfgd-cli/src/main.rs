@@ -32,7 +32,14 @@ options:
                            daemon yet
   --json                   machine-readable output
   --confirm SECONDS        arm commit-confirm for this apply
+  --allow-disruption IFACE consent to disrupting one guarded interface;
+                           repeatable, and deliberately not a blanket --force
   -h, --help               this text
+
+exit codes:
+  0  the desired state was reached, or already held
+  1  an action failed, or the config did not compile
+  3  a guard refused a disruptive action; nothing else failed
 ";
 
 fn main() -> ExitCode {
@@ -51,6 +58,7 @@ struct Options {
 	run_dir: Option<String>,
 	json: bool,
 	confirm: Option<u32>,
+	allow_disruption: Vec<String>,
 }
 
 fn run(arguments: &[String]) -> Result<ExitCode, String> {
@@ -80,6 +88,7 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 		run_dir: None,
 		json: false,
 		confirm: None,
+		allow_disruption: Vec::new(),
 	};
 	let mut index = 0;
 	while index < arguments.len() {
@@ -101,6 +110,9 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 						format!("--confirm wants a number of seconds, not `{value}`")
 					})?);
 			}
+			"--allow-disruption" => options
+				.allow_disruption
+				.push(take_value("--allow-disruption")?),
 			"--json" => options.json = true,
 			// There is no daemon yet, so oneshot is the only mode there is.
 			// Accepting the flag now means the command line does not change
@@ -147,6 +159,7 @@ fn build_plan(
 	let plan_options = PlanOptions {
 		confirm_window: options.confirm,
 		revert_to: None,
+		allow_disruption: options.allow_disruption.clone(),
 	};
 	let plan = plan(&document, &observed, &plan_options);
 	Ok((plan, document, observed, run_dir))
@@ -180,7 +193,14 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 
 	if plan.is_empty() {
 		if !options.json {
-			println!("nothing to do");
+			if plan.was_refused() {
+				print_refusals(&plan);
+			} else {
+				println!("nothing to do");
+			}
+		}
+		if plan.was_refused() {
+			return Ok(ExitCode::from(3));
 		}
 		return Ok(ExitCode::SUCCESS);
 	}
@@ -219,6 +239,10 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		}
 	}
 
+	if !options.json && plan.was_refused() {
+		print_refusals(&plan);
+	}
+
 	if let Some(failure) = journal.failure() {
 		if !options.json {
 			eprintln!(
@@ -231,6 +255,13 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 			eprintln!("ncfg: re-run `ncfg apply` to resume from current state");
 		}
 		return Ok(ExitCode::from(1));
+	}
+
+	// A refusal means the desired state was not reached, whether or not some
+	// actions ran. Exiting zero here would tell a script convergence happened
+	// when the very change it asked for is the one that did not.
+	if plan.was_refused() {
+		return Ok(ExitCode::from(3));
 	}
 	Ok(ExitCode::SUCCESS)
 }
@@ -305,6 +336,26 @@ fn print_plan(plan: &Plan) {
 			Some(interface) => println!("warning: {interface}: {}", warning.message),
 			None => println!("warning: {}", warning.message),
 		}
+	}
+	print_refusals(plan);
+}
+
+/// What a guard stopped, and the exact command that consents to it.
+///
+/// Printed for `plan` and `apply` alike. A refusal the operator cannot act on
+/// is just a complaint, so the override is quoted verbatim rather than
+/// described.
+fn print_refusals(plan: &Plan) {
+	for refusal in &plan.refusals {
+		println!(
+			"refused: {} on {} -- {} depends on it",
+			refusal.op, refusal.interface, refusal.guard
+		);
+		println!(
+			"         would have been: {}",
+			describe(&refusal.op, &refusal.reason)
+		);
+		println!("         to allow it:     {}", refusal.override_with);
 	}
 }
 
