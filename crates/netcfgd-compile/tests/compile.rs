@@ -551,3 +551,97 @@ fn adversarial_input_never_panics() {
 	let combined = seeds.join("\n");
 	let _ = build(&combined);
 }
+
+/// netifrc's primary spelling for several addresses is space-separated, not
+/// newline-separated. Splitting on newlines alone treated the whole line as
+/// one malformed address, which is a real config failing to compile.
+#[test]
+fn several_addresses_on_one_line_are_separate_entries() {
+	let document =
+		build_ok(r#"interface eth0 { config = "192.168.0.2/24 192.168.0.3/24 192.168.0.4/24" }"#);
+	assert_eq!(document.interfaces[0].addressing.len(), 3);
+}
+
+/// And mixed: spaces within a line, newlines between lines.
+#[test]
+fn spaces_and_newlines_both_separate_entries() {
+	let document = build_ok(
+		"interface eth0 {\n\tconfig = \"192.168.0.2/24 192.168.0.3/24\n4321:0:1:2:3:4:567:89ab/64\"\n}",
+	);
+	assert_eq!(document.interfaces[0].addressing.len(), 3);
+}
+
+/// The reason the split needs a modifier table: a netmask is itself
+/// address-shaped, so a naive whitespace split makes two addresses out of one.
+#[test]
+fn a_netmask_does_not_start_a_second_address() {
+	let document = build_ok(r#"interface eth0 { config = "192.168.0.2 netmask 255.255.255.0" }"#);
+	assert_eq!(document.interfaces[0].addressing.len(), 1);
+	match &document.interfaces[0].addressing[0] {
+		AddressSource::Static(address) => assert_eq!(address.address, "192.168.0.2/24"),
+		other => panic!("expected a static address, got {other:?}"),
+	}
+}
+
+/// A netmask with a hole in it is not a netmask.
+#[test]
+fn a_non_contiguous_netmask_is_refused() {
+	let rendered = errors(r#"interface eth0 { config = "192.168.0.2 netmask 255.0.255.0" }"#);
+	assert!(rendered.contains("contiguous"), "got: {rendered}");
+}
+
+/// Two spellings of the same thing in one entry is a mistake, not a merge.
+#[test]
+fn a_prefix_and_a_netmask_together_are_refused() {
+	let rendered = errors(r#"interface eth0 { config = "192.168.0.2/24 netmask 255.255.255.0" }"#);
+	assert!(rendered.contains("not both"), "got: {rendered}");
+}
+
+/// Lifetimes and peers are carried through, including netifrc's `forever`.
+#[test]
+fn supported_modifiers_reach_the_model() {
+	let document = build_ok(
+		r#"interface eth0 { config = "192.168.0.2/24 peer 192.168.0.1 preferred_lft 0 valid_lft forever" }"#,
+	);
+	match &document.interfaces[0].addressing[0] {
+		AddressSource::Static(address) => {
+			assert_eq!(address.peer.as_deref(), Some("192.168.0.1"));
+			assert_eq!(address.preferred_lifetime, Some(0));
+			assert_eq!(address.valid_lifetime, None);
+		}
+		other => panic!("expected a static address, got {other:?}"),
+	}
+}
+
+/// A modifier this build cannot honour is named rather than dropped. Acting on
+/// a subset of what the author wrote is the failure mode section 2 exists to
+/// prevent, and it applies to the language as well as to the document.
+#[test]
+fn an_unsupported_modifier_is_named_not_ignored() {
+	let rendered = errors(r#"interface eth0 { config = "192.168.0.2/24 scope host" }"#);
+	assert!(rendered.contains("`scope`"), "got: {rendered}");
+	assert!(rendered.contains("not supported"), "got: {rendered}");
+}
+
+/// netifrc's `null` means "no address", used on bridge members. An empty
+/// addressing list is already legal, so it contributes nothing.
+#[test]
+fn null_yields_no_addressing_at_all() {
+	let document = build_ok(r#"interface eth0 { config = "null" }"#);
+	assert!(document.interfaces[0].addressing.is_empty());
+}
+
+/// `noop` means "keep whatever is there", which a reconciler cannot express:
+/// there is no state to converge on.
+#[test]
+fn noop_is_refused_with_an_explanation() {
+	let rendered = errors(r#"interface eth0 { config = "noop 192.168.0.2/24" }"#);
+	assert!(rendered.contains("reconciled model"), "got: {rendered}");
+}
+
+/// A stray word is caught rather than swallowed.
+#[test]
+fn a_word_that_is_neither_address_nor_keyword_is_refused() {
+	let rendered = errors(r#"interface eth0 { config = "192.168.0.2/24 wibble" }"#);
+	assert!(rendered.contains("wibble"), "got: {rendered}");
+}
