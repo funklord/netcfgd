@@ -13,6 +13,23 @@ use std::io;
 /// `AF_NETLINK`, `SOCK_RAW`, `NETLINK_ROUTE`.
 const NETLINK_ROUTE: libc::c_int = 0;
 
+/// Multicast groups a watcher subscribes to, from `linux/rtnetlink.h`.
+pub mod groups {
+	/// Links appearing, disappearing, or changing flags.
+	pub const LINK: u32 = 1;
+	/// IPv4 addresses.
+	pub const IPV4_IFADDR: u32 = 0x10;
+	/// IPv4 routes.
+	pub const IPV4_ROUTE: u32 = 0x40;
+	/// IPv6 addresses.
+	pub const IPV6_IFADDR: u32 = 0x100;
+	/// IPv6 routes.
+	pub const IPV6_ROUTE: u32 = 0x400;
+
+	/// Everything the observed model is built from.
+	pub const OBSERVED: u32 = LINK | IPV4_IFADDR | IPV4_ROUTE | IPV6_IFADDR | IPV6_ROUTE;
+}
+
 /// A connected rtnetlink socket.
 #[derive(Debug)]
 pub struct Netlink {
@@ -29,6 +46,28 @@ impl Netlink {
 	/// bound. On a kernel without `CONFIG_NETLINK` that is the failure a
 	/// caller sees, and it is worth reporting as-is rather than translating.
 	pub fn open() -> io::Result<Self> {
+		Self::open_with_groups(0)
+	}
+
+	/// Open a socket subscribed to multicast groups.
+	///
+	/// A socket bound with `nl_groups = 0` receives only replies to its own
+	/// requests, which is right for a one-shot and useless for a watcher. The
+	/// daemon binds [`groups::OBSERVED`] and then sits in a blocking receive:
+	/// a change to a link, an address or a route wakes it, and it re-reads.
+	///
+	/// Subscribing is not the same as reading the changes: the daemon treats a
+	/// multicast message as "something moved, look again" rather than trying to
+	/// apply the delta. Deltas can be lost -- a socket whose buffer overflows
+	/// gets `ENOBUFS` and a gap -- so a full re-read is the only version that
+	/// cannot drift, and it costs three dumps on a machine that is not
+	/// changing constantly.
+	///
+	/// # Errors
+	///
+	/// Returns the underlying `io::Error` if the socket cannot be opened or
+	/// bound.
+	pub fn open_with_groups(nl_groups: u32) -> io::Result<Self> {
 		// SAFETY: `socket` takes three integers and returns a file descriptor
 		// or -1. No pointers are involved, so there is nothing to get wrong
 		// about lifetimes or provenance; the only failure mode is the -1 we
@@ -54,6 +93,7 @@ impl Netlink {
 		{
 			addr.nl_family = libc::AF_NETLINK as u16;
 		}
+		addr.nl_groups = nl_groups;
 
 		// SAFETY: `addr` is a live, fully initialised `sockaddr_nl` that
 		// outlives the call, and the length passed is exactly its size, so
@@ -170,6 +210,35 @@ impl Netlink {
 			if request_flags & flags::NLM_F_DUMP == 0 && !collected.is_empty() {
 				return Ok(collected);
 			}
+		}
+	}
+
+	/// Block until the kernel reports a change on a subscribed group.
+	///
+	/// Returns `Ok(true)` when something moved and `Ok(false)` when the
+	/// receive timed out, so a caller can use the timeout as its own tick
+	/// without distinguishing the two at the syscall level.
+	///
+	/// `ENOBUFS` is reported as a change rather than as an error, and that is
+	/// the important case: it means the socket's buffer overflowed and
+	/// messages were dropped. A watcher that treated it as a failure would
+	/// stop watching precisely when the most was happening. Since the daemon
+	/// re-reads rather than applying deltas, a gap costs nothing.
+	///
+	/// # Errors
+	///
+	/// Returns the underlying `io::Error` for anything other than a timeout or
+	/// a dropped-message notification.
+	pub fn wait_for_change(&self) -> io::Result<bool> {
+		let mut buffer = vec![0_u8; 8192];
+		match self.receive(&mut buffer) {
+			Ok(_) => Ok(true),
+			Err(error) => match error.kind() {
+				// SO_RCVTIMEO expiring.
+				io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => Ok(false),
+				_ if error.raw_os_error() == Some(libc::ENOBUFS) => Ok(true),
+				_ => Err(error),
+			},
 		}
 	}
 
