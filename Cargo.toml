@@ -11,6 +11,8 @@ members = [
 	"crates/netcfgd-observe",
 	"crates/netcfgd-apply",
 	"crates/netcfgd-proto",
+	"crates/netcfgd-host",
+	"crates/netcfgd-daemon",
 	"crates/netcfgd-cli",
 ]
 
