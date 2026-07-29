@@ -171,13 +171,18 @@ impl Resolver {
 		match reference.provider {
 			SecretProvider::File => self.read_file(&reference.name),
 			SecretProvider::Exec => Self::run_command(&reference.name),
+			SecretProvider::Pass => Self::read_pass(&reference.name),
 			SecretProvider::Keyring => Err(Error::Unsupported {
 				provider: "keyring",
-				milestone: "M3",
-			}),
-			SecretProvider::Pass => Err(Error::Unsupported {
-				provider: "pass",
-				milestone: "M3",
+				// Not a milestone, because it is not scheduled, and naming one
+				// that passes without the feature arriving is how a diagnostic
+				// becomes a lie. The blocker is specific: the kernel keyring
+				// is reached through `request_key(2)` and `keyctl(2)`, which
+				// have no libc wrapper -- so it means either widening
+				// constraint 4's single `unsafe` exception past netlink, or
+				// shelling out to `keyctl`, which is a dependency on a tool
+				// rather than on the kernel. Neither has been chosen.
+				milestone: "no release yet; see the `keyring` note in netcfgd-secret",
 			}),
 		}
 	}
@@ -211,6 +216,29 @@ impl Resolver {
 		Ok(Secret::new(
 			body.strip_suffix('\n').unwrap_or(&body).to_owned(),
 		))
+	}
+
+	/// `pass show NAME`, from the standard password-store.
+	///
+	///
+	/// A thin wrapper over the exec provider rather than a separate mechanism,
+	/// and the difference from writing `@secret:exec:pass show NAME` by hand is
+	/// the validation: `pass` takes a store path, and a name that looks like a
+	/// flag or carries a second word would become an argument to `pass`
+	/// itself. `pass --help` is harmless; the point is that a config file
+	/// should not be able to choose what `pass` is asked to do.
+	fn read_pass(name: &str) -> Result<Secret, Error> {
+		if name.is_empty() || name.starts_with('-') || name.split_whitespace().count() != 1 {
+			return Err(Error::Failed {
+				name: name.to_owned(),
+				reason: "a pass secret's name is one word naming an entry in the store".to_owned(),
+			});
+		}
+		// `show` prints the first line and nothing else, which is the
+		// convention password-store documents for exactly this.
+		Ok(first_line(&Self::run_command(&format!(
+			"pass show {name}"
+		))?))
 	}
 
 	fn run_command(name: &str) -> Result<Secret, Error> {
@@ -258,6 +286,26 @@ impl Resolver {
 /// suggestion: a secret in a world-readable file is already disclosed, and
 /// reading it anyway tells the operator everything is fine.
 #[cfg(unix)]
+/// The first line of a password-store entry.
+///
+/// A store entry conventionally holds the secret on line one and notes below
+/// it -- a URL, a username, recovery codes. Taking the whole thing would hand
+/// a supplicant a passphrase with somebody's recovery codes appended, and the
+/// failure is an association that does not work for a reason the operator
+/// cannot see, because nothing will print the value.
+///
+/// A free function rather than inline, so the rule can be tested without a
+/// `pass` binary on the machine.
+#[must_use]
+pub fn first_line(secret: &Secret) -> Secret {
+	let text = secret.expose();
+	Secret::new(
+		text.split_once('\n')
+			.map_or(text, |(first, _)| first)
+			.to_owned(),
+	)
+}
+
 fn check_mode(name: &str, path: &Path, metadata: &std::fs::Metadata) -> Result<(), Error> {
 	use std::os::unix::fs::PermissionsExt;
 	let mode = metadata.permissions().mode() & 0o777;
