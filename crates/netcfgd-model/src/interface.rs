@@ -183,7 +183,7 @@ pub struct WgPeer {
 	/// Local label, for diagnostics. Sorting key for the peer list.
 	pub name: String,
 	/// The peer's public key.
-	pub public_key: String,
+	pub public_key: crate::Key,
 	/// Optional pre-shared key, by reference.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub preshared_key: Option<SecretRef>,

@@ -30,6 +30,7 @@ pub mod dns;
 pub mod hash;
 pub mod hook;
 pub mod interface;
+pub mod key;
 pub mod observed;
 pub mod route;
 pub mod rule;
@@ -45,6 +46,7 @@ pub use hook::{HookPhase, HookRef};
 pub use interface::{
 	BondMode, Guard, Interface, InterfaceKind, LinkSettings, RaPolicy, Toggle, VlanProtocol, WgPeer,
 };
+pub use key::Key;
 pub use observed::{
 	AppliedDns, BackendKind, Observed, ObservedAddress, ObservedBackend, ObservedLink,
 	ObservedRoute, Origin, Ownership,
@@ -235,6 +237,11 @@ pub enum Error {
 	},
 	/// An SSID hex string was not valid hex.
 	SsidNotHex,
+	/// A Curve25519 key was not 44 characters of base64.
+	BadKey {
+		/// How long the text actually was.
+		len: usize,
+	},
 	/// A hook path was not absolute.
 	HookPathNotAbsolute {
 		/// The offending path.
@@ -267,6 +274,10 @@ impl std::fmt::Display for Error {
 				write!(f, "ssid is {len} octets; the maximum is 32")
 			}
 			Self::SsidNotHex => write!(f, "ssid is not a valid lowercase hex string"),
+			Self::BadKey { len } => write!(
+				f,
+				"a key is 44 characters of base64 ending in `=`, and this one is {len}"
+			),
 			Self::HookPathNotAbsolute { path } => {
 				write!(f, "hook path {path} is not absolute")
 			}

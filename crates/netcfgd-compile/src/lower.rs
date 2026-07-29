@@ -13,7 +13,8 @@ use netcfgd_model::address::{Delegated, PrefixRef, Static};
 use netcfgd_model::device::{AccessPoint, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{
-	BondConfig, BondMode, BridgeConfig, VethConfig, VlanConfig, VlanProtocol, VxlanConfig,
+	BondConfig, BondMode, BridgeConfig, VethConfig, VlanConfig, VlanProtocol, VxlanConfig, WgPeer,
+	WireGuardConfig,
 };
 use netcfgd_model::interface::{LinkSettings, Toggle};
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
@@ -1457,9 +1458,19 @@ fn lower_interface(
 						interface.link_settings = Some(settings);
 					}
 				}
-				"wireguard" => diags.push(
-					Diagnostic::new(inner.span, "wireguard is not supported by this build")
-						.with_help("`wireguard` blocks land in M4; see project.md section 7"),
+				"wireguard" => {
+					if let Some(kind) = lower_wireguard(inner, diags) {
+						interface.kind = kind;
+					}
+				}
+				// The last M4 link type still to come. Named rather than
+				// reported as an unknown block, because "`pppoe` is not valid
+				// inside `interface`" reads as a typo when it is a gap.
+				"pppoe" => diags.push(
+					Diagnostic::new(inner.span, "pppoe is not supported by this build").with_help(
+						"`pppoe` needs the netcfgd-ppp backend, which lands in M4; \
+							 see project.md section 7",
+					),
 				),
 				other => diags.push(Diagnostic::new(
 					inner.span,
@@ -1490,6 +1501,167 @@ fn lower_interface(
 		interface.dns = Some(dns);
 	}
 	Some(interface)
+}
+
+fn lower_wireguard(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	let mut private_key = None;
+	let mut listen_port = None;
+	let mut fwmark = None;
+	let mut peers = Vec::new();
+
+	for item in &block.items {
+		match item {
+			Item::Assignment(assignment) => match assignment.key.as_str() {
+				"private_key" => private_key = as_secret(&assignment.value, diags),
+				"listen_port" => {
+					listen_port =
+						as_u32(&assignment.value, diags).and_then(|n| u16::try_from(n).ok());
+				}
+				"fwmark" => fwmark = as_u32(&assignment.value, diags),
+				other => diags.push(Diagnostic::new(
+					assignment.span,
+					format!("unknown wireguard key `{other}`"),
+				)),
+			},
+			Item::Block(inner) if inner.head == "peer" => {
+				if let Some(peer) = lower_wg_peer(inner, diags) {
+					peers.push(peer);
+				}
+			}
+			Item::Block(inner) => diags.push(Diagnostic::new(
+				inner.span,
+				format!("`{}` is not valid inside `wireguard`", inner.head),
+			)),
+			_ => {}
+		}
+	}
+
+	let Some(private_key) = private_key else {
+		diags.push(
+			Diagnostic::new(block.span, "a wireguard device needs a `private_key`").with_help(
+				"`private_key = \"@secret:NAME\"`; `wg genkey` produces one and it never \
+				 belongs in the config",
+			),
+		);
+		return None;
+	};
+
+	// Two peers with one public key is two halves of one entry: the key is the
+	// peer's identity, so the kernel would keep whichever came last and the
+	// other's allowed IPs would silently vanish.
+	for (index, peer) in peers.iter().enumerate() {
+		if peers[..index]
+			.iter()
+			.any(|earlier| earlier.public_key == peer.public_key)
+		{
+			diags.push(
+				Diagnostic::new(
+					block.span,
+					format!("two peers share the public key `{}`", peer.public_key),
+				)
+				.with_help("a public key is a peer's identity; merge the two blocks"),
+			);
+			return None;
+		}
+	}
+
+	Some(InterfaceKind::WireGuard(WireGuardConfig {
+		private_key,
+		listen_port,
+		fwmark,
+		peers,
+	}))
+}
+
+fn lower_wg_peer(block: &Block, diags: &mut Diagnostics) -> Option<WgPeer> {
+	let name = require_label(block, diags)?;
+	let mut public_key = None;
+	let mut preshared_key = None;
+	let mut endpoint = None;
+	let mut allowed_ips = Vec::new();
+	let mut keepalive = None;
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"public_key" => {
+				if let Some(text) = as_string(&assignment.value, diags) {
+					match netcfgd_model::Key::parse(&text) {
+						Ok(key) => public_key = Some(key),
+						Err(error) => diags.push(Diagnostic::new(
+							assignment.value.span,
+							format!("`{text}` is not a public key: {error}"),
+						)),
+					}
+				}
+			}
+			"preshared_key" => preshared_key = as_secret(&assignment.value, diags),
+			"endpoint" => endpoint = as_string(&assignment.value, diags),
+			"allowed_ips" => {
+				allowed_ips = as_words(&assignment.value, diags)
+					.into_iter()
+					.filter_map(|word| {
+						if parse_prefix(&word.node).is_some() {
+							Some(word.node)
+						} else {
+							diags.push(Diagnostic::new(
+								word.span,
+								format!("`{}` is not a CIDR prefix", word.node),
+							));
+							None
+						}
+					})
+					.collect();
+			}
+			"keepalive" => {
+				keepalive = as_u32(&assignment.value, diags).and_then(|n| u16::try_from(n).ok());
+			}
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown peer key `{other}`"),
+			)),
+		}
+	}
+
+	let Some(public_key) = public_key else {
+		diags.push(Diagnostic::new(
+			block.span,
+			format!("peer `{name}` needs a `public_key`"),
+		));
+		return None;
+	};
+	// A peer with no allowed IPs receives nothing and is routed nothing. It is
+	// legal to the kernel and never what anybody meant.
+	if allowed_ips.is_empty() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!("peer `{name}` has no `allowed_ips`, so nothing would route to it"),
+			)
+			.with_help("`allowed_ips = \"0.0.0.0/0\"` sends everything; a prefix sends some"),
+		);
+		return None;
+	}
+
+	Some(WgPeer {
+		name,
+		public_key,
+		preshared_key,
+		endpoint,
+		allowed_ips,
+		keepalive,
+	})
+}
+
+/// `address/length`, which is what an allowed IP is.
+fn parse_prefix(text: &str) -> Option<(std::net::IpAddr, u8)> {
+	let (address, length) = text.split_once('/')?;
+	let address: std::net::IpAddr = address.parse().ok()?;
+	let length: u8 = length.parse().ok()?;
+	let max = if address.is_ipv4() { 32 } else { 128 };
+	(length <= max).then_some((address, length))
 }
 
 fn lower_vxlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
