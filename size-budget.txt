@@ -36,5 +36,13 @@ tolerance_percent 3
 # the larger share (+45 KB against netcfgd's +12 KB) since it links the
 # executor for `--oneshot` and did not already carry the supplicant -- `ncfg
 # apply` really can bring up an 802.1X port, so the code has to be there.
-ncfg     1026496
-netcfgd  1317400
+#
+# Then the M4 model gaps: policy routing rules, access points, ethtool
+# settings, IPv6 tokens and MAC randomization -- types, serde and compiler
+# lowering for five features of which one is implemented. netcfgd +61 KB, ncfg
+# +29 KB, and most of it is serde's generated code for the new types rather
+# than logic. That is the cost of the freeze: three of these produce no
+# behaviour today and are carried anyway, because adding them after M4 is a
+# major version bump.
+ncfg     1055168
+netcfgd  1378840

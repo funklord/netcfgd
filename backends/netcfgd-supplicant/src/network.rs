@@ -7,6 +7,7 @@
 //! machine with no radio.
 
 use crate::protocol::{passphrase_argument, passphrase_is_sendable, ssid_argument};
+use netcfgd_model::device::MacPolicy;
 use netcfgd_model::security::PskProto;
 use netcfgd_model::{EapMethod, Security, WifiNetwork};
 use netcfgd_secret::{Resolver, Secret};
@@ -122,6 +123,32 @@ fn is_bssid(text: &str) -> bool {
 	octets == 6
 }
 
+/// How a [`MacPolicy`] is spelled in the control protocol.
+///
+/// `wpa_supplicant`'s `mac_addr` is a small integer whose meanings are not
+/// guessable from the number, so the mapping is here, once, next to the words
+/// it maps from:
+///
+/// | Model | `mac_addr` | What the supplicant does |
+/// |---|---|---|
+/// | `Permanent` | 0 | uses the hardware address |
+/// | `PerNetwork` | 1 | a random address per ESS |
+/// | `PerConnection` | 2 | a random address per association |
+///
+/// The values match `wpa_supplicant.conf`'s documented meanings for the
+/// per-network `mac_addr` key. There is a global of the same name; netcfgd
+/// sets the per-network one, so that a single network can be exempted -- which
+/// is the case that matters, since MAC-based admission control is the usual
+/// reason to need the permanent address on exactly one network.
+#[must_use]
+pub fn mac_addr_value(policy: MacPolicy) -> &'static str {
+	match policy {
+		MacPolicy::Permanent => "0",
+		MacPolicy::PerNetwork => "1",
+		MacPolicy::PerConnection => "2",
+	}
+}
+
 /// The settings for one network, in the order they should be sent.
 ///
 /// # Errors
@@ -130,9 +157,17 @@ fn is_bssid(text: &str) -> bool {
 /// propagates secret resolution failures as a rendered message.
 pub fn settings(
 	network: &WifiNetwork,
+	policy: MacPolicy,
 	resolver: &Resolver,
 ) -> Result<Vec<Setting>, Box<dyn std::error::Error>> {
 	let mut out = vec![Setting::plain("ssid", ssid_argument(&network.ssid))];
+
+	// Sent always, including for `Permanent`. Leaving it unset would inherit
+	// whatever the supplicant's global happens to be, which on a distribution
+	// that sets one would make netcfgd's `permanent` mean something else --
+	// and a privacy property that depends on somebody else's default is not a
+	// property. Decision 0015's rule applied to one more setting.
+	out.push(Setting::plain("mac_addr", mac_addr_value(policy)));
 
 	if network.hidden {
 		// Without this a hidden network is never probed for, so it simply

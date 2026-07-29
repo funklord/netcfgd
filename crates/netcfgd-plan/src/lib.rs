@@ -127,6 +127,49 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// Collected before anything is planned, because a guard on one interface
 	// has to be known when an action against it is considered, whatever order
 	// the interfaces sort in.
+	// The two features that are in the schema and not in the build. Warned at
+	// plan time rather than refused at compile time: the config is valid and
+	// will mean something in a later release, so rejecting the document would
+	// make an upgrade path into a rewrite. What must not happen is silence --
+	// a plan that omits them without saying so reports "nothing to do" about
+	// a config that asks for two things.
+	for access_point in &desired.access_points {
+		builder.warnings.push(Warning {
+			message: format!(
+				"access point `{}` is in the configuration but this build cannot run one; \
+				 it is recognised, not applied",
+				access_point.id
+			),
+			interface: Some(access_point.device.clone()),
+		});
+	}
+	for interface in &desired.interfaces {
+		if interface.link_settings.is_some() {
+			builder.warnings.push(Warning {
+				message: "`ethtool` settings are recognised but not applied by this build; \
+					 reaching them needs either an ioctl outside the audited crate or \
+					 generic netlink family resolution (docs/decisions/0016)"
+					.to_owned(),
+				interface: Some(interface.name.clone()),
+			});
+		}
+		if interface.ipv6_token.is_some() {
+			builder.warnings.push(Warning {
+				message: "`ipv6_token` is recognised but not applied by this build".to_owned(),
+				interface: Some(interface.name.clone()),
+			});
+		}
+	}
+	if !desired.rules.is_empty() {
+		builder.warnings.push(Warning {
+			message: format!(
+				"{} policy routing rule(s) are recognised but not applied by this build",
+				desired.rules.len()
+			),
+			interface: None,
+		});
+	}
+
 	builder.radios = desired
 		.devices
 		.iter()

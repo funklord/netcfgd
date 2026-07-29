@@ -10,9 +10,11 @@ use crate::hook::HookSink;
 use crate::merge::Merged;
 use crate::provenance::{field_path, interface_path, Provenance};
 use netcfgd_model::address::{Delegated, PrefixRef, Static};
-use netcfgd_model::device::{Powersave, WifiBackend, WifiDevicePolicy};
+use netcfgd_model::device::{AccessPoint, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{BondConfig, BridgeConfig, VlanConfig, VlanProtocol};
+use netcfgd_model::interface::{LinkSettings, Toggle};
+use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
 use netcfgd_model::{
 	AddressSource, Device, Dhcp4, Dhcp6, DnsPolicy, DnsServer, Document, DriftPolicy, HookPhase,
@@ -55,6 +57,22 @@ pub fn lower(
 					document.interfaces.push(interface);
 				}
 			}
+			"rule" => {
+				if let Some(rule) = lower_rule(block, &mut diagnostics) {
+					provenance.record(sources, format!("rule.{}", rule.id), block.span);
+					document.rules.push(rule);
+				}
+			}
+			"access_point" => {
+				if let Some(access_point) = lower_access_point(block, &mut diagnostics) {
+					provenance.record(
+						sources,
+						format!("access_point.{}", access_point.id),
+						block.span,
+					);
+					document.access_points.push(access_point);
+				}
+			}
 			"network" => {
 				if let Some(network) = lower_network(block, hooks, &mut diagnostics) {
 					provenance.record(sources, format!("network.{}", network.id), block.span);
@@ -63,7 +81,10 @@ pub fn lower(
 			}
 			other => diagnostics.push(
 				Diagnostic::new(block.span, format!("unknown top-level block `{other}`"))
-					.with_help("the top-level blocks are interface, network, device and global"),
+					.with_help(
+						"the top-level blocks are interface, network, device, rule, \
+						 access_point and global",
+					),
 			),
 		}
 	}
@@ -284,6 +305,371 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 	Some(device)
 }
 
+/// A `rule` block: `rule 100 { from = "10.0.0.0/8"; lookup = 100 }`.
+///
+/// The label is the priority, because the priority is what identifies a rule
+/// to the kernel and what determines when it is consulted. Making it the label
+/// rather than a key means it cannot be omitted -- see [`RoutingRule`] for why
+/// an unnumbered rule makes reconciliation meaningless.
+fn lower_rule(block: &Block, diags: &mut Diagnostics) -> Option<RoutingRule> {
+	let label = require_label(block, diags)?;
+
+	let mut rule = RoutingRule::lookup(label.clone(), 0, netcfgd_model::route::MAIN_TABLE);
+	rule.table = None;
+	let mut action_named = false;
+	let mut priority = None;
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			if let Item::Block(inner) = item {
+				diags.push(Diagnostic::new(
+					inner.span,
+					format!("`{}` is not valid inside `rule`", inner.head),
+				));
+			}
+			continue;
+		};
+		match assignment.key.as_str() {
+			"family" => {
+				if let Some(name) = as_string(&assignment.value, diags) {
+					match name.as_str() {
+						"inet" | "ipv4" => rule.family = RuleFamily::Inet,
+						"inet6" | "ipv6" => rule.family = RuleFamily::Inet6,
+						other => diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{other}` is not an address family"),
+							)
+							.with_help("one of inet, inet6"),
+						),
+					}
+				}
+			}
+			"priority" => priority = as_u32(&assignment.value, diags),
+			"from" => rule.from = as_string(&assignment.value, diags),
+			"to" => rule.to = as_string(&assignment.value, diags),
+			"iif" => rule.iif = as_string(&assignment.value, diags),
+			"oif" => rule.oif = as_string(&assignment.value, diags),
+			"fwmark" => rule.fwmark = as_u32(&assignment.value, diags),
+			"fwmask" => rule.fwmask = as_u32(&assignment.value, diags),
+			"lookup" | "table" => rule.table = as_u32(&assignment.value, diags),
+			"suppress_prefixlength" => {
+				rule.suppress_prefixlength = as_u32(&assignment.value, diags);
+			}
+			"l3mdev" => {
+				if let Some(flag) = as_bool(&assignment.value, diags) {
+					rule.l3mdev = flag;
+				}
+			}
+			"action" => {
+				if let Some(name) = as_string(&assignment.value, diags) {
+					action_named = true;
+					match name.as_str() {
+						"lookup" => rule.action = RuleAction::Lookup,
+						"blackhole" => rule.action = RuleAction::Blackhole,
+						"unreachable" => rule.action = RuleAction::Unreachable,
+						"prohibit" => rule.action = RuleAction::Prohibit,
+						other => diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{other}` is not a rule action"),
+							)
+							.with_help("one of lookup, blackhole, unreachable, prohibit"),
+						),
+					}
+				}
+			}
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown rule key `{other}`"),
+			)),
+		}
+	}
+
+	if !rule_is_complete(&rule, &label, priority, action_named, block, diags) {
+		return None;
+	}
+	rule.priority = priority.unwrap_or_default();
+	Some(rule)
+}
+
+/// The checks a rule has to pass to mean anything.
+///
+/// Separate from the key parsing because they are a different question: the
+/// loop above asks "is this a key I know?", and this asks "does the result
+/// describe something the kernel can be asked for?".
+fn rule_is_complete(
+	rule: &RoutingRule,
+	label: &str,
+	priority: Option<u32>,
+	action_named: bool,
+	block: &Block,
+	diags: &mut Diagnostics,
+) -> bool {
+	// Mandatory. The kernel will assign a priority, but an unnumbered rule
+	// lands wherever it puts one, two applies can produce different orders,
+	// and the document has stopped describing the system.
+	if priority.is_none() {
+		diags.push(
+			Diagnostic::new(block.span, format!("rule `{label}` has no `priority`")).with_help(
+				"add `priority = N`; lower is consulted first, and leaving it to the \
+					 kernel means two applies can order the rules differently",
+			),
+		);
+		return false;
+	}
+
+	// A rule that looks nothing up and does nothing else is a rule that has no
+	// effect, and the most likely cause is a `lookup` somebody meant to write.
+	if rule.action == RuleAction::Lookup && rule.table.is_none() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!("rule `{label}` looks up no table and names no action"),
+			)
+			.with_help(if action_named {
+				"`action = \"lookup\"` needs a `lookup = N`"
+			} else {
+				"add `lookup = N`, or an `action` of blackhole, unreachable or prohibit"
+			}),
+		);
+		return false;
+	}
+	// A mask without a mark matches nothing in particular, and reads as though
+	// it does.
+	if rule.fwmask.is_some() && rule.fwmark.is_none() {
+		diags.push(Diagnostic::new(
+			block.span,
+			format!("rule `{label}` has an `fwmask` but no `fwmark`"),
+		));
+		return false;
+	}
+
+	true
+}
+
+/// An `access_point` block. Compiled, then refused at use.
+fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPoint> {
+	let label = require_label(block, diags)?;
+	let ssid = match Ssid::new(label.as_bytes().to_vec()) {
+		Ok(ssid) => ssid,
+		Err(error) => {
+			diags.push(Diagnostic::new(
+				block.span,
+				format!("`{label}` cannot be a network name: {error}"),
+			));
+			return None;
+		}
+	};
+
+	let mut access_point = AccessPoint {
+		id: label.clone(),
+		ssid,
+		device: String::new(),
+		security: Security::Open,
+		channel: None,
+		band: None,
+		hidden: false,
+		regdom: None,
+	};
+	let mut security_seen = false;
+
+	for item in &block.items {
+		match item {
+			Item::Assignment(assignment) => match assignment.key.as_str() {
+				"device" => {
+					access_point.device = as_string(&assignment.value, diags).unwrap_or_default();
+				}
+				"channel" => {
+					access_point.channel =
+						as_u32(&assignment.value, diags).and_then(|n| u16::try_from(n).ok());
+				}
+				"band" => access_point.band = as_string(&assignment.value, diags),
+				"regdom" => access_point.regdom = as_string(&assignment.value, diags),
+				"hidden" => {
+					if let Some(flag) = as_bool(&assignment.value, diags) {
+						access_point.hidden = flag;
+					}
+				}
+				"ssid" => {
+					if let Some(text) = as_string(&assignment.value, diags) {
+						match Ssid::from_hex(&text) {
+							Ok(ssid) => access_point.ssid = ssid,
+							Err(error) => diags.push(Diagnostic::new(
+								assignment.span,
+								format!("`{text}` is not a usable ssid: {error}"),
+							)),
+						}
+					}
+				}
+				other => diags.push(Diagnostic::new(
+					assignment.span,
+					format!("unknown access_point key `{other}`"),
+				)),
+			},
+			Item::Block(inner) if inner.head == "wifi" => {
+				security_seen = true;
+				// An access point's security is the same shape as a station's,
+				// so it is parsed by the same code -- but through a throwaway
+				// network, since the keys that only mean something to a client
+				// (priority, autoconnect) have nowhere to go here.
+				let mut carrier = station_placeholder();
+				lower_network_wifi(inner, &mut carrier, diags);
+				access_point.security = carrier.security;
+			}
+			Item::Block(inner) => diags.push(Diagnostic::new(
+				inner.span,
+				format!("`{}` is not valid inside `access_point`", inner.head),
+			)),
+			_ => {}
+		}
+	}
+
+	if access_point.device.is_empty() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!("access point `{label}` does not say which radio runs it"),
+			)
+			.with_help(
+				"add `device = \"wlan0\"`; unlike a `network`, an access point is one radio",
+			),
+		);
+		return None;
+	}
+	if !security_seen {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!("access point `{label}` has no `wifi` block, so it would be open"),
+			)
+			.with_help("add `wifi { psk = \"@secret:NAME\" }`, or `wifi { open = true }`"),
+		);
+		return None;
+	}
+
+	Some(access_point)
+}
+
+/// A throwaway station profile, for parsing security out of a context that has
+/// no network of its own.
+fn station_placeholder() -> WifiNetwork {
+	WifiNetwork {
+		id: String::new(),
+		ssid: Ssid::new(Vec::new()).unwrap_or_else(|_| unreachable!("empty is valid")),
+		hidden: false,
+		security: Security::Open,
+		priority: 0,
+		autoconnect: true,
+		metered: false,
+		bssid_pin: None,
+		addressing: Vec::new(),
+		routes: Vec::new(),
+		dns: None,
+		hooks: Vec::new(),
+	}
+}
+
+/// An `ethtool` block inside `interface`. Compiled, then refused at use.
+fn lower_ethtool(block: &Block, settings: &mut LinkSettings, diags: &mut Diagnostics) {
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		let toggle = |diags: &mut Diagnostics| -> Option<Toggle> {
+			let name = as_string(&assignment.value, diags)?;
+			match name.as_str() {
+				"on" | "true" => Some(Toggle::On),
+				"off" | "false" => Some(Toggle::Off),
+				"unmanaged" => Some(Toggle::Unmanaged),
+				other => {
+					diags.push(
+						Diagnostic::new(assignment.span, format!("`{other}` is not a toggle"))
+							.with_help("one of on, off, unmanaged"),
+					);
+					None
+				}
+			}
+		};
+		match assignment.key.as_str() {
+			"autoneg" => {
+				if let Some(value) = toggle(diags) {
+					settings.autoneg = value;
+				}
+			}
+			"gro" => {
+				if let Some(value) = toggle(diags) {
+					settings.gro = value;
+				}
+			}
+			"gso" => {
+				if let Some(value) = toggle(diags) {
+					settings.gso = value;
+				}
+			}
+			"tso" => {
+				if let Some(value) = toggle(diags) {
+					settings.tso = value;
+				}
+			}
+			"rx_checksum" => {
+				if let Some(value) = toggle(diags) {
+					settings.rx_checksum = value;
+				}
+			}
+			"tx_checksum" => {
+				if let Some(value) = toggle(diags) {
+					settings.tx_checksum = value;
+				}
+			}
+			"speed" => settings.speed = as_u32(&assignment.value, diags),
+			"rx_ring" => settings.rx_ring = as_u32(&assignment.value, diags),
+			"tx_ring" => settings.tx_ring = as_u32(&assignment.value, diags),
+			"duplex" => {
+				if let Some(name) = as_string(&assignment.value, diags) {
+					if name == "full" || name == "half" {
+						settings.duplex = Some(name);
+					} else {
+						diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{name}` is not a duplex setting"),
+							)
+							.with_help("one of full, half"),
+						);
+					}
+				}
+			}
+			"wol" => settings.wol = as_string(&assignment.value, diags),
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown ethtool key `{other}`"),
+			)),
+		}
+	}
+}
+
+/// The `mac_policy` key. Its own function only because the enum arm made
+/// [`lower_wifi_device`] longer than the style allows.
+fn lower_mac_policy(
+	policy: &mut WifiDevicePolicy,
+	assignment: &Assignment,
+	diags: &mut Diagnostics,
+) {
+	let Some(name) = as_string(&assignment.value, diags) else {
+		return;
+	};
+	match name.as_str() {
+		"permanent" => policy.mac_policy = MacPolicy::Permanent,
+		"per_network" => policy.mac_policy = MacPolicy::PerNetwork,
+		"per_connection" => policy.mac_policy = MacPolicy::PerConnection,
+		other => diags.push(
+			Diagnostic::new(assignment.span, format!("`{other}` is not a MAC policy"))
+				.with_help("one of permanent, per_network, per_connection"),
+		),
+	}
+}
+
 /// A `wifi` block inside `device`: how the radio behaves, not what it joins.
 fn lower_wifi_device(block: &Block, diags: &mut Diagnostics) -> WifiDevicePolicy {
 	let mut policy = WifiDevicePolicy::default();
@@ -339,6 +725,12 @@ fn lower_wifi_device(block: &Block, diags: &mut Diagnostics) -> WifiDevicePolicy
 								.with_help("an ISO 3166-1 alpha-2 code in capitals, such as SE"),
 							);
 						}
+					}
+				}
+				"mac_policy" => lower_mac_policy(&mut policy, assignment, diags),
+				"scan_randomization" => {
+					if let Some(flag) = as_bool(&assignment.value, diags) {
+						policy.scan_randomization = flag;
 					}
 				}
 				"powersave" => {
@@ -815,6 +1207,8 @@ fn lower_interface(
 		advertise: None,
 		forwarding: None,
 		guard: None,
+		ipv6_token: None,
+		link_settings: None,
 	};
 	let mut dns = DnsPolicy::default();
 	let mut dns_touched = false;
@@ -854,6 +1248,34 @@ fn lower_interface(
 					interface.mtu = as_u32(&assignment.value, diags);
 				}
 				"mac" => interface.mac = as_string(&assignment.value, diags),
+				"ipv6_token" => {
+					if let Some(text) = as_string(&assignment.value, diags) {
+						// A token is an interface identifier, so the prefix
+						// bits must be zero -- `::5`, not `2001:db8::5`. The
+						// kernel accepts a full address and silently uses only
+						// the host part, which means a config that looks like
+						// it pins a whole address quietly pins half of one.
+						match text.parse::<std::net::Ipv6Addr>() {
+							Ok(address) if address.octets()[..8].iter().all(|byte| *byte == 0) => {
+								interface.ipv6_token = Some(text);
+							}
+							Ok(_) => diags.push(
+								Diagnostic::new(
+									assignment.span,
+									format!("`{text}` has bits set in the prefix half"),
+								)
+								.with_help(
+									"a token is the host part only, such as `::5`; the prefix \
+									 comes from the router advertisement",
+								),
+							),
+							Err(_) => diags.push(Diagnostic::new(
+								assignment.span,
+								format!("`{text}` is not an IPv6 address"),
+							)),
+						}
+					}
+				}
 				"enabled" => {
 					if let Some(flag) = as_bool(&assignment.value, diags) {
 						interface.enabled = flag;
@@ -923,6 +1345,13 @@ fn lower_interface(
 						);
 					} else if let Some(Security::Eap(config)) = build_security(keys, inner, diags) {
 						interface.dot1x = Some(config);
+					}
+				}
+				"ethtool" => {
+					let mut settings = LinkSettings::default();
+					lower_ethtool(inner, &mut settings, diags);
+					if !settings.is_empty() {
+						interface.link_settings = Some(settings);
 					}
 				}
 				"wireguard" => diags.push(

@@ -18,7 +18,7 @@ pub mod network;
 pub mod protocol;
 
 pub use client::{Client, DEFAULT_CTRL_DIR};
-pub use network::{settings, wired_settings, Setting, Unsupported};
+pub use network::{mac_addr_value, settings, wired_settings, Setting, Unsupported};
 pub use protocol::{Event, NetworkEntry, Reply, ScanResult};
 
 use netcfgd_model::WifiNetwork;
@@ -84,9 +84,10 @@ pub fn configure_wired(
 pub fn add_network(
 	client: &Client,
 	network: &WifiNetwork,
+	policy: netcfgd_model::MacPolicy,
 	resolver: &Resolver,
 ) -> Result<u32, Box<dyn std::error::Error>> {
-	let settings = settings(network, resolver)?;
+	let settings = settings(network, policy, resolver)?;
 
 	let id: u32 = client.ask("ADD_NETWORK")?.trim().parse().map_err(|_| {
 		io::Error::new(

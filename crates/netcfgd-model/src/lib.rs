@@ -32,21 +32,23 @@ pub mod hook;
 pub mod interface;
 pub mod observed;
 pub mod route;
+pub mod rule;
 pub mod secret;
 pub mod security;
 pub mod wifi;
 
 pub use address::{AddressSource, Dhcp4, Dhcp6, PdRequest, PrefixRef, Slaac, Static};
 pub use control::{Control, Principal, Tier};
-pub use device::{Device, DeviceMatch, WifiDevicePolicy};
+pub use device::{AccessPoint, Device, DeviceMatch, MacPolicy, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
-pub use interface::{Guard, Interface, InterfaceKind, RaPolicy, WgPeer};
+pub use interface::{Guard, Interface, InterfaceKind, LinkSettings, RaPolicy, Toggle, WgPeer};
 pub use observed::{
 	AppliedDns, BackendKind, Observed, ObservedAddress, ObservedBackend, ObservedLink,
 	ObservedRoute, Origin, Ownership,
 };
 pub use route::{Route, RouteScope};
+pub use rule::{RoutingRule, RuleAction, RuleFamily};
 pub use secret::{SecretProvider, SecretRef};
 pub use security::{EapConfig, EapMethod, Security};
 pub use wifi::{Ssid, WifiNetwork};
@@ -63,7 +65,7 @@ pub(crate) fn default_true() -> bool {
 /// Bumping `minor` means fields were added. Bumping `major` means a consumer
 /// of the old version must refuse the document outright, which is what
 /// [`Document::from_json`] does.
-pub const SCHEMA_VERSION: Version = Version { major: 1, minor: 0 };
+pub const SCHEMA_VERSION: Version = Version { major: 1, minor: 1 };
 
 /// A `{major, minor}` schema version.
 ///
@@ -148,6 +150,14 @@ pub struct Document {
 	pub interfaces: Vec<Interface>,
 	/// Wifi profiles, sorted by id. Not bound to a device.
 	pub networks: Vec<WifiNetwork>,
+	/// Policy routing rules, sorted by priority. Host-wide, not per-interface
+	/// -- see [`rule`] for why.
+	#[serde(default)]
+	pub rules: Vec<RoutingRule>,
+	/// Access points this host runs, sorted by id. Unimplemented; see
+	/// [`AccessPoint`].
+	#[serde(default)]
+	pub access_points: Vec<AccessPoint>,
 }
 
 // `generated_by` is provenance, not state. Deriving PartialEq would make a
@@ -160,6 +170,8 @@ impl PartialEq for Document {
 			&& self.devices == other.devices
 			&& self.interfaces == other.interfaces
 			&& self.networks == other.networks
+			&& self.rules == other.rules
+			&& self.access_points == other.access_points
 	}
 }
 
@@ -172,6 +184,8 @@ impl Default for Document {
 			devices: Vec::new(),
 			interfaces: Vec::new(),
 			networks: Vec::new(),
+			rules: Vec::new(),
+			access_points: Vec::new(),
 		}
 	}
 }

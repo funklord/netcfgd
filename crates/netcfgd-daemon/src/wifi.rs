@@ -235,7 +235,17 @@ pub(crate) fn connect_to(
 		id
 	} else {
 		let resolver = Resolver::with_secrets_dir(secrets_dir);
-		match add_network(&client, network, &resolver) {
+		// The device's policy, or permanent. Without this a network joined
+		// from the command line would go in with a different address policy
+		// from the same network added at apply time -- quietly leaking the
+		// hardware address an apply would have hidden.
+		let policy = document
+			.devices
+			.iter()
+			.find(|device| device.name == interface)
+			.and_then(|device| device.wifi.as_ref())
+			.map_or(netcfgd_model::MacPolicy::Permanent, |wifi| wifi.mac_policy);
+		match add_network(&client, network, policy, &resolver) {
 			Ok(id) => id,
 			Err(error) => return Response::error(format!("cannot configure `{wanted}`: {error}")),
 		}

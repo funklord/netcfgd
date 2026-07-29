@@ -899,3 +899,80 @@ fn removing_dot1x_stops_the_supplicant() {
 		"a supplicant stopped for `addressing` sends the reader to the wrong block"
 	);
 }
+
+/// The M4 freeze put three features in the schema that nothing implements.
+/// The failure mode to guard against is not that they do nothing -- that is
+/// intended -- but that they do nothing *silently*, so a plan reports "one
+/// action" about a config that asked for four things.
+#[test]
+fn recognised_but_unimplemented_features_are_named_in_the_plan() {
+	let document = document(
+		r#"
+rule vpn { priority = 100; fwmark = 1; lookup = 42 }
+
+access_point "guest" {
+	device = "wlan0"
+	wifi   { open = true }
+}
+
+interface eth0 {
+	ipv6_token = "::5"
+	ethtool { gro = "off" }
+	config = "null"
+}
+"#,
+	);
+	let plan = plan(
+		&document,
+		&observed_with(&["eth0"]),
+		&PlanOptions::default(),
+	);
+	let warnings: Vec<&str> = plan
+		.warnings
+		.iter()
+		.map(|warning| warning.message.as_str())
+		.collect();
+
+	for expected in [
+		"access point `guest`",
+		"ethtool",
+		"ipv6_token",
+		"policy routing rule",
+	] {
+		assert!(
+			warnings.iter().any(|message| message.contains(expected)),
+			"nothing warned about {expected}: {warnings:?}"
+		);
+	}
+
+	// And each says which interface it concerns, where it concerns one -- a
+	// warning about `ethtool` on a host with twelve interfaces is not useful
+	// without the name.
+	let ethtool = plan
+		.warnings
+		.iter()
+		.find(|warning| warning.message.contains("ethtool"))
+		.expect("an ethtool warning");
+	assert_eq!(ethtool.interface.as_deref(), Some("eth0"));
+}
+
+/// A document that asks for none of them warns about none of them. A gate that
+/// always fires is one people learn to scroll past.
+#[test]
+fn a_document_using_none_of_them_gets_no_such_warnings() {
+	let document = document(r#"interface eth0 { config = "dhcp" }"#);
+	let plan = plan(
+		&document,
+		&observed_with(&["eth0"]),
+		&PlanOptions::default(),
+	);
+	for unwanted in ["ethtool", "ipv6_token", "policy routing", "access point"] {
+		assert!(
+			!plan
+				.warnings
+				.iter()
+				.any(|warning| warning.message.contains(unwanted)),
+			"warned about {unwanted} for a config that does not mention it"
+		);
+	}
+}
