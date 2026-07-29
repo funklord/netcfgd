@@ -267,8 +267,8 @@ fn lower_interface(
 		match item {
 			Item::Assignment(assignment) => match assignment.key.as_str() {
 				"config" => {
-					for line in as_lines(&assignment.value, diags) {
-						if let Some(source) = address_source(&line, diags) {
+					for entry in address_entries(&assignment.value, diags) {
+						if let Some(source) = address_source(&entry, diags) {
 							interface.addressing.push(source);
 						}
 					}
@@ -492,14 +492,175 @@ fn hook_phase(name: &str) -> Option<HookPhase> {
 	})
 }
 
+/// One addressing entry: a head, plus the modifier words that follow it.
+#[derive(Debug, Clone)]
+pub struct AddressEntry {
+	/// The address or keyword.
+	head: String,
+	/// `(keyword, argument)` pairs following it.
+	modifiers: Vec<(String, Option<String>)>,
+}
+
+/// Modifier keywords and how many words each consumes after itself.
+///
+/// This table is what makes splitting unambiguous. Without it,
+/// `192.168.0.2 netmask 255.255.255.0` splits into two addresses, because the
+/// netmask is itself address-shaped. Taken from net.example's documented
+/// forms.
+const MODIFIERS: &[(&str, usize)] = &[
+	("netmask", 1),
+	("peer", 1),
+	("pointopoint", 1),
+	("scope", 1),
+	("brd", 1),
+	("broadcast", 1),
+	("label", 1),
+	("metric", 1),
+	("preferred_lft", 1),
+	("valid_lft", 1),
+	("nodad", 0),
+	("home", 0),
+	("mngtmpaddr", 0),
+	("noprefixroute", 0),
+];
+
+fn modifier_arity(word: &str) -> Option<usize> {
+	MODIFIERS
+		.iter()
+		.find(|(name, _)| *name == word)
+		.map(|(_, arity)| *arity)
+}
+
+/// Whether a word begins a new addressing entry.
+fn starts_entry(word: &str) -> bool {
+	matches!(
+		word,
+		"dhcp"
+			| "dhcp4" | "dhcpv6"
+			| "dhcp6" | "slaac"
+			| "link-local"
+			| "link_local"
+			| "null" | "noop"
+	) || word.starts_with("@pd:")
+		|| word
+			.split('/')
+			.next()
+			.is_some_and(|head| head.parse::<IpAddr>().is_ok())
+}
+
+/// Split a `config` value into entries.
+///
+/// netifrc separates addresses with **spaces**, and uses newlines only when an
+/// entry carries modifiers that themselves contain spaces:
+///
+/// ```text
+/// config_eth0="192.168.0.2/24 192.168.0.3/24 192.168.0.4/24"
+/// config_eth0="192.168.0.2/24 scope host
+/// 4321:0:1:2:3:4:567:89ab/64 nodad home preferred_lft 0"
+/// ```
+///
+/// Splitting on newlines alone -- which this did until a real config failed to
+/// compile -- treats the first line as one malformed address. Both separators
+/// are honoured here, with [`MODIFIERS`] deciding where an entry really ends.
+fn address_entries(value: &Spanned<Value>, diags: &mut Diagnostics) -> Vec<Spanned<AddressEntry>> {
+	let mut out = Vec::new();
+	for line in as_lines(value, diags) {
+		let words: Vec<&str> = line.node.split_whitespace().collect();
+		let mut index = 0;
+		let mut current: Option<AddressEntry> = None;
+
+		while index < words.len() {
+			let word = words[index];
+			if let Some(arity) = modifier_arity(word) {
+				let argument = if arity == 0 {
+					None
+				} else {
+					index += 1;
+					if let Some(argument) = words.get(index) {
+						Some((*argument).to_owned())
+					} else {
+						diags.push(Diagnostic::new(
+							line.span,
+							format!("`{word}` needs a value"),
+						));
+						break;
+					}
+				};
+				if let Some(entry) = &mut current {
+					entry.modifiers.push((word.to_owned(), argument));
+				} else {
+					diags.push(Diagnostic::new(
+						line.span,
+						format!("`{word}` has no address to apply to"),
+					));
+				}
+			} else if starts_entry(word) {
+				if let Some(entry) = current.take() {
+					out.push(Spanned::new(entry, line.span));
+				}
+				current = Some(AddressEntry {
+					head: word.to_owned(),
+					modifiers: Vec::new(),
+				});
+			} else {
+				diags.push(
+					Diagnostic::new(line.span, format!("`{word}` is not an address or keyword"))
+						.with_help(
+							"an entry is an address, or one of dhcp, dhcp6, slaac, link-local",
+						),
+				);
+			}
+			index += 1;
+		}
+		if let Some(entry) = current {
+			out.push(Spanned::new(entry, line.span));
+		}
+	}
+	out
+}
+
+/// An IPv4 netmask as a prefix length, rejecting a non-contiguous one.
+fn netmask_to_prefix(text: &str) -> Option<u8> {
+	let mask: std::net::Ipv4Addr = text.parse().ok()?;
+	let bits = u32::from_be_bytes(mask.octets());
+	let ones = bits.leading_ones();
+	// 255.0.255.0 has four leading ones and is not a mask. Rebuilding from the
+	// count and comparing is the cheapest way to insist it is contiguous.
+	let rebuilt = if ones == 0 {
+		0
+	} else {
+		u32::MAX << (32 - ones)
+	};
+	if rebuilt != bits {
+		return None;
+	}
+	u8::try_from(ones).ok()
+}
+
 /// One entry of a `config` value.
-fn address_source(entry: &Spanned<String>, diags: &mut Diagnostics) -> Option<AddressSource> {
-	let text = entry.node.trim();
+fn address_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Option<AddressSource> {
+	let text = entry.node.head.trim();
 	match text {
 		"dhcp" | "dhcp4" => return Some(AddressSource::Dhcp4(Dhcp4::default())),
-		"dhcp6" => return Some(AddressSource::Dhcp6(Dhcp6::default())),
+		"dhcp6" | "dhcpv6" => return Some(AddressSource::Dhcp6(Dhcp6::default())),
 		"slaac" => return Some(AddressSource::Slaac(Slaac::default())),
 		"link-local" | "link_local" => return Some(AddressSource::LinkLocal),
+		// netifrc's "no address at all", used on bridge members. An empty
+		// addressing list is already legal (decision 0006 rule 6), so this
+		// contributes nothing rather than being an error.
+		"null" => return None,
+		// "keep whatever is already there" cannot be expressed by a
+		// reconciler: there is no state to converge on, so every run would
+		// have to decide afresh what it meant.
+		"noop" => {
+			diags.push(
+				Diagnostic::new(entry.span, "`noop` has no meaning in a reconciled model")
+					.with_help(
+						"state what the interface should have; an empty config keeps nothing",
+					),
+			);
+			return None;
+		}
 		_ => {}
 	}
 
@@ -532,13 +693,92 @@ fn address_source(entry: &Spanned<String>, diags: &mut Diagnostics) -> Option<Ad
 		}));
 	}
 
-	check_cidr(text, entry.span, diags)?;
+	let mut address = text.to_owned();
+	let mut peer = None;
+	let mut preferred_lifetime = None;
+	let mut valid_lifetime = None;
+
+	for (keyword, argument) in &entry.node.modifiers {
+		match (keyword.as_str(), argument.as_deref()) {
+			("netmask", Some(mask)) => {
+				// netifrc's pre-CIDR spelling. Converting rather than refusing
+				// costs fifteen lines and is the second form net.example
+				// documents, so a converted config is likelier to work.
+				let Some(prefix) = netmask_to_prefix(mask) else {
+					diags.push(Diagnostic::new(
+						entry.span,
+						format!("`{mask}` is not a contiguous netmask"),
+					));
+					return None;
+				};
+				if address.contains('/') {
+					diags.push(Diagnostic::new(
+						entry.span,
+						"an address may carry a prefix length or a netmask, not both",
+					));
+					return None;
+				}
+				address = format!("{address}/{prefix}");
+			}
+			("peer" | "pointopoint", Some(value)) => peer = Some(value.to_owned()),
+			("preferred_lft", Some(value)) => {
+				if !set_lifetime(&mut preferred_lifetime, value, entry.span, diags) {
+					return None;
+				}
+			}
+			("valid_lft", Some(value)) => {
+				if !set_lifetime(&mut valid_lifetime, value, entry.span, diags) {
+					return None;
+				}
+			}
+			(other, _) => {
+				// Recognised, and not silently dropped. Section 2's rule about
+				// unknown fields applies to the language too: acting on a
+				// subset of what the author wrote is the failure mode.
+				diags.push(
+					Diagnostic::new(
+						entry.span,
+						format!("`{other}` is not supported by this build"),
+					)
+					.with_help("supported modifiers: netmask, peer, preferred_lft, valid_lft"),
+				);
+				return None;
+			}
+		}
+	}
+
+	// A bare address with no prefix and no netmask is still an error, and the
+	// message says which of the two spellings to reach for.
+	check_cidr(&address, entry.span, diags)?;
 	Some(AddressSource::Static(Static {
-		address: text.to_owned(),
-		peer: None,
-		preferred_lifetime: None,
-		valid_lifetime: None,
+		address,
+		peer,
+		preferred_lifetime,
+		valid_lifetime,
 	}))
+}
+
+/// Set a lifetime, where netifrc's `forever` means "no limit" and so leaves
+/// the slot empty. Returns false if the value was not a lifetime at all.
+///
+/// A slot rather than a return value because "forever" and "failed" are both
+/// absences, and `Option<Option<u32>>` makes the caller decide which is which
+/// on every line.
+fn set_lifetime(slot: &mut Option<u32>, text: &str, span: Span, diags: &mut Diagnostics) -> bool {
+	if text == "forever" {
+		*slot = None;
+		return true;
+	}
+	if let Ok(seconds) = text.parse::<u32>() {
+		*slot = Some(seconds);
+		true
+	} else {
+		diags.push(Diagnostic::new(
+			span,
+			format!("`{text}` is not a number of seconds"),
+		));
+		false
+	}
 }
 
 /// Reject an address that is not `IP/prefixlen` here rather than at apply

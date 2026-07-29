@@ -1,5 +1,8 @@
 [workspace]
 resolver = "2"
+# fuzz/ is built by cargo-fuzz with nightly and a sanitizer, never by
+# `cargo build`. Excluding it keeps the workspace buildable on stable.
+exclude = ["fuzz"]
 members = [
 	"crates/netcfgd-model",
 	"crates/netcfgd-compile",

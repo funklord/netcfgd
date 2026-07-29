@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii size deny clean
+.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii size fuzz deny clean
 
 all: build
 
@@ -88,6 +88,28 @@ size:
 		echo "size: over budget"; \
 		exit 1; \
 	fi
+
+# section 6 wants a cargo-fuzz target per parser, and there are three:
+# netlink messages, the config language, and the document JSON. They need
+# nightly and a sanitizer, so they are not part of `make check` -- the
+# randomised tests in crates/*/tests/random.rs cover the same entry points on
+# stable and do run there. A target nobody can run on the machine they commit
+# from is a target that rots; a randomised test that runs every time is not a
+# substitute for coverage-guided fuzzing. Both, deliberately.
+#
+#   make fuzz TARGET=netlink_wire FUZZ_ARGS='-max_total_time=300'
+FUZZ_TARGET ?= netlink_wire
+FUZZ_ARGS   ?=
+
+fuzz:
+	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \
+		echo "fuzz: cargo-fuzz is not installed"; \
+		echo "fuzz:   cargo install cargo-fuzz   (needs a nightly toolchain)"; \
+		echo "fuzz: targets are in fuzz/fuzz_targets/, and the randomised"; \
+		echo "fuzz: tests in crates/*/tests/random.rs run on stable meanwhile"; \
+		exit 1; \
+	fi
+	$(CARGO) fuzz run $(FUZZ_TARGET) -- $(FUZZ_ARGS)
 
 # Supply chain. Both are optional installs, so this reports rather than failing
 # when they are absent -- a gate nobody can run locally is a gate that rots.

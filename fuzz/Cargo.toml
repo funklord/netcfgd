@@ -1,0 +1,36 @@
+# Not a workspace member: cargo-fuzz builds this separately, with nightly and a
+# sanitizer, and pulling it into the workspace would make `cargo build` require
+# both. `cargo fuzz run <target>` from the repo root is the entry point.
+[package]
+name         = "netcfgd-fuzz"
+version      = "0.0.0"
+edition      = "2021"
+publish      = false
+description  = "Fuzz targets for every parser netcfgd exposes to untrusted input."
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys   = "0.4"
+netcfgd-netlink = { path = "../crates/netcfgd-netlink" }
+netcfgd-compile = { path = "../crates/netcfgd-compile" }
+netcfgd-model   = { path = "../crates/netcfgd-model" }
+
+[[bin]]
+name = "netlink_wire"
+path = "fuzz_targets/netlink_wire.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "config_parse"
+path = "fuzz_targets/config_parse.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "document_json"
+path = "fuzz_targets/document_json.rs"
+test = false
+doc  = false
