@@ -84,13 +84,39 @@ a different supplicant would produce different roaming behaviour than the
 config asked for, and that is exactly the kind of thing nobody would think to
 check.
 
-**The parsing is testable without a radio.** Everything about the control
-protocol -- scan results, network lists, status -- is text in and structs out,
-so it is exercised against captured-shape fixtures. What is *not* testable
-that way is association itself, and that needs `mac80211_hwsim`. This machine
-has neither wpa_supplicant nor the module, so the integration is written
-against the documented protocol and marked as needing a hwsim run before M3
-can be called done. Saying so is better than implying the tests cover it.
+**The parsing is testable without a radio, and more of it than expected.**
+Everything about the control protocol -- scan results, network lists, status --
+is text in and structs out, so it is exercised without a supplicant at all.
+
+Beyond that, a real wpa_supplicant can be run with `-Dwired` against loopback
+inside `unshare -rn`, which needs no radio, no `mac80211_hwsim` and no root.
+That covers the control socket, the network database and -- the valuable part
+-- the *config parser*, so "does wpa_supplicant accept the strings netcfgd
+sends for WPA3?" has a real answer rather than a documented one. `make live`
+runs it.
+
+What remains untested is association itself, which does need
+`mac80211_hwsim`. M3 is not done until that has run.
+
+### Correction, 2026-07-29
+
+This record originally said "this machine has neither wpa_supplicant nor the
+module". Both claims were wrong. wpa_supplicant 2.10 is installed at
+`/usr/sbin/wpa_supplicant`, and `mac80211_hwsim` ships with the kernel package;
+the check that produced the claim used `which`, which does not search
+`/usr/sbin` for a non-root user.
+
+Left as a correction rather than an edit because the conclusion it supported --
+write against the documented protocol, defer verification -- was the wrong
+call, and running against the real thing immediately found a defect no fixture
+would have: wpa_supplicant does not return the SSID octets it was given. It
+escapes every byte outside printable ASCII as `\xHH`, so a reader that takes
+the field literally shows `caf\xc3\xa9` to somebody looking for their coffee
+shop. The documentation does not mention it.
+
+The general lesson is worth more than the specific bug: "no fixture can prove
+this" was correct, and the response should have been to find a way to run the
+real thing rather than to note the gap and continue.
 
 ## Amendment, 2026-07-29
 
