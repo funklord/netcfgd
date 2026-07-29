@@ -24,6 +24,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "netcfgd-apply"
 version = "0.0.0"
 dependencies = [
+ "netcfgd-dns",
  "netcfgd-model",
  "netcfgd-netlink",
  "netcfgd-plan",
@@ -37,9 +38,11 @@ version = "0.0.0"
 dependencies = [
  "netcfgd-apply",
  "netcfgd-compile",
+ "netcfgd-host",
  "netcfgd-model",
  "netcfgd-observe",
  "netcfgd-plan",
+ "netcfgd-proto",
  "serde",
  "serde_json",
 ]
@@ -49,6 +52,44 @@ name = "netcfgd-compile"
 version = "0.0.0"
 dependencies = [
  "netcfgd-model",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "netcfgd-daemon"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-apply",
+ "netcfgd-compile",
+ "netcfgd-host",
+ "netcfgd-model",
+ "netcfgd-netlink",
+ "netcfgd-observe",
+ "netcfgd-plan",
+ "netcfgd-proto",
+ "serde_json",
+]
+
+[[package]]
+name = "netcfgd-dns"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-model",
+]
+
+[[package]]
+name = "netcfgd-host"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-apply",
+ "netcfgd-compile",
+ "netcfgd-model",
+ "netcfgd-observe",
+ "netcfgd-plan",
+ "netcfgd-proto",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -81,6 +122,32 @@ dependencies = [
  "netcfgd-compile",
  "netcfgd-model",
  "serde",
+]
+
+[[package]]
+name = "netcfgd-proto"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-apply",
+ "netcfgd-model",
+ "netcfgd-plan",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "netcfgd-secret"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-model",
+]
+
+[[package]]
+name = "netcfgd-supplicant"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-model",
+ "netcfgd-secret",
 ]
 
 [[package]]
