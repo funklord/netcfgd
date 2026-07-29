@@ -13,6 +13,14 @@ The milestone table answers it one way -- M3 reads "iwd backend
 (wpa_supplicant fallback)" -- and the brief was written before two things were
 true.
 
+**iwd keeps its own network database and writes to it.** This is the
+decisive one, and it was found after this record was first written -- see the
+amendment below. iwd stores credentials under `/var/lib/iwd` and its own
+documentation says it "will also modify these files in the course of network
+connections". There is no stateless mode. That makes it a second source of
+truth that writes itself, which contradicts constraint 1 directly rather than
+merely costing something.
+
 **iwd speaks D-Bus and nothing else.** Its entire control surface is the
 system bus. Constraint 3 keeps D-Bus out of the core, and wifi is a backend so
 it could in principle carry the dependency in its own package -- but the
@@ -37,12 +45,13 @@ be present and integrated whatever happens with wifi.
 fallback.** One supplicant integration then covers wifi and wired 802.1X, with
 no new dependency of any kind.
 
-**iwd stays wanted, and its cost is now explicit.** It roams better, it is
-smaller on disk, and it is the default on some distributions -- those are real
-and this record is not an argument against it. What it needs is a D-Bus
-client, and taking that on is a decision to make deliberately, with the size
-gate in the room, rather than something to arrive at by implementing the
-milestone table in order.
+**iwd stays wanted, and what it needs is now specific.** It roams better, it
+is smaller on disk, and it is the default on some distributions -- those are
+real and this record is not an argument against it. But it needs two things,
+and only one of them is netcfgd's to build: a D-Bus client, which is a cost to
+take deliberately with the size gate in the room; and **a way not to
+persist**, which iwd does not have and netcfgd cannot add. Until the second
+exists, iwd support is blocked rather than merely unscheduled.
 
 `WifiDevicePolicy.backend` already has `Auto`, `Iwd` and `WpaSupplicant`, so
 the model needs no change. `Auto` resolves to wpa_supplicant in this build,
@@ -82,6 +91,24 @@ that way is association itself, and that needs `mac80211_hwsim`. This machine
 has neither wpa_supplicant nor the module, so the integration is written
 against the documented protocol and marked as needing a hwsim run before M3
 can be called done. Saying so is better than implying the tests cover it.
+
+## Amendment, 2026-07-29
+
+This record originally led with the D-Bus dependency, which is the weaker
+argument. Analysing what netcfgd actually needs from a supplicant -- a
+mechanism rather than a manager -- turned up the persistence conflict, and
+that one is not a cost to be weighed. A supplicant that writes its own network
+database and acts on it makes `ncfg plan` capable of reporting an empty plan
+on a machine that is about to associate with something the document has never
+mentioned.
+
+The practical difference: on the dependency argument, iwd support is a matter
+of deciding to pay. On the persistence argument, it is a matter of iwd growing
+a mode it does not currently offer. Those call for different conversations,
+and the record should say which one it is.
+
+Decision 0015 records how wpa_supplicant is driven so that the same conflict
+does not arise there.
 
 ## Alternatives considered
 
