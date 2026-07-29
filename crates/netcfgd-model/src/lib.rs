@@ -26,6 +26,7 @@ pub mod address;
 pub mod canonical;
 pub mod device;
 pub mod dns;
+pub mod hash;
 pub mod hook;
 pub mod interface;
 pub mod observed;

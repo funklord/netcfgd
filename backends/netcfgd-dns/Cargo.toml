@@ -1,0 +1,14 @@
+[package]
+name        = "netcfgd-dns"
+description = "DNS delivery backends. Flat modes for M2; the scope-capable ones land with M4."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lints]
+workspace = true
+
+[dependencies]
+netcfgd-model = { path = "../../crates/netcfgd-model" }
