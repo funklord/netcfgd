@@ -13,6 +13,7 @@ members = [
 	"crates/netcfgd-proto",
 	"crates/netcfgd-host",
 	"crates/netcfgd-daemon",
+	"backends/netcfgd-dns",
 	"crates/netcfgd-cli",
 ]
 

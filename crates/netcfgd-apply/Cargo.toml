@@ -11,6 +11,7 @@ repository.workspace   = true
 workspace = true
 
 [dependencies]
+netcfgd-dns     = { path = "../../backends/netcfgd-dns" }
 netcfgd-model   = { path = "../netcfgd-model" }
 netcfgd-netlink = { path = "../netcfgd-netlink" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
