@@ -81,8 +81,9 @@ impl State {
 			}
 		};
 
-		match netcfgd_compile::compile(&sources, &mut sink) {
-			Ok(document) => {
+		match netcfgd_compile::compile_with_provenance(&sources, &mut sink) {
+			Ok((document, provenance)) => {
+				let _ = run_state::write_provenance(&self.paths.run_dir, &provenance);
 				if self.rejected.as_deref() == Some(confirm::document_hash(&document).as_str()) {
 					// The same configuration a revert already rejected. Adopting
 					// it would undo the revert on the next drift check, which the

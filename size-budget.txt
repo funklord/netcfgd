@@ -18,5 +18,5 @@
 # Tolerance covers compiler-version noise; a real feature will exceed it.
 tolerance_percent 3
 
-ncfg     862656
-netcfgd  1128984
+ncfg     899520
+netcfgd  1165848

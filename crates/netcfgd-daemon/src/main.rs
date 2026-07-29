@@ -369,7 +369,12 @@ fn answer(
 			}
 			response
 		}
-		Request::Explain { .. } => Response::error("explain is not implemented in this build"),
+		Request::Explain { subject } => Response::Explanation(Box::new(netcfgd_host::explain(
+			subject,
+			state.desired.as_ref(),
+			&state.observed,
+			&run_state::read_provenance(&state.paths.run_dir),
+		))),
 		// Handled entirely on the connection thread.
 		Request::Monitor => Response::Ok,
 	}
