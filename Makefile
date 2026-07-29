@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii size fuzz deny clean
+.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii size footprint rss fuzz deny clean
 
 all: build
 
@@ -14,7 +14,7 @@ build:
 	$(CARGO) build --workspace
 
 # Ordered cheapest first, so a formatting slip does not wait on a full test run.
-check: fmt ascii clippy unsafe-policy test size
+check: fmt ascii clippy unsafe-policy test size footprint rss
 
 fmt:
 	$(CARGO) fmt --check
@@ -91,6 +91,58 @@ size:
 		fi; \
 	done < size-budget.txt; \
 	exit $$fail
+
+# Design section 4.6's mechanical test, and constraint 2's enforcement: on a
+# machine that has never used an optional feature, the footprint is exactly the
+# fixture. A feature that creates a directory unasked has leaked, and the leak
+# is a bug rather than a preference.
+footprint:
+	@$(CARGO) build --quiet
+	@work=$$(mktemp -d); \
+	cp -r tests/footprint/etc "$$work/etc"; \
+	mkdir -p "$$work/run"; \
+	NCFG_CONFIG_DIR="$$work/etc" NCFG_RUN_DIR="$$work/run" \
+		./target/debug/ncfg plan >/dev/null 2>&1 || true; \
+	fail=0; \
+	for pair in "etc:expected-etc.txt" "run:expected-run.txt"; do \
+		dir=$${pair%%:*}; want=tests/footprint/$${pair##*:}; \
+		( cd "$$work/$$dir" && find . | sort ) \
+			| sed -E 's#^\./observed/.*\.json$$#./observed/<per-interface>#' \
+			| sort -u > "$$work/actual.txt"; \
+		grep -v '^#' "$$want" | grep -v '^$$' | sort > "$$work/expected.txt"; \
+		if ! cmp -s "$$work/actual.txt" "$$work/expected.txt"; then \
+			echo "footprint: /$$dir does not match $$want"; \
+			diff "$$work/expected.txt" "$$work/actual.txt" | sed 's/^/footprint:   /' || true; \
+			fail=1; \
+		fi; \
+	done; \
+	rm -rf "$$work"; \
+	[ $$fail -eq 0 ] && echo "footprint: ok"; \
+	exit $$fail
+
+# section 10.4: under 4 MB resident for the nano tier. What is measured here is
+# the full-tier daemon, so the number is a ratchet like the size one rather
+# than the tier target -- see size-budget.txt for why that distinction exists.
+# Measured at 5400 KB. The headroom is deliberate: resident size varies with
+# allocator behaviour and page reclaim in a way binary size does not, so a
+# limit set at the measurement would fail on noise. A genuine regression --
+# holding every observed snapshot, say -- clears this easily.
+RSS_LIMIT_KB ?= 8192
+
+rss:
+	@$(CARGO) build --quiet
+	@work=$$(mktemp -d); \
+	cp -r tests/footprint/etc "$$work/etc"; mkdir -p "$$work/run"; \
+	./target/debug/netcfgd --config-dir "$$work/etc" --run-dir "$$work/run" \
+		--no-apply-on-start >/dev/null 2>&1 & \
+	pid=$$!; \
+	sleep 2; \
+	peak=$$(awk '/VmHWM/ {print $$2}' /proc/$$pid/status 2>/dev/null); \
+	kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
+	rm -rf "$$work"; \
+	if [ -z "$$peak" ]; then echo "rss: could not measure"; exit 1; fi; \
+	printf 'rss: netcfgd peak %s KB of %s limit\n' "$$peak" "$(RSS_LIMIT_KB)"; \
+	if [ "$$peak" -gt "$(RSS_LIMIT_KB)" ]; then echo "rss: over limit"; exit 1; fi
 
 # section 6 wants a cargo-fuzz target per parser, and there are three:
 # netlink messages, the config language, and the document JSON. They need

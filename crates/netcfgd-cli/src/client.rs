@@ -94,7 +94,7 @@ pub(crate) fn ask(socket: &Path, request: &Request) -> Result<Answer, String> {
 /// Where the socket is, for a given run directory.
 #[must_use]
 pub(crate) fn socket_path(run_dir: &Path) -> std::path::PathBuf {
-	run_dir.join("control.sock")
+	run_dir.join("netcfgd.sock")
 }
 
 /// Subscribe to the daemon's event stream and print until interrupted.

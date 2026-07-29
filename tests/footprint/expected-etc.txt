@@ -1,0 +1,13 @@
+# The entire filesystem footprint of a default installation, per design
+# section 4.6. `make footprint` runs netcfgd against a fixture that uses no
+# optional feature and asserts `find /etc/netcfgd` matches this exactly.
+#
+# Constraint 2 is what this enforces: the filesystem reflects use, not
+# capability. Directories that appear only once used -- secrets/, hooks/,
+# conf.d/nm/ -- must not be here, and a feature that creates one unasked has
+# leaked. Section 4.6 calls this "a CI check against a fixture, not a
+# code-review aspiration", which is why it is a file rather than a paragraph.
+.
+./conf.d
+./conf.d/10-eth0.conf
+./netcfgd.conf
