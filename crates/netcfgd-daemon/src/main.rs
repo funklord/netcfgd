@@ -14,7 +14,6 @@ mod server;
 mod state;
 mod wifi;
 
-use netcfgd_apply::KernelExecutor;
 use netcfgd_host::state as run_state;
 use netcfgd_netlink::socket::groups;
 use netcfgd_netlink::{Netlink, Watcher};
@@ -221,13 +220,9 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 
 /// Apply whatever the config asks for, reporting failures to stderr.
 fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
-	let Ok(executor) = KernelExecutor::new() else {
+	let Ok(mut executor) = state.executor() else {
 		eprintln!("netcfgd: cannot open a netlink socket to apply");
 		return;
-	};
-	let mut executor = match &state.desired {
-		Some(document) => executor.with_context(&state.paths.run_dir, document),
-		None => executor,
 	};
 	let (plan, journal) = state.apply(&PlanOptions::default(), &mut executor);
 	let mut owned = run_state::read_owned(&state.paths.run_dir);
@@ -282,7 +277,8 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 		eprintln!("netcfgd: not reconciled in isolation: {note}");
 	}
 
-	let Ok(mut executor) = KernelExecutor::new() else {
+	let Ok(mut executor) = state.executor() else {
+		eprintln!("netcfgd: cannot open a netlink socket to reconcile drift");
 		return;
 	};
 	let journal = netcfgd_apply::apply(&restricted, &mut executor);
@@ -328,8 +324,9 @@ fn apply_request(
 		revert_to: last_good.as_ref().map(netcfgd_host::document_hash),
 		allow_disruption: allow_disruption.to_vec(),
 	};
-	let Ok(mut executor) = KernelExecutor::new() else {
-		return Response::error("cannot open a netlink socket");
+	let mut executor = match state.executor() {
+		Ok(executor) => executor,
+		Err(message) => return Response::error(message),
 	};
 	let (_, journal) = state.apply(&options, &mut executor);
 	let mut owned = run_state::read_owned(&state.paths.run_dir);
