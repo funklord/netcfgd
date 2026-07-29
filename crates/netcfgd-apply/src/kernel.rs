@@ -260,6 +260,26 @@ impl Executor for KernelExecutor {
 				self.effects.created_links.push(name.clone());
 				// The index map is stale the moment a link appears.
 				self.indices.clear();
+
+				// A bridge's own settings cannot ride along with creation: the
+				// kernel takes IFLA_INFO_DATA there, but changing them later
+				// has to be a separate RTM_NEWLINK anyway, and having one path
+				// rather than two means the create case and the correct-an-
+				// existing-bridge case cannot drift apart.
+				if let InterfaceKind::Bridge(bridge) = &**kind {
+					let index = self.index_of(name)?;
+					self.socket
+						.set_bridge_attrs(
+							index,
+							netcfgd_netlink::ops::BridgeAttrs {
+								stp: bridge.stp,
+								forward_delay: bridge.forward_delay,
+							},
+						)
+						.map_err(|error| {
+							format!("created {name} but could not set its attributes: {error}")
+						})?;
+				}
 				Ok(())
 			}
 			Op::LinkDelete { name } => {
@@ -466,6 +486,27 @@ fn new_link(
 		InterfaceKind::Vlan(vlan) => Ok(NewLink::Vlan {
 			parent: executor.index_of(&vlan.parent)?,
 			id: vlan.id,
+			protocol: vlan.protocol.ethertype(),
+		}),
+		InterfaceKind::Bond(bond) => Ok(NewLink::Bond {
+			mode: bond.mode.number(),
+			miimon: bond.miimon,
+		}),
+		InterfaceKind::Vxlan(vxlan) => Ok(NewLink::Vxlan {
+			id: vxlan.id,
+			// Resolved here rather than carried as a name, because the kernel
+			// wants an index and the interface may have been created earlier
+			// in this same plan.
+			parent: match &vxlan.parent {
+				Some(parent) => Some(executor.index_of(parent)?),
+				None => None,
+			},
+			local: vxlan.local,
+			remote: vxlan.remote,
+			port: vxlan.port,
+		}),
+		InterfaceKind::Veth(veth) => Ok(NewLink::Veth {
+			peer: veth.peer.clone(),
 		}),
 		other => Err(format!(
 			"creating a {} link ({name}) is not implemented in this build",

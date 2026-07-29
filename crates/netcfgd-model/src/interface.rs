@@ -21,6 +21,97 @@ pub enum VlanProtocol {
 	Dot1ad,
 }
 
+impl VlanProtocol {
+	/// The ethertype the kernel wants in `IFLA_VLAN_PROTOCOL`.
+	#[must_use]
+	pub fn ethertype(self) -> u16 {
+		match self {
+			Self::Dot1q => 0x8100,
+			Self::Dot1ad => 0x88a8,
+		}
+	}
+}
+
+/// How a bond distributes traffic across its members.
+///
+/// An enum rather than the string it used to be. A string accepts
+/// `active_backup` and `activebackup` and `ActiveBackup`, all of which the
+/// kernel rejects at apply time -- so the config compiles, the plan looks
+/// right, and the failure arrives with the interface half-built. The names
+/// are the ones `iproute2` and every piece of bonding documentation use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BondMode {
+	/// Round robin across members.
+	#[serde(rename = "balance-rr")]
+	BalanceRr,
+	/// One member active, the rest standing by. The safe default: it needs
+	/// nothing of the switch, where most of the others need a cooperating one.
+	#[default]
+	#[serde(rename = "active-backup")]
+	ActiveBackup,
+	/// Hash-based distribution.
+	#[serde(rename = "balance-xor")]
+	BalanceXor,
+	/// Everything on every member.
+	#[serde(rename = "broadcast")]
+	Broadcast,
+	/// LACP. Needs a switch configured for it.
+	#[serde(rename = "802.3ad")]
+	Ieee8023ad,
+	/// Adaptive transmit load balancing.
+	#[serde(rename = "balance-tlb")]
+	BalanceTlb,
+	/// Adaptive load balancing.
+	#[serde(rename = "balance-alb")]
+	BalanceAlb,
+}
+
+impl BondMode {
+	/// The number the kernel uses in `IFLA_BOND_MODE`.
+	#[must_use]
+	pub fn number(self) -> u8 {
+		match self {
+			Self::BalanceRr => 0,
+			Self::ActiveBackup => 1,
+			Self::BalanceXor => 2,
+			Self::Broadcast => 3,
+			Self::Ieee8023ad => 4,
+			Self::BalanceTlb => 5,
+			Self::BalanceAlb => 6,
+		}
+	}
+
+	/// The name as the config spells it.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::BalanceRr => "balance-rr",
+			Self::ActiveBackup => "active-backup",
+			Self::BalanceXor => "balance-xor",
+			Self::Broadcast => "broadcast",
+			Self::Ieee8023ad => "802.3ad",
+			Self::BalanceTlb => "balance-tlb",
+			Self::BalanceAlb => "balance-alb",
+		}
+	}
+
+	/// Parse the config spelling.
+	#[must_use]
+	pub fn parse(text: &str) -> Option<Self> {
+		[
+			Self::BalanceRr,
+			Self::ActiveBackup,
+			Self::BalanceXor,
+			Self::Broadcast,
+			Self::Ieee8023ad,
+			Self::BalanceTlb,
+			Self::BalanceAlb,
+		]
+		.into_iter()
+		.find(|mode| mode.name() == text)
+	}
+}
+
 /// A bridge.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -40,8 +131,9 @@ pub struct BridgeConfig {
 pub struct BondConfig {
 	/// Member interface names.
 	pub members: Vec<String>,
-	/// Bonding mode, as the kernel spells it.
-	pub mode: String,
+	/// How traffic is distributed across the members.
+	#[serde(default)]
+	pub mode: BondMode,
 	/// MII monitoring interval in milliseconds.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub miimon: Option<u32>,
@@ -66,6 +158,13 @@ pub struct VlanConfig {
 pub struct VxlanConfig {
 	/// VNI.
 	pub id: u32,
+	/// Underlay interface the tunnel rides on.
+	///
+	/// Optional, and the difference matters: without it the kernel routes the
+	/// outer packets itself, which is usually what is wanted on a host with
+	/// one uplink and never what is wanted on a host with several.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub parent: Option<String>,
 	/// Local endpoint.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub local: Option<IpAddr>,

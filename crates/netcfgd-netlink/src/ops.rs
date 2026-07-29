@@ -26,6 +26,28 @@ const RTNH_F_ONLINK: u32 = 4;
 const IFLA_INFO_DATA: u16 = 2;
 /// `IFLA_VLAN_ID`, inside a vlan's `INFO_DATA`.
 const IFLA_VLAN_ID: u16 = 1;
+/// `IFLA_VLAN_PROTOCOL`. Big-endian on the wire, unlike almost everything
+/// else here -- it carries an ethertype, and the kernel reads it as one.
+const IFLA_VLAN_PROTOCOL: u16 = 5;
+/// `IFLA_LINK`, the parent a virtual link rides on.
+const IFLA_LINK: u16 = 5;
+/// `IFLA_LINKINFO` sub-attributes for a bridge.
+const IFLA_BR_FORWARD_DELAY: u16 = 1;
+const IFLA_BR_STP_STATE: u16 = 5;
+/// `IFLA_BOND_*`.
+const IFLA_BOND_MODE: u16 = 1;
+const IFLA_BOND_MIIMON: u16 = 3;
+/// `IFLA_VXLAN_*`.
+const IFLA_VXLAN_ID: u16 = 1;
+const IFLA_VXLAN_GROUP: u16 = 2;
+const IFLA_VXLAN_LOCAL: u16 = 4;
+const IFLA_VXLAN_PORT: u16 = 15;
+const IFLA_VXLAN_GROUP6: u16 = 16;
+const IFLA_VXLAN_LOCAL6: u16 = 17;
+/// `VETH_INFO_PEER`, whose payload is a whole nested `ifinfomsg` plus
+/// attributes rather than a plain value -- veth is the one link type created
+/// two-at-a-time, so the peer's entire definition rides inside the first.
+const VETH_INFO_PEER: u16 = 1;
 /// `IFF_UP`, from `net/if.h`.
 const IFF_UP: u32 = 0x1;
 
@@ -45,15 +67,130 @@ pub enum NewLink {
 		parent: u32,
 		/// VLAN id.
 		id: u16,
+		/// Tag protocol identifier, as an ethertype: `0x8100` or `0x88a8`.
+		protocol: u16,
+	},
+	/// A bond.
+	Bond {
+		/// Bonding mode, as the kernel numbers them.
+		mode: u8,
+		/// Link monitoring interval in milliseconds.
+		miimon: Option<u32>,
+	},
+	/// A VXLAN.
+	Vxlan {
+		/// VXLAN network identifier.
+		id: u32,
+		/// Index of the underlay interface, where one is named.
+		parent: Option<u32>,
+		/// Source address for the outer header.
+		local: Option<std::net::IpAddr>,
+		/// Remote unicast address, or the multicast group.
+		remote: Option<std::net::IpAddr>,
+		/// Destination UDP port.
+		port: Option<u16>,
+	},
+	/// A veth pair. Creating one end creates both.
+	Veth {
+		/// The name of the other end.
+		peer: String,
 	},
 }
 
+/// Bridge attributes, applied after creation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BridgeAttrs {
+	/// Spanning tree.
+	pub stp: bool,
+	/// Forward delay in seconds.
+	pub forward_delay: Option<u32>,
+}
+
 impl NewLink {
+	/// The `IFLA_INFO_DATA` nest for this kind, where it has one.
+	fn info_data(&self, name: &str) -> Option<AttrBuf> {
+		let mut data = AttrBuf::new();
+		match self {
+			Self::Bridge | Self::Dummy => return None,
+			Self::Vlan { id, protocol, .. } => {
+				data.push(IFLA_VLAN_ID, &id.to_ne_bytes());
+				// Big-endian: it is an ethertype, and the kernel reads it as
+				// one. Sending it native-endian is refused outright -- the
+				// kernel knows only 0x8100 and 0x88a8 and rejects the
+				// byte-swapped values -- so this fails loudly rather than
+				// producing a link that tags with nonsense. Verified by
+				// sending the wrong one.
+				data.push(IFLA_VLAN_PROTOCOL, &protocol.to_be_bytes());
+			}
+			Self::Bond { mode, miimon } => {
+				data.push_u8(IFLA_BOND_MODE, *mode);
+				if let Some(interval) = miimon {
+					data.push_u32(IFLA_BOND_MIIMON, *interval);
+				}
+			}
+			Self::Vxlan {
+				id,
+				local,
+				remote,
+				port,
+				..
+			} => {
+				data.push_u32(IFLA_VXLAN_ID, *id);
+				// The v4 and v6 attributes are different numbers, so the
+				// family decides which one is sent rather than the value being
+				// coerced into a single field.
+				if let Some(address) = local {
+					data.push_ip(
+						if address.is_ipv6() {
+							IFLA_VXLAN_LOCAL6
+						} else {
+							IFLA_VXLAN_LOCAL
+						},
+						*address,
+					);
+				}
+				if let Some(address) = remote {
+					data.push_ip(
+						if address.is_ipv6() {
+							IFLA_VXLAN_GROUP6
+						} else {
+							IFLA_VXLAN_GROUP
+						},
+						*address,
+					);
+				}
+				if let Some(port) = port {
+					// Big-endian, like every port number on the wire.
+					data.push(IFLA_VXLAN_PORT, &port.to_be_bytes());
+				}
+			}
+			Self::Veth { peer } => {
+				// The peer's whole definition, not just its name: an
+				// `ifinfomsg` followed by its own attributes, nested inside
+				// this one. veth is the only link type created in pairs and
+				// this is why its encoding looks unlike the others.
+				let mut peer_attrs = AttrBuf::new();
+				peer_attrs.push_str(ifla::IFNAME, peer);
+
+				let mut nested = Vec::new();
+				wire::IfInfo::default().encode(&mut nested);
+				nested.extend_from_slice(peer_attrs.as_bytes());
+				data.push(VETH_INFO_PEER, &nested);
+
+				let _ = name;
+			}
+		}
+		Some(data)
+	}
+
 	fn kind_name(&self) -> &'static str {
 		match self {
 			Self::Bridge => "bridge",
 			Self::Dummy => "dummy",
 			Self::Vlan { .. } => "vlan",
+			Self::Bond { .. } => "bond",
+			Self::Vxlan { .. } => "vxlan",
+			Self::Veth { .. } => "veth",
 		}
 	}
 }
@@ -319,17 +456,21 @@ impl Netlink {
 	pub fn create_link(&mut self, name: &str, kind: &NewLink) -> io::Result<()> {
 		let mut info = AttrBuf::new();
 		info.push_str(ifla::INFO_KIND, kind.kind_name());
-		if let NewLink::Vlan { id, .. } = kind {
-			let mut data = AttrBuf::new();
-			data.push(IFLA_VLAN_ID, &id.to_ne_bytes());
+		if let Some(data) = kind.info_data(name) {
 			info.push(IFLA_INFO_DATA, data.as_bytes());
 		}
 
 		let mut attrs = AttrBuf::new();
 		attrs.push_str(ifla::IFNAME, name);
-		if let NewLink::Vlan { parent, .. } = kind {
-			// IFLA_LINK on a vlan names the parent it rides on.
-			attrs.push_u32(5, *parent);
+		// The parent a virtual link rides on. A vlan must have one; a vxlan
+		// may, and without it the kernel routes the underlay itself.
+		if let NewLink::Vlan { parent, .. }
+		| NewLink::Vxlan {
+			parent: Some(parent),
+			..
+		} = kind
+		{
+			attrs.push_u32(IFLA_LINK, *parent);
 		}
 		attrs.push(ifla::LINKINFO, info.as_bytes());
 
@@ -342,6 +483,44 @@ impl Netlink {
 			&body,
 			&attrs,
 		)?;
+		Ok(())
+	}
+
+	/// Set bridge attributes on an existing bridge.
+	///
+	/// Separate from creation because they are separately reconcilable: a
+	/// bridge that exists with the wrong forward delay should be corrected,
+	/// not deleted and remade, and deleting a bridge takes its members down
+	/// with it.
+	///
+	/// # Errors
+	///
+	/// Returns the errno the kernel replied with.
+	pub fn set_bridge_attrs(&mut self, index: u32, attrs: BridgeAttrs) -> io::Result<()> {
+		let mut data = AttrBuf::new();
+		data.push_u32(IFLA_BR_STP_STATE, u32::from(attrs.stp));
+		if let Some(delay) = attrs.forward_delay {
+			// The kernel counts forward delay in hundredths of a second, and
+			// the config counts it in seconds because that is what every other
+			// tool and every piece of documentation uses.
+			data.push_u32(IFLA_BR_FORWARD_DELAY, delay.saturating_mul(100));
+		}
+
+		let mut info = AttrBuf::new();
+		info.push_str(ifla::INFO_KIND, "bridge");
+		info.push(IFLA_INFO_DATA, data.as_bytes());
+
+		let mut outer = AttrBuf::new();
+		outer.push(ifla::LINKINFO, info.as_bytes());
+
+		let mut body = Vec::new();
+		wire::IfInfo {
+			index: i32::try_from(index).unwrap_or(0),
+			..wire::IfInfo::default()
+		}
+		.encode(&mut body);
+
+		self.request(msg_type::RTM_NEWLINK, ack_flags(), &body, &outer)?;
 		Ok(())
 	}
 

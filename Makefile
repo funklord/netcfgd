@@ -203,6 +203,7 @@ live:
 		echo "live:   user namespaces restricted; run as root instead"; \
 		exit 1; \
 	}
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/links.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
 	@# Association, which needs real root and a loadable mac80211_hwsim. Not
