@@ -7,6 +7,20 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {
 	/// Before the link comes up.
+	///
+	/// The interface is **down** when this runs, which is a constraint and not
+	/// only an ordering: the kernel returns `EINVAL` for
+	/// `/sys/class/net/*/carrier` on a down interface, so a hook here cannot
+	/// discover whether a cable is plugged in. `mii-tool` and `ethtool` fail
+	/// for the same reason.
+	///
+	/// This is where netcfgd differs from netifrc, which runs `up; preup; up`
+	/// precisely so that its `preup` can check link. A netifrc `preup` that
+	/// aborts on "no link" deadlocks here: it refuses the bring-up that would
+	/// have produced the carrier it wanted. See `docs/decisions/0011`.
+	///
+	/// Use [`HookPhase::Up`] for anything needing an initialised device, and
+	/// [`HookPhase::Carrier`] for anything reacting to a cable.
 	PreUp,
 	/// As the link comes up.
 	Up,
@@ -19,6 +33,11 @@ pub enum HookPhase {
 	/// After the link is down.
 	PostDown,
 	/// Carrier gained or lost.
+	///
+	/// Where a link-state check belongs. Note that netcfgd does not currently
+	/// gate addressing on carrier -- it brings a link up and addresses it
+	/// whether or not a cable is present -- so this reports rather than
+	/// defers (`docs/decisions/0011`).
 	Carrier,
 	/// A lease was acquired, renewed or lost.
 	Lease,
