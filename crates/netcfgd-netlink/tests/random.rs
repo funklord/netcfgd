@@ -7,6 +7,7 @@
 //! reproducible rather than a flaky CI run.
 
 use netcfgd_netlink::dump::{decode_address, decode_link, decode_route};
+use netcfgd_netlink::genl::{payload_attrs, GenlHeader};
 use netcfgd_netlink::wire::{
 	error_code, ifla, msg_type, AttrBuf, Attrs, Header, IfAddr, IfInfo, Messages, RtMsg,
 };
@@ -65,6 +66,27 @@ fn exercise(data: &[u8]) {
 			Attrs::new(message.payload).take(10_000).count() < 10_000,
 			"nested attribute iteration did not terminate"
 		);
+	}
+
+	// Generic netlink replies come from the kernel on the same terms. The
+	// family parser is the entry point every future family shares, so a hang
+	// here would be a hang in whatever uses nl80211 or wireguard next.
+	let _ = GenlHeader::decode(data);
+	assert!(
+		payload_attrs(data).take(10_000).count() < 10_000,
+		"generic netlink attribute iteration did not terminate"
+	);
+	for message in Messages::new(data).take(10_000) {
+		let _ = GenlHeader::decode(message.payload);
+		for attr in payload_attrs(message.payload).take(10_000) {
+			// The nested arrays a family list uses: an attribute whose value
+			// is itself a run of attributes, which is where a length that
+			// makes no progress hides.
+			assert!(
+				Attrs::new(attr.value).take(10_000).count() < 10_000,
+				"nested generic netlink iteration did not terminate"
+			);
+		}
 	}
 }
 
