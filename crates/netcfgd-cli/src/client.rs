@@ -97,6 +97,85 @@ pub(crate) fn socket_path(run_dir: &Path) -> std::path::PathBuf {
 	run_dir.join("control.sock")
 }
 
+/// Subscribe to the daemon's event stream and print until interrupted.
+///
+/// # Errors
+///
+/// Returns a message naming what could not be reached.
+pub(crate) fn stream(socket: &Path, json: bool) -> Result<std::process::ExitCode, String> {
+	let stream = UnixStream::connect(socket)
+		.map_err(|error| format!("cannot reach the daemon at {}: {error}", socket.display()))?;
+	let write_half = stream
+		.try_clone()
+		.map_err(|error| format!("cannot use the socket: {error}"))?;
+	let mut reader = BufReader::new(stream);
+	let mut writer = BufWriter::new(write_half);
+
+	write_message(&mut writer, &Request::Monitor)
+		.map_err(|error| format!("cannot subscribe: {error}"))?;
+
+	// Events arrive until the daemon stops or the terminal goes away. There is
+	// no exit condition on this side by design: `monitor` is something you
+	// leave running in another window and interrupt when you are done.
+	loop {
+		match read_message::<serde_json::Value, _>(&mut reader) {
+			Ok(Some(value)) => {
+				if json {
+					println!("{value}");
+				} else {
+					println!("{}", render_event(&value));
+				}
+			}
+			Ok(None) => return Ok(std::process::ExitCode::SUCCESS),
+			Err(error) => return Err(format!("the stream ended: {error}")),
+		}
+	}
+}
+
+/// One line per event.
+///
+/// Rendered from the JSON rather than a typed enum for the same reason the
+/// response type is narrow: pulling the full `Response` in costs several
+/// hundred kilobytes, and a monitor that prints an event it does not recognise
+/// is more useful than one that refuses to parse it.
+fn render_event(value: &serde_json::Value) -> String {
+	let event = value.get("event").and_then(serde_json::Value::as_str);
+	let field = |name: &str| {
+		value
+			.get(name)
+			.map(|found| match found.as_str() {
+				Some(text) => text.to_owned(),
+				None => found.to_string(),
+			})
+			.unwrap_or_default()
+	};
+	match event {
+		Some("observed") => format!("observed  {}", field("summary")),
+		Some("reloaded") => {
+			if value.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+				"reloaded  the configuration compiled".to_owned()
+			} else {
+				format!("reloaded  FAILED\n{}", field("diagnostics"))
+			}
+		}
+		Some("drift") => format!(
+			"drift     {}: {} ({})",
+			field("interface"),
+			field("summary"),
+			field("action")
+		),
+		Some("confirm_armed") => format!("confirm   window open for {}s", field("seconds")),
+		Some("confirm_resolved") => {
+			if value.get("confirmed").and_then(serde_json::Value::as_bool) == Some(true) {
+				"confirm   confirmed; the change stands".to_owned()
+			} else {
+				"confirm   reverted to the last-good configuration".to_owned()
+			}
+		}
+		_ => value.to_string(),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::Answer;

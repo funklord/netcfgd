@@ -12,3 +12,5 @@ workspace = true
 
 [dependencies]
 netcfgd-model = { path = "../netcfgd-model" }
+serde.workspace      = true
+serde_json.workspace = true

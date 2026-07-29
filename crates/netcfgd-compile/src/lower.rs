@@ -4,9 +4,11 @@
 //! the AST carries spans rather than being lowered as it is parsed.
 
 use crate::ast::{Assignment, Block, Item, Spanned, Value};
+use crate::diag::SourceMap;
 use crate::diag::{Diagnostic, Diagnostics, Span};
 use crate::hook::HookSink;
 use crate::merge::Merged;
+use crate::provenance::{field_path, interface_path, Provenance};
 use netcfgd_model::address::{Delegated, PrefixRef, Static};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{BondConfig, BridgeConfig, VlanConfig, VlanProtocol};
@@ -21,7 +23,12 @@ use std::net::IpAddr;
 /// # Errors
 ///
 /// Returns every diagnostic found.
-pub fn lower(merged: &Merged, hooks: &mut dyn HookSink) -> Result<Document, Diagnostics> {
+pub fn lower(
+	merged: &Merged,
+	hooks: &mut dyn HookSink,
+	sources: &SourceMap,
+	provenance: &mut Provenance,
+) -> Result<Document, Diagnostics> {
 	let mut diagnostics = Diagnostics::new();
 	let mut document = Document::default();
 
@@ -38,7 +45,10 @@ pub fn lower(merged: &Merged, hooks: &mut dyn HookSink) -> Result<Document, Diag
 				}
 			}
 			"interface" => {
-				if let Some(interface) = lower_interface(block, hooks, &mut diagnostics) {
+				if let Some(interface) =
+					lower_interface(block, hooks, &mut diagnostics, sources, provenance)
+				{
+					provenance.record(sources, interface_path(&interface.name), block.span);
 					document.interfaces.push(interface);
 				}
 			}
@@ -241,6 +251,8 @@ fn lower_interface(
 	block: &Block,
 	hooks: &mut dyn HookSink,
 	diags: &mut Diagnostics,
+	sources: &SourceMap,
+	provenance: &mut Provenance,
 ) -> Option<Interface> {
 	let name = require_label(block, diags)?;
 	let mut interface = Interface {
@@ -269,6 +281,14 @@ fn lower_interface(
 				"config" => {
 					for entry in address_entries(&assignment.value, diags) {
 						if let Some(source) = address_source(&entry, diags) {
+							provenance.record(
+								sources,
+								field_path(
+									&name,
+									&format!("addressing[{}]", interface.addressing.len()),
+								),
+								entry.span,
+							);
 							interface.addressing.push(source);
 						}
 					}
@@ -276,11 +296,19 @@ fn lower_interface(
 				"routes" => {
 					for line in as_lines(&assignment.value, diags) {
 						if let Some(route) = parse_route(&line, diags) {
+							provenance.record(
+								sources,
+								field_path(&name, &format!("routes[{}]", route.destination)),
+								line.span,
+							);
 							interface.routes.push(route);
 						}
 					}
 				}
-				"mtu" => interface.mtu = as_u32(&assignment.value, diags),
+				"mtu" => {
+					provenance.record(sources, field_path(&name, "mtu"), assignment.span);
+					interface.mtu = as_u32(&assignment.value, diags);
+				}
 				"mac" => interface.mac = as_string(&assignment.value, diags),
 				"enabled" => {
 					if let Some(flag) = as_bool(&assignment.value, diags) {
@@ -291,11 +319,13 @@ fn lower_interface(
 				"forwarding" => interface.forwarding = as_bool(&assignment.value, diags),
 				"on_drift" => interface.on_drift = as_drift(&assignment.value, diags),
 				"guard" => {
+					provenance.record(sources, field_path(&name, "guard"), assignment.span);
 					interface.guard = as_string(&assignment.value, diags)
 						.map(|reason| netcfgd_model::Guard { reason });
 				}
 				"dns" | "dns_search" | "dns_mode" | "dns_domains" => {
 					dns_touched = true;
+					provenance.record(sources, field_path(&name, "dns"), assignment.span);
 					lower_dns_key(&mut dns, assignment, diags);
 				}
 				other => diags.push(Diagnostic::new(
