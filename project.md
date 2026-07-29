@@ -414,6 +414,7 @@ netcfgd/
     netcfgd-plan/               # diff(desired, observed) -> Plan. Pure.
     netcfgd-apply/              # executes a Plan
     netcfgd-proto/              # control socket types
+    netcfgd-host/               # reads /etc, writes /run, materialises hooks
     netcfgd-daemon/             # `netcfgd` binary
     netcfgd-cli/                # `ncfg` binary (incl. `ncfg tui`)
   backends/
@@ -426,6 +427,8 @@ netcfgd/
     footprint/                  # §6 filesystem-footprint fixture
   fuzz/
 ```
+
+`netcfgd-host` is not in the original list and was added in M2. Both binaries need to read the config directory in the same order, write the same `/run` files and materialise hooks the same way; two copies of "which files are the config" is how `ncfg` and `netcfgd` come to disagree about what the config says. Keeping the filesystem side in one crate is also what lets the pure crates stay pure.
 
 The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are **pure and hardware-free**. The entire planner is unit-testable by feeding fixture configs plus fake observed snapshots and asserting on the action list. Build that harness first; it is what makes the rest safe to write.
 

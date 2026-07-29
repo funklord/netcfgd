@@ -12,7 +12,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Where config lives when nothing says otherwise.
-pub(crate) const DEFAULT_CONFIG_DIR: &str = "/etc/netcfgd";
+pub const DEFAULT_CONFIG_DIR: &str = "/etc/netcfgd";
 
 /// Read a config directory into a source map, in precedence order.
 ///
@@ -21,7 +21,7 @@ pub(crate) const DEFAULT_CONFIG_DIR: &str = "/etc/netcfgd";
 /// Returns an `io::Error` naming the path that could not be read. A missing
 /// directory is not an error: an empty config is a legitimate state and
 /// compiles to an empty document, which plans to do nothing.
-pub(crate) fn load(dir: &Path) -> io::Result<SourceMap> {
+pub fn load(dir: &Path) -> io::Result<SourceMap> {
 	let mut sources = SourceMap::new();
 
 	let main = dir.join("netcfgd.conf");
@@ -90,7 +90,7 @@ fn include_target(line: &str) -> Option<String> {
 
 /// The config directory to use: the argument, the environment, or the default.
 #[must_use]
-pub(crate) fn resolve_dir(explicit: Option<&str>) -> PathBuf {
+pub fn resolve_dir(explicit: Option<&str>) -> PathBuf {
 	if let Some(path) = explicit {
 		return PathBuf::from(path);
 	}

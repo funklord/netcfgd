@@ -1,6 +1,6 @@
 [package]
-name        = "netcfgd-cli"
-description = "ncfg: the netcfgd command-line interface."
+name        = "netcfgd-daemon"
+description = "The netcfgd daemon: watch, reconcile, and answer the control socket."
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace      = true
 repository.workspace   = true
 
 [[bin]]
-name = "ncfg"
+name = "netcfgd"
 path = "src/main.rs"
 
 [lints]
@@ -19,7 +19,8 @@ netcfgd-apply   = { path = "../netcfgd-apply" }
 netcfgd-compile = { path = "../netcfgd-compile" }
 netcfgd-host    = { path = "../netcfgd-host" }
 netcfgd-model   = { path = "../netcfgd-model" }
+netcfgd-netlink = { path = "../netcfgd-netlink" }
 netcfgd-observe = { path = "../netcfgd-observe" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
-serde.workspace      = true
+netcfgd-proto   = { path = "../netcfgd-proto" }
 serde_json.workspace = true

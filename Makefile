@@ -79,15 +79,19 @@ SIZE_BUDGET_EMBEDDED ?= 1048576
 
 size:
 	@$(CARGO) build --release --quiet
-	@bin=target/release/ncfg; \
-	actual=$$(stat -c%s "$$bin"); \
-	printf 'size: ncfg %s bytes of %s budget (%s%% used)\n' \
-		"$$actual" "$(SIZE_BUDGET_EMBEDDED)" \
-		"$$(( actual * 100 / $(SIZE_BUDGET_EMBEDDED) ))"; \
-	if [ "$$actual" -gt "$(SIZE_BUDGET_EMBEDDED)" ]; then \
-		echo "size: over budget"; \
-		exit 1; \
-	fi
+	@fail=0; \
+	for bin in target/release/ncfg target/release/netcfgd; do \
+		[ -f "$$bin" ] || continue; \
+		actual=$$(stat -c%s "$$bin"); \
+		printf 'size: %s %s bytes of %s budget (%s%% used)\n' \
+			"$$(basename $$bin)" "$$actual" "$(SIZE_BUDGET_EMBEDDED)" \
+			"$$(( actual * 100 / $(SIZE_BUDGET_EMBEDDED) ))"; \
+		if [ "$$actual" -gt "$(SIZE_BUDGET_EMBEDDED)" ]; then \
+			echo "size: $$bin is over budget"; \
+			fail=1; \
+		fi; \
+	done; \
+	exit $$fail
 
 # section 6 wants a cargo-fuzz target per parser, and there are three:
 # netlink messages, the config language, and the document JSON. They need

@@ -7,9 +7,7 @@
 //! this small -- section 6's size gate is the kind of constraint that has to
 //! bind on the first binary or it never binds at all.
 
-mod config;
-mod hooks;
-mod state;
+use netcfgd_host::{config, hooks, state};
 
 use netcfgd_apply::{apply, KernelExecutor};
 use netcfgd_model::Observed;
