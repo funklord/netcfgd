@@ -458,8 +458,8 @@ fn an_impossible_prefix_length_is_refused() {
 /// they arrive in, rather than reporting an unknown keyword.
 #[test]
 fn an_unimplemented_feature_names_its_milestone() {
-	let rendered = errors("network \"home\" { }");
-	assert!(rendered.contains("M3"), "got: {rendered}");
+	let rendered = errors("interface wg0 {\n\twireguard { listen_port = 51820 }\n}");
+	assert!(rendered.contains("M4"), "got: {rendered}");
 }
 
 /// Unterminated constructs are named rather than producing a cascade.
@@ -644,4 +644,173 @@ fn noop_is_refused_with_an_explanation() {
 fn a_word_that_is_neither_address_nor_keyword_is_refused() {
 	let rendered = errors(r#"interface eth0 { config = "192.168.0.2/24 wibble" }"#);
 	assert!(rendered.contains("wibble"), "got: {rendered}");
+}
+
+/// The wifi example from design section 3.2, which is what a laptop config
+/// actually looks like.
+#[test]
+fn the_wifi_example_compiles() {
+	let document = build_ok(
+		r#"
+device wlan0 {
+	wifi {
+		backend      = "wpa_supplicant"
+		autoconnect  = true
+		portal_check = true
+		regdom       = "SE"
+		powersave    = "off"
+	}
+}
+
+network "HomeFiber" {
+	wifi   { psk = "@secret:HomeFiber"; priority = 30 }
+	config = "dhcp"
+}
+
+network "Office" {
+	wifi {
+		eap      = "peap"
+		identity = "dave"
+		password = "@secret:Office"
+		ca_cert  = "/etc/ssl/certs/office.pem"
+		priority = 20
+	}
+	config = "dhcp"
+}
+
+network "Phone Hotspot" {
+	wifi    { psk = "@secret:Hotspot"; priority = 5 }
+	config  = "dhcp"
+	metered = true
+}
+"#,
+	);
+
+	let radio = document.devices[0].wifi.as_ref().expect("a wifi policy");
+	assert_eq!(
+		radio.backend,
+		netcfgd_model::device::WifiBackend::WpaSupplicant
+	);
+	assert_eq!(radio.regdom.as_deref(), Some("SE"));
+	assert_eq!(radio.powersave, netcfgd_model::device::Powersave::Off);
+
+	// Sorted by id, per the schema.
+	let ids: Vec<&str> = document
+		.networks
+		.iter()
+		.map(|network| network.id.as_str())
+		.collect();
+	assert_eq!(ids, ["HomeFiber", "Office", "Phone Hotspot"]);
+
+	let home = &document.networks[0];
+	assert_eq!(home.ssid.as_bytes(), b"HomeFiber");
+	assert_eq!(home.priority, 30);
+	assert!(matches!(home.security, netcfgd_model::Security::Psk(_)));
+
+	// A space in an SSID is ordinary and must survive being a block label.
+	assert_eq!(document.networks[2].ssid.as_bytes(), b"Phone Hotspot");
+	assert!(document.networks[2].metered);
+}
+
+/// A passphrase written into the config would make "config files are safe to
+/// commit" a convention rather than a property. The first person to paste one
+/// in has to be told, not accommodated.
+#[test]
+fn an_inline_passphrase_is_refused() {
+	let message = errors(r#"network "Home" { wifi { psk = "hunter2hunter2" } }"#);
+	assert!(message.contains("secret reference"), "got: {message}");
+	assert!(message.contains("@secret:"), "got: {message}");
+	assert!(
+		!message.contains("hunter2hunter2"),
+		"a diagnostic must not echo the passphrase: {message}"
+	);
+}
+
+/// Two kinds of security means guessing which was meant, and the wrong guess
+/// is either a network that will not join or one joined with less protection
+/// than was asked for.
+#[test]
+fn a_network_has_one_kind_of_security() {
+	let message =
+		errors(r#"network "Home" { wifi { psk = "@secret:home"; eap = "peap"; identity = "d" } }"#);
+	assert!(message.contains("one kind of security"), "got: {message}");
+}
+
+/// An open network is a real thing and almost never what somebody meant to
+/// write. Silence here is how a laptop joins anything using the same name.
+#[test]
+fn a_network_with_no_security_block_must_say_so() {
+	let message = errors(r#"network "Cafe" { config = "dhcp" }"#);
+	assert!(message.contains("open network"), "got: {message}");
+	assert!(message.contains("open = true"), "got: {message}");
+
+	// And saying so compiles.
+	let document = build_ok(r#"network "Cafe" { wifi { open = true }; config = "dhcp" }"#);
+	assert_eq!(document.networks[0].security, netcfgd_model::Security::Open);
+}
+
+/// An EAP network with no CA certificate authenticates to any server that
+/// answers. Plenty of real deployments pin nothing, so this is said rather
+/// than refused -- but it is said.
+#[test]
+fn eap_without_a_ca_certificate_is_reported() {
+	let message = errors(
+		r#"network "Corp" { wifi { eap = "ttls"; identity = "d"; password = "@secret:c" } }"#,
+	);
+	assert!(message.contains("trust any server"), "got: {message}");
+}
+
+/// WPA3 has to be expressible, and the default has to be the transitional mode
+/// that works against both -- picking WPA2 by default would quietly cap a WPA3
+/// network's security at WPA2.
+#[test]
+fn the_wpa_generation_defaults_to_transitional() {
+	use netcfgd_model::security::PskProto;
+
+	let default = build_ok(r#"network "H" { wifi { psk = "@secret:h" } }"#);
+	let netcfgd_model::Security::Psk(config) = &default.networks[0].security else {
+		panic!("expected a psk network");
+	};
+	assert_eq!(config.proto, PskProto::Wpa2Wpa3);
+
+	let wpa3 = build_ok(r#"network "H" { wifi { psk = "@secret:h"; proto = "wpa3" } }"#);
+	let netcfgd_model::Security::Psk(config) = &wpa3.networks[0].security else {
+		panic!("expected a psk network");
+	};
+	assert_eq!(config.proto, PskProto::Wpa3);
+}
+
+/// An SSID is 32 arbitrary octets, so a name that is not text needs a way in.
+#[test]
+fn a_non_text_ssid_can_be_given_as_hex() {
+	let document = build_ok(r#"network "the odd one" { ssid = "ff0080"; wifi { open = true } }"#);
+	assert_eq!(document.networks[0].ssid.as_bytes(), &[0xff, 0x00, 0x80]);
+	// The label stays the handle, so the network still has one readable name.
+	assert_eq!(document.networks[0].id, "the odd one");
+}
+
+/// iwd compiles and is refused at use, so the diagnostic can explain why
+/// rather than reading as a typo (decision 0014).
+#[test]
+fn the_iwd_backend_compiles_so_it_can_be_refused_by_name() {
+	let document = build_ok(r#"device wlan0 { wifi { backend = "iwd" } }"#);
+	assert_eq!(
+		document.devices[0].wifi.as_ref().expect("policy").backend,
+		netcfgd_model::device::WifiBackend::Iwd
+	);
+}
+
+/// A regulatory domain the kernel ignores is a radio quietly using the
+/// world-roaming defaults, which is not a thing anybody notices.
+#[test]
+fn a_malformed_regulatory_domain_is_refused() {
+	for bad in ["se", "SWE", "S"] {
+		let message = errors(&format!(
+			r#"device wlan0 {{ wifi {{ regdom = "{bad}" }} }}"#
+		));
+		assert!(
+			message.contains("regulatory domain"),
+			"`{bad}` should be refused: {message}"
+		);
+	}
 }

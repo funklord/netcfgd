@@ -23,4 +23,6 @@ netcfgd-netlink = { path = "../netcfgd-netlink" }
 netcfgd-observe = { path = "../netcfgd-observe" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
 netcfgd-proto   = { path = "../netcfgd-proto" }
+netcfgd-secret  = { path = "../netcfgd-secret" }
+netcfgd-supplicant = { path = "../../backends/netcfgd-supplicant" }
 serde_json.workspace = true

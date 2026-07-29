@@ -66,6 +66,35 @@ pub enum Request {
 	},
 	/// Stream events until the connection closes.
 	Monitor,
+
+	/// Scan for access points on a wireless interface.
+	WifiScan {
+		/// Which interface.
+		interface: String,
+	},
+	/// What a wireless interface is currently doing.
+	WifiStatus {
+		/// Which interface.
+		interface: String,
+	},
+	/// Join a network **that is already in the configuration**.
+	///
+	/// The network is named by its id in the document, not by SSID and
+	/// passphrase. That is what keeps this inside the `wifi` tier rather than
+	/// making it `admin` wearing a hat: joining a configured network changes
+	/// no configuration, and there is no request here that could create one
+	/// (decision 0013).
+	WifiConnect {
+		/// Which interface.
+		interface: String,
+		/// The `network` block's id.
+		network: String,
+	},
+	/// Leave the current network, without forgetting it.
+	WifiDisconnect {
+		/// Which interface.
+		interface: String,
+	},
 }
 
 /// What `explain` is being asked about.
@@ -116,6 +145,10 @@ pub enum Response {
 	Explanation(Box<Explanation>),
 	/// One event, on a monitor stream.
 	Event(Box<Event>),
+	/// What a scan found.
+	WifiScan(Box<ScanReport>),
+	/// What a radio is doing.
+	WifiStatus(Box<WifiState>),
 	/// The request succeeded and had nothing to return.
 	Ok,
 	/// The request failed.
@@ -151,6 +184,79 @@ pub struct Fact {
 	/// kernel attribute, a file under `/run`.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub source: Option<String>,
+}
+
+/// What one scan found.
+///
+/// A struct wrapping the list rather than the list itself, and not only for
+/// the interface name. [`Response`] is an internally tagged enum, and serde
+/// cannot serialise a tagged newtype variant containing a sequence -- it fails
+/// at runtime, when the daemon tries to answer. Every other variant here wraps
+/// a struct, and this one has to as well.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScanReport {
+	/// Which interface scanned.
+	pub interface: String,
+	/// What it found, strongest first.
+	pub access_points: Vec<ScanEntry>,
+}
+
+/// One access point a scan found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScanEntry {
+	/// The access point's address.
+	pub bssid: String,
+	/// Centre frequency in MHz.
+	pub frequency: u32,
+	/// Signal level in dBm. Closer to zero is stronger.
+	pub signal: i32,
+	/// Whether joining it needs a credential.
+	pub secured: bool,
+	/// The network name as hex, which is the canonical form and the only one
+	/// that is always available -- an SSID is 32 arbitrary octets.
+	pub ssid: String,
+	/// The name as text, where it happens to be valid UTF-8. Absent rather
+	/// than mangled otherwise, so a client can tell "not text" from "empty".
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub name: Option<String>,
+	/// The id of the `network` block describing it, if the configuration has
+	/// one.
+	///
+	/// This is the field that makes decision 0013's boundary visible instead
+	/// of surprising. A caller holding only the `wifi` tier can join exactly
+	/// the entries where this is set; for the rest, somebody has to write
+	/// config first. A client that shows the difference saves the operator
+	/// discovering it by being refused.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub configured: Option<String>,
+}
+
+/// What a wireless interface is doing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WifiState {
+	/// Which interface.
+	pub interface: String,
+	/// The supplicant's own state name, such as `COMPLETED` or `SCANNING`.
+	pub state: String,
+	/// The associated network's name as hex, when there is one.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ssid: Option<String>,
+	/// That name as text, where it is valid UTF-8.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub name: Option<String>,
+	/// The access point.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub bssid: Option<String>,
+	/// Which `network` block it came from.
+	///
+	/// Absent means the supplicant is on something the document did not put
+	/// there, which after decision 0015 should not happen -- so a client
+	/// showing this is showing a discrepancy worth reporting, not a gap.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub network: Option<String>,
 }
 
 /// Something that happened, for a monitor stream.
