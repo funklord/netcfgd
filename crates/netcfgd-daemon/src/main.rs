@@ -8,6 +8,7 @@
 //! a channel" does not need one; no epoll, because that would mean `unsafe`
 //! outside the one crate allowed it.
 
+mod authorize;
 mod confirm;
 mod server;
 mod state;
@@ -66,7 +67,8 @@ struct Options {
 	poll_config: bool,
 }
 
-fn run(arguments: &[String]) -> Result<ExitCode, String> {
+/// Parse the command line, or say what was wrong with it.
+fn parse_options(arguments: &[String]) -> Result<Option<Options>, String> {
 	let mut options = Options {
 		config_dir: None,
 		run_dir: None,
@@ -88,7 +90,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		match argument {
 			"-h" | "--help" => {
 				print!("{USAGE}");
-				return Ok(ExitCode::SUCCESS);
+				return Ok(None);
 			}
 			"--config-dir" => options.config_dir = Some(value("--config-dir")?),
 			"--run-dir" => options.run_dir = Some(value("--run-dir")?),
@@ -99,6 +101,13 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		}
 		index += 1;
 	}
+	Ok(Some(options))
+}
+
+fn run(arguments: &[String]) -> Result<ExitCode, String> {
+	let Some(options) = parse_options(arguments)? else {
+		return Ok(ExitCode::SUCCESS);
+	};
 
 	let paths = Paths {
 		config_dir: netcfgd_host::config::resolve_dir(options.config_dir.as_deref()),
@@ -115,7 +124,12 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	}
 
 	let (commands, incoming) = mpsc::channel();
-	server::serve(&socket_path, commands.clone())
+	let control = state
+		.desired
+		.as_ref()
+		.map(|document| document.globals.control.clone())
+		.unwrap_or_default();
+	server::serve(&socket_path, &control, commands.clone())
 		.map_err(|error| format!("could not bind {}: {error}", socket_path.display()))?;
 	spawn_kernel_watcher(&commands);
 	let mechanism = spawn_config_watcher(&commands, &paths, options.poll_config);
@@ -158,7 +172,11 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 				Command::ConfirmExpired => confirm_expired = true,
 				Command::Tick => {}
 				Command::Subscribe { events } => subscribers.push(events),
-				Command::Request { request, reply } => requests.push((request, reply)),
+				Command::Request {
+					request,
+					peer,
+					reply,
+				} => requests.push((request, peer, reply)),
 			}
 		}
 
@@ -181,8 +199,16 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			reconcile_drift(&mut state, &mut subscribers);
 		}
 
-		for (request, reply) in requests {
-			let response = answer(&mut state, &request, &mut subscribers, Some(&commands));
+		for (request, peer, reply) in requests {
+			let policy = state
+				.desired
+				.as_ref()
+				.map(|document| document.globals.control.clone())
+				.unwrap_or_default();
+			let response = match authorize::check(&policy, &peer, &request) {
+				Ok(()) => answer(&mut state, &request, &mut subscribers, Some(&commands)),
+				Err(message) => Response::error(message),
+			};
 			// A client that hung up between asking and being answered is
 			// ordinary, not an error.
 			let _ = reply.send(response);

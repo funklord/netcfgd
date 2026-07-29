@@ -24,6 +24,7 @@
 
 pub mod address;
 pub mod canonical;
+pub mod control;
 pub mod device;
 pub mod dns;
 pub mod hash;
@@ -36,6 +37,7 @@ pub mod security;
 pub mod wifi;
 
 pub use address::{AddressSource, Dhcp4, Dhcp6, PdRequest, PrefixRef, Slaac, Static};
+pub use control::{Control, Principal, Tier};
 pub use device::{Device, DeviceMatch, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
@@ -119,6 +121,8 @@ pub struct Globals {
 	pub confirm_default: Option<u32>,
 	/// Hostname handling.
 	pub hostname_policy: HostnamePolicy,
+	/// Who may do what over the control socket.
+	pub control: Control,
 }
 
 /// The whole-host desired state.

@@ -6,6 +6,8 @@
 //! (constraint 4), keeps the daemon's state free of locks, and costs a thread
 //! per client on a socket that will normally have one or two.
 
+use netcfgd_model::Control;
+use netcfgd_netlink::peer::{group_id, Peer};
 use netcfgd_proto::{read_message, write_message, Event, Request, Response};
 use std::io::{BufReader, BufWriter};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -19,6 +21,8 @@ pub(crate) enum Command {
 	Request {
 		/// What was asked.
 		request: Request,
+		/// Who asked.
+		peer: Peer,
 		/// Where to send the answer.
 		reply: SyncSender<Response>,
 	},
@@ -42,7 +46,11 @@ pub(crate) enum Command {
 /// # Errors
 ///
 /// Returns the underlying `io::Error` if the socket cannot be bound.
-pub(crate) fn serve(path: &Path, commands: Sender<Command>) -> std::io::Result<()> {
+pub(crate) fn serve(
+	path: &Path,
+	control: &Control,
+	commands: Sender<Command>,
+) -> std::io::Result<()> {
 	if let Some(parent) = path.parent() {
 		std::fs::create_dir_all(parent)?;
 	}
@@ -52,7 +60,7 @@ pub(crate) fn serve(path: &Path, commands: Sender<Command>) -> std::io::Result<(
 	let _ = std::fs::remove_file(path);
 
 	let listener = UnixListener::bind(path)?;
-	restrict_permissions(path)?;
+	apply_policy_permissions(path, control);
 
 	thread::Builder::new()
 		.name("control".to_owned())
@@ -72,20 +80,79 @@ pub(crate) fn serve(path: &Path, commands: Sender<Command>) -> std::io::Result<(
 	Ok(())
 }
 
-/// Mode 0600 on the socket.
+/// Give the socket permissions that match what the policy promises.
 ///
-/// The socket can arm a commit-confirm window, tear down an interface and run
-/// hooks as root, so it is exactly as privileged as the daemon. Section 13's
-/// tiering -- a read-only group that can ask but not change -- needs the
-/// request to carry a peer credential check, which is M3 work; until then the
-/// honest thing is to let nobody but root open it at all rather than to offer
-/// a distinction that is not enforced.
-fn restrict_permissions(path: &Path) -> std::io::Result<()> {
+/// A policy naming a group is a lie if the socket stays root-only, because the
+/// caller cannot connect to be told yes. So the mode follows the most
+/// permissive tier, and where a tier names a group the socket is given to it.
+///
+/// Where that cannot be done -- no such group, or the daemon is not root --
+/// this says so loudly rather than leaving a root-only socket under a config
+/// that claims otherwise. That combination produces a bug report about wifi
+/// not working which takes an afternoon to trace.
+fn apply_policy_permissions(path: &Path, control: &Control) {
 	use std::os::unix::fs::PermissionsExt;
-	std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+
+	let groups = control.named_groups();
+	let mode = if control.observe == netcfgd_model::Principal::Any
+		|| control.wifi == netcfgd_model::Principal::Any
+		|| control.admin == netcfgd_model::Principal::Any
+	{
+		0o666
+	} else if control.opens_beyond_root() {
+		0o660
+	} else {
+		0o600
+	};
+
+	if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)) {
+		eprintln!("netcfgd: could not set socket mode {mode:o}: {error}");
+	}
+
+	// One group can own the socket. Where the policy names several, the first
+	// is used and the rest are reported -- a machine wanting two groups to
+	// reach the socket wants one shared group, and saying so beats silently
+	// serving whichever the code happened to pick.
+	let Some(name) = groups.first() else {
+		return;
+	};
+	if groups.len() > 1 {
+		eprintln!(
+			"netcfgd: the control policy names {} groups ({}); the socket can belong to one, \
+			 so it is given to `{name}`. Members of the others will not be able to connect.",
+			groups.len(),
+			groups.join(", ")
+		);
+	}
+	match group_id(name) {
+		Some(gid) => {
+			if let Err(error) = chown_group(path, gid) {
+				eprintln!(
+					"netcfgd: the control policy opens access to group `{name}`, but the socket \
+					 could not be given to it: {error}. Nobody outside root will be able to \
+					 connect."
+				);
+			}
+		}
+		None => eprintln!(
+			"netcfgd: the control policy names group `{name}`, which does not exist in \
+			 /etc/group. Nobody outside root will be able to connect."
+		),
+	}
+}
+
+/// `chown` the socket to a group, leaving the owner alone.
+fn chown_group(path: &Path, gid: u32) -> std::io::Result<()> {
+	std::os::unix::fs::chown(path, None, Some(gid))
 }
 
 fn handle(stream: UnixStream, commands: &Sender<Command>) {
+	// Read once, at accept time, rather than per request: the credentials
+	// belong to the connection, and re-reading them would only widen the
+	// window in which the peer's pid could be recycled.
+	let Ok(peer) = netcfgd_netlink::credentials(&stream) else {
+		return;
+	};
 	let Ok(write_half) = stream.try_clone() else {
 		return;
 	};
@@ -104,6 +171,28 @@ fn handle(stream: UnixStream, commands: &Sender<Command>) {
 		};
 
 		if matches!(request, Request::Monitor) {
+			// Streaming is still a request and still gets checked. The loop
+			// does the checking, so ask it first and only subscribe if the
+			// answer is yes.
+			let (probe, verdict) = std::sync::mpsc::sync_channel(1);
+			if commands
+				.send(Command::Request {
+					request: Request::Monitor,
+					peer: peer.clone(),
+					reply: probe,
+				})
+				.is_err()
+			{
+				return;
+			}
+			match verdict.recv() {
+				Ok(Response::Ok) => {}
+				Ok(other) => {
+					let _ = write_message(&mut writer, &other);
+					return;
+				}
+				Err(_) => return,
+			}
 			// Streaming: the connection hands the loop a sender and then does
 			// nothing but forward. Keeping socket writes on this thread means
 			// a slow client cannot stall the event loop -- the bounded channel
@@ -121,7 +210,14 @@ fn handle(stream: UnixStream, commands: &Sender<Command>) {
 		}
 
 		let (reply, answer) = std::sync::mpsc::sync_channel(1);
-		if commands.send(Command::Request { request, reply }).is_err() {
+		if commands
+			.send(Command::Request {
+				request,
+				peer: peer.clone(),
+				reply,
+			})
+			.is_err()
+		{
 			return;
 		}
 		let Ok(response) = answer.recv() else {
