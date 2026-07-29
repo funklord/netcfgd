@@ -51,6 +51,12 @@ fn exercise(data: &[u8]) {
 		Attrs::new(data).take(10_000).count() < 10_000,
 		"attribute iteration did not terminate"
 	);
+	assert!(
+		netcfgd_netlink::inotify::Events::new(data)
+			.take(10_000)
+			.count() < 10_000,
+		"inotify event iteration did not terminate"
+	);
 	for message in Messages::new(data).take(10_000) {
 		let _ = decode_link(message.payload);
 		let _ = decode_address(message.payload);
