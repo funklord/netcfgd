@@ -1034,3 +1034,137 @@ access_point "guest" {
 	let message = errors(r#"access_point "guest" { wifi { open = true } }"#);
 	assert!(message.contains("which radio runs it"), "got: {message}");
 }
+
+/// A VLAN interface is conventionally named `eth0.42`, and design section 3.2
+/// uses exactly that spelling. Without a dot in identifiers the standard name
+/// for the commonest virtual interface does not parse.
+#[test]
+fn an_interface_name_may_contain_a_dot() {
+	let document = build_ok(
+		r#"interface eth0.42 { vlan { parent = "eth0"; id = 42 }; config = "10.42.0.2/24" }"#,
+	);
+	assert!(document
+		.interfaces
+		.iter()
+		.any(|interface| interface.name == "eth0.42"));
+
+	// But a bare dot still is not a name, and a float is still refused.
+	assert!(build(".42 { }").is_err());
+}
+
+/// Membership can be written from either end. The model holds only `master`,
+/// because that is the direction the kernel works in -- so the list has to be
+/// expanded, and before it was it was accepted and ignored: the bridge came up
+/// empty and the apply reported success.
+#[test]
+fn bridge_members_become_masters() {
+	let document = build_ok(
+		r#"
+interface br0 { bridge { members = "eth0 eth1" }; config = "dhcp" }
+interface eth0 { config = "null" }
+"#,
+	);
+
+	let master_of = |name: &str| {
+		document
+			.interfaces
+			.iter()
+			.find(|interface| interface.name == name)
+			.unwrap_or_else(|| panic!("no {name}"))
+			.master
+			.clone()
+	};
+	// One had a block of its own; the other did not, and gets one. Otherwise
+	// `bridge { members = ... }` only works when every member is also spelled
+	// out, which is not the shape anybody writes.
+	assert_eq!(master_of("eth0").as_deref(), Some("br0"));
+	assert_eq!(master_of("eth1").as_deref(), Some("br0"));
+}
+
+/// Said twice consistently is fine -- drop-ins do that. Said twice differently
+/// is one of them being wrong, and guessing puts an interface in the wrong
+/// bridge.
+#[test]
+fn a_contradictory_membership_is_refused() {
+	let agreed = build_ok(
+		r#"
+interface br0 { bridge { members = "eth0" }; config = "dhcp" }
+interface eth0 { master = "br0"; config = "null" }
+"#,
+	);
+	assert_eq!(agreed.interfaces.len(), 2);
+
+	let message = errors(
+		r#"
+interface br0 { bridge { members = "eth0" }; config = "dhcp" }
+interface br1 { bridge { members = "eth0" }; config = "dhcp" }
+interface eth0 { config = "null" }
+"#,
+	);
+	assert!(message.contains("is listed as a member"), "got: {message}");
+	assert!(message.contains("one master"), "got: {message}");
+}
+
+/// A bonding mode a string could hold but the kernel rejects is a config that
+/// compiles, plans cleanly, and fails with the interface half-built.
+#[test]
+fn a_bonding_mode_is_checked_at_compile_time() {
+	use netcfgd_model::BondMode;
+
+	let document = build_ok(
+		r#"interface bond0 { bond { members = "eth0"; mode = "802.3ad" }; config = "dhcp" }"#,
+	);
+	let netcfgd_model::InterfaceKind::Bond(bond) = &document.interfaces[0].kind else {
+		panic!("expected a bond");
+	};
+	assert_eq!(bond.mode, BondMode::Ieee8023ad);
+	assert_eq!(bond.mode.number(), 4);
+
+	let message = errors(r#"interface bond0 { bond { mode = "active_backup" } }"#);
+	assert!(message.contains("not a bonding mode"), "got: {message}");
+	assert!(
+		message.contains("active-backup"),
+		"the help spells it: {message}"
+	);
+}
+
+/// VXLAN, which had no lowering at all: `interface vx0 { vxlan { ... } }` was
+/// an unknown block.
+#[test]
+fn vxlan_compiles() {
+	let document = build_ok(
+		r#"
+interface vx100 {
+	vxlan { id = 100; parent = "eth0"; local = "10.0.0.1"; remote = "10.0.0.2"; port = 4789 }
+	config = "null"
+}
+"#,
+	);
+	let netcfgd_model::InterfaceKind::Vxlan(vxlan) = &document.interfaces[0].kind else {
+		panic!("expected a vxlan");
+	};
+	assert_eq!(vxlan.id, 100);
+	assert_eq!(vxlan.parent.as_deref(), Some("eth0"));
+	assert_eq!(vxlan.port, Some(4789));
+
+	// A VNI over 24 bits is silently truncated by the kernel, so two tunnels
+	// that look distinct in the config become one.
+	assert!(errors("interface vx0 { vxlan { id = 16777216 } }").contains("24 bits"));
+	// Mixing families produces a kernel error that names neither end.
+	assert!(errors(
+		r#"interface vx0 { vxlan { id = 1; local = "10.0.0.1"; remote = "fd00::1" } }"#
+	)
+	.contains("same address family"));
+	assert!(errors(r#"interface vx0 { vxlan { parent = "eth0" } }"#).contains("needs an `id`"));
+}
+
+/// A veth is a pair and both ends are named at creation.
+#[test]
+fn veth_compiles() {
+	let document = build_ok(r#"interface veth-a { veth { peer = "veth-b" }; config = "null" }"#);
+	let netcfgd_model::InterfaceKind::Veth(veth) = &document.interfaces[0].kind else {
+		panic!("expected a veth");
+	};
+	assert_eq!(veth.peer, "veth-b");
+	assert!(errors("interface veth-a { veth { } }").contains("needs a `peer`"));
+}

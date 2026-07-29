@@ -170,6 +170,15 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		});
 	}
 
+	builder.appearing = desired
+		.interfaces
+		.iter()
+		.filter_map(|interface| match &interface.kind {
+			InterfaceKind::Veth(veth) => Some(veth.peer.clone()),
+			_ => None,
+		})
+		.collect();
+
 	builder.radios = desired
 		.devices
 		.iter()
@@ -259,6 +268,15 @@ struct Builder {
 	/// `interface` block -- so it is collected up front instead of looked up
 	/// per action.
 	radios: Vec<String>,
+	/// Names that will exist by the end of this plan without anything
+	/// creating them directly.
+	///
+	/// Only veth peers, so far. Creating one end of a veth creates both, so a
+	/// peer that has no `interface` block of its own -- or has one and is not
+	/// present yet -- is not absent hardware to be skipped. Without this the
+	/// peer is configured on the *next* apply, which a daemon reaches on its
+	/// own and `ncfg apply --oneshot` never does.
+	appearing: Vec<String>,
 	/// Whether the document has any wifi network to join.
 	///
 	/// A managed radio with no networks gets no supplicant. Starting one that
@@ -387,7 +405,12 @@ impl Builder {
 	fn plan_link_attributes(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let link = observed.link(name);
-		if link.is_none() && matches!(interface.kind, InterfaceKind::Physical) {
+		if link.is_none()
+			&& matches!(interface.kind, InterfaceKind::Physical)
+			&& !self.appearing.iter().any(|peer| peer == name)
+		{
+			// Absent hardware. Planning for a NIC that is not plugged in would
+			// fill every plan with actions that cannot run.
 			return;
 		}
 		let gate = self.gate(name);
@@ -479,7 +502,12 @@ impl Builder {
 	fn plan_interface_contents(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let link = observed.link(name);
-		if link.is_none() && matches!(interface.kind, InterfaceKind::Physical) {
+		if link.is_none()
+			&& matches!(interface.kind, InterfaceKind::Physical)
+			&& !self.appearing.iter().any(|peer| peer == name)
+		{
+			// Absent hardware. Planning for a NIC that is not plugged in would
+			// fill every plan with actions that cannot run.
 			return;
 		}
 

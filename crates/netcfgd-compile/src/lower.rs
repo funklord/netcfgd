@@ -12,7 +12,9 @@ use crate::provenance::{field_path, interface_path, Provenance};
 use netcfgd_model::address::{Delegated, PrefixRef, Static};
 use netcfgd_model::device::{AccessPoint, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
-use netcfgd_model::interface::{BondConfig, BridgeConfig, VlanConfig, VlanProtocol};
+use netcfgd_model::interface::{
+	BondConfig, BondMode, BridgeConfig, VethConfig, VlanConfig, VlanProtocol, VxlanConfig,
+};
 use netcfgd_model::interface::{LinkSettings, Toggle};
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
@@ -36,6 +38,9 @@ pub fn lower(
 ) -> Result<Document, Diagnostics> {
 	let mut diagnostics = Diagnostics::new();
 	let mut document = Document::default();
+	// `(member, master, where the master's block is)`, so a conflict points at
+	// the line that declared the membership rather than at the top of a file.
+	let mut memberships: Vec<(String, String, crate::diag::Span)> = Vec::new();
 
 	for assignment in &merged.assignments {
 		lower_global_key(&mut document, assignment, &mut diagnostics);
@@ -54,6 +59,14 @@ pub fn lower(
 					lower_interface(block, hooks, &mut diagnostics, sources, provenance)
 				{
 					provenance.record(sources, interface_path(&interface.name), block.span);
+					let members = match &interface.kind {
+						InterfaceKind::Bridge(bridge) => bridge.members.clone(),
+						InterfaceKind::Bond(bond) => bond.members.clone(),
+						_ => Vec::new(),
+					};
+					for member in members {
+						memberships.push((member, interface.name.clone(), block.span));
+					}
 					document.interfaces.push(interface);
 				}
 			}
@@ -89,10 +102,90 @@ pub fn lower(
 		}
 	}
 
+	expand_members(&mut document, &memberships, &mut diagnostics);
+
 	if diagnostics.is_empty() {
 		Ok(document)
 	} else {
 		Err(diagnostics)
+	}
+}
+
+/// Turn `bridge { members = ... }` into `master` on each member.
+///
+/// Membership can be written from either end -- the master listing its members
+/// or a member naming its master -- and the model holds only the second, since
+/// that is the direction the kernel works in and the direction the planner
+/// reads. Before this existed the `members` list was accepted and ignored: a
+/// bridge would be created empty and the apply would report success, which is
+/// the worst way for a feature to be missing.
+///
+/// Run after every block is lowered, because a member may be declared before
+/// or after the master, or not declared at all.
+fn expand_members(
+	document: &mut Document,
+	memberships: &[(String, String, crate::diag::Span)],
+	diags: &mut Diagnostics,
+) {
+	for (member, master, span) in memberships {
+		let (member, master) = (member.clone(), master.clone());
+		if member == master {
+			diags.push(Diagnostic::new(
+				*span,
+				format!("`{master}` lists itself as a member"),
+			));
+			continue;
+		}
+
+		if let Some(existing) = document
+			.interfaces
+			.iter_mut()
+			.find(|interface| interface.name == member)
+		{
+			match &existing.master {
+				// Said twice, consistently. Harmless, and common in a config
+				// assembled from drop-ins.
+				Some(current) if *current == master => {}
+				// Said twice, differently. One of them is wrong and guessing
+				// which would put an interface in the wrong bridge.
+				Some(current) => diags.push(
+					Diagnostic::new(
+						*span,
+						format!(
+							"`{member}` is listed as a member of `{master}` but has \
+							 `master = \"{current}\"`"
+						),
+					)
+					.with_help("an interface has one master; remove one of the two"),
+				),
+				None => existing.master = Some(master),
+			}
+			continue;
+		}
+
+		// A member with no `interface` block of its own. Creating one is what
+		// makes `bridge { members = "eth0 eth1" }` work on its own, which is
+		// the shape design section 3.2 uses and the shape somebody converting
+		// from another tool will write.
+		document.interfaces.push(Interface {
+			name: member,
+			kind: InterfaceKind::Physical,
+			enabled: true,
+			mtu: None,
+			mac: None,
+			addressing: Vec::new(),
+			routes: Vec::new(),
+			dns: None,
+			hooks: Vec::new(),
+			on_drift: None,
+			master: Some(master),
+			dot1x: None,
+			advertise: None,
+			forwarding: None,
+			guard: None,
+			ipv6_token: None,
+			link_settings: None,
+		});
 	}
 }
 
@@ -1347,6 +1440,16 @@ fn lower_interface(
 						interface.dot1x = Some(config);
 					}
 				}
+				"vxlan" => {
+					if let Some(kind) = lower_vxlan(inner, diags) {
+						interface.kind = kind;
+					}
+				}
+				"veth" => {
+					if let Some(kind) = lower_veth(inner, diags) {
+						interface.kind = kind;
+					}
+				}
 				"ethtool" => {
 					let mut settings = LinkSettings::default();
 					lower_ethtool(inner, &mut settings, diags);
@@ -1387,6 +1490,109 @@ fn lower_interface(
 		interface.dns = Some(dns);
 	}
 	Some(interface)
+}
+
+fn lower_vxlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	let mut config = VxlanConfig {
+		id: 0,
+		parent: None,
+		local: None,
+		remote: None,
+		port: None,
+	};
+	let mut id_seen = false;
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		let address = |diags: &mut Diagnostics| -> Option<std::net::IpAddr> {
+			let text = as_string(&assignment.value, diags)?;
+			if let Ok(address) = text.parse() {
+				Some(address)
+			} else {
+				diags.push(Diagnostic::new(
+					assignment.value.span,
+					format!("`{text}` is not an IP address"),
+				));
+				None
+			}
+		};
+		match assignment.key.as_str() {
+			"id" | "vni" => {
+				if let Some(value) = as_u32(&assignment.value, diags) {
+					// 24 bits. A VNI above that is silently truncated by the
+					// kernel, so two tunnels that look distinct in the config
+					// become one.
+					if value < (1 << 24) {
+						config.id = value;
+						id_seen = true;
+					} else {
+						diags.push(Diagnostic::new(
+							assignment.value.span,
+							"a VNI is 24 bits, so at most 16777215",
+						));
+					}
+				}
+			}
+			"parent" | "dev" => config.parent = as_string(&assignment.value, diags),
+			"local" => config.local = address(diags),
+			"remote" | "group" => config.remote = address(diags),
+			"port" => {
+				config.port = as_u32(&assignment.value, diags).and_then(|n| u16::try_from(n).ok());
+			}
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown vxlan key `{other}`"),
+			)),
+		}
+	}
+
+	if !id_seen {
+		diags.push(
+			Diagnostic::new(block.span, "a vxlan needs an `id`")
+				.with_help("the VNI, which identifies the overlay: `id = 100`"),
+		);
+		return None;
+	}
+	// Both families in one tunnel is not a thing the kernel will build, and
+	// the error it gives says nothing about which end was wrong.
+	if let (Some(local), Some(remote)) = (config.local, config.remote) {
+		if local.is_ipv4() != remote.is_ipv4() {
+			diags.push(Diagnostic::new(
+				block.span,
+				"`local` and `remote` must be the same address family",
+			));
+			return None;
+		}
+	}
+
+	Some(InterfaceKind::Vxlan(config))
+}
+
+fn lower_veth(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	let mut peer = None;
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"peer" => peer = as_string(&assignment.value, diags),
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown veth key `{other}`"),
+			)),
+		}
+	}
+
+	let Some(peer) = peer else {
+		diags.push(
+			Diagnostic::new(block.span, "a veth needs a `peer`")
+				.with_help("a veth is a pair, and both ends are named at creation"),
+		);
+		return None;
+	};
+	Some(InterfaceKind::Veth(VethConfig { peer }))
 }
 
 fn lower_vlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
@@ -1486,7 +1692,23 @@ fn lower_bond(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 					.map(|w| w.node)
 					.collect();
 			}
-			"mode" => mode = as_string(&assignment.value, diags),
+			"mode" => {
+				if let Some(text) = as_string(&assignment.value, diags) {
+					match BondMode::parse(&text) {
+						Some(parsed) => mode = Some(parsed),
+						None => diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{text}` is not a bonding mode"),
+							)
+							.with_help(
+								"one of balance-rr, active-backup, balance-xor, broadcast, \
+								 802.3ad, balance-tlb, balance-alb",
+							),
+						),
+					}
+				}
+			}
 			"miimon" => miimon = as_u32(&assignment.value, diags),
 			other => diags.push(Diagnostic::new(
 				assignment.span,
@@ -1496,7 +1718,12 @@ fn lower_bond(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 	}
 
 	let Some(mode) = mode else {
-		diags.push(Diagnostic::new(block.span, "a bond needs a `mode`"));
+		diags.push(
+			Diagnostic::new(block.span, "a bond needs a `mode`").with_help(
+				"`active-backup` needs nothing of the switch; the others need a \
+				 cooperating one",
+			),
+		);
 		return None;
 	};
 	Some(InterfaceKind::Bond(BondConfig {

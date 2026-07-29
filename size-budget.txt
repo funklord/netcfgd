@@ -44,5 +44,9 @@ tolerance_percent 3
 # than logic. That is the cost of the freeze: three of these produce no
 # behaviour today and are carried anyway, because adding them after M4 is a
 # major version bump.
-ncfg     1055168
-netcfgd  1378840
+#
+# Then M4 link types: bond, vxlan and veth creation, per-kind attributes for
+# all of them, and the member-list expansion. +12 KB each, which is what
+# actual netlink encoding costs when the types already exist.
+ncfg     1067456
+netcfgd  1391128
