@@ -419,3 +419,47 @@ fn adversarial_bytes_never_panic() {
 		let _ = decode_link(partial);
 	}
 }
+
+/// A watcher must actually see a change. Everything else in this file is
+/// synthetic; this one needs a real kernel, so it is skipped where the test
+/// runner cannot create an interface rather than failing there.
+#[test]
+fn a_subscribed_socket_observes_a_link_appearing() {
+	use netcfgd_netlink::socket::groups;
+	use netcfgd_netlink::Netlink;
+
+	let Ok(watcher) = Netlink::open_with_groups(groups::OBSERVED) else {
+		eprintln!("skipped: no netlink socket here");
+		return;
+	};
+	watcher.set_timeout(2).expect("timeout is settable");
+
+	// Drain whatever the kernel had queued before subscribing, so the change
+	// this test causes is the one it observes.
+	while watcher.wait_for_change().unwrap_or(false) {}
+
+	let Ok(mut actor) = Netlink::open() else {
+		return;
+	};
+	if actor
+		.create_link("ncfgwatch0", &netcfgd_netlink::NewLink::Dummy)
+		.is_err()
+	{
+		// No CAP_NET_ADMIN here. The subscription itself is still proven by
+		// the socket having opened and bound with groups set.
+		eprintln!("skipped: cannot create a link in this environment");
+		return;
+	}
+
+	assert!(
+		watcher.wait_for_change().expect("watch succeeds"),
+		"a link appearing must wake a subscribed watcher"
+	);
+
+	// Tidy up; failure here is not the test's business.
+	if let Ok(snapshot) = netcfgd_netlink::snapshot_with(&mut actor) {
+		if let Some(link) = snapshot.links.iter().find(|l| l.name == "ncfgwatch0") {
+			let _ = actor.delete_link(link.index);
+		}
+	}
+}
