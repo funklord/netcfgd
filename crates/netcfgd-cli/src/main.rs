@@ -157,8 +157,11 @@ fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::Pat
 	}
 
 	let mut sink = hooks::RunHooks::new(&run_dir);
-	let document = netcfgd_compile::compile(&sources, &mut sink)
+	let (document, provenance) = netcfgd_compile::compile_with_provenance(&sources, &mut sink)
 		.map_err(|diagnostics| diagnostics.render(&sources))?;
+	// Written on every compile, not only when `explain` asks, so that what is
+	// in /run describes the current configuration whichever binary last ran.
+	let _ = state::write_provenance(&run_dir, &provenance);
 
 	Ok((document, run_dir))
 }
