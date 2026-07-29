@@ -6,20 +6,29 @@
 // of which are entirely safe. The `unsafe` is six syscalls in `socket`, each
 // with a SAFETY comment naming the invariant that makes it sound.
 
-//! rtnetlink: a socket, a codec, and the dumps netcfgd needs.
+//! Direct kernel interfaces: rtnetlink, and inotify.
+//!
+//! Named for the larger half. What actually defines this crate is section 1
+//! constraint 4 -- it is the single place `unsafe` is permitted, so every raw
+//! syscall netcfgd makes lives here whether or not it is netlink. A second
+//! crate making syscalls would mean a second thing to audit to the same bar,
+//! which is what the constraint exists to prevent (`docs/decisions/0012`).
 //!
 //! Depends on libc and the kernel and nothing else, which is why its record
 //! types are its own rather than `netcfgd-model`'s -- turning them into an
 //! `Observed` belongs to `netcfgd-observe`.
 
 pub mod dump;
+pub mod inotify;
 pub mod ops;
 pub mod socket;
+pub mod watch;
 pub mod wire;
 
 pub use dump::{AddressRecord, LinkRecord, RouteRecord};
 pub use ops::{parse_mac, NewLink, RouteSpec};
 pub use socket::Netlink;
+pub use watch::{Mechanism, Watcher};
 
 use std::io;
 

@@ -7,6 +7,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use netcfgd_netlink::dump::{decode_address, decode_link, decode_route};
+use netcfgd_netlink::inotify::Events;
 use netcfgd_netlink::wire::{error_code, Attrs, Header, IfAddr, IfInfo, Messages, RtMsg};
 
 fuzz_target!(|data: &[u8]| {
@@ -18,6 +19,10 @@ fuzz_target!(|data: &[u8]| {
 	let _ = decode_link(data);
 	let _ = decode_address(data);
 	let _ = decode_route(data);
+
+	// inotify events come from the kernel on the same terms and have the same
+	// termination hazard, so they are driven by the same target.
+	assert!(Events::new(data).take(10_000).count() < 10_000);
 
 	// Bounded rather than unbounded: a length field that makes no progress
 	// would otherwise spin here forever and look like a slow input rather than
