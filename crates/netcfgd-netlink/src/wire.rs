@@ -232,6 +232,18 @@ impl Attr<'_> {
 		self.value.first().copied()
 	}
 
+	/// The value as a native-endian `u16`.
+	///
+	/// Netlink is not consistent about integer widths and the header gives no
+	/// hint: `CTRL_ATTR_FAMILY_ID` is two bytes where almost everything around
+	/// it is four. Reading one with the wrong accessor returns `None` rather
+	/// than a wrong number, which is the right failure -- but only if the
+	/// right accessor exists.
+	#[must_use]
+	pub fn u16(&self) -> Option<u16> {
+		Some(u16::from_ne_bytes(self.value.get(0..2)?.try_into().ok()?))
+	}
+
 	/// The value as a native-endian `u32`.
 	#[must_use]
 	pub fn u32(&self) -> Option<u32> {

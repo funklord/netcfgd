@@ -19,6 +19,7 @@
 //! `Observed` belongs to `netcfgd-observe`.
 
 pub mod dump;
+pub mod genl;
 pub mod inotify;
 pub mod ops;
 pub mod peer;
@@ -27,6 +28,7 @@ pub mod watch;
 pub mod wire;
 
 pub use dump::{AddressRecord, LinkRecord, RouteRecord};
+pub use genl::{Family, Genl, GenlHeader};
 pub use ops::{parse_mac, NewLink, RouteSpec};
 pub use peer::{credentials, Peer};
 pub use socket::Netlink;

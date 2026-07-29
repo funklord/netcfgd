@@ -7,6 +7,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use netcfgd_netlink::dump::{decode_address, decode_link, decode_route};
+use netcfgd_netlink::genl::{payload_attrs, GenlHeader};
 use netcfgd_netlink::inotify::Events;
 use netcfgd_netlink::wire::{error_code, Attrs, Header, IfAddr, IfInfo, Messages, RtMsg};
 
@@ -33,5 +34,16 @@ fuzz_target!(|data: &[u8]| {
 		let _ = decode_address(message.payload);
 		let _ = decode_route(message.payload);
 		assert!(Attrs::new(message.payload).take(10_000).count() < 10_000);
+	}
+
+	// Generic netlink: the same kernel, the same socket family, and the entry
+	// point every family added after this one will share.
+	let _ = GenlHeader::decode(data);
+	assert!(payload_attrs(data).take(10_000).count() < 10_000);
+	for message in Messages::new(data).take(10_000) {
+		let _ = GenlHeader::decode(message.payload);
+		for attr in payload_attrs(message.payload).take(10_000) {
+			assert!(Attrs::new(attr.value).take(10_000).count() < 10_000);
+		}
 	}
 });

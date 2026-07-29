@@ -11,7 +11,11 @@ use crate::wire::{self, flags, msg_type};
 use std::io;
 
 /// `AF_NETLINK`, `SOCK_RAW`, `NETLINK_ROUTE`.
-const NETLINK_ROUTE: libc::c_int = 0;
+pub const NETLINK_ROUTE: libc::c_int = 0;
+/// `NETLINK_GENERIC`. A different protocol on the same socket family, and the
+/// door to `wireguard`, `nl80211` and `ethtool` -- none of which have an
+/// rtnetlink interface.
+pub const NETLINK_GENERIC: libc::c_int = 16;
 
 /// Multicast groups a watcher subscribes to, from `linux/rtnetlink.h`.
 pub mod groups {
@@ -68,6 +72,22 @@ impl Netlink {
 	/// Returns the underlying `io::Error` if the socket cannot be opened or
 	/// bound.
 	pub fn open_with_groups(nl_groups: u32) -> io::Result<Self> {
+		Self::open_protocol(NETLINK_ROUTE, nl_groups)
+	}
+
+	/// Open a socket on a specific netlink protocol.
+	///
+	/// Everything above this speaks rtnetlink. Generic netlink is a second
+	/// protocol on the same socket family with its own message layout on top
+	/// of the shared header, so it needs its own socket and cannot share one
+	/// with the route socket -- family ids from one are meaningless on the
+	/// other.
+	///
+	/// # Errors
+	///
+	/// Returns the underlying `io::Error` if the socket cannot be opened or
+	/// bound.
+	pub fn open_protocol(protocol: libc::c_int, nl_groups: u32) -> io::Result<Self> {
 		// SAFETY: `socket` takes three integers and returns a file descriptor
 		// or -1. No pointers are involved, so there is nothing to get wrong
 		// about lifetimes or provenance; the only failure mode is the -1 we
@@ -76,7 +96,7 @@ impl Netlink {
 			libc::socket(
 				libc::AF_NETLINK,
 				libc::SOCK_RAW | libc::SOCK_CLOEXEC,
-				NETLINK_ROUTE,
+				protocol,
 			)
 		};
 		if fd < 0 {

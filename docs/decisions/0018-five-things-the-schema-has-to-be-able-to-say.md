@@ -112,6 +112,10 @@ rediscovered. Two of them share the blocker that decision 0016 identified for
 `nl80211`: generic netlink family resolution is unpaid work in the one crate
 allowed `unsafe`, and doing it once unlocks ethtool as well.
 
+*Paid, 2026-07-30.* That resolution now exists, and `ethtool` resolves as id
+22. What remains for ethtool is its own message types and the reconciliation --
+the shared cost is gone, and it turned out to need no new `unsafe`.
+
 **The hook workaround is still there and now has a deadline.** Somebody with
 `ip rule` in a `post_up` today keeps it working. When rules are implemented,
 that hook becomes drift against a document that finally describes it -- which
