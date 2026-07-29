@@ -89,6 +89,13 @@ message types -- more surface in the one crate permitted `unsafe`, and more
 for the fuzz targets to cover. Worth knowing before starting rather than
 halfway through.
 
+*Paid, 2026-07-30.* `netcfgd-netlink::genl` resolves families and multicast
+groups, and `nl80211` comes back as id 35 with six groups on the machine this
+was written on. The remaining work for the path above is the message types,
+not the plumbing. Notably the new module needs no `unsafe` of its own -- it is
+a second protocol on the same socket, so the one audited exception did not
+have to widen.
+
 **Nothing about M3 changes.** The supplicant integration being built now is
 the same either way: whether netcfgd picks the BSS or wpa_supplicant does, the
 association still goes through the control socket. The nl80211 path adds a
