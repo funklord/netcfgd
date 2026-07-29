@@ -51,6 +51,14 @@ pub struct KernelExecutor {
 	/// scopes, so netcfgd flattens once, deliberately, rather than repeatedly
 	/// and by accident.
 	dns_scopes: Vec<netcfgd_model::AppliedDns>,
+	/// The wired 802.1X profile for each interface that has one.
+	dot1x: Vec<(String, netcfgd_model::EapConfig)>,
+	/// Every wifi profile the document describes.
+	///
+	/// Carried here because a supplicant that has just been started holds
+	/// nothing (decision 0015), and the thing that starts it is the thing that
+	/// has to fill it.
+	networks: Vec<netcfgd_model::WifiNetwork>,
 	/// `(path, sha256)` for every hook the document references.
 	///
 	/// Carried here because the op does not include the hash and the executor
@@ -89,6 +97,8 @@ impl KernelExecutor {
 				.map(|link| (link.name.clone(), link.index))
 				.collect(),
 			dns_scopes: Vec::new(),
+			dot1x: Vec::new(),
+			networks: Vec::new(),
 			hook_hashes: Vec::new(),
 			run_dir: std::path::PathBuf::from("/run/netcfgd"),
 			resolv_conf: resolv_conf_path(),
@@ -117,7 +127,56 @@ impl KernelExecutor {
 			.flat_map(|interface| interface.hooks.iter())
 			.map(|hook| (hook.path.clone(), hook.sha256.clone()))
 			.collect();
+		self.dot1x = document
+			.interfaces
+			.iter()
+			.filter_map(|interface| {
+				interface
+					.dot1x
+					.clone()
+					.map(|config| (interface.name.clone(), config))
+			})
+			.collect();
+		self.networks.clone_from(&document.networks);
 		self
+	}
+
+	/// Give a freshly started supplicant the networks the document describes.
+	///
+	/// Wired and wireless are different populations, not different amounts of
+	/// the same one: a wired port has exactly one profile and it uses
+	/// `IEEE8021X`, while a radio gets every network in the document and picks
+	/// among them.
+	fn populate_supplicant(&self, iface: &str) -> Result<(), String> {
+		let dir = ctrl_dir();
+		let client = netcfgd_supplicant::Client::connect(&dir, iface).map_err(|error| {
+			format!("started a supplicant on {iface} but cannot reach it: {error}")
+		})?;
+
+		// Explicit, not assumed. Decision 0015: a silent default is not a
+		// control, and this is the property that keeps the document the only
+		// authority.
+		client
+			.command("SET update_config 0")
+			.map_err(|error| format!("could not pin update_config on {iface}: {error}"))?;
+
+		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+
+		if let Some((_, eap)) = self.dot1x.iter().find(|(name, _)| name == iface) {
+			netcfgd_supplicant::configure_wired(&client, eap, &resolver)
+				.map_err(|error| format!("could not configure 802.1X on {iface}: {error}"))?;
+			return Ok(());
+		}
+
+		// Wireless. Clear first, so a supplicant that survived a crash does
+		// not contribute networks nobody can account for.
+		netcfgd_supplicant::clear_networks(&client)
+			.map_err(|error| format!("could not clear {iface}: {error}"))?;
+		for network in &self.networks {
+			netcfgd_supplicant::add_network(&client, network, &resolver)
+				.map_err(|error| format!("could not give `{}` to {iface}: {error}", network.id))?;
+		}
+		Ok(())
 	}
 
 	/// The index of an interface, refreshing once if it is not known.
@@ -286,6 +345,14 @@ impl Executor for KernelExecutor {
 			Op::BackendStart { kind, iface } => {
 				start_backend(*kind, iface)?;
 				self.effects.started_backends.push((*kind, iface.clone()));
+				if *kind == netcfgd_model::BackendKind::Supplicant {
+					// A supplicant that has just started knows nothing, by
+					// design. Filling it is part of starting it: a plan that
+					// reported success while leaving an empty supplicant would
+					// be reporting that the port is authenticated when it is
+					// not.
+					self.populate_supplicant(iface)?;
+				}
 				Ok(())
 			}
 			Op::BackendStop { kind, iface } => {
@@ -430,10 +497,119 @@ fn start_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), St
 				"no DHCPv4 client found for {iface}; install dhcpcd or busybox udhcpc"
 			))
 		}
+		BackendKind::Supplicant => start_supplicant(iface),
 		other => Err(format!(
 			"the {other:?} backend is not implemented in this build"
 		)),
 	}
+}
+
+/// Where `file` secrets live.
+///
+/// Derived from the config directory rather than passed in, because the
+/// executor is handed a run directory and a document, and a secret is neither.
+fn secrets_dir() -> std::path::PathBuf {
+	std::env::var_os("NCFG_CONFIG_DIR").map_or_else(
+		|| std::path::PathBuf::from(netcfgd_secret::DEFAULT_SECRETS_DIR),
+		|dir| std::path::PathBuf::from(dir).join("secrets"),
+	)
+}
+
+/// Where the supplicant's control sockets live.
+///
+/// Overridable so a test can point at a directory that is not the real one --
+/// a network namespace is not a mount namespace, so without this a test would
+/// share `/run/wpa_supplicant` with whatever the host is running.
+fn ctrl_dir() -> std::path::PathBuf {
+	std::env::var_os("NCFG_WPA_CTRL_DIR").map_or_else(
+		|| std::path::PathBuf::from(netcfgd_supplicant::DEFAULT_CTRL_DIR),
+		std::path::PathBuf::from,
+	)
+}
+
+/// Start a `wpa_supplicant` that holds no state.
+///
+/// Decision 0015, as command-line arguments:
+///
+/// - No config file. Not an empty one, none -- `-C` supplies the control
+///   interface, so there is nothing a file would be needed for, and a file
+///   that does not exist cannot be edited by anything else.
+/// - `update_config=0`, set explicitly through `-o`... except there is no such
+///   flag, so it is set on the running instance below. It is the default, and
+///   relying on a default for the property that keeps constraint 1 true is how
+///   the property quietly stops holding after a distribution patches a
+///   template.
+/// - Networks arrive over the control socket afterwards, from the document.
+///
+/// The driver depends on what the interface is. A wired port authenticating
+/// with 802.1X needs `-Dwired`; a radio needs `nl80211`. Guessing wrong
+/// produces a supplicant that starts and never associates, so the wireless
+/// case is detected rather than assumed.
+fn start_supplicant(iface: &str) -> Result<(), String> {
+	let dir = ctrl_dir();
+	std::fs::create_dir_all(&dir)
+		.map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+
+	if dir.join(iface).exists() {
+		// Already running -- started by a previous apply, or surviving a
+		// netcfgd restart. Decision 0015 makes that harmless: whoever
+		// populates it calls REMOVE_NETWORK all first, so it holds nothing
+		// nobody can account for.
+		return Ok(());
+	}
+
+	// `/sys/class/net/<iface>/wireless` exists for a radio and does not for
+	// anything else. Cheaper and more reliable than asking nl80211, and it
+	// needs no privilege.
+	let wireless = std::path::Path::new("/sys/class/net")
+		.join(iface)
+		.join("wireless")
+		.exists();
+	let driver = if wireless { "nl80211,wext" } else { "wired" };
+
+	let program = supplicant_binary().ok_or_else(|| {
+		format!(
+			"no wpa_supplicant found for {iface}; install wpa_supplicant, or set \
+			 `backend` on the device to say which supplicant to use"
+		)
+	})?;
+
+	let status = Command::new(&program)
+		.arg("-B")
+		.arg(format!("-D{driver}"))
+		.arg("-i")
+		.arg(iface)
+		.arg("-C")
+		.arg(&dir)
+		.status()
+		.map_err(|error| format!("could not run {}: {error}", program.display()))?;
+	if !status.success() {
+		return Err(format!(
+			"wpa_supplicant on {iface} (driver {driver}) exited with {status}"
+		));
+	}
+	Ok(())
+}
+
+/// Find `wpa_supplicant`.
+///
+/// It lives in `/usr/sbin`, which is not on a non-root `PATH` on Debian and
+/// several others -- so `Command::new("wpa_supplicant")` finds nothing on a
+/// machine that has it. netcfgd normally runs as root and would not notice;
+/// anything running it unprivileged would, and the error would say the wrong
+/// thing.
+fn supplicant_binary() -> Option<std::path::PathBuf> {
+	for dir in ["/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/bin"] {
+		let path = std::path::Path::new(dir).join("wpa_supplicant");
+		if path.is_file() {
+			return Some(path);
+		}
+	}
+	std::env::var_os("PATH").and_then(|paths| {
+		std::env::split_paths(&paths)
+			.map(|dir| dir.join("wpa_supplicant"))
+			.find(|path| path.is_file())
+	})
 }
 
 fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), String> {
@@ -444,6 +620,19 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 			Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
 			Err(error) => Err(format!("could not stop dhcpcd on {iface}: {error}")),
 		},
+		BackendKind::Supplicant => {
+			// Terminated through its own control socket rather than by signal:
+			// the socket is the interface netcfgd already speaks, and killing
+			// a process by name would reach supplicants netcfgd did not start.
+			let dir = ctrl_dir();
+			match netcfgd_supplicant::Client::connect(&dir, iface) {
+				Ok(client) => client
+					.command("TERMINATE")
+					.map_err(|error| format!("could not stop the supplicant on {iface}: {error}")),
+				// Nothing listening is the state this was asked to produce.
+				Err(_) => Ok(()),
+			}
+		}
 		other => Err(format!(
 			"stopping the {other:?} backend is not implemented in this build"
 		)),

@@ -814,3 +814,53 @@ fn a_malformed_regulatory_domain_is_refused() {
 		);
 	}
 }
+
+/// Decision 0008: 802.1X lives on the interface, because port-based access
+/// control predates radios and is ordinary on wired campus networks. Nesting
+/// it under an SSID made the wired case inexpressible.
+#[test]
+fn a_wired_port_can_carry_dot1x() {
+	let document = build_ok(
+		r#"
+interface eth0 {
+	dot1x {
+		eap      = "peap"
+		identity = "dave@corp.example"
+		password = "@secret:corp"
+		ca_cert  = "/etc/ssl/certs/corp.pem"
+		phase2   = "auth=MSCHAPV2"
+	}
+	config = "dhcp"
+}
+"#,
+	);
+	let eap = document.interfaces[0]
+		.dot1x
+		.as_ref()
+		.expect("a dot1x config");
+	assert_eq!(eap.method, netcfgd_model::EapMethod::Peap);
+	assert_eq!(eap.identity, "dave@corp.example");
+	assert_eq!(eap.phase2.as_deref(), Some("auth=MSCHAPV2"));
+}
+
+/// A wired port has no passphrase, no band and no priority. Accepting those
+/// keys and ignoring them would let somebody write a config that says
+/// something the system does not do.
+#[test]
+fn wireless_only_keys_are_refused_on_a_wired_port() {
+	for key in ["psk = \"@secret:x\"", "priority = 3", "owe = true"] {
+		let message = errors(&format!("interface eth0 {{ dot1x {{ {key} }} }}"));
+		assert!(
+			message.contains("means nothing on a wired port"),
+			"`{key}` should be refused: {message}"
+		);
+	}
+}
+
+/// A `dot1x` block with no method is a port that would authenticate with
+/// nothing, which is not a thing to guess at.
+#[test]
+fn dot1x_without_a_method_is_refused() {
+	let message = errors(r#"interface eth0 { dot1x { identity = "dave" } }"#);
+	assert!(message.contains("needs an `eap` method"), "got: {message}");
+}

@@ -30,5 +30,11 @@ tolerance_percent 3
 # Recorded at the measured size rather than left to ride the tolerance: the 3%
 # is for compiler-version noise, and spending it on a real feature means the
 # next real feature fails the gate for the wrong reason.
-ncfg     977344
-netcfgd  1305112
+#
+# Then wired 802.1X: netcfgd-apply gained the supplicant client, because
+# starting a supplicant and filling it is one action rather than two. ncfg took
+# the larger share (+45 KB against netcfgd's +12 KB) since it links the
+# executor for `--oneshot` and did not already carry the supplicant -- `ncfg
+# apply` really can bring up an 802.1X port, so the code has to be there.
+ncfg     1022400
+netcfgd  1317400

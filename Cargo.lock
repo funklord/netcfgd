@@ -28,6 +28,8 @@ dependencies = [
  "netcfgd-model",
  "netcfgd-netlink",
  "netcfgd-plan",
+ "netcfgd-secret",
+ "netcfgd-supplicant",
  "serde",
  "serde_json",
 ]
