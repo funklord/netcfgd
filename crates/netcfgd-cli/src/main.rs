@@ -7,6 +7,8 @@
 //! this small -- section 6's size gate is the kind of constraint that has to
 //! bind on the first binary or it never binds at all.
 
+mod client;
+
 use netcfgd_host::{config, hooks, state};
 
 use netcfgd_apply::{apply, KernelExecutor};
@@ -22,6 +24,8 @@ usage:
   ncfg apply [options]     make the observed state match the config
   ncfg status [options]    show what is currently observed
   ncfg show [options]      print the compiled desired-state document
+  ncfg confirm [options]   keep a change made under a confirm window
+  ncfg revert [options]    undo it now rather than at expiry
 
 options:
   --config-dir PATH        default /etc/netcfgd, or $NCFG_CONFIG_DIR
@@ -29,7 +33,9 @@ options:
   --oneshot                apply once and exit; the default, there being no
                            daemon yet
   --json                   machine-readable output
-  --confirm SECONDS        arm commit-confirm for this apply
+  --confirm-within SECS    apply, then revert automatically unless confirmed
+                           within SECS. Needs netcfgd running, since the
+                           window has to outlive this command.
   --allow-disruption IFACE consent to disrupting one guarded interface;
                            repeatable, and deliberately not a blanket --force
   -h, --help               this text
@@ -76,6 +82,8 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"apply" => command_apply(&options),
 		"status" => command_status(&options),
 		"show" => command_show(&options),
+		"confirm" => command_confirm(&options, &netcfgd_proto::Request::Confirm),
+		"revert" => command_confirm(&options, &netcfgd_proto::Request::Revert),
 		other => Err(format!("unknown command `{other}`; try `ncfg --help`")),
 	}
 }
@@ -101,12 +109,11 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 		match argument {
 			"--config-dir" => options.config_dir = Some(take_value("--config-dir")?),
 			"--run-dir" => options.run_dir = Some(take_value("--run-dir")?),
-			"--confirm" => {
-				let value = take_value("--confirm")?;
-				options.confirm =
-					Some(value.parse().map_err(|_| {
-						format!("--confirm wants a number of seconds, not `{value}`")
-					})?);
+			"--confirm-within" => {
+				let value = take_value("--confirm-within")?;
+				options.confirm = Some(value.parse().map_err(|_| {
+					format!("--confirm-within wants a number of seconds, not `{value}`")
+				})?);
 			}
 			"--allow-disruption" => options
 				.allow_disruption
@@ -184,6 +191,32 @@ fn command_plan(options: &Options) -> Result<ExitCode, String> {
 }
 
 fn command_apply(options: &Options) -> Result<ExitCode, String> {
+	if let Some(seconds) = options.confirm {
+		// One implementation of the safety net, in the daemon. `ncfg` could
+		// fork a watchdog instead, but two implementations of the mechanism
+		// that saves a machine from a bad config is two chances to get it
+		// wrong, and the one that runs would depend on how it was invoked.
+		let run_dir = state::resolve_dir(options.run_dir.as_deref());
+		let request = netcfgd_proto::Request::Apply {
+			confirm: Some(seconds),
+			allow_disruption: options.allow_disruption.clone(),
+		};
+		return match client::ask(&client::socket_path(&run_dir), &request)? {
+			client::Answer::Journal(journal) => {
+				for record in &journal.records {
+					println!("{:?} {}", record.outcome, record.op);
+				}
+				println!(
+					"confirm window open for {seconds}s -- run `ncfg confirm` to keep this, \
+					 or `ncfg revert` to undo it now"
+				);
+				Ok(ExitCode::SUCCESS)
+			}
+			client::Answer::Error { message } => Err(message),
+			other => Err(format!("the daemon sent {}", other.describe())),
+		};
+	}
+
 	let (plan, document, observed, run_dir) = build_plan(options)?;
 
 	let _ = state::write_desired(&run_dir, &document);
@@ -262,6 +295,30 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		return Ok(ExitCode::from(3));
 	}
 	Ok(ExitCode::SUCCESS)
+}
+
+/// Confirm or revert, both of which are the daemon's to do.
+fn command_confirm(
+	options: &Options,
+	request: &netcfgd_proto::Request,
+) -> Result<ExitCode, String> {
+	let run_dir = state::resolve_dir(options.run_dir.as_deref());
+	let response = client::ask(&client::socket_path(&run_dir), request)?;
+	match response {
+		client::Answer::Ok => {
+			println!(
+				"{}",
+				if matches!(request, netcfgd_proto::Request::Confirm) {
+					"confirmed; the change stands"
+				} else {
+					"reverted to the last-good configuration"
+				}
+			);
+			Ok(ExitCode::SUCCESS)
+		}
+		client::Answer::Error { message } => Err(message),
+		other => Err(format!("the daemon sent {}", other.describe())),
+	}
 }
 
 fn command_status(options: &Options) -> Result<ExitCode, String> {

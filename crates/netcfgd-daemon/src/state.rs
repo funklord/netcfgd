@@ -6,7 +6,7 @@
 //! which is the same seam that makes the planner testable without hardware.
 
 use netcfgd_apply::{apply, Executor, Journal};
-use netcfgd_host::{config, hooks::RunHooks, state as run_state};
+use netcfgd_host::{config, confirm, hooks::RunHooks, state as run_state};
 use netcfgd_model::{Document, DriftPolicy, Observed};
 use netcfgd_plan::{plan, Plan, PlanOptions};
 use netcfgd_proto::Event;
@@ -31,6 +31,14 @@ pub(crate) struct State {
 	pub(crate) diagnostics: Option<String>,
 	/// What the kernel last reported.
 	pub(crate) observed: Observed,
+	/// The hash of a configuration a revert rejected, if there is one.
+	///
+	/// Compared against every recompile. Without it, anything that triggers a
+	/// reload -- a spurious inotify event, an explicit request -- would adopt
+	/// the config that just broke the machine and drift-reconcile the breakage
+	/// straight back. A hash rather than a flag so that *fixing* the config
+	/// clears it automatically: a different document is a different answer.
+	pub(crate) rejected: Option<String>,
 }
 
 impl State {
@@ -47,6 +55,7 @@ impl State {
 			desired: None,
 			diagnostics: None,
 			observed: Observed::default(),
+			rejected: None,
 		};
 		state.reload();
 		state.reobserve();
@@ -74,7 +83,21 @@ impl State {
 
 		match netcfgd_compile::compile(&sources, &mut sink) {
 			Ok(document) => {
+				if self.rejected.as_deref() == Some(confirm::document_hash(&document).as_str()) {
+					// The same configuration a revert already rejected. Adopting
+					// it would undo the revert on the next drift check, which the
+					// operator would watch happen and be unable to explain.
+					return Event::Reloaded {
+						ok: false,
+						diagnostics: Some(
+							"this configuration was reverted away from and has not \
+							 changed since; edit it to try again"
+								.to_owned(),
+						),
+					};
+				}
 				let _ = run_state::write_desired(&self.paths.run_dir, &document);
+				self.rejected = None;
 				self.desired = Some(document);
 				self.diagnostics = None;
 				Event::Reloaded {
