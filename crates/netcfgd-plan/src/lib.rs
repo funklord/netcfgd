@@ -430,7 +430,11 @@ impl Builder {
 			.collect();
 		base.extend(enslavements);
 
-		// Rule 6: pre_up runs before link.up.
+		// Rule 6: pre_up runs before link.up. Deliberately, and not the same
+		// as netifrc, which runs `up; preup; up` so that a preup hook can read
+		// carrier -- the kernel returns EINVAL for carrier on a down
+		// interface. Decision 0011 keeps this ordering and documents the
+		// breakage; do not "fix" it to match netifrc without reading that.
 		for hook in interface
 			.hooks
 			.iter()

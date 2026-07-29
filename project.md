@@ -457,7 +457,7 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 | **M1** | Walking skeleton | `netcfgd-model` + DSL compiler + rtnetlink observe + planner + `ncfg apply --oneshot`. Wired static and DHCP only. Fixture test harness. Size/footprint CI live. **The whole model lands here in types, including the parts nothing implements until M3–M4** — DNS scopes (0007), `EapConfig` (0008), `Delegated`/`PrefixRef`/`RaPolicy` (0009) — because M4 is the freeze and a structural change after it is a major bump. |
 | **M2** | Daemon and safety | `netcfgd` daemon, control socket, inotify reload, drift detection, hook runner, **commit-confirm**, `ncfg explain`, `ncfg monitor`. Flat DNS backends (`WriteResolvConf`, `Resolvconf`) so ordinary single-link hosts resolve long before scopes matter. |
 | **M3** | Wifi and 802.1X | iwd backend (wpa_supplicant fallback), secret providers, `ncfg wifi *`. **Wired 802.1X shares the supplicant backend** (0008) — `iwd` has no wired driver, so this path is wpa_supplicant regardless of device policy. |
-| **M4** | Link types, DNS scopes, router side | WireGuard, bridge/bond/VLAN/VXLAN polish, netifrc compat + `ncfg convert`, importers (`nm`, `networkd`, `uci`). Scope-capable DNS backends (0007). DHCPv6-PD, `Delegated` resolution and RA handoff (0009). PPPoE via `netcfgd-ppp`. **Model, document schema and socket API freeze here.** |
+| **M4** | Link types, DNS scopes, router side | WireGuard, bridge/bond/VLAN/VXLAN polish, netifrc compat + `ncfg convert` (**which must warn on every converted `preup`** — see 0011), importers (`nm`, `networkd`, `uci`). Scope-capable DNS backends (0007). DHCPv6-PD, `Delegated` resolution and RA handoff (0009). PPPoE via `netcfgd-ppp`. **Model, document schema and socket API freeze here.** |
 | **M5** | Embedded | Build tiers, procd integration, read-only-root support, nano consumer without compiler. |
 | **M6** | TUI | `ncfg tui` including the interactive plan-preview pane. |
 | **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). |
@@ -514,6 +514,11 @@ Source, comments and commit messages are **ASCII**; write `--` where prose would
 - **Nothing containing real secret material is committed** — not in fixtures, not in test data, not temporarily. §2 makes the desired-state document secret-free by construction; the repository holds to the same rule, and a test fixture is the easiest place to forget it.
 
 Changing any of the above is a convention change: raise it rather than adjusting the default in passing.
+
+### Known incompatibilities to carry forward
+
+- **A netifrc `preup` that checks link state deadlocks under netcfgd's ordering.** Rule 6 runs `pre_up` before `link.up`, and the kernel returns `EINVAL` for `carrier` on a down interface, so `mii-tool`/`ethtool` checks cannot work there — and net.example's canonical `preup` aborts on "no link", which then prevents the bring-up that would have produced the carrier. The ordering stays; `ncfg convert` must warn. [0011](docs/decisions/0011-preup-runs-before-the-link-is-up.md).
+- **netcfgd does not gate addressing on carrier.** A link is brought up and addressed whether or not a cable is present. The `carrier` hook reports; nothing defers. Noted as a gap in 0011, not scheduled.
 
 ---
 
