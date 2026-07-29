@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii size footprint rss fuzz deny clean
+.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii size footprint rss live fuzz deny clean
 
 all: build
 
@@ -155,6 +155,25 @@ rss:
 #   make fuzz TARGET=netlink_wire FUZZ_ARGS='-max_total_time=300'
 FUZZ_TARGET ?= netlink_wire
 FUZZ_ARGS   ?=
+
+# The supplicant tests that need a real wpa_supplicant. Not part of `check`:
+# they need a privileged network namespace, and a machine without one should
+# get a clean run rather than a failure it cannot act on. NCFG_LIVE turns the
+# skips into failures, so running this target proves the tests actually ran --
+# without it a missing supplicant would look exactly like a passing suite.
+#
+# unshare -rn gives CAP_NET_ADMIN in a fresh network namespace without root.
+# The suite is built first because the binary has to exist inside it, where
+# there is no network for cargo to fetch anything over.
+live:
+	$(CARGO) build --tests -p netcfgd-supplicant
+	@binary=$$(ls -t target/debug/deps/live-* 2>/dev/null | grep -v '\.d$$' | head -1); \
+	if [ -z "$$binary" ]; then echo "live: no test binary was built"; exit 1; fi; \
+	unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1" || { \
+		echo "live: if this failed to unshare, the kernel may have"; \
+		echo "live:   user namespaces restricted; run as root instead"; \
+		exit 1; \
+	}
 
 fuzz:
 	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \
