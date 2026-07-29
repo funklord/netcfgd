@@ -42,7 +42,9 @@ pub use control::{Control, Principal, Tier};
 pub use device::{AccessPoint, Device, DeviceMatch, MacPolicy, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
-pub use interface::{Guard, Interface, InterfaceKind, LinkSettings, RaPolicy, Toggle, WgPeer};
+pub use interface::{
+	BondMode, Guard, Interface, InterfaceKind, LinkSettings, RaPolicy, Toggle, VlanProtocol, WgPeer,
+};
 pub use observed::{
 	AppliedDns, BackendKind, Observed, ObservedAddress, ObservedBackend, ObservedLink,
 	ObservedRoute, Origin, Ownership,

@@ -346,7 +346,15 @@ fn is_ident_start(byte: u8) -> bool {
 }
 
 fn is_ident_continue(byte: u8) -> bool {
-	byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+	// A dot is legal *inside* an identifier and not at the start, which is
+	// what keeps `eth0.42` an interface name while a bare `.42` stays an
+	// error. Linux names VLAN interfaces that way by universal convention and
+	// design section 3.2's own example is `interface eth0.42`, so without this
+	// the standard spelling of the commonest virtual interface does not parse.
+	//
+	// It cannot be confused with a float: a number never begins with a letter,
+	// and floats are refused by the number lexer independently.
+	byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-' || byte == b'.'
 }
 
 /// How many bytes this UTF-8 lead byte introduces, including itself.
