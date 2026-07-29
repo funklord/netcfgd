@@ -294,3 +294,39 @@ fn eap_name(method: EapMethod) -> &'static str {
 fn quote(value: &str) -> String {
 	passphrase_argument(value)
 }
+
+/// The settings for a wired 802.1X port.
+///
+/// Not the same as a wifi EAP network, and the difference is the one that
+/// matters: wired uses `key_mgmt = IEEE8021X`, bare EAPOL with no WPA
+/// handshake wrapped around it. Sending `WPA-EAP` to a `wired` driver produces
+/// a network the supplicant accepts and never authenticates with, which is the
+/// worst available outcome -- everything looks configured and the port stays
+/// blocked.
+///
+/// Decision 0008 puts wired 802.1X on this supplicant precisely so the EAP
+/// method handling is shared; this function is the part that must not be.
+///
+/// # Errors
+///
+/// The same failures as [`settings`]: an unusable credential, or a secret that
+/// will not resolve.
+pub fn wired_settings(
+	eap: &netcfgd_model::EapConfig,
+	resolver: &Resolver,
+) -> Result<Vec<Setting>, Box<dyn std::error::Error>> {
+	let mut out = eap_settings(eap, resolver)?;
+
+	// eap_settings speaks wifi. Replace the two things that differ rather than
+	// duplicating the method, identity and certificate handling.
+	for setting in &mut out {
+		if setting.variable == "key_mgmt" {
+			"IEEE8021X".clone_into(&mut setting.value);
+		}
+	}
+	// Without this the supplicant tries to install WEP keys the switch never
+	// sends, and the port authenticates and then goes quiet.
+	out.push(Setting::plain("eapol_flags", "0"));
+
+	Ok(out)
+}
