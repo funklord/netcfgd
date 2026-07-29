@@ -166,6 +166,7 @@ FUZZ_ARGS   ?=
 # The suite is built first because the binary has to exist inside it, where
 # there is no network for cargo to fetch anything over.
 live:
+	$(CARGO) build --workspace
 	$(CARGO) build --tests -p netcfgd-supplicant
 	@binary=$$(ls -t target/debug/deps/live-* 2>/dev/null | grep -v '\.d$$' | head -1); \
 	if [ -z "$$binary" ]; then echo "live: no test binary was built"; exit 1; fi; \
@@ -174,6 +175,7 @@ live:
 		echo "live:   user namespaces restricted; run as root instead"; \
 		exit 1; \
 	}
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
 
 fuzz:
 	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \

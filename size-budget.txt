@@ -18,5 +18,17 @@
 # Tolerance covers compiler-version noise; a real feature will exceed it.
 tolerance_percent 3
 
-ncfg     940480
-netcfgd  1219096
+# M3, the supplicant and the wifi config syntax. netcfgd grew 86 KB and ncfg
+# 37 KB across two steps: the control-socket client and the wireless request
+# handlers, then the compiler learning `network` and `device.wifi` blocks --
+# which both binaries carry, since `ncfg` compiles the config itself. Plus
+# serde's generated code for the new protocol types.
+#
+# No new dependency in any of it. The whole increase is code that was written
+# rather than pulled in, which is what constraint 3 was protecting.
+#
+# Recorded at the measured size rather than left to ride the tolerance: the 3%
+# is for compiler-version noise, and spending it on a real feature means the
+# next real feature fails the gate for the wrong reason.
+ncfg     977344
+netcfgd  1305112
