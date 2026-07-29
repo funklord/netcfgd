@@ -11,6 +11,7 @@ members = [
 	"crates/netcfgd-observe",
 	"crates/netcfgd-apply",
 	"crates/netcfgd-proto",
+	"crates/netcfgd-secret",
 	"crates/netcfgd-host",
 	"crates/netcfgd-daemon",
 	"backends/netcfgd-dns",
