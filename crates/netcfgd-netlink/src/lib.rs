@@ -21,12 +21,14 @@
 pub mod dump;
 pub mod inotify;
 pub mod ops;
+pub mod peer;
 pub mod socket;
 pub mod watch;
 pub mod wire;
 
 pub use dump::{AddressRecord, LinkRecord, RouteRecord};
 pub use ops::{parse_mac, NewLink, RouteSpec};
+pub use peer::{credentials, Peer};
 pub use socket::Netlink;
 pub use watch::{Mechanism, Watcher};
 

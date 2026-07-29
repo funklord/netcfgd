@@ -112,6 +112,13 @@ fn lower_global_block(document: &mut Document, block: &Block, diags: &mut Diagno
 					}
 				}
 			}
+			Item::Block(inner) if inner.head == "control" => {
+				for item in &inner.items {
+					if let Item::Assignment(assignment) = item {
+						lower_control_key(&mut document.globals.control, assignment, diags);
+					}
+				}
+			}
 			Item::Block(inner) => diags.push(Diagnostic::new(
 				inner.span,
 				format!("`{}` is not valid inside `global`", inner.head),
@@ -185,6 +192,36 @@ fn lower_dns_key(policy: &mut DnsPolicy, assignment: &Assignment, diags: &mut Di
 			assignment.span,
 			format!("unknown dns key `{other}`"),
 		)),
+	}
+}
+
+/// One key of the `control` block.
+fn lower_control_key(
+	control: &mut netcfgd_model::Control,
+	assignment: &Assignment,
+	diags: &mut Diagnostics,
+) {
+	let Some(text) = as_string(&assignment.value, diags) else {
+		return;
+	};
+	let principal = match netcfgd_model::Principal::parse(&text) {
+		Ok(principal) => principal,
+		Err(message) => {
+			diags.push(
+				Diagnostic::new(assignment.value.span, message)
+					.with_help("for example: group:netdev, user:alice, any, root"),
+			);
+			return;
+		}
+	};
+	match assignment.key.as_str() {
+		"observe" => control.observe = principal,
+		"wifi" => control.wifi = principal,
+		"admin" => control.admin = principal,
+		other => diags.push(
+			Diagnostic::new(assignment.span, format!("unknown control key `{other}`"))
+				.with_help("the tiers are observe, wifi and admin"),
+		),
 	}
 }
 

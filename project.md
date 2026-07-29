@@ -73,7 +73,33 @@ Globals {
   on_drift_default : DriftPolicy      // = Report
   confirm_default  : u32?             // seconds; commit-confirm default window
   hostname_policy  : enum { None, FromDhcp, Static(string) }
+  control          : Control          // who may do what; see 0013
 }
+
+Control {                             // every tier defaults to Root
+  observe : Principal                 // ask what the network looks like
+  wifi    : Principal                 // join, leave and scan known networks
+  admin   : Principal                 // change anything else
+}
+
+Principal = Root | Any | User(string) | Group(string)
+```
+
+Written in a config as a `control` block inside `global`:
+
+```
+global {
+	control {
+		observe = "any"
+		wifi    = "group:netdev"
+		admin   = "root"
+	}
+}
+```
+
+Everything defaults to `root`, so a machine that never edits this block behaves exactly as design §13 describes. The socket's mode and group follow the policy, and netcfgd complains loudly at startup if it cannot make the policy reachable — a config that says `group:netdev` over a root-only socket is a lie that costs an afternoon to diagnose.
+
+```
 
 DnsPolicy {                           // see docs/decisions/0007
   mode      : enum { None, WriteResolvConf, Resolvconf, Openresolv,
