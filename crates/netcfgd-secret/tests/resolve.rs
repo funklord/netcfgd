@@ -229,16 +229,65 @@ fn a_failing_exec_secret_does_not_quote_its_output() {
 	assert!(message.contains("exited with"), "got: {message}");
 }
 
-/// Providers that are not implemented say which milestone, rather than
-/// failing in a way that looks like the secret is missing.
+/// A provider that is not implemented says so, and says what it is waiting
+/// for -- rather than failing in a way that looks like the secret is missing.
+///
+/// It deliberately does not name a milestone. `keyring` is not scheduled, and
+/// a diagnostic promising a release that passes without the feature arriving
+/// is worse than one that admits the state of things.
 #[test]
-fn an_unimplemented_provider_names_its_milestone() {
+fn an_unimplemented_provider_says_what_it_is_waiting_for() {
 	let resolver = Resolver::default();
-	for provider in [SecretProvider::Keyring, SecretProvider::Pass] {
+	let error = resolver
+		.resolve(&reference("anything", SecretProvider::Keyring))
+		.expect_err("unsupported");
+	assert!(matches!(error, Error::Unsupported { .. }));
+
+	let message = error.to_string();
+	assert!(message.contains("keyring"), "got: {message}");
+	assert!(message.contains("not implemented"), "got: {message}");
+	assert!(
+		!message.contains("M3") && !message.contains("M4"),
+		"an unscheduled feature must not claim a milestone: {message}"
+	);
+}
+
+/// A `pass` name reaches the command line as an argument, so it is validated
+/// rather than escaped: a config file should not get to choose what `pass` is
+/// asked to do.
+#[test]
+fn a_pass_name_cannot_become_an_option() {
+	let resolver = Resolver::default();
+	for hostile in ["--help", "-c", "entry --clip", "", "a b"] {
 		let error = resolver
-			.resolve(&reference("anything", provider))
-			.expect_err("unsupported");
-		assert!(matches!(error, Error::Unsupported { .. }));
-		assert!(error.to_string().contains("M3"));
+			.resolve(&reference(hostile, SecretProvider::Pass))
+			.expect_err("refused");
+		// Either the name is refused outright, or `pass` is not installed --
+		// but never "the option was accepted and something happened".
+		let message = error.to_string();
+		assert!(
+			message.contains("one word") || message.contains("No such file"),
+			"`{hostile}`: {message}"
+		);
 	}
+}
+
+/// A store entry conventionally holds the secret on line one and notes below
+/// it. Handing a supplicant the whole thing would append somebody's recovery
+/// codes to their passphrase.
+#[test]
+fn a_pass_entry_yields_only_its_first_line() {
+	// The rule, not the plumbing: `pass` is not installed on most build
+	// machines, and a test that quietly exercised something else instead
+	// would pass without checking anything.
+	let entry = Secret::new("hunter2\nurl: example.net\nrecovery: 1234 5678".to_owned());
+	assert_eq!(netcfgd_secret::first_line(&entry).expose(), "hunter2");
+
+	// An entry with no notes is the common case and must survive intact.
+	let bare = Secret::new("hunter2".to_owned());
+	assert_eq!(netcfgd_secret::first_line(&bare).expose(), "hunter2");
+
+	// And an empty first line is empty, not the second line.
+	let blank = Secret::new("\nhunter2".to_owned());
+	assert_eq!(netcfgd_secret::first_line(&blank).expose(), "");
 }

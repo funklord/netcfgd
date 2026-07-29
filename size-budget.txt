@@ -36,5 +36,5 @@ tolerance_percent 3
 # the larger share (+45 KB against netcfgd's +12 KB) since it links the
 # executor for `--oneshot` and did not already carry the supplicant -- `ncfg
 # apply` really can bring up an 802.1X port, so the code has to be there.
-ncfg     1022400
+ncfg     1026496
 netcfgd  1317400
