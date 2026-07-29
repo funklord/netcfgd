@@ -13,9 +13,11 @@
 //! chosen step, which is how the stop-and-resume behaviour is checked without
 //! a network namespace.
 
+pub mod hooks;
 pub mod journal;
 pub mod kernel;
 
+pub use hooks::{HookEnv, Outcome as HookOutcome};
 pub use journal::{Journal, Outcome, Record};
 pub use kernel::KernelExecutor;
 

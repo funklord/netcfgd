@@ -40,6 +40,33 @@ pub struct Effects {
 pub struct KernelExecutor {
 	socket: Netlink,
 	indices: Vec<(String, u32)>,
+	/// Every DNS scope the document declares.
+	///
+	/// A flat mode has exactly one artifact -- `/etc/resolv.conf` -- so
+	/// delivering one scope at a time would have each action overwrite the
+	/// last, and the file would end up holding whichever scope the plan
+	/// happened to order last. The per-scope action still says *what changed*,
+	/// which is what the plan is for; the delivery is whole-host because the
+	/// file is. Decision 0007's point restated: a flat resolver cannot express
+	/// scopes, so netcfgd flattens once, deliberately, rather than repeatedly
+	/// and by accident.
+	dns_scopes: Vec<netcfgd_model::AppliedDns>,
+	/// `(path, sha256)` for every hook the document references.
+	///
+	/// Carried here because the op does not include the hash and the executor
+	/// has no document. Supplied by the caller through
+	/// [`KernelExecutor::with_hooks`].
+	hook_hashes: Vec<(String, String)>,
+	/// Where `/run` is, for the DNS backend's record.
+	run_dir: std::path::PathBuf,
+	/// Where `resolv.conf` is.
+	///
+	/// Configurable rather than fixed because netcfgd is expected to run in a
+	/// container or a chroot, and because section 10.4's read-only root means
+	/// the real file may be a symlink into a writable overlay. It is also what
+	/// makes the delivery testable without touching the host's resolver
+	/// configuration -- which a test very nearly did.
+	resolv_conf: std::path::PathBuf,
 	/// What happened, for the caller to record.
 	pub effects: Effects,
 }
@@ -61,8 +88,36 @@ impl KernelExecutor {
 				.iter()
 				.map(|link| (link.name.clone(), link.index))
 				.collect(),
+			dns_scopes: Vec::new(),
+			hook_hashes: Vec::new(),
+			run_dir: std::path::PathBuf::from("/run/netcfgd"),
+			resolv_conf: resolv_conf_path(),
 			effects: Effects::default(),
 		})
+	}
+
+	/// Tell the executor where `/run` is and what the document's hooks hash to.
+	#[must_use]
+	pub fn with_context(
+		mut self,
+		run_dir: impl Into<std::path::PathBuf>,
+		document: &netcfgd_model::Document,
+	) -> Self {
+		self.run_dir = run_dir.into();
+		self.dns_scopes = netcfgd_dns::scopes_of(document)
+			.into_iter()
+			.map(|scope| netcfgd_model::AppliedDns {
+				scope: scope.name.to_owned(),
+				policy: scope.policy.clone(),
+			})
+			.collect();
+		self.hook_hashes = document
+			.interfaces
+			.iter()
+			.flat_map(|interface| interface.hooks.iter())
+			.map(|hook| (hook.path.clone(), hook.sha256.clone()))
+			.collect();
+		self
 	}
 
 	/// The index of an interface, refreshing once if it is not known.
@@ -239,26 +294,61 @@ impl Executor for KernelExecutor {
 				Ok(())
 			}
 			Op::DnsApply { scope, policy } => {
-				// The DNS backends land with the scope-capable modes in M4.
-				// Recording the delivery without performing it would make the
-				// next plan believe DNS is configured when it is not, so this
-				// refuses instead.
-				Err(format!(
-					"dns delivery for scope {scope} via mode {} is not implemented in this build; \
-					 it lands with M4",
-					policy.mode.name()
-				))
+				// Deliver every scope, not just this one, for the reason
+				// `dns_scopes` documents. Where the executor was given no
+				// document -- a caller that did not use `with_context` -- fall
+				// back to the single scope rather than delivering nothing.
+				let owned: Vec<netcfgd_model::AppliedDns> = if self.dns_scopes.is_empty() {
+					vec![netcfgd_model::AppliedDns {
+						scope: scope.clone(),
+						policy: (**policy).clone(),
+					}]
+				} else {
+					self.dns_scopes.clone()
+				};
+				let scopes: Vec<netcfgd_dns::Scope<'_>> = owned
+					.iter()
+					.map(|entry| netcfgd_dns::Scope {
+						name: &entry.scope,
+						policy: &entry.policy,
+					})
+					.collect();
+				let delivered = netcfgd_dns::deliver(&scopes, &self.resolv_conf, &self.run_dir)?;
+				self.effects.applied_dns.extend(delivered);
+				Ok(())
 			}
 			Op::HookRun { iface, phase, path } => {
-				let status = Command::new(path)
-					.env("NCFG_IFACE", iface)
-					.env("NCFG_PHASE", format!("{phase:?}"))
-					.status()
-					.map_err(|error| format!("could not run {path}: {error}"))?;
-				if status.success() {
-					Ok(())
-				} else {
-					Err(format!("{path} exited with {status}"))
+				// The sha256 is not in the op, so it is looked up in the
+				// document the plan came from -- which the executor does not
+				// have. Until the op carries it (an additive change, M4),
+				// verify against the file as materialised and report a
+				// mismatch as a failure of the phase rather than silently
+				// running whatever is there now.
+				let reference = netcfgd_model::HookRef {
+					phase: *phase,
+					path: path.clone(),
+					sha256: self
+						.hook_hashes
+						.iter()
+						.find(|(known, _)| known == path)
+						.map_or_else(String::new, |(_, hash)| hash.clone()),
+					run_as: None,
+					timeout: None,
+				};
+				let env = crate::hooks::HookEnv::for_interface(iface);
+				match crate::hooks::run(&reference, &env) {
+					crate::hooks::Outcome::Ok => Ok(()),
+					// A pre_* veto stops the plan, which is section 5.2's
+					// whole point: you can refuse a bring-up.
+					crate::hooks::Outcome::Vetoed(message) => Err(message),
+					// A post_* or event hook failing is reported and does not
+					// roll anything back. Failing the plan here would leave
+					// the rest of the machine unconfigured because a logging
+					// script exited 1.
+					crate::hooks::Outcome::Noted(message) => {
+						eprintln!("netcfgd: {message}");
+						Ok(())
+					}
 				}
 			}
 			// The commit family is a marker in the plan rather than something
@@ -270,6 +360,14 @@ impl Executor for KernelExecutor {
 			other => Err(format!("{} is not implemented in this build", other.name())),
 		}
 	}
+}
+
+/// Where `resolv.conf` is: the environment, or the usual place.
+fn resolv_conf_path() -> std::path::PathBuf {
+	std::env::var("NCFG_RESOLV_CONF").map_or_else(
+		|_| std::path::PathBuf::from(netcfgd_dns::RESOLV_CONF),
+		std::path::PathBuf::from,
+	)
 }
 
 fn new_link(

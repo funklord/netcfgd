@@ -194,9 +194,13 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 
 /// Apply whatever the config asks for, reporting failures to stderr.
 fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
-	let Ok(mut executor) = KernelExecutor::new() else {
+	let Ok(executor) = KernelExecutor::new() else {
 		eprintln!("netcfgd: cannot open a netlink socket to apply");
 		return;
+	};
+	let mut executor = match &state.desired {
+		Some(document) => executor.with_context(&state.paths.run_dir, document),
+		None => executor,
 	};
 	let (plan, journal) = state.apply(&PlanOptions::default(), &mut executor);
 	let mut owned = run_state::read_owned(&state.paths.run_dir);

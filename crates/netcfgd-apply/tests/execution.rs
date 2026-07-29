@@ -179,3 +179,99 @@ fn the_journal_round_trips_through_json() {
 	assert_eq!(journal, back);
 	assert!(text.contains("\"outcome\": \"failed\""));
 }
+
+/// Section 5.2 draws a line most hook systems do not: a `pre_*` failure
+/// vetoes the transition, a `post_*` or event failure is logged and does not
+/// roll anything back. Treating them alike either makes vetoes impossible or
+/// makes a logging script able to abort a network bring-up.
+#[test]
+fn only_the_pre_phases_can_veto() {
+	use netcfgd_apply::hooks::is_veto_phase;
+	use netcfgd_model::HookPhase;
+
+	for phase in [
+		HookPhase::PreUp,
+		HookPhase::PreDown,
+		HookPhase::Up,
+		HookPhase::Down,
+	] {
+		assert!(is_veto_phase(phase), "{phase:?} should be able to veto");
+	}
+	for phase in [
+		HookPhase::PostUp,
+		HookPhase::PostDown,
+		HookPhase::Carrier,
+		HookPhase::Lease,
+		HookPhase::Roam,
+		HookPhase::Portal,
+		HookPhase::Drift,
+	] {
+		assert!(!is_veto_phase(phase), "{phase:?} must not abort a plan");
+	}
+}
+
+/// Section 2.2 records a hook's content hash so drift detection can notice it
+/// changing underneath the document. Checking it before execution turns that
+/// from a report into a control: a hook file swapped after the config was
+/// compiled does not get to run as root on the strength of the old approval.
+#[test]
+fn a_hook_whose_content_changed_is_refused() {
+	use netcfgd_apply::hooks::{run, sha256_hex, HookEnv, Outcome};
+	use netcfgd_model::{HookPhase, HookRef};
+
+	let dir = std::env::temp_dir().join(format!("ncfg-hook-{}", std::process::id()));
+	let _ = std::fs::remove_dir_all(&dir);
+	std::fs::create_dir_all(&dir).expect("scratch");
+	let path = dir.join("hook.sh");
+	std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write");
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt;
+		std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+	}
+
+	let approved = HookRef {
+		phase: HookPhase::PreUp,
+		path: path.display().to_string(),
+		sha256: sha256_hex(b"#!/bin/sh\nexit 0\n"),
+		run_as: None,
+		timeout: None,
+	};
+	assert_eq!(
+		run(&approved, &HookEnv::for_interface("eth0")),
+		Outcome::Ok,
+		"the approved content should run"
+	);
+
+	// Somebody replaces the file after the config was compiled.
+	std::fs::write(&path, "#!/bin/sh\nexit 0\n# and something else\n").expect("rewrite");
+	match run(&approved, &HookEnv::for_interface("eth0")) {
+		Outcome::Vetoed(message) => {
+			assert!(message.contains("has changed"), "got: {message}");
+			assert!(message.contains("not running it"), "got: {message}");
+		}
+		other => panic!("a changed hook must not run: {other:?}"),
+	}
+
+	let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// And the same mismatch in a post phase is noted rather than fatal, because
+/// the phase decides severity and not the kind of failure.
+#[test]
+fn a_changed_post_hook_is_noted_not_vetoed() {
+	use netcfgd_apply::hooks::{run, HookEnv, Outcome};
+	use netcfgd_model::{HookPhase, HookRef};
+
+	let missing = HookRef {
+		phase: HookPhase::PostUp,
+		path: "/nonexistent/netcfgd-test-hook".to_owned(),
+		sha256: "0".repeat(64),
+		run_as: None,
+		timeout: None,
+	};
+	assert!(matches!(
+		run(&missing, &HookEnv::for_interface("eth0")),
+		Outcome::Noted(_)
+	));
+}
