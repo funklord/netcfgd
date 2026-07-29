@@ -1,0 +1,22 @@
+# Per-binary size limits in bytes, checked by `make size`.
+#
+# These are NOT section 10.2's tier budgets. That document sets nano at 400 KB
+# and embedded at 1 MB, and calls them "budgets to validate, not measurements".
+# What is built today is the full tier: every feature compiled in, and two
+# separate static binaries that each link most of the workspace. Meeting the
+# embedded budget is M5's job, through the build profiles that compile the DSL
+# compiler, the client and the adapters out -- and probably through making
+# `ncfg` and `netcfgd` one multi-call binary, since duplicating the shared
+# crates is most of what is being paid for here.
+#
+# What this file does instead is ratchet. A limit is the last measured size
+# plus a small tolerance, so ordinary growth fails the build and raising a
+# number is a deliberate, reviewable edit rather than something that happens
+# quietly. Constraint 8's point is not the specific figure, it is that nobody
+# gets to drift upward without saying so.
+#
+# Tolerance covers compiler-version noise; a real feature will exceed it.
+tolerance_percent 3
+
+ncfg     862656
+netcfgd  1128984

@@ -33,6 +33,8 @@ pub(crate) enum Command {
 	ConfigChanged,
 	/// Nothing happened, but it has been a while.
 	Tick,
+	/// A commit-confirm window reached its deadline.
+	ConfirmExpired,
 }
 
 /// Bind the control socket and serve it until the process exits.

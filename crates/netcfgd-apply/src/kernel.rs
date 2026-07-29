@@ -261,6 +261,12 @@ impl Executor for KernelExecutor {
 					Err(format!("{path} exited with {status}"))
 				}
 			}
+			// The commit family is a marker in the plan rather than something
+			// the kernel does. The window lives in the daemon, which opens it
+			// after the apply succeeds and owns the timer, so the executor's
+			// correct behaviour is to do nothing -- not to fail the very plan
+			// it is bracketing, which is what an unhandled op would do.
+			Op::CommitArm { .. } | Op::CommitConfirm | Op::CommitRevert { .. } => Ok(()),
 			other => Err(format!("{} is not implemented in this build", other.name())),
 		}
 	}

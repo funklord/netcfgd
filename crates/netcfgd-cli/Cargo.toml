@@ -21,5 +21,6 @@ netcfgd-host    = { path = "../netcfgd-host" }
 netcfgd-model   = { path = "../netcfgd-model" }
 netcfgd-observe = { path = "../netcfgd-observe" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
+netcfgd-proto   = { path = "../netcfgd-proto" }
 serde.workspace      = true
 serde_json.workspace = true

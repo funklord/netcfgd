@@ -8,6 +8,7 @@
 //! a channel" does not need one; no epoll, because that would mean `unsafe`
 //! outside the one crate allowed it.
 
+mod confirm;
 mod server;
 mod state;
 
@@ -125,7 +126,12 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		socket_path.display()
 	);
 
-	if options.apply_on_start {
+	// Before anything else: a window found here was opened by a daemon that is
+	// no longer running, so nobody can have confirmed it.
+	let startup_events = confirm::resolve_on_startup(&mut state);
+	let reverted_at_startup = !startup_events.is_empty();
+
+	if options.apply_on_start && !reverted_at_startup {
 		// A network configuration daemon that starts and configures nothing is
 		// not doing its job; design section 4.4 makes oneshot the alternative
 		// rather than the default. `--no-apply-on-start` exists for anyone who
@@ -142,15 +148,24 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		// the daemon's cost scale with the kernel's chattiness.
 		let mut kernel_changed = false;
 		let mut config_changed = false;
+		let mut confirm_expired = false;
 		let mut requests = Vec::new();
 
 		for command in std::iter::once(command).chain(server::drain(&incoming)) {
 			match command {
 				Command::KernelChanged => kernel_changed = true,
 				Command::ConfigChanged => config_changed = true,
+				Command::ConfirmExpired => confirm_expired = true,
 				Command::Tick => {}
 				Command::Subscribe { events } => subscribers.push(events),
 				Command::Request { request, reply } => requests.push((request, reply)),
+			}
+		}
+
+		if confirm_expired {
+			let (_, events) = confirm::revert(&mut state, "the window closed unconfirmed");
+			for event in events {
+				server::broadcast(&mut subscribers, &event);
 			}
 		}
 
@@ -167,7 +182,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		}
 
 		for (request, reply) in requests {
-			let response = answer(&mut state, &request, &mut subscribers);
+			let response = answer(&mut state, &request, &mut subscribers, Some(&commands));
 			// A client that hung up between asking and being answered is
 			// ordinary, not an error.
 			let _ = reply.send(response);
@@ -202,6 +217,17 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 		);
 	}
 	state.reobserve();
+
+	// This configuration is now the one in effect, so it is what a future
+	// commit-confirm window falls back to. Without recording it here, the
+	// first `apply --confirm-within` after a boot is refused for having
+	// nothing to revert to -- which is safe, and useless.
+	if journal.failure().is_none() {
+		if let Some(desired) = &state.desired {
+			let _ = netcfgd_host::confirm::write_last_good(&state.paths.run_dir, desired);
+		}
+	}
+
 	server::broadcast(
 		subscribers,
 		&Event::Observed {
@@ -247,6 +273,7 @@ fn answer(
 	state: &mut State,
 	request: &Request,
 	subscribers: &mut Vec<SyncSender<Event>>,
+	timers: Option<&Sender<Command>>,
 ) -> Response {
 	match request {
 		Request::Hello => Response::Hello {
@@ -270,15 +297,24 @@ fn answer(
 			Response::Plan(Box::new(state.plan(&PlanOptions::default())))
 		}
 		Request::Apply {
-			confirm,
+			confirm: window,
 			allow_disruption,
 		} => {
 			if let Some(diagnostics) = &state.diagnostics {
 				return Response::error(diagnostics.clone());
 			}
+			// Checked before anything is applied, so a refusal leaves the
+			// machine untouched rather than changed-but-unprotected.
+			let last_good = match window {
+				Some(_) => match confirm::may_arm(state) {
+					Ok(document) => Some(document),
+					Err(error) => return Response::error(error.message()),
+				},
+				None => None,
+			};
 			let options = PlanOptions {
-				confirm_window: *confirm,
-				revert_to: None,
+				confirm_window: *window,
+				revert_to: last_good.as_ref().map(netcfgd_host::document_hash),
 				allow_disruption: allow_disruption.clone(),
 			};
 			let Ok(mut executor) = KernelExecutor::new() else {
@@ -289,6 +325,23 @@ fn answer(
 			owned.absorb(&executor.effects);
 			let _ = run_state::write_owned(&state.paths.run_dir, &owned);
 			state.reobserve();
+
+			match (window, last_good) {
+				(Some(seconds), Some(document)) => {
+					let event = confirm::arm(state, *seconds, &document);
+					if let Some(timer) = timers {
+						spawn_expiry_timer(timer, *seconds);
+					}
+					server::broadcast(subscribers, &event);
+				}
+				// No window: this configuration is the one to fall back to.
+				_ => {
+					if let Some(desired) = &state.desired {
+						let _ =
+							netcfgd_host::confirm::write_last_good(&state.paths.run_dir, desired);
+					}
+				}
+			}
 			Response::Journal(Box::new(journal))
 		}
 		Request::Reload => {
@@ -302,13 +355,40 @@ fn answer(
 		// Commit-confirm is the next piece of M2; refusing by name beats
 		// accepting and doing nothing, which would let a client believe it had
 		// a safety net.
-		Request::Confirm | Request::Revert => {
-			Response::error("commit-confirm is not implemented in this build")
+		Request::Confirm => {
+			let (response, event) = confirm::confirm_window(state);
+			if let Some(event) = event {
+				server::broadcast(subscribers, &event);
+			}
+			response
+		}
+		Request::Revert => {
+			let (response, events) = confirm::revert(state, "asked to");
+			for event in events {
+				server::broadcast(subscribers, &event);
+			}
+			response
 		}
 		Request::Explain { .. } => Response::error("explain is not implemented in this build"),
 		// Handled entirely on the connection thread.
 		Request::Monitor => Response::Ok,
 	}
+}
+
+/// Wake the loop when a window closes.
+///
+/// A dedicated one-shot thread rather than the 5-second tick, because a
+/// safety mechanism that fires up to five seconds late is one whose window is
+/// not the length it says. If the window is confirmed first the thread still
+/// fires and the loop finds no window to close, which costs nothing.
+fn spawn_expiry_timer(commands: &Sender<Command>, seconds: u32) {
+	let commands = commands.clone();
+	let _ = std::thread::Builder::new()
+		.name("confirm".to_owned())
+		.spawn(move || {
+			std::thread::sleep(std::time::Duration::from_secs(u64::from(seconds)));
+			let _ = commands.send(Command::ConfirmExpired);
+		});
 }
 
 fn spawn_kernel_watcher(commands: &Sender<Command>) {

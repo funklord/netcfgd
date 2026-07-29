@@ -218,10 +218,15 @@ pub fn write_journal(run_dir: &Path, journal: &Journal) -> io::Result<()> {
 
 /// Write via a temporary file and a rename.
 ///
+/// # Errors
+///
+/// Returns an `io::Error` if the directory cannot be created, or the file
+/// cannot be written or renamed.
+///
 /// Design section 17 requires that a power cut during a write cannot leave an
 /// unparseable file. Rename is atomic within a filesystem, so a reader sees
 /// either the old contents or the new ones and never a half-written mixture.
-fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+pub fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 	if let Some(parent) = path.parent() {
 		fs::create_dir_all(parent)?;
 	}

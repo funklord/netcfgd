@@ -13,9 +13,11 @@
 //! exists rather than the I/O being pushed down into them.
 
 pub mod config;
+pub mod confirm;
 pub mod hooks;
 pub mod state;
 
 pub use config::load;
+pub use confirm::{document_hash, Window};
 pub use hooks::RunHooks;
 pub use state::{OwnedState, DEFAULT_RUN_DIR};

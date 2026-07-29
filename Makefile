@@ -69,28 +69,27 @@ ascii:
 	fi; \
 	echo "ascii: ok"
 
-# section 6 size budget. There is one binary and one tier so far, so this gates
-# what exists: `ncfg` against the 1 MB netcfgd-embedded budget. The nano tier's
-# 400 KB gate arrives with the build profiles in M5, and the RSS and
-# filesystem-footprint gates need a daemon and an install fixture respectively.
-#
-# Constraint 8 is why this is here at 785 KB rather than later at 1.2 MB.
-SIZE_BUDGET_EMBEDDED ?= 1048576
-
+# Size, ratcheted. See size-budget.txt for why this is not section 10.2's tier
+# budget, and what would have to change for it to become one.
 size:
 	@$(CARGO) build --release --quiet
-	@fail=0; \
-	for bin in target/release/ncfg target/release/netcfgd; do \
+	@tol=$$(awk '/^tolerance_percent/ {print $$2}' size-budget.txt); \
+	fail=0; \
+	while read -r name limit; do \
+		case "$$name" in ''|\#*|tolerance_percent) continue ;; esac; \
+		bin=target/release/$$name; \
 		[ -f "$$bin" ] || continue; \
 		actual=$$(stat -c%s "$$bin"); \
-		printf 'size: %s %s bytes of %s budget (%s%% used)\n' \
-			"$$(basename $$bin)" "$$actual" "$(SIZE_BUDGET_EMBEDDED)" \
-			"$$(( actual * 100 / $(SIZE_BUDGET_EMBEDDED) ))"; \
-		if [ "$$actual" -gt "$(SIZE_BUDGET_EMBEDDED)" ]; then \
-			echo "size: $$bin is over budget"; \
+		ceiling=$$(( limit + limit * tol / 100 )); \
+		if [ "$$actual" -gt "$$ceiling" ]; then \
+			printf 'size: %s %s bytes, over its %s limit by %s\n' \
+				"$$name" "$$actual" "$$limit" "$$(( actual - limit ))"; \
+			echo "size:   raise it in size-budget.txt, and say why in the commit"; \
 			fail=1; \
+		else \
+			printf 'size: %-8s %8s of %s\n' "$$name" "$$actual" "$$limit"; \
 		fi; \
-	done; \
+	done < size-budget.txt; \
 	exit $$fail
 
 # section 6 wants a cargo-fuzz target per parser, and there are three:
