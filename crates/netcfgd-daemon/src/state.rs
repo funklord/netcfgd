@@ -134,6 +134,31 @@ impl State {
 	}
 
 	/// Make the observed state match the config.
+	/// A kernel executor that knows about the current document.
+	///
+	/// The only way the daemon should make one. Three call sites used to
+	/// construct it directly and exactly one remembered `with_context`, so an
+	/// apply behaved differently depending on whether it arrived at startup,
+	/// over the socket, or from drift -- DNS lost its scope flattening, a
+	/// supplicant would be started with no networks, and the run directory
+	/// reverted to the compiled-in default.
+	///
+	/// Nothing enforces that this is used instead of `KernelExecutor::new`.
+	/// What it does is make the correct thing shorter than the incorrect one,
+	/// which is the most a function can do about a mistake of omission.
+	///
+	/// # Errors
+	///
+	/// Returns a rendered message if a netlink socket cannot be opened.
+	pub(crate) fn executor(&self) -> Result<netcfgd_apply::KernelExecutor, String> {
+		let executor = netcfgd_apply::KernelExecutor::new()
+			.map_err(|error| format!("cannot open a netlink socket: {error}"))?;
+		Ok(match &self.desired {
+			Some(document) => executor.with_context(&self.paths.run_dir, document),
+			None => executor,
+		})
+	}
+
 	pub(crate) fn apply(
 		&mut self,
 		options: &PlanOptions,

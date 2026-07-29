@@ -127,6 +127,14 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// Collected before anything is planned, because a guard on one interface
 	// has to be known when an action against it is considered, whatever order
 	// the interfaces sort in.
+	builder.radios = desired
+		.devices
+		.iter()
+		.filter(|device| device.managed && device.wifi.is_some())
+		.map(|device| device.name.clone())
+		.collect();
+	builder.has_networks = !desired.networks.is_empty();
+
 	for interface in &desired.interfaces {
 		if let Some(guard) = &interface.guard {
 			builder
@@ -201,6 +209,19 @@ struct Builder {
 	added: Vec<(String, String, u32)>,
 	/// `hook.run(pre_up)` ids per interface.
 	pre_up: Vec<(String, u32)>,
+	/// Interfaces that are radios netcfgd manages.
+	///
+	/// A radio needs a supplicant before it can carry anything, and whether an
+	/// interface is one is a fact about the `device` block rather than the
+	/// `interface` block -- so it is collected up front instead of looked up
+	/// per action.
+	radios: Vec<String>,
+	/// Whether the document has any wifi network to join.
+	///
+	/// A managed radio with no networks gets no supplicant. Starting one that
+	/// would be given nothing is a process running for no reason, and it makes
+	/// `ncfg status` report a backend nothing asked for.
+	has_networks: bool,
 }
 
 impl Builder {
@@ -491,6 +512,14 @@ impl Builder {
 		if interface.dot1x.is_some() {
 			authentication =
 				self.plan_backend(interface, BackendKind::Supplicant, "dot1x", observed, &base);
+		} else if self.radios.iter().any(|name| name == &interface.name) && self.has_networks {
+			// A radio carries nothing until it has associated, so the
+			// supplicant is the same kind of prerequisite as 802.1X and gets
+			// the same position in the order. The field named in the reason is
+			// the `device` block's, not the interface's, because that is where
+			// somebody would go to turn this off.
+			authentication =
+				self.plan_backend(interface, BackendKind::Supplicant, "wifi", observed, &base);
 		}
 
 		let mut addressing_ids = Vec::new();
@@ -828,24 +857,52 @@ impl Builder {
 		}
 	}
 
+	/// Whether a running supplicant is one the document asks for.
+	///
+	/// The same two conditions that start one. Getting this wrong in the
+	/// permissive direction leaves a supplicant nobody owns; getting it wrong
+	/// in the other direction makes netcfgd start a supplicant and kill it on
+	/// the next reconcile, forever -- which is what the idempotence gate
+	/// caught when this function did not know the kind existed.
+	fn supplicant_wanted(&self, desired: &Document, iface: &str) -> bool {
+		let dot1x = desired
+			.interfaces
+			.iter()
+			.any(|interface| interface.name == iface && interface.dot1x.is_some());
+		dot1x || (self.radios.iter().any(|name| name == iface) && self.has_networks)
+	}
+
 	fn teardown_backends(&mut self, desired: &Document, observed: &Observed) {
 		for backend in &observed.backends {
 			if !backend.running {
 				continue;
 			}
-			let wanted = desired
-				.interfaces
-				.iter()
-				.filter(|interface| interface.name == backend.interface)
-				.any(|interface| {
-					interface.addressing.iter().any(|source| {
-						matches!(
-							(source, backend.kind),
-							(AddressSource::Dhcp4(_), BackendKind::Dhcp4)
-								| (AddressSource::Dhcp6(_), BackendKind::Dhcp6)
-						)
-					})
-				});
+			// Why a backend is wanted differs by kind, and the field named in
+			// the reason has to differ with it -- an operator told a
+			// supplicant was stopped because of `addressing` would go and look
+			// at the wrong block.
+			let (wanted, field) = match backend.kind {
+				BackendKind::Supplicant => (
+					self.supplicant_wanted(desired, &backend.interface),
+					"wifi/dot1x",
+				),
+				_ => (
+					desired
+						.interfaces
+						.iter()
+						.filter(|interface| interface.name == backend.interface)
+						.any(|interface| {
+							interface.addressing.iter().any(|source| {
+								matches!(
+									(source, backend.kind),
+									(AddressSource::Dhcp4(_), BackendKind::Dhcp4)
+										| (AddressSource::Dhcp6(_), BackendKind::Dhcp6)
+								)
+							})
+						}),
+					"addressing",
+				),
+			};
 			if wanted {
 				continue;
 			}
@@ -854,11 +911,7 @@ impl Builder {
 					kind: backend.kind,
 					iface: backend.interface.clone(),
 				},
-				Reason::unwanted(
-					&backend.interface,
-					"addressing",
-					format!("{:?}", backend.kind),
-				),
+				Reason::unwanted(&backend.interface, field, format!("{:?}", backend.kind)),
 				Some(Op::BackendStart {
 					kind: backend.kind,
 					iface: backend.interface.clone(),

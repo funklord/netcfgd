@@ -9,7 +9,6 @@
 //! decides when these run.
 
 use crate::state::State;
-use netcfgd_apply::KernelExecutor;
 use netcfgd_host::{confirm, state as run_state};
 use netcfgd_model::Document;
 use netcfgd_plan::PlanOptions;
@@ -119,7 +118,12 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 	}
 
 	let mut events = Vec::new();
-	let Ok(mut executor) = KernelExecutor::new() else {
+	// `state.desired` was set to the last-good document just above, so this
+	// picks up the context of the configuration being reverted *to* -- which
+	// is the point. A revert is the recovery path, and the worst place to
+	// deliver a partial configuration is the one that runs after something has
+	// already gone wrong.
+	let Ok(mut executor) = state.executor() else {
 		return (
 			Response::error("cannot open a netlink socket to revert"),
 			events,

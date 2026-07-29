@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy ascii size footprint rss live fuzz deny clean
+.PHONY: all check build test fmt fmt-fix clippy unsafe-policy executor-policy ascii size footprint rss live fuzz deny clean
 
 all: build
 
@@ -14,7 +14,7 @@ build:
 	$(CARGO) build --workspace
 
 # Ordered cheapest first, so a formatting slip does not wait on a full test run.
-check: fmt ascii clippy unsafe-policy test size footprint rss
+check: fmt ascii clippy unsafe-policy executor-policy test size footprint rss
 
 fmt:
 	$(CARGO) fmt --check
@@ -53,6 +53,34 @@ unsafe-policy:
 	fi; \
 	[ $$fail -eq 0 ] && echo "unsafe-policy: ok"; \
 	exit $$fail
+
+# An executor built without the current document silently loses things: DNS
+# stops flattening across scopes, a supplicant gets started with no networks,
+# and the run directory reverts to the compiled-in default. Nothing fails; the
+# apply just does less than it said.
+#
+# Four call sites in the daemon used to construct one and exactly one
+# remembered `with_context`, so the same apply behaved differently depending on
+# whether it arrived at startup, over the socket, from drift, or from a revert.
+# `State::executor` is now the only place that may build one, and this is what
+# keeps it that way -- a fifth call site is a one-line diff that would
+# otherwise be invisible in review.
+executor-policy:
+	@sites=$$(grep -rn 'KernelExecutor::new' crates/netcfgd-daemon/src \
+		--include='*.rs' | grep -v ':[0-9]*:[[:space:]]*//'); \
+	count=$$(printf '%s\n' "$$sites" | grep -c . || true); \
+	if [ "$$count" != "1" ]; then \
+		echo "executor-policy: $$count places build a KernelExecutor, expected 1"; \
+		printf '%s\n' "$$sites"; \
+		echo "executor-policy: use State::executor, which supplies the document"; \
+		exit 1; \
+	fi; \
+	if ! grep -v '^[[:space:]]*//' crates/netcfgd-daemon/src/state.rs \
+		| grep -q 'with_context'; then \
+		echo "executor-policy: State::executor no longer supplies the document"; \
+		exit 1; \
+	fi; \
+	echo "executor-policy: ok"
 
 # code-style.md section 4: source, comments and doc comments are ASCII. Markdown
 # is exempt and is not checked here. This caught real drift the first time it
@@ -177,6 +205,10 @@ live:
 	}
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
+	@# Association, which needs real root and a loadable mac80211_hwsim. Not
+	@# under NCFG_LIVE and not under unshare: it does its own namespace, and a
+	@# machine that cannot run it should get a skip rather than a failure.
+	@sh tests/live/hwsim.sh
 
 fuzz:
 	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \
