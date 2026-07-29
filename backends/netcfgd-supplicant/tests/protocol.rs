@@ -4,6 +4,7 @@
 //! `wpa_supplicant` installed. The association path cannot be tested that way
 //! and is covered by `tests/live.rs`, which skips when there is no supplicant.
 
+use netcfgd_model::device::MacPolicy;
 use netcfgd_model::security::{PskConfig, PskProto};
 use netcfgd_model::{EapConfig, EapMethod, SecretProvider, SecretRef, Security, Ssid, WifiNetwork};
 use netcfgd_secret::Resolver;
@@ -72,7 +73,7 @@ fn psk(passphrase: &str, proto: PskProto) -> (Resolver, Security, PathBuf) {
 }
 
 fn rendered(network: &WifiNetwork, resolver: &Resolver) -> Vec<String> {
-	settings(network, resolver)
+	settings(network, MacPolicy::Permanent, resolver)
 		.expect("settings")
 		.iter()
 		.map(|setting| setting.command(0))
@@ -279,7 +280,8 @@ fn a_passphrase_with_a_newline_is_refused() {
 	assert!(!passphrase_is_sendable("nul\0byte"));
 
 	let (resolver, security, dir) = psk("bad\npassphrase", PskProto::Wpa2);
-	let error = settings(&network("home", security), &resolver).expect_err("refused");
+	let error =
+		settings(&network("home", security), MacPolicy::Permanent, &resolver).expect_err("refused");
 	assert!(
 		error
 			.downcast_ref::<Unsupported>()
@@ -365,7 +367,7 @@ fn a_bssid_is_validated_rather_than_quoted() {
 		"gg:11:22:33:44:55",
 	] {
 		pinned.bssid_pin = Some(hostile.to_owned());
-		let error = settings(&pinned, &resolver).expect_err("refused");
+		let error = settings(&pinned, MacPolicy::Permanent, &resolver).expect_err("refused");
 		assert!(
 			matches!(
 				error.downcast_ref::<Unsupported>(),
@@ -382,7 +384,8 @@ fn a_bssid_is_validated_rather_than_quoted() {
 fn a_passphrase_of_the_wrong_length_is_refused_with_its_length() {
 	for (passphrase, len) in [("short", 5_usize), (&"x".repeat(64), 64)] {
 		let (resolver, security, dir) = psk(passphrase, PskProto::Wpa2);
-		let error = settings(&network("home", security), &resolver).expect_err("refused");
+		let error = settings(&network("home", security), MacPolicy::Permanent, &resolver)
+			.expect_err("refused");
 		assert_eq!(
 			error.downcast_ref::<Unsupported>(),
 			Some(&Unsupported::PassphraseLength { len }),
@@ -401,7 +404,8 @@ fn a_passphrase_of_the_wrong_length_is_refused_with_its_length() {
 #[test]
 fn a_secret_setting_redacts_itself() {
 	let (resolver, security, dir) = psk("hunter2hunter2", PskProto::Wpa2);
-	let all = settings(&network("home", security), &resolver).expect("settings");
+	let all =
+		settings(&network("home", security), MacPolicy::Permanent, &resolver).expect("settings");
 	let secret = all
 		.iter()
 		.find(|setting| setting.variable == "psk")
@@ -444,7 +448,7 @@ fn eap_settings_quote_and_redact_the_identity() {
 		phase2: Some("auth=MSCHAPV2".to_owned()),
 	});
 
-	let all = settings(&network("corp", eap), &resolver).expect("settings");
+	let all = settings(&network("corp", eap), MacPolicy::Permanent, &resolver).expect("settings");
 	let commands: Vec<String> = all.iter().map(|setting| setting.command(0)).collect();
 
 	assert!(commands.contains(&"SET_NETWORK 0 key_mgmt WPA-EAP".to_owned()));
@@ -482,7 +486,8 @@ fn an_eap_method_missing_its_credential_says_which() {
 		private_key: None,
 		phase2: None,
 	});
-	let error = settings(&network("corp", eap), &resolver).expect_err("refused");
+	let error =
+		settings(&network("corp", eap), MacPolicy::Permanent, &resolver).expect_err("refused");
 	assert_eq!(
 		error.downcast_ref::<Unsupported>(),
 		Some(&Unsupported::MissingEapField { field: "password" })
@@ -498,11 +503,47 @@ fn an_eap_method_missing_its_credential_says_which() {
 		private_key: None,
 		phase2: None,
 	});
-	let error = settings(&network("corp", tls), &resolver).expect_err("refused");
+	let error =
+		settings(&network("corp", tls), MacPolicy::Permanent, &resolver).expect_err("refused");
 	assert_eq!(
 		error.downcast_ref::<Unsupported>(),
 		Some(&Unsupported::MissingEapField {
 			field: "private_key"
 		})
 	);
+}
+
+/// The `mac_addr` mapping, which is the whole of the MAC randomization
+/// feature at this layer. The numbers are not guessable from the names, and
+/// getting one wrong is a privacy setting that silently does something else.
+#[test]
+fn the_mac_policy_maps_to_the_documented_numbers() {
+	use netcfgd_supplicant::mac_addr_value;
+
+	assert_eq!(mac_addr_value(MacPolicy::Permanent), "0");
+	assert_eq!(mac_addr_value(MacPolicy::PerNetwork), "1");
+	assert_eq!(mac_addr_value(MacPolicy::PerConnection), "2");
+}
+
+/// It is sent for every policy including `Permanent`, because leaving it unset
+/// inherits the supplicant's global -- and a privacy property that depends on
+/// somebody else's default is not a property.
+#[test]
+fn the_mac_policy_is_always_sent() {
+	let resolver = Resolver::default();
+	for (policy, expected) in [
+		(MacPolicy::Permanent, "0"),
+		(MacPolicy::PerNetwork, "1"),
+		(MacPolicy::PerConnection, "2"),
+	] {
+		let rendered: Vec<String> = settings(&network("home", Security::Open), policy, &resolver)
+			.expect("settings")
+			.iter()
+			.map(|setting| setting.command(0))
+			.collect();
+		assert!(
+			rendered.contains(&format!("SET_NETWORK 0 mac_addr {expected}")),
+			"{policy:?} should send mac_addr {expected}: {rendered:?}"
+		);
+	}
 }

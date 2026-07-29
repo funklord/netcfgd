@@ -18,6 +18,7 @@
 //! which case it fails, because a live test that silently passes on a machine
 //! that cannot run it is worse than no test.
 
+use netcfgd_model::device::MacPolicy;
 use netcfgd_model::security::{PskConfig, PskProto};
 use netcfgd_model::{SecretProvider, SecretRef, Security, Ssid, WifiNetwork};
 use netcfgd_secret::Resolver;
@@ -249,8 +250,13 @@ fn every_security_mode_is_accepted_by_the_real_parser() {
 			("transitional", psk(PskProto::Wpa2Wpa3)),
 			("owe", Security::Owe),
 		] {
-			let id = add_network(&client, &network(name, name, security), &resolver)
-				.unwrap_or_else(|error| panic!("{name} was refused: {error}"));
+			let id = add_network(
+				&client,
+				&network(name, name, security),
+				MacPolicy::Permanent,
+				&resolver,
+			)
+			.unwrap_or_else(|error| panic!("{name} was refused: {error}"));
 
 			let listed = parse_network_list(&client.ask("LIST_NETWORKS").expect("LIST_NETWORKS"));
 			let entry = listed
@@ -265,6 +271,43 @@ fn every_security_mode_is_accepted_by_the_real_parser() {
 		}
 
 		let _ = fs::remove_dir_all(&secrets);
+	});
+}
+
+/// The MAC policy has to be a value the real supplicant accepts. `mac_addr`
+/// takes a small integer whose meanings are documented but not obvious, and a
+/// value it rejects is a network that fails to configure at all.
+#[test]
+fn every_mac_policy_is_accepted_by_the_real_supplicant() {
+	with_supplicant(|supplicant| {
+		let client = supplicant.connect();
+		clear_networks(&client).expect("REMOVE_NETWORK all");
+
+		for policy in [
+			MacPolicy::Permanent,
+			MacPolicy::PerNetwork,
+			MacPolicy::PerConnection,
+		] {
+			let id = add_network(
+				&client,
+				&network("mac", "mac", Security::Open),
+				policy,
+				&Resolver::default(),
+			)
+			.unwrap_or_else(|error| panic!("{policy:?} was refused: {error}"));
+
+			let stored = client
+				.ask(&format!("GET_NETWORK {id} mac_addr"))
+				.unwrap_or_else(|error| panic!("{policy:?}: {error}"));
+			assert_eq!(
+				stored.trim(),
+				netcfgd_supplicant::mac_addr_value(policy),
+				"the supplicant stored a different value than it was sent"
+			);
+			client
+				.command(&format!("REMOVE_NETWORK {id}"))
+				.expect("REMOVE_NETWORK");
+		}
 	});
 }
 
@@ -306,6 +349,7 @@ fn a_hostile_ssid_reaches_the_supplicant_intact() {
 		let id = add_network(
 			&client,
 			&network("hostile", hostile, Security::Open),
+			MacPolicy::Permanent,
 			&Resolver::default(),
 		)
 		.expect("added");
@@ -335,7 +379,7 @@ fn autoconnect_false_leaves_the_network_disabled() {
 
 		let mut manual = network("manual", "manual", Security::Open);
 		manual.autoconnect = false;
-		add_network(&client, &manual, &Resolver::default()).expect("added");
+		add_network(&client, &manual, MacPolicy::Permanent, &Resolver::default()).expect("added");
 
 		let listed = parse_network_list(&client.ask("LIST_NETWORKS").expect("LIST_NETWORKS"));
 		assert!(

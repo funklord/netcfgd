@@ -864,3 +864,173 @@ fn dot1x_without_a_method_is_refused() {
 	let message = errors(r#"interface eth0 { dot1x { identity = "dave" } }"#);
 	assert!(message.contains("needs an `eap` method"), "got: {message}");
 }
+
+/// Policy routing: which table a packet is looked up in, which is a different
+/// question from where it goes. Without it a machine that needs it has `ip
+/// rule` in a hook and netcfgd reporting no drift.
+#[test]
+fn policy_routing_rules_compile() {
+	let document = build_ok(
+		r#"
+rule work    { priority = 100; from = "192.168.8.0/24"; lookup = 42 }
+rule marked  { priority = 200; fwmark = 1; fwmask = 255; lookup = 43; family = "inet6" }
+rule dropped { priority = 50;  to = "10.0.0.0/8"; action = "blackhole" }
+rule nodefault { priority = 90; lookup = 254; suppress_prefixlength = 0 }
+"#,
+	);
+
+	// Sorted by priority, because that is the order the kernel consults them
+	// and any other order would misrepresent what the config does.
+	let priorities: Vec<u32> = document.rules.iter().map(|rule| rule.priority).collect();
+	assert_eq!(priorities, [50, 90, 100, 200]);
+
+	assert_eq!(
+		document.rules[0].action,
+		netcfgd_model::RuleAction::Blackhole
+	);
+	assert_eq!(document.rules[1].suppress_prefixlength, Some(0));
+	assert_eq!(document.rules[2].from.as_deref(), Some("192.168.8.0/24"));
+	assert_eq!(document.rules[3].family, netcfgd_model::RuleFamily::Inet6);
+	assert_eq!(document.rules[3].fwmark, Some(1));
+
+	// The name is the handle a diagnostic can use; the rendering is the rule
+	// as the kernel holds it, so it can be compared against `ip rule`.
+	assert_eq!(document.rules[0].id, "dropped");
+	assert_eq!(
+		document.rules[2].render(),
+		"100: from 192.168.8.0/24 lookup 42"
+	);
+}
+
+/// The priority is mandatory even though the kernel would assign one: an
+/// unnumbered rule lands wherever the kernel puts it, two applies can order
+/// them differently, and then the document has stopped describing the system.
+#[test]
+fn a_rule_without_a_priority_is_refused() {
+	let message = errors("rule vpn { lookup = 42 }");
+	assert!(message.contains("no `priority`"), "got: {message}");
+	assert!(message.contains("two applies"), "got: {message}");
+}
+
+/// A rule that looks up no table and names no action does nothing, and reads
+/// as though it does something. The likeliest cause is a `lookup` somebody
+/// meant to write.
+#[test]
+fn a_rule_that_does_nothing_is_refused() {
+	let message = errors(r#"rule vpn { priority = 100; from = "10.0.0.0/8" }"#);
+	assert!(message.contains("looks up no table"), "got: {message}");
+	assert!(message.contains("add `lookup = N`"), "got: {message}");
+}
+
+/// A mask with no mark matches nothing in particular while looking as though
+/// it narrows something.
+#[test]
+fn a_mask_without_a_mark_is_refused() {
+	let message = errors("rule vpn { priority = 100; fwmask = 255; lookup = 42 }");
+	assert!(message.contains("no `fwmark`"), "got: {message}");
+}
+
+/// An IPv6 token is the host half only. The kernel accepts a full address and
+/// silently uses the bottom 64 bits, so a config that looks like it pins an
+/// address would quietly pin half of one.
+#[test]
+fn an_ipv6_token_must_be_host_bits_only() {
+	let document = build_ok(r#"interface eth0 { ipv6_token = "::5"; config = "dhcp" }"#);
+	assert_eq!(document.interfaces[0].ipv6_token.as_deref(), Some("::5"));
+
+	let message = errors(r#"interface eth0 { ipv6_token = "2001:db8::5"; config = "dhcp" }"#);
+	assert!(message.contains("prefix half"), "got: {message}");
+	assert!(
+		message.contains("::5"),
+		"the help shows the right shape: {message}"
+	);
+
+	assert!(errors(r#"interface eth0 { ipv6_token = "10.0.0.1" }"#).contains("not an IPv6"));
+}
+
+/// MAC randomization: a client that always uses its permanent address is
+/// trackable across every network it has joined by anyone who has seen it
+/// twice. The default stays permanent, because some networks admit by address.
+#[test]
+fn mac_policy_compiles_and_defaults_to_permanent() {
+	use netcfgd_model::MacPolicy;
+
+	let default = build_ok(r#"device wlan0 { wifi { backend = "auto" } }"#);
+	let policy = default.devices[0].wifi.as_ref().expect("policy");
+	assert_eq!(policy.mac_policy, MacPolicy::Permanent);
+	assert!(!policy.scan_randomization);
+
+	let chosen = build_ok(
+		r#"device wlan0 { wifi { mac_policy = "per_network"; scan_randomization = true } }"#,
+	);
+	let policy = chosen.devices[0].wifi.as_ref().expect("policy");
+	assert_eq!(policy.mac_policy, MacPolicy::PerNetwork);
+	assert!(policy.scan_randomization);
+
+	assert!(
+		errors(r#"device wlan0 { wifi { mac_policy = "sometimes" } }"#)
+			.contains("not a MAC policy")
+	);
+}
+
+/// ethtool settings are in the schema and not in the build. They still have to
+/// compile, or a config that will work in a later release is a config that has
+/// to be rewritten to upgrade.
+#[test]
+fn ethtool_settings_compile_even_though_nothing_applies_them() {
+	use netcfgd_model::Toggle;
+
+	let document = build_ok(
+		r#"
+interface eth0 {
+	ethtool { gro = "off"; tso = "off"; rx_ring = 4096; wol = "g" }
+	config = "dhcp"
+}
+"#,
+	);
+	let settings = document.interfaces[0]
+		.link_settings
+		.as_ref()
+		.expect("link settings");
+	assert_eq!(settings.gro, Toggle::Off);
+	assert_eq!(settings.tso, Toggle::Off);
+	assert_eq!(settings.rx_ring, Some(4096));
+	assert_eq!(settings.wol.as_deref(), Some("g"));
+	// Unmanaged is a third state, not a synonym for off: "netcfgd does not
+	// touch this" and "netcfgd requires this off" are different instructions.
+	assert_eq!(settings.gso, Toggle::Unmanaged);
+
+	assert!(
+		errors(r#"interface eth0 { ethtool { duplex = "sideways" } }"#)
+			.contains("not a duplex setting")
+	);
+}
+
+/// An empty `ethtool` block asks for nothing, and must not produce a settings
+/// object -- an action that changes nothing does not belong in a plan.
+#[test]
+fn an_empty_ethtool_block_produces_nothing() {
+	let document = build_ok(r#"interface eth0 { ethtool { }; config = "dhcp" }"#);
+	assert!(document.interfaces[0].link_settings.is_none());
+}
+
+/// An access point is bound to one radio, unlike a `network`, which
+/// deliberately is not.
+#[test]
+fn an_access_point_compiles_and_names_its_radio() {
+	let document = build_ok(
+		r#"
+access_point "guest" {
+	device  = "wlan0"
+	channel = 6
+	wifi    { psk = "@secret:guest"; proto = "wpa2" }
+}
+"#,
+	);
+	assert_eq!(document.access_points[0].device, "wlan0");
+	assert_eq!(document.access_points[0].channel, Some(6));
+	assert_eq!(document.access_points[0].ssid.as_bytes(), b"guest");
+
+	let message = errors(r#"access_point "guest" { wifi { open = true } }"#);
+	assert!(message.contains("which radio runs it"), "got: {message}");
+}

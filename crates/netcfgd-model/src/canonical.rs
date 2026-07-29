@@ -18,6 +18,8 @@ impl Document {
 		self.devices.sort_by(|a, b| a.name.cmp(&b.name));
 		self.interfaces.sort_by(|a, b| a.name.cmp(&b.name));
 		self.networks.sort_by(|a, b| a.id.cmp(&b.id));
+		self.rules.sort();
+		self.access_points.sort_by(|a, b| a.id.cmp(&b.id));
 
 		for interface in &mut self.interfaces {
 			interface.routes.sort();

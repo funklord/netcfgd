@@ -28,6 +28,8 @@ fn iface(name: &str) -> Interface {
 		advertise: None,
 		forwarding: None,
 		guard: None,
+		ipv6_token: None,
+		link_settings: None,
 	}
 }
 

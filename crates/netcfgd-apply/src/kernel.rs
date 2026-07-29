@@ -53,6 +53,8 @@ pub struct KernelExecutor {
 	dns_scopes: Vec<netcfgd_model::AppliedDns>,
 	/// The wired 802.1X profile for each interface that has one.
 	dot1x: Vec<(String, netcfgd_model::EapConfig)>,
+	/// The MAC policy for each radio the document describes one for.
+	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
 	/// Every wifi profile the document describes.
 	///
 	/// Carried here because a supplicant that has just been started holds
@@ -98,6 +100,7 @@ impl KernelExecutor {
 				.collect(),
 			dns_scopes: Vec::new(),
 			dot1x: Vec::new(),
+			mac_policy: Vec::new(),
 			networks: Vec::new(),
 			hook_hashes: Vec::new(),
 			run_dir: std::path::PathBuf::from("/run/netcfgd"),
@@ -138,6 +141,16 @@ impl KernelExecutor {
 			})
 			.collect();
 		self.networks.clone_from(&document.networks);
+		self.mac_policy = document
+			.devices
+			.iter()
+			.filter_map(|device| {
+				device
+					.wifi
+					.as_ref()
+					.map(|wifi| (device.name.clone(), wifi.mac_policy))
+			})
+			.collect();
 		self
 	}
 
@@ -172,8 +185,13 @@ impl KernelExecutor {
 		// not contribute networks nobody can account for.
 		netcfgd_supplicant::clear_networks(&client)
 			.map_err(|error| format!("could not clear {iface}: {error}"))?;
+		let policy = self
+			.mac_policy
+			.iter()
+			.find(|(name, _)| name == iface)
+			.map_or(netcfgd_model::MacPolicy::Permanent, |(_, policy)| *policy);
 		for network in &self.networks {
-			netcfgd_supplicant::add_network(&client, network, &resolver)
+			netcfgd_supplicant::add_network(&client, network, policy, &resolver)
 				.map_err(|error| format!("could not give `{}` to {iface}: {error}", network.id))?;
 		}
 		Ok(())
