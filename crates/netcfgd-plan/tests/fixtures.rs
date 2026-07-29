@@ -763,3 +763,139 @@ fn a_guarded_interface_is_not_torn_down_when_it_leaves_the_config() {
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 	assert!(!names(&plan).contains(&"link.delete"));
 }
+
+/// A radio carries nothing until it has associated, so the supplicant is a
+/// prerequisite in the same way 802.1X is -- and gets the same position in the
+/// order.
+#[test]
+fn a_managed_radio_gets_a_supplicant_before_addressing() {
+	let document = document(
+		r#"
+device wlan0 { wifi { backend = "wpa_supplicant" } }
+network "Home" { wifi { psk = "@secret:home" }; config = "dhcp" }
+interface wlan0 { config = "dhcp" }
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	let plan = plan(&document, &observed, &PlanOptions::default());
+
+	assert!(
+		position(&plan, "link.up") < position(&plan, "backend.start"),
+		"a radio has to be up before a supplicant can use it: {:?}",
+		names(&plan)
+	);
+
+	// Two backends: the supplicant and the DHCP client. The DHCP one has to
+	// wait -- a client started before association spends its whole backoff
+	// talking to nothing.
+	let starts: Vec<&str> = plan
+		.actions
+		.iter()
+		.filter(|action| action.op.name() == "backend.start")
+		.map(|action| action.reason.field.as_str())
+		.collect();
+	assert_eq!(starts.len(), 2, "got {starts:?}");
+	assert!(
+		starts.contains(&"wifi"),
+		"the reason names the device block: {starts:?}"
+	);
+
+	settle(&document, &mut observed);
+}
+
+/// A radio with no networks to join gets no supplicant. Starting one that
+/// would be handed nothing is a process running for no reason, and it makes
+/// `ncfg status` report a backend nothing asked for.
+#[test]
+fn a_radio_with_no_networks_gets_no_supplicant() {
+	let document = document(
+		r#"
+device wlan0 { wifi { backend = "wpa_supplicant" } }
+interface wlan0 { config = "null" }
+"#,
+	);
+	let plan = plan(
+		&document,
+		&observed_with(&["wlan0"]),
+		&PlanOptions::default(),
+	);
+	assert!(
+		!names(&plan).contains(&"backend.start"),
+		"got {:?}",
+		names(&plan)
+	);
+}
+
+/// An unmanaged device is one netcfgd never touches, and that has to include
+/// not starting a supplicant on it.
+#[test]
+fn an_unmanaged_radio_gets_no_supplicant() {
+	let document = document(
+		r#"
+device wlan0 { managed = false; wifi { backend = "wpa_supplicant" } }
+network "Home" { wifi { psk = "@secret:home" }; config = "dhcp" }
+interface wlan0 { config = "null" }
+"#,
+	);
+	let plan = plan(
+		&document,
+		&observed_with(&["wlan0"]),
+		&PlanOptions::default(),
+	);
+	assert!(
+		!names(&plan).contains(&"backend.start"),
+		"got {:?}",
+		names(&plan)
+	);
+}
+
+/// The wired half of the same property. `tests/live/dot1x.sh` runs apply once
+/// and would not have noticed a supplicant that gets stopped on the next
+/// reconcile; the idempotence gate is what notices.
+#[test]
+fn a_dot1x_port_keeps_its_supplicant_across_reconciles() {
+	let document = document(
+		r#"
+interface eth0 {
+	dot1x { eap = "peap"; identity = "dave"; password = "@secret:corp"; ca_cert = "/ca.pem" }
+	config = "dhcp"
+}
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	let plan = plan(&document, &observed, &PlanOptions::default());
+	assert!(
+		names(&plan).contains(&"backend.start"),
+		"{:?}",
+		names(&plan)
+	);
+
+	settle(&document, &mut observed);
+}
+
+/// And when the document stops asking, the supplicant does get stopped. A
+/// backend nothing wants that keeps running is the other half of the same
+/// mistake, and fixing the first one is how you introduce the second.
+#[test]
+fn removing_dot1x_stops_the_supplicant() {
+	let mut observed = observed_with(&["eth0"]);
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::Supplicant,
+		interface: "eth0".to_owned(),
+		running: true,
+	});
+
+	let document = document(r#"interface eth0 { config = "null" }"#);
+	let plan = plan(&document, &observed, &PlanOptions::default());
+
+	assert!(names(&plan).contains(&"backend.stop"), "{:?}", names(&plan));
+	let stop = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "backend.stop")
+		.expect("a stop");
+	assert_eq!(
+		stop.reason.field, "wifi/dot1x",
+		"a supplicant stopped for `addressing` sends the reader to the wrong block"
+	);
+}
