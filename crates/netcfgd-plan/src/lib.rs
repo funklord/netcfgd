@@ -481,9 +481,29 @@ impl Builder {
 			);
 		}
 
+		// 802.1X comes before addressing, not after. A port that has not
+		// authenticated drops everything, so a DHCP client started first would
+		// spend its whole backoff sequence talking to a switch that is not
+		// listening -- and then report a failure whose real cause is two steps
+		// earlier. Decision 0008 puts wired 802.1X on the same supplicant as
+		// wifi, so this is the same op either way.
+		let mut authentication = Vec::new();
+		if interface.dot1x.is_some() {
+			authentication =
+				self.plan_backend(interface, BackendKind::Supplicant, "dot1x", observed, &base);
+		}
+
 		let mut addressing_ids = Vec::new();
 		for (index, source) in interface.addressing.iter().enumerate() {
-			addressing_ids.extend(self.plan_source(interface, index, source, observed, &base));
+			let mut source_base = base.clone();
+			source_base.extend(authentication.iter().copied());
+			addressing_ids.extend(self.plan_source(
+				interface,
+				index,
+				source,
+				observed,
+				&source_base,
+			));
 		}
 
 		for route in &interface.routes {

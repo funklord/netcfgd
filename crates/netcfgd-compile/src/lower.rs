@@ -660,6 +660,43 @@ fn lower_wifi_key(
 	}
 }
 
+/// One `key = value` inside an interface's `dot1x` block.
+///
+/// The same keys as a wifi network's EAP, minus the ones that only mean
+/// something on a radio. Sharing [`WifiKeys`] rather than duplicating the
+/// parsing means the two cannot drift into accepting different spellings of
+/// the same thing.
+fn lower_dot1x_key(keys: &mut WifiKeys, assignment: &Assignment, diags: &mut Diagnostics) {
+	match assignment.key.as_str() {
+		"psk" | "open" | "owe" | "proto" | "priority" | "autoconnect" => diags.push(
+			Diagnostic::new(
+				assignment.span,
+				format!("`{}` means nothing on a wired port", assignment.key),
+			)
+			.with_help("`dot1x` is EAP only: eap, identity, password, ca_cert, client_cert, private_key, phase2"),
+		),
+		_ => {
+			// `network` is not in scope here, and none of the keys reaching
+			// this arm touch it.
+			let mut unused = WifiNetwork {
+				id: String::new(),
+				ssid: Ssid::new(Vec::new()).unwrap_or_else(|_| unreachable!("empty is valid")),
+				hidden: false,
+				security: Security::Open,
+				priority: 0,
+				autoconnect: true,
+				metered: false,
+				bssid_pin: None,
+				addressing: Vec::new(),
+				routes: Vec::new(),
+				dns: None,
+				hooks: Vec::new(),
+			};
+			lower_wifi_key(keys, &mut unused, assignment, diags);
+		}
+	}
+}
+
 /// Turn the collected keys into the one security mode they describe.
 fn build_security(keys: WifiKeys, block: &Block, diags: &mut Diagnostics) -> Option<Security> {
 	if let Some(passphrase) = keys.psk {
@@ -858,6 +895,34 @@ fn lower_interface(
 						if let Item::Assignment(assignment) = item {
 							lower_dns_key(&mut dns, assignment, diags);
 						}
+					}
+				}
+				// Wired 802.1X. Decision 0008 puts this on the interface
+				// rather than inside a wifi profile, because port-based access
+				// control predates radios and is ordinary on campus and
+				// corporate wired networks -- nesting it under an SSID made
+				// the wired case inexpressible.
+				"dot1x" => {
+					let mut keys = WifiKeys::default();
+					for item in &inner.items {
+						match item {
+							Item::Assignment(assignment) => {
+								lower_dot1x_key(&mut keys, assignment, diags);
+							}
+							Item::Block(nested) => diags.push(Diagnostic::new(
+								nested.span,
+								format!("`{}` is not valid inside `dot1x`", nested.head),
+							)),
+							_ => {}
+						}
+					}
+					if keys.eap.is_none() {
+						diags.push(
+							Diagnostic::new(inner.span, "a `dot1x` block needs an `eap` method")
+								.with_help("one of peap, ttls, tls, pwd"),
+						);
+					} else if let Some(Security::Eap(config)) = build_security(keys, inner, diags) {
+						interface.dot1x = Some(config);
 					}
 				}
 				"wireguard" => diags.push(

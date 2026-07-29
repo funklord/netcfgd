@@ -176,6 +176,7 @@ live:
 		exit 1; \
 	}
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
 
 fuzz:
 	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \

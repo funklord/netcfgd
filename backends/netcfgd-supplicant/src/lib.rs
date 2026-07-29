@@ -18,7 +18,7 @@ pub mod network;
 pub mod protocol;
 
 pub use client::{Client, DEFAULT_CTRL_DIR};
-pub use network::{settings, Setting, Unsupported};
+pub use network::{settings, wired_settings, Setting, Unsupported};
 pub use protocol::{Event, NetworkEntry, Reply, ScanResult};
 
 use netcfgd_model::WifiNetwork;
@@ -36,6 +36,43 @@ use std::io;
 /// Returns an error if the supplicant refuses or the socket fails.
 pub fn clear_networks(client: &Client) -> io::Result<()> {
 	client.command("REMOVE_NETWORK all")
+}
+
+/// Configure a wired 802.1X port: one network, enabled, nothing else.
+///
+/// A wired supplicant has exactly one thing to authenticate with, so this
+/// clears first -- the port cannot be "on" two profiles, and leaving a stale
+/// one would let the supplicant fall back to it.
+///
+/// # Errors
+///
+/// Returns an error if a credential cannot be resolved or the supplicant
+/// refuses a setting.
+pub fn configure_wired(
+	client: &Client,
+	eap: &netcfgd_model::EapConfig,
+	resolver: &Resolver,
+) -> Result<u32, Box<dyn std::error::Error>> {
+	clear_networks(client)?;
+	let settings = wired_settings(eap, resolver)?;
+
+	let id: u32 = client.ask("ADD_NETWORK")?.trim().parse().map_err(|_| {
+		io::Error::new(
+			io::ErrorKind::InvalidData,
+			"ADD_NETWORK did not answer with a network id",
+		)
+	})?;
+	for setting in &settings {
+		if let Err(error) = client.command(&setting.command(id)) {
+			let _ = client.command(&format!("REMOVE_NETWORK {id}"));
+			return Err(Box::new(io::Error::new(
+				io::ErrorKind::InvalidData,
+				format!("{} was refused: {error}", setting.redacted(id)),
+			)));
+		}
+	}
+	client.command(&format!("ENABLE_NETWORK {id}"))?;
+	Ok(id)
 }
 
 /// Add one network and enable it, returning the supplicant's id for it.
