@@ -197,6 +197,71 @@ impl KernelExecutor {
 		Ok(())
 	}
 
+	/// Give a freshly created `WireGuard` device its keys and peers.
+	fn configure_wireguard(
+		name: &str,
+		config: &netcfgd_model::interface::WireGuardConfig,
+	) -> Result<(), String> {
+		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+		let private = resolve_key(&resolver, &config.private_key)
+			.map_err(|error| format!("{name}: private key: {error}"))?;
+
+		let mut peers = Vec::new();
+		for peer in &config.peers {
+			let preshared = match &peer.preshared_key {
+				Some(reference) => Some(
+					resolve_key(&resolver, reference)
+						.map_err(|error| format!("{name}: peer `{}`: {error}", peer.name))?,
+				),
+				None => None,
+			};
+			// Resolved here rather than at compile time: a hostname endpoint
+			// is the normal case for a roaming peer, and resolving it when the
+			// config is read would pin whatever the answer was then.
+			let endpoint = match &peer.endpoint {
+				Some(text) => Some(
+					resolve_endpoint(text)
+						.map_err(|error| format!("{name}: peer `{}`: {error}", peer.name))?,
+				),
+				None => None,
+			};
+			peers.push(netcfgd_netlink::wg::Peer {
+				public_key: *peer.public_key.as_bytes(),
+				preshared_key: preshared,
+				endpoint,
+				allowed_ips: peer
+					.allowed_ips
+					.iter()
+					.filter_map(|prefix| parse_prefix(prefix))
+					.collect(),
+				keepalive: peer.keepalive,
+			});
+		}
+
+		let mut genl = netcfgd_netlink::Genl::open()
+			.map_err(|error| format!("cannot open a generic netlink socket: {error}"))?;
+		netcfgd_netlink::wg::set_device(
+			&mut genl,
+			&netcfgd_netlink::wg::Device {
+				name: name.to_owned(),
+				private_key: private,
+				listen_port: config.listen_port,
+				fwmark: config.fwmark,
+				peers,
+			},
+		)
+		.map_err(|error| {
+			if error.kind() == std::io::ErrorKind::NotFound {
+				format!(
+					"{name} was created but cannot be configured: the kernel has no \
+					 `wireguard` generic netlink family, so the module is not loaded"
+				)
+			} else {
+				format!("cannot configure {name}: {error}")
+			}
+		})
+	}
+
 	/// The index of an interface, refreshing once if it is not known.
 	///
 	/// A link created earlier in this very plan will not be in the map built
@@ -266,6 +331,14 @@ impl Executor for KernelExecutor {
 				// has to be a separate RTM_NEWLINK anyway, and having one path
 				// rather than two means the create case and the correct-an-
 				// existing-bridge case cannot drift apart.
+				// Everything that makes a `WireGuard` device a tunnel goes over
+				// generic netlink, after the link exists. A link created and
+				// left unconfigured is up, addressed, and silently carrying
+				// nothing -- so this is part of creating it rather than a
+				// separate action.
+				if let InterfaceKind::WireGuard(config) = &**kind {
+					Self::configure_wireguard(name, config)?;
+				}
 				if let InterfaceKind::Bridge(bridge) = &**kind {
 					let index = self.index_of(name)?;
 					self.socket
@@ -508,6 +581,7 @@ fn new_link(
 		InterfaceKind::Veth(veth) => Ok(NewLink::Veth {
 			peer: veth.peer.clone(),
 		}),
+		InterfaceKind::WireGuard(_) => Ok(NewLink::WireGuard),
 		other => Err(format!(
 			"creating a {} link ({name}) is not implemented in this build",
 			kind_name(other)
@@ -561,6 +635,36 @@ fn start_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), St
 			"the {other:?} backend is not implemented in this build"
 		)),
 	}
+}
+
+/// A 32-octet key from a secret, in the base64 every `WireGuard` tool prints.
+fn resolve_key(
+	resolver: &netcfgd_secret::Resolver,
+	reference: &netcfgd_model::SecretRef,
+) -> Result<[u8; 32], String> {
+	let secret = resolver
+		.resolve(reference)
+		.map_err(|error| error.to_string())?;
+	// The error deliberately does not quote the value: a private key that
+	// failed to parse is still a private key.
+	netcfgd_model::Key::parse(secret.expose())
+		.map(|key| *key.as_bytes())
+		.map_err(|error| error.to_string())
+}
+
+/// `host:port`, resolved now rather than at compile time.
+fn resolve_endpoint(text: &str) -> Result<std::net::SocketAddr, String> {
+	use std::net::ToSocketAddrs;
+	text.to_socket_addrs()
+		.map_err(|error| format!("cannot resolve endpoint `{text}`: {error}"))?
+		.next()
+		.ok_or_else(|| format!("`{text}` resolved to no address"))
+}
+
+/// `address/length`.
+fn parse_prefix(text: &str) -> Option<(std::net::IpAddr, u8)> {
+	let (address, length) = text.split_once('/')?;
+	Some((address.parse().ok()?, length.parse().ok()?))
 }
 
 /// Where `file` secrets live.

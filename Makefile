@@ -195,7 +195,12 @@ FUZZ_ARGS   ?=
 # there is no network for cargo to fetch anything over.
 live:
 	$(CARGO) build --workspace
-	$(CARGO) build --tests -p netcfgd-supplicant
+	$(CARGO) build --tests -p netcfgd-supplicant -p netcfgd-netlink
+	@# WireGuard needs CAP_NET_ADMIN and the module; it skips without either.
+	@binary=$$(ls -t target/debug/deps/wg-* 2>/dev/null | grep -v '\.d$$' | head -1); \
+	if [ -n "$$binary" ]; then \
+		unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
+	fi
 	@binary=$$(ls -t target/debug/deps/live-* 2>/dev/null | grep -v '\.d$$' | head -1); \
 	if [ -z "$$binary" ]; then echo "live: no test binary was built"; exit 1; fi; \
 	unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1" || { \
