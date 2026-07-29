@@ -31,6 +31,10 @@ pub(crate) enum Answer {
 	Ok,
 	/// What an apply did.
 	Journal(Box<Journal>),
+	/// What a scan found.
+	WifiScan(Box<netcfgd_proto::ScanReport>),
+	/// What a radio is doing.
+	WifiStatus(Box<netcfgd_proto::WifiState>),
 	/// The request failed.
 	Error {
 		/// What went wrong.
@@ -50,6 +54,8 @@ impl Answer {
 		match self {
 			Self::Ok => "ok".to_owned(),
 			Self::Journal(_) => "a journal".to_owned(),
+			Self::WifiScan(_) => "a scan".to_owned(),
+			Self::WifiStatus(_) => "a radio status".to_owned(),
 			Self::Error { message } => format!("an error: {message}"),
 			Self::Unexpected(value) => {
 				let rendered = value.to_string();

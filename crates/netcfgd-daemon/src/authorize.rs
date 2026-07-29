@@ -23,7 +23,18 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		| Request::Plan
 		| Request::Show
 		| Request::Explain { .. }
-		| Request::Monitor => Tier::Observe,
+		| Request::Monitor
+		// Asking what the radio is doing is reading, and a status display that
+		// needs the wifi tier is a status display that ends up being given it.
+		| Request::WifiStatus { .. } => Tier::Observe,
+
+		// Scanning is not reading: it transmits probe requests, it interrupts
+		// whatever the radio was doing, and it is one of the things design
+		// section 13 could not express. Decision 0013 puts it here with the
+		// other two.
+		Request::WifiScan { .. } | Request::WifiConnect { .. } | Request::WifiDisconnect { .. } => {
+			Tier::Wifi
+		}
 
 		// Everything that changes the machine. Apply is Admin even when the
 		// only thing in the plan is a wifi association: a tier that could call
@@ -155,6 +166,70 @@ mod tests {
 			}),
 			Tier::Admin
 		);
+	}
+
+	/// The case decision 0013 exists for, end to end: a laptop user joins
+	/// wireless networks and cannot touch anything else. Two lines of config.
+	#[test]
+	fn the_desktop_case_works_as_advertised() {
+		let control = Control {
+			observe: Principal::Any,
+			wifi: Principal::Group("netdev".to_owned()),
+			admin: Principal::Root,
+		};
+		// Group 44 stands in for netdev; `satisfies` resolves the name through
+		// /etc/group, which a test cannot arrange, so the tier mapping is what
+		// is checked here and `satisfies` is covered separately.
+		let user = peer(1000, 1000, &[44]);
+
+		assert!(check(&control, &user, &Request::Status).is_ok());
+		assert_eq!(
+			tier_of(&Request::WifiScan {
+				interface: "wlan0".to_owned()
+			}),
+			Tier::Wifi
+		);
+		assert_eq!(
+			tier_of(&Request::WifiConnect {
+				interface: "wlan0".to_owned(),
+				network: "home".to_owned()
+			}),
+			Tier::Wifi
+		);
+		// And the tier that would let them rewrite the network is not open.
+		assert!(check(&control, &user, &Request::Reload).is_err());
+		assert!(check(
+			&control,
+			&user,
+			&Request::Apply {
+				confirm: None,
+				allow_disruption: Vec::new()
+			}
+		)
+		.is_err());
+	}
+
+	/// Asking what the radio is doing is reading. A status display that needs
+	/// the wifi tier is one that ends up being given it.
+	#[test]
+	fn wifi_status_is_only_observe() {
+		let control = Control {
+			observe: Principal::Any,
+			..Control::default()
+		};
+		let user = peer(1000, 1000, &[]);
+		let interface = "wlan0".to_owned();
+
+		assert!(check(
+			&control,
+			&user,
+			&Request::WifiStatus {
+				interface: interface.clone()
+			}
+		)
+		.is_ok());
+		// But scanning transmits, so it is not.
+		assert!(check(&control, &user, &Request::WifiScan { interface }).is_err());
 	}
 
 	/// Supplementary groups count. Checking the primary gid alone would deny

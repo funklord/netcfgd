@@ -223,7 +223,19 @@ fn handle(stream: UnixStream, commands: &Sender<Command>) {
 		let Ok(response) = answer.recv() else {
 			return;
 		};
-		if write_message(&mut writer, &response).is_err() {
+		if let Err(error) = write_message(&mut writer, &response) {
+			// A client that hung up mid-answer is ordinary and silent. A
+			// response that will not serialise is a bug in the daemon, and one
+			// that presents to the operator as "the daemon closed the
+			// connection without answering" -- indistinguishable from a crash,
+			// with nothing anywhere saying otherwise. It cost a probe to find
+			// once; it will not again.
+			if error.kind() == std::io::ErrorKind::InvalidData {
+				eprintln!(
+					"netcfgd: could not serialise a response, which is a bug: {error}. \
+					 The client was told nothing."
+				);
+			}
 			return;
 		}
 	}

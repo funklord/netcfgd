@@ -10,12 +10,15 @@ use crate::hook::HookSink;
 use crate::merge::Merged;
 use crate::provenance::{field_path, interface_path, Provenance};
 use netcfgd_model::address::{Delegated, PrefixRef, Static};
+use netcfgd_model::device::{Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{BondConfig, BridgeConfig, VlanConfig, VlanProtocol};
+use netcfgd_model::security::{PskConfig, PskProto};
 use netcfgd_model::{
 	AddressSource, Device, Dhcp4, Dhcp6, DnsPolicy, DnsServer, Document, DriftPolicy, HookPhase,
 	HostnamePolicy, Interface, InterfaceKind, Route, Slaac,
 };
+use netcfgd_model::{EapConfig, EapMethod, SecretProvider, SecretRef, Security, Ssid, WifiNetwork};
 use std::net::IpAddr;
 
 /// Lower merged blocks into a document.
@@ -52,10 +55,12 @@ pub fn lower(
 					document.interfaces.push(interface);
 				}
 			}
-			"network" => diagnostics.push(
-				Diagnostic::new(block.span, "wifi networks are not supported by this build")
-					.with_help("`network` blocks land in M3; see project.md section 7"),
-			),
+			"network" => {
+				if let Some(network) = lower_network(block, hooks, &mut diagnostics) {
+					provenance.record(sources, format!("network.{}", network.id), block.span);
+					document.networks.push(network);
+				}
+			}
 			other => diagnostics.push(
 				Diagnostic::new(block.span, format!("unknown top-level block `{other}`"))
 					.with_help("the top-level blocks are interface, network, device and global"),
@@ -258,13 +263,9 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 				assignment.span,
 				format!("unknown device key `{}`", assignment.key),
 			)),
-			Item::Block(inner) if inner.head == "wifi" => diags.push(
-				Diagnostic::new(
-					inner.span,
-					"wifi device policy is not supported by this build",
-				)
-				.with_help("`wifi` blocks land in M3; see project.md section 7"),
-			),
+			Item::Block(inner) if inner.head == "wifi" => {
+				device.wifi = Some(lower_wifi_device(inner, diags));
+			}
 			Item::Block(inner) => diags.push(Diagnostic::new(
 				inner.span,
 				format!("`{}` is not valid inside `device`", inner.head),
@@ -281,6 +282,475 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 	}
 
 	Some(device)
+}
+
+/// A `wifi` block inside `device`: how the radio behaves, not what it joins.
+fn lower_wifi_device(block: &Block, diags: &mut Diagnostics) -> WifiDevicePolicy {
+	let mut policy = WifiDevicePolicy::default();
+
+	for item in &block.items {
+		match item {
+			Item::Assignment(assignment) => match assignment.key.as_str() {
+				"backend" => {
+					if let Some(name) = as_string(&assignment.value, diags) {
+						match name.as_str() {
+							"auto" => policy.backend = WifiBackend::Auto,
+							"wpa_supplicant" => policy.backend = WifiBackend::WpaSupplicant,
+							// Accepted by the compiler and refused at use, so
+							// the diagnostic can explain the reason rather
+							// than reading as a typo. Decision 0014: iwd keeps
+							// its own network database, which cannot be
+							// reconciled against.
+							"iwd" => policy.backend = WifiBackend::Iwd,
+							other => diags.push(
+								Diagnostic::new(
+									assignment.span,
+									format!("`{other}` is not a wifi backend"),
+								)
+								.with_help("one of auto, wpa_supplicant, iwd"),
+							),
+						}
+					}
+				}
+				"autoconnect" => {
+					if let Some(flag) = as_bool(&assignment.value, diags) {
+						policy.autoconnect = flag;
+					}
+				}
+				"portal_check" => {
+					if let Some(flag) = as_bool(&assignment.value, diags) {
+						policy.portal_check = flag;
+					}
+				}
+				"regdom" => {
+					if let Some(code) = as_string(&assignment.value, diags) {
+						// Two letters, because a regulatory domain that is not
+						// one is silently ignored by the kernel -- and a radio
+						// quietly using the world-roaming defaults is a
+						// difficult thing to notice.
+						if code.len() == 2 && code.bytes().all(|byte| byte.is_ascii_uppercase()) {
+							policy.regdom = Some(code);
+						} else {
+							diags.push(
+								Diagnostic::new(
+									assignment.span,
+									format!("`{code}` is not a regulatory domain"),
+								)
+								.with_help("an ISO 3166-1 alpha-2 code in capitals, such as SE"),
+							);
+						}
+					}
+				}
+				"powersave" => {
+					if let Some(name) = as_string(&assignment.value, diags) {
+						match name.as_str() {
+							"default" => policy.powersave = Powersave::Default,
+							"on" => policy.powersave = Powersave::On,
+							"off" => policy.powersave = Powersave::Off,
+							other => diags.push(
+								Diagnostic::new(
+									assignment.span,
+									format!("`{other}` is not a powersave setting"),
+								)
+								.with_help("one of default, on, off"),
+							),
+						}
+					}
+				}
+				other => diags.push(Diagnostic::new(
+					assignment.span,
+					format!("unknown wifi device key `{other}`"),
+				)),
+			},
+			Item::Block(inner) => diags.push(Diagnostic::new(
+				inner.span,
+				format!("`{}` is not valid inside a device `wifi` block", inner.head),
+			)),
+			Item::Hook(hook) => diags.push(Diagnostic::new(
+				hook.span,
+				"hooks belong to an interface or a network, not to a radio",
+			)),
+			Item::Include(include) => diags.push(Diagnostic::new(
+				include.span,
+				"include was not resolved before compiling",
+			)),
+		}
+	}
+
+	policy
+}
+
+/// One `key = value` directly inside a `network` block.
+fn lower_network_key(network: &mut WifiNetwork, assignment: &Assignment, diags: &mut Diagnostics) {
+	match assignment.key.as_str() {
+		"config" => {
+			for entry in address_entries(&assignment.value, diags) {
+				if let Some(source) = address_source(&entry, diags) {
+					network.addressing.push(source);
+				}
+			}
+		}
+		"routes" => {
+			for line in as_lines(&assignment.value, diags) {
+				if let Some(route) = parse_route(&line, diags) {
+					network.routes.push(route);
+				}
+			}
+		}
+		"hidden" => {
+			if let Some(flag) = as_bool(&assignment.value, diags) {
+				network.hidden = flag;
+			}
+		}
+		"metered" => {
+			if let Some(flag) = as_bool(&assignment.value, diags) {
+				network.metered = flag;
+			}
+		}
+		"ssid" => {
+			// The escape hatch for a name that is not text, given as hex. The
+			// label stays the id, so the network still has one readable
+			// handle.
+			if let Some(text) = as_string(&assignment.value, diags) {
+				match Ssid::from_hex(&text) {
+					Ok(ssid) => network.ssid = ssid,
+					Err(error) => diags.push(Diagnostic::new(
+						assignment.span,
+						format!("`{text}` is not a usable ssid: {error}"),
+					)),
+				}
+			}
+		}
+		"bssid" => {
+			if let Some(text) = as_string(&assignment.value, diags) {
+				network.bssid_pin = Some(text);
+			}
+		}
+		other => diags.push(Diagnostic::new(
+			assignment.span,
+			format!("unknown network key `{other}`"),
+		)),
+	}
+}
+
+/// A `network` block: an SSID profile, not bound to a device.
+fn lower_network(
+	block: &Block,
+	hooks: &mut dyn HookSink,
+	diags: &mut Diagnostics,
+) -> Option<WifiNetwork> {
+	let label = require_label(block, diags)?;
+
+	// The label is the SSID as written, and it is also the id. That is not a
+	// shortcut: an SSID is what the operator recognises, and giving a network
+	// a separate handle would mean two names for one thing in every
+	// diagnostic. A profile for a name that is not text uses `ssid` below.
+	let ssid = match Ssid::new(label.as_bytes().to_vec()) {
+		Ok(ssid) => ssid,
+		Err(error) => {
+			diags.push(Diagnostic::new(
+				block.span,
+				format!("`{label}` cannot be a network name: {error}"),
+			));
+			return None;
+		}
+	};
+
+	let mut network = WifiNetwork {
+		id: label.clone(),
+		ssid,
+		hidden: false,
+		security: Security::Open,
+		priority: 0,
+		autoconnect: true,
+		metered: false,
+		bssid_pin: None,
+		addressing: Vec::new(),
+		routes: Vec::new(),
+		dns: None,
+		hooks: Vec::new(),
+	};
+	let mut security_seen = false;
+
+	for item in &block.items {
+		match item {
+			Item::Assignment(assignment) => {
+				lower_network_key(&mut network, assignment, diags);
+			}
+			Item::Block(inner) if inner.head == "wifi" => {
+				security_seen = true;
+				lower_network_wifi(inner, &mut network, diags);
+			}
+			Item::Block(inner) if inner.head == "dns" => {
+				let mut policy = DnsPolicy::default();
+				for item in &inner.items {
+					if let Item::Assignment(assignment) = item {
+						lower_dns_key(&mut policy, assignment, diags);
+					}
+				}
+				network.dns = Some(policy);
+			}
+			Item::Block(inner) => diags.push(Diagnostic::new(
+				inner.span,
+				format!("`{}` is not valid inside `network`", inner.head),
+			)),
+			Item::Hook(hook) => match hook_phase(&hook.phase) {
+				Some(phase) => match hooks.materialise(phase, &label, &hook.body) {
+					Ok(reference) => network.hooks.push(reference),
+					Err(message) => diags.push(Diagnostic::new(hook.span, message)),
+				},
+				None => diags.push(
+					Diagnostic::new(hook.span, format!("unknown hook phase `{}`", hook.phase))
+						.with_help(
+							"phases: pre_up, up, post_up, pre_down, down, post_down, \
+							 and `on` with carrier, lease, roam, portal or drift",
+						),
+				),
+			},
+			Item::Include(include) => diags.push(Diagnostic::new(
+				include.span,
+				"include was not resolved before compiling",
+			)),
+		}
+	}
+
+	// An open network is a real thing, but it is almost never what somebody
+	// meant to write, and joining one silently is how a laptop ends up
+	// associating with anything calling itself the same name. Saying so costs
+	// one line in the config for the cases that are deliberate.
+	if !security_seen {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!("`{label}` has no `wifi` block, so it is an open network"),
+			)
+			.with_help(
+				"add `wifi { psk = \"@secret:NAME\" }`, or `wifi { open = true }` if that is meant",
+			),
+		);
+		return None;
+	}
+
+	Some(network)
+}
+
+/// The keys a network's `wifi` block can carry, before they become a
+/// [`Security`].
+///
+/// Collected first and interpreted second, because which fields matter depends
+/// on which kind of security was named -- and that may be named after them.
+#[derive(Default)]
+struct WifiKeys {
+	psk: Option<SecretRef>,
+	proto: PskProto,
+	open: bool,
+	owe: bool,
+	eap: Option<EapMethod>,
+	identity: Option<String>,
+	anonymous_identity: Option<String>,
+	password: Option<SecretRef>,
+	ca_cert: Option<String>,
+	client_cert: Option<String>,
+	private_key: Option<SecretRef>,
+	phase2: Option<String>,
+}
+
+/// The `wifi` block inside a `network`: how to authenticate to it.
+fn lower_network_wifi(block: &Block, network: &mut WifiNetwork, diags: &mut Diagnostics) {
+	let mut keys = WifiKeys::default();
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			if let Item::Block(inner) = item {
+				diags.push(Diagnostic::new(
+					inner.span,
+					format!(
+						"`{}` is not valid inside a network `wifi` block",
+						inner.head
+					),
+				));
+			}
+			continue;
+		};
+		lower_wifi_key(&mut keys, network, assignment, diags);
+	}
+
+	// Exactly one kind of security. Two would mean guessing which the operator
+	// meant, and the wrong guess is a network that either will not join or
+	// joins with less protection than was asked for.
+	let chosen = usize::from(keys.psk.is_some())
+		+ usize::from(keys.eap.is_some())
+		+ usize::from(keys.open)
+		+ usize::from(keys.owe);
+	if chosen > 1 {
+		diags.push(
+			Diagnostic::new(block.span, "a network has one kind of security")
+				.with_help("exactly one of psk, eap, open or owe"),
+		);
+		return;
+	}
+
+	if let Some(security) = build_security(keys, block, diags) {
+		network.security = security;
+	}
+}
+
+/// One `key = value` inside a network's `wifi` block.
+fn lower_wifi_key(
+	keys: &mut WifiKeys,
+	network: &mut WifiNetwork,
+	assignment: &Assignment,
+	diags: &mut Diagnostics,
+) {
+	match assignment.key.as_str() {
+		"psk" => keys.psk = as_secret(&assignment.value, diags),
+		"password" => keys.password = as_secret(&assignment.value, diags),
+		"private_key" => keys.private_key = as_secret(&assignment.value, diags),
+		"open" => keys.open = as_bool(&assignment.value, diags).unwrap_or(false),
+		"owe" => keys.owe = as_bool(&assignment.value, diags).unwrap_or(false),
+		"identity" => keys.identity = as_string(&assignment.value, diags),
+		"anonymous_identity" => keys.anonymous_identity = as_string(&assignment.value, diags),
+		"ca_cert" => keys.ca_cert = as_string(&assignment.value, diags),
+		"client_cert" => keys.client_cert = as_string(&assignment.value, diags),
+		"phase2" => keys.phase2 = as_string(&assignment.value, diags),
+		"priority" => {
+			if let Some(value) = as_u32(&assignment.value, diags) {
+				network.priority = i32::try_from(value).unwrap_or(i32::MAX);
+			}
+		}
+		"autoconnect" => {
+			if let Some(flag) = as_bool(&assignment.value, diags) {
+				network.autoconnect = flag;
+			}
+		}
+		"proto" => {
+			if let Some(name) = as_string(&assignment.value, diags) {
+				match name.as_str() {
+					"wpa2" => keys.proto = PskProto::Wpa2,
+					"wpa3" => keys.proto = PskProto::Wpa3,
+					"wpa2+wpa3" | "wpa2wpa3" => keys.proto = PskProto::Wpa2Wpa3,
+					other => diags.push(
+						Diagnostic::new(
+							assignment.span,
+							format!("`{other}` is not a WPA generation"),
+						)
+						.with_help("one of wpa2, wpa3, wpa2+wpa3"),
+					),
+				}
+			}
+		}
+		"eap" => {
+			if let Some(name) = as_string(&assignment.value, diags) {
+				match name.as_str() {
+					"peap" => keys.eap = Some(EapMethod::Peap),
+					"ttls" => keys.eap = Some(EapMethod::Ttls),
+					"tls" => keys.eap = Some(EapMethod::Tls),
+					"pwd" => keys.eap = Some(EapMethod::Pwd),
+					other => diags.push(
+						Diagnostic::new(assignment.span, format!("`{other}` is not an EAP method"))
+							.with_help("one of peap, ttls, tls, pwd"),
+					),
+				}
+			}
+		}
+		other => diags.push(Diagnostic::new(
+			assignment.span,
+			format!("unknown wifi key `{other}`"),
+		)),
+	}
+}
+
+/// Turn the collected keys into the one security mode they describe.
+fn build_security(keys: WifiKeys, block: &Block, diags: &mut Diagnostics) -> Option<Security> {
+	if let Some(passphrase) = keys.psk {
+		return Some(Security::Psk(PskConfig {
+			passphrase,
+			proto: keys.proto,
+		}));
+	}
+	if let Some(method) = keys.eap {
+		let Some(identity) = keys.identity else {
+			diags.push(Diagnostic::new(
+				block.span,
+				"an EAP network needs an `identity`",
+			));
+			return None;
+		};
+		if keys.ca_cert.is_none() {
+			// Not an error, because plenty of real deployments pin nothing and
+			// refusing would make netcfgd unusable on them. But an EAP network
+			// with no CA certificate will authenticate to any server that
+			// answers, which is the whole attack -- so it is said out loud
+			// rather than left for somebody to notice.
+			diags.push(
+				Diagnostic::new(
+					block.span,
+					"this EAP network has no `ca_cert`, so it will trust any server that answers",
+				)
+				.with_help("set `ca_cert` to the issuer's certificate; see docs/decisions/0008"),
+			);
+		}
+		return Some(Security::Eap(EapConfig {
+			method,
+			identity,
+			anonymous_identity: keys.anonymous_identity,
+			password: keys.password,
+			ca_cert: keys.ca_cert,
+			client_cert: keys.client_cert,
+			private_key: keys.private_key,
+			phase2: keys.phase2,
+		}));
+	}
+	if keys.owe {
+		return Some(Security::Owe);
+	}
+	Some(Security::Open)
+}
+
+/// `"@secret:NAME"` or `"@secret:provider:NAME"`.
+fn as_secret(value: &Spanned<Value>, diags: &mut Diagnostics) -> Option<SecretRef> {
+	let text = as_string(value, diags)?;
+	let Some(rest) = text.strip_prefix("@secret:") else {
+		// The whole point of the indirection is that a config file stays safe
+		// to commit. Accepting a bare string here would make that a convention
+		// rather than a property, and the first person to paste a passphrase
+		// in would find it works.
+		diags.push(
+			Diagnostic::new(value.span, "a credential must be a secret reference").with_help(
+				"write `@secret:NAME`; `ncfg secret set NAME` stores the value outside \
+					 the config, which is what keeps the config safe to commit",
+			),
+		);
+		return None;
+	};
+	let (provider, name) = match rest.split_once(':') {
+		Some((provider, name)) => (provider, name),
+		None => ("file", rest),
+	};
+	let provider = match provider {
+		"file" => SecretProvider::File,
+		"exec" => SecretProvider::Exec,
+		"keyring" => SecretProvider::Keyring,
+		"pass" => SecretProvider::Pass,
+		other => {
+			diags.push(
+				Diagnostic::new(value.span, format!("`{other}` is not a secret provider"))
+					.with_help("one of file, exec, keyring, pass"),
+			);
+			return None;
+		}
+	};
+	if name.is_empty() {
+		diags.push(Diagnostic::new(
+			value.span,
+			"a secret reference needs a name",
+		));
+		return None;
+	}
+	Some(SecretRef {
+		provider,
+		name: name.to_owned(),
+	})
 }
 
 #[allow(clippy::too_many_lines)]

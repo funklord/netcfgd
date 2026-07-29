@@ -68,6 +68,8 @@ dependencies = [
  "netcfgd-observe",
  "netcfgd-plan",
  "netcfgd-proto",
+ "netcfgd-secret",
+ "netcfgd-supplicant",
  "serde_json",
 ]
 

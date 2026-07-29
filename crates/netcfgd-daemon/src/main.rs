@@ -12,6 +12,7 @@ mod authorize;
 mod confirm;
 mod server;
 mod state;
+mod wifi;
 
 use netcfgd_apply::KernelExecutor;
 use netcfgd_host::state as run_state;
@@ -299,6 +300,61 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 	);
 }
 
+/// Everything an `apply` request does.
+///
+/// Split out of [`answer`] to keep that a dispatcher rather than a place where
+/// one arm is longer than the other twelve together.
+fn apply_request(
+	state: &mut State,
+	window: Option<u32>,
+	allow_disruption: &[String],
+	subscribers: &mut Vec<SyncSender<Event>>,
+	timers: Option<&Sender<Command>>,
+) -> Response {
+	if let Some(diagnostics) = &state.diagnostics {
+		return Response::error(diagnostics.clone());
+	}
+	// Checked before anything is applied, so a refusal leaves the
+	// machine untouched rather than changed-but-unprotected.
+	let last_good = match &window {
+		Some(_) => match confirm::may_arm(state) {
+			Ok(document) => Some(document),
+			Err(error) => return Response::error(error.message()),
+		},
+		None => None,
+	};
+	let options = PlanOptions {
+		confirm_window: window,
+		revert_to: last_good.as_ref().map(netcfgd_host::document_hash),
+		allow_disruption: allow_disruption.to_vec(),
+	};
+	let Ok(mut executor) = KernelExecutor::new() else {
+		return Response::error("cannot open a netlink socket");
+	};
+	let (_, journal) = state.apply(&options, &mut executor);
+	let mut owned = run_state::read_owned(&state.paths.run_dir);
+	owned.absorb(&executor.effects);
+	let _ = run_state::write_owned(&state.paths.run_dir, &owned);
+	state.reobserve();
+
+	match (&window, last_good) {
+		(Some(seconds), Some(document)) => {
+			let event = confirm::arm(state, *seconds, &document);
+			if let Some(timer) = timers {
+				spawn_expiry_timer(timer, *seconds);
+			}
+			server::broadcast(subscribers, &event);
+		}
+		// No window: this configuration is the one to fall back to.
+		_ => {
+			if let Some(desired) = &state.desired {
+				let _ = netcfgd_host::confirm::write_last_good(&state.paths.run_dir, desired);
+			}
+		}
+	}
+	Response::Journal(Box::new(journal))
+}
+
 fn answer(
 	state: &mut State,
 	request: &Request,
@@ -329,51 +385,7 @@ fn answer(
 		Request::Apply {
 			confirm: window,
 			allow_disruption,
-		} => {
-			if let Some(diagnostics) = &state.diagnostics {
-				return Response::error(diagnostics.clone());
-			}
-			// Checked before anything is applied, so a refusal leaves the
-			// machine untouched rather than changed-but-unprotected.
-			let last_good = match window {
-				Some(_) => match confirm::may_arm(state) {
-					Ok(document) => Some(document),
-					Err(error) => return Response::error(error.message()),
-				},
-				None => None,
-			};
-			let options = PlanOptions {
-				confirm_window: *window,
-				revert_to: last_good.as_ref().map(netcfgd_host::document_hash),
-				allow_disruption: allow_disruption.clone(),
-			};
-			let Ok(mut executor) = KernelExecutor::new() else {
-				return Response::error("cannot open a netlink socket");
-			};
-			let (_, journal) = state.apply(&options, &mut executor);
-			let mut owned = run_state::read_owned(&state.paths.run_dir);
-			owned.absorb(&executor.effects);
-			let _ = run_state::write_owned(&state.paths.run_dir, &owned);
-			state.reobserve();
-
-			match (window, last_good) {
-				(Some(seconds), Some(document)) => {
-					let event = confirm::arm(state, *seconds, &document);
-					if let Some(timer) = timers {
-						spawn_expiry_timer(timer, *seconds);
-					}
-					server::broadcast(subscribers, &event);
-				}
-				// No window: this configuration is the one to fall back to.
-				_ => {
-					if let Some(desired) = &state.desired {
-						let _ =
-							netcfgd_host::confirm::write_last_good(&state.paths.run_dir, desired);
-					}
-				}
-			}
-			Response::Journal(Box::new(journal))
-		}
+		} => apply_request(state, *window, allow_disruption, subscribers, timers),
 		Request::Reload => {
 			let event = state.reload();
 			server::broadcast(subscribers, &event);
@@ -407,6 +419,21 @@ fn answer(
 		))),
 		// Handled entirely on the connection thread.
 		Request::Monitor => Response::Ok,
+
+		// Wireless. These reach the supplicant rather than the kernel, and
+		// none of them can create a network -- the `wifi` tier joins what the
+		// configuration already describes and nothing else (decision 0013).
+		Request::WifiScan { interface } => wifi::scan(state.desired.as_ref(), interface),
+		Request::WifiStatus { interface } => wifi::status(state.desired.as_ref(), interface),
+		Request::WifiConnect { interface, network } => wifi::connect_to(
+			state.desired.as_ref(),
+			&state.paths.config_dir.join("secrets"),
+			interface,
+			network,
+		),
+		Request::WifiDisconnect { interface } => {
+			wifi::disconnect(state.desired.as_ref(), interface)
+		}
 	}
 }
 

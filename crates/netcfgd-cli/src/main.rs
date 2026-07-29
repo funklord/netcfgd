@@ -28,6 +28,13 @@ usage:
                              interface NAME
                              address   IFACE CIDR
                              route     IFACE DEST
+  ncfg wifi SUBCOMMAND      wireless, via netcfgd. SUBCOMMAND is one of:
+                             scan       [IFACE]  list access points in range
+                             status     [IFACE]  what the radio is doing
+                             connect ID [IFACE]  join a configured network
+                             disconnect [IFACE]  leave it, keeping the config
+                           IFACE may be omitted when the config describes one
+                           wireless device.
   ncfg monitor [options]   stream events until interrupted (needs netcfgd)
   ncfg confirm [options]   keep a change made under a confirm window
   ncfg revert [options]    undo it now rather than at expiry
@@ -89,6 +96,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"show" => command_show(&options),
 		"explain" => command_explain(&arguments[1..], &options),
 		"monitor" => command_monitor(&options),
+		"wifi" => command_wifi(&positional(&arguments[1..]), &options),
 		"confirm" => command_confirm(&options, &netcfgd_proto::Request::Confirm),
 		"revert" => command_confirm(&options, &netcfgd_proto::Request::Revert),
 		other => Err(format!("unknown command `{other}`; try `ncfg --help`")),
@@ -391,6 +399,205 @@ fn command_explain(arguments: &[String], options: &Options) -> Result<ExitCode, 
 		}
 	}
 	Ok(ExitCode::SUCCESS)
+}
+
+/// The arguments that are not options or option values.
+///
+/// `explain` does its own thing with indexes; this is for the subcommands
+/// added later, which need the positional arguments without caring where the
+/// flags were.
+fn positional(arguments: &[String]) -> Vec<String> {
+	const TAKES_VALUE: &[&str] = &[
+		"--config-dir",
+		"--run-dir",
+		"--confirm-within",
+		"--allow-disruption",
+	];
+	let mut out = Vec::new();
+	let mut skip_next = false;
+	for argument in arguments {
+		if skip_next {
+			skip_next = false;
+			continue;
+		}
+		if argument.starts_with('-') {
+			skip_next = TAKES_VALUE.contains(&argument.as_str());
+			continue;
+		}
+		out.push(argument.clone());
+	}
+	out
+}
+
+/// Which wireless interface, when the command line did not say.
+///
+/// Naming an interface every time is friction on the machine this is for --
+/// a laptop with one radio. Where there is exactly one wireless device in the
+/// config, that is the answer; where there are several, the error lists them
+/// rather than picking.
+fn wireless_interface(given: Option<&String>, options: &Options) -> Result<String, String> {
+	if let Some(name) = given {
+		return Ok(name.clone());
+	}
+	let (document, _) = compile(options)?;
+	let radios: Vec<&str> = document
+		.devices
+		.iter()
+		.filter(|device| device.wifi.is_some())
+		.map(|device| device.name.as_str())
+		.collect();
+	match radios.as_slice() {
+		[only] => Ok((*only).to_owned()),
+		[] => Err(
+			"no wireless device in the configuration. Name the interface, or add a \
+			 `device` block with a `wifi` section."
+				.to_owned(),
+		),
+		several => Err(format!(
+			"the configuration has {} wireless devices ({}); name the one you mean",
+			several.len(),
+			several.join(", ")
+		)),
+	}
+}
+
+/// The wireless subcommands, all of which are the daemon's to do.
+///
+/// None of these compile or apply anything. They reach the supplicant through
+/// netcfgd, which is what makes them available to the `wifi` tier without
+/// giving that tier the ability to change configuration (decision 0013).
+fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, String> {
+	let Some(subcommand) = positional.first() else {
+		return Err(
+			"`ncfg wifi` needs a subcommand: scan, status, connect or disconnect".to_owned(),
+		);
+	};
+	let rest = &positional[1..];
+	let run_dir = state::resolve_dir(options.run_dir.as_deref());
+	let socket = client::socket_path(&run_dir);
+
+	let request = match subcommand.as_str() {
+		"scan" => netcfgd_proto::Request::WifiScan {
+			interface: wireless_interface(rest.first(), options)?,
+		},
+		"status" => netcfgd_proto::Request::WifiStatus {
+			interface: wireless_interface(rest.first(), options)?,
+		},
+		"connect" => {
+			let Some(network) = rest.first() else {
+				return Err(
+					"`ncfg wifi connect` needs the id of a `network` block. It joins networks \
+					 the configuration already describes; adding one means editing the config."
+						.to_owned(),
+				);
+			};
+			netcfgd_proto::Request::WifiConnect {
+				interface: wireless_interface(rest.get(1), options)?,
+				network: network.clone(),
+			}
+		}
+		"disconnect" => netcfgd_proto::Request::WifiDisconnect {
+			interface: wireless_interface(rest.first(), options)?,
+		},
+		other => {
+			return Err(format!(
+				"unknown wifi subcommand `{other}`; try scan, status, connect or disconnect"
+			))
+		}
+	};
+
+	match client::ask(&socket, &request)? {
+		client::Answer::WifiScan(report) => {
+			render_scan(&report, options.json)?;
+			Ok(ExitCode::SUCCESS)
+		}
+		client::Answer::WifiStatus(state) => {
+			render_wifi_status(&state, options.json)?;
+			Ok(ExitCode::SUCCESS)
+		}
+		client::Answer::Ok => {
+			println!(
+				"{}",
+				if matches!(request, netcfgd_proto::Request::WifiConnect { .. }) {
+					"joining; `ncfg wifi status` says whether it worked"
+				} else {
+					"disconnected"
+				}
+			);
+			Ok(ExitCode::SUCCESS)
+		}
+		client::Answer::Error { message } => Err(message),
+		other => Err(format!("the daemon sent {}", other.describe())),
+	}
+}
+
+fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), String> {
+	if json {
+		println!(
+			"{}",
+			serde_json::to_string_pretty(report).map_err(|error| error.to_string())?
+		);
+		return Ok(());
+	}
+	if report.access_points.is_empty() {
+		println!("no access points in range of {}", report.interface);
+		return Ok(());
+	}
+	let mut any_unconfigured = false;
+	for entry in &report.access_points {
+		// A name that is not UTF-8 is shown as hex rather than mangled, and
+		// marked so nobody reads the hex as the name.
+		let name = entry
+			.name
+			.clone()
+			.unwrap_or_else(|| format!("hex:{}", entry.ssid));
+		let security = if entry.secured { "secured" } else { "open" };
+		let configured = if let Some(id) = &entry.configured {
+			format!("  [{id}]")
+		} else {
+			any_unconfigured = true;
+			String::new()
+		};
+		println!(
+			"{:>4} dBm  {:>5} MHz  {security:<7}  {name}{configured}",
+			entry.signal, entry.frequency
+		);
+	}
+	if any_unconfigured {
+		println!();
+		println!(
+			"a name in brackets is a `network` block: `ncfg wifi connect ID` joins it. \
+			 The rest need config written first, which needs the admin tier."
+		);
+	}
+	Ok(())
+}
+
+fn render_wifi_status(state: &netcfgd_proto::WifiState, json: bool) -> Result<(), String> {
+	if json {
+		println!(
+			"{}",
+			serde_json::to_string_pretty(state).map_err(|error| error.to_string())?
+		);
+		return Ok(());
+	}
+	println!("{} {}", state.interface, state.state);
+	if let Some(name) = state.name.as_ref().or(state.ssid.as_ref()) {
+		let bssid = state
+			.bssid
+			.as_ref()
+			.map_or_else(String::new, |bssid| format!(" ({bssid})"));
+		println!("    {name}{bssid}");
+	}
+	match &state.network {
+		Some(id) => println!("    from the `{id}` network block"),
+		None if state.ssid.is_some() => println!(
+			"    not from any `network` block, which should not happen: netcfgd supplies \
+			 every network the supplicant knows. Worth reporting."
+		),
+		None => {}
+	}
+	Ok(())
 }
 
 /// Stream events from the daemon until interrupted.
