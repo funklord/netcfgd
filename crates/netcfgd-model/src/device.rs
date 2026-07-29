@@ -66,6 +66,18 @@ pub struct WifiDevicePolicy {
 	pub regdom: Option<String>,
 	/// Power saving.
 	pub powersave: Powersave,
+	/// What hardware address this radio presents.
+	#[serde(default)]
+	pub mac_policy: MacPolicy,
+	/// Whether to randomise the address used while scanning.
+	///
+	/// Separate from [`WifiDevicePolicy::mac_policy`] because it is a
+	/// different exposure: scanning broadcasts probe requests to everyone in
+	/// range, whether or not anything is ever joined. A device that randomises
+	/// on association and not on scan is trackable by a passive listener in a
+	/// cafe it never connected to.
+	#[serde(default)]
+	pub scan_randomization: bool,
 }
 
 impl Default for WifiDevicePolicy {
@@ -76,6 +88,8 @@ impl Default for WifiDevicePolicy {
 			portal_check: false,
 			regdom: None,
 			powersave: Powersave::Default,
+			mac_policy: MacPolicy::Permanent,
+			scan_randomization: false,
 		}
 	}
 }
@@ -95,4 +109,94 @@ pub struct Device {
 	/// Radio policy, for wifi devices.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub wifi: Option<WifiDevicePolicy>,
+}
+
+/// What hardware address a radio presents.
+///
+/// A wifi client that always uses its permanent address is trackable across
+/// every network it has ever joined, by anyone who has seen it twice. Every
+/// other supplicant grew a way to change that; netcfgd could not express it,
+/// which meant the answer was "whatever the supplicant's default happens to
+/// be" -- and that is a privacy property nobody chose.
+///
+/// The three values are named for what they do rather than for what a
+/// particular supplicant calls them, and the mapping is written down where it
+/// is applied rather than implied here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MacPolicy {
+	/// The hardware address. Trackable, and sometimes required -- a network
+	/// with MAC-based admission control is the usual reason.
+	#[default]
+	Permanent,
+	/// A fresh address for each network joined, kept for the duration of the
+	/// association.
+	///
+	/// The useful middle: an access point sees one consistent client for the
+	/// length of a session, and two networks cannot correlate their visitors.
+	PerNetwork,
+	/// A fresh address for every association, including reconnecting to the
+	/// same network.
+	///
+	/// Strongest, and it breaks anything that recognises a returning client:
+	/// DHCP reservations, captive portal sessions, MAC-based admission.
+	PerConnection,
+}
+
+impl MacPolicy {
+	/// The name as the config spells it.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::Permanent => "permanent",
+			Self::PerNetwork => "per_network",
+			Self::PerConnection => "per_connection",
+		}
+	}
+}
+
+/// An access point netcfgd runs, rather than joins.
+///
+/// Bound to a device, unlike [`crate::WifiNetwork`], which deliberately is
+/// not: a station profile describes a network that may be in range of any
+/// radio, while an access point is a thing one specific radio is doing.
+///
+/// Nothing implements this yet. It is in the schema because the model freezes
+/// at M4 and adding it afterwards is a major version bump -- the same reason
+/// `BackendKind::Builtin` is there (project.md section 8, row 4). A config
+/// asking for one is refused by name, with the milestone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccessPoint {
+	/// Handle for this access point. Sorting key.
+	pub id: String,
+	/// The network name to broadcast.
+	pub ssid: crate::Ssid,
+	/// Which radio runs it.
+	pub device: String,
+	/// How stations authenticate.
+	///
+	/// The same type as a station profile's, and not every variant makes
+	/// sense here -- an access point cannot be `Owe` transition-mode without
+	/// a second BSS, and `Eap` means pointing at a RADIUS server rather than
+	/// holding a credential. Validation belongs with the implementation,
+	/// which does not exist, so the type stays wide rather than pretending to
+	/// a precision nothing enforces yet.
+	pub security: crate::Security,
+	/// Channel to operate on. Absent means the implementation chooses.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub channel: Option<u16>,
+	/// Band, where the channel number alone is ambiguous.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub band: Option<String>,
+	/// Whether to suppress the SSID in beacons.
+	///
+	/// Not a security measure and not documented as one: it stops the network
+	/// appearing in a list and makes every client that knows it broadcast the
+	/// name while probing, which is worse than the problem.
+	#[serde(default)]
+	pub hidden: bool,
+	/// Country code the access point advertises.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub regdom: Option<String>,
 }
