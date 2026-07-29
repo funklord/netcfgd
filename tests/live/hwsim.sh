@@ -68,21 +68,21 @@ iw=$(find_in_sbin iw) || skip "iw is not installed (apt install iw)"
 ip=$(find_in_sbin ip) || die "no ip(8), which is not something this can work around"
 [ -x "$repo/target/debug/ncfg" ] || skip "netcfgd is not built (cargo build --workspace)"
 
-# The AP side is wpa_supplicant in AP mode rather than hostapd, so that this
-# needs no package the station side did not already need. It is only available
-# if the binary was built with CONFIG_AP=y, which Debian's is -- but a build
-# that was not would fail later with an unhelpful `FAIL`, so it is checked.
-# Without binutils there is no `strings`, and an empty pipe would read as
-# "no AP mode" -- a confident wrong diagnosis, which is worse than not
-# checking. So the absence of the tool is its own case.
-if command -v strings >/dev/null 2>&1; then
-	if ! strings "$supplicant" | grep -q '^AP-ENABLED$'; then
-		skip "this wpa_supplicant has no AP mode; install hostapd, or rebuild with CONFIG_AP=y"
-	fi
-else
-	echo "hwsim.sh: no strings(1), so AP support is assumed; if the access" >&2
-	echo "hwsim.sh:   point never comes up, that is the thing to check" >&2
-fi
+# The AP side is wpa_supplicant in AP mode rather than hostapd, so this needs
+# no package the station side did not already need. That requires the binary to
+# have been built with CONFIG_AP=y, which Debian's is.
+#
+# There is deliberately no preflight check for it. The first version of this
+# script grepped the binary for `AP-ENABLED`, anchored -- and the string in the
+# binary is `AP-ENABLED ` with a trailing space, so the check reported "no AP
+# mode" on a build that has it and skipped the entire test. A check that can
+# only produce a false negative, on the one machine it was written for, is
+# worse than no check: it turns a test that would have run into a test that
+# reports "skipped" and looks fine.
+#
+# If AP mode really is missing, the access point below fails to start and the
+# diagnostic there says so, having read what wpa_supplicant actually printed
+# rather than guessing from the binary.
 
 if grep -q '^mac80211_hwsim ' /proc/modules; then
 	die "mac80211_hwsim is already loaded, so something else is using it.
@@ -160,6 +160,16 @@ passphrase=hunter2hunter2
 
 # The access point. wpa_supplicant in AP mode: `mode=2` with an explicit
 # frequency, since there is no scan to learn one from.
+#
+# Channel 1 (2412 MHz) because AP mode needs permission to transmit, and the
+# world-roaming regulatory domain a fresh hwsim radio inherits allows it there:
+# the 2402-2472 range carries no NO-IR flag. Pick a channel that does and the
+# radio comes up and never beacons, which looks like an association failure
+# several steps later.
+#
+# Nothing here changes the regulatory domain, and it would not matter to a real
+# card if it did -- modern wifi hardware registers as self-managed and ignores
+# the global setting.
 cat > "$work/ap/ap.conf" <<CONF
 ctrl_interface=$work/ap/ctrl
 update_config=0
@@ -232,6 +242,10 @@ until [ "$ap_state" = COMPLETED ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 150 ]; then
 		echo "hwsim.sh: the access point never came up (last state: ${ap_state:-none})" >&2
+		if grep -q 'not included in the build' "$work/ap/log"; then
+			echo "hwsim.sh: this wpa_supplicant was built without CONFIG_AP." >&2
+			echo "hwsim.sh:   install hostapd and use it as the AP instead." >&2
+		fi
 		cat "$work/ap/log" >&2
 		exit 1
 	fi
