@@ -95,8 +95,29 @@ That covers the control socket, the network database and -- the valuable part
 sends for WPA3?" has a real answer rather than a documented one. `make live`
 runs it.
 
-What remains untested is association itself, which does need
-`mac80211_hwsim`. M3 is not done until that has run.
+Association itself does need `mac80211_hwsim`, and that has now run --
+see the closing note below.
+
+### Association, verified 2026-07-30
+
+`tests/live/hwsim.sh` loads `mac80211_hwsim`, stands up an access point on one
+virtual radio with wpa_supplicant in AP mode, and has netcfgd associate with it
+from the other. It reached `COMPLETED` on the SSID the document named,
+negotiated key management from the transitional WPA2/WPA3 offer, and `ncfg wifi
+status` resolved the association back to the `network` block it came from --
+which is decision 0015's property observed from the outside rather than argued
+for.
+
+So the caveat this section carried is discharged, and M3 is done.
+
+Two things worth keeping from how it got there. The script needs real root, so
+it is the one gate in this project that a contributor has to run deliberately;
+`make live` invokes it and it skips cleanly without privilege. And the first
+run did not fail -- it *skipped*, because a preflight check grepped the binary
+for `^AP-ENABLED$` when the string is `AP-ENABLED ` with a trailing space. The
+check was removed rather than corrected: it could only ever produce a false
+negative, and a false negative there turns a test that would have run into one
+that reports success. A gate that cannot fail loudly is not a gate.
 
 ### Correction, 2026-07-29
 
