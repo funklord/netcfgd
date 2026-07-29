@@ -193,6 +193,31 @@ pub fn write_desired(run_dir: &Path, document: &Document) -> io::Result<()> {
 	write_atomic(&run_dir.join("desired.json"), &text)
 }
 
+/// Write the provenance table, so `ncfg explain` can name a file and line
+/// without recompiling the configuration.
+///
+/// # Errors
+///
+/// Returns an `io::Error`.
+pub fn write_provenance(
+	run_dir: &Path,
+	provenance: &netcfgd_compile::Provenance,
+) -> io::Result<()> {
+	let text = serde_json::to_string_pretty(provenance)
+		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+	write_atomic(&run_dir.join("provenance.json"), &text)
+}
+
+/// Read it back, treating an absent or unreadable file as empty -- an
+/// explanation without file positions is still worth printing.
+#[must_use]
+pub fn read_provenance(run_dir: &Path) -> netcfgd_compile::Provenance {
+	fs::read_to_string(run_dir.join("provenance.json"))
+		.ok()
+		.and_then(|text| serde_json::from_str(&text).ok())
+		.unwrap_or_default()
+}
+
 /// Write the observed model.
 ///
 /// # Errors

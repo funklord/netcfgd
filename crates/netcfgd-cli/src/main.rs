@@ -24,6 +24,11 @@ usage:
   ncfg apply [options]     make the observed state match the config
   ncfg status [options]    show what is currently observed
   ncfg show [options]      print the compiled desired-state document
+  ncfg explain SUBJECT      why is it like this? SUBJECT is one of:
+                             interface NAME
+                             address   IFACE CIDR
+                             route     IFACE DEST
+  ncfg monitor [options]   stream events until interrupted (needs netcfgd)
   ncfg confirm [options]   keep a change made under a confirm window
   ncfg revert [options]    undo it now rather than at expiry
 
@@ -82,6 +87,8 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"apply" => command_apply(&options),
 		"status" => command_status(&options),
 		"show" => command_show(&options),
+		"explain" => command_explain(&arguments[1..], &options),
+		"monitor" => command_monitor(&options),
 		"confirm" => command_confirm(&options, &netcfgd_proto::Request::Confirm),
 		"revert" => command_confirm(&options, &netcfgd_proto::Request::Revert),
 		other => Err(format!("unknown command `{other}`; try `ncfg --help`")),
@@ -123,7 +130,12 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 			// Accepting the flag now means the command line does not change
 			// when the daemon lands in M2.
 			"--oneshot" => {}
-			other => return Err(format!("unknown option `{other}`")),
+			// Positional arguments belong to the subcommand -- `explain` takes
+			// three. An unknown *option* is still an error, because a typo in
+			// a flag silently ignored is how somebody thinks they passed
+			// --confirm-within and did not.
+			other if other.starts_with('-') => return Err(format!("unknown option `{other}`")),
+			_ => {}
 		}
 		index += 1;
 	}
@@ -149,6 +161,21 @@ fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::Pat
 		.map_err(|diagnostics| diagnostics.render(&sources))?;
 
 	Ok((document, run_dir))
+}
+
+/// Compile, keeping the provenance table.
+fn compile_with_provenance(
+	options: &Options,
+) -> Result<(netcfgd_model::Document, netcfgd_compile::Provenance), String> {
+	let config_dir = config::resolve_dir(options.config_dir.as_deref());
+	let run_dir = state::resolve_dir(options.run_dir.as_deref());
+	let sources = config::load(&config_dir)
+		.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
+	let mut sink = hooks::RunHooks::new(&run_dir);
+	let (document, provenance) = netcfgd_compile::compile_with_provenance(&sources, &mut sink)
+		.map_err(|diagnostics| diagnostics.render(&sources))?;
+	let _ = state::write_provenance(&run_dir, &provenance);
+	Ok((document, provenance))
 }
 
 fn observe(run_dir: &std::path::Path) -> Result<Observed, String> {
@@ -295,6 +322,77 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		return Ok(ExitCode::from(3));
 	}
 	Ok(ExitCode::SUCCESS)
+}
+
+/// Answer "why is it like this?" locally.
+///
+/// Deliberately not routed through the daemon. Design section 4.4 makes
+/// daemon-optional a property rather than a fallback, and explain is exactly
+/// the command somebody reaches for when things are broken -- which is when a
+/// daemon is least likely to be running.
+fn command_explain(arguments: &[String], options: &Options) -> Result<ExitCode, String> {
+	let positional: Vec<&String> = arguments
+		.iter()
+		.take_while(|argument| !argument.starts_with("--"))
+		.collect();
+
+	let subject = match positional.as_slice() {
+		[kind, name] if *kind == "interface" => netcfgd_proto::Subject::Interface {
+			name: (*name).clone(),
+		},
+		[kind, interface, address] if *kind == "address" => netcfgd_proto::Subject::Address {
+			interface: (*interface).clone(),
+			address: (*address).clone(),
+		},
+		[kind, interface, destination] if *kind == "route" => netcfgd_proto::Subject::Route {
+			interface: (*interface).clone(),
+			destination: (*destination).clone(),
+		},
+		_ => {
+			return Err("explain what? try `ncfg explain interface eth0`, \
+				 `ncfg explain address eth0 10.0.0.1/24`, or \
+				 `ncfg explain route eth0 default`"
+				.to_owned())
+		}
+	};
+
+	let run_dir = state::resolve_dir(options.run_dir.as_deref());
+	// Compiled fresh rather than read from /run, so the answer describes the
+	// configuration as it is now and not as it was when something last wrote
+	// there. A config that no longer compiles is reported as such.
+	let (desired, provenance) = match compile_with_provenance(options) {
+		Ok((document, provenance)) => (Some(document), provenance),
+		Err(diagnostics) => {
+			eprintln!("ncfg: the configuration does not compile:\n{diagnostics}");
+			(None, netcfgd_compile::Provenance::default())
+		}
+	};
+	let observed = observe(&run_dir)?;
+
+	let explanation = netcfgd_host::explain(&subject, desired.as_ref(), &observed, &provenance);
+
+	if options.json {
+		println!(
+			"{}",
+			serde_json::to_string_pretty(&explanation).map_err(|error| error.to_string())?
+		);
+		return Ok(ExitCode::SUCCESS);
+	}
+
+	println!("{}", explanation.subject);
+	for fact in &explanation.facts {
+		match &fact.source {
+			Some(source) => println!("  {:<9} {}   [{}]", fact.topic, fact.detail, source),
+			None => println!("  {:<9} {}", fact.topic, fact.detail),
+		}
+	}
+	Ok(ExitCode::SUCCESS)
+}
+
+/// Stream events from the daemon until interrupted.
+fn command_monitor(options: &Options) -> Result<ExitCode, String> {
+	let run_dir = state::resolve_dir(options.run_dir.as_deref());
+	client::stream(&client::socket_path(&run_dir), options.json)
 }
 
 /// Confirm or revert, both of which are the daemon's to do.

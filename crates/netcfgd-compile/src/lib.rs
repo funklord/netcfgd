@@ -26,9 +26,11 @@ pub mod lex;
 pub mod lower;
 pub mod merge;
 pub mod parse;
+pub mod provenance;
 
 pub use diag::{Diagnostic, Diagnostics, SourceId, SourceMap, Span};
 pub use hook::{HookSink, NoHooks};
+pub use provenance::Provenance;
 
 use netcfgd_model::Document;
 
@@ -39,6 +41,22 @@ use netcfgd_model::Document;
 /// Returns every diagnostic found. A config with four mistakes should take one
 /// edit round rather than four.
 pub fn compile(sources: &SourceMap, hooks: &mut dyn HookSink) -> Result<Document, Diagnostics> {
+	compile_with_provenance(sources, hooks).map(|(document, _)| document)
+}
+
+/// Compile, and report where each field came from.
+///
+/// The provenance is a side table rather than part of the document, because
+/// the document is the frozen schema and has to encode identically for two
+/// compiles of one config. See `provenance`.
+///
+/// # Errors
+///
+/// As [`compile`].
+pub fn compile_with_provenance(
+	sources: &SourceMap,
+	hooks: &mut dyn HookSink,
+) -> Result<(Document, Provenance), Diagnostics> {
 	let mut files = Vec::with_capacity(sources.len());
 	let mut diagnostics = Diagnostics::new();
 
@@ -53,7 +71,9 @@ pub fn compile(sources: &SourceMap, hooks: &mut dyn HookSink) -> Result<Document
 	}
 
 	let merged = merge::merge(&files)?;
-	let mut document = lower::lower(&merged, hooks)?;
+	let mut provenance = Provenance::default();
+	let mut document = lower::lower(&merged, hooks, sources, &mut provenance)?;
+	provenance.canonicalize();
 
 	// Canonicalise before validating so that a diagnostic about, say, a
 	// duplicate interface names the same entry every time regardless of which
@@ -65,5 +85,5 @@ pub fn compile(sources: &SourceMap, hooks: &mut dyn HookSink) -> Result<Document
 		diagnostics
 	})?;
 
-	Ok(document)
+	Ok((document, provenance))
 }
