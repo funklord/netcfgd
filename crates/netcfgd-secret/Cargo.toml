@@ -1,0 +1,14 @@
+[package]
+name        = "netcfgd-secret"
+description = "Resolving a SecretRef to the material it names, and refusing to when the storage is unsafe."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lints]
+workspace = true
+
+[dependencies]
+netcfgd-model = { path = "../netcfgd-model" }
