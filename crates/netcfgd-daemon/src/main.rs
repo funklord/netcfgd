@@ -33,7 +33,7 @@ usage:
 options:
   --config-dir PATH      default /etc/netcfgd, or $NCFG_CONFIG_DIR
   --run-dir PATH         default /run/netcfgd, or $NCFG_RUN_DIR
-  --socket PATH          default /run/netcfgd/control.sock
+  --socket PATH          default /run/netcfgd/netcfgd.sock
   --no-apply-on-start    observe and watch, but change nothing until asked
   --poll-config          use mtime polling rather than inotify
   -h, --help             this text
@@ -106,7 +106,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	};
 	let socket_path = options
 		.socket
-		.map_or_else(|| paths.run_dir.join("control.sock"), PathBuf::from);
+		.map_or_else(|| paths.run_dir.join("netcfgd.sock"), PathBuf::from);
 	let _ = DEFAULT_SOCKET;
 
 	let mut state = State::new(paths.clone());

@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: Version = Version { major: 1, minor: 0 };
 
 /// Where the socket lives when nothing says otherwise.
-pub const DEFAULT_SOCKET: &str = "/run/netcfgd/control.sock";
+pub const DEFAULT_SOCKET: &str = "/run/netcfgd/netcfgd.sock";
 
 /// What a client asks for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

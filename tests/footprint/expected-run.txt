@@ -1,0 +1,21 @@
+# What /run/netcfgd holds after a plan on a config using no optional feature.
+#
+# Same rule as /etc, applied to runtime state: hooks/ appears only when a hook
+# is materialised, dns/ only when DNS is delivered, and neither of those is in
+# the fixture. The whole-host documents are always present because they are
+# what principle 2 promises -- `cat` answers what netcfgd decided and saw.
+#
+# desired/ and observed/ are the per-interface projections section 2 calls
+# "projections for convenience, not separate documents". The observed ones are
+# collapsed to a single marker, because which interfaces a machine has is not
+# something a footprint gate should have an opinion about -- what it checks is
+# that no directory or unconditional file appears that the fixture did not ask
+# for.
+.
+./desired
+./desired/eth0.json
+./desired.json
+./observed
+./observed/<per-interface>
+./observed.json
+./provenance.json

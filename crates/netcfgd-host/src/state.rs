@@ -181,6 +181,42 @@ pub fn write_owned(run_dir: &Path, state: &OwnedState) -> io::Result<()> {
 	write_atomic(&run_dir.join("owned.json"), &text)
 }
 
+/// Write the per-interface projections of a whole-host document.
+///
+/// Section 2 is explicit that the whole-host document is canonical and these
+/// are "projections for convenience, not separate documents". They exist so
+/// that `cat /run/netcfgd/desired/eth0.json` answers a question about one
+/// interface without a reader having to find it inside the whole file --
+/// which is the same reason the observed side has them.
+///
+/// # Errors
+///
+/// Returns an `io::Error`.
+fn write_projections<T: serde::Serialize>(dir: &Path, entries: &[(String, T)]) -> io::Result<()> {
+	// Removed first, so an interface dropped from the config does not leave a
+	// stale file claiming it is still configured. Principle 2 depends on what
+	// is in /run being true, not merely once-true.
+	if dir.is_dir() {
+		for entry in fs::read_dir(dir)?.filter_map(Result::ok) {
+			if entry.path().extension().is_some_and(|ext| ext == "json") {
+				let _ = fs::remove_file(entry.path());
+			}
+		}
+	}
+	if entries.is_empty() {
+		// No interfaces, no directory. Section 4.6: the filesystem reflects
+		// use, not capability.
+		return Ok(());
+	}
+	fs::create_dir_all(dir)?;
+	for (name, value) in entries {
+		let text = serde_json::to_string_pretty(value)
+			.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+		write_atomic(&dir.join(format!("{name}.json")), &text)?;
+	}
+	Ok(())
+}
+
 /// Write the desired document, so `cat` can answer what netcfgd decided.
 ///
 /// # Errors
@@ -190,7 +226,14 @@ pub fn write_desired(run_dir: &Path, document: &Document) -> io::Result<()> {
 	let text = document
 		.to_json_canonical()
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
-	write_atomic(&run_dir.join("desired.json"), &text)
+	write_atomic(&run_dir.join("desired.json"), &text)?;
+
+	let projections: Vec<(String, &netcfgd_model::Interface)> = document
+		.interfaces
+		.iter()
+		.map(|interface| (interface.name.clone(), interface))
+		.collect();
+	write_projections(&run_dir.join("desired"), &projections)
 }
 
 /// Write the provenance table, so `ncfg explain` can name a file and line
@@ -226,7 +269,25 @@ pub fn read_provenance(run_dir: &Path) -> netcfgd_compile::Provenance {
 pub fn write_observed(run_dir: &Path, observed: &Observed) -> io::Result<()> {
 	let text = serde_json::to_string_pretty(observed)
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-	write_atomic(&run_dir.join("observed.json"), &text)
+	write_atomic(&run_dir.join("observed.json"), &text)?;
+
+	// One file per link, carrying that link and everything on it, so a reader
+	// asking about eth0 does not have to filter the whole-host view.
+	let projections: Vec<(String, serde_json::Value)> = observed
+		.links
+		.iter()
+		.map(|link| {
+			(
+				link.name.clone(),
+				serde_json::json!({
+					"link": link,
+					"addresses": observed.addresses_on(&link.name).collect::<Vec<_>>(),
+					"routes": observed.routes_on(&link.name).collect::<Vec<_>>(),
+				}),
+			)
+		})
+		.collect();
+	write_projections(&run_dir.join("observed"), &projections)
 }
 
 /// Write the journal of the last apply.
