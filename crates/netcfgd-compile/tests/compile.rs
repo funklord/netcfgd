@@ -458,8 +458,9 @@ fn an_impossible_prefix_length_is_refused() {
 /// they arrive in, rather than reporting an unknown keyword.
 #[test]
 fn an_unimplemented_feature_names_its_milestone() {
-	let rendered = errors("interface wg0 {\n\twireguard { listen_port = 51820 }\n}");
+	let rendered = errors("interface ppp0 {\n\tpppoe { parent = \"eth0\" }\n}");
 	assert!(rendered.contains("M4"), "got: {rendered}");
+	assert!(rendered.contains("netcfgd-ppp"), "got: {rendered}");
 }
 
 /// Unterminated constructs are named rather than producing a cascade.
@@ -1167,4 +1168,103 @@ fn veth_compiles() {
 	};
 	assert_eq!(veth.peer, "veth-b");
 	assert!(errors("interface veth-a { veth { } }").contains("needs a `peer`"));
+}
+
+/// `WireGuard`, which had been refused with "lands in M4" since M1.
+#[test]
+fn wireguard_compiles() {
+	let document = build_ok(
+		r#"
+interface wg0 {
+	wireguard {
+		private_key = "@secret:wg0"
+		listen_port = 51820
+		peer hub {
+			public_key  = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+			endpoint    = "vpn.example.com:51820"
+			allowed_ips = "10.0.0.0/24 fd00::/64"
+			keepalive   = 25
+		}
+	}
+	config = "10.0.0.5/32"
+}
+"#,
+	);
+	let netcfgd_model::InterfaceKind::WireGuard(wg) = &document.interfaces[0].kind else {
+		panic!("expected a wireguard interface");
+	};
+	assert_eq!(wg.listen_port, Some(51820));
+	assert_eq!(wg.peers.len(), 1);
+	assert_eq!(wg.peers[0].allowed_ips.len(), 2);
+	assert_eq!(wg.peers[0].keepalive, Some(25));
+}
+
+/// A public key that is not 32 octets of base64 fails here rather than after
+/// the interface has been created and the tunnel is half-built.
+#[test]
+fn a_malformed_public_key_is_refused_at_compile_time() {
+	let message = errors(
+		r#"
+interface wg0 {
+	wireguard {
+		private_key = "@secret:wg0"
+		peer hub { public_key = "not-a-key"; allowed_ips = "10.0.0.0/24" }
+	}
+}
+"#,
+	);
+	assert!(message.contains("not a public key"), "got: {message}");
+	assert!(message.contains("44 characters"), "got: {message}");
+}
+
+/// A private key written into the config would be a private key in version
+/// control. It is a secret reference like every other credential.
+#[test]
+fn a_wireguard_private_key_must_be_a_secret() {
+	let message = errors(
+		r#"interface wg0 { wireguard { private_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" } }"#,
+	);
+	assert!(message.contains("secret reference"), "got: {message}");
+
+	let missing = errors(r"interface wg0 { wireguard { listen_port = 51820 } }");
+	assert!(missing.contains("needs a `private_key`"), "got: {missing}");
+}
+
+/// A peer with no allowed IPs is legal to the kernel, receives nothing, is
+/// routed nothing, and is never what anybody meant.
+#[test]
+fn a_peer_with_no_allowed_ips_is_refused() {
+	let message = errors(
+		r#"
+interface wg0 {
+	wireguard {
+		private_key = "@secret:wg0"
+		peer hub { public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }
+	}
+}
+"#,
+	);
+	assert!(
+		message.contains("nothing would route to it"),
+		"got: {message}"
+	);
+}
+
+/// A public key is a peer's identity, so two peers sharing one is two halves
+/// of one entry -- the kernel would keep the last and the other's allowed IPs
+/// would silently vanish.
+#[test]
+fn two_peers_may_not_share_a_public_key() {
+	let message = errors(
+		r#"
+interface wg0 {
+	wireguard {
+		private_key = "@secret:wg0"
+		peer a { public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; allowed_ips = "10.0.0.0/24" }
+		peer b { public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; allowed_ips = "10.0.1.0/24" }
+	}
+}
+"#,
+	);
+	assert!(message.contains("share the public key"), "got: {message}");
 }

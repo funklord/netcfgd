@@ -25,6 +25,7 @@ pub mod ops;
 pub mod peer;
 pub mod socket;
 pub mod watch;
+pub mod wg;
 pub mod wire;
 
 pub use dump::{AddressRecord, LinkRecord, RouteRecord};

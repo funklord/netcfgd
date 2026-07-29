@@ -48,5 +48,10 @@ tolerance_percent 3
 # Then M4 link types: bond, vxlan and veth creation, per-kind attributes for
 # all of them, and the member-list expansion. +12 KB each, which is what
 # actual netlink encoding costs when the types already exist.
-ncfg     1067456
-netcfgd  1391128
+#
+# Then generic netlink and WireGuard: the family resolver, the wg encoder and
+# reader, the base64 key type, and the compiler lowering. +25 KB and +29 KB.
+# The genl half is small; most of this is WireGuard, and both binaries carry it
+# because `ncfg apply --oneshot` configures a tunnel as readily as the daemon.
+ncfg     1092032
+netcfgd  1419800

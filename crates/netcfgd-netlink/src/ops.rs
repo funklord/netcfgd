@@ -95,6 +95,12 @@ pub enum NewLink {
 		/// The name of the other end.
 		peer: String,
 	},
+	/// A `WireGuard` device.
+	///
+	/// The link is ordinary rtnetlink; everything that makes it a tunnel --
+	/// keys, peers, allowed IPs -- goes over generic netlink afterwards. See
+	/// [`crate::wg`].
+	WireGuard,
 }
 
 /// Bridge attributes, applied after creation.
@@ -111,7 +117,7 @@ impl NewLink {
 	fn info_data(&self, name: &str) -> Option<AttrBuf> {
 		let mut data = AttrBuf::new();
 		match self {
-			Self::Bridge | Self::Dummy => return None,
+			Self::Bridge | Self::Dummy | Self::WireGuard => return None,
 			Self::Vlan { id, protocol, .. } => {
 				data.push(IFLA_VLAN_ID, &id.to_ne_bytes());
 				// Big-endian: it is an ethertype, and the kernel reads it as
@@ -191,6 +197,7 @@ impl NewLink {
 			Self::Bond { .. } => "bond",
 			Self::Vxlan { .. } => "vxlan",
 			Self::Veth { .. } => "veth",
+			Self::WireGuard => "wireguard",
 		}
 	}
 }
