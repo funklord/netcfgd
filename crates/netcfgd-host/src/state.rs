@@ -14,11 +14,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Where runtime state lives when nothing says otherwise.
-pub(crate) const DEFAULT_RUN_DIR: &str = "/run/netcfgd";
+pub const DEFAULT_RUN_DIR: &str = "/run/netcfgd";
 
 /// The `/run` directory to use.
 #[must_use]
-pub(crate) fn resolve_dir(explicit: Option<&str>) -> PathBuf {
+pub fn resolve_dir(explicit: Option<&str>) -> PathBuf {
 	if let Some(path) = explicit {
 		return PathBuf::from(path);
 	}
@@ -36,7 +36,7 @@ pub(crate) fn resolve_dir(explicit: Option<&str>) -> PathBuf {
 /// what is on disk.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct OwnedState {
+pub struct OwnedState {
 	/// Links netcfgd created.
 	pub created_links: Vec<String>,
 	/// Addresses netcfgd installed.
@@ -52,7 +52,7 @@ pub(crate) struct OwnedState {
 /// One object netcfgd installed, and which source asked for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct OwnedObject {
+pub struct OwnedObject {
 	/// Which interface.
 	pub interface: String,
 	/// The address in CIDR form, or the route destination.
@@ -64,7 +64,7 @@ pub(crate) struct OwnedObject {
 impl OwnedState {
 	/// Turn this into the form `netcfgd-observe` consumes.
 	#[must_use]
-	pub(crate) fn to_prior(&self) -> PriorState {
+	pub fn to_prior(&self) -> PriorState {
 		PriorState {
 			created_links: self.created_links.clone(),
 			address_origins: self
@@ -86,7 +86,7 @@ impl OwnedState {
 	///
 	/// Removals are applied before additions so that replacing an address in
 	/// one plan leaves exactly one record, not zero.
-	pub(crate) fn absorb(&mut self, effects: &Effects) {
+	pub fn absorb(&mut self, effects: &Effects) {
 		self.created_links
 			.retain(|name| !effects.deleted_links.contains(name));
 		for name in &effects.created_links {
@@ -161,7 +161,7 @@ impl OwnedState {
 /// as empty is that netcfgd under-claims ownership, which is the safe
 /// direction.
 #[must_use]
-pub(crate) fn read_owned(run_dir: &Path) -> OwnedState {
+pub fn read_owned(run_dir: &Path) -> OwnedState {
 	let path = run_dir.join("owned.json");
 	fs::read_to_string(path)
 		.ok()
@@ -175,7 +175,7 @@ pub(crate) fn read_owned(run_dir: &Path) -> OwnedState {
 ///
 /// Returns an `io::Error` if the directory cannot be created or the file
 /// cannot be written.
-pub(crate) fn write_owned(run_dir: &Path, state: &OwnedState) -> io::Result<()> {
+pub fn write_owned(run_dir: &Path, state: &OwnedState) -> io::Result<()> {
 	let text = serde_json::to_string_pretty(state)
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 	write_atomic(&run_dir.join("owned.json"), &text)
@@ -186,7 +186,7 @@ pub(crate) fn write_owned(run_dir: &Path, state: &OwnedState) -> io::Result<()> 
 /// # Errors
 ///
 /// Returns an `io::Error`, or the model's own error rendered as one.
-pub(crate) fn write_desired(run_dir: &Path, document: &Document) -> io::Result<()> {
+pub fn write_desired(run_dir: &Path, document: &Document) -> io::Result<()> {
 	let text = document
 		.to_json_canonical()
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
@@ -198,7 +198,7 @@ pub(crate) fn write_desired(run_dir: &Path, document: &Document) -> io::Result<(
 /// # Errors
 ///
 /// Returns an `io::Error`.
-pub(crate) fn write_observed(run_dir: &Path, observed: &Observed) -> io::Result<()> {
+pub fn write_observed(run_dir: &Path, observed: &Observed) -> io::Result<()> {
 	let text = serde_json::to_string_pretty(observed)
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 	write_atomic(&run_dir.join("observed.json"), &text)
@@ -209,7 +209,7 @@ pub(crate) fn write_observed(run_dir: &Path, observed: &Observed) -> io::Result<
 /// # Errors
 ///
 /// Returns an `io::Error`.
-pub(crate) fn write_journal(run_dir: &Path, journal: &Journal) -> io::Result<()> {
+pub fn write_journal(run_dir: &Path, journal: &Journal) -> io::Result<()> {
 	let text = journal
 		.to_json()
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;

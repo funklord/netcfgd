@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Writes hook bodies under a directory and hashes them.
-pub(crate) struct RunHooks {
+pub struct RunHooks {
 	dir: PathBuf,
 	written: usize,
 }
@@ -20,7 +20,7 @@ pub(crate) struct RunHooks {
 impl RunHooks {
 	/// Materialise into `run_dir/hooks/`.
 	#[must_use]
-	pub(crate) fn new(run_dir: &std::path::Path) -> Self {
+	pub fn new(run_dir: &std::path::Path) -> Self {
 		Self {
 			dir: run_dir.join("hooks"),
 			written: 0,
@@ -104,7 +104,7 @@ fn phase_name(phase: HookPhase) -> &'static str {
 /// boundary against a chosen-prefix attacker.
 #[must_use]
 #[allow(clippy::many_single_char_names, clippy::too_many_lines)]
-pub(crate) fn sha256_hex(input: &[u8]) -> String {
+pub fn sha256_hex(input: &[u8]) -> String {
 	const K: [u32; 64] = [
 		0x428a_2f98,
 		0x7137_4491,
