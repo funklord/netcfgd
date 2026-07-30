@@ -16,6 +16,8 @@
 //! testable against synthetic dumps with no kernel present. [`current`] is the
 //! thin wrapper that fetches real ones.
 
+pub mod host;
+
 use netcfgd_model::route::NETCFGD_PROTO;
 use netcfgd_model::{
 	Observed, ObservedAddress, ObservedBackend, ObservedLink, ObservedRoute, Origin, Ownership,
@@ -40,6 +42,8 @@ pub struct PriorState {
 	pub backends: Vec<ObservedBackend>,
 	/// DNS scopes netcfgd has delivered.
 	pub dns: Vec<netcfgd_model::AppliedDns>,
+	/// Interfaces netcfgd turned IP forwarding on for.
+	pub forwarding: Vec<String>,
 	/// Prefixes a `DHCPv6` client reported, read from `/run`.
 	///
 	/// Prior state rather than a kernel read because a delegated prefix is not
@@ -97,6 +101,9 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 			// The kernel has no protocol field for links, so this can only
 			// come from what netcfgd wrote down. A link nobody recorded is
 			// never deleted, which is the conservative direction.
+			// Not in the netlink snapshot; filled in by `host::augment`,
+			// which is why `build` can stay pure.
+			forwarding: None,
 			ownership: if prior.created_links.contains(&link.name) {
 				Ownership::Ours
 			} else {
@@ -155,6 +162,9 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		.collect();
 
 	let mut observed = Observed {
+		nat: Vec::new(),
+		nat_conflicts: Vec::new(),
+		forwarding_applied: prior.forwarding.clone(),
 		links,
 		addresses,
 		routes,
@@ -210,7 +220,9 @@ fn address_ownership(proto: Option<u8>, proto_supported: bool, recorded: bool) -
 /// Returns the underlying `io::Error` from the netlink socket.
 pub fn current(prior: &PriorState) -> io::Result<Observed> {
 	let snapshot = netcfgd_netlink::snapshot()?;
-	Ok(build(&snapshot, prior))
+	let mut observed = build(&snapshot, prior);
+	host::augment(&mut observed);
+	Ok(observed)
 }
 
 #[cfg(test)]

@@ -198,6 +198,7 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 			lifetime: Some(1800),
 		}),
 		forwarding: Some(true),
+		nat: Some(true),
 		guard: Some(Guard {
 			reason: "nfs".to_owned(),
 		}),

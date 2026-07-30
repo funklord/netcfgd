@@ -586,8 +586,29 @@ pub struct Interface {
 	/// for NAT, on the grounds that translating addresses is addressing --
 	/// deciding which packets may pass is security policy, which this project
 	/// has no model of and does not want one.
+	///
+	/// Set on the interface packets *arrive* on, which is the LAN side of a
+	/// router and not the uplink -- the kernel decides whether to forward from
+	/// the ingress device's setting. Both `net.ipv4.conf.<name>.forwarding` and
+	/// the IPv6 equivalent are written, and the IPv6 one has a consequence
+	/// worth knowing: a forwarding interface stops accepting router
+	/// advertisements, because a router is not supposed to be autoconfigured by
+	/// its neighbours.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub forwarding: Option<bool>,
+	/// Masquerade traffic leaving this interface.
+	///
+	/// The uplink side of a router: every packet going out here leaves with
+	/// this interface's address, so a LAN behind it reaches the internet from
+	/// one address. This is the *only* packet-level rule netcfgd writes, and
+	/// decision 0022 draws the line at it -- translating addresses is
+	/// addressing, filtering is security policy.
+	///
+	/// It is the other half of [`Interface::forwarding`] and neither works
+	/// alone. Forwarding without NAT sends private addresses at the internet;
+	/// NAT without forwarding translates packets the kernel already dropped.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub nat: Option<bool>,
 	/// Something outside netcfgd depends on this interface.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub guard: Option<Guard>,

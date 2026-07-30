@@ -183,6 +183,7 @@ fn expand_members(
 			dot1x: None,
 			advertise: None,
 			forwarding: None,
+			nat: None,
 			guard: None,
 			ipv6_token: None,
 			link_settings: None,
@@ -1297,6 +1298,7 @@ fn lower_interface(
 		routes: Vec::new(),
 		dns: None,
 		hooks: Vec::new(),
+		nat: None,
 		on_drift: None,
 		master: None,
 		dot1x: None,
@@ -1415,6 +1417,7 @@ fn lower_interface(
 				}
 				"master" => interface.master = as_string(&assignment.value, diags),
 				"forwarding" => interface.forwarding = as_bool(&assignment.value, diags),
+				"nat" => interface.nat = as_bool(&assignment.value, diags),
 				"on_drift" => interface.on_drift = as_drift(&assignment.value, diags),
 				"guard" => {
 					provenance.record(sources, field_path(&name, "guard"), assignment.span);
