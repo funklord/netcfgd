@@ -1,9 +1,15 @@
 //! The schema freeze, as a test.
 //!
-//! M4 freezes the document schema. A declaration is not enforcement: a field
-//! renamed in a refactor, an enum variant reordered, a `skip_serializing_if`
-//! added -- each changes what a consumer reads and none of them looks like a
-//! breaking change in a diff.
+//! M4 freezes the document schema, and the freeze is about *this* codebase
+//! rather than about anybody else's. Project.md section 8: "the model freezes
+//! before any adapter exists, so no adapter can shape it." The NM shim and the
+//! TUI arrive later and will both want a field bent their way; the point is
+//! that bending one has to be a decision rather than a diff.
+//!
+//! Nothing consumes the format yet, so a change to it breaks nothing. What the
+//! witness buys is visibility: a field renamed in a refactor, a variant
+//! reordered, a `skip_serializing_if` added -- none of them looks like a
+//! schema change in a diff, and all of them are one.
 //!
 //! So the frozen surface is written down as a *witness*: one document with
 //! every field populated and every variant present, serialised and checked in
@@ -500,8 +506,9 @@ fn witness() -> Document {
 /// The frozen surface, byte for byte.
 ///
 /// If this fails and the change was intended, `make schema-bless` rewrites the
-/// witness -- and the commit has to say why, because after M4 a change here is
-/// either a minor bump (a field added) or a major one (anything else).
+/// witness and the commit says why. Nothing reads the format yet, so that is
+/// the whole cost -- the gate exists to make the change visible, not to make
+/// it expensive.
 #[test]
 fn the_schema_matches_its_witness() {
 	let document = witness();
@@ -529,18 +536,21 @@ fn the_schema_matches_its_witness() {
 		// would bury the one that changed.
 		let (line, before, after) = first_difference(&expected, &rendered);
 		panic!(
-			"the document schema has changed, and M4 froze it.\n\
+			"the document schema has changed.\n\
 			 \n\
 			 first difference at line {line}:\n\
 			 \x20 was: {before}\n\
 			 \x20 now: {after}\n\
 			 \n\
-			 A field added is a minor bump and is allowed. Anything else -- a\n\
-			 rename, a removal, a changed type, a variant reordered -- is a major\n\
-			 bump, and every consumer of the document format refuses to read it.\n\
+			 Nothing reads this format yet, so the change breaks nothing and is\n\
+			 cheap. The gate is here to make it visible: run `make schema-bless`\n\
+			 and say in the commit what moved and why.\n\
 			 \n\
-			 If the change is intended: bump SCHEMA_VERSION, run\n\
-			 `make schema-bless`, and say in the commit which kind it is."
+			 The one thing to weigh is whose idea the change was. M4 froze the\n\
+			 model so that a later adapter -- the NM shim, the TUI -- cannot\n\
+			 quietly reshape it to suit itself (project.md section 8). A change\n\
+			 that comes from the network is ordinary; one that comes from a\n\
+			 consumer's convenience is the thing the freeze is for."
 		);
 	}
 }
@@ -570,14 +580,28 @@ fn the_witness_round_trips() {
 	assert_eq!(parsed.to_json_canonical().expect("re-serialises"), rendered);
 }
 
-/// The freeze is on the major version. A minor bump adds fields and stays
-/// readable; a major one does not, and that is the line this test draws.
+/// A document from a future major is refused rather than half-read.
+///
+/// The mechanism, not the ceremony. There is nothing to be compatible with
+/// yet, so the version number is not doing work and this does not assert what
+/// it is -- what matters is that `from_json` still declines a document it
+/// cannot claim to understand, which is the behaviour a rolling upgrade will
+/// need whenever there is finally something to roll.
 #[test]
-fn the_frozen_major_version_is_one() {
-	assert_eq!(
-		netcfgd_model::SCHEMA_VERSION.major,
+fn a_document_from_a_future_major_is_refused() {
+	// Patched in the text rather than the struct: the *serialiser* validates
+	// the major too, so a future-major document cannot be produced by this
+	// build at all. Which is itself the right behaviour -- and means the only
+	// way to test the reader is to hand it bytes this build would not write.
+	let text = witness().to_json_canonical().expect("serialises").replacen(
+		"\"major\": 1",
+		"\"major\": 2",
 		1,
-		"M4 froze the schema at major 1. Changing this is not a refactor: every \
-		 consumer of the document format refuses a document whose major differs."
+	);
+
+	let error = Document::from_json(&text).expect_err("a future major must be refused");
+	assert!(
+		matches!(error, netcfgd_model::Error::SchemaMajor { .. }),
+		"got {error:?}"
 	);
 }

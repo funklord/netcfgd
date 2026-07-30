@@ -1,9 +1,9 @@
 //! The socket API freeze, as a test.
 //!
-//! M4 freezes the socket contract alongside the document schema, and for a
-//! sharper reason: the document is read by netcfgd, but the socket is read by
-//! anything anybody wrote against it. A renamed request is a client that stops
-//! working, with no version to have told it so.
+//! M4 freezes the socket contract alongside the document schema. Nothing
+//! speaks it yet, so a change breaks nothing today -- the witness is here to
+//! make a change visible, and because the socket is the surface most likely to
+//! be reshaped by whatever is written against it next.
 //!
 //! Same mechanism as `netcfgd-model`'s witness: every request, response and
 //! event serialised into `docs/schema/socket.json`, and any change to the wire
@@ -187,17 +187,16 @@ fn the_socket_api_matches_its_witness() {
 			|(index, (left, right))| format!("line {}:\n  was: {left}\n  now: {right}", index + 1),
 		);
 		panic!(
-			"the socket API has changed, and M4 froze it.\n\
+			"the socket API has changed.\n\
 			 \n\
 			 {detail}\n\
 			 \n\
-			 Unlike the document schema, this is read by clients nobody here\n\
-			 controls -- a renamed request is somebody's tooling breaking with no\n\
-			 version to have warned them. Adding a request or a field is a minor\n\
-			 bump; anything else is major.\n\
+			 Nothing speaks this protocol yet, so the change is cheap. Run\n\
+			 `make schema-bless` and say in the commit what moved.\n\
 			 \n\
-			 If intended: bump PROTOCOL_VERSION, run `make schema-bless`, and say\n\
-			 in the commit which kind it is."
+			 Worth a moment's thought all the same: this is the surface a client\n\
+			 is written against, and the first one written will fix its shape\n\
+			 harder than any version number would."
 		);
 	}
 }
@@ -237,12 +236,19 @@ fn no_message_spans_two_lines() {
 	}
 }
 
-/// The freeze is on the major version.
+/// `Hello` reports both versions, so a client that asks can tell.
+///
+/// Not an assertion about what the numbers are -- there is nothing to be
+/// compatible with yet. What is worth pinning is that the handshake exists and
+/// carries both, because a client written before the first real change is the
+/// one that will need it.
 #[test]
-fn the_frozen_protocol_major_is_one() {
-	assert_eq!(
-		netcfgd_proto::PROTOCOL_VERSION.major,
-		1,
-		"M4 froze the socket API at major 1"
-	);
+fn the_handshake_reports_both_versions() {
+	let hello = Response::Hello {
+		protocol: netcfgd_proto::PROTOCOL_VERSION,
+		schema: netcfgd_model::SCHEMA_VERSION,
+	};
+	let text = serde_json::to_string(&hello).expect("serialises");
+	assert!(text.contains("\"protocol\""), "got: {text}");
+	assert!(text.contains("\"schema\""), "got: {text}");
 }
