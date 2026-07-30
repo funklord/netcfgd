@@ -22,7 +22,7 @@ use netcfgd_model::route::NETCFGD_PROTO;
 use netcfgd_model::{
 	Observed, ObservedAddress, ObservedBackend, ObservedLink, ObservedRoute, Origin, Ownership,
 };
-use netcfgd_netlink::Snapshot;
+use netcfgd_sys::Snapshot;
 use std::io;
 
 /// What netcfgd recorded about its own past actions.
@@ -84,7 +84,7 @@ fn link_name(snapshot: &Snapshot, index: u32) -> Option<&str> {
 
 /// One link, with everything the dumps and the recorded state say about it.
 fn observed_link(
-	link: &netcfgd_netlink::LinkRecord,
+	link: &netcfgd_sys::LinkRecord,
 	snapshot: &Snapshot,
 	prior: &PriorState,
 ) -> ObservedLink {
@@ -123,7 +123,7 @@ fn observed_link(
 }
 
 /// The root qdisc on one link, from the dump.
-fn root_qdisc(snapshot: &Snapshot, index: u32) -> Option<&netcfgd_netlink::qdisc::QdiscRecord> {
+fn root_qdisc(snapshot: &Snapshot, index: u32) -> Option<&netcfgd_sys::qdisc::QdiscRecord> {
 	snapshot
 		.qdiscs
 		.roots
@@ -261,7 +261,7 @@ fn address_ownership(proto: Option<u8>, proto_supported: bool, recorded: bool) -
 ///
 /// Returns the underlying `io::Error` from the netlink socket.
 pub fn current(prior: &PriorState) -> io::Result<Observed> {
-	let snapshot = netcfgd_netlink::snapshot()?;
+	let snapshot = netcfgd_sys::snapshot()?;
 	let mut observed = build(&snapshot, prior);
 	host::augment(&mut observed);
 	Ok(observed)
@@ -270,7 +270,7 @@ pub fn current(prior: &PriorState) -> io::Result<Observed> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use netcfgd_netlink::{AddressRecord, LinkRecord, RouteRecord};
+	use netcfgd_sys::{AddressRecord, LinkRecord, RouteRecord};
 
 	fn link(index: u32, name: &str) -> LinkRecord {
 		LinkRecord {
@@ -294,15 +294,15 @@ mod tests {
 		}
 	}
 
-	/// The constant is duplicated in `netcfgd-netlink`, which cannot depend on
+	/// The constant is duplicated in `netcfgd-sys`, which cannot depend on
 	/// the model. If the two ever disagree, every route netcfgd installed
 	/// becomes foreign to it and drift detection silently stops working.
 	#[test]
 	fn the_two_copies_of_the_protocol_constant_agree() {
-		assert_eq!(NETCFGD_PROTO, netcfgd_netlink::wire::netcfgd_proto());
+		assert_eq!(NETCFGD_PROTO, netcfgd_sys::wire::netcfgd_proto());
 		assert_eq!(
 			netcfgd_model::route::MAIN_TABLE,
-			netcfgd_netlink::ops::RT_TABLE_MAIN
+			netcfgd_sys::ops::RT_TABLE_MAIN
 		);
 	}
 
@@ -375,7 +375,7 @@ mod tests {
 	#[test]
 	fn a_snapshot_becomes_a_model_with_names_resolved() {
 		let snapshot = Snapshot {
-			qdiscs: netcfgd_netlink::qdisc::QdiscDump::default(),
+			qdiscs: netcfgd_sys::qdisc::QdiscDump::default(),
 			redirects: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
@@ -440,7 +440,7 @@ mod tests {
 		orphan.master = Some(99);
 
 		let snapshot = Snapshot {
-			qdiscs: netcfgd_netlink::qdisc::QdiscDump::default(),
+			qdiscs: netcfgd_sys::qdisc::QdiscDump::default(),
 			redirects: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![member, link(3, "br0"), orphan],
@@ -459,7 +459,7 @@ mod tests {
 	#[test]
 	fn an_address_with_no_matching_link_is_dropped() {
 		let snapshot = Snapshot {
-			qdiscs: netcfgd_netlink::qdisc::QdiscDump::default(),
+			qdiscs: netcfgd_sys::qdisc::QdiscDump::default(),
 			redirects: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0")],
@@ -475,7 +475,7 @@ mod tests {
 	#[test]
 	fn only_recorded_links_are_ours() {
 		let snapshot = Snapshot {
-			qdiscs: netcfgd_netlink::qdisc::QdiscDump::default(),
+			qdiscs: netcfgd_sys::qdisc::QdiscDump::default(),
 			redirects: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],

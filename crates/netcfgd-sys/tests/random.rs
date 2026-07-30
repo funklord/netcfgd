@@ -6,9 +6,9 @@
 //! committing from is a check that rots. Seeds are fixed, so a failure here is
 //! reproducible rather than a flaky CI run.
 
-use netcfgd_netlink::dump::{decode_address, decode_link, decode_route};
-use netcfgd_netlink::genl::{payload_attrs, GenlHeader};
-use netcfgd_netlink::wire::{
+use netcfgd_sys::dump::{decode_address, decode_link, decode_route};
+use netcfgd_sys::genl::{payload_attrs, GenlHeader};
+use netcfgd_sys::wire::{
 	error_code, ifla, msg_type, AttrBuf, Attrs, Header, IfAddr, IfInfo, Messages, RtMsg,
 };
 
@@ -53,9 +53,7 @@ fn exercise(data: &[u8]) {
 		"attribute iteration did not terminate"
 	);
 	assert!(
-		netcfgd_netlink::inotify::Events::new(data)
-			.take(10_000)
-			.count() < 10_000,
+		netcfgd_sys::inotify::Events::new(data).take(10_000).count() < 10_000,
 		"inotify event iteration did not terminate"
 	);
 	for message in Messages::new(data).take(10_000) {
@@ -116,7 +114,7 @@ fn mutated_valid_messages_never_panic() {
 
 	let mut body = Vec::new();
 	IfInfo::default().encode(&mut body);
-	let template = netcfgd_netlink::wire::build_request(msg_type::RTM_NEWLINK, 0, 1, &body, &attrs);
+	let template = netcfgd_sys::wire::build_request(msg_type::RTM_NEWLINK, 0, 1, &body, &attrs);
 
 	let mut rng = Rng(0x2026_0729_0000_0002);
 	for _ in 0..4_000 {

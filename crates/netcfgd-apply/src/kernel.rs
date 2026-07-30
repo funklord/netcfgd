@@ -3,9 +3,9 @@
 use crate::Executor;
 use netcfgd_model::route::NETCFGD_PROTO;
 use netcfgd_model::{InterfaceKind, Origin};
-use netcfgd_netlink::ops::RT_TABLE_MAIN;
-use netcfgd_netlink::{parse_mac, Netlink, NewLink, RouteSpec};
 use netcfgd_plan::{net, Op};
+use netcfgd_sys::ops::RT_TABLE_MAIN;
+use netcfgd_sys::{parse_mac, Netlink, NewLink, RouteSpec};
 use std::process::Command;
 
 /// What the executor did that the next observation cannot work out for itself.
@@ -51,7 +51,7 @@ pub struct KernelExecutor {
 	/// make every netcfgd hold a `NETLINK_NETFILTER` socket, and would turn a
 	/// kernel built without `nf_tables` into a startup failure for a daemon
 	/// that was never going to write a rule.
-	nft: Option<netcfgd_netlink::nft::Nft>,
+	nft: Option<netcfgd_sys::nft::Nft>,
 	indices: Vec<(String, u32)>,
 	/// Every DNS scope the document declares.
 	///
@@ -107,7 +107,7 @@ impl KernelExecutor {
 	pub fn new() -> std::io::Result<Self> {
 		let mut socket = Netlink::open()?;
 		socket.set_timeout(5)?;
-		let snapshot = netcfgd_netlink::snapshot_with(&mut socket)?;
+		let snapshot = netcfgd_sys::snapshot_with(&mut socket)?;
 		Ok(Self {
 			socket,
 			nft: None,
@@ -315,7 +315,7 @@ impl KernelExecutor {
 				),
 				None => None,
 			};
-			peers.push(netcfgd_netlink::wg::Peer {
+			peers.push(netcfgd_sys::wg::Peer {
 				public_key: *peer.public_key.as_bytes(),
 				preshared_key: preshared,
 				endpoint,
@@ -328,11 +328,11 @@ impl KernelExecutor {
 			});
 		}
 
-		let mut genl = netcfgd_netlink::Genl::open()
+		let mut genl = netcfgd_sys::Genl::open()
 			.map_err(|error| format!("cannot open a generic netlink socket: {error}"))?;
-		netcfgd_netlink::wg::set_device(
+		netcfgd_sys::wg::set_device(
 			&mut genl,
-			&netcfgd_netlink::wg::Device {
+			&netcfgd_sys::wg::Device {
 				name: name.to_owned(),
 				private_key: private,
 				listen_port: config.listen_port,
@@ -362,7 +362,7 @@ impl KernelExecutor {
 		if let Some((_, index)) = self.indices.iter().find(|(iface, _)| iface == name) {
 			return Ok(*index);
 		}
-		let snapshot = netcfgd_netlink::snapshot_with(&mut self.socket)
+		let snapshot = netcfgd_sys::snapshot_with(&mut self.socket)
 			.map_err(|error| format!("could not re-read interfaces: {error}"))?;
 		self.indices = snapshot
 			.links
@@ -434,7 +434,7 @@ impl Executor for KernelExecutor {
 					self.socket
 						.set_bridge_attrs(
 							index,
-							netcfgd_netlink::ops::BridgeAttrs {
+							netcfgd_sys::ops::BridgeAttrs {
 								stp: bridge.stp,
 								forward_delay: bridge.forward_delay,
 								hello_time: bridge.hello_time,
@@ -580,7 +580,7 @@ impl Executor for KernelExecutor {
 				self.socket
 					.set_bridge_vlan(
 						index,
-						netcfgd_netlink::ops::VlanChange {
+						netcfgd_sys::ops::VlanChange {
 							vid: *vid,
 							pvid: *pvid,
 							untagged: *untagged,
@@ -613,7 +613,7 @@ impl Executor for KernelExecutor {
 				self.socket
 					.set_bridge_vlan(
 						index,
-						netcfgd_netlink::ops::VlanChange {
+						netcfgd_sys::ops::VlanChange {
 							vid: *vid,
 							pvid: false,
 							untagged: false,
@@ -693,10 +693,10 @@ impl Executor for KernelExecutor {
 				ingress,
 			} => {
 				let index = self.index_of(iface)?;
-				netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket)
+				netcfgd_sys::qdisc::Qdisc::new(&mut self.socket)
 					.set_root(
 						index,
-						&netcfgd_netlink::qdisc::RootQdisc {
+						&netcfgd_sys::qdisc::RootQdisc {
 							kind,
 							bandwidth_bits: *bandwidth_bits,
 							ingress: *ingress,
@@ -717,7 +717,7 @@ impl Executor for KernelExecutor {
 			}
 			Op::QdiscReset { iface } => {
 				let index = self.index_of(iface)?;
-				netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket)
+				netcfgd_sys::qdisc::Qdisc::new(&mut self.socket)
 					.delete_root(index)
 					.map_err(|error| {
 						format!("cannot restore the default qdisc on {iface}: {error}")
@@ -728,7 +728,7 @@ impl Executor for KernelExecutor {
 			Op::IngressRedirect { iface, target } => {
 				let index = self.index_of(iface)?;
 				let target_index = self.index_of(target)?;
-				let mut tc = netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket);
+				let mut tc = netcfgd_sys::qdisc::Qdisc::new(&mut self.socket);
 				// The hook first, then the filter that hangs off it: the
 				// kernel has nowhere to put a classifier until the ingress
 				// qdisc exists, and the error for that says only EINVAL.
@@ -752,7 +752,7 @@ impl Executor for KernelExecutor {
 				let index = self.index_of(iface)?;
 				// Removing the hook takes every filter on it, so there is
 				// nothing to delete separately.
-				netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket)
+				netcfgd_sys::qdisc::Qdisc::new(&mut self.socket)
 					.delete_ingress(index)
 					.map_err(|error| {
 						format!("cannot remove the ingress hook from {iface}: {error}")
@@ -768,7 +768,7 @@ impl Executor for KernelExecutor {
 			Op::NatReplace { uplinks } => {
 				let nft = match &mut self.nft {
 					Some(nft) => nft,
-					slot => slot.insert(netcfgd_netlink::nft::Nft::open().map_err(|error| {
+					slot => slot.insert(netcfgd_sys::nft::Nft::open().map_err(|error| {
 						format!(
 							"cannot reach nftables: {error}. NAT needs `nf_tables` in the \
 							 kernel and CAP_NET_ADMIN in this namespace"
@@ -778,7 +778,7 @@ impl Executor for KernelExecutor {
 				nft.replace_nat(uplinks).map_err(|error| {
 					format!(
 						"could not replace the `{}` table: {error}",
-						netcfgd_netlink::nft::TABLE
+						netcfgd_sys::nft::TABLE
 					)
 				})
 			}

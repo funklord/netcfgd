@@ -77,7 +77,7 @@ This record amends 0022, which said of NAT:
 `size-budget.txt` repeated it: NAT is "the one to reach for first when the
 install has to shrink".
 
-**Measured: `netcfgd-netlink` is 11,904 bytes of symbols in total.** That crate
+**Measured: `netcfgd-sys` is 11,904 bytes of symbols in total.** That crate
 holds the nftables encoder, the qdisc and filter encoders, the WireGuard and
 generic-netlink layers, the ifb plumbing and every rtnetlink message. All of
 it, twelve kilobytes.
