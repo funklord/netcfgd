@@ -13,6 +13,13 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[features]
+# `ncfg tui`. On by default; off builds a client that links nothing beyond
+# libc, which is what constraint 3 asks of the core and what design section
+# 10.2's embedded tier has always listed the TUI as removable from.
+default = ["tui"]
+tui = ["netcfgd-netlink/tui"]
+
 [dependencies]
 netcfgd-apply   = { path = "../netcfgd-apply" }
 netcfgd-compile = { path = "../netcfgd-compile" }
