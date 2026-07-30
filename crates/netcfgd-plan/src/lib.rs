@@ -123,17 +123,12 @@ impl Plan {
 /// is not that a feature does nothing -- that is intended and recorded -- but
 /// that it does nothing *silently*, so a plan reports "one action" about a
 /// config that asked for several things.
+///
+/// The list has shrunk as the M4 freeze's inert features were built. What is
+/// left is the half of the `ethtool` block that needs a physical NIC, and the
+/// parts of an access point that hostapd can do and the schema cannot say.
 fn warn_unapplied(builder: &mut Builder, desired: &Document) {
-	for access_point in &desired.access_points {
-		builder.warnings.push(Warning {
-			message: format!(
-				"access point `{}` is in the configuration but this build cannot run one; \
-				 it is recognised, not applied",
-				access_point.id
-			),
-			interface: Some(access_point.device.clone()),
-		});
-	}
+	warn_access_points(builder, desired);
 	for interface in &desired.interfaces {
 		// The offloads are applied; the rest of the `ethtool` block is not, and
 		// says so field by field rather than as one blanket sentence -- an
@@ -171,6 +166,78 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	}
 }
 
+/// Say what an access point asks for that will not happen.
+///
+/// Three things, each of which produces an access point that looks configured
+/// and is not -- which is the failure this whole function exists to prevent.
+/// None of them is an error: the document is valid, and a later release or a
+/// second `interface` block makes each one work.
+fn warn_access_points(builder: &mut Builder, desired: &Document) {
+	for access_point in &desired.access_points {
+		let device = &access_point.device;
+
+		// hostapd is started as an interface's prerequisite, and an interface
+		// that is not in the document is never passed over.
+		if !desired
+			.interfaces
+			.iter()
+			.any(|interface| &interface.name == device)
+		{
+			builder.warnings.push(Warning {
+				message: format!(
+					"access point `{}` runs on `{device}`, which has no `interface` block, so \
+					 nothing brings the radio up and nothing starts hostapd on it. Adding \
+					 `interface {device} {{ }}` is enough",
+					access_point.id
+				),
+				interface: Some(device.clone()),
+			});
+		}
+
+		// One radio, one BSS. Multiple would be `bss=` sections in hostapd's
+		// configuration, each with its own security -- which is a real feature
+		// and not one that can be written without a radio to try it on.
+		//
+		// Warned from the first access point on the device rather than from
+		// each of them, so a radio with three gets one warning naming the two
+		// that are ignored. `access_points` is sorted by id (section 2.1), so
+		// "the first" is a stable answer rather than whichever the compiler
+		// happened to emit first.
+		let mut on_device = desired
+			.access_points
+			.iter()
+			.filter(|other| &other.device == device);
+		let first = on_device.next().map(|other| other.id.as_str());
+		let ignored: Vec<&str> = on_device.map(|other| other.id.as_str()).collect();
+		if first == Some(access_point.id.as_str()) && !ignored.is_empty() {
+			builder.warnings.push(Warning {
+				message: format!(
+					"`{device}` has more than one access point and this build runs one BSS \
+					 per radio, so `{}` is started and `{}` {} not",
+					access_point.id,
+					ignored.join("`, `"),
+					if ignored.len() == 1 { "is" } else { "are" }
+				),
+				interface: Some(device.clone()),
+			});
+		}
+
+		// Both halves of a radio at once needs two virtual interfaces on the
+		// phy, which is a thing netcfgd does not create.
+		if builder.radios.iter().any(|name| name == device) && builder.has_networks {
+			builder.warnings.push(Warning {
+				message: format!(
+					"`{device}` runs the `{}` access point, so it is not also joining the \
+					 configured networks -- one radio does both only with a second virtual \
+					 interface, which netcfgd does not create",
+					access_point.id
+				),
+				interface: Some(device.clone()),
+			});
+		}
+	}
+}
+
 /// Compute what would have to change for `observed` to satisfy `desired`.
 #[must_use]
 pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> Plan {
@@ -182,14 +249,6 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// Collected before anything is planned, because a guard on one interface
 	// has to be known when an action against it is considered, whatever order
 	// the interfaces sort in.
-	// The two features that are in the schema and not in the build. Warned at
-	// plan time rather than refused at compile time: the config is valid and
-	// will mean something in a later release, so rejecting the document would
-	// make an upgrade path into a rewrite. What must not happen is silence --
-	// a plan that omits them without saying so reports "nothing to do" about
-	// a config that asks for two things.
-	warn_unapplied(&mut builder, desired);
-
 	builder.appearing = desired
 		.interfaces
 		.iter()
@@ -206,6 +265,23 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		.map(|device| device.name.clone())
 		.collect();
 	builder.has_networks = !desired.networks.is_empty();
+	builder.access_point_devices = desired
+		.access_points
+		.iter()
+		.map(|access_point| access_point.device.clone())
+		.collect();
+
+	// What the document asks for that this build does not do. Warned at plan
+	// time rather than refused at compile time: the config is valid and will
+	// mean something in a later release, so rejecting the document would make
+	// an upgrade path into a rewrite. What must not happen is silence -- a plan
+	// that omits something without saying so reports "nothing to do" about a
+	// config that asked for two things.
+	//
+	// After the collections above, not before: it asks whether a device is a
+	// radio and whether there are networks to join, and reading those while
+	// they were still empty made one of its three warnings unreachable.
+	warn_unapplied(&mut builder, desired);
 
 	for interface in &desired.interfaces {
 		if let Some(guard) = &interface.guard {
@@ -310,6 +386,13 @@ struct Builder {
 	/// would be given nothing is a process running for no reason, and it makes
 	/// `ncfg status` report a backend nothing asked for.
 	has_networks: bool,
+	/// Devices that run an access point, in document order.
+	///
+	/// The device names rather than the access points themselves: the planner
+	/// decides *that* hostapd runs on a radio, and the executor -- which has the
+	/// document -- decides what it is told. A plan that carried the SSID and the
+	/// channel would be a second copy of the configuration to keep in step.
+	access_point_devices: Vec<String>,
 }
 
 impl Builder {
@@ -523,11 +606,12 @@ impl Builder {
 
 	/// The backend an interface needs before it can carry anything.
 	///
-	/// Three cases and one shape: an 802.1X port has not authenticated, a
-	/// radio has not associated, and a PPP interface does not exist. All three
-	/// are prerequisites rather than addressing, and all three go in the same
-	/// place in the order -- before any address, because a client started
-	/// first spends its backoff talking to something that is not listening.
+	/// Four cases and one shape: an 802.1X port has not authenticated, a radio
+	/// is not running its access point, a radio has not associated, and a PPP
+	/// interface does not exist. All four are prerequisites rather than
+	/// addressing, and all four go in the same place in the order -- before any
+	/// address, because a client started first spends its backoff talking to
+	/// something that is not listening.
 	fn plan_prerequisite(
 		&mut self,
 		interface: &Interface,
@@ -539,6 +623,24 @@ impl Builder {
 		}
 		if matches!(interface.kind, InterfaceKind::Pppoe(_)) {
 			return self.plan_backend(interface, BackendKind::Pppoe, "pppoe", observed, base);
+		}
+		// Before the supplicant, because a radio that runs an access point does
+		// not also join networks with the same interface. The warning that says
+		// so is emitted once, up front, rather than here -- this runs per
+		// interface and per plan, and a warning that repeats is one people
+		// learn to page past.
+		if self
+			.access_point_devices
+			.iter()
+			.any(|name| name == &interface.name)
+		{
+			return self.plan_backend(
+				interface,
+				BackendKind::AccessPoint,
+				"access_point",
+				observed,
+				base,
+			);
 		}
 		if self.radios.iter().any(|name| name == &interface.name) && self.has_networks {
 			// The field named is the `device` block's, not the interface's,
@@ -1772,6 +1874,17 @@ impl Builder {
 				self.supplicant_wanted(desired, &backend.interface),
 				"wifi/dot1x",
 			),
+			// The document still naming an access point on this device. Not
+			// "this device is a radio": a radio whose `access_point` block was
+			// deleted is exactly the case that has to stop hostapd, and the
+			// radio is still a radio.
+			BackendKind::AccessPoint => (
+				desired
+					.access_points
+					.iter()
+					.any(|access_point| access_point.device == backend.interface),
+				"access_point",
+			),
 			BackendKind::Dhcp4 => (
 				on_interface(&|interface| {
 					interface
@@ -1817,7 +1930,17 @@ impl Builder {
 			.interfaces
 			.iter()
 			.any(|interface| interface.name == iface && interface.dot1x.is_some());
-		dot1x || (self.radios.iter().any(|name| name == iface) && self.has_networks)
+		if dot1x {
+			return true;
+		}
+		// A radio that has been given an access point is not a station, so a
+		// supplicant left over from before the `access_point` block was written
+		// is unwanted. Without this arm the two backends would each be started
+		// by the pass that wants it and stopped by the pass that does not.
+		if self.access_point_devices.iter().any(|name| name == iface) {
+			return false;
+		}
+		self.radios.iter().any(|name| name == iface) && self.has_networks
 	}
 
 	fn teardown_backends(&mut self, desired: &Document, observed: &Observed) {

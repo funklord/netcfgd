@@ -17,5 +17,6 @@ netcfgd-sys = { path = "../netcfgd-sys" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
 netcfgd-secret  = { path = "../netcfgd-secret" }
 netcfgd-supplicant = { path = "../../backends/netcfgd-supplicant" }
+netcfgd-hostapd    = { path = "../../backends/netcfgd-hostapd" }
 serde.workspace      = true
 serde_json.workspace = true

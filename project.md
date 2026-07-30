@@ -450,6 +450,7 @@ netcfgd/
     netcfgd-cli/                # `ncfg` binary (incl. `ncfg tui`)
   backends/
     netcfgd-dhcp/  netcfgd-supplicant/  netcfgd-wg/  netcfgd-dns/  netcfgd-ppp/
+    netcfgd-hostapd/            # access points, added with M4's last inert feature
   adapters/
     netcfgd-nm/                 # milestone M7
     netcfgd-restconf/           # milestone M9 — LAST
@@ -497,6 +498,8 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 | **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). |
 | **M8** | Desktop | GUI + tray applet; NM shim tier 2. |
 | **M9** | **RESTCONF — last** | `netcfgd-restconf`: `ietf-interfaces`/`ietf-ip` mapping plus a netcfgd augment module, hooks read-only. Full NETCONF (SSH/XML) only if sites ask. |
+
+**The M4 freeze's four inert features are all closed**, after M6 rather than at M4 — the schema had to carry them before the freeze, the behaviour did not. Policy routing rules, `ipv6_token` and the ethtool offloads are netlink; access points are hostapd, configured by a generated file under `/run` ([0026](docs/decisions/0026-an-access-point-is-a-file-hostapd-reads.md)). What is still recognised and not applied is the half of the `ethtool` block that needs a physical NIC to exercise, and `ncfg plan` names those fields individually.
 
 **Consequence of M9 being last, stated plainly:** multi-host management arrives at the very end, because conforming to RESTCONF *is* the multi-host answer (design doc §11.1). That is a deliberate choice — this is a single-host tool first, and nothing before M9 should be shaped by fleet considerations.
 

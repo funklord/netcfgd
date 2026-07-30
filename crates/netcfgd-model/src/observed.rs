@@ -251,6 +251,8 @@ pub enum BackendKind {
 	Dhcp6,
 	/// A supplicant, for a radio or a wired 802.1X port.
 	Supplicant,
+	/// An access point this machine runs, rather than joins.
+	AccessPoint,
 	/// A `WireGuard` device.
 	WireGuard,
 	/// A `PPPoE` session.

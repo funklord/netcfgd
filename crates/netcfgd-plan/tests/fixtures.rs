@@ -1072,20 +1072,15 @@ fn removing_dot1x_stops_the_supplicant() {
 }
 
 /// The M4 freeze put four features in the schema that nothing implemented.
-/// Rules, `ipv6_token` and the ethtool offloads are built; access points and
-/// the rest of the ethtool block are not. The failure mode to
-/// guard against is not that they do nothing -- that is intended -- but that
-/// they do nothing *silently*, so a plan reports "one action" about a config
-/// that asked for several things.
+/// All four are built now; what remains unapplied is the half of the `ethtool`
+/// block that can only be exercised against a physical NIC. The failure mode
+/// to guard against is not that it does nothing -- that is intended -- but
+/// that it does nothing *silently*, so a plan reports "one action" about a
+/// config that asked for several things.
 #[test]
 fn recognised_but_unimplemented_features_are_named_in_the_plan() {
 	let document = document(
 		r#"
-access_point "guest" {
-	device = "wlan0"
-	wifi   { open = true }
-}
-
 interface eth0 {
 	ethtool { gro = "off"; speed = 1000; wol = "g" }
 	config = "null"
@@ -1103,12 +1098,11 @@ interface eth0 {
 		.map(|warning| warning.message.as_str())
 		.collect();
 
-	for expected in ["access point `guest`", "`speed`, `wol`"] {
-		assert!(
-			warnings.iter().any(|message| message.contains(expected)),
-			"nothing warned about {expected}: {warnings:?}"
-		);
-	}
+	let expected = "`speed`, `wol`";
+	assert!(
+		warnings.iter().any(|message| message.contains(expected)),
+		"nothing warned about {expected}: {warnings:?}"
+	);
 
 	// And each says which interface it concerns, where it concerns one -- a
 	// warning about `ethtool` on a host with twelve interfaces is not useful
@@ -1140,6 +1134,236 @@ fn a_document_using_none_of_them_gets_no_such_warnings() {
 			"warned about {unwanted} for a config that does not mention it"
 		);
 	}
+}
+
+/// An access point is a prerequisite, in the same place a supplicant is: after
+/// the link is up and before anything is addressed. hostapd needs the
+/// interface up to put a BSS on it, and a bridge member with no BSS is an
+/// interface that carries nothing.
+#[test]
+fn an_access_point_starts_after_the_link_is_up() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { } }
+
+access_point "guest" {
+	device  = "wlan0"
+	channel = 6
+	wifi    { open = true }
+}
+
+interface wlan0 { config = "192.168.9.1/24" }
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	let plan = settle(&desired, &mut observed);
+
+	assert_eq!(names(&plan), ["link.up", "backend.start", "addr.add"]);
+
+	let start = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "backend.start")
+		.expect("a start");
+	assert_eq!(
+		start.reason.field, "access_point",
+		"a backend started for `wifi` sends the reader to the wrong block"
+	);
+	let up = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "link.up")
+		.expect("a link.up");
+	assert!(
+		start.depends_on.contains(&up.id),
+		"hostapd was started without waiting for the link"
+	);
+}
+
+/// Deleting the block stops the access point. The radio is still a radio, so
+/// "is this device wireless" is the wrong question to ask here -- the right
+/// one is whether the document still names an access point on it.
+#[test]
+fn an_access_point_stops_when_its_block_goes() {
+	let desired = document(r#"interface wlan0 { config = "null" }"#);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: true,
+	});
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+
+	let stop = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "backend.stop")
+		.expect("a stop");
+	assert_eq!(stop.reason.field, "access_point");
+}
+
+/// One radio does not do both halves at once. Getting this wrong is not a
+/// missing feature but an oscillation: the access-point pass starts hostapd,
+/// the station pass wants a supplicant, and each reconcile stops what the last
+/// one started. `settle` is what catches that, by re-planning after applying.
+#[test]
+fn a_radio_running_an_access_point_does_not_also_join_networks() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { } }
+
+network "home" { wifi { psk = "@secret:home" } }
+
+access_point "guest" {
+	device = "wlan0"
+	wifi   { open = true }
+}
+
+interface wlan0 { config = "192.168.9.1/24" }
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	let plan = settle(&desired, &mut observed);
+
+	let starts: Vec<&Op> = plan
+		.actions
+		.iter()
+		.map(|action| &action.op)
+		.filter(|op| op.name() == "backend.start")
+		.collect();
+	assert_eq!(starts.len(), 1, "{starts:?}");
+	assert!(
+		matches!(
+			starts[0],
+			Op::BackendStart {
+				kind: BackendKind::AccessPoint,
+				..
+			}
+		),
+		"{starts:?}"
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("not also joining")),
+		"nothing said the station side was dropped: {:?}",
+		plan.warnings
+	);
+}
+
+/// Turning a station into an access point stops the supplicant.
+///
+/// The case the arm above cannot see. A radio that was joining networks has a
+/// supplicant *running*, and adding an `access_point` block has to take it
+/// away -- otherwise the radio has a supplicant trying to associate and
+/// hostapd trying to beacon on the same interface, which is a fight the
+/// operator did not ask for and neither pass would ever resolve.
+#[test]
+fn a_radio_promoted_to_an_access_point_loses_its_supplicant() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { } }
+
+network "home" { wifi { psk = "@secret:home" } }
+
+access_point "guest" {
+	device = "wlan0"
+	wifi   { open = true }
+}
+
+interface wlan0 { config = "null" }
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::Supplicant,
+		interface: "wlan0".to_owned(),
+		running: true,
+	});
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+
+	let stopped: Vec<&Op> = plan
+		.actions
+		.iter()
+		.map(|action| &action.op)
+		.filter(|op| op.name() == "backend.stop")
+		.collect();
+	assert!(
+		matches!(
+			stopped.as_slice(),
+			[Op::BackendStop {
+				kind: BackendKind::Supplicant,
+				..
+			}]
+		),
+		"the supplicant was left running alongside hostapd: {stopped:?}"
+	);
+}
+
+/// An access point on a device with no `interface` block is configured and
+/// unreachable: nothing brings the radio up, so nothing starts hostapd. That
+/// is a plan with no actions in it, which without a warning reads as "already
+/// correct".
+#[test]
+fn an_access_point_needs_an_interface_block_to_run_on() {
+	let desired = document(
+		r#"
+access_point "guest" {
+	device = "wlan0"
+	wifi   { open = true }
+}
+"#,
+	);
+	let plan = plan(
+		&desired,
+		&observed_with(&["wlan0"]),
+		&PlanOptions::default(),
+	);
+
+	assert!(plan.is_empty(), "{:?}", names(&plan));
+	let warning = plan
+		.warnings
+		.iter()
+		.find(|warning| warning.message.contains("no `interface` block"))
+		.expect("a warning about the missing interface block");
+	assert_eq!(warning.interface.as_deref(), Some("wlan0"));
+}
+
+/// Two access points on one radio needs multiple BSSes, which this build does
+/// not have. The plan and the executor have to agree on *which* one runs, or
+/// the plan names one and hostapd serves another.
+#[test]
+fn two_access_points_on_one_radio_run_the_first_by_name() {
+	let desired = document(
+		r#"
+access_point "aaa" { device = "wlan0"; wifi { open = true } }
+access_point "zzz" { device = "wlan0"; wifi { open = true } }
+
+interface wlan0 { config = "null" }
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	let plan = settle(&desired, &mut observed);
+
+	assert_eq!(
+		names(&plan)
+			.iter()
+			.filter(|name| **name == "backend.start")
+			.count(),
+		1
+	);
+	let warning = plan
+		.warnings
+		.iter()
+		.find(|warning| warning.message.contains("one BSS per radio"))
+		.expect("a warning about the second access point");
+	assert!(
+		warning.message.contains("`aaa` is started") && warning.message.contains("`zzz` is not"),
+		"the warning has to name which one runs: {}",
+		warning.message
+	);
 }
 
 /// Decision 0009: the document holds a reference and the plan holds the value.

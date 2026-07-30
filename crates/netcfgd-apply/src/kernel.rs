@@ -83,6 +83,13 @@ pub struct KernelExecutor {
 	/// nothing (decision 0015), and the thing that starts it is the thing that
 	/// has to fill it.
 	networks: Vec<netcfgd_model::WifiNetwork>,
+	/// Every access point the document describes.
+	///
+	/// Carried for the same reason as `networks` and one more: hostapd is
+	/// configured by a file rather than over a socket, so the whole access
+	/// point has to be in hand at the moment it starts. The plan carries only
+	/// the device (decision 0026).
+	access_points: Vec<netcfgd_model::AccessPoint>,
 	/// `(path, sha256)` for every hook the document references.
 	///
 	/// Carried here because the op does not include the hash and the executor
@@ -128,6 +135,7 @@ impl KernelExecutor {
 			pppoe: Vec::new(),
 			preferences: Vec::new(),
 			networks: Vec::new(),
+			access_points: Vec::new(),
 			hook_hashes: Vec::new(),
 			run_dir: std::path::PathBuf::from("/run/netcfgd"),
 			resolv_conf: resolv_conf_path(),
@@ -167,6 +175,7 @@ impl KernelExecutor {
 			})
 			.collect();
 		self.networks.clone_from(&document.networks);
+		self.access_points.clone_from(&document.access_points);
 		self.preferences = document
 			.interfaces
 			.iter()
@@ -248,6 +257,25 @@ impl KernelExecutor {
 			));
 		}
 		Ok(())
+	}
+
+	/// Run the access point the document puts on this radio.
+	///
+	/// The plan says which device, not which access point, so the lookup is
+	/// here. Where a document puts two on one radio the first in name order
+	/// wins, which is the same answer the plan warned about -- one radio is one
+	/// BSS in this build, and the two have to agree on which one, or the plan
+	/// would name one access point and the executor start another.
+	fn start_access_point(&self, iface: &str) -> Result<(), String> {
+		let Some(access_point) = self
+			.access_points
+			.iter()
+			.find(|access_point| access_point.device == iface)
+		else {
+			return Err(format!("no access point configuration for {iface}"));
+		};
+		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+		netcfgd_hostapd::start(&self.run_dir, access_point, &resolver)
 	}
 
 	/// Give a freshly started supplicant the networks the document describes.
@@ -554,12 +582,18 @@ impl Executor for KernelExecutor {
 				Ok(())
 			}
 			Op::BackendStart { kind, iface } => {
-				// PPPoE first, and before `start_backend`: the session's
-				// parameters live on the interface, which the op does not
-				// carry, so this is the one backend the executor dials from
-				// its own context rather than from the op alone.
+				// PPPoE and hostapd first, and before `start_backend`: both are
+				// configured from parts of the document the op does not carry
+				// -- a session's credentials, an access point's whole block --
+				// so these are the backends the executor starts from its own
+				// context rather than from the op alone.
 				if *kind == netcfgd_model::BackendKind::Pppoe {
 					self.start_pppoe(iface)?;
+					self.effects.started_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
+				if *kind == netcfgd_model::BackendKind::AccessPoint {
+					self.start_access_point(iface)?;
 					self.effects.started_backends.push((*kind, iface.clone()));
 					return Ok(());
 				}
@@ -630,6 +664,15 @@ impl Executor for KernelExecutor {
 					.map_err(|error| format!("cannot remove vlan {vid} from {iface}: {error}"))
 			}
 			Op::BackendStop { kind, iface } => {
+				if *kind == netcfgd_model::BackendKind::AccessPoint {
+					// Where `/run` is, which `stop_backend` has no access to --
+					// it is a free function, and the control socket for an
+					// access point lives under netcfgd's own run directory
+					// rather than in a fixed place.
+					netcfgd_hostapd::stop(&self.run_dir, iface)?;
+					self.effects.stopped_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
 				stop_backend(*kind, iface)?;
 				self.effects.stopped_backends.push((*kind, iface.clone()));
 				Ok(())

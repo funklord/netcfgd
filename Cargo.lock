@@ -25,6 +25,7 @@ name = "netcfgd-apply"
 version = "0.0.0"
 dependencies = [
  "netcfgd-dns",
+ "netcfgd-hostapd",
  "netcfgd-model",
  "netcfgd-plan",
  "netcfgd-secret",
@@ -103,6 +104,15 @@ dependencies = [
  "netcfgd-proto",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "netcfgd-hostapd"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-model",
+ "netcfgd-secret",
+ "netcfgd-supplicant",
 ]
 
 [[package]]

@@ -1,0 +1,271 @@
+#![forbid(unsafe_code)]
+
+//! Running an access point through `hostapd`.
+//!
+//! An `access_point` block is the last of the four features the M4 freeze put
+//! in the document with nothing behind them. Decision 0026 says why it is
+//! hostapd: it is what a wireless router actually runs, and it is the only
+//! thing that can grow the parts of an access point the schema does not yet
+//! describe.
+//!
+//! The shape differs from [`netcfgd_supplicant`] in one way that drives
+//! everything here. A supplicant is filled over its control socket, so
+//! decision 0015 can say it holds no state; hostapd reads a file once at
+//! startup and offers no way to hand it a network afterwards. So netcfgd
+//! writes that file, into `/run` where derived state belongs (constraint 1),
+//! and regenerates it on every apply. Nothing is read back out of it -- the
+//! document remains the only authority, and the file is a rendering of the
+//! document rather than a second place a network can be defined.
+//!
+//! The control socket is still used, for stopping. hostapd speaks the same
+//! `wpa_ctrl` protocol as `wpa_supplicant`, so the client from that crate
+//! reaches it unchanged.
+
+pub mod render;
+
+pub use render::{config, to_file, to_redacted, Line, Unsupported};
+
+use netcfgd_model::AccessPoint;
+use netcfgd_secret::Resolver;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Where the control sockets and generated configurations live.
+///
+/// Under netcfgd's own `/run` directory rather than `/run/hostapd`, because a
+/// socket in the distribution's location would be found by that
+/// distribution's `hostapd_cli` and its init script, which would then be
+/// talking to an access point netcfgd owns.
+#[must_use]
+pub fn ctrl_dir(run_dir: &Path) -> PathBuf {
+	run_dir.join("hostapd")
+}
+
+/// The generated configuration for one device.
+#[must_use]
+pub fn config_path(run_dir: &Path, device: &str) -> PathBuf {
+	ctrl_dir(run_dir).join(format!("{device}.conf"))
+}
+
+/// Where hostapd's startup diagnostics go.
+#[must_use]
+pub fn log_path(run_dir: &Path, device: &str) -> PathBuf {
+	ctrl_dir(run_dir).join(format!("{device}.log"))
+}
+
+/// Find `hostapd`.
+///
+/// The same search as the supplicant's, and for the same reason: it lives in
+/// `/usr/sbin`, which is not on a non-root `PATH` on Debian and several
+/// others, so `Command::new("hostapd")` finds nothing on a machine that has
+/// it.
+#[must_use]
+pub fn binary() -> Option<PathBuf> {
+	for dir in ["/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/bin"] {
+		let path = Path::new(dir).join("hostapd");
+		if path.is_file() {
+			return Some(path);
+		}
+	}
+	std::env::var_os("PATH").and_then(|paths| {
+		std::env::split_paths(&paths)
+			.map(|dir| dir.join("hostapd"))
+			.find(|path| path.is_file())
+	})
+}
+
+/// Write the configuration for one access point, and say where it went.
+///
+/// Mode 0600 before anything is written to it, because a `psk` access point's
+/// file holds the passphrase in the clear -- hostapd has no indirection for
+/// it. That is the same trade the `PPPoE` options file already makes, and the
+/// same mitigations apply: the file is under `/run`, so it is tmpfs and does
+/// not survive a reboot, and the document itself still carries only a
+/// `SecretRef` (constraint 5).
+///
+/// # Errors
+///
+/// Returns a message naming the access point if the document cannot be
+/// rendered, or the file cannot be written.
+pub fn write_config(
+	run_dir: &Path,
+	access_point: &AccessPoint,
+	resolver: &Resolver,
+) -> Result<PathBuf, String> {
+	use std::io::Write;
+	use std::os::unix::fs::OpenOptionsExt;
+
+	let dir = ctrl_dir(run_dir);
+	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+
+	let passphrase = match &access_point.security {
+		netcfgd_model::Security::Psk(psk) => Some(
+			resolver
+				.resolve(&psk.passphrase)
+				.map_err(|error| format!("`{}`: {error}", access_point.id))?,
+		),
+		_ => None,
+	};
+
+	let lines = config(
+		access_point,
+		&dir,
+		passphrase.as_ref().map(netcfgd_secret::Secret::expose),
+	)
+	.map_err(|error| format!("`{}`: {error}", access_point.id))?;
+
+	let path = config_path(run_dir, &access_point.device);
+	// Truncate through `OpenOptions` rather than `fs::write` plus a chmod: the
+	// window between the two is a window in which the passphrase is readable by
+	// everybody, and a mode set afterwards is a mode that was wrong once.
+	let mut file = std::fs::OpenOptions::new()
+		.write(true)
+		.create(true)
+		.truncate(true)
+		.mode(0o600)
+		.open(&path)
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	file.write_all(to_file(&access_point.id, &lines).as_bytes())
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+
+	Ok(path)
+}
+
+/// Start an access point.
+///
+/// # Errors
+///
+/// Returns a message naming what failed: no hostapd installed, a document this
+/// build cannot render, or hostapd refusing to start.
+pub fn start(
+	run_dir: &Path,
+	access_point: &AccessPoint,
+	resolver: &Resolver,
+) -> Result<(), String> {
+	let device = &access_point.device;
+	let path = write_config(run_dir, access_point, resolver)?;
+
+	let program = binary().ok_or_else(|| {
+		format!(
+			"no hostapd found for {device}; an access point needs the hostapd package. \
+			 netcfgd does not implement one itself (docs/decisions/0026)"
+		)
+	})?;
+
+	// Startup diagnostics go to a file rather than through a pipe. hostapd
+	// daemonizes on success and closes its standard streams when it does, so a
+	// pipe would be fine -- but a file is fine either way, and it leaves the
+	// reason an access point failed somewhere the operator can read it after
+	// the fact rather than only in whatever captured netcfgd's stderr.
+	let log = log_path(run_dir, device);
+	let capture = std::fs::File::create(&log)
+		.map_err(|error| format!("cannot write {}: {error}", log.display()))?;
+	let errors = capture
+		.try_clone()
+		.map_err(|error| format!("cannot write {}: {error}", log.display()))?;
+
+	let status = Command::new(&program)
+		.arg("-B")
+		.arg(&path)
+		.stdout(capture)
+		.stderr(errors)
+		.status()
+		.map_err(|error| format!("could not run {}: {error}", program.display()))?;
+
+	if !status.success() {
+		// hostapd exits nonzero for a configuration it will not parse *and* for
+		// a driver it cannot initialise -- it daemonizes only after the
+		// interface is up, which is what makes this check worth making at all.
+		// The last lines it wrote say which, and they are far more use than the
+		// exit status: "unknown configuration item" and "nl80211 driver
+		// initialization failed" send the operator to different places.
+		return Err(format!(
+			"hostapd would not start on {device}: {}. Its output is in {}",
+			complaints(&log, 2).unwrap_or_else(|| format!("it exited with {status}")),
+			log.display()
+		));
+	}
+	Ok(())
+}
+
+/// Stop an access point.
+///
+/// Through the control socket rather than by signal, for the reason the
+/// supplicant's teardown gives: killing by name would reach an access point
+/// netcfgd did not start.
+///
+/// # Errors
+///
+/// Returns a message if hostapd is listening and refuses to stop. Nothing
+/// listening is the state this was asked to produce, so that is success.
+pub fn stop(run_dir: &Path, device: &str) -> Result<(), String> {
+	let dir = ctrl_dir(run_dir);
+	match netcfgd_supplicant::Client::connect(&dir, device) {
+		Ok(client) => client
+			.command("TERMINATE")
+			.map_err(|error| format!("could not stop the access point on {device}: {error}")),
+		Err(_) => Ok(()),
+	}
+}
+
+/// The lines of a log that say what went wrong, for an error message.
+///
+/// The tail is the wrong answer, which is what running this against a real
+/// hostapd showed. hostapd announces the problem and then narrates its
+/// shutdown, so the last three lines of a failed start are `AP-DISABLED`,
+/// `CTRL-EVENT-TERMINATING` and `Interface ap0 wasn't started` -- all true,
+/// none of them the reason, and the operator is sent to look at the interface
+/// when the answer was "this driver is not a wireless driver" four lines
+/// earlier.
+///
+/// So the diagnosis is picked out by what it looks like instead. The two
+/// failures that matter both announce themselves in the first line that
+/// matches: a configuration hostapd will not parse says `Line 6: ...`, and a
+/// driver it cannot attach to says `nl80211 driver initialization failed`.
+///
+/// Joined with `; ` rather than kept as lines: this ends up in a single-line
+/// journal record and in `ncfg apply` output, where an embedded newline breaks
+/// the alignment of everything after it.
+fn complaints(path: &Path, count: usize) -> Option<String> {
+	let text = std::fs::read_to_string(path).ok()?;
+	let lines: Vec<&str> = text
+		.lines()
+		.map(str::trim)
+		.filter(|line| !line.is_empty())
+		.collect();
+	if lines.is_empty() {
+		return None;
+	}
+
+	let telling: Vec<&str> = lines
+		.iter()
+		.filter(|line| {
+			let lowered = line.to_lowercase();
+			line.starts_with("Line ")
+				|| [
+					"fail",
+					"error",
+					"not support",
+					"cannot",
+					"could not",
+					"invalid",
+				]
+				.iter()
+				.any(|marker| lowered.contains(marker))
+		})
+		.take(count)
+		.copied()
+		.collect();
+
+	// Nothing recognisable: the tail, which is at least the most recent thing
+	// hostapd had to say. Better than reporting only the exit status.
+	let chosen = if telling.is_empty() {
+		lines[lines.len().saturating_sub(count)..].to_vec()
+	} else {
+		telling
+	};
+	// hostapd's lines end in a full stop about half the time, and the caller
+	// puts this in the middle of a sentence. Trimming here rather than there,
+	// because here is where it is known that the text came from somebody else.
+	Some(chosen.join("; ").trim_end_matches('.').to_owned())
+}
