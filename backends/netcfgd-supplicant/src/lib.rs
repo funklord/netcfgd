@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Driving `wpa_supplicant` over its control socket.
 //!
 //! Decision 0014 makes `wpa_supplicant` the floor rather than the fallback, and
@@ -10,8 +12,6 @@
 //! be tested exhaustively on a machine with no radio and no supplicant
 //! installed; [`client`] is the socket, and needs a running daemon to say
 //! anything about.
-
-#![forbid(unsafe_code)]
 
 pub mod client;
 pub mod network;
