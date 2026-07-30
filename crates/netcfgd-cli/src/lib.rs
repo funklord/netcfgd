@@ -63,7 +63,15 @@ exit codes:
   3  a guard refused a disruptive action; nothing else failed
 ";
 
-fn main() -> ExitCode {
+/// The entry point, called by the multi-call binary rather than by the
+/// runtime.
+///
+/// Both programs live in one binary that dispatches on `argv[0]`, because they
+/// share most of their code and shipping it twice cost 775 KB of the install
+/// -- three quarters of a megabyte of identical machine code, on the class of
+/// device that has single-digit megabytes of flash free.
+#[must_use]
+pub fn main() -> ExitCode {
 	let arguments: Vec<String> = std::env::args().skip(1).collect();
 	match run(&arguments) {
 		Ok(code) => code,

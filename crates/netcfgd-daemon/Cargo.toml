@@ -7,9 +7,8 @@ rust-version.workspace = true
 license.workspace      = true
 repository.workspace   = true
 
-[[bin]]
-name = "netcfgd"
-path = "src/main.rs"
+[lib]
+path = "src/lib.rs"
 
 [lints]
 workspace = true

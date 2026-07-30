@@ -513,6 +513,8 @@ So it is closer to "XML Schema plus database constraints plus RPC plus pub/sub" 
 
 ### 10.1 What "embedded" concretely means here
 
+**The 1 MB figure below is superseded.** Measured at M5 and found unreachable without giving up either the compiler or derived serialization; the install is 1.75 MB with every feature in, and that is the ratcheted budget. See [0024](docs/decisions/0024-one-binary-and-what-a-megabyte-would-actually-cost.md).
+
 The reference target is an OpenWrt-class device: 16 MB flash (a built image leaves only single-digit megabytes free), 64 MB RAM, a slow MIPS or modest ARM core, frequently a **read-only squashfs root with a writable overlay**. 4 MB-flash devices are past end-of-life in OpenWrt and are explicitly not a target. The bar to clear is credibility against `netifd`, which is small, fast and already there.
 
 ### 10.2 Build tiers

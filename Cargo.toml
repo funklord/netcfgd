@@ -17,6 +17,7 @@ members = [
 	"backends/netcfgd-dns",
 	"backends/netcfgd-supplicant",
 	"crates/netcfgd-cli",
+	"crates/netcfgd-bin",
 ]
 
 [workspace.package]
