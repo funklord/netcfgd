@@ -47,13 +47,14 @@ pub use device::{AccessPoint, Device, DeviceMatch, MacPolicy, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
 pub use interface::{
-	BondMode, Guard, Interface, InterfaceKind, LinkSettings, MacvlanConfig, MacvlanMode, RaPolicy,
-	Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind, VlanProtocol, VrfConfig, WgPeer,
+	BondMode, BridgeVlan, Guard, Interface, InterfaceKind, LinkSettings, MacvlanConfig,
+	MacvlanMode, RaPolicy, Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind, VlanProtocol,
+	VrfConfig, WgPeer,
 };
 pub use key::Key;
 pub use observed::{
-	AppliedDns, BackendKind, Delegation, Observed, ObservedAddress, ObservedBackend, ObservedLink,
-	ObservedRoute, Origin, Ownership,
+	AppliedDns, BackendKind, Delegation, Observed, ObservedAddress, ObservedBackend,
+	ObservedBridgeVlan, ObservedLink, ObservedRoute, Origin, Ownership,
 };
 pub use route::{Route, RouteScope};
 pub use rule::{RoutingRule, RuleAction, RuleFamily};

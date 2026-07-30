@@ -371,6 +371,120 @@ impl Builder {
 			.map(|(_, id)| *id)
 	}
 
+	/// The VLANs a bridge port or bridge device carries.
+	///
+	/// Authoritative where the document lists any: the port has exactly those
+	/// and nothing else. That includes removing the VLAN 1 the kernel adds by
+	/// itself when a port joins a filtering bridge -- every real trunk setup
+	/// starts by deleting it, and leaving it because the kernel put it there
+	/// would mean the document does not describe the port.
+	///
+	/// A port the document says nothing about is left alone entirely. The
+	/// authority is over ports that are configured, not over the bridge.
+	fn plan_bridge_vlans(&mut self, interface: &Interface, observed: &Observed, base: &[u32]) {
+		if interface.bridge_vlans.is_empty() {
+			return;
+		}
+		let name = &interface.name;
+		// A VLAN on the bridge device itself is a SELF operation; one on a
+		// port is MASTER. Getting it backwards is accepted by the kernel and
+		// configures the wrong device.
+		let on_self = matches!(interface.kind, InterfaceKind::Bridge(_));
+
+		// A link this plan is about to create has no VLANs yet, which is not
+		// the same as having none to compare against -- returning early here
+		// meant a freshly created bridge got its VLANs on the *next* reconcile
+		// instead of this one. Anything absent by now is being created; the
+		// cases that are genuinely missing were dropped further up.
+		let existing = observed.link(name);
+		let current: Vec<&netcfgd_model::ObservedBridgeVlan> = existing
+			.map(|link| {
+				observed
+					.bridge_vlans
+					.iter()
+					.filter(|vlan| vlan.index == link.index)
+					.collect()
+			})
+			.unwrap_or_default();
+
+		// The kernel puts VLAN 1 on a port the moment it joins a filtering
+		// bridge, which happens during *this* apply -- so it is not in the
+		// observed state the plan was computed from, and without this the
+		// removal would land on the next reconcile. That is fine for the
+		// daemon and never happens under `--oneshot`.
+		//
+		// Safe to plan unconditionally because removing a VLAN that is not
+		// there is a silent success: checked against the kernel with filtering
+		// both on and off, and with the id absent.
+		if existing.is_none() && !interface.bridge_vlans.iter().any(|vlan| vlan.vid == 1) {
+			self.push(
+				Op::BridgeVlanDel {
+					iface: name.clone(),
+					vid: 1,
+					on_self,
+				},
+				Reason::unwanted(name, "vlans", "1 (the kernel's default)".to_owned()),
+				base.to_vec(),
+				None,
+			);
+		}
+
+		for wanted in &interface.bridge_vlans {
+			// Compared on the flags too: a VLAN that is present but tagged
+			// where the document says untagged is wrong in a way that shows up
+			// as traffic arriving with a tag nobody expected.
+			if current.iter().any(|vlan| {
+				vlan.vid == wanted.vid
+					&& vlan.pvid == wanted.pvid
+					&& vlan.untagged == wanted.untagged
+			}) {
+				continue;
+			}
+			self.push(
+				Op::BridgeVlanAdd {
+					iface: name.clone(),
+					vid: wanted.vid,
+					pvid: wanted.pvid,
+					untagged: wanted.untagged,
+					on_self,
+				},
+				Reason::absent(name, "vlans", render_vlan(*wanted)),
+				base.to_vec(),
+				Some(Op::BridgeVlanDel {
+					iface: name.clone(),
+					vid: wanted.vid,
+					on_self,
+				}),
+			);
+		}
+
+		for present in current {
+			if interface
+				.bridge_vlans
+				.iter()
+				.any(|wanted| wanted.vid == present.vid)
+			{
+				continue;
+			}
+			self.push(
+				Op::BridgeVlanDel {
+					iface: name.clone(),
+					vid: present.vid,
+					on_self,
+				},
+				Reason::unwanted(name, "vlans", present.vid.to_string()),
+				base.to_vec(),
+				Some(Op::BridgeVlanAdd {
+					iface: name.clone(),
+					vid: present.vid,
+					pvid: present.pvid,
+					untagged: present.untagged,
+					on_self,
+				}),
+			);
+		}
+	}
+
 	/// The backend an interface needs before it can carry anything.
 	///
 	/// Three cases and one shape: an 802.1X port has not authenticated, a
@@ -641,6 +755,7 @@ impl Builder {
 		// earlier. Decision 0008 puts wired 802.1X on the same supplicant as
 		// wifi, so this is the same op either way.
 		let authentication = self.plan_prerequisite(interface, observed, &base);
+		self.plan_bridge_vlans(interface, observed, &base);
 
 		let mut addressing_ids = Vec::new();
 		for (index, source) in interface.addressing.iter().enumerate() {
@@ -1242,6 +1357,18 @@ fn render_route(route: &Route) -> String {
 	}
 	if let Some(metric) = route.metric {
 		out.push_str(&format!(" metric {metric}"));
+	}
+	out
+}
+
+/// A VLAN as the config spells it, for a plan's reason line.
+fn render_vlan(vlan: netcfgd_model::BridgeVlan) -> String {
+	let mut out = vlan.vid.to_string();
+	if vlan.pvid {
+		out.push_str(" pvid");
+	}
+	if vlan.untagged {
+		out.push_str(" untagged");
 	}
 	out
 }

@@ -207,7 +207,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "d-1",
@@ -350,7 +362,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "d-2",
@@ -493,7 +517,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "d-3",
@@ -641,7 +677,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "d-4",
@@ -789,7 +837,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "d-5",
@@ -937,7 +997,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "d-6",
@@ -1085,7 +1157,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "d-7",
@@ -1235,7 +1319,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-bond",
@@ -1388,7 +1484,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-bridge",
@@ -1545,7 +1653,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-dummy",
@@ -1693,7 +1813,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-macvlan",
@@ -1843,7 +1975,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-physical",
@@ -1991,7 +2135,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-pppoe",
@@ -2147,7 +2303,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-tun",
@@ -2298,7 +2466,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-tunnel",
@@ -2452,7 +2632,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-veth",
@@ -2601,7 +2793,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-vlan",
@@ -2752,7 +2956,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-vrf",
@@ -2901,7 +3117,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-vxlan",
@@ -3054,7 +3282,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "k-wireguard",
@@ -3223,7 +3463,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "p-0",
@@ -3371,7 +3623,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "p-1",
@@ -3519,7 +3783,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "p-2",
@@ -3667,7 +3943,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "t-geneve",
@@ -3816,7 +4104,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "t-gre",
@@ -3965,7 +4265,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "t-gretap",
@@ -4114,7 +4426,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "t-ip6gre",
@@ -4263,7 +4587,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "t-ip6tnl",
@@ -4412,7 +4748,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "t-ipip",
@@ -4561,7 +4909,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     },
     {
       "name": "t-sit",
@@ -4710,7 +5070,19 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
     }
   ],
   "networks": [

@@ -24,6 +24,7 @@ impl Document {
 		for interface in &mut self.interfaces {
 			interface.routes.sort();
 			interface.hooks.sort();
+			interface.bridge_vlans.sort();
 			if let InterfaceKind::WireGuard(wg) = &mut interface.kind {
 				wg.peers.sort_by(|a, b| a.name.cmp(&b.name));
 				for peer in &mut wg.peers {

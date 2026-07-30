@@ -82,4 +82,7 @@ netcfgd
 
 # 1 MB is design section 10.2's embedded budget. The install is over it and
 # that is M5's remaining size work -- the ratchet holds the line meanwhile.
-total 2655232
+#
+# +37 KB for bridge VLANs: a second netlink dump under AF_BRIDGE, the setter,
+# the range expansion, and the planner's per-port reconciliation.
+total 2692056

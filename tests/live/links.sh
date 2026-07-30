@@ -64,6 +64,22 @@ interface mv0      { macvlan { parent = "base0"; mode = "bridge" }; config = "nu
 interface gre1     { tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2"; key = 42 }; config = "null" }
 interface sit1     { tunnel { mode = "sit"; local = "10.7.0.1"; remote = "10.7.0.3"; ttl = 64 }; config = "null" }
 interface gnv0     { tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 }; config = "null" }
+
+# Per-port VLAN membership: how a switch is provisioned on a current kernel.
+interface brv2 { bridge { vlan_filtering = true }; vlans = "10"; config = "null" }
+# A filtering bridge the config gives no vlans to. The kernel puts vlan 1 on it
+# and netcfgd must leave it there -- the authority is over what is configured.
+interface brkeep { bridge { vlan_filtering = true }; config = "null" }
+interface lan1 {
+	veth   { peer = "lan1p" }
+	master = "brv2"
+	vlans  = "
+		10 pvid untagged
+		20
+		30-32
+	"
+	config = "null"
+}
 CONF
 
 export NCFG_CONFIG_DIR="$work/etc"
@@ -138,6 +154,40 @@ contains "and its key, which needs the flag" "$(detail gre1)" "ikey 0.0.0.42"
 contains "a sit tunnel uses the other numbering" "$(detail sit1)" "remote 10.7.0.3 local 10.7.0.1"
 contains "and its ttl"                 "$(detail sit1)"   "ttl 64"
 contains "a geneve tunnel gets its vni" "$(detail gnv0)"  "geneve id 500"
+
+# The VLANs read back from the kernel, through netcfgd's own observation --
+# `bridge` is not installed everywhere and this is the path that matters.
+# Per interface, not across the whole host. The first version of this check
+# collected every vid from the JSON and looked for a 1 -- which found the one
+# on `brv`, a filtering bridge the config gives no vlans to and netcfgd
+# correctly leaves alone. A check that cannot tell those apart reports a bug
+# that is not there, and would have hidden the one that is.
+vlans_of() {
+	"$ncfg" status 2>/dev/null | awk -v want="$1" '
+		/^[^ ]/ { iface = $1 }
+		iface == want && /^    vlan / { printf "%s ", $2 }
+	'
+}
+
+contains "a port gets its pvid"    "$(vlans_of lan1)" "10 "
+contains "and a tagged vlan"       "$(vlans_of lan1)" "20 "
+contains "and every id in a range" "$(vlans_of lan1)" "32 "
+contains "a bridge can hold one itself" "$(vlans_of brv2)" "10 "
+
+# The kernel adds vlan 1 when a port joins a filtering bridge. A configured
+# port owns its list, so it goes -- every real trunk setup starts by deleting
+# it, and leaving it would mean the document does not describe the port.
+case " $(vlans_of lan1)" in
+*" 1 "*)
+	echo "FAIL the kernel default vlan 1 was left on the configured port"
+	failures=$((failures + 1))
+	;;
+*) echo "ok   the kernel default vlan 1 is gone from the configured port" ;;
+esac
+
+# And the bridge the config says nothing about keeps its own. The authority is
+# over ports that are configured, not over the bridge.
+contains "an unconfigured bridge keeps vlan 1" "$(vlans_of brkeep)" "1 "
 
 # One apply, not two. This is the property the veth peer nearly broke.
 second=$("$ncfg" apply 2>&1)

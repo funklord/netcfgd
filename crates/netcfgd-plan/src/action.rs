@@ -104,6 +104,29 @@ pub enum Op {
 		iface: String,
 	},
 	/// Stop a helper.
+	/// Put a VLAN on a bridge port, or on the bridge itself.
+	BridgeVlanAdd {
+		/// Which interface.
+		iface: String,
+		/// The VLAN id.
+		vid: u16,
+		/// Untagged ingress joins this VLAN.
+		pvid: bool,
+		/// Egress leaves untagged.
+		untagged: bool,
+		/// Whether this is the bridge device rather than a port.
+		on_self: bool,
+	},
+	/// Take one off.
+	BridgeVlanDel {
+		/// Which interface.
+		iface: String,
+		/// The VLAN id.
+		vid: u16,
+		/// Whether this is the bridge device rather than a port.
+		on_self: bool,
+	},
+	/// Stop a backend.
 	BackendStop {
 		/// Which helper.
 		kind: BackendKind,
@@ -211,6 +234,8 @@ impl Op {
 			Self::RouteDel { .. } => "route.del",
 			Self::BackendStart { .. } => "backend.start",
 			Self::BackendStop { .. } => "backend.stop",
+			Self::BridgeVlanAdd { .. } => "bridge.vlan.add",
+			Self::BridgeVlanDel { .. } => "bridge.vlan.del",
 			Self::BackendReload { .. } => "backend.reload",
 			Self::WifiSetProfiles { .. } => "wifi.set_profiles",
 			Self::WifiAssociate { .. } => "wifi.associate",
@@ -253,7 +278,11 @@ impl Op {
 			| Self::WifiDisassociate { .. }
 			| Self::WifiAssociate { .. }
 			| Self::WgSetDevice { .. }
-			| Self::WgSetPeers { .. } => true,
+			| Self::WgSetPeers { .. }
+			// Removing a VLAN from a port stops traffic in it reaching that
+			// port, which is the same kind of interruption as taking an
+			// address away.
+			| Self::BridgeVlanDel { .. } => true,
 			Self::LinkCreate { .. }
 			| Self::LinkUp { .. }
 			| Self::AddrAdd { .. }
@@ -265,6 +294,7 @@ impl Op {
 			| Self::HookRun { .. }
 			| Self::CommitArm { .. }
 			| Self::CommitConfirm
+			| Self::BridgeVlanAdd { .. }
 			| Self::CommitRevert { .. } => false,
 		}
 	}
@@ -281,7 +311,9 @@ impl Op {
 			| Self::LinkUnsetMaster { name }
 			| Self::LinkUp { name }
 			| Self::LinkDown { name } => Some(name),
-			Self::AddrAdd { iface, .. }
+			Self::BridgeVlanAdd { iface, .. }
+			| Self::BridgeVlanDel { iface, .. }
+			| Self::AddrAdd { iface, .. }
 			| Self::AddrDel { iface, .. }
 			| Self::RouteAdd { iface, .. }
 			| Self::RouteDel { iface, .. }

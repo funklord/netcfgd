@@ -1439,3 +1439,58 @@ fn a_pppoe_password_must_be_a_secret() {
 	let parentless = errors(r#"interface ppp0 { pppoe { username = "a" } }"#);
 	assert!(parentless.contains("needs a `parent`"), "got: {parentless}");
 }
+
+/// Per-port VLAN membership: how a switch is provisioned on any current
+/// kernel, since DSA presents switch ports as ordinary interfaces.
+#[test]
+fn bridge_vlans_compile() {
+	let document = build_ok(
+		r#"
+interface br0  { bridge { vlan_filtering = true }; vlans = "10"; config = "null" }
+interface lan1 {
+	master = "br0"
+	vlans  = "
+		10 pvid untagged
+		20
+		30-32
+	"
+	config = "null"
+}
+"#,
+	);
+	let vlans = |name: &str| {
+		document
+			.interfaces
+			.iter()
+			.find(|interface| interface.name == name)
+			.unwrap_or_else(|| panic!("no {name}"))
+			.bridge_vlans
+			.clone()
+	};
+
+	assert_eq!(vlans("br0").len(), 1);
+	// The range is expanded here, so nothing downstream has to know ranges
+	// exist -- the kernel compresses them again on the way out.
+	let ids: Vec<u16> = vlans("lan1").iter().map(|vlan| vlan.vid).collect();
+	assert_eq!(ids, [10, 20, 30, 31, 32]);
+	assert!(vlans("lan1")[0].pvid && vlans("lan1")[0].untagged);
+	assert!(!vlans("lan1")[1].pvid && !vlans("lan1")[1].untagged);
+}
+
+/// 0 is not a VLAN and 4095 is reserved. The kernel refuses both with an errno
+/// rather than a name.
+#[test]
+fn an_impossible_vlan_id_is_refused() {
+	assert!(errors(r#"interface p { vlans = "0" }"#).contains("not a VLAN id"));
+	assert!(errors(r#"interface p { vlans = "4095" }"#).contains("not a VLAN id"));
+	assert!(errors(r#"interface p { vlans = "20-10" }"#).contains("counts backwards"));
+	assert!(errors(r#"interface p { vlans = "10 sideways" }"#).contains("not a vlan option"));
+}
+
+/// A PVID is where untagged ingress lands, so a range of them would be several
+/// answers to one question.
+#[test]
+fn a_range_cannot_be_the_pvid() {
+	let message = errors(r#"interface p { vlans = "10-20 pvid" }"#);
+	assert!(message.contains("cannot be the pvid"), "got: {message}");
+}

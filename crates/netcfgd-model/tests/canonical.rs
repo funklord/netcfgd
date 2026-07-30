@@ -30,6 +30,7 @@ fn iface(name: &str) -> Interface {
 		guard: None,
 		ipv6_token: None,
 		link_settings: None,
+		bridge_vlans: Vec::new(),
 	}
 }
 

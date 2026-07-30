@@ -34,9 +34,10 @@ use netcfgd_model::device::{
 use netcfgd_model::dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 use netcfgd_model::hook::{HookPhase, HookRef};
 use netcfgd_model::interface::{
-	BondConfig, BondMode, BridgeConfig, Guard, LinkSettings, MacvlanConfig, MacvlanMode,
-	PppoeConfig, RaBackend, RaPolicy, Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind,
-	VethConfig, VlanConfig, VlanProtocol, VrfConfig, VxlanConfig, WgPeer, WireGuardConfig,
+	BondConfig, BondMode, BridgeConfig, BridgeVlan, Guard, LinkSettings, MacvlanConfig,
+	MacvlanMode, PppoeConfig, RaBackend, RaPolicy, Toggle, TunConfig, TunMode, TunnelConfig,
+	TunnelKind, VethConfig, VlanConfig, VlanProtocol, VrfConfig, VxlanConfig, WgPeer,
+	WireGuardConfig,
 };
 use netcfgd_model::route::{Route, RouteScope};
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
@@ -201,6 +202,18 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 			reason: "nfs".to_owned(),
 		}),
 		ipv6_token: Some("::5".to_owned()),
+		bridge_vlans: vec![
+			BridgeVlan {
+				vid: 10,
+				pvid: true,
+				untagged: true,
+			},
+			BridgeVlan {
+				vid: 20,
+				pvid: false,
+				untagged: false,
+			},
+		],
 		link_settings: Some(LinkSettings {
 			autoneg: Toggle::Off,
 			speed: Some(1000),

@@ -650,6 +650,19 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 		for address in observed.addresses_on(&link.name) {
 			println!("    {} [{:?}]", address.address, address.ownership);
 		}
+		for vlan in observed
+			.bridge_vlans
+			.iter()
+			.filter(|vlan| vlan.index == link.index)
+		{
+			let flags = match (vlan.pvid, vlan.untagged) {
+				(true, true) => " pvid untagged",
+				(true, false) => " pvid",
+				(false, true) => " untagged",
+				(false, false) => "",
+			};
+			println!("    vlan {}{flags}", vlan.vid);
+		}
 		for route in observed.routes_on(&link.name) {
 			let via = route
 				.via

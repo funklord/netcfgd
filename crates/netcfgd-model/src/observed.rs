@@ -172,6 +172,26 @@ pub enum BackendKind {
 	RouterAdvert,
 }
 
+/// One VLAN the kernel holds on one interface.
+///
+/// No ownership field, unlike an address. There is no protocol tag for a
+/// bridge VLAN, and unlike a link there is no useful `/run` record either --
+/// the kernel creates VLAN 1 by itself, so "netcfgd did not add this" does not
+/// mean "somebody else did". Authority comes from the document instead: see
+/// [`crate::Interface::bridge_vlans`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedBridgeVlan {
+	/// Which interface carries it.
+	pub index: u32,
+	/// The VLAN id.
+	pub vid: u16,
+	/// Untagged ingress joins this VLAN.
+	pub pvid: bool,
+	/// Egress leaves untagged.
+	pub untagged: bool,
+}
+
 /// What a `DHCPv6` client obtained by prefix delegation.
 ///
 /// Not read from the kernel: a delegated prefix is not kernel state at all
@@ -231,6 +251,9 @@ pub struct Observed {
 	pub backends: Vec<ObservedBackend>,
 	/// DNS scopes already delivered, sorted by scope.
 	pub dns: Vec<AppliedDns>,
+	/// Bridge VLANs the kernel currently holds, sorted by interface then id.
+	#[serde(default)]
+	pub bridge_vlans: Vec<ObservedBridgeVlan>,
 	/// Prefixes delegated to this host, sorted by interface.
 	#[serde(default)]
 	pub delegations: Vec<Delegation>,

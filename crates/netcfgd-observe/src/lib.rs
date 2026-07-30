@@ -160,6 +160,16 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		routes,
 		backends: prior.backends.clone(),
 		dns: prior.dns.clone(),
+		bridge_vlans: snapshot
+			.bridge_vlans
+			.iter()
+			.map(|vlan| netcfgd_model::ObservedBridgeVlan {
+				index: vlan.index,
+				vid: vlan.vid,
+				pvid: vlan.pvid,
+				untagged: vlan.untagged,
+			})
+			.collect(),
 		delegations: prior.delegations.clone(),
 		address_proto_supported: snapshot.address_proto_supported,
 	};
@@ -311,6 +321,7 @@ mod tests {
 	#[test]
 	fn a_snapshot_becomes_a_model_with_names_resolved() {
 		let snapshot = Snapshot {
+			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
 			addresses: vec![
 				address(2, "192.168.1.10", 24, Some(NETCFGD_PROTO)),
@@ -373,6 +384,7 @@ mod tests {
 		orphan.master = Some(99);
 
 		let snapshot = Snapshot {
+			bridge_vlans: Vec::new(),
 			links: vec![member, link(3, "br0"), orphan],
 			..Snapshot::default()
 		};
@@ -389,6 +401,7 @@ mod tests {
 	#[test]
 	fn an_address_with_no_matching_link_is_dropped() {
 		let snapshot = Snapshot {
+			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0")],
 			addresses: vec![address(77, "10.0.0.1", 24, None)],
 			..Snapshot::default()
@@ -402,6 +415,7 @@ mod tests {
 	#[test]
 	fn only_recorded_links_are_ours() {
 		let snapshot = Snapshot {
+			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
 			..Snapshot::default()
 		};
