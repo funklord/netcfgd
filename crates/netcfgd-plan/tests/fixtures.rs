@@ -38,6 +38,15 @@ fn link(name: &str) -> ObservedLink {
 	}
 }
 
+fn with_delegation(links: &[&str], interface: &str, prefixes: &[&str]) -> Observed {
+	let mut observed = observed_with(links);
+	observed.delegations.push(netcfgd_model::Delegation {
+		interface: interface.to_owned(),
+		prefixes: prefixes.iter().map(|p| (*p).to_owned()).collect(),
+	});
+	observed
+}
+
 fn observed_with(links: &[&str]) -> Observed {
 	Observed {
 		links: links.iter().map(|name| link(name)).collect(),
@@ -975,4 +984,209 @@ fn a_document_using_none_of_them_gets_no_such_warnings() {
 			"warned about {unwanted} for a config that does not mention it"
 		);
 	}
+}
+
+/// Decision 0009: the document holds a reference and the plan holds the value.
+/// Until the lease arrives there is nothing to plan and the operator is told
+/// what is being waited for -- the config is right, the answer is "later".
+#[test]
+fn a_delegated_address_waits_for_its_lease() {
+	let document = document(
+		r#"
+interface wan0  { config = "dhcp6" }
+interface br-lan { config = "@pd:wan0=::1/64" }
+"#,
+	);
+	let plan = plan(
+		&document,
+		&observed_with(&["wan0", "br-lan"]),
+		&PlanOptions::default(),
+	);
+
+	assert!(
+		!names(&plan).contains(&"addr.add"),
+		"nothing can be addressed before the prefix is known: {:?}",
+		names(&plan)
+	);
+	assert!(
+		plan.warnings.iter().any(|warning| warning
+			.message
+			.contains("waiting on a delegated prefix from wan0")),
+		"got {:?}",
+		plan.warnings
+	);
+}
+
+/// And once it has arrived, the address is planned exactly as a static one.
+#[test]
+fn a_delegated_address_resolves_once_the_lease_arrives() {
+	let document = document(
+		r#"
+interface wan0   { config = "dhcp6" }
+interface br-lan { config = "@pd:wan0=::1/64" }
+"#,
+	);
+	let mut observed = with_delegation(&["wan0", "br-lan"], "wan0", &["2001:db8:1234::/56"]);
+	let plan = plan(&document, &observed, &PlanOptions::default());
+
+	let added: Vec<&str> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::AddrAdd { iface, addr, .. } if iface == "br-lan" => Some(addr.as_str()),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(added, ["2001:db8:1234::1/64"]);
+
+	// The reason names where the prefix came from, because "why does this
+	// interface have this address" is unanswerable otherwise.
+	let reason = plan
+		.actions
+		.iter()
+		.find(|action| matches!(&action.op, Op::AddrAdd { iface, .. } if iface == "br-lan"))
+		.expect("an add")
+		.reason
+		.desired
+		.clone();
+	assert!(reason.contains("from wan0"), "got: {reason}");
+
+	settle(&document, &mut observed);
+}
+
+/// Two LANs off one delegation, which is what `subnet` is for.
+#[test]
+fn several_interfaces_share_one_delegation() {
+	let document = document(
+		r#"
+interface wan0  { config = "dhcp6" }
+interface lan-a { config = "@pd:wan0/0=::1/64" }
+interface lan-b { config = "@pd:wan0/1=::1/64" }
+"#,
+	);
+	let mut observed =
+		with_delegation(&["wan0", "lan-a", "lan-b"], "wan0", &["2001:db8:1234::/56"]);
+	let plan = plan(&document, &observed, &PlanOptions::default());
+
+	let mut added: Vec<(&str, &str)> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::AddrAdd { iface, addr, .. } => Some((iface.as_str(), addr.as_str())),
+			_ => None,
+		})
+		.collect();
+	added.sort_unstable();
+	assert_eq!(
+		added,
+		[
+			("lan-a", "2001:db8:1234::1/64"),
+			("lan-b", "2001:db8:1234:1::1/64"),
+		]
+	);
+
+	settle(&document, &mut observed);
+}
+
+/// Renumbering. Decision 0009 wants this to be an ordinary diff rather than a
+/// special case: the ISP changes the delegation, and every derived address
+/// follows through the same `addr.del` then `addr.add` any other change uses.
+#[test]
+fn renumbering_is_an_ordinary_diff() {
+	let document = document(
+		r#"
+interface wan0   { config = "dhcp6" }
+interface br-lan { config = "@pd:wan0=::1/64" }
+"#,
+	);
+
+	// Converge on the first delegation.
+	let mut observed = with_delegation(&["wan0", "br-lan"], "wan0", &["2001:db8:1111::/56"]);
+	let first = plan(&document, &observed, &PlanOptions::default());
+	simulate(&first, &mut observed);
+	assert!(observed
+		.addresses_on("br-lan")
+		.any(|address| address.address == "2001:db8:1111::1/64"));
+
+	// The ISP renumbers.
+	observed.delegations[0].prefixes = vec!["2001:db8:2222::/56".to_owned()];
+	let second = plan(&document, &observed, &PlanOptions::default());
+
+	let ops: Vec<&str> = second
+		.actions
+		.iter()
+		.filter(|action| action.op.interface() == Some("br-lan"))
+		.map(|action| action.op.name())
+		.collect();
+	assert!(ops.contains(&"addr.add"), "got {ops:?}");
+	assert!(
+		ops.contains(&"addr.del"),
+		"the old address is no longer wanted and must go: {ops:?}"
+	);
+
+	simulate(&second, &mut observed);
+	let remaining: Vec<&str> = observed
+		.addresses_on("br-lan")
+		.map(|address| address.address.as_str())
+		.collect();
+	assert_eq!(remaining, ["2001:db8:2222::1/64"]);
+}
+
+/// A delegation that cannot produce the requested address is a config that
+/// can never work, so it is reported rather than waited on.
+#[test]
+fn an_impossible_subnet_is_reported_not_awaited() {
+	let document = document(
+		r#"
+interface wan0   { config = "dhcp6" }
+interface br-lan { config = "@pd:wan0/300=::1/64" }
+"#,
+	);
+	let plan = plan(
+		&document,
+		&with_delegation(&["wan0", "br-lan"], "wan0", &["2001:db8:1234::/56"]),
+		&PlanOptions::default(),
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("does not fit")),
+		"got {:?}",
+		plan.warnings
+	);
+	assert!(!names(&plan).contains(&"addr.add"));
+}
+
+/// Asking for the second prefix of a lease that carries one says so, rather
+/// than silently using the first.
+#[test]
+fn an_out_of_range_prefix_index_is_named() {
+	let document = document(
+		r#"
+interface wan0   { config = "dhcp6" }
+interface br-lan { config = "@pd:wan0=::1/64" }
+"#,
+	);
+	let mut observed = with_delegation(&["wan0", "br-lan"], "wan0", &["2001:db8::/56"]);
+	// Reach past the end by hand: the DSL spells the index as `wan0/N`, which
+	// is the subnet, and the prefix index has no surface syntax yet.
+	let mut document = document;
+	if let Some(netcfgd_model::AddressSource::Delegated(delegated)) = document
+		.interfaces
+		.iter_mut()
+		.find(|interface| interface.name == "br-lan")
+		.and_then(|interface| interface.addressing.first_mut())
+	{
+		delegated.prefix.index = 1;
+	}
+
+	let plan = plan(&document, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("asks for index 1")),
+		"got {:?}",
+		plan.warnings
+	);
+	let _ = &mut observed;
 }

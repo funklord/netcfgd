@@ -49,6 +49,64 @@ pub struct OwnedState {
 	pub dns: Vec<netcfgd_model::AppliedDns>,
 }
 
+/// Where a `DHCPv6` client's hook records what it was delegated.
+///
+/// One file per interface, one prefix per line, blank lines and `#` comments
+/// ignored. Not JSON, because the thing that writes it is a shell script the
+/// client runs and a shell script that has to emit valid JSON is a shell
+/// script that will one day emit invalid JSON. A line of text it cannot get
+/// wrong.
+#[must_use]
+pub fn prefixes_dir(run_dir: &Path) -> PathBuf {
+	run_dir.join("prefixes")
+}
+
+/// Read every delegation a client has reported.
+///
+/// A missing directory is not an error: it means no client has reported one,
+/// which is the state of every machine that is not a router.
+#[must_use]
+pub fn read_delegations(run_dir: &Path) -> Vec<netcfgd_model::Delegation> {
+	let Ok(entries) = fs::read_dir(prefixes_dir(run_dir)) else {
+		return Vec::new();
+	};
+	let mut out: Vec<netcfgd_model::Delegation> = entries
+		.flatten()
+		.filter_map(|entry| {
+			let interface = entry.file_name().to_str()?.to_owned();
+			let body = fs::read_to_string(entry.path()).ok()?;
+			let prefixes: Vec<String> = body
+				.lines()
+				.map(str::trim)
+				.filter(|line| !line.is_empty() && !line.starts_with('#'))
+				.map(ToOwned::to_owned)
+				.collect();
+			// An empty file means the lease expired and the hook recorded
+			// that, which is different from no file at all only in that it
+			// says so deliberately. Both produce no prefixes.
+			Some(netcfgd_model::Delegation {
+				interface,
+				prefixes,
+			})
+		})
+		.collect();
+	out.sort_by(|a, b| a.interface.cmp(&b.interface));
+	out
+}
+
+/// The prior state an observation needs: what netcfgd did, plus what a client
+/// reported.
+///
+/// One function so the two callers cannot disagree about whether delegations
+/// are included -- which is the same divergence `State::executor` exists to
+/// prevent on the other side.
+#[must_use]
+pub fn prior_state(run_dir: &Path) -> PriorState {
+	let mut prior = read_owned(run_dir).to_prior();
+	prior.delegations = read_delegations(run_dir);
+	prior
+}
+
 /// One object netcfgd installed, and which source asked for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,6 +137,10 @@ impl OwnedState {
 				.collect(),
 			backends: self.backends.clone(),
 			dns: self.dns.clone(),
+			// Not from this file. A delegation is not something netcfgd did,
+			// it is something a client was told, so it is recorded separately
+			// and folded in by [`prior_state`].
+			delegations: Vec::new(),
 		}
 	}
 

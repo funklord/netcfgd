@@ -38,7 +38,10 @@ pub mod secret;
 pub mod security;
 pub mod wifi;
 
-pub use address::{AddressSource, Dhcp4, Dhcp6, PdRequest, PrefixRef, Slaac, Static};
+pub use address::{
+	derive_from_delegation, AddressSource, Delegated, Dhcp4, Dhcp6, PdRequest, PrefixRef, Slaac,
+	Static,
+};
 pub use control::{Control, Principal, Tier};
 pub use device::{AccessPoint, Device, DeviceMatch, MacPolicy, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
@@ -48,7 +51,7 @@ pub use interface::{
 };
 pub use key::Key;
 pub use observed::{
-	AppliedDns, BackendKind, Observed, ObservedAddress, ObservedBackend, ObservedLink,
+	AppliedDns, BackendKind, Delegation, Observed, ObservedAddress, ObservedBackend, ObservedLink,
 	ObservedRoute, Origin, Ownership,
 };
 pub use route::{Route, RouteScope};

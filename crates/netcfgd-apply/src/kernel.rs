@@ -630,11 +630,130 @@ fn start_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), St
 				"no DHCPv4 client found for {iface}; install dhcpcd or busybox udhcpc"
 			))
 		}
+		BackendKind::Dhcp6 => start_dhcp6(iface),
 		BackendKind::Supplicant => start_supplicant(iface),
 		other => Err(format!(
 			"the {other:?} backend is not implemented in this build"
 		)),
 	}
+}
+
+/// Start a `DHCPv6` client, with the hook that reports a delegated prefix.
+///
+/// Decision 0004 delegates DHCP, so netcfgd does not learn the prefix by
+/// speaking the protocol -- it learns it because the client tells it. The
+/// mechanism is a script netcfgd writes and the client runs: the client
+/// exports the delegation in the environment, the script writes it to a file
+/// under `/run`, and the observer reads that file.
+///
+/// A file rather than a socket callback, deliberately. Design section 5.2 says
+/// hooks never need to call back into netcfgd, and a delegated prefix arriving
+/// through the same greppable-file route as everything else in `/run` means an
+/// operator can see what the client reported without netcfgd running.
+fn start_dhcp6(iface: &str) -> Result<(), String> {
+	let hook = write_pd_hook(iface)?;
+
+	for (program, args) in [
+		// odhcp6c takes the script as an argument, which is the shape this
+		// wants: no global hook directory to share with other clients.
+		(
+			"odhcp6c",
+			vec![
+				"-d".to_owned(),
+				"-P".to_owned(),
+				"0".to_owned(),
+				"-s".to_owned(),
+				hook.display().to_string(),
+				iface.to_owned(),
+			],
+		),
+		// dhcpcd reads hooks from a directory rather than an argument, so the
+		// script is installed there by `write_pd_hook` and this only asks for
+		// prefix delegation.
+		(
+			"dhcpcd",
+			vec!["-b".to_owned(), "-6".to_owned(), iface.to_owned()],
+		),
+	] {
+		match Command::new(program).args(&args).status() {
+			Ok(status) if status.success() => return Ok(()),
+			Ok(status) => return Err(format!("{program} on {iface} exited with {status}")),
+			Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+			Err(error) => return Err(format!("could not run {program}: {error}")),
+		}
+	}
+	Err(format!(
+		"no DHCPv6 client found for {iface}; install odhcp6c or dhcpcd"
+	))
+}
+
+/// Write the script a `DHCPv6` client runs when a lease changes.
+///
+/// One script, handling both clients, because they differ only in which
+/// environment variable carries the prefix. Writing two would mean two places
+/// for the file format to drift from what the observer reads.
+fn write_pd_hook(iface: &str) -> Result<std::path::PathBuf, String> {
+	use std::io::Write;
+	use std::os::unix::fs::PermissionsExt;
+
+	let run_dir = run_dir_path();
+	let hooks = run_dir.join("hooks");
+	let prefixes = run_dir.join("prefixes");
+	std::fs::create_dir_all(&hooks).map_err(|error| format!("{}: {error}", hooks.display()))?;
+	std::fs::create_dir_all(&prefixes)
+		.map_err(|error| format!("{}: {error}", prefixes.display()))?;
+
+	let path = hooks.join(format!("pd-{iface}"));
+	let script = pd_hook_script(iface, &prefixes.join(iface));
+
+	let mut file = std::fs::File::create(&path)
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	file.write_all(script.as_bytes())
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+		.map_err(|error| format!("cannot make {} executable: {error}", path.display()))?;
+	Ok(path)
+}
+
+/// The script's text.
+///
+/// Public and pure so it can be run the way a client runs it, with the same
+/// environment, and its output compared against what
+/// `netcfgd_host::state::read_delegations` parses. The two halves of this
+/// feature are a shell script and a Rust reader that never call each other,
+/// and the only thing holding them together is that file format.
+#[must_use]
+pub fn pd_hook_script(iface: &str, target: &std::path::Path) -> String {
+	// `PREFIXES` is odhcp6c's and `new_dhcp6_prefix` is dhcpcd's; whichever is
+	// set is the one that ran us. Written to a temporary and renamed, because
+	// the observer may read at any moment and a half-written file would be
+	// read as a shorter list rather than as an error. Rewritten rather than
+	// appended, because a renewal that changed the prefix must not leave both.
+	//
+	// `${p%%,*}` strips odhcp6c's trailing lifetime fields: it reports
+	// `2001:db8::/56,3600,7200`, and the prefix is everything before the first
+	// comma.
+	format!(
+		"#!/bin/sh\n\
+		 # Written by netcfgd. Reports the prefixes delegated on {iface}.\n\
+		 # One per line; an empty file means the lease is gone.\n\
+		 set -u\n\
+		 out={}\n\
+		 : > \"$out.tmp\"\n\
+		 for p in ${{PREFIXES:-}} ${{new_dhcp6_prefix:-}}; do\n\
+		 \tprintf '%s\\n' \"${{p%%,*}}\" >> \"$out.tmp\"\n\
+		 done\n\
+		 mv \"$out.tmp\" \"$out\"\n",
+		target.display()
+	)
+}
+
+/// Where `/run` is, for code that has no executor to hand.
+fn run_dir_path() -> std::path::PathBuf {
+	std::env::var_os("NCFG_RUN_DIR").map_or_else(
+		|| std::path::PathBuf::from("/run/netcfgd"),
+		std::path::PathBuf::from,
+	)
 }
 
 /// A 32-octet key from a secret, in the base64 every `WireGuard` tool prints.
