@@ -91,6 +91,15 @@ pub struct ObservedLink {
 	/// Bridge or bond this link is enslaved to.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub master: Option<String>,
+	/// Whether this interface forwards, from the `forwarding` sysctls.
+	///
+	/// `Some(true)` only when both the IPv4 and the IPv6 one are set: half a
+	/// forwarding interface routes one family and silently blackholes the
+	/// other, and reporting that as "on" would make a plan claim there was
+	/// nothing to do. `None` means the sysctls could not be read, which is the
+	/// ordinary case in a container without `/proc/sys` mounted writable.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub forwarding: Option<bool>,
 	/// Whether netcfgd created this link.
 	///
 	/// Netlink has no protocol field for links, so unlike an address or a
@@ -257,6 +266,32 @@ pub struct Observed {
 	/// Prefixes delegated to this host, sorted by interface.
 	#[serde(default)]
 	pub delegations: Vec<Delegation>,
+	/// Interfaces netcfgd turned forwarding on for, sorted.
+	///
+	/// Recorded rather than inferred, because a sysctl carries no owner. An
+	/// interface that was already forwarding when netcfgd first ran is not in
+	/// here and never gets turned off -- somebody else's `sysctl.conf` is not
+	/// netcfgd's to undo. One that netcfgd switched on is, which is what makes
+	/// deleting `forwarding` from the document mean something.
+	#[serde(default)]
+	pub forwarding_applied: Vec<String>,
+	/// Interfaces netcfgd's own nftables table currently masquerades, sorted.
+	///
+	/// Empty where the table does not exist, and also where the kernel has no
+	/// `nf_tables` at all -- the two are indistinguishable from here and the
+	/// planner treats them the same, because "no NAT is installed" is the true
+	/// statement in both cases. What separates them is what happens on apply:
+	/// a missing subsystem fails loudly there.
+	#[serde(default)]
+	pub nat: Vec<String>,
+	/// Tables other than netcfgd's that translate source addresses, sorted.
+	///
+	/// Decision 0022 refuses to delete these and reports them instead: a
+	/// second source-NAT chain on the same hook translates the same packets
+	/// twice, and the table it lives in almost certainly holds filtering
+	/// netcfgd cannot evaluate.
+	#[serde(default)]
+	pub nat_conflicts: Vec<String>,
 	/// Whether address ownership came from `IFA_PROTO` or from the weaker
 	/// `/run` fallback.
 	///
