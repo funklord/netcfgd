@@ -44,7 +44,8 @@ use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{EapConfig, EapMethod, PskConfig, PskProto, Security};
 use netcfgd_model::{
 	AddressSource, Control, Dhcp4, Dhcp6, Document, DriftPolicy, Globals, HostnamePolicy,
-	Interface, InterfaceKind, Key, Principal, SecretProvider, SecretRef, Ssid, WifiNetwork,
+	Interface, InterfaceKind, Key, Principal, QdiscKind, QdiscPolicy, SecretProvider, SecretRef,
+	Ssid, WifiNetwork,
 };
 use std::path::PathBuf;
 
@@ -199,6 +200,10 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 		}),
 		forwarding: Some(true),
 		nat: Some(true),
+		qdisc: Some(QdiscPolicy {
+			kind: QdiscKind::Cake,
+			bandwidth_bits: Some(100_000_000),
+		}),
 		guard: Some(Guard {
 			reason: "nfs".to_owned(),
 		}),

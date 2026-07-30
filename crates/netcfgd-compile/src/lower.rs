@@ -14,8 +14,8 @@ use netcfgd_model::device::{AccessPoint, MacPolicy, Powersave, WifiBackend, Wifi
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{
 	BondConfig, BondMode, BridgeConfig, BridgeVlan, LinkSettings, MacvlanConfig, MacvlanMode,
-	PppoeConfig, Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind, VethConfig, VlanConfig,
-	VlanProtocol, VrfConfig, VxlanConfig, WgPeer, WireGuardConfig,
+	PppoeConfig, QdiscKind, QdiscPolicy, Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind,
+	VethConfig, VlanConfig, VlanProtocol, VrfConfig, VxlanConfig, WgPeer, WireGuardConfig,
 };
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
@@ -184,6 +184,7 @@ fn expand_members(
 			advertise: None,
 			forwarding: None,
 			nat: None,
+			qdisc: None,
 			guard: None,
 			ipv6_token: None,
 			link_settings: None,
@@ -1299,6 +1300,7 @@ fn lower_interface(
 		dns: None,
 		hooks: Vec::new(),
 		nat: None,
+		qdisc: None,
 		on_drift: None,
 		master: None,
 		dot1x: None,
@@ -1418,6 +1420,16 @@ fn lower_interface(
 				"master" => interface.master = as_string(&assignment.value, diags),
 				"forwarding" => interface.forwarding = as_bool(&assignment.value, diags),
 				"nat" => interface.nat = as_bool(&assignment.value, diags),
+				// `qdisc = "fq_codel"`, the shorthand for a scheduler that
+				// needs no parameters -- which is all of them except `cake`.
+				"qdisc" => {
+					interface.qdisc = as_string(&assignment.value, diags).and_then(|name| {
+						qdisc_kind(&name, assignment.span, diags).map(|kind| QdiscPolicy {
+							kind,
+							bandwidth_bits: None,
+						})
+					});
+				}
 				"on_drift" => interface.on_drift = as_drift(&assignment.value, diags),
 				"guard" => {
 					provenance.record(sources, field_path(&name, "guard"), assignment.span);
@@ -1441,6 +1453,7 @@ fn lower_interface(
 					}
 				}
 				"bridge" => interface.kind = lower_bridge(inner, diags),
+				"qdisc" => interface.qdisc = lower_qdisc(inner, diags),
 				"bond" => {
 					if let Some(kind) = lower_bond(inner, diags) {
 						interface.kind = kind;
@@ -2181,6 +2194,149 @@ fn lower_vlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 		id,
 		protocol,
 	}))
+}
+
+/// One of the schedulers decision 0023 allows, or a diagnostic naming them.
+///
+/// The full list is in the message rather than "unknown qdisc", because the
+/// set is small, closed, and not guessable: somebody who writes `htb` needs to
+/// be told that classful schedulers are out, not that they typed something
+/// unrecognised.
+fn qdisc_kind(name: &str, span: Span, diags: &mut Diagnostics) -> Option<QdiscKind> {
+	let kinds = [
+		QdiscKind::FqCodel,
+		QdiscKind::Cake,
+		QdiscKind::Fq,
+		QdiscKind::PfifoFast,
+		QdiscKind::Noqueue,
+	];
+	if let Some(kind) = kinds.into_iter().find(|kind| kind.name() == name) {
+		return Some(kind);
+	}
+	let names: Vec<&str> = kinds.iter().map(|kind| kind.name()).collect();
+	diags.push(
+		Diagnostic::new(
+			span,
+			format!("`{name}` is not a queueing discipline netcfgd sets"),
+		)
+		.with_help(format!(
+			"one of {}; netcfgd sets the root qdisc only, so classful \
+				 schedulers like `htb` are out of scope (docs/decisions/0023)",
+			names.join(", ")
+		)),
+	);
+	None
+}
+
+/// A rate such as `100mbit`, in bits per second.
+///
+/// Decimal multipliers, as `tc` uses them: `kbit` is 1000 bits, not 1024. A
+/// bare number is bits per second, which is the unit everything else here is
+/// in.
+fn rate_bits(text: &str, span: Span, diags: &mut Diagnostics) -> Option<u64> {
+	let trimmed = text.trim();
+	let (digits, multiplier) = [
+		("gbit", 1_000_000_000_u64),
+		("mbit", 1_000_000),
+		("kbit", 1_000),
+		("bit", 1),
+	]
+	.into_iter()
+	.find_map(|(suffix, multiplier)| {
+		trimmed
+			.strip_suffix(suffix)
+			.map(|digits| (digits.trim_end(), multiplier))
+	})
+	.unwrap_or((trimmed, 1));
+
+	match digits.parse::<u64>() {
+		Ok(0) => {
+			diags.push(Diagnostic::new(
+				span,
+				"a shaped rate of zero would pass nothing",
+			));
+			None
+		}
+		Ok(number) => number.checked_mul(multiplier).or_else(|| {
+			diags.push(Diagnostic::new(
+				span,
+				format!("`{text}` is too large a rate"),
+			));
+			None
+		}),
+		Err(_) => {
+			diags.push(
+				Diagnostic::new(span, format!("`{text}` is not a rate")).with_help(
+					"a number and one of `bit`, `kbit`, `mbit`, `gbit`, as in `100mbit`",
+				),
+			);
+			None
+		}
+	}
+}
+
+/// The `qdisc { ... }` block.
+fn lower_qdisc(block: &Block, diags: &mut Diagnostics) -> Option<QdiscPolicy> {
+	let mut kind = None;
+	let mut bandwidth_bits = None;
+	let mut bandwidth_span = None;
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			if let Item::Block(nested) = item {
+				diags.push(Diagnostic::new(
+					nested.span,
+					format!("`{}` is not valid inside `qdisc`", nested.head),
+				));
+			}
+			continue;
+		};
+		match assignment.key.as_str() {
+			"kind" => {
+				kind = as_string(&assignment.value, diags)
+					.and_then(|name| qdisc_kind(&name, assignment.span, diags));
+			}
+			"bandwidth" => {
+				bandwidth_span = Some(assignment.span);
+				bandwidth_bits = as_string(&assignment.value, diags)
+					.and_then(|text| rate_bits(&text, assignment.span, diags));
+			}
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown qdisc key `{other}`"),
+			)),
+		}
+	}
+
+	let kind = kind.or_else(|| {
+		diags.push(
+			Diagnostic::new(block.span, "a `qdisc` block needs a `kind`")
+				.with_help("as in `qdisc { kind = \"cake\"; bandwidth = \"100mbit\" }`"),
+		);
+		None
+	})?;
+
+	// Refused rather than ignored. A rate on `fq_codel` is somebody expecting
+	// their line to be shaped, and silently dropping it would leave them with
+	// an unshaped uplink and a config that says otherwise.
+	if bandwidth_bits.is_some() && !kind.shapes() {
+		diags.push(
+			Diagnostic::new(
+				bandwidth_span.unwrap_or(block.span),
+				format!("`{}` cannot shape to a rate", kind.name()),
+			)
+			.with_help(
+				"`cake` is the scheduler that shapes without a class tree; the others \
+				 queue but do not limit",
+			),
+		);
+		return None;
+	}
+
+	Some(QdiscPolicy {
+		kind,
+		bandwidth_bits,
+	})
 }
 
 fn lower_bridge(block: &Block, diags: &mut Diagnostics) -> InterfaceKind {

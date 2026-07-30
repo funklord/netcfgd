@@ -34,6 +34,8 @@ fn link(name: &str) -> ObservedLink {
 		mtu: 1500,
 		mac: None,
 		master: None,
+		qdisc: Some("noqueue".to_owned()),
+		qdisc_bandwidth_bits: None,
 		forwarding: None,
 		ownership: Ownership::Unknown,
 	}
@@ -106,6 +108,35 @@ fn simulate_vlan(op: &Op, observed: &mut Observed) {
 				pvid: *pvid,
 				untagged: *untagged,
 			});
+	}
+}
+
+/// The qdisc half of [`simulate`], split out for the same reason as the VLAN
+/// half: one match arm per op had grown past what the style allows.
+fn simulate_qdisc(op: &Op, observed: &mut Observed) {
+	let (Op::QdiscSet { iface, .. } | Op::QdiscReset { iface }) = op else {
+		return;
+	};
+	// The kernel puts its default back on a reset, which for the fake link
+	// here is `noqueue`. Modelling that as "no qdisc at all" would let a
+	// planner bug that never converges look like it converged.
+	let (kind, rate) = match op {
+		Op::QdiscSet {
+			kind,
+			bandwidth_bits,
+			..
+		} => (kind.clone(), *bandwidth_bits),
+		_ => ("noqueue".to_owned(), None),
+	};
+
+	if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
+		link.qdisc = Some(kind);
+		link.qdisc_bandwidth_bits = rate;
+	}
+
+	observed.qdisc_applied.retain(|name| name != iface);
+	if matches!(op, Op::QdiscSet { .. }) {
+		observed.qdisc_applied.push(iface.clone());
 	}
 }
 
@@ -194,6 +225,9 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 					scope: scope.clone(),
 					policy: (**policy).clone(),
 				});
+			}
+			Op::QdiscSet { .. } | Op::QdiscReset { .. } => {
+				simulate_qdisc(&action.op, observed);
 			}
 			Op::SysctlSetForwarding { iface, enabled } => {
 				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
@@ -1650,4 +1684,92 @@ fn a_foreign_nat_table_is_reported_not_removed() {
 		"{:?}",
 		names(&plan)
 	);
+}
+
+/// A named scheduler is installed once and then left alone.
+#[test]
+fn a_qdisc_is_set_once_and_then_left_alone() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config = "10.0.0.2/24"
+			qdisc  = "fq_codel"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	let plan = settle(&desired, &mut observed);
+
+	assert!(names(&plan).contains(&"qdisc.set"));
+	assert_eq!(
+		observed.link("eth0").and_then(|l| l.qdisc.as_deref()),
+		Some("fq_codel")
+	);
+}
+
+/// The rate is part of the comparison, not an afterthought.
+///
+/// `cake` already installed at the wrong bandwidth is the case where "the kind
+/// matches, so nothing to do" leaves a line shaped at somebody else's number.
+#[test]
+fn a_cake_at_the_wrong_rate_is_reshaped() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config = "10.0.0.2/24"
+			qdisc {
+				kind      = "cake"
+				bandwidth = "100mbit"
+			}
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.qdisc = Some("cake".to_owned());
+		link.qdisc_bandwidth_bits = Some(50_000_000);
+	}
+
+	let plan = settle(&desired, &mut observed);
+	assert!(names(&plan).contains(&"qdisc.set"));
+	assert_eq!(
+		observed.link("eth0").and_then(|l| l.qdisc_bandwidth_bits),
+		Some(100_000_000)
+	);
+}
+
+/// Dropping `qdisc` puts the kernel default back, but only where netcfgd is
+/// what moved it.
+#[test]
+fn removing_a_qdisc_netcfgd_set_restores_the_default() {
+	let desired = document("interface eth0 { config = \"10.0.0.2/24\" }");
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.qdisc = Some("cake".to_owned());
+	}
+	observed.qdisc_applied = vec!["eth0".to_owned()];
+
+	let plan = settle(&desired, &mut observed);
+	assert!(names(&plan).contains(&"qdisc.reset"));
+	assert_eq!(
+		observed.link("eth0").and_then(|l| l.qdisc.as_deref()),
+		Some("noqueue")
+	);
+}
+
+/// A qdisc somebody else set is left exactly where it is.
+///
+/// The counterpart of the test above, and the one that matters: without the
+/// ownership record netcfgd would reset every interface whose config does not
+/// mention a qdisc, which is most of them.
+#[test]
+fn a_qdisc_netcfgd_did_not_set_is_left_alone() {
+	let desired = document("interface eth0 { config = \"10.0.0.2/24\" }");
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.qdisc = Some("cake".to_owned());
+	}
+
+	let plan = settle(&desired, &mut observed);
+	assert!(!names(&plan).contains(&"qdisc.reset"), "{:?}", names(&plan));
 }

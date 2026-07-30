@@ -232,6 +232,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	}
 
 	builder.plan_dns(desired, observed);
+	builder.plan_qdisc(desired, observed);
 	builder.plan_forwarding(desired, observed);
 	builder.plan_nat(desired, observed);
 
@@ -1061,6 +1062,81 @@ impl Builder {
 				route: Box::new(route.clone()),
 			}),
 		);
+	}
+
+	/// The root qdisc on each interface that names one.
+	///
+	/// Every interface always has a qdisc, so this is never "install where
+	/// absent" -- it is always a comparison against something, which is what
+	/// makes it idempotent without recorded state. Recorded state is needed
+	/// only to know whether netcfgd may reset one.
+	fn plan_qdisc(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			let link = observed.link(&interface.name);
+			let current = link.and_then(|link| link.qdisc.as_deref());
+			let current_rate = link.and_then(|link| link.qdisc_bandwidth_bits);
+			let ours = observed.qdisc_applied.contains(&interface.name);
+
+			let Some(policy) = interface.qdisc else {
+				// Stopped asking. Put the kernel default back, but only where
+				// netcfgd is what moved it -- an interface that was already
+				// running `cake` before netcfgd existed keeps it.
+				if ours {
+					self.push(
+						Op::QdiscReset {
+							iface: interface.name.clone(),
+						},
+						Reason::unwanted(
+							&interface.name,
+							"qdisc",
+							current.unwrap_or("<unknown>").to_owned(),
+						),
+						self.gate(&interface.name),
+						current.map(|kind| Op::QdiscSet {
+							iface: interface.name.clone(),
+							kind: kind.to_owned(),
+							bandwidth_bits: current_rate,
+						}),
+					);
+				}
+				continue;
+			};
+
+			// The rate is part of the comparison, not an afterthought. A
+			// `cake` already installed at the wrong bandwidth is the exact
+			// case where "the kind matches, nothing to do" shapes a line at
+			// somebody else's number.
+			if current == Some(policy.kind.name()) && current_rate == policy.bandwidth_bits {
+				continue;
+			}
+
+			let describe = |kind: &str, rate: Option<u64>| match rate {
+				Some(bits) => format!("{kind} at {bits} bit/s"),
+				None => kind.to_owned(),
+			};
+			self.push(
+				Op::QdiscSet {
+					iface: interface.name.clone(),
+					kind: policy.kind.name().to_owned(),
+					bandwidth_bits: policy.bandwidth_bits,
+				},
+				Reason {
+					interface: Some(interface.name.clone()),
+					field: "qdisc".to_owned(),
+					desired: describe(policy.kind.name(), policy.bandwidth_bits),
+					observed: current.map_or_else(
+						|| "<absent>".to_owned(),
+						|kind| describe(kind, current_rate),
+					),
+				},
+				self.gate(&interface.name),
+				current.map(|kind| Op::QdiscSet {
+					iface: interface.name.clone(),
+					kind: kind.to_owned(),
+					bandwidth_bits: current_rate,
+				}),
+			);
+		}
 	}
 
 	/// The `forwarding` sysctl on each interface that asks for one.

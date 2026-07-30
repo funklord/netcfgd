@@ -28,6 +28,7 @@ fn iface(name: &str) -> Interface {
 		advertise: None,
 		forwarding: None,
 		nat: None,
+		qdisc: None,
 		guard: None,
 		ipv6_token: None,
 		link_settings: None,

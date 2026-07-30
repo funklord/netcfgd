@@ -24,6 +24,7 @@ pub mod inotify;
 pub mod nft;
 pub mod ops;
 pub mod peer;
+pub mod qdisc;
 pub mod socket;
 pub mod watch;
 pub mod wg;
@@ -49,6 +50,8 @@ pub struct Snapshot {
 	pub routes: Vec<RouteRecord>,
 	/// Every bridge VLAN, from the separate `AF_BRIDGE` dump.
 	pub bridge_vlans: Vec<dump::BridgeVlanRecord>,
+	/// Every interface's root qdisc, from the `RTM_GETQDISC` dump.
+	pub qdiscs: Vec<qdisc::QdiscRecord>,
 	/// Whether any address in this dump carried `IFA_PROTO`.
 	///
 	/// **A lower bound, not a kernel capability check.** `false` means "no
@@ -129,6 +132,10 @@ pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
 		.collect();
 	bridge_vlans.sort_unstable();
 
+	// Root qdiscs, which need their own dump because `RTM_GETQDISC` is a
+	// different message and not an attribute of a link.
+	let qdiscs = qdisc::Qdisc::new(socket).roots()?;
+
 	let address_proto_supported = addresses.iter().any(|address| address.proto.is_some());
 
 	Ok(Snapshot {
@@ -136,6 +143,7 @@ pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
 		addresses,
 		routes,
 		bridge_vlans,
+		qdiscs,
 		address_proto_supported,
 	})
 }

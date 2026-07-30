@@ -36,6 +36,8 @@ pub struct Effects {
 	pub applied_dns: Vec<netcfgd_model::AppliedDns>,
 	/// `(interface, enabled)` for each forwarding sysctl written.
 	pub forwarding: Vec<(String, bool)>,
+	/// `(interface, set)` for each root qdisc changed. `false` is a reset.
+	pub qdisc: Vec<(String, bool)>,
 }
 
 /// Executes actions against rtnetlink and the backend helpers.
@@ -681,6 +683,43 @@ impl Executor for KernelExecutor {
 						Ok(())
 					}
 				}
+			}
+			Op::QdiscSet {
+				iface,
+				kind,
+				bandwidth_bits,
+			} => {
+				let index = self.index_of(iface)?;
+				netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket)
+					.set_root(
+						index,
+						&netcfgd_netlink::qdisc::RootQdisc {
+							kind,
+							bandwidth_bits: *bandwidth_bits,
+						},
+					)
+					.map_err(|error| {
+						if error.kind() == std::io::ErrorKind::NotFound {
+							format!(
+								"cannot set {kind} on {iface}: this kernel has no such \
+								 scheduler, and the module could not be loaded"
+							)
+						} else {
+							format!("cannot set {kind} on {iface}: {error}")
+						}
+					})?;
+				self.effects.qdisc.push((iface.clone(), true));
+				Ok(())
+			}
+			Op::QdiscReset { iface } => {
+				let index = self.index_of(iface)?;
+				netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket)
+					.delete_root(index)
+					.map_err(|error| {
+						format!("cannot restore the default qdisc on {iface}: {error}")
+					})?;
+				self.effects.qdisc.push((iface.clone(), false));
+				Ok(())
 			}
 			Op::SysctlSetForwarding { iface, enabled } => {
 				set_forwarding(iface, *enabled)?;

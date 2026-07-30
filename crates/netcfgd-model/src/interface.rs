@@ -483,6 +483,67 @@ pub enum InterfaceKind {
 	Tun(TunConfig),
 }
 
+/// Which queueing discipline a link drains its transmit queue with.
+///
+/// A closed set, not a free string. Decision 0023 keeps netcfgd to the root
+/// qdisc and to schedulers that need no classes or filters underneath them, and
+/// an open string would make that line invisible: `htb` would compile, apply,
+/// and produce a class-less shaper that drops everything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QdiscKind {
+	/// Flow queueing with `CoDel`. The sane default for anything congested.
+	FqCodel,
+	/// Common Applications Kept Enhanced: fair queueing plus a shaper, so it
+	/// needs no class tree to limit a rate. The uplink one.
+	Cake,
+	/// Fair queueing with pacing. For a host originating a lot of TCP.
+	Fq,
+	/// The historical default: three priority bands, no fairness.
+	PfifoFast,
+	/// No queue at all, which is what virtual devices usually want.
+	Noqueue,
+}
+
+impl QdiscKind {
+	/// The name the kernel knows it by, which is also the config spelling.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::FqCodel => "fq_codel",
+			Self::Cake => "cake",
+			Self::Fq => "fq",
+			Self::PfifoFast => "pfifo_fast",
+			Self::Noqueue => "noqueue",
+		}
+	}
+
+	/// Whether this scheduler can shape to a rate.
+	///
+	/// Only `cake`, which is the whole reason a rate is expressible at all
+	/// without the class machinery decision 0023 refuses.
+	#[must_use]
+	pub fn shapes(self) -> bool {
+		matches!(self, Self::Cake)
+	}
+}
+
+/// The root qdisc on an interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QdiscPolicy {
+	/// Which scheduler.
+	pub kind: QdiscKind,
+	/// Shaped rate in **bits** per second.
+	///
+	/// Bits because that is what an operator writes and what every tool
+	/// prints; the kernel wants bytes and the conversion happens once, at the
+	/// netlink boundary. Storing the kernel's unit here would put a division
+	/// by eight in front of every reader.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub bandwidth_bits: Option<u64>,
+}
+
 /// Which daemon sends router advertisements.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -596,6 +657,14 @@ pub struct Interface {
 	/// its neighbours.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub forwarding: Option<bool>,
+	/// How this link drains its transmit queue.
+	///
+	/// The root qdisc and nothing below it: decision 0023 draws the same line
+	/// here that 0022 draws for netfilter. netcfgd sets how a link behaves when
+	/// it is congested, because that is a property of the link; it does not
+	/// decide which traffic wins, because that is policy.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub qdisc: Option<QdiscPolicy>,
 	/// Masquerade traffic leaving this interface.
 	///
 	/// The uplink side of a router: every packet going out here leaves with

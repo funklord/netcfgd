@@ -1494,3 +1494,59 @@ fn a_range_cannot_be_the_pvid() {
 	let message = errors(r#"interface p { vlans = "10-20 pvid" }"#);
 	assert!(message.contains("cannot be the pvid"), "got: {message}");
 }
+
+/// Rates are written the way `tc` writes them and stored the way the model
+/// wants them: decimal multipliers in, bits per second out.
+#[test]
+fn a_shaped_rate_is_converted_to_bits() {
+	for (written, bits) in [
+		("100mbit", 100_000_000_u64),
+		("1gbit", 1_000_000_000),
+		("512kbit", 512_000),
+		("2000000", 2_000_000),
+	] {
+		let document = build_ok(&format!(
+			"interface eth0 {{\n\tqdisc {{ kind = \"cake\"; bandwidth = \"{written}\" }}\n}}"
+		));
+		let qdisc = document.interfaces[0].qdisc.expect("a qdisc");
+		assert_eq!(qdisc.bandwidth_bits, Some(bits), "for {written}");
+	}
+}
+
+/// A scheduler netcfgd does not set is refused by name, with the set that is
+/// allowed and the reason the rest are not.
+#[test]
+fn a_classful_scheduler_is_refused_with_the_reason() {
+	let rendered = errors("interface eth0 {\n\tqdisc = \"htb\"\n}");
+	assert!(
+		rendered.contains("not a queueing discipline netcfgd sets"),
+		"got: {rendered}"
+	);
+	assert!(rendered.contains("fq_codel"), "got: {rendered}");
+	assert!(rendered.contains("0023"), "got: {rendered}");
+}
+
+/// A rate on a scheduler that cannot shape is refused rather than dropped.
+///
+/// Dropping it would leave somebody with an unshaped uplink and a config
+/// saying otherwise, which is the failure that is hardest to notice.
+#[test]
+fn a_rate_on_a_scheduler_that_cannot_shape_is_refused() {
+	let rendered =
+		errors("interface eth0 {\n\tqdisc { kind = \"fq_codel\"; bandwidth = \"100mbit\" }\n}");
+	assert!(
+		rendered.contains("cannot shape to a rate"),
+		"got: {rendered}"
+	);
+}
+
+/// A rate that is not a rate says what one looks like.
+#[test]
+fn a_malformed_rate_is_reported() {
+	let rendered = errors("interface eth0 {\n\tqdisc { kind = \"cake\"; bandwidth = \"fast\" }\n}");
+	assert!(rendered.contains("is not a rate"), "got: {rendered}");
+
+	let rendered =
+		errors("interface eth0 {\n\tqdisc { kind = \"cake\"; bandwidth = \"0mbit\" }\n}");
+	assert!(rendered.contains("would pass nothing"), "got: {rendered}");
+}

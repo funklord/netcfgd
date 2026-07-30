@@ -190,6 +190,28 @@ pub enum Op {
 		/// The policy.
 		policy: Box<DnsPolicy>,
 	},
+	/// Set the root qdisc on an interface.
+	///
+	/// The root and nothing below it (decision 0023). Sent as a replace, so
+	/// there is no moment where the interface is on the kernel default -- on a
+	/// shaped uplink that moment is a window of unshaped traffic.
+	QdiscSet {
+		/// Interface name.
+		iface: String,
+		/// The scheduler, as the kernel spells it.
+		kind: String,
+		/// Shaped rate in bits per second, for the schedulers that shape.
+		bandwidth_bits: Option<u64>,
+	},
+	/// Put the kernel's default root qdisc back.
+	///
+	/// Not deletion in the sense `addr.del` is: every interface has a qdisc,
+	/// so removing netcfgd's means `net.core.default_qdisc` returns
+	/// immediately. There is no state in between and nothing to restore.
+	QdiscReset {
+		/// Interface name.
+		iface: String,
+	},
 	/// Turn IP forwarding on or off for one interface.
 	///
 	/// A sysctl and nothing else -- see [`netcfgd_model::Interface::forwarding`]
@@ -268,6 +290,8 @@ impl Op {
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
+			Self::QdiscSet { .. } => "qdisc.set",
+			Self::QdiscReset { .. } => "qdisc.reset",
 			Self::SysctlSetForwarding { .. } => "sysctl.set_forwarding",
 			Self::NatReplace { .. } => "nat.replace",
 			Self::HookRun { .. } => "hook.run",
@@ -327,6 +351,13 @@ impl Op {
 			| Self::CommitArm { .. }
 			| Self::CommitConfirm
 			| Self::BridgeVlanAdd { .. }
+			// Replacing a qdisc discards whatever is queued on the interface,
+			// which is a few milliseconds of loss that TCP absorbs -- not the
+			// kind of interruption a guard exists to prevent. Calling it
+			// disruptive would block the one change that fixes a link which is
+			// already dropping packets from bufferbloat.
+			| Self::QdiscSet { .. }
+			| Self::QdiscReset { .. }
 			// Not because replacing the table is harmless -- withdrawing NAT
 			// cuts off a whole LAN. It is because `interface()` returns
 			// nothing for this op, so no guard can match it anyway, and
@@ -361,6 +392,8 @@ impl Op {
 			| Self::WgSetDevice { iface, .. }
 			| Self::WgSetPeers { iface, .. }
 			| Self::SysctlSetForwarding { iface, .. }
+			| Self::QdiscSet { iface, .. }
+			| Self::QdiscReset { iface }
 			| Self::HookRun { iface, .. } => Some(iface),
 			Self::WifiSetProfiles { device, .. }
 			| Self::WifiAssociate { device, .. }
