@@ -15,10 +15,12 @@ use std::path::PathBuf;
 /// Where the daemon reads and writes.
 #[derive(Debug, Clone)]
 pub(crate) struct Paths {
-	/// The config directory.
-	pub(crate) config_dir: PathBuf,
+	/// The factory-default config directory, read before the writable one.
+	pub(crate) factory: PathBuf,
+	/// The writable config directory.
+	pub(crate) config: PathBuf,
 	/// The runtime state directory.
-	pub(crate) run_dir: PathBuf,
+	pub(crate) run: PathBuf,
 }
 
 /// What the daemon knows.
@@ -66,11 +68,11 @@ impl State {
 	///
 	/// Returns the event describing what happened, for subscribers.
 	pub(crate) fn reload(&mut self) -> Event {
-		let mut sink = RunHooks::new(&self.paths.run_dir);
-		let sources = match config::load(&self.paths.config_dir) {
+		let mut sink = RunHooks::new(&self.paths.run);
+		let sources = match config::load_layered(&self.paths.factory, &self.paths.config) {
 			Ok(sources) => sources,
 			Err(error) => {
-				self.diagnostics = Some(format!("{}: {error}", self.paths.config_dir.display()));
+				self.diagnostics = Some(format!("{}: {error}", self.paths.config.display()));
 				// The previous desired state is kept deliberately. Dropping it
 				// would mean an unreadable directory silently disarms drift
 				// detection, which is the moment it is most wanted.
@@ -83,7 +85,7 @@ impl State {
 
 		match netcfgd_compile::compile_with_provenance(&sources, &mut sink) {
 			Ok((document, provenance)) => {
-				let _ = run_state::write_provenance(&self.paths.run_dir, &provenance);
+				let _ = run_state::write_provenance(&self.paths.run, &provenance);
 				if self.rejected.as_deref() == Some(confirm::document_hash(&document).as_str()) {
 					// The same configuration a revert already rejected. Adopting
 					// it would undo the revert on the next drift check, which the
@@ -97,7 +99,7 @@ impl State {
 						),
 					};
 				}
-				let _ = run_state::write_desired(&self.paths.run_dir, &document);
+				let _ = run_state::write_desired(&self.paths.run, &document);
 				self.rejected = None;
 				self.desired = Some(document);
 				self.diagnostics = None;
@@ -118,10 +120,10 @@ impl State {
 
 	/// Re-read the kernel.
 	pub(crate) fn reobserve(&mut self) {
-		let prior = run_state::prior_state(&self.paths.run_dir);
+		let prior = run_state::prior_state(&self.paths.run);
 		if let Ok(observed) = netcfgd_observe::current(&prior) {
 			self.observed = observed;
-			let _ = run_state::write_observed(&self.paths.run_dir, &self.observed);
+			let _ = run_state::write_observed(&self.paths.run, &self.observed);
 		}
 	}
 
@@ -154,7 +156,7 @@ impl State {
 		let executor = netcfgd_apply::KernelExecutor::new()
 			.map_err(|error| format!("cannot open a netlink socket: {error}"))?;
 		Ok(match &self.desired {
-			Some(document) => executor.with_context(&self.paths.run_dir, document),
+			Some(document) => executor.with_context(&self.paths.run, document),
 			None => executor,
 		})
 	}
@@ -166,7 +168,7 @@ impl State {
 	) -> (Plan, Journal) {
 		let plan = self.plan(options);
 		let journal = apply(&plan, executor);
-		let _ = run_state::write_journal(&self.paths.run_dir, &journal);
+		let _ = run_state::write_journal(&self.paths.run, &journal);
 		(plan, journal)
 	}
 

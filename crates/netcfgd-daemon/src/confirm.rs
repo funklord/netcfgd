@@ -43,17 +43,17 @@ impl ArmError {
 /// start and records a last-good then, so in ordinary use one always exists by
 /// the time anybody asks for a window.
 pub(crate) fn may_arm(state: &State) -> Result<Document, ArmError> {
-	if let Some(window) = confirm::read_window(&state.paths.run_dir) {
+	if let Some(window) = confirm::read_window(&state.paths.run) {
 		#[allow(clippy::cast_possible_truncation)]
 		return Err(ArmError::AlreadyArmed(window.remaining().as_secs() as u32));
 	}
-	confirm::read_last_good(&state.paths.run_dir).ok_or(ArmError::NoLastGood)
+	confirm::read_last_good(&state.paths.run).ok_or(ArmError::NoLastGood)
 }
 
 /// Open the window. Called after the apply has run.
 pub(crate) fn arm(state: &State, window_seconds: u32, last_good: &Document) -> Event {
 	let window = confirm::arm(window_seconds, confirm::document_hash(last_good));
-	let _ = confirm::write_window(&state.paths.run_dir, &window);
+	let _ = confirm::write_window(&state.paths.run, &window);
 	Event::ConfirmArmed {
 		seconds: window_seconds,
 	}
@@ -61,13 +61,13 @@ pub(crate) fn arm(state: &State, window_seconds: u32, last_good: &Document) -> E
 
 /// Keep the change.
 pub(crate) fn confirm_window(state: &mut State) -> (Response, Option<Event>) {
-	if confirm::read_window(&state.paths.run_dir).is_none() {
+	if confirm::read_window(&state.paths.run).is_none() {
 		return (Response::error("no confirm window is open"), None);
 	}
-	let _ = confirm::clear_window(&state.paths.run_dir);
+	let _ = confirm::clear_window(&state.paths.run);
 	// The change stood, so it becomes what a future revert falls back to.
 	if let Some(desired) = &state.desired {
-		let _ = confirm::write_last_good(&state.paths.run_dir, desired);
+		let _ = confirm::write_last_good(&state.paths.run, desired);
 	}
 	(
 		Response::Ok,
@@ -85,11 +85,11 @@ pub(crate) fn confirm_window(state: &mut State) -> (Response, Option<Event>) {
 /// network: the target document is on disk and the current state comes from
 /// netlink.
 pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) {
-	let Some(window) = confirm::read_window(&state.paths.run_dir) else {
+	let Some(window) = confirm::read_window(&state.paths.run) else {
 		return (Response::error("no confirm window is open"), Vec::new());
 	};
-	let Some(last_good) = confirm::read_last_good(&state.paths.run_dir) else {
-		let _ = confirm::clear_window(&state.paths.run_dir);
+	let Some(last_good) = confirm::read_last_good(&state.paths.run) else {
+		let _ = confirm::clear_window(&state.paths.run);
 		return (
 			Response::error("the last-good configuration is unreadable; nothing reverted"),
 			Vec::new(),
@@ -114,7 +114,7 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 	// /run/desired.json is what `cat` answers with, so it has to say what is
 	// actually in effect rather than what is on disk.
 	if let Some(desired) = &state.desired {
-		let _ = run_state::write_desired(&state.paths.run_dir, desired);
+		let _ = run_state::write_desired(&state.paths.run, desired);
 	}
 
 	let mut events = Vec::new();
@@ -130,10 +130,10 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 		);
 	};
 	let (_, journal) = state.apply(&PlanOptions::default(), &mut executor);
-	let mut owned = run_state::read_owned(&state.paths.run_dir);
+	let mut owned = run_state::read_owned(&state.paths.run);
 	owned.absorb(&executor.effects);
-	let _ = run_state::write_owned(&state.paths.run_dir, &owned);
-	let _ = confirm::clear_window(&state.paths.run_dir);
+	let _ = run_state::write_owned(&state.paths.run, &owned);
+	let _ = confirm::clear_window(&state.paths.run);
 	state.reobserve();
 
 	if let Some(failure) = journal.failure() {
@@ -157,7 +157,7 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 /// long the daemon was down, which is exactly the assumption commit-confirm
 /// exists because you cannot make.
 pub(crate) fn resolve_on_startup(state: &mut State) -> Vec<Event> {
-	if confirm::read_window(&state.paths.run_dir).is_none() {
+	if confirm::read_window(&state.paths.run).is_none() {
 		return Vec::new();
 	}
 	eprintln!("netcfgd: a confirm window was open when this daemon started");

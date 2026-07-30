@@ -112,4 +112,7 @@ netcfgd
 # reads it back, plus the compiler expansion that turns one config key into a
 # synthesised device and a redirect. More than the qdisc work itself, because
 # the filter is three levels of nesting to write and to parse.
-total 2884568
+# +8 KB for read-only-root support: a second config layer, `ncfg reset`, and
+# the file enumeration they share. All of it in ncfg -- the daemon did not
+# grow, because reading two directories instead of one is the same code path.
+total 2892760
