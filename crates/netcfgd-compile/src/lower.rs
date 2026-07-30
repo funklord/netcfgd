@@ -1901,7 +1901,7 @@ fn lower_macvlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind
 fn lower_tunnel(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 	let mut kind = None;
 	let mut config = TunnelConfig {
-		kind: TunnelKind::Gre,
+		mode: TunnelKind::Gre,
 		local: None,
 		remote: None,
 		parent: None,
@@ -1970,7 +1970,7 @@ fn lower_tunnel(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind>
 		);
 		return None;
 	};
-	config.kind = kind;
+	config.mode = kind;
 
 	// The endpoints have to agree with each other and with the encapsulation.
 	// A v6 remote on an `ipip` produces a link the kernel refuses to build,

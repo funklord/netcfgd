@@ -1259,7 +1259,7 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Veth(_) => "veth",
 		InterfaceKind::Vrf(_) => "vrf",
 		InterfaceKind::Macvlan(_) => "macvlan",
-		InterfaceKind::Tunnel(tunnel) => tunnel.kind.name(),
+		InterfaceKind::Tunnel(tunnel) => tunnel.mode.name(),
 		InterfaceKind::Tun(_) => "tun",
 	}
 }

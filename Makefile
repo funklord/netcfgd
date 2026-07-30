@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy executor-policy ascii size footprint rss live fuzz deny clean
+.PHONY: all check build test fmt fmt-fix clippy unsafe-policy executor-policy ascii size footprint rss live schema-bless fuzz deny clean
 
 all: build
 
@@ -81,6 +81,21 @@ executor-policy:
 		exit 1; \
 	fi; \
 	echo "executor-policy: ok"
+
+# M4 froze the document schema and the socket API. The freeze is enforced by
+# two witnesses under docs/schema/: one document with every field and variant
+# populated, and one of every socket message. Any change to either wire form
+# moves those bytes, and the diff is the review.
+#
+# The tests run inside `make check`, so there is no separate gate target -- what
+# is here is the deliberate way to move the line. Running it is not the
+# decision; the commit message is. A field added is a minor bump and fine.
+# Anything else is major, and every consumer refuses the document.
+schema-bless:
+	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-model --test frozen >/dev/null
+	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-proto --test frozen >/dev/null
+	@echo "schema-bless: witnesses rewritten; `git diff --stat docs/schema | tail -1`"
+	@echo "schema-bless: say in the commit whether this is a minor or a major bump"
 
 # code-style.md section 4: source, comments and doc comments are ASCII. Markdown
 # is exempt and is not checked here. This caught real drift the first time it

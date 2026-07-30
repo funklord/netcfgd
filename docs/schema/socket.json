@@ -1,0 +1,27 @@
+{"request":"hello"}
+{"request":"status"}
+{"request":"plan"}
+{"request":"apply","confirm":90,"allow_disruption":["eth0"]}
+{"request":"confirm"}
+{"request":"revert"}
+{"request":"reload"}
+{"request":"show"}
+{"request":"explain","subject":{"subject":"interface","name":"eth0"}}
+{"request":"explain","subject":{"subject":"address","interface":"eth0","address":"192.0.2.1/24"}}
+{"request":"explain","subject":{"subject":"route","interface":"eth0","destination":"default"}}
+{"request":"monitor"}
+{"request":"wifi_scan","interface":"wlan0"}
+{"request":"wifi_status","interface":"wlan0"}
+{"request":"wifi_connect","interface":"wlan0","network":"home"}
+{"request":"wifi_disconnect","interface":"wlan0"}
+{"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":1}}
+{"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
+{"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"ssid":"686f6d65","name":"home","configured":"home"}]}
+{"response":"wifi_status","interface":"wlan0","state":"COMPLETED","ssid":"686f6d65","name":"home","bssid":"00:11:22:33:44:55","network":"home"}
+{"response":"ok"}
+{"response":"error","message":"not permitted"}
+{"event":"observed","summary":"eth0 gained an address"}
+{"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}
+{"event":"drift","interface":"eth0","summary":"an address we installed is gone","action":"reconciled"}
+{"event":"confirm_armed","seconds":90}
+{"event":"confirm_resolved","confirmed":true}
