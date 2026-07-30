@@ -98,9 +98,13 @@ pub struct RoutingRule {
 	pub oif: Option<String>,
 	/// Firewall mark selector.
 	///
-	/// netcfgd never sets a mark -- that is a firewall's job and constraint 2
-	/// keeps it out of rulesets it does not own -- but routing on one somebody
-	/// else set is exactly what this is for.
+	/// netcfgd never sets a mark; routing on one somebody else set is exactly
+	/// what this is for.
+	///
+	/// That survives decision 0022, which lets netcfgd own an nftables table
+	/// for NAT. Marking a packet is classification -- a judgement about what
+	/// the traffic *is* -- and it would be the first step across the line 0022
+	/// draws between translating addresses and filtering packets.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub fwmark: Option<u32>,
 	/// Mask applied to the mark before comparing.
