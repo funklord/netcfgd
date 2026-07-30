@@ -6,7 +6,7 @@
 //! system becomes unpredictable (project.md section 3).
 
 use crate::ast::{Block, File, Item};
-use crate::diag::{Diagnostic, Diagnostics};
+use crate::diag::{Diagnostic, Diagnostics, SourceMap};
 
 /// Everything the files collectively say, with precedence already applied.
 #[derive(Debug, Clone, Default)]
@@ -23,14 +23,14 @@ pub struct Merged {
 ///
 /// Returns a diagnostic for every block redefined without `override`, naming
 /// both positions so the reader can see which two files disagree.
-pub fn merge(files: &[File]) -> Result<Merged, Diagnostics> {
+pub fn merge(files: &[File], sources: &SourceMap) -> Result<Merged, Diagnostics> {
 	let mut diagnostics = Diagnostics::new();
 	let mut merged = Merged::default();
 
 	for file in files {
 		for item in &file.items {
 			match item {
-				Item::Block(block) => merge_block(&mut merged, block, &mut diagnostics),
+				Item::Block(block) => merge_block(&mut merged, block, sources, &mut diagnostics),
 				Item::Assignment(assignment) => {
 					// Later wins, so replace in place rather than appending;
 					// keeping both would leave the winner ambiguous to every
@@ -64,7 +64,12 @@ pub fn merge(files: &[File]) -> Result<Merged, Diagnostics> {
 	}
 }
 
-fn merge_block(merged: &mut Merged, block: &Block, diagnostics: &mut Diagnostics) {
+fn merge_block(
+	merged: &mut Merged,
+	block: &Block,
+	sources: &SourceMap,
+	diagnostics: &mut Diagnostics,
+) {
 	let key = block.key();
 	let existing = merged.blocks.iter().position(|b| b.key() == key);
 
@@ -83,8 +88,14 @@ fn merge_block(merged: &mut Merged, block: &Block, diagnostics: &mut Diagnostics
 					block.span,
 					format!("`{}` is already defined", block.describe()),
 				)
+				// Naming the file, not just the line. The two definitions
+				// are usually in different files -- that is what drop-ins are
+				// for -- and with a factory layer under a writable one they
+				// are in different directories, where "line 1" on its own
+				// sends the reader to the wrong file.
 				.with_help(format!(
-					"first defined at line {}; write `override {}` to replace it",
+					"first defined at {}:{}; write `override {}` to replace it",
+					sources.name(first.source),
 					first.line,
 					block.describe()
 				)),
