@@ -18,6 +18,7 @@ netcfgd-apply   = { path = "../netcfgd-apply" }
 netcfgd-compile = { path = "../netcfgd-compile" }
 netcfgd-host    = { path = "../netcfgd-host" }
 netcfgd-model   = { path = "../netcfgd-model" }
+netcfgd-netlink = { path = "../netcfgd-netlink" }
 netcfgd-observe = { path = "../netcfgd-observe" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
 netcfgd-proto   = { path = "../netcfgd-proto" }
