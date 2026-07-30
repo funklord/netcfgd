@@ -90,4 +90,16 @@ netcfgd
 # and the DHCP client finally being told the metric the model always carried.
 #
 # +12 KB for detecting another daemon on the same interface.
-total 2712536
+#
+# +72 KB for NAT and forwarding, which is the largest single step since M3 and
+# was predicted: decision 0022 said "it costs size, and the budget is already
+# over". It buys a whole second netlink protocol -- `NETLINK_NETFILTER`, its
+# batched transaction framing, an nftables expression encoder and the reader
+# that parses rules back -- plus the forwarding sysctls, two planner passes and
+# two executor arms.
+#
+# This is the one to reach for first when the install has to shrink. 0022 and
+# design section 10.3 already say so: a machine that is not a router should not
+# be carrying an nftables encoder, and the table is self-contained enough to be
+# an optional backend rather than something threaded through the model.
+total 2786264

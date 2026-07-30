@@ -21,6 +21,7 @@
 pub mod dump;
 pub mod genl;
 pub mod inotify;
+pub mod nft;
 pub mod ops;
 pub mod peer;
 pub mod socket;

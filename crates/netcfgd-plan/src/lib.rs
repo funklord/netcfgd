@@ -232,6 +232,8 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	}
 
 	builder.plan_dns(desired, observed);
+	builder.plan_forwarding(desired, observed);
+	builder.plan_nat(desired, observed);
 
 	// Teardown comes last, so a change to an address is make-before-break: the
 	// new address is in place before the old one goes. On a machine being
@@ -1057,6 +1059,133 @@ impl Builder {
 			Some(Op::RouteDel {
 				iface: name.clone(),
 				route: Box::new(route.clone()),
+			}),
+		);
+	}
+
+	/// The `forwarding` sysctl on each interface that asks for one.
+	///
+	/// Planned per interface and applied per interface, rather than through
+	/// the global `net.ipv4.ip_forward`. Writing the global one sets every
+	/// device at once, so netcfgd would be turning forwarding on for
+	/// interfaces the document says nothing about -- and it could never turn
+	/// it off again without guessing which of those it had been responsible
+	/// for.
+	fn plan_forwarding(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			// An interface that stops asking is turned back off, but only
+			// where netcfgd is the one that turned it on. Without this the
+			// sysctl is a one-way door: deleting `forwarding = true` from the
+			// document leaves the machine routing, which is drift the config
+			// can no longer describe and constraint 1 does not allow.
+			let wanted = match interface.forwarding {
+				Some(wanted) => wanted,
+				None if observed.forwarding_applied.contains(&interface.name) => false,
+				None => continue,
+			};
+			let current = observed
+				.link(&interface.name)
+				.and_then(|link| link.forwarding);
+			if current == Some(wanted) {
+				continue;
+			}
+			self.push(
+				Op::SysctlSetForwarding {
+					iface: interface.name.clone(),
+					enabled: wanted,
+				},
+				Reason {
+					interface: Some(interface.name.clone()),
+					field: "forwarding".to_owned(),
+					desired: wanted.to_string(),
+					observed: current
+						.map_or_else(|| "<unreadable>".to_owned(), |on| on.to_string()),
+				},
+				self.gate(&interface.name),
+				// Only where the previous value is known. A sysctl that could
+				// not be read cannot be restored, and inventing `false` as the
+				// inverse would have commit-confirm turn forwarding off on a
+				// router that had it on before netcfgd ever ran.
+				current.map(|previous| Op::SysctlSetForwarding {
+					iface: interface.name.clone(),
+					enabled: previous,
+				}),
+			);
+		}
+	}
+
+	/// netcfgd's one nftables table, replaced whole.
+	///
+	/// The comparison is between two sorted lists of interface names, which is
+	/// the entire diff -- there is no per-rule reconciliation because there is
+	/// no per-rule change. Decision 0022.
+	fn plan_nat(&mut self, desired: &Document, observed: &Observed) {
+		let mut wanted: Vec<String> = desired
+			.interfaces
+			.iter()
+			.filter(|interface| interface.nat == Some(true))
+			.map(|interface| interface.name.clone())
+			.collect();
+		wanted.sort();
+
+		// Reported whenever netcfgd has an opinion about NAT, including when
+		// its opinion is "none" -- an operator who has just removed `nat` from
+		// their config is exactly the person who needs to know something else
+		// is still translating.
+		if !observed.nat_conflicts.is_empty() && (!wanted.is_empty() || !observed.nat.is_empty()) {
+			self.warnings.push(Warning {
+				message: format!(
+					"nftables table(s) `{}` also translate source addresses. Traffic \
+					 matching both is translated twice, which breaks return paths in \
+					 ways that look like packet loss. netcfgd will not delete another \
+					 table -- it cannot tell what filtering is in there -- so remove \
+					 the duplicate rule yourself, or drop `nat` here.",
+					observed.nat_conflicts.join("`, `")
+				),
+				interface: None,
+			});
+		}
+
+		// Forwarding is what makes NAT do anything, and the two are set
+		// independently, so this is the mistake that produces a router which
+		// translates nothing because nothing was forwarded to it.
+		if !wanted.is_empty()
+			&& !desired
+				.interfaces
+				.iter()
+				.any(|interface| interface.forwarding == Some(true))
+		{
+			self.warnings.push(Warning {
+				message: "`nat` is set but no interface has `forwarding = true`, so nothing \
+					 will reach the translation. Set it on the interface the traffic \
+					 arrives on -- the LAN side, not the uplink."
+					.to_owned(),
+				interface: None,
+			});
+		}
+
+		if wanted == observed.nat {
+			return;
+		}
+
+		let describe = |uplinks: &[String]| {
+			if uplinks.is_empty() {
+				"<none>".to_owned()
+			} else {
+				uplinks.join(", ")
+			}
+		};
+		let reason = Reason {
+			interface: None,
+			field: "nat".to_owned(),
+			desired: describe(&wanted),
+			observed: describe(&observed.nat),
+		};
+		self.push_root(
+			Op::NatReplace { uplinks: wanted },
+			reason,
+			Some(Op::NatReplace {
+				uplinks: observed.nat.clone(),
 			}),
 		);
 	}

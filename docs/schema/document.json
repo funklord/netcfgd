@@ -191,6 +191,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -347,6 +348,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -503,6 +505,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -664,6 +667,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -825,6 +829,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -986,6 +991,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -1147,6 +1153,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -1310,6 +1317,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -1476,6 +1484,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -1646,6 +1655,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -1807,6 +1817,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -1970,6 +1981,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -2131,6 +2143,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -2300,6 +2313,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -2464,6 +2478,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -2631,6 +2646,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -2793,6 +2809,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -2957,6 +2974,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -3119,6 +3137,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -3285,6 +3304,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -3467,6 +3487,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -3628,6 +3649,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -3789,6 +3811,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -3950,6 +3973,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -4112,6 +4136,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -4274,6 +4299,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -4436,6 +4462,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -4598,6 +4625,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -4760,6 +4788,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -4922,6 +4951,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },
@@ -5084,6 +5114,7 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "nat": true,
       "guard": {
         "reason": "nfs"
       },

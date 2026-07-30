@@ -34,6 +34,7 @@ fn link(name: &str) -> ObservedLink {
 		mtu: 1500,
 		mac: None,
 		master: None,
+		forwarding: None,
 		ownership: Ownership::Unknown,
 	}
 }
@@ -194,6 +195,16 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 					policy: (**policy).clone(),
 				});
 			}
+			Op::SysctlSetForwarding { iface, enabled } => {
+				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
+					link.forwarding = Some(*enabled);
+				}
+			}
+			// Whole-table replacement, so the observed list becomes the
+			// requested one rather than accumulating -- which is the point of
+			// the op and the thing that has to be true for the gate to mean
+			// anything.
+			Op::NatReplace { uplinks } => observed.nat.clone_from(uplinks),
 			// Hooks and commit actions leave no observable state of their own.
 			Op::BridgeVlanAdd { .. } | Op::BridgeVlanDel { .. } => {
 				simulate_vlan(&action.op, observed);
@@ -1545,6 +1556,98 @@ fn without_a_preference_carrier_is_not_consulted() {
 	assert!(
 		plan.actions.is_empty(),
 		"a flap must not disturb an interface that opted out: {:?}",
+		names(&plan)
+	);
+}
+
+/// NAT is one table, replaced whole, and the plan converges on the second run.
+///
+/// The interesting half is the second assertion. `settle` re-plans after
+/// applying, so a `nat.replace` that did not compare against what the kernel
+/// holds would be planned again every time -- which is exactly what happened
+/// before the observed side read the rules back rather than assuming them.
+#[test]
+fn nat_is_planned_once_and_then_left_alone() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config     = "10.0.0.2/24"
+			nat        = true
+		}
+		interface eth1 {
+			config     = "192.168.1.1/24"
+			forwarding = true
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0", "eth1"]);
+	let plan = settle(&desired, &mut observed);
+
+	assert!(names(&plan).contains(&"nat.replace"));
+	assert_eq!(observed.nat, vec!["eth0".to_owned()]);
+	assert!(
+		names(&plan).contains(&"sysctl.set_forwarding"),
+		"{:?}",
+		names(&plan)
+	);
+}
+
+/// Dropping `nat` from the document removes the table rather than leaving it.
+///
+/// The empty-list case is the one a bolted-on "add the rules" implementation
+/// gets wrong: there is nothing to add, so nothing is planned, and the machine
+/// keeps translating after the config stopped asking for it.
+#[test]
+fn removing_nat_withdraws_the_table() {
+	let desired = document("interface eth0 { config = \"10.0.0.2/24\" }");
+	let mut observed = observed_with(&["eth0"]);
+	observed.nat = vec!["eth0".to_owned()];
+
+	let plan = settle(&desired, &mut observed);
+	assert!(names(&plan).contains(&"nat.replace"));
+	assert!(observed.nat.is_empty());
+}
+
+/// NAT with nothing forwarding is a router that translates nothing, so the
+/// plan says so. Cheap to get wrong and invisible on the wire.
+#[test]
+fn nat_without_forwarding_is_warned_about() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config = "10.0.0.2/24"
+			nat    = true
+		}
+		"#,
+	);
+	let observed = observed_with(&["eth0"]);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan
+		.warnings
+		.iter()
+		.any(|w| w.message.contains("no interface has `forwarding = true`")));
+}
+
+/// A second table doing source NAT is reported and never deleted.
+#[test]
+fn a_foreign_nat_table_is_reported_not_removed() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config = "10.0.0.2/24"
+			nat    = true
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.nat_conflicts = vec!["fw4".to_owned()];
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan.warnings.iter().any(|w| w.message.contains("`fw4`")));
+	assert!(
+		!names(&plan).iter().any(|name| name.contains("delete")),
+		"{:?}",
 		names(&plan)
 	);
 }

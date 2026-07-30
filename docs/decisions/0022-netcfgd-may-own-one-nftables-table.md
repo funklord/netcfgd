@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-07-30
-Milestone: not scheduled
+Milestone: M5
 Amends: [0009](0009-router-side-addressing.md)
 
 ## Context
@@ -136,6 +136,23 @@ family in the audited crate, plus a model, a planner op and an executor path.
 Design section 10.3 makes optional backends separately installable for exactly
 this, and NAT is a good candidate for that treatment -- a machine that is not a
 router should not carry it.
+
+Measured after the fact: 72 KB, the largest single step since M3. That is
+recorded in `size-budget.txt` along with the note that this is the first thing
+to make optional when the install has to shrink.
+
+**`forwarding` had to be built at the same time.** It was in the model and the
+config parser from the start and had no executor at all, so a document saying
+`forwarding = true` was accepted and did nothing. NAT without it translates
+packets the kernel already refused to forward, so shipping one without the
+other would have been a feature that could not work. It is a per-interface
+sysctl rather than the global `net.ipv4.ip_forward`, which would turn
+forwarding on for interfaces the document says nothing about.
+
+Turning it *off* needs recorded state, unlike everything else here. A sysctl
+carries no owner, so netcfgd writes down which interfaces it switched on and
+turns off only those -- an interface that was already forwarding when netcfgd
+first ran belongs to whoever set it.
 
 **`fwmark` stays out.** `RoutingRule` can match a mark and the model says
 netcfgd never sets one. That does not change: setting a mark is filtering by

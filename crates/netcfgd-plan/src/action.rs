@@ -104,6 +104,19 @@ pub enum Op {
 		iface: String,
 	},
 	/// Stop a helper.
+	BackendStop {
+		/// Which helper.
+		kind: BackendKind,
+		/// Which interface it serves.
+		iface: String,
+	},
+	/// Reconfigure a running helper.
+	BackendReload {
+		/// Which helper.
+		kind: BackendKind,
+		/// Which interface it serves.
+		iface: String,
+	},
 	/// Put a VLAN on a bridge port, or on the bridge itself.
 	BridgeVlanAdd {
 		/// Which interface.
@@ -125,20 +138,6 @@ pub enum Op {
 		vid: u16,
 		/// Whether this is the bridge device rather than a port.
 		on_self: bool,
-	},
-	/// Stop a backend.
-	BackendStop {
-		/// Which helper.
-		kind: BackendKind,
-		/// Which interface it serves.
-		iface: String,
-	},
-	/// Reconfigure a running helper.
-	BackendReload {
-		/// Which helper.
-		kind: BackendKind,
-		/// Which interface it serves.
-		iface: String,
 	},
 	/// Hand a radio its network profiles.
 	WifiSetProfiles {
@@ -190,6 +189,31 @@ pub enum Op {
 		scope: String,
 		/// The policy.
 		policy: Box<DnsPolicy>,
+	},
+	/// Turn IP forwarding on or off for one interface.
+	///
+	/// A sysctl and nothing else -- see [`netcfgd_model::Interface::forwarding`]
+	/// for why this is the ingress side and what it does to IPv6 router
+	/// advertisements.
+	SysctlSetForwarding {
+		/// Interface name.
+		iface: String,
+		/// Whether packets arriving here may be forwarded.
+		enabled: bool,
+	},
+	/// Replace netcfgd's nftables table with one masquerading these interfaces.
+	///
+	/// One action for the whole table rather than one per rule, because that is
+	/// what the kernel does: an nftables change is a transaction, and netcfgd
+	/// sends the delete and every rule inside a single one. Splitting it into
+	/// per-rule actions would describe a sequence of states the kernel never
+	/// passes through.
+	///
+	/// An empty list removes the table. That is how a document that stops
+	/// asking for NAT is honoured, and it is why this is not `NatAdd`.
+	NatReplace {
+		/// Interfaces to masquerade, sorted. Empty removes the table.
+		uplinks: Vec<String>,
 	},
 	/// Run a hook.
 	HookRun {
@@ -244,6 +268,8 @@ impl Op {
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
+			Self::SysctlSetForwarding { .. } => "sysctl.set_forwarding",
+			Self::NatReplace { .. } => "nat.replace",
 			Self::HookRun { .. } => "hook.run",
 			Self::CommitArm { .. } => "commit.arm",
 			Self::CommitConfirm => "commit.confirm",
@@ -283,6 +309,12 @@ impl Op {
 			// port, which is the same kind of interruption as taking an
 			// address away.
 			| Self::BridgeVlanDel { .. } => true,
+			// Turning forwarding off cuts every host behind this interface
+			// off from everything in front of it, which is a worse
+			// interruption than taking one address away. Turning it on
+			// interrupts nothing, so a guard has no reason to block it and
+			// blocking it would leave a router that cannot route.
+			Self::SysctlSetForwarding { enabled, .. } => !enabled,
 			Self::LinkCreate { .. }
 			| Self::LinkUp { .. }
 			| Self::AddrAdd { .. }
@@ -295,6 +327,12 @@ impl Op {
 			| Self::CommitArm { .. }
 			| Self::CommitConfirm
 			| Self::BridgeVlanAdd { .. }
+			// Not because replacing the table is harmless -- withdrawing NAT
+			// cuts off a whole LAN. It is because `interface()` returns
+			// nothing for this op, so no guard can match it anyway, and
+			// claiming otherwise would suggest a protection that does not
+			// exist. The commit-confirm inverse is what covers this one.
+			| Self::NatReplace { .. }
 			| Self::CommitRevert { .. } => false,
 		}
 	}
@@ -322,12 +360,18 @@ impl Op {
 			| Self::BackendReload { iface, .. }
 			| Self::WgSetDevice { iface, .. }
 			| Self::WgSetPeers { iface, .. }
+			| Self::SysctlSetForwarding { iface, .. }
 			| Self::HookRun { iface, .. } => Some(iface),
 			Self::WifiSetProfiles { device, .. }
 			| Self::WifiAssociate { device, .. }
 			| Self::WifiDisassociate { device }
 			| Self::WifiSetRegdom { device, .. } => Some(device),
-			Self::DnsApply { .. }
+			// Deliberately not attributed to an interface even though it
+			// names several: the table is one object and replacing it is one
+			// change to the host, so a guard on any single uplink has no
+			// standing to refuse it.
+			Self::NatReplace { .. }
+			| Self::DnsApply { .. }
 			| Self::CommitArm { .. }
 			| Self::CommitConfirm
 			| Self::CommitRevert { .. } => None,

@@ -166,6 +166,7 @@ Interface {
   dot1x       : EapConfig?            // wired 802.1X; see 0008
   advertise   : RaPolicy?             // RA handoff to odhcpd/radvd; see 0009
   forwarding  : bool?                 // sysctl only, never a firewall rule
+  nat         : bool?                 // masquerade what leaves here; see 0022
 }
 
 InterfaceKind =

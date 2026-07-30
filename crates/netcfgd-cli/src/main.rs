@@ -689,6 +689,12 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 			};
 			println!("    vlan {}{flags}", vlan.vid);
 		}
+		if observed.nat.contains(&link.name) {
+			println!("    masquerade");
+		}
+		if link.forwarding == Some(true) {
+			println!("    forwarding");
+		}
 		for route in observed.routes_on(&link.name) {
 			let via = route
 				.via
@@ -698,6 +704,18 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 				route.destination, route.ownership
 			);
 		}
+	}
+	// Printed once rather than per interface: the conflict is with a table,
+	// not with a device, and repeating it under every link would make one
+	// problem look like several.
+	if !observed.nat_conflicts.is_empty() {
+		println!();
+		println!(
+			"note: nftables table(s) `{}` also translate source addresses. netcfgd \
+			 does not touch tables it did not create, so this is a report, not \
+			 something it will resolve.",
+			observed.nat_conflicts.join("`, `")
+		);
 	}
 	if !observed.address_proto_supported {
 		println!();

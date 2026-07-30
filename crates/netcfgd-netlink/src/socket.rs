@@ -262,6 +262,55 @@ impl Netlink {
 		}
 	}
 
+	/// Send a pre-built buffer and collect replies until `last_acked` is
+	/// acknowledged.
+	///
+	/// nftables is transactional: a change is a run of messages between a
+	/// batch-begin and a batch-end, and the kernel applies all of them or none.
+	/// That does not fit `request`, which sends one message and waits, so this
+	/// exists alongside it rather than inside it.
+	///
+	/// # Errors
+	///
+	/// Returns the first errno any message in the batch replied with. One
+	/// failure means the whole transaction was rolled back, so reporting the
+	/// first is reporting the cause.
+	///
+	/// `last_acked` is the sequence number of the last message that asked for
+	/// an acknowledgement -- **not** the batch-end marker. The kernel
+	/// acknowledges the messages inside the transaction and says nothing about
+	/// the end marker, so waiting for that one waits until the socket times
+	/// out.
+	pub fn send_batch(&mut self, buffer: &[u8], last_acked: u32) -> io::Result<Vec<Vec<u8>>> {
+		self.send(buffer)?;
+
+		let mut collected = Vec::new();
+		let mut read_buffer = vec![0_u8; 32 * 1024];
+		loop {
+			let read = self.receive(&mut read_buffer)?;
+			for message in wire::Messages::new(&read_buffer[..read]) {
+				match message.header.kind {
+					msg_type::NLMSG_ERROR => {
+						let code = wire::error_code(message.payload).unwrap_or(libc::EPROTO);
+						if code != 0 {
+							return Err(io::Error::from_raw_os_error(code));
+						}
+						if message.header.seq >= last_acked {
+							return Ok(collected);
+						}
+					}
+					msg_type::NLMSG_DONE => return Ok(collected),
+					_ => collected.push(message.payload.to_vec()),
+				}
+			}
+		}
+	}
+
+	/// The next sequence number, for a caller building its own messages.
+	pub fn take_seq(&mut self) -> u32 {
+		self.next_seq()
+	}
+
 	fn send(&self, bytes: &[u8]) -> io::Result<()> {
 		// SAFETY: `bytes` is a live slice for the duration of the call, and
 		// the length passed is its actual length, so the kernel reads only

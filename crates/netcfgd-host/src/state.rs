@@ -47,6 +47,8 @@ pub struct OwnedState {
 	pub backends: Vec<netcfgd_model::ObservedBackend>,
 	/// DNS scopes netcfgd delivered.
 	pub dns: Vec<netcfgd_model::AppliedDns>,
+	/// Interfaces netcfgd turned IP forwarding on for.
+	pub forwarding: Vec<String>,
 }
 
 /// Where a `DHCPv6` client's hook records what it was delegated.
@@ -137,6 +139,7 @@ impl OwnedState {
 				.collect(),
 			backends: self.backends.clone(),
 			dns: self.dns.clone(),
+			forwarding: self.forwarding.clone(),
 			// Not from this file. A delegation is not something netcfgd did,
 			// it is something a client was told, so it is recorded separately
 			// and folded in by [`prior_state`].
@@ -149,6 +152,17 @@ impl OwnedState {
 	/// Removals are applied before additions so that replacing an address in
 	/// one plan leaves exactly one record, not zero.
 	pub fn absorb(&mut self, effects: &Effects) {
+		// Only the interfaces netcfgd switched *on* are recorded. Switching
+		// one off drops the record rather than storing `false`: the question
+		// this answers is "is this ours to turn off later", and once it is off
+		// the answer is no.
+		for (interface, enabled) in &effects.forwarding {
+			self.forwarding.retain(|name| name != interface);
+			if *enabled {
+				self.forwarding.push(interface.clone());
+			}
+		}
+
 		self.created_links
 			.retain(|name| !effects.deleted_links.contains(name));
 		for name in &effects.created_links {

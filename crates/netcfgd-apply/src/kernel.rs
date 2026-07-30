@@ -34,11 +34,20 @@ pub struct Effects {
 	pub stopped_backends: Vec<(netcfgd_model::BackendKind, String)>,
 	/// DNS scopes delivered.
 	pub applied_dns: Vec<netcfgd_model::AppliedDns>,
+	/// `(interface, enabled)` for each forwarding sysctl written.
+	pub forwarding: Vec<(String, bool)>,
 }
 
 /// Executes actions against rtnetlink and the backend helpers.
 pub struct KernelExecutor {
 	socket: Netlink,
+	/// The netfilter socket, opened the first time NAT is actually changed.
+	///
+	/// Lazy because most machines are not routers: opening it eagerly would
+	/// make every netcfgd hold a `NETLINK_NETFILTER` socket, and would turn a
+	/// kernel built without `nf_tables` into a startup failure for a daemon
+	/// that was never going to write a rule.
+	nft: Option<netcfgd_netlink::nft::Nft>,
 	indices: Vec<(String, u32)>,
 	/// Every DNS scope the document declares.
 	///
@@ -97,6 +106,7 @@ impl KernelExecutor {
 		let snapshot = netcfgd_netlink::snapshot_with(&mut socket)?;
 		Ok(Self {
 			socket,
+			nft: None,
 			indices: snapshot
 				.links
 				.iter()
@@ -672,6 +682,28 @@ impl Executor for KernelExecutor {
 					}
 				}
 			}
+			Op::SysctlSetForwarding { iface, enabled } => {
+				set_forwarding(iface, *enabled)?;
+				self.effects.forwarding.push((iface.clone(), *enabled));
+				Ok(())
+			}
+			Op::NatReplace { uplinks } => {
+				let nft = match &mut self.nft {
+					Some(nft) => nft,
+					slot => slot.insert(netcfgd_netlink::nft::Nft::open().map_err(|error| {
+						format!(
+							"cannot reach nftables: {error}. NAT needs `nf_tables` in the \
+							 kernel and CAP_NET_ADMIN in this namespace"
+						)
+					})?),
+				};
+				nft.replace_nat(uplinks).map_err(|error| {
+					format!(
+						"could not replace the `{}` table: {error}",
+						netcfgd_netlink::nft::TABLE
+					)
+				})
+			}
 			// The commit family is a marker in the plan rather than something
 			// the kernel does. The window lives in the daemon, which opens it
 			// after the apply succeeds and owns the timer, so the executor's
@@ -681,6 +713,40 @@ impl Executor for KernelExecutor {
 			other => Err(format!("{} is not implemented in this build", other.name())),
 		}
 	}
+}
+
+/// Turn forwarding on or off for one interface, in both families.
+///
+/// Writes the per-device sysctl rather than the global `net.ipv4.ip_forward`,
+/// which would set every interface on the machine -- including the ones the
+/// document says nothing about.
+///
+/// An IPv6 failure is reported and an IPv4 one is fatal, which is deliberate
+/// asymmetry: a kernel built with `ipv6.disable=1` has no IPv6 sysctl at all
+/// and refusing there would make netcfgd unable to configure an IPv4 router.
+/// The IPv4 path has no such excuse.
+fn set_forwarding(iface: &str, enabled: bool) -> Result<(), String> {
+	let root = std::env::var_os("NCFG_PROC_ROOT").map_or_else(
+		|| std::path::PathBuf::from("/proc"),
+		std::path::PathBuf::from,
+	);
+	let value = if enabled { "1" } else { "0" };
+
+	let write = |family: &str| -> std::io::Result<()> {
+		std::fs::write(
+			root.join(format!("sys/net/{family}/conf/{iface}/forwarding")),
+			value,
+		)
+	};
+
+	write("ipv4").map_err(|error| format!("cannot set IPv4 forwarding on {iface}: {error}"))?;
+	if let Err(error) = write("ipv6") {
+		eprintln!(
+			"netcfgd: cannot set IPv6 forwarding on {iface}: {error}; IPv4 is set and IPv6 \
+			 traffic will not be routed"
+		);
+	}
+	Ok(())
 }
 
 /// Where `resolv.conf` is: the environment, or the usual place.
