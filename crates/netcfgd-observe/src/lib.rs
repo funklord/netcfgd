@@ -40,6 +40,13 @@ pub struct PriorState {
 	pub backends: Vec<ObservedBackend>,
 	/// DNS scopes netcfgd has delivered.
 	pub dns: Vec<netcfgd_model::AppliedDns>,
+	/// Prefixes a `DHCPv6` client reported, read from `/run`.
+	///
+	/// Prior state rather than a kernel read because a delegated prefix is not
+	/// kernel state: nothing in the kernel knows the machine was given a /56
+	/// until an address is derived from it. The client is the only source, and
+	/// netcfgd does not implement the client (decision 0004).
+	pub delegations: Vec<netcfgd_model::Delegation>,
 }
 
 impl PriorState {
@@ -153,6 +160,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		routes,
 		backends: prior.backends.clone(),
 		dns: prior.dns.clone(),
+		delegations: prior.delegations.clone(),
 		address_proto_supported: snapshot.address_proto_supported,
 	};
 	observed.canonicalize();

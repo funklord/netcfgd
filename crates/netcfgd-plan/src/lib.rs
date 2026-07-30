@@ -693,20 +693,100 @@ impl Builder {
 				Vec::new()
 			}
 			AddressSource::Delegated(delegated) => {
-				// The prefix is not known until the source interface's lease
-				// arrives, so there is nothing to plan until then. Decision
-				// 0009 puts the ordering edge here; the resolution lands with
-				// prefix delegation in M4.
-				self.warn(
-					name,
-					format!(
-						"waiting on a delegated prefix from {}; nothing planned for {field}",
-						delegated.prefix.source
-					),
-				);
-				Vec::new()
+				self.plan_delegated(interface, delegated, &field, observed, base)
 			}
 		}
+	}
+
+	/// An address derived from a prefix the ISP delegated.
+	///
+	/// Decision 0009: the document holds a reference, never a value, so this
+	/// is where the value is looked up. Three outcomes, and the difference
+	/// between the first two is the whole reason the indirection exists:
+	///
+	/// - **No delegation yet.** The lease has not arrived. Nothing is planned
+	///   and a warning says what is being waited for -- not an error, because
+	///   the config is correct and the answer is "later".
+	/// - **A delegation that cannot produce this address.** The subnet does
+	///   not fit, or the suffix is wider than the block. That is a config that
+	///   can never work, so it is a refusal rather than a wait.
+	/// - **A resolved address**, planned exactly as a static one would be.
+	///   Renumbering then falls out of the ordinary diff: a new delegation
+	///   produces a different address, the old one is no longer wanted, and
+	///   the plan is an `addr.del` and an `addr.add`.
+	fn plan_delegated(
+		&mut self,
+		interface: &Interface,
+		delegated: &netcfgd_model::Delegated,
+		field: &str,
+		observed: &Observed,
+		base: &[u32],
+	) -> Vec<u32> {
+		let name = &interface.name;
+		let source = &delegated.prefix.source;
+
+		let Some(delegation) = observed.delegation(source) else {
+			self.warn(
+				name,
+				format!("waiting on a delegated prefix from {source}; nothing planned for {field}"),
+			);
+			return Vec::new();
+		};
+		let Some(prefix) = delegation.prefixes.get(delegated.prefix.index as usize) else {
+			self.warn(
+				name,
+				format!(
+					"{source} has {} delegated prefix(es) and {field} asks for index {}",
+					delegation.prefixes.len(),
+					delegated.prefix.index
+				),
+			);
+			return Vec::new();
+		};
+
+		let address = match netcfgd_model::derive_from_delegation(
+			prefix,
+			&delegated.prefix,
+			&delegated.suffix,
+		) {
+			Ok(address) => address,
+			Err(message) => {
+				// A warning rather than a refusal: `Refusal` is for a guard
+				// declining a disruptive action, and this is a configuration
+				// that cannot be satisfied. Both stop the address being
+				// planned; only one of them is about consent.
+				self.warn(name, format!("{field}: {message}"));
+				return Vec::new();
+			}
+		};
+
+		if observed
+			.addresses_on(name)
+			.any(|existing| existing.address == address)
+		{
+			return Vec::new();
+		}
+
+		// The source interface's lease has to exist before this address can,
+		// and it does -- the delegation was read from observed state. What
+		// this still waits for is the same base the interface's other
+		// addresses do.
+		let id = self.push(
+			Op::AddrAdd {
+				iface: name.clone(),
+				addr: address.clone(),
+				preferred_lifetime: None,
+				valid_lifetime: None,
+			},
+			Reason::absent(name, field, format!("{address} (from {source})")),
+			base.to_vec(),
+			Some(Op::AddrDel {
+				iface: name.clone(),
+				addr: address.clone(),
+			}),
+		);
+		self.added.push((name.clone(), address, id));
+		vec![id]
 	}
 
 	fn plan_backend(
@@ -906,6 +986,25 @@ impl Builder {
 				.any(|interface| {
 					interface.addressing.iter().any(|source| match source {
 						AddressSource::Static(candidate) => candidate.address == address.address,
+						// A derived address is as wanted as a literal one. The
+						// document holds a reference rather than the value, so
+						// answering "is this wanted?" means resolving it again
+						// -- and a teardown that skipped that would delete the
+						// address the same plan had just added, forever.
+						AddressSource::Delegated(delegated) => observed
+							.delegation(&delegated.prefix.source)
+							.and_then(|delegation| {
+								delegation.prefixes.get(delegated.prefix.index as usize)
+							})
+							.and_then(|prefix| {
+								netcfgd_model::derive_from_delegation(
+									prefix,
+									&delegated.prefix,
+									&delegated.suffix,
+								)
+								.ok()
+							})
+							.is_some_and(|derived| derived == address.address),
 						_ => false,
 					})
 				});

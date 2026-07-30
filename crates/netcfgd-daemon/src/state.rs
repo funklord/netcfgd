@@ -118,7 +118,7 @@ impl State {
 
 	/// Re-read the kernel.
 	pub(crate) fn reobserve(&mut self) {
-		let prior = run_state::read_owned(&self.paths.run_dir).to_prior();
+		let prior = run_state::prior_state(&self.paths.run_dir);
 		if let Ok(observed) = netcfgd_observe::current(&prior) {
 			self.observed = observed;
 			let _ = run_state::write_observed(&self.paths.run_dir, &self.observed);
