@@ -13,9 +13,9 @@ use netcfgd_model::address::{Delegated, PrefixRef, Static};
 use netcfgd_model::device::{AccessPoint, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{
-	BondConfig, BondMode, BridgeConfig, LinkSettings, MacvlanConfig, MacvlanMode, Toggle,
-	TunConfig, TunMode, TunnelConfig, TunnelKind, VethConfig, VlanConfig, VlanProtocol, VrfConfig,
-	VxlanConfig, WgPeer, WireGuardConfig,
+	BondConfig, BondMode, BridgeConfig, LinkSettings, MacvlanConfig, MacvlanMode, PppoeConfig,
+	Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind, VethConfig, VlanConfig, VlanProtocol,
+	VrfConfig, VxlanConfig, WgPeer, WireGuardConfig,
 };
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
@@ -1504,15 +1504,11 @@ fn lower_interface(
 						interface.kind = kind;
 					}
 				}
-				// The last M4 link type still to come. Named rather than
-				// reported as an unknown block, because "`pppoe` is not valid
-				// inside `interface`" reads as a typo when it is a gap.
-				"pppoe" => diags.push(
-					Diagnostic::new(inner.span, "pppoe is not supported by this build").with_help(
-						"`pppoe` needs the netcfgd-ppp backend, which lands in M4; \
-							 see project.md section 7",
-					),
-				),
+				"pppoe" => {
+					if let Some(kind) = lower_pppoe(inner, diags) {
+						interface.kind = kind;
+					}
+				}
 				other => diags.push(Diagnostic::new(
 					inner.span,
 					format!("`{other}` is not valid inside `interface`"),
@@ -1781,6 +1777,57 @@ fn lower_vxlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> 
 	}
 
 	Some(InterfaceKind::Vxlan(config))
+}
+
+fn lower_pppoe(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	let mut parent = None;
+	let mut username = None;
+	let mut password = None;
+	let mut service = None;
+	let mut ac = None;
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"parent" | "dev" => parent = as_string(&assignment.value, diags),
+			"username" | "user" => username = as_string(&assignment.value, diags),
+			"password" => password = as_secret(&assignment.value, diags),
+			"service" => service = as_string(&assignment.value, diags),
+			"ac" => ac = as_string(&assignment.value, diags),
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown pppoe key `{other}`"),
+			)),
+		}
+	}
+
+	let Some(parent) = parent else {
+		diags.push(
+			Diagnostic::new(block.span, "a pppoe session needs a `parent`")
+				.with_help("the ethernet interface the session runs over, such as `eth0`"),
+		);
+		return None;
+	};
+	let (Some(username), Some(password)) = (username, password) else {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				"a pppoe session needs a `username` and a `password`",
+			)
+			.with_help("`password = \"@secret:NAME\"`; a DSL password never belongs in config"),
+		);
+		return None;
+	};
+
+	Some(InterfaceKind::Pppoe(PppoeConfig {
+		parent,
+		username,
+		password,
+		service,
+		ac,
+	}))
 }
 
 fn lower_vrf(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {

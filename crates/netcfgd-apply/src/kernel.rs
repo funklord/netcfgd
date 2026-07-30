@@ -55,6 +55,8 @@ pub struct KernelExecutor {
 	dot1x: Vec<(String, netcfgd_model::EapConfig)>,
 	/// The MAC policy for each radio the document describes one for.
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
+	/// The `PPPoE` session on each interface that has one.
+	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
 	/// Every wifi profile the document describes.
 	///
 	/// Carried here because a supplicant that has just been started holds
@@ -101,6 +103,7 @@ impl KernelExecutor {
 			dns_scopes: Vec::new(),
 			dot1x: Vec::new(),
 			mac_policy: Vec::new(),
+			pppoe: Vec::new(),
 			networks: Vec::new(),
 			hook_hashes: Vec::new(),
 			run_dir: std::path::PathBuf::from("/run/netcfgd"),
@@ -141,6 +144,14 @@ impl KernelExecutor {
 			})
 			.collect();
 		self.networks.clone_from(&document.networks);
+		self.pppoe = document
+			.interfaces
+			.iter()
+			.filter_map(|interface| match &interface.kind {
+				InterfaceKind::Pppoe(config) => Some((interface.name.clone(), config.clone())),
+				_ => None,
+			})
+			.collect();
 		self.mac_policy = document
 			.devices
 			.iter()
@@ -152,6 +163,51 @@ impl KernelExecutor {
 			})
 			.collect();
 		self
+	}
+
+	/// Dial a `PPPoE` session.
+	///
+	/// pppd is told to install neither a route nor a resolver. Both would be
+	/// somebody else configuring the network behind netcfgd's back, which
+	/// constraint 1 exists to prevent -- and the drift report would be right
+	/// but useless, since the operator did not ask for either.
+	///
+	/// What a DSL user needs instead is `routes = "default"` on the ppp
+	/// interface. A point-to-point link needs no gateway, so that is a
+	/// device route netcfgd owns and can explain, rather than a dynamic one
+	/// nobody wrote down.
+	fn start_pppoe(&self, iface: &str) -> Result<(), String> {
+		let Some((_, config)) = self.pppoe.iter().find(|(name, _)| name == iface) else {
+			return Err(format!("no pppoe configuration for {iface}"));
+		};
+		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+		let password = resolver
+			.resolve(&config.password)
+			.map_err(|error| format!("{iface}: {error}"))?;
+
+		let path = write_ppp_options(iface, config, password.expose())?;
+
+		let program = ["/usr/sbin/pppd", "/sbin/pppd", "/usr/bin/pppd"]
+			.into_iter()
+			.map(std::path::PathBuf::from)
+			.find(|path| path.is_file())
+			.ok_or_else(|| {
+				format!("no pppd found for {iface}; a pppoe session needs the ppp package")
+			})?;
+
+		let status = Command::new(&program)
+			.arg("file")
+			.arg(&path)
+			.status()
+			.map_err(|error| format!("could not run {}: {error}", program.display()))?;
+		if !status.success() {
+			return Err(format!(
+				"pppd exited with {status} for {iface}; its log will say why, and the \
+				 usual causes are a wrong username, a parent interface that is down, or \
+				 no access concentrator answering"
+			));
+		}
+		Ok(())
 	}
 
 	/// Give a freshly started supplicant the networks the document describes.
@@ -458,6 +514,15 @@ impl Executor for KernelExecutor {
 				Ok(())
 			}
 			Op::BackendStart { kind, iface } => {
+				// PPPoE first, and before `start_backend`: the session's
+				// parameters live on the interface, which the op does not
+				// carry, so this is the one backend the executor dials from
+				// its own context rather than from the op alone.
+				if *kind == netcfgd_model::BackendKind::Pppoe {
+					self.start_pppoe(iface)?;
+					self.effects.started_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
 				start_backend(*kind, iface)?;
 				self.effects.started_backends.push((*kind, iface.clone()));
 				if *kind == netcfgd_model::BackendKind::Supplicant {
@@ -666,6 +731,10 @@ fn start_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), St
 			))
 		}
 		BackendKind::Dhcp6 => start_dhcp6(iface),
+		BackendKind::Pppoe => Err(format!(
+			"a pppoe session on {iface} needs its configuration, which the plain \
+			 backend path does not carry"
+		)),
 		BackendKind::Supplicant => start_supplicant(iface),
 		other => Err(format!(
 			"the {other:?} backend is not implemented in this build"
@@ -748,6 +817,115 @@ fn write_pd_hook(iface: &str) -> Result<std::path::PathBuf, String> {
 	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
 		.map_err(|error| format!("cannot make {} executable: {error}", path.display()))?;
 	Ok(path)
+}
+
+/// Write pppd's options file.
+///
+/// The parent interface goes in as `nic-<name>`, the option the pppoe plugin
+/// registers, rather than as a bare device argument. Both are accepted and the
+/// difference could not be settled on the machine this was written on -- pppd
+/// gives up at `/dev/ppp` before it validates a device name, so neither form
+/// could be shown wrong. `nic-` is the unambiguous one: it cannot be mistaken
+/// for something else and it needs no quoting, where a quoted device argument
+/// leaves open whether the quotes end up in the name. Removing the question
+/// beats answering it from memory.
+///
+/// A file rather than command-line arguments, and mode 0600, because the
+/// password is in it: pppd takes a `password` option and anything on a command
+/// line is readable by every process on the machine through `ps`. The file is
+/// under `/run` so it does not survive a reboot and does not collide with
+/// whatever else on the host uses `/etc/ppp`.
+fn write_ppp_options(
+	iface: &str,
+	config: &netcfgd_model::interface::PppoeConfig,
+	password: &str,
+) -> Result<std::path::PathBuf, String> {
+	use std::io::Write;
+	use std::os::unix::fs::PermissionsExt;
+
+	let dir = run_dir_path().join("ppp");
+	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+	let path = dir.join(iface);
+	let text = ppp_options(iface, config, password);
+
+	let mut file = std::fs::File::create(&path)
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	// Before the content, not after: a window where the password is readable
+	// is a window, however short.
+	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+		.map_err(|error| format!("cannot secure {}: {error}", path.display()))?;
+	file.write_all(text.as_bytes())
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	Ok(path)
+}
+
+/// The options file's text.
+///
+/// Pure, so what pppd is told can be checked without a filesystem -- and the
+/// two things most worth checking are that the password survives quoting and
+/// that pppd is told to leave routes and DNS alone.
+#[must_use]
+pub fn ppp_options(
+	iface: &str,
+	config: &netcfgd_model::interface::PppoeConfig,
+	password: &str,
+) -> String {
+	// The unit number comes from the interface name, so `interface ppp0` is
+	// ppp0 and not whichever unit happened to be free. Without it the document
+	// stops describing the system after the second session -- the same reason
+	// a routing rule's priority is mandatory.
+	let unit = iface
+		.strip_prefix("ppp")
+		.and_then(|rest| rest.parse::<u32>().ok());
+
+	let mut text = format!(
+		"# Written by netcfgd for {iface}. Do not edit; it is rewritten on apply.\n\
+		 plugin pppoe.so\n\
+		 nic-{parent}\n\
+		 user {user}\n\
+		 password {password}\n\
+		 noauth\n\
+		 persist\n\
+		 maxfail 0\n\
+		 # netcfgd owns routes and resolvers. `defaultroute` here would install\n\
+		 # a route nobody wrote down, and `usepeerdns` would rewrite resolv.conf\n\
+		 # underneath the dns backend. A ppp link needs no gateway, so the\n\
+		 # config says `routes = \"default\"` and netcfgd installs it.\n\
+		 nodefaultroute\n\
+		 noipdefault\n",
+		parent = config.parent,
+		user = quote_ppp(&config.username),
+		password = quote_ppp(password),
+	);
+	if let Some(unit) = unit {
+		text.push_str(&format!("unit {unit}\n"));
+	}
+	if let Some(service) = &config.service {
+		text.push_str(&format!("rp_pppoe_service {}\n", quote_ppp(service)));
+	}
+	if let Some(ac) = &config.ac {
+		text.push_str(&format!("rp_pppoe_ac {}\n", quote_ppp(ac)));
+	}
+	text
+}
+
+/// Quote a value for pppd's options file.
+///
+/// pppd splits on whitespace and understands double quotes with backslash
+/// escapes. A DSL password with a space in it is ordinary, and one with a
+/// quote would otherwise end the option and turn the rest into pppd
+/// directives.
+fn quote_ppp(value: &str) -> String {
+	let mut out = String::with_capacity(value.len() + 2);
+	out.push('"');
+	for character in value.chars() {
+		if character == '"' || character == '\\' {
+			out.push('\\');
+		}
+		out.push(character);
+	}
+	out.push('"');
+	out
 }
 
 /// The script's text.
