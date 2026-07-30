@@ -1,0 +1,68 @@
+# netcfgd under systemd.
+#
+# A text file and nothing more. Installing it creates no dependency on systemd,
+# in the packaging sense or any other: a machine without systemd never reads
+# it, and netcfgd links nothing from it. The same goes for the OpenRC and procd
+# scripts beside it -- whichever init the machine runs picks up its own, and
+# `make install` installs none of them unless asked.
+#
+# In particular there is no `Type=notify`, which would mean linking libsystemd.
+# `Type=exec` gets most of what notify does -- systemd waits for the exec
+# rather than the fork -- and costs nothing.
+
+[Unit]
+Description=netcfgd network configuration daemon
+
+# Before the network is expected to work, and before anything that waits for
+# it. `network-pre.target` is the passive one: firewalls and this hook into it
+# so they are in place before interfaces come up.
+Wants=network.target
+Before=network.target
+Wants=network-pre.target
+Before=network-pre.target
+
+# Not Conflicts=NetworkManager.service. That would stop NetworkManager
+# entirely the moment netcfgd is enabled, including on machines where the
+# operator wants it for devices netcfgd does not manage -- and netcfgd's own
+# contention check is per-device for exactly that reason. The drop-in beside
+# this file adds the conflict for anybody who does want it.
+
+[Service]
+Type=exec
+ExecStart=/usr/sbin/netcfgd
+ExecReload=/usr/bin/ncfg reload
+Restart=on-failure
+RestartSec=2
+
+# netcfgd needs to configure interfaces and nothing else. CAP_NET_RAW is here
+# for the children rather than for netcfgd: a wpa_supplicant driving a wired
+# 802.1X port opens a packet socket, and it inherits the ambient set.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+# `full`, not `strict`. Strict would make /etc read-only, and the DNS backends
+# legitimately write there -- /etc/resolv.conf in the default mode,
+# /etc/dnsmasq.d/netcfgd.conf and /etc/unbound/... in the others. A unit that
+# looked more locked down and broke DNS would be worse than one that says what
+# it needs.
+ProtectSystem=full
+
+# /etc/netcfgd is the only authority and netcfgd never writes to it, so the
+# init system enforces what the code already promises. This binds netcfgd's own
+# namespace, so it does not stop an operator editing the files.
+ReadOnlyPaths=/etc/netcfgd
+
+RuntimeDirectory=netcfgd
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
