@@ -193,6 +193,29 @@ pub struct VxlanConfig {
 	pub port: Option<u16>,
 }
 
+/// One VLAN on a bridge port, or on the bridge device itself.
+///
+/// Per-port VLAN membership is how a switch is provisioned on any current
+/// kernel: DSA presents switch ports as ordinary interfaces, and telling the
+/// bridge which VLANs a port carries is what `swconfig` used to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BridgeVlan {
+	/// The VLAN id.
+	pub vid: u16,
+	/// Untagged traffic arriving on this port joins this VLAN.
+	///
+	/// At most one per port, which the compiler checks -- the kernel accepts a
+	/// second and silently moves the PVID, so two ports' worth of config
+	/// merged from drop-ins could change which VLAN untagged traffic lands in
+	/// with nothing reporting it.
+	#[serde(default)]
+	pub pvid: bool,
+	/// Traffic leaves this port without a tag.
+	#[serde(default)]
+	pub untagged: bool,
+}
+
 /// A VRF: a routing table with an interface in front of it.
 ///
 /// The reason this exists is an inconsistency the pre-freeze format audit
@@ -578,6 +601,19 @@ pub struct Interface {
 	/// Driver-level settings. Unimplemented; see [`LinkSettings`].
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub link_settings: Option<LinkSettings>,
+	/// VLANs this interface carries, as a bridge port or as a bridge.
+	///
+	/// **Authoritative where present.** A port whose config lists VLANs has
+	/// exactly those, and anything else the kernel holds for it is removed --
+	/// including the VLAN 1 the kernel adds by itself the moment a port joins
+	/// a filtering bridge. Every real trunk setup begins by deleting that
+	/// one, so leaving it because the kernel put it there would mean the
+	/// document does not describe the port.
+	///
+	/// A port the document says nothing about keeps whatever it has. The
+	/// authority is over ports that are configured, not over the bridge.
+	#[serde(default)]
+	pub bridge_vlans: Vec<BridgeVlan>,
 }
 
 /// Whether a tunable is left alone, turned on, or turned off.

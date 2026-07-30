@@ -72,6 +72,42 @@ fn position(plan: &Plan, name: &str) -> usize {
 /// an `addr.add` produces an address tagged as ours and originating from
 /// config, because that is what a real apply would leave behind, and getting
 /// that wrong is how a plan converges in the fake and loops on real hardware.
+/// The VLAN half of [`simulate`], split out only because one match arm per op
+/// had grown past what the style allows.
+fn simulate_vlan(op: &Op, observed: &mut Observed) {
+	let (iface, vid) = match op {
+		Op::BridgeVlanAdd { iface, vid, .. } | Op::BridgeVlanDel { iface, vid, .. } => {
+			(iface, *vid)
+		}
+		_ => return,
+	};
+	let Some(index) = observed
+		.links
+		.iter()
+		.find(|link| &link.name == iface)
+		.map(|link| link.index)
+	else {
+		return;
+	};
+	// Removed first in both cases: adding a VLAN that is already present with
+	// different flags is how the kernel changes them, and a fake that appended
+	// would report two.
+	observed
+		.bridge_vlans
+		.retain(|vlan| !(vlan.index == index && vlan.vid == vid));
+
+	if let Op::BridgeVlanAdd { pvid, untagged, .. } = op {
+		observed
+			.bridge_vlans
+			.push(netcfgd_model::ObservedBridgeVlan {
+				index,
+				vid,
+				pvid: *pvid,
+				untagged: *untagged,
+			});
+	}
+}
+
 fn simulate(plan: &Plan, observed: &mut Observed) {
 	for action in &plan.actions {
 		match &action.op {
@@ -159,6 +195,9 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 				});
 			}
 			// Hooks and commit actions leave no observable state of their own.
+			Op::BridgeVlanAdd { .. } | Op::BridgeVlanDel { .. } => {
+				simulate_vlan(&action.op, observed);
+			}
 			_ => {}
 		}
 	}
@@ -1260,5 +1299,137 @@ interface ppp0 {
 		names(&plan)
 	);
 
+	settle(&document, &mut observed);
+}
+
+/// A port whose config lists VLANs has exactly those. That includes removing
+/// the VLAN 1 the kernel adds by itself when a port joins a filtering bridge:
+/// every real trunk setup begins by deleting it, and leaving it because the
+/// kernel put it there would mean the document does not describe the port.
+#[test]
+fn a_configured_port_owns_its_vlan_list() {
+	let document = document(
+		r#"
+interface br0  { bridge { vlan_filtering = true }; config = "null" }
+interface lan1 { master = "br0"; vlans = "10 pvid untagged"; config = "null" }
+"#,
+	);
+	let mut observed = observed_with(&["br0", "lan1"]);
+	let index = observed
+		.links
+		.iter()
+		.find(|link| link.name == "lan1")
+		.expect("lan1")
+		.index;
+	// What the kernel has: its own default, and one the document dropped.
+	observed
+		.bridge_vlans
+		.push(netcfgd_model::ObservedBridgeVlan {
+			index,
+			vid: 1,
+			pvid: true,
+			untagged: true,
+		});
+	observed
+		.bridge_vlans
+		.push(netcfgd_model::ObservedBridgeVlan {
+			index,
+			vid: 99,
+			pvid: false,
+			untagged: false,
+		});
+
+	let plan = plan(&document, &observed, &PlanOptions::default());
+	let removed: Vec<u16> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::BridgeVlanDel { vid, .. } => Some(*vid),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(removed, [1, 99], "both go, including the kernel's own");
+	assert!(plan
+		.actions
+		.iter()
+		.any(|action| matches!(&action.op, Op::BridgeVlanAdd { vid: 10, .. })));
+
+	settle(&document, &mut observed);
+}
+
+/// A port the document says nothing about keeps whatever it has. The authority
+/// is over ports that are configured, not over the bridge.
+#[test]
+fn an_unmentioned_port_keeps_its_vlans() {
+	let document = document(
+		r#"
+interface br0   { bridge { vlan_filtering = true }; config = "null" }
+interface other { master = "br0"; config = "null" }
+"#,
+	);
+	let mut observed = observed_with(&["br0", "other"]);
+	let index = observed
+		.links
+		.iter()
+		.find(|link| link.name == "other")
+		.expect("other")
+		.index;
+	observed
+		.bridge_vlans
+		.push(netcfgd_model::ObservedBridgeVlan {
+			index,
+			vid: 7,
+			pvid: false,
+			untagged: false,
+		});
+
+	let plan = plan(&document, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"bridge.vlan.del"),
+		"an unconfigured port is not netcfgd's to strip: {:?}",
+		names(&plan)
+	);
+}
+
+/// A VLAN present but with the wrong flags is wrong in a way that shows up as
+/// traffic arriving with a tag nobody expected, so it is corrected rather than
+/// counted as present.
+#[test]
+fn wrong_vlan_flags_are_corrected() {
+	let document = document(
+		r#"
+interface br0  { bridge { vlan_filtering = true }; config = "null" }
+interface lan1 { master = "br0"; vlans = "10 pvid untagged"; config = "null" }
+"#,
+	);
+	let mut observed = observed_with(&["br0", "lan1"]);
+	let index = observed
+		.links
+		.iter()
+		.find(|link| link.name == "lan1")
+		.expect("lan1")
+		.index;
+	observed
+		.bridge_vlans
+		.push(netcfgd_model::ObservedBridgeVlan {
+			index,
+			vid: 10,
+			pvid: false,
+			untagged: false,
+		});
+
+	let plan = plan(&document, &observed, &PlanOptions::default());
+	assert!(
+		plan.actions.iter().any(|action| matches!(
+			&action.op,
+			Op::BridgeVlanAdd {
+				vid: 10,
+				pvid: true,
+				..
+			}
+		)),
+		"got {:?}",
+		names(&plan)
+	);
 	settle(&document, &mut observed);
 }

@@ -46,6 +46,8 @@ pub struct Snapshot {
 	pub addresses: Vec<AddressRecord>,
 	/// Every route.
 	pub routes: Vec<RouteRecord>,
+	/// Every bridge VLAN, from the separate `AF_BRIDGE` dump.
+	pub bridge_vlans: Vec<dump::BridgeVlanRecord>,
 	/// Whether any address in this dump carried `IFA_PROTO`.
 	///
 	/// **A lower bound, not a kernel capability check.** `false` means "no
@@ -109,12 +111,30 @@ pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
 		.filter_map(|payload| dump::decode_route(payload))
 		.collect();
 
+	// A second link dump, under AF_BRIDGE. It cannot be folded into the first:
+	// the ordinary dump reports bridges with their VLAN configuration omitted
+	// rather than empty, and asking for both families at once is not a thing
+	// the request can express.
+	let (body, attrs) = dump::bridge_vlan_request();
+	let mut bridge_vlans: Vec<dump::BridgeVlanRecord> = socket
+		.request(
+			dump::requests::BRIDGE_VLAN,
+			dump::dump_flags(),
+			&body,
+			&attrs,
+		)?
+		.iter()
+		.flat_map(|payload| dump::decode_bridge_vlans(payload))
+		.collect();
+	bridge_vlans.sort_unstable();
+
 	let address_proto_supported = addresses.iter().any(|address| address.proto.is_some());
 
 	Ok(Snapshot {
 		links,
 		addresses,
 		routes,
+		bridge_vlans,
 		address_proto_supported,
 	})
 }
