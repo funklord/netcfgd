@@ -1,0 +1,5089 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 1
+  },
+  "generated_by": "witness",
+  "globals": {
+    "dns": {
+      "mode": "dnsmasq",
+      "servers": [
+        {
+          "addr": "192.0.2.53",
+          "port": 853,
+          "sni": "dns.example"
+        }
+      ],
+      "search": [
+        "example"
+      ],
+      "domains": [
+        {
+          "suffix": "corp.example",
+          "exclusive": true
+        }
+      ],
+      "options": [
+        "ndots:2"
+      ],
+      "dnssec": "yes",
+      "transport": "tls"
+    },
+    "on_drift_default": "report",
+    "confirm_default": 90,
+    "hostname_policy": {
+      "static": "host.example"
+    },
+    "control": {
+      "observe": "any",
+      "wifi": {
+        "group": "netdev"
+      },
+      "admin": {
+        "user": "root"
+      }
+    }
+  },
+  "devices": [
+    {
+      "name": "wlan0",
+      "match": {
+        "mac": "02:00:00:00:00:02",
+        "path": "pci-0000:03:00.0",
+        "driver": "iwlwifi",
+        "name_glob": "wl*"
+      },
+      "managed": true,
+      "wifi": {
+        "backend": "wpa_supplicant",
+        "autoconnect": true,
+        "portal_check": true,
+        "regdom": "SE",
+        "powersave": "off",
+        "mac_policy": "per_network",
+        "scan_randomization": true
+      }
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "d-0",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "none",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "d-1",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "write_resolv_conf",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "d-2",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "resolvconf",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "d-3",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "d-4",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "resolved",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "d-5",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "dnsmasq",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "d-6",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "unbound",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "d-7",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": {
+          "exec": "/usr/local/bin/dns"
+        },
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-bond",
+      "kind": {
+        "kind": "bond",
+        "members": [
+          "eth1"
+        ],
+        "mode": "802.3ad",
+        "miimon": 100
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-bridge",
+      "kind": {
+        "kind": "bridge",
+        "members": [
+          "eth0"
+        ],
+        "stp": true,
+        "forward_delay": 4,
+        "hello_time": 2,
+        "ageing_time": 300,
+        "priority": 4096,
+        "vlan_filtering": true
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-dummy",
+      "kind": {
+        "kind": "dummy"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-macvlan",
+      "kind": {
+        "kind": "macvlan",
+        "parent": "eth0",
+        "mode": "passthru"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-physical",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-pppoe",
+      "kind": {
+        "kind": "pppoe",
+        "parent": "eth0",
+        "username": "alice",
+        "password": {
+          "provider": "file",
+          "name": "dsl"
+        },
+        "service": "internet",
+        "ac": "BRAS-01"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-tun",
+      "kind": {
+        "kind": "tun",
+        "mode": "tap",
+        "owner": "qemu",
+        "group": "kvm"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-tunnel",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "gretap",
+        "local": "192.0.2.1",
+        "remote": "192.0.2.2",
+        "parent": "eth0",
+        "ttl": 64,
+        "key": 7
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-veth",
+      "kind": {
+        "kind": "veth",
+        "peer": "veth-b"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-vlan",
+      "kind": {
+        "kind": "vlan",
+        "parent": "eth0",
+        "id": 42,
+        "protocol": "dot1ad"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-vrf",
+      "kind": {
+        "kind": "vrf",
+        "table": 100
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-vxlan",
+      "kind": {
+        "kind": "vxlan",
+        "id": 100,
+        "parent": "eth0",
+        "local": "192.0.2.1",
+        "remote": "192.0.2.2",
+        "port": 4789
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "k-wireguard",
+      "kind": {
+        "kind": "wire_guard",
+        "private_key": {
+          "provider": "keyring",
+          "name": "wg"
+        },
+        "listen_port": 51820,
+        "fwmark": 42,
+        "peers": [
+          {
+            "name": "hub",
+            "public_key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            "preshared_key": {
+              "provider": "pass",
+              "name": "psk"
+            },
+            "endpoint": "vpn.example:51820",
+            "allowed_ips": [
+              "10.0.0.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "p-0",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "report",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "p-1",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "p-2",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "ignore",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "t-geneve",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "geneve"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "t-gre",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "gre"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "t-gretap",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "gretap"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "t-ip6gre",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "ip6gre"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "t-ip6tnl",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "ip6tnl"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "t-ipip",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "ipip"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    },
+    {
+      "name": "t-sit",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "sit"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      }
+    }
+  ],
+  "networks": [
+    {
+      "id": "n-eap",
+      "ssid": "656170",
+      "hidden": true,
+      "security": {
+        "type": "eap",
+        "method": "tls",
+        "identity": "dave",
+        "private_key": {
+          "provider": "file",
+          "name": "k"
+        }
+      },
+      "priority": 30,
+      "autoconnect": true,
+      "metered": true,
+      "bssid_pin": "00:11:22:33:44:55",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [],
+      "dns": {
+        "mode": "resolved",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": []
+    },
+    {
+      "id": "n-open",
+      "ssid": "6f70656e",
+      "hidden": true,
+      "security": {
+        "type": "open"
+      },
+      "priority": 30,
+      "autoconnect": true,
+      "metered": true,
+      "bssid_pin": "00:11:22:33:44:55",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [],
+      "dns": {
+        "mode": "resolved",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": []
+    },
+    {
+      "id": "n-owe",
+      "ssid": "6f7765",
+      "hidden": true,
+      "security": {
+        "type": "owe"
+      },
+      "priority": 30,
+      "autoconnect": true,
+      "metered": true,
+      "bssid_pin": "00:11:22:33:44:55",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [],
+      "dns": {
+        "mode": "resolved",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": []
+    },
+    {
+      "id": "n-psk",
+      "ssid": "70736b",
+      "hidden": true,
+      "security": {
+        "type": "psk",
+        "passphrase": {
+          "provider": "file",
+          "name": "psk"
+        },
+        "proto": "wpa2_wpa3"
+      },
+      "priority": 30,
+      "autoconnect": true,
+      "metered": true,
+      "bssid_pin": "00:11:22:33:44:55",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [],
+      "dns": {
+        "mode": "resolved",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": []
+    }
+  ],
+  "rules": [
+    {
+      "id": "vpn",
+      "priority": 100,
+      "family": "inet6",
+      "from": "2001:db8::/32",
+      "to": "2001:db8:1::/48",
+      "iif": "eth0",
+      "oif": "eth1",
+      "fwmark": 1,
+      "fwmask": 255,
+      "table": 42,
+      "action": "prohibit",
+      "suppress_prefixlength": 0,
+      "l3mdev": true,
+      "invert": true
+    }
+  ],
+  "access_points": [
+    {
+      "id": "guest",
+      "ssid": "6775657374",
+      "device": "wlan0",
+      "security": {
+        "type": "owe"
+      },
+      "channel": 6,
+      "band": "2.4",
+      "hidden": true,
+      "regdom": "SE"
+    }
+  ]
+}

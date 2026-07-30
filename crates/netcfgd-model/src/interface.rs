@@ -304,7 +304,14 @@ impl TunnelKind {
 #[serde(deny_unknown_fields)]
 pub struct TunnelConfig {
 	/// Which encapsulation.
-	pub kind: TunnelKind,
+	///
+	/// Named `mode` and not `kind`, which is what it wants to be called.
+	/// [`InterfaceKind`] is serialised with an internal tag named `kind`, so a
+	/// variant whose inner struct also has a `kind` produces JSON with the
+	/// field twice -- which serde writes happily and refuses to read back.
+	/// Found by the schema witness the moment every variant was serialised in
+	/// one document, and fixed here rather than frozen in.
+	pub mode: TunnelKind,
 	/// Local endpoint.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub local: Option<IpAddr>,
