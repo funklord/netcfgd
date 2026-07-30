@@ -145,6 +145,54 @@ pub struct ObservedAddress {
 	pub origin: Option<Origin>,
 }
 
+/// A policy routing rule as the kernel reports it.
+///
+/// The same fields as [`crate::RoutingRule`] minus the `id`, which is
+/// netcfgd's own handle and has no kernel counterpart, plus the ownership the
+/// `FRA_PROTOCOL` tag establishes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedRule {
+	/// Consulted in ascending order. With the family, this is the kernel's key.
+	pub priority: u32,
+	/// Which family it is installed in.
+	pub family: crate::RuleFamily,
+	/// Source selector, in CIDR form.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub from: Option<String>,
+	/// Destination selector.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub to: Option<String>,
+	/// Incoming interface selector.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub iif: Option<String>,
+	/// Outgoing interface selector.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub oif: Option<String>,
+	/// Firewall mark selector.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub fwmark: Option<u32>,
+	/// Mask applied before comparing the mark.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub fwmask: Option<u32>,
+	/// Which table it consults.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub table: Option<u32>,
+	/// What it does on a match.
+	pub action: crate::RuleAction,
+	/// Ignore routes shorter than this.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub suppress_prefixlength: Option<u32>,
+	/// Matches packets belonging to an l3mdev master.
+	#[serde(default)]
+	pub l3mdev: bool,
+	/// Selectors are inverted.
+	#[serde(default)]
+	pub invert: bool,
+	/// Whether this is ours.
+	pub ownership: Ownership,
+}
+
 /// A route as the kernel reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -277,6 +325,9 @@ pub struct Observed {
 	pub backends: Vec<ObservedBackend>,
 	/// DNS scopes already delivered, sorted by scope.
 	pub dns: Vec<AppliedDns>,
+	/// Policy routing rules, sorted by family then priority.
+	#[serde(default)]
+	pub rules: Vec<ObservedRule>,
 	/// Bridge VLANs the kernel currently holds, sorted by interface then id.
 	#[serde(default)]
 	pub bridge_vlans: Vec<ObservedBridgeVlan>,

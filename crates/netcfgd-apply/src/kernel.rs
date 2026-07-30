@@ -686,6 +686,20 @@ impl Executor for KernelExecutor {
 					}
 				}
 			}
+			Op::RuleAdd { rule } => {
+				let record = rule_record(rule)?;
+				self.socket
+					.add_rule(&record)
+					.map_err(|error| format!("could not install rule `{}`: {error}", rule.id))?;
+				Ok(())
+			}
+			Op::RuleDel { rule } => {
+				let record = rule_record(rule)?;
+				self.socket
+					.del_rule(&record)
+					.map_err(|error| format!("could not remove rule `{}`: {error}", rule.id))?;
+				Ok(())
+			}
 			Op::QdiscSet {
 				iface,
 				kind,
@@ -791,6 +805,48 @@ impl Executor for KernelExecutor {
 			other => Err(format!("{} is not implemented in this build", other.name())),
 		}
 	}
+}
+
+/// A model rule as the wire wants it.
+///
+/// The `FRA_PROTOCOL` tag is applied here rather than carried in the model,
+/// for the reason decision 0002 gives about routes: ownership is netcfgd's own
+/// bookkeeping, not something the operator writes or should be able to forge
+/// by copying a config.
+fn rule_record(rule: &netcfgd_model::RoutingRule) -> Result<netcfgd_sys::rule::RuleRecord, String> {
+	let selector = |cidr: &Option<String>| -> Result<Option<(std::net::IpAddr, u8)>, String> {
+		match cidr {
+			None => Ok(None),
+			Some(text) => net::parse_cidr(text)
+				.map(Some)
+				.ok_or_else(|| format!("`{text}` is not a prefix")),
+		}
+	};
+	Ok(netcfgd_sys::rule::RuleRecord {
+		// `AF_INET` and `AF_INET6`.
+		family: match rule.family {
+			netcfgd_model::RuleFamily::Inet => 2,
+			netcfgd_model::RuleFamily::Inet6 => 10,
+		},
+		priority: rule.priority,
+		table: rule.table.unwrap_or(0),
+		action: match rule.action {
+			netcfgd_model::RuleAction::Lookup => netcfgd_sys::rule::FR_ACT_TO_TBL,
+			netcfgd_model::RuleAction::Blackhole => netcfgd_sys::rule::FR_ACT_BLACKHOLE,
+			netcfgd_model::RuleAction::Unreachable => netcfgd_sys::rule::FR_ACT_UNREACHABLE,
+			netcfgd_model::RuleAction::Prohibit => netcfgd_sys::rule::FR_ACT_PROHIBIT,
+		},
+		from: selector(&rule.from)?,
+		to: selector(&rule.to)?,
+		iif: rule.iif.clone(),
+		oif: rule.oif.clone(),
+		fwmark: rule.fwmark,
+		fwmask: rule.fwmask,
+		suppress_prefixlength: rule.suppress_prefixlength,
+		l3mdev: rule.l3mdev,
+		invert: rule.invert,
+		protocol: NETCFGD_PROTO,
+	})
 }
 
 /// Turn forwarding on or off for one interface, in both families.

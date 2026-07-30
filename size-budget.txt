@@ -147,4 +147,8 @@ netcfgd
 # linker pads to page boundaries, and so this gate cannot see a difference
 # smaller than 4 KB. `--no-default-features` drops the TUI and links no ncurses,
 # returning the binary to 1743384 -- the size it was before any TUI existed.
-total 1772056
+# +20 KB for policy routing rules: the fib_rule encoder and dump decoder, the
+# observed type, a reconciliation pass and two executor arms. This closes one
+# of the four features the M4 freeze put in the schema with nothing behind
+# them, so it removes a plan warning as well as adding a feature.
+total 1792536
