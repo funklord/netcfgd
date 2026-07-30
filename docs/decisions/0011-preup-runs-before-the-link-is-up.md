@@ -135,3 +135,12 @@ Rejected: it changes what the hook does -- from "refuse to configure" to "run
 when carrier appears" -- and a converter that silently changes semantics is
 worse than one that refuses and explains. `ncfg convert` reports; the operator
 decides.
+
+## Amendment, 2026-07-30
+
+This record required `ncfg convert` to warn on every converted `preup`.
+Decision 0019 dropped the converter, so there is nothing to warn from. The
+finding stands and is the reason the comparison was worth doing at all: the
+ordering is deliberate, it is incompatible with a common netifrc idiom, and
+anybody porting one by hand needs to know. It is documented in project.md
+section 9 rather than emitted by a tool.

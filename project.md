@@ -346,7 +346,7 @@ A hook body ends at **the first line consisting solely of `}`**. Unambiguous, re
 
 **Drop-in precedence:** `/etc/netcfgd/netcfgd.conf` first, then `conf.d/*.conf` in lexical filename order. Later wins for scalar keys. Lists replace rather than append unless the key is declared additive in the schema. An explicit `override` keyword before a block makes replacement intent visible; without it, redefining a block that already exists is a compile **error**, not a silent win. That last rule is deliberate — silent last-wins is where every config system becomes unpredictable.
 
-**netifrc compatibility** is a separate front end producing the same model: read `config_<iface>`, `routes_<iface>`, `dns_servers_<iface>`, and `preup()`/`postup()` style functions from a `conf.d/net`-shaped file. It is a compatibility path, not a dialect of the native grammar, and lives behind its own feature flag.
+**~~netifrc compatibility~~ — dropped, see [0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md).** A second permanent parser behind a feature flag, for an audience that is mostly one distribution. What netifrc was worth has already been taken without it: [0001](docs/decisions/0001-native-config-syntax.md) took the vocabulary and rejected the syntax, and [0011](docs/decisions/0011-preup-runs-before-the-link-is-up.md) found the `preup` ordering trap, which is the most useful thing the comparison produced.
 
 ---
 
@@ -434,7 +434,7 @@ netcfgd/
   Cargo.toml                    # workspace
   crates/
     netcfgd-model/              # document types, serde, canonical encode. NO I/O.
-    netcfgd-compile/            # DSL + netifrc front ends -> model. Pure.
+    netcfgd-compile/            # DSL -> model. Pure.
     netcfgd-netlink/            # rtnetlink. ONLY crate permitted `unsafe`.
     netcfgd-observe/            # netlink + backend reports -> observed model
     netcfgd-plan/               # diff(desired, observed) -> Plan. Pure.
@@ -469,7 +469,7 @@ The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are
 | Filesystem footprint | `find /etc/netcfgd` on a fixture install with no optional features used must match a build compiled without those features |
 | Unsafe policy | `forbid(unsafe_code)` holds everywhere except `netcfgd-netlink` |
 | Supply chain | `cargo-deny`, `cargo-audit`, pinned lockfile, stated MSRV |
-| Fuzzing | every parser — DSL, netifrc, netlink messages, backend IPC — has a `cargo-fuzz` target running in CI |
+| Fuzzing | every parser — DSL, netlink messages, backend IPC — has a `cargo-fuzz` target running in CI |
 | Determinism | same config compiles to byte-identical document across runs and platforms |
 | Plan idempotence | applying a plan twice produces an empty second plan |
 
@@ -486,8 +486,8 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 | **M1** | Walking skeleton | `netcfgd-model` + DSL compiler + rtnetlink observe + planner + `ncfg apply --oneshot`. Wired static and DHCP only. Fixture test harness. Size/footprint CI live. **The whole model lands here in types, including the parts nothing implements until M3–M4** — DNS scopes (0007), `EapConfig` (0008), `Delegated`/`PrefixRef`/`RaPolicy` (0009) — because M4 is the freeze and a structural change after it is a major bump. |
 | **M2** | Daemon and safety | `netcfgd` daemon, control socket, inotify reload, drift detection, hook runner, **commit-confirm**, `ncfg explain`, `ncfg monitor`. Flat DNS backends (`WriteResolvConf`, `Resolvconf`) so ordinary single-link hosts resolve long before scopes matter. |
 | **M3** | Wifi and 802.1X | **wpa_supplicant backend; iwd deferred** — reversed from the original order, see [0014](docs/decisions/0014-wpa-supplicant-is-the-floor-not-the-fallback.md): iwd is D-Bus-only and 0008 already commits wired 802.1X to wpa_supplicant, so one integration with no new dependency covers both. Secret providers, `ncfg wifi *`, and the control-tier policy that decides who may use them ([0013](docs/decisions/0013-three-things-a-caller-may-be-allowed-to-do.md)). |
-| **M4** | Link types, DNS scopes, router side | WireGuard, bridge/bond/VLAN/VXLAN polish, netifrc compat + `ncfg convert` (**which must warn on every converted `preup`** — see 0011), importers (`nm`, `networkd`, `uci`). Scope-capable DNS backends (0007). DHCPv6-PD, `Delegated` resolution and RA handoff (0009). PPPoE via `netcfgd-ppp`. **Model, document schema and socket API freeze here.** |
-| **M5** | Embedded | Build tiers, procd integration, read-only-root support, nano consumer without compiler. |
+| **M4** | Link types, DNS scopes, router side | WireGuard, bridge/bond/VLAN/VXLAN polish. Scope-capable DNS backends (0007). DHCPv6-PD, `Delegated` resolution and RA handoff (0009). PPPoE via `netcfgd-ppp`. A read of the foreign formats against the model, in place of the importers that were dropped ([0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md)) — the gap-finding was the part worth keeping. **Model, document schema and socket API freeze here.** |
+| **M5** | Embedded | Build tiers, procd integration, read-only-root support, nano consumer without compiler. `uci` import, deferred here from M4 ([0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md)) because OpenWrt is where it belongs and uci is not rewritten behind the operator. |
 | **M6** | TUI | `ncfg tui` including the interactive plan-preview pane. |
 | **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). |
 | **M8** | Desktop | GUI + tray applet; NM shim tier 2. |
@@ -503,7 +503,7 @@ All six are answered. Each has a record under `docs/decisions/` carrying the rea
 
 | # | Question | Answer | Record |
 |---|---|---|---|
-| 1 | Native syntax shape | **Blocks.** netifrc syntax is a compat front end only, behind its own feature flag; `ncfg convert` transpiles one way. What transfers from netifrc is vocabulary, not syntax. | [0001](docs/decisions/0001-native-config-syntax.md) |
+| 1 | Native syntax shape | **Blocks.** What transfers from netifrc is vocabulary, not syntax. The compat front end and `ncfg convert` were dropped in [0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md). | [0001](docs/decisions/0001-native-config-syntax.md) |
 | 2 | Route protocol constant | **110** (`0x6e`), used for both `rtm_protocol` and `IFA_PROTO`, defined once in `netcfgd-model`. Minimum kernel 5.10; `IFA_PROTO` (5.18+) detected by read-back, never by version, with the `/run` fallback below that. | [0002](docs/decisions/0002-object-ownership-tagging.md) |
 | 3 | Nano tier at all | **Kept, opt-in, floor is `netcfgd-embedded`.** Nothing before M5 may be shaped by it. Ship/no-ship is re-decided at M5 against measured compiler size, not against the current budget guess. | [0003](docs/decisions/0003-nano-tier.md) |
 | 4 | Built-in DHCPv4 | **No.** Delegate to dhcpcd/udhcpc. The `Builtin` backend variant stays in the schema — unimplemented but recognised — because adding it after the M4 freeze is a major version bump. | [0004](docs/decisions/0004-dhcpv4-client-sourcing.md) |
@@ -546,7 +546,7 @@ Changing any of the above is a convention change: raise it rather than adjusting
 
 ### Known incompatibilities to carry forward
 
-- **A netifrc `preup` that checks link state deadlocks under netcfgd's ordering.** Rule 6 runs `pre_up` before `link.up`, and the kernel returns `EINVAL` for `carrier` on a down interface, so `mii-tool`/`ethtool` checks cannot work there — and net.example's canonical `preup` aborts on "no link", which then prevents the bring-up that would have produced the carrier. The ordering stays; `ncfg convert` must warn. [0011](docs/decisions/0011-preup-runs-before-the-link-is-up.md).
+- **A netifrc `preup` that checks link state deadlocks under netcfgd's ordering.** Rule 6 runs `pre_up` before `link.up`, and the kernel returns `EINVAL` for `carrier` on a down interface, so `mii-tool`/`ethtool` checks cannot work there — and net.example's canonical `preup` aborts on "no link", which then prevents the bring-up that would have produced the carrier. The ordering stays. The warning was to have lived in `ncfg convert`, which [0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md) dropped, so the incompatibility is documented and nothing converts. [0011](docs/decisions/0011-preup-runs-before-the-link-is-up.md).
 - **A supplicant must hold no state of its own.** wpa_supplicant runs with no persistent configuration and `update_config=0` set explicitly, and every network arrives over the control socket ([0015](docs/decisions/0015-the-supplicant-holds-no-state.md)). iwd cannot be driven this way — it writes its own network database during connections and has no stateless mode — which is what blocks it, rather than the D-Bus cost ([0014](docs/decisions/0014-wpa-supplicant-is-the-floor-not-the-fallback.md)).
 - **netcfgd will never implement key management or EAP.** Permanently delegated, affirming design §1.5. Scan and BSS selection *could* become netcfgd's, and [0016](docs/decisions/0016-which-half-of-a-supplicant-could-ever-be-ours.md) records the shape and the cost — pinning a BSSID defeats 802.11r fast transition, so it buys explainability and spends roaming quality.
 - **netcfgd does not gate addressing on carrier.** A link is brought up and addressed whether or not a cable is present. The `carrier` hook reports; nothing defers. Noted as a gap in 0011, not scheduled.
