@@ -10,6 +10,12 @@
 # `ncfg` and `netcfgd` one multi-call binary, since duplicating the shared
 # crates is most of what is being paid for here.
 #
+# Measured as **total installed size**, not per binary. What a 16 MB router
+# cares about is how much flash the install takes; a per-binary limit would call
+# merging two binaries a regression when it saves a megabyte of flash. The
+# per-binary numbers are still printed, because "which one grew?" is the next
+# question -- but only the total is a gate.
+#
 # What this file does instead is ratchet. A limit is the last measured size
 # plus a small tolerance, so ordinary growth fails the build and raising a
 # number is a deliberate, reviewable edit rather than something that happens
@@ -70,5 +76,10 @@ tolerance_percent 3
 #
 # Then PPPoE: the compiler, the planner treating a session as a prerequisite
 # rather than a link, and the executor writing pppd's options file. +12 KB each.
-ncfg     1157568
-netcfgd  1497624
+# The binaries the gate sums. A name with no number is measured, not limited.
+ncfg
+netcfgd
+
+# 1 MB is design section 10.2's embedded budget. The install is over it and
+# that is M5's remaining size work -- the ratchet holds the line meanwhile.
+total 2655232
