@@ -51,6 +51,8 @@ pub struct OwnedState {
 	pub forwarding: Vec<String>,
 	/// Interfaces netcfgd set the root qdisc on.
 	pub qdisc: Vec<String>,
+	/// Interfaces netcfgd installed an ingress redirect on.
+	pub ingress: Vec<String>,
 }
 
 /// Where a `DHCPv6` client's hook records what it was delegated.
@@ -143,6 +145,7 @@ impl OwnedState {
 			dns: self.dns.clone(),
 			forwarding: self.forwarding.clone(),
 			qdisc: self.qdisc.clone(),
+			ingress: self.ingress.clone(),
 			// Not from this file. A delegation is not something netcfgd did,
 			// it is something a client was told, so it is recorded separately
 			// and folded in by [`prior_state`].
@@ -173,6 +176,13 @@ impl OwnedState {
 			self.qdisc.retain(|name| name != interface);
 			if *set {
 				self.qdisc.push(interface.clone());
+			}
+		}
+
+		for (interface, set) in &effects.ingress {
+			self.ingress.retain(|name| name != interface);
+			if *set {
+				self.ingress.push(interface.clone());
 			}
 		}
 

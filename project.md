@@ -168,6 +168,7 @@ Interface {
   forwarding  : bool?                 // sysctl only, never a firewall rule
   nat         : bool?                 // masquerade what leaves here; see 0022
   qdisc       : QdiscPolicy?          // root qdisc only; see 0023
+  ingress_redirect : string?          // synthesised ifb; see 0023 amendment
 }
 
 InterfaceKind =

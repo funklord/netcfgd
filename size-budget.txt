@@ -107,4 +107,9 @@ netcfgd
 # planner pass and two executor arms. A third of what NAT cost, because this is
 # rtnetlink on the socket netcfgd already holds rather than a second protocol
 # -- which is the measured version of what decision 0023 predicted.
-total 2827224
+# +56 KB for ingress shaping: the `ifb` link kind, the ingress hook, a
+# `matchall` classifier carrying a `mirred` redirect, the filter dump that
+# reads it back, plus the compiler expansion that turns one config key into a
+# synthesised device and a redirect. More than the qdisc work itself, because
+# the filter is three levels of nesting to write and to parse.
+total 2884568

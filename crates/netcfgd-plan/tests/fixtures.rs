@@ -36,6 +36,8 @@ fn link(name: &str) -> ObservedLink {
 		master: None,
 		qdisc: Some("noqueue".to_owned()),
 		qdisc_bandwidth_bits: None,
+		qdisc_ingress: false,
+		ingress_redirect: None,
 		forwarding: None,
 		ownership: Ownership::Unknown,
 	}
@@ -120,23 +122,68 @@ fn simulate_qdisc(op: &Op, observed: &mut Observed) {
 	// The kernel puts its default back on a reset, which for the fake link
 	// here is `noqueue`. Modelling that as "no qdisc at all" would let a
 	// planner bug that never converges look like it converged.
-	let (kind, rate) = match op {
+	let (kind, rate, ingress) = match op {
 		Op::QdiscSet {
 			kind,
 			bandwidth_bits,
+			ingress,
 			..
-		} => (kind.clone(), *bandwidth_bits),
-		_ => ("noqueue".to_owned(), None),
+		} => (kind.clone(), *bandwidth_bits, *ingress),
+		_ => ("noqueue".to_owned(), None, false),
 	};
 
 	if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
 		link.qdisc = Some(kind);
 		link.qdisc_bandwidth_bits = rate;
+		link.qdisc_ingress = ingress;
 	}
 
 	observed.qdisc_applied.retain(|name| name != iface);
 	if matches!(op, Op::QdiscSet { .. }) {
 		observed.qdisc_applied.push(iface.clone());
+	}
+}
+
+/// The link-attribute half of [`simulate`]: find the link, set the field.
+fn simulate_link(op: &Op, observed: &mut Observed) {
+	let (Op::LinkSetMtu { name, .. }
+	| Op::LinkSetMac { name, .. }
+	| Op::LinkSetMaster { name, .. }
+	| Op::LinkUnsetMaster { name }
+	| Op::LinkUp { name }
+	| Op::LinkDown { name }) = op
+	else {
+		return;
+	};
+	let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) else {
+		return;
+	};
+	match op {
+		Op::LinkSetMtu { mtu, .. } => link.mtu = *mtu,
+		Op::LinkSetMac { mac, .. } => link.mac = Some(mac.clone()),
+		Op::LinkSetMaster { master, .. } => link.master = Some(master.clone()),
+		Op::LinkUnsetMaster { .. } => link.master = None,
+		Op::LinkUp { .. } => link.up = true,
+		Op::LinkDown { .. } => link.up = false,
+		_ => {}
+	}
+}
+
+/// The ingress half of [`simulate`].
+fn simulate_ingress(op: &Op, observed: &mut Observed) {
+	let (Op::IngressRedirect { iface, .. } | Op::IngressRedirectClear { iface }) = op else {
+		return;
+	};
+	let target = match op {
+		Op::IngressRedirect { target, .. } => Some(target.clone()),
+		_ => None,
+	};
+	if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
+		link.ingress_redirect = target;
+	}
+	observed.ingress_applied.retain(|name| name != iface);
+	if matches!(op, Op::IngressRedirect { .. }) {
+		observed.ingress_applied.push(iface.clone());
 	}
 }
 
@@ -153,36 +200,12 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 				observed.addresses.retain(|a| &a.interface != name);
 				observed.routes.retain(|r| &r.interface != name);
 			}
-			Op::LinkSetMtu { name, mtu } => {
-				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
-					link.mtu = *mtu;
-				}
-			}
-			Op::LinkSetMac { name, mac } => {
-				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
-					link.mac = Some(mac.clone());
-				}
-			}
-			Op::LinkSetMaster { name, master } => {
-				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
-					link.master = Some(master.clone());
-				}
-			}
-			Op::LinkUnsetMaster { name } => {
-				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
-					link.master = None;
-				}
-			}
-			Op::LinkUp { name } => {
-				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
-					link.up = true;
-				}
-			}
-			Op::LinkDown { name } => {
-				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
-					link.up = false;
-				}
-			}
+			Op::LinkSetMtu { .. }
+			| Op::LinkSetMac { .. }
+			| Op::LinkSetMaster { .. }
+			| Op::LinkUnsetMaster { .. }
+			| Op::LinkUp { .. }
+			| Op::LinkDown { .. } => simulate_link(&action.op, observed),
 			Op::AddrAdd { iface, addr, .. } => observed.addresses.push(ObservedAddress {
 				interface: iface.clone(),
 				address: addr.clone(),
@@ -228,6 +251,9 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 			}
 			Op::QdiscSet { .. } | Op::QdiscReset { .. } => {
 				simulate_qdisc(&action.op, observed);
+			}
+			Op::IngressRedirect { .. } | Op::IngressRedirectClear { .. } => {
+				simulate_ingress(&action.op, observed);
 			}
 			Op::SysctlSetForwarding { iface, enabled } => {
 				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
@@ -1772,4 +1798,99 @@ fn a_qdisc_netcfgd_did_not_set_is_left_alone() {
 
 	let plan = settle(&desired, &mut observed);
 	assert!(!names(&plan).contains(&"qdisc.reset"), "{:?}", names(&plan));
+}
+
+/// `ingress_bandwidth` builds the whole ingress path: a device to redirect
+/// onto, a shaper on it, and the redirect itself.
+///
+/// The ordering assertion is the one that matters. Traffic redirected onto a
+/// device that is not yet shaped is traffic that is not being shaped, so the
+/// `ifb` has to exist and carry its qdisc before anything is pointed at it.
+#[test]
+fn ingress_shaping_builds_a_device_a_shaper_and_a_redirect() {
+	let desired = document(
+		r#"
+		interface wan0 {
+			config = "10.0.0.2/24"
+			qdisc {
+				kind              = "cake"
+				bandwidth         = "100mbit"
+				ingress_bandwidth = "50mbit"
+			}
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["wan0"]);
+	let plan = settle(&desired, &mut observed);
+
+	assert!(
+		names(&plan).contains(&"ingress.redirect"),
+		"{:?}",
+		names(&plan)
+	);
+	assert!(
+		position(&plan, "link.create") < position(&plan, "ingress.redirect"),
+		"the ifb must exist before traffic is sent to it: {:?}",
+		names(&plan)
+	);
+	assert_eq!(
+		observed
+			.link("wan0")
+			.and_then(|l| l.ingress_redirect.as_deref()),
+		Some("ifb-wan0")
+	);
+	// The shaper on the ifb is told it is metering arrivals, which changes
+	// what cake counts.
+	let ifb = observed.link("ifb-wan0").expect("the ifb");
+	assert_eq!(ifb.qdisc.as_deref(), Some("cake"));
+	assert_eq!(ifb.qdisc_bandwidth_bits, Some(50_000_000));
+	assert!(ifb.qdisc_ingress);
+}
+
+/// Dropping `ingress_bandwidth` takes the redirect and the device away.
+#[test]
+fn removing_ingress_shaping_removes_the_whole_path() {
+	let desired = document(
+		r#"
+		interface wan0 {
+			config = "10.0.0.2/24"
+			qdisc  = "fq_codel"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["wan0", "ifb-wan0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "wan0") {
+		link.ingress_redirect = Some("ifb-wan0".to_owned());
+	}
+	observed.ingress_applied = vec!["wan0".to_owned()];
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "ifb-wan0") {
+		link.ownership = Ownership::Ours;
+	}
+
+	let plan = settle(&desired, &mut observed);
+	assert!(names(&plan).contains(&"ingress.redirect.clear"));
+	assert!(names(&plan).contains(&"link.delete"));
+	assert_eq!(
+		observed
+			.link("wan0")
+			.and_then(|l| l.ingress_redirect.as_deref()),
+		None
+	);
+}
+
+/// A redirect netcfgd did not install is left where it is.
+#[test]
+fn a_redirect_netcfgd_did_not_install_is_left_alone() {
+	let desired = document("interface wan0 { config = \"10.0.0.2/24\" }");
+	let mut observed = observed_with(&["wan0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "wan0") {
+		link.ingress_redirect = Some("ifb0".to_owned());
+	}
+
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		!names(&plan).contains(&"ingress.redirect.clear"),
+		"{:?}",
+		names(&plan)
+	);
 }

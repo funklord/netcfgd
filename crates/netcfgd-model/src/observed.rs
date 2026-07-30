@@ -102,6 +102,12 @@ pub struct ObservedLink {
 	/// The shaped rate in **bits** per second, where the qdisc shapes.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub qdisc_bandwidth_bits: Option<u64>,
+	/// Whether the root qdisc was told it is shaping traffic on the way in.
+	#[serde(default)]
+	pub qdisc_ingress: bool,
+	/// The device traffic arriving here is redirected to, if any.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ingress_redirect: Option<String>,
 	/// Whether this interface forwards, from the `forwarding` sysctls.
 	///
 	/// `Some(true)` only when both the IPv4 and the IPv6 one are set: half a
@@ -285,6 +291,9 @@ pub struct Observed {
 	/// first started is not netcfgd's to reset.
 	#[serde(default)]
 	pub qdisc_applied: Vec<String>,
+	/// Interfaces netcfgd installed an ingress redirect on, sorted.
+	#[serde(default)]
+	pub ingress_applied: Vec<String>,
 	/// Interfaces netcfgd turned forwarding on for, sorted.
 	///
 	/// Recorded rather than inferred, because a sysctl carries no owner. An

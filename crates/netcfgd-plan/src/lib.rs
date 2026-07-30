@@ -233,6 +233,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 
 	builder.plan_dns(desired, observed);
 	builder.plan_qdisc(desired, observed);
+	builder.plan_ingress(desired, observed);
 	builder.plan_forwarding(desired, observed);
 	builder.plan_nat(desired, observed);
 
@@ -1096,6 +1097,7 @@ impl Builder {
 							iface: interface.name.clone(),
 							kind: kind.to_owned(),
 							bandwidth_bits: current_rate,
+							ingress: link.is_some_and(|link| link.qdisc_ingress),
 						}),
 					);
 				}
@@ -1106,7 +1108,11 @@ impl Builder {
 			// `cake` already installed at the wrong bandwidth is the exact
 			// case where "the kind matches, nothing to do" shapes a line at
 			// somebody else's number.
-			if current == Some(policy.kind.name()) && current_rate == policy.bandwidth_bits {
+			let current_ingress = link.is_some_and(|link| link.qdisc_ingress);
+			if current == Some(policy.kind.name())
+				&& current_rate == policy.bandwidth_bits
+				&& current_ingress == policy.ingress
+			{
 				continue;
 			}
 
@@ -1119,6 +1125,7 @@ impl Builder {
 					iface: interface.name.clone(),
 					kind: policy.kind.name().to_owned(),
 					bandwidth_bits: policy.bandwidth_bits,
+					ingress: policy.ingress,
 				},
 				Reason {
 					interface: Some(interface.name.clone()),
@@ -1134,8 +1141,66 @@ impl Builder {
 					iface: interface.name.clone(),
 					kind: kind.to_owned(),
 					bandwidth_bits: current_rate,
+					ingress: current_ingress,
 				}),
 			);
+		}
+	}
+
+	/// The ingress redirect on each interface that asks for one.
+	///
+	/// Planned after the qdiscs so the `ifb` exists and is shaped before
+	/// anything is pointed at it -- traffic redirected onto a device with no
+	/// shaper is traffic that is not being shaped, which is worse than not
+	/// redirecting it at all.
+	fn plan_ingress(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			let current = observed
+				.link(&interface.name)
+				.and_then(|link| link.ingress_redirect.as_deref());
+			let ours = observed.ingress_applied.contains(&interface.name);
+
+			match interface.ingress_redirect.as_deref() {
+				Some(target) if current == Some(target) => {}
+				Some(target) => {
+					self.push(
+						Op::IngressRedirect {
+							iface: interface.name.clone(),
+							target: target.to_owned(),
+						},
+						Reason {
+							interface: Some(interface.name.clone()),
+							field: "ingress_redirect".to_owned(),
+							desired: target.to_owned(),
+							observed: current.unwrap_or("<absent>").to_owned(),
+						},
+						self.gate(target),
+						Some(Op::IngressRedirectClear {
+							iface: interface.name.clone(),
+						}),
+					);
+				}
+				// Same ownership rule as the qdisc: a redirect somebody else
+				// put there is not netcfgd's to take away.
+				None if current.is_some() && ours => {
+					self.push(
+						Op::IngressRedirectClear {
+							iface: interface.name.clone(),
+						},
+						Reason::unwanted(
+							&interface.name,
+							"ingress_redirect",
+							current.unwrap_or_default().to_owned(),
+						),
+						Vec::new(),
+						current.map(|target| Op::IngressRedirect {
+							iface: interface.name.clone(),
+							target: target.to_owned(),
+						}),
+					);
+				}
+				None => {}
+			}
 		}
 	}
 
@@ -1644,5 +1709,6 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Macvlan(_) => "macvlan",
 		InterfaceKind::Tunnel(tunnel) => tunnel.mode.name(),
 		InterfaceKind::Tun(_) => "tun",
+		InterfaceKind::Ifb => "ifb",
 	}
 }
