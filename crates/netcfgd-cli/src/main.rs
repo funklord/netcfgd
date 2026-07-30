@@ -689,6 +689,17 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 			};
 			println!("    vlan {}{flags}", vlan.vid);
 		}
+		if let Some(kind) = &link.qdisc {
+			let shaped = link
+				.qdisc_bandwidth_bits
+				.map_or_else(String::new, |bits| format!(" at {bits} bit/s"));
+			let ours = if observed.qdisc_applied.contains(&link.name) {
+				""
+			} else {
+				" [kernel default or set elsewhere]"
+			};
+			println!("    qdisc {kind}{shaped}{ours}");
+		}
 		if observed.nat.contains(&link.name) {
 			println!("    masquerade");
 		}

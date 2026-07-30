@@ -49,6 +49,8 @@ pub struct OwnedState {
 	pub dns: Vec<netcfgd_model::AppliedDns>,
 	/// Interfaces netcfgd turned IP forwarding on for.
 	pub forwarding: Vec<String>,
+	/// Interfaces netcfgd set the root qdisc on.
+	pub qdisc: Vec<String>,
 }
 
 /// Where a `DHCPv6` client's hook records what it was delegated.
@@ -140,6 +142,7 @@ impl OwnedState {
 			backends: self.backends.clone(),
 			dns: self.dns.clone(),
 			forwarding: self.forwarding.clone(),
+			qdisc: self.qdisc.clone(),
 			// Not from this file. A delegation is not something netcfgd did,
 			// it is something a client was told, so it is recorded separately
 			// and folded in by [`prior_state`].
@@ -160,6 +163,16 @@ impl OwnedState {
 			self.forwarding.retain(|name| name != interface);
 			if *enabled {
 				self.forwarding.push(interface.clone());
+			}
+		}
+
+		// Same shape: a reset drops the record rather than storing it, because
+		// the question is "is this ours to put back", and once the kernel
+		// default is restored the answer is no.
+		for (interface, set) in &effects.qdisc {
+			self.qdisc.retain(|name| name != interface);
+			if *set {
+				self.qdisc.push(interface.clone());
 			}
 		}
 
