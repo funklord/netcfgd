@@ -57,6 +57,8 @@ it later it is a script rather than a decision to revisit.
 
 ### uci is deferred, not dropped
 
+**Amended 2026-07-30: dropped. See the amendment at the end.**
+
 OpenWrt is a declared target: M5 is build tiers, procd integration and
 read-only root. uci files are hand-edited, stable, and not rewritten behind the
 operator's back, so the objection above does not reach them either. An importer
@@ -149,3 +151,47 @@ without writing it.** Genuinely tempting -- it makes the operator read the
 result, which answers the "config nobody wrote" objection. Still rejected for
 NM and networkd, because the input is unstable whatever is done with the
 output. It is the shape to use if uci lands in M5.
+
+## Amendment: uci is dropped too
+
+Date: 2026-07-30
+
+The deferral above kept `uci` on the grounds that OpenWrt is a declared target
+and uci files are hand-edited and stable. Both facts are still true and the
+conclusion was still wrong, because it never asked what the importer would be
+*for*.
+
+The answer is mass provisioning, and mass provisioning on OpenWrt runs the
+other way. Image Builder bakes files into the image; `/etc/uci-defaults/`
+scripts run once on first boot; OpenWISP's `netjsonconfig` renders NetJSON to
+uci; the Firmware Selector drops a generated script into `uci-defaults`. Every
+one of those **emits** uci. Nothing in the flow reads it.
+
+So an importer serves exactly one case: an operator migrating a single box they
+already configured by hand. That is a script, not a feature -- which is the
+same conclusion this record already reached for the other three, and the reason
+it gave applies unchanged: "if somebody needs it later it is a script rather
+than a decision to revisit".
+
+### What OpenWrt provisioning actually needed, and already has
+
+The netcfgd shape of that flow is the factory config layer: a provisioning tool
+emits netcfgd config, Image Builder puts it in the `files/` overlay at
+`/usr/share/netcfgd/`, and the device boots on it. An operator's later changes
+land in `/etc/netcfgd` on the writable overlay, and `ncfg reset` returns the
+device to the shipped configuration without reflashing.
+
+That landed with read-only-root support (design section 10.4,
+`docs/read-only-root.md`). It is the whole mass-provisioning story, and uci is
+not in it at any point.
+
+### What this costs
+
+The same thing the other three cost, and it is worth restating rather than
+waving away: reading a foreign format is how a model gap gets found. That
+argument had force before the freeze. It has none now -- the schema is frozen
+and a gap found by an importer would be a breaking change rather than a cheap
+correction, so the importer would arrive too late to buy the thing importers
+were scheduled to buy.
+
+**M5 has no importer work left.** The only open item is the 1 MB size target.
