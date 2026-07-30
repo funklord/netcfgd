@@ -172,6 +172,25 @@ pub enum BackendKind {
 	RouterAdvert,
 }
 
+/// What a `DHCPv6` client obtained by prefix delegation.
+///
+/// Not read from the kernel: a delegated prefix is not kernel state at all
+/// until something derives an address from it. It comes from the client, which
+/// netcfgd does not implement (decision 0004) and therefore has to be told by
+/// -- through a file the client's hook writes and the observer reads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Delegation {
+	/// The interface whose lease carries them.
+	pub interface: String,
+	/// The prefixes, in the order the lease listed them.
+	///
+	/// A list rather than one, because a lease may carry several and
+	/// `PrefixRef::index` selects between them. Most connections deliver
+	/// exactly one.
+	pub prefixes: Vec<String>,
+}
+
 /// A backend process as netcfgd currently believes it to be.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -212,6 +231,9 @@ pub struct Observed {
 	pub backends: Vec<ObservedBackend>,
 	/// DNS scopes already delivered, sorted by scope.
 	pub dns: Vec<AppliedDns>,
+	/// Prefixes delegated to this host, sorted by interface.
+	#[serde(default)]
+	pub delegations: Vec<Delegation>,
 	/// Whether address ownership came from `IFA_PROTO` or from the weaker
 	/// `/run` fallback.
 	///
@@ -222,6 +244,14 @@ pub struct Observed {
 }
 
 impl Observed {
+	/// The prefixes delegated on an interface.
+	#[must_use]
+	pub fn delegation(&self, interface: &str) -> Option<&Delegation> {
+		self.delegations
+			.iter()
+			.find(|entry| entry.interface == interface)
+	}
+
 	/// The link of this name, if the kernel has one.
 	#[must_use]
 	pub fn link(&self, name: &str) -> Option<&ObservedLink> {

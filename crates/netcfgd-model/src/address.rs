@@ -241,3 +241,91 @@ pub(crate) fn check_multiplicity(interface: &str, sources: &[AddressSource]) -> 
 	}
 	Ok(())
 }
+
+/// Derive an address from a delegated prefix.
+///
+/// The one piece of arithmetic in the project, and the reason decision 0009
+/// made `Delegated` a typed indirection rather than a string: what comes back
+/// from the ISP is a prefix like `2001:db8:1234::/56`, and what goes on
+/// `br-lan` is one `/64` carved out of it with a host part appended.
+///
+/// Three inputs, and each answers a different question:
+///
+/// - the delegation says which block the machine was given;
+/// - `subnet` says which sub-prefix of that block this interface takes, so
+///   several LANs can share one delegation without colliding;
+/// - `suffix` supplies both the host part and the resulting prefix length --
+///   `::1/64` means "the first address of a /64".
+///
+/// # Errors
+///
+/// Returns an error naming what does not fit. Every failure here is a config
+/// that can never work rather than a transient one, so the message has to be
+/// actionable: an operator told only "invalid" would have to work out which of
+/// three numbers was wrong.
+pub fn derive_from_delegation(
+	delegation: &str,
+	reference: &PrefixRef,
+	suffix: &str,
+) -> Result<String, String> {
+	let (prefix, prefix_len) =
+		parse_prefix6(delegation).ok_or_else(|| format!("`{delegation}` is not an IPv6 prefix"))?;
+	let (host, subnet_len) = parse_prefix6(suffix)
+		.ok_or_else(|| format!("`{suffix}` is not an IPv6 address with a prefix length"))?;
+
+	// A sub-prefix has to be longer than the block it is carved from.
+	// Equal is legal and means the whole delegation, so only shorter is
+	// refused -- and it is worth refusing loudly: it would silently widen the
+	// interface's route to cover addresses the ISP did not give this machine.
+	if subnet_len < prefix_len {
+		return Err(format!(
+			"a /{subnet_len} cannot be carved out of a /{prefix_len}; the suffix's prefix \
+			 length must be at least as long as the delegation's"
+		));
+	}
+
+	let spare_bits = u32::from(subnet_len - prefix_len);
+	// `1 << 16` would overflow a u16 subnet anyway, so the check is on the
+	// value rather than the shift.
+	if spare_bits < 16 && u32::from(reference.subnet) >= (1_u32 << spare_bits) {
+		return Err(format!(
+			"subnet {} does not fit: a /{prefix_len} delegation split into /{subnet_len} \
+			 blocks has {} of them",
+			reference.subnet,
+			1_u128 << spare_bits
+		));
+	}
+
+	let mut bits = u128::from_be_bytes(prefix.octets());
+	// Clear anything below the delegation's own length. An ISP that hands out
+	// `2001:db8:1234:5678::/56` -- and they do -- would otherwise contribute
+	// bits that belong to nobody.
+	bits &= mask(prefix_len);
+	bits |= u128::from(reference.subnet) << (128 - u32::from(subnet_len));
+	// The host part is whatever the suffix sets below the sub-prefix.
+	bits |= u128::from_be_bytes(host.octets()) & !mask(subnet_len);
+
+	Ok(format!(
+		"{}/{subnet_len}",
+		std::net::Ipv6Addr::from(bits.to_be_bytes())
+	))
+}
+
+/// A mask with the top `len` bits set.
+fn mask(len: u8) -> u128 {
+	if len == 0 {
+		0
+	} else if len >= 128 {
+		u128::MAX
+	} else {
+		u128::MAX << (128 - u32::from(len))
+	}
+}
+
+/// `address/length`, IPv6 only.
+fn parse_prefix6(text: &str) -> Option<(std::net::Ipv6Addr, u8)> {
+	let (address, length) = text.split_once('/')?;
+	let address: std::net::Ipv6Addr = address.parse().ok()?;
+	let length: u8 = length.parse().ok()?;
+	(length <= 128).then_some((address, length))
+}

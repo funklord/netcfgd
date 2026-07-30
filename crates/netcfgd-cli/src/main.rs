@@ -190,7 +190,7 @@ fn compile_with_provenance(
 }
 
 fn observe(run_dir: &std::path::Path) -> Result<Observed, String> {
-	let prior = state::read_owned(run_dir).to_prior();
+	let prior = state::prior_state(run_dir);
 	netcfgd_observe::current(&prior).map_err(|error| format!("could not read the kernel: {error}"))
 }
 
