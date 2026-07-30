@@ -149,6 +149,7 @@ fn observed_link(
 		// The kernel has no protocol field for links, so this can only
 		// come from what netcfgd wrote down. A link nobody recorded is
 		// never deleted, which is the conservative direction.
+		ipv6_token: link.ipv6_token.map(|address| address.to_string()),
 		qdisc: root_qdisc(snapshot, link.index).map(|record| record.kind.clone()),
 		qdisc_ingress: root_qdisc(snapshot, link.index).is_some_and(|record| record.ingress),
 		ingress_redirect: snapshot
@@ -330,6 +331,7 @@ mod tests {
 			mtu: 1500,
 			mac: None,
 			master: None,
+			ipv6_token: None,
 		}
 	}
 
