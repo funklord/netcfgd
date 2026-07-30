@@ -34,6 +34,7 @@ fn link(name: &str) -> ObservedLink {
 		mtu: 1500,
 		mac: None,
 		master: None,
+		ipv6_token: None,
 		qdisc: Some("noqueue".to_owned()),
 		qdisc_bandwidth_bits: None,
 		qdisc_ingress: false,
@@ -187,6 +188,37 @@ fn simulate_ingress(op: &Op, observed: &mut Observed) {
 	}
 }
 
+/// The rule half of [`simulate`].
+fn simulate_rule(op: &Op, observed: &mut Observed) {
+	match op {
+		Op::RuleAdd { rule } => observed.rules.push(netcfgd_model::ObservedRule {
+			priority: rule.priority,
+			family: rule.family,
+			from: rule.from.clone(),
+			to: rule.to.clone(),
+			iif: rule.iif.clone(),
+			oif: rule.oif.clone(),
+			fwmark: rule.fwmark,
+			fwmask: rule.fwmask,
+			// The kernel reports no table for the non-lookup actions,
+			// whatever the document said. A fake that echoed the desired
+			// value back would hide a real mismatch.
+			table: (rule.action == netcfgd_model::RuleAction::Lookup)
+				.then_some(rule.table)
+				.flatten(),
+			action: rule.action,
+			suppress_prefixlength: rule.suppress_prefixlength,
+			l3mdev: rule.l3mdev,
+			invert: rule.invert,
+			ownership: Ownership::Ours,
+		}),
+		Op::RuleDel { rule } => observed
+			.rules
+			.retain(|held| !(held.family == rule.family && held.priority == rule.priority)),
+		_ => {}
+	}
+}
+
 fn simulate(plan: &Plan, observed: &mut Observed) {
 	for action in &plan.actions {
 		match &action.op {
@@ -255,30 +287,14 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 			Op::IngressRedirect { .. } | Op::IngressRedirectClear { .. } => {
 				simulate_ingress(&action.op, observed);
 			}
-			Op::RuleAdd { rule } => observed.rules.push(netcfgd_model::ObservedRule {
-				priority: rule.priority,
-				family: rule.family,
-				from: rule.from.clone(),
-				to: rule.to.clone(),
-				iif: rule.iif.clone(),
-				oif: rule.oif.clone(),
-				fwmark: rule.fwmark,
-				fwmask: rule.fwmask,
-				// The kernel reports no table for the non-lookup actions,
-				// whatever the document said. A fake that echoed the desired
-				// value back would hide a real mismatch.
-				table: (rule.action == netcfgd_model::RuleAction::Lookup)
-					.then_some(rule.table)
-					.flatten(),
-				action: rule.action,
-				suppress_prefixlength: rule.suppress_prefixlength,
-				l3mdev: rule.l3mdev,
-				invert: rule.invert,
-				ownership: Ownership::Ours,
-			}),
-			Op::RuleDel { rule } => observed
-				.rules
-				.retain(|held| !(held.family == rule.family && held.priority == rule.priority)),
+			Op::LinkSetIpv6Token { name, token } => {
+				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
+					// `::` is how the kernel spells "none", so it clears
+					// rather than storing an address.
+					link.ipv6_token = (token != "::").then(|| token.clone());
+				}
+			}
+			Op::RuleAdd { .. } | Op::RuleDel { .. } => simulate_rule(&action.op, observed),
 			Op::SysctlSetForwarding { iface, enabled } => {
 				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
 					link.forwarding = Some(*enabled);
@@ -1044,7 +1060,7 @@ fn removing_dot1x_stops_the_supplicant() {
 }
 
 /// The M4 freeze put four features in the schema that nothing implemented.
-/// Policy routing rules are now built, so three remain. The failure mode to
+/// Policy routing rules and `ipv6_token` are now built, so two remain. The failure mode to
 /// guard against is not that they do nothing -- that is intended -- but that
 /// they do nothing *silently*, so a plan reports "one action" about a config
 /// that asked for several things.
@@ -1058,7 +1074,6 @@ access_point "guest" {
 }
 
 interface eth0 {
-	ipv6_token = "::5"
 	ethtool { gro = "off" }
 	config = "null"
 }
@@ -1075,7 +1090,7 @@ interface eth0 {
 		.map(|warning| warning.message.as_str())
 		.collect();
 
-	for expected in ["access point `guest`", "ethtool", "ipv6_token"] {
+	for expected in ["access point `guest`", "ethtool"] {
 		assert!(
 			warnings.iter().any(|message| message.contains(expected)),
 			"nothing warned about {expected}: {warnings:?}"
@@ -2040,4 +2055,80 @@ fn removing_a_rule_from_the_config_withdraws_it() {
 	let plan = settle(&desired, &mut observed);
 	assert!(names(&plan).contains(&"rule.del"));
 	assert!(observed.rules.is_empty());
+}
+
+/// A token is set once and then left alone.
+#[test]
+fn an_ipv6_token_is_set_once_and_then_left_alone() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config     = "10.0.0.2/24"
+			ipv6_token = "::5"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	let plan = settle(&desired, &mut observed);
+
+	assert!(
+		names(&plan).contains(&"link.set_ipv6_token"),
+		"{:?}",
+		names(&plan)
+	);
+	assert_eq!(
+		observed.link("eth0").and_then(|l| l.ipv6_token.as_deref()),
+		Some("::5")
+	);
+}
+
+/// The same token spelled differently is the same token.
+///
+/// The kernel reports its own spelling, so comparing text would reinstall on
+/// every apply for anybody who wrote the long form.
+#[test]
+fn a_token_is_compared_as_an_address_not_as_text() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config     = "10.0.0.2/24"
+			ipv6_token = "0:0:0:0:0:0:0:5"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.ipv6_token = Some("::5".to_owned());
+	}
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"link.set_ipv6_token"),
+		"{:?}",
+		names(&plan)
+	);
+}
+
+/// A token the document does not mention is left where it is.
+///
+/// It carries no ownership tag and the kernel offers no way to tell one
+/// netcfgd set from one an operator set, so removing it would be a guess.
+#[test]
+fn a_token_nobody_asked_about_is_left_alone() {
+	let desired = document("interface eth0 { config = \"10.0.0.2/24\" }");
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.ipv6_token = Some("::9".to_owned());
+	}
+
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		!names(&plan).contains(&"link.set_ipv6_token"),
+		"{:?}",
+		names(&plan)
+	);
+	assert_eq!(
+		observed.link("eth0").and_then(|l| l.ipv6_token.as_deref()),
+		Some("::9")
+	);
 }

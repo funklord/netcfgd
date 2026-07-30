@@ -151,4 +151,7 @@ netcfgd
 # observed type, a reconciliation pass and two executor arms. This closes one
 # of the four features the M4 freeze put in the schema with nothing behind
 # them, so it removes a plan warning as well as adding a feature.
-total 1792536
+# +4 KB for `ipv6_token`: one setter through IFLA_AF_SPEC, the token read out
+# of the link dump, a planner pass and an executor arm. Small because the dump
+# already carried it -- reading it needed no second request.
+total 1796632

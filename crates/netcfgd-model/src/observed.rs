@@ -91,6 +91,13 @@ pub struct ObservedLink {
 	/// Bridge or bond this link is enslaved to.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub master: Option<String>,
+	/// The IPv6 interface identifier, where one is set.
+	///
+	/// `None` covers both "no token" and "this device cannot have one" -- a
+	/// dummy or any other `NOARP` device does no neighbour discovery, and the
+	/// kernel refuses a token on it.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ipv6_token: Option<String>,
 	/// The root qdisc the kernel currently runs on this link.
 	///
 	/// Always present in practice -- there is no such thing as an interface

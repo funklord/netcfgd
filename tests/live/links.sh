@@ -67,6 +67,15 @@ interface gnv0     { tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 };
 
 # Per-port VLAN membership: how a switch is provisioned on a current kernel.
 interface brv2 { bridge { vlan_filtering = true }; vlans = "10"; config = "null" }
+# An IPv6 interface identifier. A veth, deliberately: the kernel refuses a
+# token on any device that does not do neighbour discovery, so a dummy gets
+# "Device does not do neighbour discovery" and would test only the error path.
+interface tok0 {
+	veth       { peer = "tok0p" }
+	ipv6_token = "::5"
+	config     = "null"
+}
+
 # A filtering bridge the config gives no vlans to. The kernel puts vlan 1 on it
 # and netcfgd must leave it there -- the authority is over what is configured.
 interface brkeep { bridge { vlan_filtering = true }; config = "null" }
@@ -133,6 +142,8 @@ contains "and its port"                "$(detail vx100)"  "dstport 4789"
 # block. The planner has to know it will appear or it is configured on the
 # *next* apply -- which a daemon reaches and `--oneshot` never does.
 contains "a veth pair exists"          "$(ip -br link show type veth)" "veth-b@veth-a"
+# The prefix would come from a router advertisement; the host half is this.
+contains "an ipv6 token is set"        "$(ip token show dev tok0)" "token ::5 dev tok0"
 contains "the declared end is enslaved" "$(detail veth-a)" "master bond0"
 contains "and so is the peer"          "$(detail veth-b)" "master bond0"
 

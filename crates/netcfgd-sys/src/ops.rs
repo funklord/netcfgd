@@ -801,6 +801,46 @@ impl Netlink {
 		Ok(())
 	}
 
+	/// Set the IPv6 interface identifier, or clear it with `::`.
+	///
+	/// `ip token set ::5 dev eth0`. The prefix still comes from the router
+	/// advertisement; this fixes the host half, which is the only way to have
+	/// a predictable IPv6 address on a prefix that can change.
+	///
+	/// The kernel is particular about when it will accept one, and each
+	/// refusal is `EINVAL` with nothing to distinguish it: the device must be
+	/// up and ready, it must accept router advertisements, and its router
+	/// solicitation count must be non-zero. A token on a device that forwards
+	/// is therefore refused, because forwarding turns RA acceptance off --
+	/// which is a real configuration somebody will write, since a router is
+	/// exactly the machine you want at a predictable address.
+	///
+	/// # Errors
+	///
+	/// Returns the errno the kernel replied with.
+	pub fn set_ipv6_token(&mut self, index: u32, token: std::net::IpAddr) -> io::Result<()> {
+		let mut inet6 = AttrBuf::new();
+		inet6.push_ip(dump::IFLA_INET6_TOKEN, token);
+
+		// The family is the attribute *type* here, not a field: `IFLA_AF_SPEC`
+		// holds one nest per address family, keyed by the family number.
+		let mut spec = AttrBuf::new();
+		spec.push(dump::AF_INET6, inet6.as_bytes());
+
+		let mut attrs = AttrBuf::new();
+		attrs.push(dump::IFLA_AF_SPEC, spec.as_bytes());
+
+		let mut body = Vec::new();
+		wire::IfInfo {
+			index: i32::try_from(index).unwrap_or(0),
+			..wire::IfInfo::default()
+		}
+		.encode(&mut body);
+
+		self.request(msg_type::RTM_SETLINK, ack_flags(), &body, &attrs)?;
+		Ok(())
+	}
+
 	/// Delete a link.
 	///
 	/// # Errors

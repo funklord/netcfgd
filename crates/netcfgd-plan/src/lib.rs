@@ -154,12 +154,6 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 				interface: Some(interface.name.clone()),
 			});
 		}
-		if interface.ipv6_token.is_some() {
-			builder.warnings.push(Warning {
-				message: "`ipv6_token` is recognised but not applied by this build".to_owned(),
-				interface: Some(interface.name.clone()),
-			});
-		}
 	}
 
 	builder.appearing = desired
@@ -224,6 +218,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	}
 
 	builder.plan_dns(desired, observed);
+	builder.plan_ipv6_token(desired, observed);
 	builder.plan_rules(desired, observed);
 	builder.plan_qdisc(desired, observed);
 	builder.plan_ingress(desired, observed);
@@ -1065,6 +1060,50 @@ impl Builder {
 	/// the model: an unnumbered rule lands wherever the kernel puts it, and
 	/// two applies can produce different orders, which makes the document stop
 	/// describing the system.
+	/// The IPv6 interface identifier on each interface that names one.
+	///
+	/// Only where the document asks. A token nobody asked for is not removed:
+	/// unlike an address it carries no ownership tag, and the kernel offers no
+	/// way to tell one netcfgd set from one an operator set by hand.
+	fn plan_ipv6_token(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			let Some(token) = &interface.ipv6_token else {
+				continue;
+			};
+			let link = observed.link(&interface.name);
+			let current = link.and_then(|link| link.ipv6_token.as_deref());
+			// Compared as addresses, not as text: `::5` and `0:0:0:0:0:0:0:5`
+			// are the same token, and the kernel reports its own spelling.
+			let same = current
+				.and_then(|held| held.parse::<std::net::IpAddr>().ok())
+				.zip(token.parse::<std::net::IpAddr>().ok())
+				.is_some_and(|(held, want)| held == want);
+			if same {
+				continue;
+			}
+			self.push(
+				Op::LinkSetIpv6Token {
+					name: interface.name.clone(),
+					token: token.clone(),
+				},
+				Reason {
+					interface: Some(interface.name.clone()),
+					field: "ipv6_token".to_owned(),
+					desired: token.clone(),
+					observed: current.unwrap_or("<absent>").to_owned(),
+				},
+				self.gate(&interface.name),
+				// The inverse clears it. Restoring a previous token would be
+				// wrong where there was none, and `::` is how the kernel
+				// spells "none".
+				Some(Op::LinkSetIpv6Token {
+					name: interface.name.clone(),
+					token: current.unwrap_or("::").to_owned(),
+				}),
+			);
+		}
+	}
+
 	fn plan_rules(&mut self, desired: &Document, observed: &Observed) {
 		for rule in &desired.rules {
 			let current = observed

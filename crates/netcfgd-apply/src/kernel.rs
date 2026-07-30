@@ -686,6 +686,34 @@ impl Executor for KernelExecutor {
 					}
 				}
 			}
+			Op::LinkSetIpv6Token { name, token } => {
+				let index = self.index_of(name)?;
+				let address: std::net::IpAddr = token
+					.parse()
+					.map_err(|_| format!("`{token}` is not an IPv6 address"))?;
+				self.socket
+					.set_ipv6_token(index, address)
+					.map_err(|error| {
+						if error.kind() == std::io::ErrorKind::InvalidInput {
+							// The kernel returns a bare EINVAL for four different
+							// preconditions, so the message has to name them.
+							// "Invalid argument" on its own sends an operator
+							// looking at the address, which is the one thing that
+							// is usually right.
+							format!(
+								"cannot set an IPv6 token on {name}: the kernel refused it. A \
+							 token needs a device that does neighbour discovery -- not a \
+							 dummy or any other NOARP device -- which is up, accepts \
+							 router advertisements, and sends router solicitations. \
+							 Forwarding turns RA acceptance off, so a router interface \
+							 cannot have one."
+							)
+						} else {
+							format!("cannot set an IPv6 token on {name}: {error}")
+						}
+					})?;
+				Ok(())
+			}
 			Op::RuleAdd { rule } => {
 				let record = rule_record(rule)?;
 				self.socket

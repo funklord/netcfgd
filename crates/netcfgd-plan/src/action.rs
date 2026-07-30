@@ -191,6 +191,13 @@ pub enum Op {
 		/// The policy.
 		policy: Box<DnsPolicy>,
 	},
+	/// Set or clear the IPv6 interface identifier.
+	LinkSetIpv6Token {
+		/// Interface name.
+		name: String,
+		/// The identifier, or `::` to clear it.
+		token: String,
+	},
 	/// Install a policy routing rule.
 	RuleAdd {
 		/// The rule.
@@ -320,6 +327,7 @@ impl Op {
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
+			Self::LinkSetIpv6Token { .. } => "link.set_ipv6_token",
 			Self::RuleAdd { .. } => "rule.add",
 			Self::RuleDel { .. } => "rule.del",
 			Self::QdiscSet { .. } => "qdisc.set",
@@ -413,6 +421,11 @@ impl Op {
 			// names at most one incidentally. Removing one is the disruptive
 			// direction and is covered below.
 			| Self::RuleAdd { .. }
+			// Changing the host half of an address the router supplies does
+			// change an address -- but SLAAC addresses are not netcfgd's and
+			// the old one lingers until it expires, so nothing is cut off at
+			// the moment of the change.
+			| Self::LinkSetIpv6Token { .. }
 			| Self::CommitRevert { .. } => false,
 		}
 	}
@@ -428,6 +441,7 @@ impl Op {
 			| Self::LinkSetMaster { name, .. }
 			| Self::LinkUnsetMaster { name }
 			| Self::LinkUp { name }
+			| Self::LinkSetIpv6Token { name, .. }
 			| Self::LinkDown { name } => Some(name),
 			Self::BridgeVlanAdd { iface, .. }
 			| Self::BridgeVlanDel { iface, .. }
