@@ -458,6 +458,7 @@ mod tests {
 			guard: None,
 			ipv6_token: None,
 			link_settings: None,
+			preference: None,
 			bridge_vlans: Vec::new(),
 		}
 	}

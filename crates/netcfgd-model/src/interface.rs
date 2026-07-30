@@ -601,6 +601,24 @@ pub struct Interface {
 	/// Driver-level settings. Unimplemented; see [`LinkSettings`].
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub link_settings: Option<LinkSettings>,
+	/// How this interface ranks against others that can reach the same place.
+	///
+	/// Lower wins, as in a route metric -- which is what it becomes: a route
+	/// on this interface that names no metric of its own takes this one, and a
+	/// DHCP client started for it is told to use it too.
+	///
+	/// Setting it also ties the interface's routes to its carrier. That is the
+	/// half that makes a laptop work: a default route down a cable that is not
+	/// plugged in is a black hole, and a lower metric makes the kernel prefer
+	/// it over the wifi that does work. So while an interface with a
+	/// preference has no carrier, netcfgd does not install its routes, and
+	/// withdraws the ones it installed.
+	///
+	/// Absent means netcfgd manages neither -- routes keep whatever metric
+	/// they name and stay put through a carrier flap, which is what a server
+	/// with one uplink wants.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub preference: Option<u32>,
 	/// VLANs this interface carries, as a bridge port or as a bridge.
 	///
 	/// **Authoritative where present.** A port whose config lists VLANs has

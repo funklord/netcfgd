@@ -85,4 +85,7 @@ netcfgd
 #
 # +37 KB for bridge VLANs: a second netlink dump under AF_BRIDGE, the setter,
 # the range expansion, and the planner's per-port reconciliation.
-total 2692056
+#
+# +8 KB for carrier-based switching: the preference field, metric resolution,
+# and the DHCP client finally being told the metric the model always carried.
+total 2700248

@@ -1433,3 +1433,118 @@ interface lan1 { master = "br0"; vlans = "10 pvid untagged"; config = "null" }
 	);
 	settle(&document, &mut observed);
 }
+
+/// The laptop case: wired preferred, wifi as fallback, decided by metric.
+#[test]
+fn a_preference_becomes_the_route_metric() {
+	let document = document(
+		r#"
+interface eth0  { preference = 100; config = "10.1.0.2/24"; routes = "default via 10.1.0.1" }
+interface wlan0 { preference = 600; config = "10.2.0.2/24"; routes = "default via 10.2.0.1" }
+"#,
+	);
+	let mut observed = observed_with(&["eth0", "wlan0"]);
+	let plan = plan(&document, &observed, &PlanOptions::default());
+
+	let mut metrics: Vec<(&str, Option<u32>)> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::RouteAdd { iface, route, .. } => Some((iface.as_str(), route.metric)),
+			_ => None,
+		})
+		.collect();
+	metrics.sort_unstable();
+	assert_eq!(metrics, [("eth0", Some(100)), ("wlan0", Some(600))]);
+
+	settle(&document, &mut observed);
+}
+
+/// A route that names its own metric keeps it. The preference is a default,
+/// not an override -- otherwise a config could not express one route on a
+/// preferred interface that should lose to the rest.
+#[test]
+fn an_explicit_metric_wins_over_the_preference() {
+	let document = document(
+		r#"interface eth0 { preference = 100; config = "10.1.0.2/24"; routes = "default via 10.1.0.1 metric 5" }"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	let plan = plan(&document, &observed, &PlanOptions::default());
+
+	assert!(plan.actions.iter().any(|action| matches!(
+		&action.op,
+		Op::RouteAdd { route, .. } if route.metric == Some(5)
+	)));
+	settle(&document, &mut observed);
+}
+
+/// The other half, and the one that makes the switch happen: a default route
+/// down a cable that is not plugged in is a black hole, and its lower metric
+/// would make the kernel prefer it over the wifi that works.
+#[test]
+fn losing_carrier_withdraws_the_route() {
+	let document = document(
+		r#"interface eth0 { preference = 100; config = "10.1.0.2/24"; routes = "default via 10.1.0.1" }"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	settle(&document, &mut observed);
+	assert!(observed
+		.routes_on("eth0")
+		.any(|route| route.destination == "default"));
+
+	// The cable comes out.
+	for link in &mut observed.links {
+		if link.name == "eth0" {
+			link.carrier = false;
+		}
+	}
+
+	let plan = plan(&document, &observed, &PlanOptions::default());
+	assert!(
+		plan.actions
+			.iter()
+			.any(|action| matches!(&action.op, Op::RouteDel { iface, .. } if iface == "eth0")),
+		"got {:?}",
+		names(&plan)
+	);
+
+	simulate(&plan, &mut observed);
+	assert!(
+		observed.routes_on("eth0").next().is_none(),
+		"the route down the dead cable has to go"
+	);
+
+	// And it comes back when the cable does.
+	for link in &mut observed.links {
+		if link.name == "eth0" {
+			link.carrier = true;
+		}
+	}
+	settle(&document, &mut observed);
+	assert!(observed
+		.routes_on("eth0")
+		.any(|route| route.destination == "default"));
+}
+
+/// An interface with no preference keeps its routes through a flap. A server
+/// with one uplink does not want them withdrawn because a switch port
+/// bounced -- there is nothing to fail over to.
+#[test]
+fn without_a_preference_carrier_is_not_consulted() {
+	let document =
+		document(r#"interface eth0 { config = "10.1.0.2/24"; routes = "default via 10.1.0.1" }"#);
+	let mut observed = observed_with(&["eth0"]);
+	settle(&document, &mut observed);
+
+	for link in &mut observed.links {
+		if link.name == "eth0" {
+			link.carrier = false;
+		}
+	}
+	let plan = plan(&document, &observed, &PlanOptions::default());
+	assert!(
+		plan.actions.is_empty(),
+		"a flap must not disturb an interface that opted out: {:?}",
+		names(&plan)
+	);
+}
