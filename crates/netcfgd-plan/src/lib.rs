@@ -371,6 +371,15 @@ impl Builder {
 			.map(|(_, id)| *id)
 	}
 
+	/// Whether an interface currently has carrier.
+	///
+	/// An interface this plan is creating counts as having it: a veth or a
+	/// bridge that does not exist yet reports nothing, and refusing its routes
+	/// on that basis would mean they never landed on the first apply.
+	fn has_carrier(name: &str, observed: &Observed) -> bool {
+		observed.link(name).is_none_or(|link| link.carrier)
+	}
+
 	/// The VLANs a bridge port or bridge device carries.
 	///
 	/// Authoritative where the document lists any: the port has exactly those
@@ -991,6 +1000,21 @@ impl Builder {
 		base: &[u32],
 	) {
 		let name = &interface.name;
+
+		// A route down a cable that is not plugged in is a black hole, and a
+		// lower metric would make the kernel prefer it over the wifi that
+		// works. So an interface with a preference does not get its routes
+		// while it has no carrier. Without a preference nothing here applies:
+		// a server with one uplink keeps its routes through a flap.
+		if interface.preference.is_some() && !Self::has_carrier(name, observed) {
+			self.warn(
+				name,
+				format!("no carrier, so {name}'s routes are not installed"),
+			);
+			return;
+		}
+
+		let route = &with_metric(route, interface.preference);
 		if observed
 			.routes_on(name)
 			.any(|observed| route_matches(route, observed))
@@ -1101,10 +1125,20 @@ impl Builder {
 				.iter()
 				.filter(|interface| interface.name == route.interface)
 				.any(|interface| {
-					interface
-						.routes
-						.iter()
-						.any(|desired| route_matches(desired, route))
+					// A route on an interface that has lost carrier stops
+					// being wanted, which is what makes the switch happen:
+					// removing it is how the kernel starts using the other
+					// interface instead of black-holing traffic down this one.
+					if interface.preference.is_some()
+						&& !observed
+							.link(&interface.name)
+							.is_some_and(|link| link.carrier)
+					{
+						return false;
+					}
+					interface.routes.iter().any(|desired| {
+						route_matches(&with_metric(desired, interface.preference), route)
+					})
 				});
 			if wanted {
 				continue;
@@ -1359,6 +1393,23 @@ fn render_route(route: &Route) -> String {
 		out.push_str(&format!(" metric {metric}"));
 	}
 	out
+}
+
+/// A route with the interface's preference filled in as its metric.
+///
+/// Resolved here rather than at compile time so the document stays a literal
+/// reading of the config -- `ncfg show` reports what was written, and the plan
+/// reports what it means. It also has to happen in exactly one place, because
+/// the comparison that decides "is this route already present" uses the metric
+/// and would loop forever against a value computed differently on each side.
+fn with_metric(route: &Route, preference: Option<u32>) -> Route {
+	if route.metric.is_some() {
+		return route.clone();
+	}
+	Route {
+		metric: preference,
+		..route.clone()
+	}
 }
 
 /// A VLAN as the config spells it, for a plan's reason line.

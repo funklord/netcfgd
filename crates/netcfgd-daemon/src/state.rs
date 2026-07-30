@@ -231,10 +231,22 @@ impl State {
 				.interfaces
 				.iter()
 				.filter(|interface| {
-					interface
-						.on_drift
-						.unwrap_or(desired.globals.on_drift_default)
-						== DriftPolicy::Reconcile
+					// An interface with a preference is always reconciled,
+					// whatever the drift policy says. Losing carrier is not
+					// drift: drift is something else moving the system away
+					// from the config, and this is the config's own meaning
+					// changing, because a preferred interface's desired state
+					// is a function of the document *and* its carrier.
+					//
+					// Treating it as drift meant the daemon reported the
+					// switch instead of making it, and a laptop that announces
+					// "your cable is out" while still routing down it is not
+					// the feature anybody asked for.
+					interface.preference.is_some()
+						|| interface
+							.on_drift
+							.unwrap_or(desired.globals.on_drift_default)
+							== DriftPolicy::Reconcile
 				})
 				.map(|interface| interface.name.clone())
 				.collect()

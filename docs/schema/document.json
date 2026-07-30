@@ -208,6 +208,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -363,6 +364,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -518,6 +520,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -678,6 +681,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -838,6 +842,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -998,6 +1003,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1158,6 +1164,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1320,6 +1327,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1485,6 +1493,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1654,6 +1663,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1814,6 +1824,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1976,6 +1987,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2136,6 +2148,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2304,6 +2317,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2467,6 +2481,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2633,6 +2648,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2794,6 +2810,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2957,6 +2974,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3118,6 +3136,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3283,6 +3302,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3464,6 +3484,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3624,6 +3645,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3784,6 +3806,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3944,6 +3967,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4105,6 +4129,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4266,6 +4291,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4427,6 +4453,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4588,6 +4615,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4749,6 +4777,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4910,6 +4939,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,
@@ -5071,6 +5101,7 @@
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
       },
+      "preference": 100,
       "bridge_vlans": [
         {
           "vid": 10,

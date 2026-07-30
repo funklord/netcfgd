@@ -57,6 +57,8 @@ pub struct KernelExecutor {
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
+	/// The route preference of each interface that declares one.
+	preferences: Vec<(String, u32)>,
 	/// Every wifi profile the document describes.
 	///
 	/// Carried here because a supplicant that has just been started holds
@@ -104,6 +106,7 @@ impl KernelExecutor {
 			dot1x: Vec::new(),
 			mac_policy: Vec::new(),
 			pppoe: Vec::new(),
+			preferences: Vec::new(),
 			networks: Vec::new(),
 			hook_hashes: Vec::new(),
 			run_dir: std::path::PathBuf::from("/run/netcfgd"),
@@ -144,6 +147,15 @@ impl KernelExecutor {
 			})
 			.collect();
 		self.networks.clone_from(&document.networks);
+		self.preferences = document
+			.interfaces
+			.iter()
+			.filter_map(|interface| {
+				interface
+					.preference
+					.map(|preference| (interface.name.clone(), preference))
+			})
+			.collect();
 		self.pppoe = document
 			.interfaces
 			.iter()
@@ -163,6 +175,14 @@ impl KernelExecutor {
 			})
 			.collect();
 		self
+	}
+
+	/// The preference the document gives an interface, if any.
+	fn preference_of(&self, iface: &str) -> Option<u32> {
+		self.preferences
+			.iter()
+			.find(|(name, _)| name == iface)
+			.map(|(_, preference)| *preference)
 	}
 
 	/// Dial a `PPPoE` session.
@@ -523,7 +543,7 @@ impl Executor for KernelExecutor {
 					self.effects.started_backends.push((*kind, iface.clone()));
 					return Ok(());
 				}
-				start_backend(*kind, iface)?;
+				start_backend(*kind, iface, self.preference_of(iface))?;
 				self.effects.started_backends.push((*kind, iface.clone()));
 				if *kind == netcfgd_model::BackendKind::Supplicant {
 					// A supplicant that has just started knows nothing, by
@@ -764,14 +784,31 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 /// handoff -- which turns a fresh lease into observed state -- lands with
 /// `netcfgd-dhcp` in M2; until then the client configures the interface and
 /// netcfgd sees the result as somebody else's, which is the safe direction.
-fn start_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), String> {
+fn start_backend(
+	kind: netcfgd_model::BackendKind,
+	iface: &str,
+	metric: Option<u32>,
+) -> Result<(), String> {
 	use netcfgd_model::BackendKind;
 	match kind {
 		BackendKind::Dhcp4 => {
-			for (program, args) in [
-				("dhcpcd", vec!["-b", "-4", iface]),
-				("udhcpc", vec!["-b", "-i", iface]),
-			] {
+			// The metric matters as much as the address on a machine with two
+			// uplinks: the lease's default route has to lose to the wired one
+			// or win over the wifi, and the client is what installs it. This
+			// was a field in the model that reached nothing until carrier
+			// switching needed it.
+			let metric = metric.map(|value| value.to_string());
+			let mut dhcpcd = vec!["-b".to_owned(), "-4".to_owned()];
+			let udhcpc = vec!["-b".to_owned(), "-i".to_owned(), iface.to_owned()];
+			if let Some(metric) = &metric {
+				dhcpcd.push("-m".to_owned());
+				dhcpcd.push(metric.clone());
+				// busybox udhcpc has no metric option; its script does the
+				// routing. Saying so beats passing a flag it would reject.
+			}
+			dhcpcd.push(iface.to_owned());
+
+			for (program, args) in [("dhcpcd", dhcpcd), ("udhcpc", udhcpc)] {
 				match Command::new(program).args(&args).status() {
 					Ok(status) if status.success() => return Ok(()),
 					Ok(status) => return Err(format!("{program} on {iface} exited with {status}")),

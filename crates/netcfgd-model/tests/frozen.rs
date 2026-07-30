@@ -202,6 +202,7 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 			reason: "nfs".to_owned(),
 		}),
 		ipv6_token: Some("::5".to_owned()),
+		preference: Some(100),
 		bridge_vlans: vec![
 			BridgeVlan {
 				vid: 10,
