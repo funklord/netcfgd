@@ -97,6 +97,61 @@ pub(crate) fn ask(socket: &Path, request: &Request) -> Result<Answer, String> {
 	}
 }
 
+/// Ask, and return the answer as raw JSON.
+///
+/// Used by the TUI, which draws four fields out of a document and would
+/// otherwise pull in the derived deserialiser for the whole thing -- hundreds
+/// of kilobytes, for a pane that prints a name and an address.
+///
+/// # Errors
+///
+/// Returns a message naming what could not be reached.
+pub(crate) fn ask_value(socket: &Path, request: &Request) -> Result<serde_json::Value, String> {
+	let stream = UnixStream::connect(socket)
+		.map_err(|error| format!("cannot reach the daemon at {}: {error}", socket.display()))?;
+	let write_half = stream
+		.try_clone()
+		.map_err(|error| format!("cannot use the socket: {error}"))?;
+	let mut reader = BufReader::new(stream);
+	let mut writer = BufWriter::new(write_half);
+
+	write_message(&mut writer, request).map_err(|error| format!("cannot send: {error}"))?;
+	match read_message::<serde_json::Value, _>(&mut reader) {
+		Ok(Some(value)) => Ok(value),
+		Ok(None) => Err("the daemon closed the connection without answering".to_owned()),
+		Err(error) => Err(format!("cannot read the answer: {error}")),
+	}
+}
+
+/// Subscribe, and hand each event to `sink` as a rendered line.
+///
+/// The same subscription `stream` makes, without the assumption that the
+/// destination is standard output.
+///
+/// # Errors
+///
+/// Returns a message naming what could not be reached.
+pub(crate) fn stream_lines(socket: &Path, sink: &dyn Fn(String)) -> Result<(), String> {
+	let stream = UnixStream::connect(socket)
+		.map_err(|error| format!("cannot reach the daemon at {}: {error}", socket.display()))?;
+	let write_half = stream
+		.try_clone()
+		.map_err(|error| format!("cannot use the socket: {error}"))?;
+	let mut reader = BufReader::new(stream);
+	let mut writer = BufWriter::new(write_half);
+
+	write_message(&mut writer, &Request::Monitor)
+		.map_err(|error| format!("cannot subscribe: {error}"))?;
+
+	loop {
+		match read_message::<serde_json::Value, _>(&mut reader) {
+			Ok(Some(value)) => sink(render_event(&value)),
+			Ok(None) => return Ok(()),
+			Err(error) => return Err(error.to_string()),
+		}
+	}
+}
+
 /// Where the socket is, for a given run directory.
 #[must_use]
 pub(crate) fn socket_path(run_dir: &Path) -> std::path::PathBuf {

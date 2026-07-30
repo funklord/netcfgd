@@ -8,6 +8,7 @@
 //! bind on the first binary or it never binds at all.
 
 mod client;
+mod tui;
 
 use netcfgd_host::{config, hooks, state};
 
@@ -35,6 +36,7 @@ usage:
                              disconnect [IFACE]  leave it, keeping the config
                            IFACE may be omitted when the config describes one
                            wireless device.
+  ncfg tui [options]       full-screen client: devices, wifi, plan, events
   ncfg monitor [options]   stream events until interrupted (needs netcfgd)
   ncfg confirm [options]   keep a change made under a confirm window
   ncfg revert [options]    undo it now rather than at expiry
@@ -82,7 +84,7 @@ pub fn main() -> ExitCode {
 	}
 }
 
-struct Options {
+pub(crate) struct Options {
 	config_dir: Option<String>,
 	factory_dir: Option<String>,
 	yes: bool,
@@ -112,6 +114,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"explain" => command_explain(&arguments[1..], &options),
 		"monitor" => command_monitor(&options),
 		"wifi" => command_wifi(&positional(&arguments[1..]), &options),
+		"tui" => tui::run(&options),
 		"reset" => command_reset(&options),
 		"confirm" => command_confirm(&options, &netcfgd_proto::Request::Confirm),
 		"revert" => command_confirm(&options, &netcfgd_proto::Request::Revert),

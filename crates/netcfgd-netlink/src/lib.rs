@@ -26,6 +26,7 @@ pub mod ops;
 pub mod peer;
 pub mod qdisc;
 pub mod socket;
+pub mod term;
 pub mod watch;
 pub mod wg;
 pub mod wire;
