@@ -1330,7 +1330,7 @@ interface tap0     { tap { owner = "qemu" }; config = "null" }
 	let InterfaceKind::Tunnel(tunnel) = kind("gre1") else {
 		panic!("expected a tunnel");
 	};
-	assert_eq!(tunnel.kind, TunnelKind::Gre);
+	assert_eq!(tunnel.mode, TunnelKind::Gre);
 
 	let InterfaceKind::Tun(tun) = kind("tap0") else {
 		panic!("expected a tap");

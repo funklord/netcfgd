@@ -662,7 +662,7 @@ fn new_link(
 			},
 		}),
 		InterfaceKind::Tunnel(tunnel) => Ok(NewLink::Tunnel {
-			kind: tunnel.kind.name(),
+			kind: tunnel.mode.name(),
 			parent: match &tunnel.parent {
 				Some(parent) => Some(executor.index_of(parent)?),
 				None => None,
@@ -698,7 +698,7 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Veth(_) => "veth",
 		InterfaceKind::Vrf(_) => "vrf",
 		InterfaceKind::Macvlan(_) => "macvlan",
-		InterfaceKind::Tunnel(tunnel) => tunnel.kind.name(),
+		InterfaceKind::Tunnel(tunnel) => tunnel.mode.name(),
 		InterfaceKind::Tun(_) => "tun",
 	}
 }
