@@ -146,6 +146,8 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	let startup_events = confirm::resolve_on_startup(&mut state);
 	let reverted_at_startup = !startup_events.is_empty();
 
+	establish_first_last_good(&state);
+
 	if options.apply_on_start && !reverted_at_startup {
 		// A network configuration daemon that starts and configures nothing is
 		// not doing its job; design section 4.4 makes oneshot the alternative
@@ -217,6 +219,41 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	}
 
 	Ok(ExitCode::SUCCESS)
+}
+
+/// Make a confirm window possible on the very first apply.
+///
+/// A window reverts to the last-good configuration, and until netcfgd has
+/// applied once there is none -- so `ncfg apply --confirm-within` was refused
+/// exactly when an operator most wanted it, on the first apply on a machine
+/// they were still unsure about.
+///
+/// The missing document is an empty one, and that is not a placeholder: before
+/// netcfgd's first apply its desired state genuinely was nothing. Reverting to
+/// it removes every address, route, link and backend netcfgd installed and
+/// touches nothing it did not, which is the exact undo of a first apply.
+///
+/// What it does *not* do is restore connectivity that netcfgd was not
+/// providing. If a device was handed over from `NetworkManager` and netcfgd's
+/// config is wrong, reverting leaves the device unconfigured rather than back
+/// on `NetworkManager` -- that is what "the way it was" means once the handover
+/// has happened, and docs/first-run.md says so.
+///
+/// Written before the startup apply and only when absent, so the ordinary
+/// reboot case is untouched: `converge` overwrites it with the real document a
+/// moment later.
+fn establish_first_last_good(state: &State) {
+	if netcfgd_host::confirm::read_last_good(&state.paths.run_dir).is_some() {
+		return;
+	}
+	let empty = netcfgd_model::Document::default();
+	if netcfgd_host::confirm::write_last_good(&state.paths.run_dir, &empty).is_ok() {
+		eprintln!(
+			"netcfgd: no previous configuration recorded, so a revert would undo \
+			 everything netcfgd does from here. `ncfg apply --confirm-within N` \
+			 works from the first apply."
+		);
+	}
 }
 
 /// Say so at startup if another daemon manages an interface this config

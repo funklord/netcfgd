@@ -1,10 +1,10 @@
 # Running netcfgd on a laptop for the first time
 
 This is the wired-first, wifi-second sequence for taking a machine that
-currently runs NetworkManager. It is written to be followed in order, because
-the ordering *is* the safety: for reasons in "The first apply cannot be
-protected" below, your fallback during the risky step is the interface you have
-not handed over yet, not any feature of netcfgd.
+currently runs NetworkManager. Follow it in order: every change gets a
+commit-confirm window that reverts by itself if you lose the machine, and the
+interface you have not handed over yet is what covers the case a revert cannot
+-- see "What `revert` restores, and what it does not".
 
 **Read the last section before you start.** netcfgd has never driven a real
 radio.
@@ -104,49 +104,65 @@ way back if the next step goes wrong.
 Handing a device over does not delete NetworkManager's profile for it. `nmcli
 device set enp0s31f6 managed yes` gives it straight back.
 
-## 4. Start netcfgd
+## 4. Start netcfgd, without letting it apply
 
 Install the service file for whichever init you run -- `make install-systemd`,
-`install-openrc` or `install-procd` -- then start it:
+`install-openrc` or `install-procd`. Then start it **once** with
+`--no-apply-on-start`, so it observes and changes nothing:
 
 ```
-sudo systemctl start netcfgd
-sudo systemctl status netcfgd
-journalctl -u netcfgd -n 30
+sudo netcfgd --no-apply-on-start &
 ```
 
-netcfgd applies at startup. Watch the log: it repeats the contention warning
-for anything still contested, and reports every action it took.
+Under systemd, add the flag to a drop-in for the first run, or just run it in a
+terminal as above and start the service properly afterwards.
 
-At this point wired should work through netcfgd and wifi should still work
-through NetworkManager. `ip route show default` will show both, with the wired
-route at metric 100.
-
-### The first apply cannot be protected
-
-`ncfg apply --confirm-within 60` reverts automatically unless you confirm, and
-it is how every *later* change should be made. It does not help here.
-
-A confirm window reverts to the last-good configuration, and there is no
-last-good until netcfgd has applied once. So the very first apply -- the
-startup in this step -- runs without a net. A window that reverted to nothing
-would be worse than no window, because you would believe you had one.
-
-That is why this guide hands over the wired interface first. During the one
-unprotected apply, your fallback is the wifi that NetworkManager still owns.
-
-After netcfgd has applied once, use the window for everything:
+## 5. Make the first change, with a net
 
 ```
 sudo ncfg apply --confirm-within 60
-# if you can still reach the machine:
-sudo ncfg confirm
-# if something is wrong, and you can:
-sudo ncfg revert
-# if you cannot reach it at all: wait 60 seconds
 ```
 
-## 5. Hand over the wifi
+The change goes in and a 60-second timer starts. If you can still reach the
+machine, keep it:
+
+```
+sudo ncfg confirm
+```
+
+If something is wrong and you *can* still reach it, undo it now:
+
+```
+sudo ncfg revert
+```
+
+And if you cannot reach it at all, do nothing. After 60 seconds netcfgd reverts
+by itself, which is the case the whole mechanism exists for.
+
+At this point wired should work through netcfgd and wifi should still work
+through NetworkManager. `ip route show default` will show both, with the wired
+route at metric 100. Now start the service normally, so it comes up at boot:
+
+```
+sudo systemctl enable --now netcfgd
+```
+
+### What "revert" restores, and what it does not
+
+Reverting the first apply removes every address, route, link and helper netcfgd
+installed, and touches nothing it did not. That is the exact undo of what it
+did.
+
+It does not put the device back on NetworkManager. Once you have run `nmcli
+device set enp0s31f6 managed no`, "the way it was" *is* unconfigured -- so if
+netcfgd's config was wrong, a revert leaves you with a working machine and an
+idle interface, not with your old setup. Getting the old setup back is `nmcli
+device set enp0s31f6 managed yes`.
+
+That is the other reason this guide does wired first: while you are finding
+this out, the wifi still works.
+
+## 6. Hand over the wifi
 
 Once wired has been stable for a while:
 
