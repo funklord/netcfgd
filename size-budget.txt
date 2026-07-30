@@ -56,5 +56,9 @@ tolerance_percent 3
 #
 # Then prefix delegation: the arithmetic, the observed delegation list, the
 # DHCPv6 client hook and the planner resolution. +20 KB and +16 KB.
-ncfg     1112512
-netcfgd  1436184
+#
+# Then the five scope-capable DNS backends: openresolv, resolved, dnsmasq,
+# unbound and exec. +12 KB each -- the renderers are text and the delivery is
+# a process spawn or a file write, so none of them is large.
+ncfg     1124800
+netcfgd  1448472
