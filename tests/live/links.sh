@@ -67,6 +67,15 @@ interface gnv0     { tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 };
 
 # Per-port VLAN membership: how a switch is provisioned on a current kernel.
 interface brv2 { bridge { vlan_filtering = true }; vlans = "10"; config = "null" }
+# Driver offloads. A veth is the right device for once: it takes the features
+# message, unlike the ring, link-mode and wake-on-LAN messages -- which is
+# exactly why those three are still unimplemented.
+interface off0 {
+	veth    { peer = "off0p" }
+	ethtool { gso = "off"; tso = "on" }
+	config  = "null"
+}
+
 # An IPv6 interface identifier. A veth, deliberately: the kernel refuses a
 # token on any device that does not do neighbour discovery, so a dummy gets
 # "Device does not do neighbour discovery" and would test only the error path.
@@ -96,6 +105,18 @@ export NCFG_RUN_DIR="$work/run"
 ncfg="$repo/target/debug/ncfg"
 
 failures=0
+missing() {
+	case "$2" in
+	*"$3"*)
+		echo "FAIL $1"
+		echo "       expected NOT to contain: $3"
+		echo "       actual:                  $2"
+		failures=$((failures + 1))
+		;;
+	*) echo "ok   $1" ;;
+	esac
+}
+
 contains() {
 	case "$2" in
 	*"$3"*) echo "ok   $1" ;;
@@ -142,6 +163,12 @@ contains "and its port"                "$(detail vx100)"  "dstport 4789"
 # block. The planner has to know it will appear or it is configured on the
 # *next* apply -- which a daemon reaches and `--oneshot` never does.
 contains "a veth pair exists"          "$(ip -br link show type veth)" "veth-b@veth-a"
+# `gso = off` removes it and `tso = on` leaves the other alone -- the kernel
+# takes a mask, so a request names exactly what changes.
+offloads=$("$repo/target/debug/ncfg" status 2>/dev/null | awk '
+	/^[^ ]/ { iface = $1 } iface == "off0" && $1 == "offloads" { print }')
+missing "gso is turned off"            "$offloads" "tx-generic-segmentation"
+contains "and tso left on"             "$offloads" "tx-tcp-segmentation"
 # The prefix would come from a router advertisement; the host half is this.
 contains "an ipv6 token is set"        "$(ip token show dev tok0)" "token ::5 dev tok0"
 contains "the declared end is enslaved" "$(detail veth-a)" "master bond0"

@@ -21,6 +21,7 @@
 #[cfg(feature = "tui")]
 pub mod curses;
 pub mod dump;
+pub mod ethtool;
 pub mod genl;
 pub mod inotify;
 pub mod nft;

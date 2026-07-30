@@ -91,6 +91,14 @@ pub struct ObservedLink {
 	/// Bridge or bond this link is enslaved to.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub master: Option<String>,
+	/// Which of the offloads netcfgd manages are currently on.
+	///
+	/// Kernel feature names, and only the ones the model can express -- a
+	/// device reports dozens and storing all of them would put a page of
+	/// driver detail in `/run` for five fields. A name absent here is off or
+	/// unsupported, which the kernel does not distinguish either.
+	#[serde(default)]
+	pub offloads: Vec<String>,
 	/// The IPv6 interface identifier, where one is set.
 	///
 	/// `None` covers both "no token" and "this device cannot have one" -- a

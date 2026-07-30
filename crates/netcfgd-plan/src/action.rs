@@ -191,6 +191,18 @@ pub enum Op {
 		/// The policy.
 		policy: Box<DnsPolicy>,
 	},
+	/// Turn driver offloads on or off.
+	///
+	/// One action for however many features change together, because that is
+	/// what the kernel takes: a features message carries a mask bitset saying
+	/// "change exactly these", and splitting it per feature would be several
+	/// round trips describing states the device never passes through.
+	LinkSetOffloads {
+		/// Interface name.
+		name: String,
+		/// `(kernel feature name, wanted)`, sorted.
+		features: Vec<(String, bool)>,
+	},
 	/// Set or clear the IPv6 interface identifier.
 	LinkSetIpv6Token {
 		/// Interface name.
@@ -327,6 +339,7 @@ impl Op {
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
+			Self::LinkSetOffloads { .. } => "link.set_offloads",
 			Self::LinkSetIpv6Token { .. } => "link.set_ipv6_token",
 			Self::RuleAdd { .. } => "rule.add",
 			Self::RuleDel { .. } => "rule.del",
@@ -426,6 +439,12 @@ impl Op {
 			// the old one lingers until it expires, so nothing is cut off at
 			// the moment of the change.
 			| Self::LinkSetIpv6Token { .. }
+			// Toggling an offload re-initialises the driver's transmit path on
+			// some hardware, which drops what is queued. That is a packet or
+			// two, not a lost session -- and a guard that blocked it would
+			// block the change most often made to fix a NIC that is already
+			// corrupting traffic.
+			| Self::LinkSetOffloads { .. }
 			| Self::CommitRevert { .. } => false,
 		}
 	}
@@ -442,6 +461,7 @@ impl Op {
 			| Self::LinkUnsetMaster { name }
 			| Self::LinkUp { name }
 			| Self::LinkSetIpv6Token { name, .. }
+			| Self::LinkSetOffloads { name, .. }
 			| Self::LinkDown { name } => Some(name),
 			Self::BridgeVlanAdd { iface, .. }
 			| Self::BridgeVlanDel { iface, .. }
