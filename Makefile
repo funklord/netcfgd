@@ -42,11 +42,21 @@ test:
 # which is the sole audited exception. Checked by reading the crate roots rather
 # than by trusting that nobody removed the attribute, since its absence is
 # silent -- the code still compiles, it just stops being checked.
+# Every crate root in the workspace, not just the ones under crates/. This
+# globbed `crates/*` alone until M5, so `backends/netcfgd-supplicant` went
+# unchecked from the day it was written -- and it was missing the attribute. A
+# policy gate that cannot see half the tree enforces nothing, so it now counts
+# what it found and fails if that number collapses.
 unsafe-policy:
 	@fail=0; \
-	for root in crates/*/src/lib.rs crates/*/src/main.rs; do \
+	roots=$$(find crates backends -name lib.rs -o -name main.rs | grep '/src/' | sort); \
+	if [ "$$(echo "$$roots" | wc -l)" -lt 10 ]; then \
+		echo "unsafe-policy: found $$(echo "$$roots" | wc -l) crate roots, expected more"; \
+		exit 1; \
+	fi; \
+	for root in $$roots; do \
 		[ -f "$$root" ] || continue; \
-		crate=$$(echo "$$root" | cut -d/ -f2); \
+		crate=$$(basename $$(dirname $$(dirname "$$root"))); \
 		if [ "$$crate" = "netcfgd-netlink" ]; then \
 			continue; \
 		fi; \
