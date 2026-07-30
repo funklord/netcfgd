@@ -14,6 +14,7 @@
 
 pub mod config;
 pub mod confirm;
+pub mod contention;
 pub mod explain;
 pub mod hooks;
 pub mod state;
