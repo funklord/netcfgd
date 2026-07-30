@@ -484,6 +484,7 @@ mod tests {
 				mtu: 1500,
 				mac: None,
 				master: None,
+				ipv6_token: None,
 				qdisc: None,
 				qdisc_bandwidth_bits: None,
 				qdisc_ingress: false,

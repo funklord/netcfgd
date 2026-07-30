@@ -33,6 +33,12 @@ pub struct LinkRecord {
 	pub mac: Option<String>,
 	/// Index of the master, where enslaved.
 	pub master: Option<u32>,
+	/// The IPv6 interface identifier set with `ip token`, if any.
+	///
+	/// Reported inside `IFLA_AF_SPEC`'s `AF_INET6` block. All-zero means no
+	/// token, which is how the kernel spells "none" -- so it is read as
+	/// absence rather than as the address `::`.
+	pub ipv6_token: Option<std::net::IpAddr>,
 }
 
 /// An address, as decoded from one `RTM_NEWADDR` message.
@@ -147,6 +153,17 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 	let mac = attrs.get(ifla::ADDRESS).and_then(|attr| attr.mac());
 	let master = attrs.get(ifla::MASTER).and_then(|attr| attr.u32());
 
+	// Two levels down: IFLA_AF_SPEC, then the AF_INET6 block. Present in an
+	// ordinary link dump, so this needs no second request.
+	let ipv6_token = attrs
+		.get(IFLA_AF_SPEC)
+		.and_then(|spec| Attrs::new(spec.value).get(AF_INET6))
+		.and_then(|inet6| Attrs::new(inet6.value).get(IFLA_INET6_TOKEN))
+		.and_then(|attr| attr.ip())
+		// The kernel reports `::` for a device with no token. Reading that as
+		// an address would make every interface look as though it had one.
+		.filter(|address| !address.is_unspecified());
+
 	// The kind lives one level down, inside the LINKINFO nest. Its absence is
 	// normal: a plain ethernet device has no kind.
 	let kind = attrs
@@ -176,6 +193,7 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		mtu,
 		mac,
 		master,
+		ipv6_token,
 	})
 }
 
@@ -230,6 +248,13 @@ pub fn decode_route(payload: &[u8]) -> Option<RouteRecord> {
 
 /// `AF_BRIDGE`, the address family a bridge's VLAN configuration lives under.
 pub const AF_BRIDGE: u8 = 7;
+
+/// `AF_INET6`, which inside `IFLA_AF_SPEC` is the attribute *type* of the
+/// nest holding per-device IPv6 settings.
+pub const AF_INET6: u16 = 10;
+
+/// `IFLA_INET6_TOKEN`, inside that nest.
+pub const IFLA_INET6_TOKEN: u16 = 7;
 /// `RTEXT_FILTER_BRVLAN`. Without it a bridge link dump reports no VLANs at
 /// all, which reads as "this bridge has none" rather than "you did not ask".
 const RTEXT_FILTER_BRVLAN: u32 = 2;
