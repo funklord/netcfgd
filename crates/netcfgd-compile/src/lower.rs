@@ -186,6 +186,7 @@ fn expand_members(
 			guard: None,
 			ipv6_token: None,
 			link_settings: None,
+			preference: None,
 			bridge_vlans: Vec::new(),
 		});
 	}
@@ -1304,6 +1305,7 @@ fn lower_interface(
 		guard: None,
 		ipv6_token: None,
 		link_settings: None,
+		preference: None,
 		bridge_vlans: Vec::new(),
 	};
 	let mut dns = DnsPolicy::default();
@@ -1373,6 +1375,10 @@ fn lower_interface(
 							interface.bridge_vlans.extend(vlans);
 						}
 					}
+				}
+				"preference" => {
+					provenance.record(sources, field_path(&name, "preference"), assignment.span);
+					interface.preference = as_u32(&assignment.value, diags);
 				}
 				"ipv6_token" => {
 					if let Some(text) = as_string(&assignment.value, diags) {
