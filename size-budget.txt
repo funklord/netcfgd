@@ -66,5 +66,8 @@ tolerance_percent 3
 # spelling for parameterless kinds, and four more bridge parameters. +16 KB and
 # +37 KB -- the tunnel encoding is three attribute families that disagree about
 # numbering, which is most of it.
-ncfg     1141184
-netcfgd  1485336
+#
+# Then PPPoE: the compiler, the planner treating a session as a prerequisite
+# rather than a link, and the executor writing pppd's options file. +12 KB each.
+ncfg     1157568
+netcfgd  1497624

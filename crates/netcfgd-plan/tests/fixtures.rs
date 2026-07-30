@@ -1190,3 +1190,75 @@ interface br-lan { config = "@pd:wan0=::1/64" }
 	);
 	let _ = &mut observed;
 }
+
+/// A PPP interface is created by pppd, not by netlink, so planning a
+/// `link.create` for it would emit an action that must fail.
+#[test]
+fn a_ppp_session_is_dialled_not_created() {
+	let document = document(
+		r#"
+interface ppp0 {
+	pppoe { parent = "eth0"; username = "a"; password = "@secret:dsl" }
+	routes = "default"
+}
+"#,
+	);
+	// eth0 exists; ppp0 does not, because the session has not come up.
+	let plan = plan(
+		&document,
+		&observed_with(&["eth0"]),
+		&PlanOptions::default(),
+	);
+
+	assert!(
+		!names(&plan).contains(&"link.create"),
+		"pppd creates the interface: {:?}",
+		names(&plan)
+	);
+	assert!(
+		names(&plan).contains(&"backend.start"),
+		"{:?}",
+		names(&plan)
+	);
+	// And the route waits, with the operator told why -- PPP negotiates
+	// asynchronously, so it arrives on a later reconcile rather than later in
+	// this plan.
+	assert!(!names(&plan).contains(&"route.add"), "{:?}", names(&plan));
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("ppp session is not up yet")),
+		"got {:?}",
+		plan.warnings
+	);
+}
+
+/// Once the session is up the interface is ordinary, and its route lands.
+#[test]
+fn a_live_ppp_interface_gets_its_route() {
+	let document = document(
+		r#"
+interface ppp0 {
+	pppoe { parent = "eth0"; username = "a"; password = "@secret:dsl" }
+	routes = "default"
+}
+"#,
+	);
+	let mut observed = observed_with(&["eth0", "ppp0"]);
+	// pppd started it and the backend is running, so nothing re-dials.
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::Pppoe,
+		interface: "ppp0".to_owned(),
+		running: true,
+	});
+
+	let plan = plan(&document, &observed, &PlanOptions::default());
+	assert!(names(&plan).contains(&"route.add"), "{:?}", names(&plan));
+	assert!(
+		!names(&plan).contains(&"backend.start"),
+		"a running session must not be dialled again: {:?}",
+		names(&plan)
+	);
+
+	settle(&document, &mut observed);
+}
