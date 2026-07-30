@@ -112,28 +112,37 @@ ascii:
 	fi; \
 	echo "ascii: ok"
 
-# Size, ratcheted. See size-budget.txt for why this is not section 10.2's tier
-# budget, and what would have to change for it to become one.
+# Size, ratcheted, and measured as total installed size.
+#
+# Per-binary was the wrong metric. What a 16 MB router cares about is how much
+# flash the install takes, and per-binary limits actively mislead there: merging
+# two binaries that each link most of the workspace makes the one binary bigger
+# while making the install a megabyte smaller. A gate that calls that a
+# regression is a gate pointing the wrong way.
+#
+# Per-binary figures are still printed, because "which one grew?" is the next
+# question after "did it grow?" -- but the limit is on the sum.
 size:
 	@$(CARGO) build --release --quiet
 	@tol=$$(awk '/^tolerance_percent/ {print $$2}' size-budget.txt); \
-	fail=0; \
-	while read -r name limit; do \
-		case "$$name" in ''|\#*|tolerance_percent) continue ;; esac; \
+	limit=$$(awk '/^total/ {print $$2}' size-budget.txt); \
+	total=0; \
+	while read -r name value; do \
+		case "$$name" in ''|\#*|tolerance_percent|total) continue ;; esac; \
 		bin=target/release/$$name; \
 		[ -f "$$bin" ] || continue; \
 		actual=$$(stat -c%s "$$bin"); \
-		ceiling=$$(( limit + limit * tol / 100 )); \
-		if [ "$$actual" -gt "$$ceiling" ]; then \
-			printf 'size: %s %s bytes, over its %s limit by %s\n' \
-				"$$name" "$$actual" "$$limit" "$$(( actual - limit ))"; \
-			echo "size:   raise it in size-budget.txt, and say why in the commit"; \
-			fail=1; \
-		else \
-			printf 'size: %-8s %8s of %s\n' "$$name" "$$actual" "$$limit"; \
-		fi; \
+		total=$$(( total + actual )); \
+		printf 'size: %-8s %8s\n' "$$name" "$$actual"; \
 	done < size-budget.txt; \
-	exit $$fail
+	ceiling=$$(( limit + limit * tol / 100 )); \
+	if [ "$$total" -gt "$$ceiling" ]; then \
+		printf 'size: installed %s bytes, over its %s limit by %s\n' \
+			"$$total" "$$limit" "$$(( total - limit ))"; \
+		echo "size:   raise it in size-budget.txt, and say why in the commit"; \
+		exit 1; \
+	fi; \
+	printf 'size: installed %8s of %s\n' "$$total" "$$limit"
 
 # Design section 4.6's mechanical test, and constraint 2's enforcement: on a
 # machine that has never used an optional feature, the footprint is exactly the
