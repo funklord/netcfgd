@@ -159,4 +159,13 @@ netcfgd
 # pass. The family resolution itself was already there, built for WireGuard --
 # which is what made this reachable at all, since decision 0016 had put it
 # behind either that or an ioctl the unsafe policy forbids.
-total 1813016
+# +32 KB for access points: the hostapd configuration renderer, the secret
+# resolution and file write around it, a planner pass, three warnings and two
+# executor arms. The largest of the four frozen-but-inert features to close,
+# and the only one that is not netlink -- no new dependency, but a whole
+# backend crate of text generation plus the refusals that keep it honest.
+#
+# Recorded rather than left to ride the 3% tolerance, for the reason at the top
+# of this file: the tolerance is for compiler-version noise, and spending it on
+# a feature makes the next feature fail the gate for the wrong reason.
+total 1845784
