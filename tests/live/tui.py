@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""The TUI against a real pty and a real daemon.
+
+Python, and the only test here that is. A TUI needs a pseudo-terminal to say
+anything about: raw mode, escape sequences and signal handling are all
+invisible to a pipe, and `script(1)` cannot drive input reliably because it
+forwards through a pty of its own and closes it before the child has finished
+starting. `pty.openpty()` gives direct control of both ends.
+
+It is a test-time dependency, not a runtime one. Constraint 3 is about what the
+binary links, and this links nothing.
+
+What it covers is what only a terminal can show:
+
+  * the four panes draw, and the tab bar tracks which one is showing;
+  * `q` exits cleanly;
+  * `a` then `y` runs apply-then-confirm through the daemon;
+  * SIGTERM and SIGHUP restore the terminal.
+
+The last is why this file exists. It was written after reading another
+project's TUI, which routes termination through the same wait as the keyboard
+so that a kill leaves by the same path as the quit key. netcfgd did not, and
+measured, a `kill` left the operator's shell with ECHO and ICANON both off.
+"""
+
+import fcntl
+import os
+import pty
+import re
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import time
+
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+NCFG = os.path.join(REPO, "target/debug/ncfg")
+NETCFGD = os.path.join(REPO, "target/debug/netcfgd")
+
+failures = 0
+
+
+def check(label, actual, expected):
+    global failures
+    if actual == expected:
+        print(f"ok   {label}")
+    else:
+        print(f"FAIL {label}")
+        print(f"       expected: {expected!r}")
+        print(f"       actual:   {actual!r}")
+        failures += 1
+
+
+def skip(why):
+    if os.environ.get("NCFG_LIVE"):
+        print(f"tui.py: NCFG_LIVE is set but this cannot run: {why}", file=sys.stderr)
+        sys.exit(1)
+    print(f"tui.py: skipping: {why}")
+    sys.exit(0)
+
+
+def visible(text):
+    """Drop escape sequences, keep the characters a person would see."""
+    return re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", text).replace("\r\n", "\n")
+
+
+class Session:
+    """A daemon and a pty, cleaned up together."""
+
+    def __init__(self):
+        self.work = tempfile.mkdtemp(prefix="ncfg-tui-")
+        os.makedirs(f"{self.work}/etc")
+        os.makedirs(f"{self.work}/run")
+        with open(f"{self.work}/etc/netcfgd.conf", "w") as handle:
+            handle.write('interface probe0 {\n\tkind = "dummy"\n\tconfig = "10.11.0.1/24"\n}\n')
+        self.env = dict(
+            os.environ,
+            NCFG_CONFIG_DIR=f"{self.work}/etc",
+            NCFG_RUN_DIR=f"{self.work}/run",
+        )
+        self.daemon = subprocess.Popen(
+            [NETCFGD], env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+        for _ in range(100):
+            if os.path.exists(f"{self.work}/run/netcfgd.sock"):
+                return
+            if self.daemon.poll() is not None:
+                out = self.daemon.stdout.read().decode(errors="replace")
+                if "Operation not permitted" in out:
+                    self.close()
+                    skip("no CAP_NET_ADMIN (run under unshare -rn)")
+                self.close()
+                print(f"tui.py: the daemon exited: {out}", file=sys.stderr)
+                sys.exit(1)
+            time.sleep(0.05)
+        self.close()
+        print("tui.py: the daemon never started", file=sys.stderr)
+        sys.exit(1)
+
+    def spawn(self, rows=24, columns=80):
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+        proc = subprocess.Popen(
+            [NCFG, "tui"], env=self.env, stdin=slave, stdout=slave, stderr=slave
+        )
+        os.set_blocking(master, False)
+        return proc, master, slave
+
+    def close(self):
+        try:
+            self.daemon.terminate()
+            self.daemon.wait(timeout=3)
+        except Exception:
+            pass
+        shutil.rmtree(self.work, ignore_errors=True)
+
+
+def pump(master, seconds=0.5, into=None):
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            data = os.read(master, 65536)
+            if data and into is not None:
+                into.append(data.decode(errors="replace"))
+        except BlockingIOError:
+            time.sleep(0.02)
+        except OSError:
+            return  # the child closed the pty, which is how it exits
+
+
+def flags(fd):
+    attrs = termios.tcgetattr(fd)
+    return {
+        "ECHO": bool(attrs[3] & termios.ECHO),
+        "ICANON": bool(attrs[3] & termios.ICANON),
+    }
+
+
+def panes(session):
+    """Each pane draws, the tab bar follows, and q exits."""
+    proc, master, slave = session.spawn()
+    os.close(slave)
+    seen = []
+    pump(master, 1.2, seen)
+    check("the device pane draws the interface", "probe0" in "".join(seen), True)
+    check("and its address", "10.11.0.1/24" in "".join(seen), True)
+
+    for key, marker in ((b"p", "[plan]"), (b"e", "[events]"), (b"w", "[wifi]")):
+        seen.clear()
+        os.write(master, key)
+        pump(master, 0.5, seen)
+        check(f"{key.decode()} switches to {marker}", marker in visible("".join(seen)), True)
+
+    # Two keys in one write, deliberately. That is what an arrow key, a paste
+    # and fast typing all look like, and it is how the buffered-stdin bug was
+    # found: `poll` on the descriptor saw nothing while a BufReader held the
+    # second byte, so it did not arrive until the next timeout a second later.
+    #
+    # Apply opens a confirm window; y answers it. The message the pane shows
+    # after `a` promises both keys, and promising a key that does nothing is
+    # worse than not offering the window at all.
+    seen.clear()
+    os.write(master, b"pa")
+    pump(master, 0.8, seen)
+    check("a applies with a window", "60s window" in visible("".join(seen)), True)
+    seen.clear()
+    os.write(master, b"y")
+    pump(master, 0.8, seen)
+    check("y confirms it", "confirmed" in visible("".join(seen)), True)
+
+    os.write(master, b"q")
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    check("q exits cleanly", proc.returncode, 0)
+    os.close(master)
+
+
+def signals(session):
+    """A kill leaves by the same path as the quit key."""
+    for sig, name in ((signal.SIGTERM, "SIGTERM"), (signal.SIGHUP, "SIGHUP")):
+        proc, master, slave = session.spawn()
+        pump(master, 0.8)
+        check(f"the terminal is raw while running ({name})", flags(slave)["ECHO"], False)
+        proc.send_signal(sig)
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        time.sleep(0.2)
+        check(f"{name} restores echo", flags(slave)["ECHO"], True)
+        check(f"{name} restores canonical mode", flags(slave)["ICANON"], True)
+        os.close(slave)
+        os.close(master)
+
+
+def resize(session):
+    """The frame follows the terminal without a SIGWINCH handler."""
+    proc, master, slave = session.spawn(rows=40, columns=132)
+    seen = []
+    pump(master, 1.2, seen)
+    widest = max((len(line) for line in visible("".join(seen)).split("\n")), default=0)
+    check("a 132-column terminal is filled", widest >= 132, True)
+    os.write(master, b"q")
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    os.close(slave)
+    os.close(master)
+
+
+def main():
+    for binary in (NCFG, NETCFGD):
+        if not os.access(binary, os.X_OK):
+            skip(f"{os.path.basename(binary)} is not built")
+
+    session = Session()
+    try:
+        panes(session)
+        signals(session)
+        resize(session)
+    finally:
+        session.close()
+
+    print()
+    if failures:
+        print(f"tui.py: {failures} failed")
+        sys.exit(1)
+    print("tui.py: all checks passed")
+
+
+if __name__ == "__main__":
+    main()
