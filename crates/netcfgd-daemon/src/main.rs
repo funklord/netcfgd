@@ -33,6 +33,8 @@ usage:
 
 options:
   --config-dir PATH      default /etc/netcfgd, or $NCFG_CONFIG_DIR
+  --factory-dir PATH     default /usr/share/netcfgd, or $NCFG_FACTORY_DIR.
+                         Read before --config-dir, which overrides it
   --run-dir PATH         default /run/netcfgd, or $NCFG_RUN_DIR
   --socket PATH          default /run/netcfgd/netcfgd.sock
   --no-apply-on-start    observe and watch, but change nothing until asked
@@ -61,6 +63,7 @@ fn main() -> ExitCode {
 
 struct Options {
 	config_dir: Option<String>,
+	factory_dir: Option<String>,
 	run_dir: Option<String>,
 	socket: Option<String>,
 	apply_on_start: bool,
@@ -71,6 +74,7 @@ struct Options {
 fn parse_options(arguments: &[String]) -> Result<Option<Options>, String> {
 	let mut options = Options {
 		config_dir: None,
+		factory_dir: None,
 		run_dir: None,
 		socket: None,
 		apply_on_start: true,
@@ -93,6 +97,7 @@ fn parse_options(arguments: &[String]) -> Result<Option<Options>, String> {
 				return Ok(None);
 			}
 			"--config-dir" => options.config_dir = Some(value("--config-dir")?),
+			"--factory-dir" => options.factory_dir = Some(value("--factory-dir")?),
 			"--run-dir" => options.run_dir = Some(value("--run-dir")?),
 			"--socket" => options.socket = Some(value("--socket")?),
 			"--no-apply-on-start" => options.apply_on_start = false,
@@ -110,12 +115,13 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	};
 
 	let paths = Paths {
-		config_dir: netcfgd_host::config::resolve_dir(options.config_dir.as_deref()),
-		run_dir: run_state::resolve_dir(options.run_dir.as_deref()),
+		factory: netcfgd_host::config::resolve_factory_dir(options.factory_dir.as_deref()),
+		config: netcfgd_host::config::resolve_dir(options.config_dir.as_deref()),
+		run: run_state::resolve_dir(options.run_dir.as_deref()),
 	};
 	let socket_path = options
 		.socket
-		.map_or_else(|| paths.run_dir.join("netcfgd.sock"), PathBuf::from);
+		.map_or_else(|| paths.run.join("netcfgd.sock"), PathBuf::from);
 	let _ = DEFAULT_SOCKET;
 
 	let mut state = State::new(paths.clone());
@@ -136,7 +142,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 
 	eprintln!(
 		"netcfgd: watching {} via {mechanism}, socket {}",
-		paths.config_dir.display(),
+		paths.config.display(),
 		socket_path.display()
 	);
 	report_contention(&state);
@@ -243,11 +249,11 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 /// reboot case is untouched: `converge` overwrites it with the real document a
 /// moment later.
 fn establish_first_last_good(state: &State) {
-	if netcfgd_host::confirm::read_last_good(&state.paths.run_dir).is_some() {
+	if netcfgd_host::confirm::read_last_good(&state.paths.run).is_some() {
 		return;
 	}
 	let empty = netcfgd_model::Document::default();
-	if netcfgd_host::confirm::write_last_good(&state.paths.run_dir, &empty).is_ok() {
+	if netcfgd_host::confirm::write_last_good(&state.paths.run, &empty).is_ok() {
 		eprintln!(
 			"netcfgd: no previous configuration recorded, so a revert would undo \
 			 everything netcfgd does from here. `ncfg apply --confirm-within N` \
@@ -293,9 +299,9 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 		return;
 	};
 	let (plan, journal) = state.apply(&PlanOptions::default(), &mut executor);
-	let mut owned = run_state::read_owned(&state.paths.run_dir);
+	let mut owned = run_state::read_owned(&state.paths.run);
 	owned.absorb(&executor.effects);
-	let _ = run_state::write_owned(&state.paths.run_dir, &owned);
+	let _ = run_state::write_owned(&state.paths.run, &owned);
 
 	if let Some(failure) = journal.failure() {
 		eprintln!(
@@ -318,7 +324,7 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 	// nothing to revert to -- which is safe, and useless.
 	if journal.failure().is_none() {
 		if let Some(desired) = &state.desired {
-			let _ = netcfgd_host::confirm::write_last_good(&state.paths.run_dir, desired);
+			let _ = netcfgd_host::confirm::write_last_good(&state.paths.run, desired);
 		}
 	}
 
@@ -350,10 +356,10 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 		return;
 	};
 	let journal = netcfgd_apply::apply(&restricted, &mut executor);
-	let mut owned = run_state::read_owned(&state.paths.run_dir);
+	let mut owned = run_state::read_owned(&state.paths.run);
 	owned.absorb(&executor.effects);
-	let _ = run_state::write_owned(&state.paths.run_dir, &owned);
-	let _ = run_state::write_journal(&state.paths.run_dir, &journal);
+	let _ = run_state::write_owned(&state.paths.run, &owned);
+	let _ = run_state::write_journal(&state.paths.run, &journal);
 	state.reobserve();
 
 	server::broadcast(
@@ -397,9 +403,9 @@ fn apply_request(
 		Err(message) => return Response::error(message),
 	};
 	let (_, journal) = state.apply(&options, &mut executor);
-	let mut owned = run_state::read_owned(&state.paths.run_dir);
+	let mut owned = run_state::read_owned(&state.paths.run);
 	owned.absorb(&executor.effects);
-	let _ = run_state::write_owned(&state.paths.run_dir, &owned);
+	let _ = run_state::write_owned(&state.paths.run, &owned);
 	state.reobserve();
 
 	match (&window, last_good) {
@@ -413,7 +419,7 @@ fn apply_request(
 		// No window: this configuration is the one to fall back to.
 		_ => {
 			if let Some(desired) = &state.desired {
-				let _ = netcfgd_host::confirm::write_last_good(&state.paths.run_dir, desired);
+				let _ = netcfgd_host::confirm::write_last_good(&state.paths.run, desired);
 			}
 		}
 	}
@@ -480,7 +486,7 @@ fn answer(
 			subject,
 			state.desired.as_ref(),
 			&state.observed,
-			&run_state::read_provenance(&state.paths.run_dir),
+			&run_state::read_provenance(&state.paths.run),
 		))),
 		// Handled entirely on the connection thread.
 		Request::Monitor => Response::Ok,
@@ -492,7 +498,7 @@ fn answer(
 		Request::WifiStatus { interface } => wifi::status(state.desired.as_ref(), interface),
 		Request::WifiConnect { interface, network } => wifi::connect_to(
 			state.desired.as_ref(),
-			&state.paths.config_dir.join("secrets"),
+			&state.paths.config.join("secrets"),
 			interface,
 			network,
 		),
@@ -556,7 +562,12 @@ fn spawn_config_watcher(
 	paths: &Paths,
 	force_polling: bool,
 ) -> &'static str {
-	let directories = vec![paths.config_dir.clone(), paths.config_dir.join("conf.d")];
+	// The writable layer only. The factory layer is part of the image -- on
+	// the read-only root this exists for, it cannot change while the daemon is
+	// running, and watching it would cost two more inotify descriptors on the
+	// device with the fewest to spare. A factory directory that does change is
+	// a development setup, and a `reload` picks it up.
+	let directories = vec![paths.config.clone(), paths.config.join("conf.d")];
 	let mut watcher = if force_polling {
 		Watcher::polling(&directories)
 	} else {

@@ -70,7 +70,7 @@ pub fn compile_with_provenance(
 		return Err(diagnostics);
 	}
 
-	let merged = merge::merge(&files)?;
+	let merged = merge::merge(&files, sources)?;
 	let mut provenance = Provenance::default();
 	let mut document = lower::lower(&merged, hooks, sources, &mut provenance)?;
 	provenance.canonicalize();

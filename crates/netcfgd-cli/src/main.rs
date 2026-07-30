@@ -38,9 +38,14 @@ usage:
   ncfg monitor [options]   stream events until interrupted (needs netcfgd)
   ncfg confirm [options]   keep a change made under a confirm window
   ncfg revert [options]    undo it now rather than at expiry
+  ncfg reset [--yes]       discard the writable config, leaving the factory
+                           defaults. Prints what it would remove unless --yes
 
 options:
   --config-dir PATH        default /etc/netcfgd, or $NCFG_CONFIG_DIR
+  --factory-dir PATH       default /usr/share/netcfgd, or $NCFG_FACTORY_DIR.
+                           Read before --config-dir, which overrides it
+  --yes                    for `reset`: actually remove the files
   --run-dir PATH           default /run/netcfgd, or $NCFG_RUN_DIR
   --oneshot                apply once and exit; the default, there being no
                            daemon yet
@@ -71,6 +76,8 @@ fn main() -> ExitCode {
 
 struct Options {
 	config_dir: Option<String>,
+	factory_dir: Option<String>,
+	yes: bool,
 	run_dir: Option<String>,
 	json: bool,
 	confirm: Option<u32>,
@@ -97,6 +104,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"explain" => command_explain(&arguments[1..], &options),
 		"monitor" => command_monitor(&options),
 		"wifi" => command_wifi(&positional(&arguments[1..]), &options),
+		"reset" => command_reset(&options),
 		"confirm" => command_confirm(&options, &netcfgd_proto::Request::Confirm),
 		"revert" => command_confirm(&options, &netcfgd_proto::Request::Revert),
 		other => Err(format!("unknown command `{other}`; try `ncfg --help`")),
@@ -106,6 +114,8 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 fn parse_options(arguments: &[String]) -> Result<Options, String> {
 	let mut options = Options {
 		config_dir: None,
+		factory_dir: None,
+		yes: false,
 		run_dir: None,
 		json: false,
 		confirm: None,
@@ -123,6 +133,7 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 		};
 		match argument {
 			"--config-dir" => options.config_dir = Some(take_value("--config-dir")?),
+			"--factory-dir" => options.factory_dir = Some(take_value("--factory-dir")?),
 			"--run-dir" => options.run_dir = Some(take_value("--run-dir")?),
 			"--confirm-within" => {
 				let value = take_value("--confirm-within")?;
@@ -134,6 +145,7 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 				.allow_disruption
 				.push(take_value("--allow-disruption")?),
 			"--json" => options.json = true,
+			"--yes" => options.yes = true,
 			// There is no daemon yet, so oneshot is the only mode there is.
 			// Accepting the flag now means the command line does not change
 			// when the daemon lands in M2.
@@ -155,8 +167,11 @@ fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::Pat
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
 
-	let sources = config::load(&config_dir)
-		.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
+	let sources = config::load_layered(
+		&config::resolve_factory_dir(options.factory_dir.as_deref()),
+		&config_dir,
+	)
+	.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
 	if sources.is_empty() {
 		return Err(format!(
 			"no configuration found in {}",
@@ -180,8 +195,11 @@ fn compile_with_provenance(
 ) -> Result<(netcfgd_model::Document, netcfgd_compile::Provenance), String> {
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
-	let sources = config::load(&config_dir)
-		.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
+	let sources = config::load_layered(
+		&config::resolve_factory_dir(options.factory_dir.as_deref()),
+		&config_dir,
+	)
+	.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
 	let mut sink = hooks::RunHooks::new(&run_dir);
 	let (document, provenance) = netcfgd_compile::compile_with_provenance(&sources, &mut sink)
 		.map_err(|diagnostics| diagnostics.render(&sources))?;
@@ -654,6 +672,86 @@ fn command_confirm(
 		client::Answer::Error { message } => Err(message),
 		other => Err(format!("the daemon sent {}", other.describe())),
 	}
+}
+
+/// Discard the writable config layer, leaving whatever the image shipped.
+///
+/// Design section 10.4's `ncfg reset`. It is a config edit, not a runtime
+/// operation, so it works on files and does not go through the daemon -- which
+/// is also what gates it: the config directory is root-owned, and anybody who
+/// can delete these files can edit them. The daemon notices by inotify, the
+/// same way it notices any other edit.
+///
+/// Destructive and irreversible, so it prints what it would do and stops
+/// unless `--yes` is given.
+fn command_reset(options: &Options) -> Result<ExitCode, String> {
+	let config_dir = config::resolve_dir(options.config_dir.as_deref());
+	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
+
+	// Resetting into the factory directory would delete the thing being reset
+	// to. Reachable by a misconfigured unit file rather than by a typo, which
+	// is exactly when nobody is watching.
+	if config_dir == factory_dir {
+		return Err(format!(
+			"the config directory and the factory directory are both {}; reset would \
+			 delete the defaults it is meant to fall back to",
+			config_dir.display()
+		));
+	}
+
+	let doomed = config::writable_files(&config_dir).map_err(|error| error.to_string())?;
+	let factory = config::writable_files(&factory_dir).map_err(|error| error.to_string())?;
+
+	if doomed.is_empty() {
+		println!("nothing to reset: {} holds no config", config_dir.display());
+		return Ok(ExitCode::SUCCESS);
+	}
+
+	for path in &doomed {
+		println!(
+			"{} {}",
+			if options.yes {
+				"removed"
+			} else {
+				"would remove"
+			},
+			path.display()
+		);
+	}
+
+	// The case that surprises people: no factory layer means reset does not
+	// restore anything, it empties the machine's configuration. Said before it
+	// happens rather than discovered by the next apply tearing everything
+	// down.
+	if factory.is_empty() {
+		println!();
+		println!(
+			"note: {} holds no factory config, so this leaves netcfgd with no \
+			 configuration at all. The next apply would remove every address, route \
+			 and link netcfgd installed.",
+			factory_dir.display()
+		);
+	} else {
+		println!();
+		println!(
+			"{} file{} remain{}, from {}",
+			factory.len(),
+			if factory.len() == 1 { "" } else { "s" },
+			if factory.len() == 1 { "s" } else { "" },
+			factory_dir.display()
+		);
+	}
+
+	if !options.yes {
+		println!();
+		println!("nothing was removed; add --yes to do it");
+		return Ok(ExitCode::SUCCESS);
+	}
+
+	for path in &doomed {
+		std::fs::remove_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
+	}
+	Ok(ExitCode::SUCCESS)
 }
 
 fn command_status(options: &Options) -> Result<ExitCode, String> {
