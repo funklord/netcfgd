@@ -224,8 +224,34 @@ fn command_plan(options: &Options) -> Result<ExitCode, String> {
 		);
 	} else {
 		print_plan(&plan);
+		warn_about_contention(&document, &observed);
 	}
 	Ok(ExitCode::SUCCESS)
+}
+
+/// Say so if another daemon manages an interface this plan touches.
+///
+/// Printed after the plan rather than as a plan warning: it is not a fact
+/// about the plan, which is correct either way. It is a fact about the machine
+/// that makes the plan unlikely to stick.
+fn warn_about_contention(document: &netcfgd_model::Document, observed: &Observed) {
+	let claimed: Vec<(String, u32)> = document
+		.interfaces
+		.iter()
+		.filter_map(|interface| {
+			observed
+				.link(&interface.name)
+				.map(|link| (interface.name.clone(), link.index))
+		})
+		.collect();
+
+	for contender in netcfgd_host::contention::contenders(&claimed) {
+		println!();
+		println!(
+			"warning: {}",
+			netcfgd_host::contention::describe(&contender)
+		);
+	}
 }
 
 fn command_apply(options: &Options) -> Result<ExitCode, String> {

@@ -88,4 +88,6 @@ netcfgd
 #
 # +8 KB for carrier-based switching: the preference field, metric resolution,
 # and the DHCP client finally being told the metric the model always carried.
-total 2700248
+#
+# +12 KB for detecting another daemon on the same interface.
+total 2712536

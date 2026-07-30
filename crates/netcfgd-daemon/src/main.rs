@@ -139,6 +139,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		paths.config_dir.display(),
 		socket_path.display()
 	);
+	report_contention(&state);
 
 	// Before anything else: a window found here was opened by a daemon that is
 	// no longer running, so nobody can have confirmed it.
@@ -216,6 +217,36 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	}
 
 	Ok(ExitCode::SUCCESS)
+}
+
+/// Say so at startup if another daemon manages an interface this config
+/// claims.
+///
+/// At startup rather than only in a plan, because the daemon is the case where
+/// nobody is reading a plan: it comes up at boot, applies, and the operator
+/// sees the result hours later. A line in the log at the moment it starts is
+/// the only warning they will get.
+fn report_contention(state: &State) {
+	let Some(desired) = &state.desired else {
+		return;
+	};
+	let claimed: Vec<(String, u32)> = desired
+		.interfaces
+		.iter()
+		.filter_map(|interface| {
+			state
+				.observed
+				.link(&interface.name)
+				.map(|link| (interface.name.clone(), link.index))
+		})
+		.collect();
+
+	for contender in netcfgd_host::contention::contenders(&claimed) {
+		eprintln!(
+			"netcfgd: {}",
+			netcfgd_host::contention::describe(&contender)
+		);
+	}
 }
 
 /// Apply whatever the config asks for, reporting failures to stderr.
