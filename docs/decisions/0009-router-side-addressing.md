@@ -42,7 +42,7 @@ argument:
 | DHCPv6-PD (requesting) | **yes** | client side; it is addressing |
 | RA sending on the LAN | **policy yes, implementation no** | handed to odhcpd/radvd, like the DNS backends |
 | `ip_forward` | **yes** | a sysctl over state netcfgd already owns |
-| IPv4 masquerade | **no** | an nftables rule; see below |
+| IPv4 masquerade | ~~no~~ **yes, in netcfgd's own table** | amended by [0022](0022-netcfgd-may-own-one-nftables-table.md); see below for the original reasoning |
 | DHCPv4/v6 server | **no** | serving |
 | PPPoE | **yes** | a link kind, implemented by pppd |
 
@@ -142,3 +142,16 @@ it is an unfinished one.
 boundary rule is worth more than the one option: once netcfgd writes packet
 filter rules there is no principled place to stop, and "configures, does not
 serve" stops meaning anything.
+
+## Amendment, 2026-07-30
+
+The masquerade exclusion is amended by
+[0022](0022-netcfgd-may-own-one-nftables-table.md). The reasoning above is
+about ordering fights in a single shared ruleset, which is what iptables has;
+nftables has named, independent tables, so netcfgd can own one outright without
+reading or touching anybody else's. An nftables table turns out to be the same
+kind of thing as the protocol-110 tag decision 0002 already relies on.
+
+Nothing else in this record changes. "netcfgd configures; it does not serve"
+still decides the other four rows, and 0022 draws the line one layer down:
+netcfgd translates addresses, and never filters packets.

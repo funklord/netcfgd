@@ -580,8 +580,12 @@ pub struct Interface {
 	/// Router advertisement policy, for a LAN-side interface.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub advertise: Option<RaPolicy>,
-	/// IP forwarding sysctl. Never a firewall rule: netcfgd does not write
-	/// into a ruleset it does not own.
+	/// IP forwarding sysctl, and only that.
+	///
+	/// Never a filter rule. Decision 0022 lets netcfgd own one nftables table
+	/// for NAT, on the grounds that translating addresses is addressing --
+	/// deciding which packets may pass is security policy, which this project
+	/// has no model of and does not want one.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub forwarding: Option<bool>,
 	/// Something outside netcfgd depends on this interface.
