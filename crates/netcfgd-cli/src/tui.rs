@@ -22,9 +22,10 @@
 use crate::client;
 use crate::Options;
 use netcfgd_host::state;
-use netcfgd_netlink::{signals, term};
+use netcfgd_netlink::{curses, signals, term};
 use netcfgd_proto::Request;
-use std::io::Write;
+use std::ffi::c_int;
+use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
@@ -64,7 +65,6 @@ struct App {
 	scan: Option<serde_json::Value>,
 	events: Arc<Mutex<Vec<String>>>,
 	socket: std::path::PathBuf,
-	colour: bool,
 }
 
 /// Run the TUI until `q`.
@@ -81,19 +81,12 @@ pub(crate) fn run(options: &Options) -> Result<ExitCode, String> {
 	// a sentence rather than a cleared screen and a sentence.
 	client::ask(&socket, &Request::Hello)?;
 
-	let (raw, _) = term::enter().map_err(|error| {
-		format!("{error}\n`ncfg tui` needs a terminal; for a pipe use `ncfg status --json`")
-	})?;
-	// Non-blocking reads: `poll` decides when there is something to take, so a
-	// read that blocked would hold the loop past a signal.
-	raw.set_read_timeout(0)
-		.map_err(|error| format!("cannot set a read timeout: {error}"))?;
-	// Termination has to leave by the same path as `q`. On their default
-	// disposition `SIGTERM` and `SIGHUP` kill the process outright, and the
-	// restore below never runs -- measured, that left the operator's shell
-	// with echo off and the cursor hidden.
-	let signals =
-		signals::Signals::new().map_err(|error| format!("cannot watch for signals: {error}"))?;
+	// Refused before ncurses starts. `initscr` exits the process outright when
+	// it cannot set up a terminal, so a redirected run has to be turned away
+	// here or it dies without a message.
+	if !term::is_terminal(std::io::stdin().as_raw_fd()) {
+		return Err("`ncfg tui` needs a terminal; for a pipe use `ncfg status --json`".to_owned());
+	}
 
 	let mut app = App {
 		pane: Pane::Devices,
@@ -104,71 +97,168 @@ pub(crate) fn run(options: &Options) -> Result<ExitCode, String> {
 		scan: None,
 		events: Arc::new(Mutex::new(Vec::new())),
 		socket: socket.clone(),
-		colour: std::env::var_os("NO_COLOR").is_none(),
 	};
+	// Before any thread is spawned, and that ordering is load-bearing.
+	// `sigprocmask` sets the *calling thread's* mask, and a thread inherits
+	// whatever mask was in force when it was created -- so blocking after the
+	// subscriber exists leaves that thread able to take the signal, where the
+	// default disposition kills the whole process before `endwin` can run.
+	// Measured: with the calls the other way round, SIGHUP killed it outright
+	// and SIGTERM survived only by luck of which thread the kernel picked.
+	//
+	// Termination has to leave by the same path as `q`, or the operator's
+	// shell is handed back unusable.
+	let signals =
+		signals::Signals::new().map_err(|error| format!("cannot watch for signals: {error}"))?;
+
 	subscribe(&socket, &app.events);
 
-	let mut out = std::io::stdout();
-	// Alternate screen and no cursor. Both are undone before returning, on
-	// every path, or the operator gets their shell back with an invisible
-	// cursor.
-	let _ = out.write_all(b"\x1b[?1049h\x1b[?25l");
+	let screen = curses::Screen::open().map_err(|error| error.to_string())?;
 	app.refresh();
 
-	let result = event_loop(&mut app, &raw, &signals, &mut out);
-
-	let _ = out.write_all(b"\x1b[?25h\x1b[?1049l");
-	let _ = out.flush();
-	drop(raw);
+	let result = event_loop(&mut app, &screen, &signals);
+	// Explicit, so the terminal is restored before anything else can print.
+	drop(screen);
 	result
 }
 
 /// Read keys and redraw until asked to stop.
 fn event_loop(
 	app: &mut App,
-	raw: &term::RawMode,
+	screen: &curses::Screen,
 	signals: &signals::Signals,
-	out: &mut std::io::Stdout,
 ) -> Result<ExitCode, String> {
-	// What the terminal is believed to be showing. An unchanged frame is not
-	// sent again: the loop wakes once a second whether or not anything moved,
-	// and rewriting an identical screenful is pure traffic on the slow link
-	// this is most often used over.
-	let mut shown = String::new();
+	let stdin = std::io::stdin().as_raw_fd();
+	let mut layout = Layout::new(screen)?;
 
 	loop {
-		// Re-read the size every frame rather than catching SIGWINCH, which
-		// would need a fourth signal in the set for one ioctl's worth of work.
-		let size = term::size(raw.fd());
-		let frame = draw(app, size);
-		if frame != shown {
-			let _ = out.write_all(frame.as_bytes());
-			let _ = out.flush();
-			shown = frame;
-		}
+		layout.paint(screen, app)?;
 
-		match signals::wait(raw.fd(), signals, 1000) {
-			// Leave the way `q` leaves, so the restore below runs.
+		match signals::wait(stdin, signals, 1000) {
+			// Leave the way `q` leaves, so `endwin` runs.
 			Ok(signals::Ready::Signal) | Err(_) => return Ok(ExitCode::SUCCESS),
 			Ok(signals::Ready::Timeout) => {
 				if matches!(app.pane, Pane::Devices | Pane::Plan) {
 					app.refresh();
+					layout.touch();
 				}
 			}
 			Ok(signals::Ready::Input) => {
-				// Everything available, not one byte. A burst arrives as a
-				// burst -- an arrow key is three bytes and a paste is many --
-				// and taking one per wake would meter them out at one per
-				// poll timeout.
-				let mut buffer = [0u8; 64];
-				let read = term::read(raw.fd(), &mut buffer).unwrap_or(0);
-				for byte in buffer.iter().take(read) {
-					if !app.key(*byte) {
-						return Ok(ExitCode::SUCCESS);
-					}
+				// One key per wake, and the read blocks. That pairing is the
+				// point: blocking is the only mode in which ncurses decodes an
+				// escape sequence, and it is safe because ncurses takes the
+				// descriptor a byte at a time -- so a burst leaves its
+				// remainder in the kernel, where the next `poll` finds it,
+				// rather than in a userspace buffer where nothing can.
+				let Some(key) = screen.key() else {
+					return Ok(ExitCode::SUCCESS);
+				};
+				if key == curses::KEY_RESIZE {
+					layout = Layout::new(screen)?;
+					continue;
 				}
+				if !app.key(key) {
+					return Ok(ExitCode::SUCCESS);
+				}
+				layout.touch();
 			}
 		}
+	}
+}
+
+/// The three windows, and the size they were built for.
+///
+/// Rebuilt rather than resized on `KEY_RESIZE`, which is one allocation on an
+/// event a person generates by dragging a window edge.
+struct Layout {
+	header: curses::Pane,
+	body: curses::Pane,
+	footer: curses::Pane,
+	columns: u16,
+}
+
+impl Layout {
+	fn new(screen: &curses::Screen) -> Result<Self, String> {
+		let (rows, columns) = screen.size();
+		// Header, footer and a status line are fixed; the body takes the rest.
+		// A terminal too short for all of them still gets one body row rather
+		// than an arithmetic underflow.
+		let body_rows = rows.saturating_sub(3).max(1);
+		let build =
+			|rows, y| curses::Pane::new(rows, columns, y, 0).map_err(|error| error.to_string());
+		Ok(Self {
+			header: build(1, 0)?,
+			body: build(body_rows, 1)?,
+			footer: build(2, 1 + body_rows)?,
+			columns,
+		})
+	}
+
+	/// Mark every pane as needing a redraw.
+	///
+	/// Pane granularity is as fine as this client needs: a keystroke can
+	/// change the tab bar, the body and the status line at once, and ncurses
+	/// narrows each window to the cells that actually differ.
+	fn touch(&mut self) {
+		self.header.touch();
+		self.body.touch();
+		self.footer.touch();
+	}
+
+	fn paint(&mut self, screen: &curses::Screen, app: &App) -> Result<(), String> {
+		// A resize between frames that ncurses has not reported yet.
+		if screen.size().1 != self.columns {
+			*self = Self::new(screen)?;
+		}
+		if !self.header.is_dirty() && !self.body.is_dirty() && !self.footer.is_dirty() {
+			return Ok(());
+		}
+
+		let width = usize::from(self.columns).max(20);
+		if self.header.is_dirty() {
+			self.header.draw(&[tabs(app, width)], Some(0));
+		}
+		if self.body.is_dirty() {
+			let lines = body(app, width);
+			// Scroll so the selection stays on screen, without a scrollbar to
+			// draw or a scroll offset to keep in sync.
+			let visible = lines.len().min(64);
+			let first = app.selected.saturating_sub(visible.saturating_sub(1));
+			let shown: Vec<String> = lines.iter().skip(first).cloned().collect();
+			let highlight = (app.pane != Pane::Events).then(|| app.selected.saturating_sub(first));
+			self.body.draw(&shown, highlight);
+		}
+		if self.footer.is_dirty() {
+			self.footer
+				.draw(&[fit(&app.message, width), fit(KEYS, width)], Some(1));
+		}
+		screen.flush();
+		Ok(())
+	}
+}
+
+/// The tab bar.
+fn tabs(app: &App, width: usize) -> String {
+	let tabs: Vec<String> = [Pane::Devices, Pane::Wifi, Pane::Plan, Pane::Events]
+		.iter()
+		.map(|pane| {
+			if *pane == app.pane {
+				format!("[{}]", pane.title())
+			} else {
+				format!(" {} ", pane.title())
+			}
+		})
+		.collect();
+	fit(&format!("ncfg  {}", tabs.join("")), width)
+}
+
+/// Whichever pane's content is showing.
+fn body(app: &App, width: usize) -> Vec<String> {
+	match app.pane {
+		Pane::Devices => devices(app, width),
+		Pane::Wifi => wifi(app, width),
+		Pane::Plan => plan(app, width),
+		Pane::Events => events(app, width),
 	}
 }
 
@@ -251,32 +341,41 @@ impl App {
 			.map(ToOwned::to_owned)
 	}
 
-	/// Handle one keystroke. Returns false to quit.
-	fn key(&mut self, byte: u8) -> bool {
-		match byte {
-			// `q` and ^C are the same thing: in raw mode ISIG is off, so ^C is
-			// a byte, and treating it as anything but "leave" would strand
-			// somebody whose reflex it is.
-			b'q' | 0x03 => return false,
-			b'd' => self.go(Pane::Devices),
-			b'w' => self.go(Pane::Wifi),
-			b'p' => self.go(Pane::Plan),
-			b'e' => self.go(Pane::Events),
-			b'r' => {
+	/// Handle one key. Returns false to quit.
+	///
+	/// Takes what ncurses returns, not a byte: `KEY_UP` and friends are values
+	/// above 255 decoded from the terminal's own terminfo entry, which is why
+	/// arrows work here and did not in the hand-rolled version.
+	fn key(&mut self, key: c_int) -> bool {
+		let byte = u8::try_from(key).unwrap_or(0);
+		match (key, byte) {
+			// `q` and `^C` are the same thing. ncurses leaves `ISIG` off under
+			// `cbreak`, so `^C` arrives as a key, and treating it as anything
+			// but "leave" would strand somebody whose reflex it is.
+			(_, b'q' | 0x03) => return false,
+			(_, b'd') => self.go(Pane::Devices),
+			(_, b'w') => self.go(Pane::Wifi),
+			(_, b'p') => self.go(Pane::Plan),
+			(_, b'e') => self.go(Pane::Events),
+			(_, b'r') => {
 				"refreshed".clone_into(&mut self.message);
 				self.refresh();
 			}
-			b'j' => self.selected = self.selected.saturating_add(1),
-			b'k' => self.selected = self.selected.saturating_sub(1),
-			b'a' if self.pane == Pane::Plan => self.apply(),
-			b'c' if self.pane == Pane::Wifi => self.connect(),
+			(curses::KEY_DOWN, _) | (_, b'j') => {
+				self.selected = self.selected.saturating_add(1);
+			}
+			(curses::KEY_UP, _) | (_, b'k') => {
+				self.selected = self.selected.saturating_sub(1);
+			}
+			(_, b'a') if self.pane == Pane::Plan => self.apply(),
+			(_, b'c') if self.pane == Pane::Wifi => self.connect(),
 			// The other half of `a`. Offering the window and then not
 			// answering these would be worse than not offering it: the
 			// operator would sit through the timeout believing they had
 			// confirmed.
-			b'y' => self.settle(&Request::Confirm, "confirmed; the change stands"),
-			b'n' => self.settle(&Request::Revert, "reverted to the last-good configuration"),
-			b'?' => HELP.clone_into(&mut self.message),
+			(_, b'y') => self.settle(&Request::Confirm, "confirmed; the change stands"),
+			(_, b'n') => self.settle(&Request::Revert, "reverted to the last-good configuration"),
+			(_, b'?') => HELP.clone_into(&mut self.message),
 			_ => {}
 		}
 		true
@@ -345,6 +444,21 @@ impl App {
 		self.refresh();
 	}
 
+	/// The same app showing a different pane, for tests.
+	#[cfg(test)]
+	fn clone_for(&self, pane: Pane) -> Self {
+		Self {
+			pane,
+			selected: self.selected,
+			message: self.message.clone(),
+			status: self.status.clone(),
+			plan: self.plan.clone(),
+			scan: self.scan.clone(),
+			events: Arc::clone(&self.events),
+			socket: self.socket.clone(),
+		}
+	}
+
 	fn scan_entries(&self) -> Vec<serde_json::Value> {
 		self.scan
 			.as_ref()
@@ -366,68 +480,6 @@ const KEYS: &str =
 /// screen teaches the operator that help is useless.
 const HELP: &str = "a applies with a 60s window: y keeps it, n undoes it now, \
 	 nothing reverts it. `c` marks networks the config can join.";
-
-/// Build one frame.
-///
-/// Returned as a string and written in one go, because writing line by line to
-/// a terminal over SSH is what makes a redraw visibly crawl.
-fn draw(app: &App, size: term::Size) -> String {
-	let width = usize::from(size.columns).max(20);
-	let height = usize::from(size.rows).max(6);
-	let mut lines: Vec<String> = Vec::with_capacity(height);
-
-	// Header: which pane, and which are available.
-	let tabs: Vec<String> = [Pane::Devices, Pane::Wifi, Pane::Plan, Pane::Events]
-		.iter()
-		.map(|pane| {
-			if *pane == app.pane {
-				format!("[{}]", pane.title())
-			} else {
-				format!(" {} ", pane.title())
-			}
-		})
-		.collect();
-	lines.push(emphasise(
-		&fit(&format!("ncfg  {}", tabs.join("")), width),
-		app.colour,
-	));
-
-	let body_height = height.saturating_sub(3);
-	let body = match app.pane {
-		Pane::Devices => devices(app, width),
-		Pane::Wifi => wifi(app, width),
-		Pane::Plan => plan(app, width),
-		Pane::Events => events(app, width),
-	};
-
-	// Scroll so the selection stays on screen, without a scrollbar to draw.
-	let first = app.selected.saturating_sub(body_height.saturating_sub(1));
-	for (index, line) in body.iter().skip(first).take(body_height).enumerate() {
-		let selected = first + index == app.selected && app.pane != Pane::Events;
-		lines.push(if selected {
-			emphasise(&fit(line, width), app.colour)
-		} else {
-			fit(line, width)
-		});
-	}
-	while lines.len() < height.saturating_sub(2) {
-		lines.push(String::new());
-	}
-
-	lines.push(fit(&app.message, width));
-	lines.push(emphasise(&fit(KEYS, width), app.colour));
-
-	// Home, then each line cleared to its end. Clearing per line rather than
-	// the whole screen first is what stops the display flickering on a slow
-	// link.
-	let mut frame = String::from("\x1b[H");
-	for line in lines.iter().take(height) {
-		frame.push_str(line);
-		frame.push_str("\x1b[K\r\n");
-	}
-	frame.push_str("\x1b[J");
-	frame
-}
 
 fn devices(app: &App, width: usize) -> Vec<String> {
 	let Some(links) = app
@@ -618,27 +670,17 @@ fn fit(text: &str, width: usize) -> String {
 	out
 }
 
-/// Reverse video, or plain text where colour is off.
-fn emphasise(text: &str, colour: bool) -> String {
-	if colour {
-		format!("\x1b[7m{text}\x1b[0m")
-	} else {
-		text.to_owned()
-	}
-}
-
 #[cfg(test)]
 mod tests {
-	use super::{draw, fit, App, Pane};
-	use netcfgd_netlink::term::Size;
+	use super::{body, fit, tabs, App, Pane};
 	use std::sync::{Arc, Mutex};
 
 	/// An app with canned answers and no daemon.
 	///
-	/// Drawing is a pure function of what the socket returned, which is what
-	/// makes the layout testable with no terminal, no privileges and no
-	/// kernel. The parts that need a real terminal are in `term`, and were
-	/// checked against a pty.
+	/// Each pane's content is a pure function of what the socket returned,
+	/// which is what keeps it testable with no terminal, no privileges and no
+	/// kernel. Only the painting goes through ncurses, and that is covered by
+	/// `tests/live/tui.py` against a real pty.
 	fn app(pane: Pane, status: &str, plan: &str) -> App {
 		App {
 			pane,
@@ -649,7 +691,6 @@ mod tests {
 			scan: None,
 			events: Arc::new(Mutex::new(Vec::new())),
 			socket: std::path::PathBuf::from("/nonexistent"),
-			colour: false,
 		}
 	}
 
@@ -668,91 +709,65 @@ mod tests {
 		"refusals": []
 	}"#;
 
-	/// Every line is exactly the terminal's width, so nothing wraps.
+	/// Every line is exactly the pane's width.
 	///
-	/// A single over-long line wraps and pushes the whole frame down one row,
-	/// which on a full-screen client means the footer scrolls off and never
-	/// comes back.
+	/// ncurses clears to end of line, so a short line is not a display bug --
+	/// but a line *longer* than the window wraps and pushes everything below
+	/// it down a row, which on a full-screen client scrolls the footer away.
 	#[test]
-	fn every_line_is_exactly_the_width() {
-		for columns in [80_u16, 100, 40] {
-			let size = Size { rows: 24, columns };
-			let frame = draw(&app(Pane::Devices, STATUS, PLAN), size);
-			for line in frame.split("\r\n") {
-				let text = line.replace("\x1b[H", "").replace("\x1b[K", "");
-				if text.is_empty() || text.starts_with('\x1b') {
-					continue;
+	fn no_line_exceeds_the_width() {
+		for width in [80_usize, 132, 40] {
+			let app = app(Pane::Devices, STATUS, PLAN);
+			for pane in [Pane::Devices, Pane::Wifi, Pane::Plan, Pane::Events] {
+				let mut app = app.clone_for(pane);
+				app.selected = 0;
+				for line in body(&app, width) {
+					assert!(
+						line.chars().count() <= width,
+						"{pane:?} at {width}: {line:?}"
+					);
 				}
-				assert_eq!(
-					text.chars().count(),
-					usize::from(columns),
-					"at {columns} columns: {text:?}"
-				);
 			}
-		}
-	}
-
-	/// It fills 80x24 exactly -- section 7.2's floor.
-	///
-	/// Equality rather than "at most", which is what this asserted first and
-	/// which could not fail: the frame is built to a fixed length, so a bug
-	/// that drew too few rows would have passed. Too few leaves the previous
-	/// screen showing through the bottom of the pane.
-	#[test]
-	fn it_fills_eighty_by_twentyfour_exactly() {
-		for size in [
-			Size::default(),
-			Size {
-				rows: 40,
-				columns: 132,
-			},
-		] {
-			let frame = draw(&app(Pane::Devices, STATUS, PLAN), size);
-			assert_eq!(
-				frame.matches("\r\n").count(),
-				usize::from(size.rows),
-				"at {size:?}"
-			);
+			assert_eq!(tabs(&app, width).chars().count(), width);
 		}
 	}
 
 	/// The device pane shows the interface, its state and its addresses.
 	#[test]
 	fn the_device_pane_draws_what_the_kernel_has() {
-		let frame = draw(&app(Pane::Devices, STATUS, PLAN), Size::default());
-		assert!(frame.contains("eth0"), "{frame}");
-		assert!(frame.contains("10.0.0.2/24"), "{frame}");
-		assert!(frame.contains("carrier"), "{frame}");
+		let lines = body(&app(Pane::Devices, STATUS, PLAN), 80).join("\n");
+		assert!(lines.contains("eth0"), "{lines}");
+		assert!(lines.contains("10.0.0.2/24"), "{lines}");
+		assert!(lines.contains("carrier"), "{lines}");
 	}
 
 	/// The plan pane shows the reason, not just the op.
 	///
 	/// An action list without reasons is the black box this project exists to
-	/// not be, and the pane is the place an operator reads it.
+	/// not be, and the pane is where an operator reads it.
 	#[test]
 	fn the_plan_pane_shows_why() {
-		let frame = draw(&app(Pane::Plan, STATUS, PLAN), Size::default());
-		assert!(frame.contains("addr.add"), "{frame}");
-		assert!(frame.contains("<absent> -> 10.0.0.2/24"), "{frame}");
-		assert!(frame.contains("something worth knowing"), "{frame}");
+		let lines = body(&app(Pane::Plan, STATUS, PLAN), 80).join("\n");
+		assert!(lines.contains("addr.add"), "{lines}");
+		assert!(lines.contains("<absent> -> 10.0.0.2/24"), "{lines}");
+		assert!(lines.contains("something worth knowing"), "{lines}");
 	}
 
 	/// An empty plan says so rather than drawing a blank pane.
 	#[test]
 	fn an_empty_plan_says_so() {
-		let frame = draw(
-			&app(Pane::Plan, STATUS, r#"{"actions": []}"#),
-			Size::default(),
-		);
-		assert!(frame.contains("nothing to do"), "{frame}");
+		let lines = body(&app(Pane::Plan, STATUS, r#"{"actions": []}"#), 80).join("\n");
+		assert!(lines.contains("nothing to do"), "{lines}");
 	}
 
-	/// With colour off there are no attribute sequences at all.
+	/// The tab bar marks exactly the pane that is showing.
 	#[test]
-	fn no_colour_means_no_escapes_beyond_positioning() {
-		let frame = draw(&app(Pane::Devices, STATUS, PLAN), Size::default());
-		assert!(!frame.contains("\x1b[7m"), "reverse video with colour off");
-		assert!(!frame.contains("\x1b[0m"), "a reset with colour off");
+	fn the_tab_bar_marks_one_pane() {
+		for pane in [Pane::Devices, Pane::Wifi, Pane::Plan, Pane::Events] {
+			let bar = tabs(&app(pane, STATUS, PLAN), 80);
+			assert!(bar.contains(&format!("[{}]", pane.title())), "{bar}");
+			assert_eq!(bar.matches('[').count(), 1, "{bar}");
+		}
 	}
 
 	/// Truncation and padding both land on the width.

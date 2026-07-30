@@ -14,6 +14,16 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# `ncfg tui`. On by default; off builds a client that links nothing beyond
+# libc, which is what constraint 3 asks of the core and what design section
+# 10.2's embedded tier has always listed the TUI as removable from.
+default = ["tui"]
+tui = ["netcfgd-cli/tui"]
+
 [dependencies]
-netcfgd-cli    = { path = "../netcfgd-cli" }
+# `default-features = false`, or turning the feature off here would not reach
+# the client: a dependency pulls its own defaults regardless of what the
+# depending package's defaults say.
+netcfgd-cli    = { path = "../netcfgd-cli", default-features = false }
 netcfgd-daemon = { path = "../netcfgd-daemon" }

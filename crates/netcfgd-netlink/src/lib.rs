@@ -18,6 +18,8 @@
 //! types are its own rather than `netcfgd-model`'s -- turning them into an
 //! `Observed` belongs to `netcfgd-observe`.
 
+#[cfg(feature = "tui")]
+pub mod curses;
 pub mod dump;
 pub mod genl;
 pub mod inotify;

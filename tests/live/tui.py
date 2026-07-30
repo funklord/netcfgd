@@ -148,11 +148,20 @@ def panes(session):
     check("the device pane draws the interface", "probe0" in "".join(seen), True)
     check("and its address", "10.11.0.1/24" in "".join(seen), True)
 
-    for key, marker in ((b"p", "[plan]"), (b"e", "[events]"), (b"w", "[wifi]")):
+    # Asserted on each pane's own content, not on the tab bar. ncurses emits
+    # the minimal diff, so switching from [plan] to [events] sends only the
+    # changed bracket cells -- the terminal displays "[events]" while that
+    # string never crosses the wire. Body text changes wholesale between panes
+    # and does arrive, and it is the more meaningful thing to check anyway.
+    for key, marker in (
+        (b"p", "nothing to do"),
+        (b"e", "waiting for events"),
+        (b"w", "no scan"),
+    ):
         seen.clear()
         os.write(master, key)
         pump(master, 0.5, seen)
-        check(f"{key.decode()} switches to {marker}", marker in visible("".join(seen)), True)
+        check(f"{key.decode()} shows its pane", marker in visible("".join(seen)), True)
 
     # Two keys in one write, deliberately. That is what an arrow key, a paste
     # and fast typing all look like, and it is how the buffered-stdin bug was
@@ -170,6 +179,31 @@ def panes(session):
     os.write(master, b"y")
     pump(master, 0.8, seen)
     check("y confirms it", "confirmed" in visible("".join(seen)), True)
+
+    # Arrow keys. The whole reason this client uses ncurses rather than
+    # hand-rolled ANSI: Down arrives as ESC [ B, which terminfo decodes into
+    # KEY_DOWN. The hand-rolled version read one byte and switched on it, so
+    # arrows did nothing at all and their trailing bytes fell through as
+    # unbound keys.
+    #
+    # Asserted by effect rather than by looking for a marker: moving the
+    # selection repaints, and an unbound key repaints nothing. That tells
+    # "decoded and acted on" from "ignored" without modelling the screen.
+    os.write(master, b"d")
+    pump(master, 0.5)
+    seen.clear()
+    # ESC O B, not ESC [ B. ncurses sends `smkx` on startup, which puts the
+    # terminal into application cursor mode, and xterm's terminfo then has
+    # kcud1=\EOB. A real terminal honours smkx; this pty has no emulator on the
+    # far end, so the test has to send what one would. Sending the normal-mode
+    # sequence decodes as a bare ESC, which is a correct reading of it.
+    os.write(master, b"\x1bOB")  # Down, application cursor mode
+    pump(master, 0.5, seen)
+    check("Down moves the selection", len("".join(seen)) > 0, True)
+    seen.clear()
+    os.write(master, b"Z")  # bound to nothing
+    pump(master, 0.5, seen)
+    check("an unbound key repaints nothing", "".join(seen), "")
 
     os.write(master, b"q")
     try:

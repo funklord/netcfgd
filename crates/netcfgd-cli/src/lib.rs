@@ -8,6 +8,7 @@
 //! bind on the first binary or it never binds at all.
 
 mod client;
+#[cfg(feature = "tui")]
 mod tui;
 
 use netcfgd_host::{config, hooks, state};
@@ -114,7 +115,10 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"explain" => command_explain(&arguments[1..], &options),
 		"monitor" => command_monitor(&options),
 		"wifi" => command_wifi(&positional(&arguments[1..]), &options),
+		#[cfg(feature = "tui")]
 		"tui" => tui::run(&options),
+		#[cfg(not(feature = "tui"))]
+		"tui" => Err("this build has no TUI; it was compiled without the `tui` feature".to_owned()),
 		"reset" => command_reset(&options),
 		"confirm" => command_confirm(&options, &netcfgd_proto::Request::Confirm),
 		"revert" => command_confirm(&options, &netcfgd_proto::Request::Revert),

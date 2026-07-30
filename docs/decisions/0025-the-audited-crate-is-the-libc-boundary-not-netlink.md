@@ -98,3 +98,84 @@ calls.
 **Line-oriented interactive mode, no raw terminal.** Rejected: it is not what
 design section 7.2 describes, and the plan-preview pane -- edit, see the diff,
 press a key to apply -- is the reason the TUI exists.
+
+## Amendment: the drawing is ncurses, and the reasoning above was half right
+
+Date: 2026-07-30
+
+The record above is still correct about where FFI lives. It was wrong by
+omission about what should be behind it: it treated hand-rolled ANSI as the
+obvious thing and asked only where the three termios calls belonged.
+
+The author's objection: *rolling your own ncurses will only produce
+incompatibilities and bugs.* The hand-rolled version had already produced
+three, all found within hours of shipping it:
+
+- **No escape-sequence decoding at all.** It read one byte and switched on it,
+  so every arrow key did nothing and the trailing bytes fell through as unbound
+  keys.
+- **A buffered-read bug.** Rust's `Stdin` is `BufReader`-backed; a one-byte
+  read drained the kernel buffer into userspace, after which `poll` on the
+  descriptor truthfully reported nothing readable while the next keystroke sat
+  where it could not be seen. Two keys typed together arrived a second apart.
+- **No signal handling.** `kill` left the operator's shell with `ECHO` and
+  `ICANON` both off.
+
+A fourth was found while replacing it, and is the one that makes the argument:
+`sigprocmask` sets the *calling thread's* mask, and the signal watcher was
+created after the event-subscription thread was spawned. That thread inherited
+an unblocked mask and could take the signal with default disposition.
+`SIGHUP` killed the process outright; `SIGTERM` survived only by luck of which
+thread the kernel picked.
+
+None of these are novel. All of them are things ncurses, or a correct
+signal-blocking order, has had right for decades.
+
+### The constraint did not forbid it, and saying it did was the mistake
+
+An earlier version of this reasoning held that netcfgd could not link ncurses.
+Constraint 3 says "**Core** has no mandatory dependencies beyond libc and the
+kernel. No D-Bus, no glib, no polkit, no systemd" -- a bar on heavyweight
+system integration, in a project that links serde and serde_json without
+trouble. It never forbade a library, and the TUI is not core: design section
+10.2 has always listed the TUI as removable from the embedded tier.
+
+So the honest reading is that hand-rolling was a *choice*, and dressing it as
+a constraint made a worse decision look like a forced one.
+
+### What is behind the feature flag, and why the flag exists
+
+`ncfg tui` is a cargo feature, on by default. With it off nothing links
+ncurses and the binary is byte-for-byte the size it was before any TUI existed
+-- 1,743,384, against 1,772,056 with it on. That is what keeps constraint 3
+true for a build that wants it: the operator of an appliance gets a client with
+no dependency beyond libc, and everyone else gets a TUI that works.
+
+The 28,672-byte difference is exactly seven pages, and that is not a
+coincidence about the code -- the linker pads to page boundaries, so this
+project's size gate cannot see a change smaller than 4 KB. Worth knowing before
+reading meaning into a size that did not move.
+
+### What stayed this project's own
+
+Each pane's *content* is still four pure functions from a JSON answer to a list
+of lines, tested with no terminal at all. Only the painting went to ncurses.
+That split is what let the layout tests survive the rewrite unchanged in
+substance.
+
+### Two things the replacement taught, both worth writing down
+
+**ncurses only decodes escape sequences in blocking mode.** Given a
+non-blocking or timed read it sees the `ESC`, cannot wait out `ESCDELAY` for
+the rest, and hands back raw bytes. Measured: with a 50 ms timeout, Down
+arrived as 27, 91, 66. Blocking is safe here because `poll` gates it and
+because ncurses reads the descriptor a byte at a time rather than slurping it
+-- so nothing is stranded where `poll` cannot see it, which is exactly the trap
+the hand-rolled version fell into.
+
+**A pty is not a terminal emulator.** `smkx` puts the terminal into application
+cursor mode, where xterm's `kcud1` is `\EOB` rather than `\E[B`. A test
+driving a bare pty has to send what a real terminal in that mode would send.
+Half an hour was spent hunting a decoding bug that did not exist because the
+test sent the normal-mode sequence; a minimal C program using ncurses directly
+behaved identically, which is what finally located it.

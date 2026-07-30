@@ -30,3 +30,11 @@ libc = "0.2"
 
 [dev-dependencies]
 libc = "0.2"
+
+[features]
+# The TUI's terminal handling, and the only thing in this workspace that links
+# anything beyond libc. Off means `ncfg tui` is not built and nothing depends
+# on ncurses -- which is what keeps constraint 3 true for the core, design
+# section 10.2's embedded tier having always listed the TUI as removable.
+tui = []
+
