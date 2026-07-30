@@ -74,6 +74,48 @@ comparing them against the model gets the same answer**, in an afternoon rather
 than a milestone, and it is what happens instead -- before the freeze, and
 recorded wherever it turns something up.
 
+## What the audit found, 2026-07-30
+
+Done in place of the importers, and it earned its keep. Six gaps, one of them
+in netcfgd's own model rather than against a foreign format.
+
+| Gap | Where it shows | Now |
+|---|---|---|
+| VRF | networkd `Kind=vrf`; **and netcfgd's own `RoutingRule.l3mdev`** | `InterfaceKind::Vrf`, created |
+| macvlan | netifrc `macvlan_`, networkd `Kind=macvlan` | `InterfaceKind::Macvlan`, created |
+| GRE/SIT/IPIP/geneve | networkd `Kind=gre` and friends | one `InterfaceKind::Tunnel`, created |
+| tun/tap | netifrc `tuntap_`, networkd `Kind=tun` | in the schema; needs an ioctl |
+| bridge hello/ageing/priority/vlan_filtering | netifrc `bridge_hello_time_` | on `BridgeConfig`, applied |
+| **no way to say `dummy`** | nothing -- netcfgd's own gap | `kind = "dummy"` |
+
+**The VRF one is the reason to have done this.** Decision 0018 gave
+`RoutingRule` an `l3mdev` flag -- "match packets belonging to a VRF master" --
+and nothing in the model could create the master. A field that can only ever
+match something the tool cannot build reads as supported and is not. No foreign
+format was needed to find it; reading the model against networkd's link kinds
+was.
+
+**The `dummy` one is the same shape.** `InterfaceKind::Dummy` existed from M1
+and the executor could create it. The DSL had no spelling for it, because every
+other kind is declared by its own parameter block and a dummy has no
+parameters. So the capability was reachable from the JSON document and not from
+the config language anybody writes.
+
+Two things were considered and deliberately not added:
+
+- **netifrc's `fallback_`** -- "if this config fails, use that one". It is an
+  imperative notion in a declarative model: netcfgd's addressing list is a
+  composition, not an ordered set of attempts (decision 0006). A machine that
+  wants a static address when DHCP fails is asking for something netcfgd would
+  express as both, and the difference is worth a conversation rather than a
+  field added quietly before a freeze.
+- **netifrc's `arping_`** -- checking a gateway answers before declaring a
+  link usable. That is liveness monitoring, not configuration, and it belongs
+  with whatever watches the link rather than in the desired-state document.
+
+Neither is blocked by the freeze in the way a link kind would be: both would be
+new fields on existing types, which is a minor bump.
+
 ## Consequences
 
 **M4 loses four deliverables and the freeze arrives sooner.** What is left is

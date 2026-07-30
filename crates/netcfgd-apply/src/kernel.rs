@@ -347,6 +347,10 @@ impl Executor for KernelExecutor {
 							netcfgd_netlink::ops::BridgeAttrs {
 								stp: bridge.stp,
 								forward_delay: bridge.forward_delay,
+								hello_time: bridge.hello_time,
+								ageing_time: bridge.ageing_time,
+								priority: bridge.priority,
+								vlan_filtering: bridge.vlan_filtering,
 							},
 						)
 						.map_err(|error| {
@@ -582,6 +586,33 @@ fn new_link(
 			peer: veth.peer.clone(),
 		}),
 		InterfaceKind::WireGuard(_) => Ok(NewLink::WireGuard),
+		InterfaceKind::Vrf(vrf) => Ok(NewLink::Vrf { table: vrf.table }),
+		InterfaceKind::Macvlan(macvlan) => Ok(NewLink::Macvlan {
+			parent: executor.index_of(&macvlan.parent)?,
+			mode: match macvlan.mode {
+				netcfgd_model::MacvlanMode::Private => 1,
+				netcfgd_model::MacvlanMode::Vepa => 2,
+				netcfgd_model::MacvlanMode::Bridge => 4,
+				netcfgd_model::MacvlanMode::Passthru => 8,
+			},
+		}),
+		InterfaceKind::Tunnel(tunnel) => Ok(NewLink::Tunnel {
+			kind: tunnel.kind.name(),
+			parent: match &tunnel.parent {
+				Some(parent) => Some(executor.index_of(parent)?),
+				None => None,
+			},
+			local: tunnel.local,
+			remote: tunnel.remote,
+			ttl: tunnel.ttl,
+			key: tunnel.key,
+		}),
+		InterfaceKind::Tun(_) => Err(format!(
+			"{name} is a tun/tap device, which this build cannot create: they come from a \
+			 TUNSETIFF ioctl on /dev/net/tun rather than from netlink, and that is outside \
+			 the one crate permitted unsafe. Create it with `ip tuntap add` and netcfgd will \
+			 address it."
+		)),
 		other => Err(format!(
 			"creating a {} link ({name}) is not implemented in this build",
 			kind_name(other)
@@ -600,6 +631,10 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Pppoe(_) => "pppoe",
 		InterfaceKind::Dummy => "dummy",
 		InterfaceKind::Veth(_) => "veth",
+		InterfaceKind::Vrf(_) => "vrf",
+		InterfaceKind::Macvlan(_) => "macvlan",
+		InterfaceKind::Tunnel(tunnel) => tunnel.kind.name(),
+		InterfaceKind::Tun(_) => "tun",
 	}
 }
 
