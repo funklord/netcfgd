@@ -5,6 +5,7 @@
 //! Nothing in this module is `unsafe`: the requests are built by `wire` and
 //! handed to the socket, which is where the syscalls live.
 
+use crate::dump;
 use crate::socket::Netlink;
 use crate::wire::{self, flags, ifa, ifla, msg_type, rta, AttrBuf};
 use std::io;
@@ -169,6 +170,25 @@ pub enum NewLink {
 	/// keys, peers, allowed IPs -- goes over generic netlink afterwards. See
 	/// [`crate::wg`].
 	WireGuard,
+}
+
+/// One change to a bridge VLAN.
+///
+/// A struct rather than five positional booleans: `set_bridge_vlan(i, 10,
+/// true, true, false, true)` is a line nobody can read, and three of those
+/// five mean something different if transposed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VlanChange {
+	/// The VLAN id.
+	pub vid: u16,
+	/// Untagged ingress joins this VLAN.
+	pub pvid: bool,
+	/// Egress leaves untagged.
+	pub untagged: bool,
+	/// The bridge device itself rather than a port.
+	pub on_self: bool,
+	/// Adding rather than removing.
+	pub add: bool,
 }
 
 /// Bridge attributes, applied after creation.
@@ -703,6 +723,73 @@ impl Netlink {
 		.encode(&mut body);
 
 		self.request(msg_type::RTM_NEWLINK, ack_flags(), &body, &outer)?;
+		Ok(())
+	}
+
+	/// Add or remove a VLAN on a bridge port, or on the bridge itself.
+	///
+	/// `on_self` picks which, and getting it backwards is the mistake this
+	/// interface exists to make hard: a VLAN on a *port* is a MASTER
+	/// operation, because the bridge is being told what that port carries. A
+	/// VLAN on the *bridge device* is SELF, and is what lets the bridge
+	/// terminate traffic in that VLAN itself.
+	///
+	/// # Errors
+	///
+	/// Returns the errno the kernel replied with. `EOPNOTSUPP` here almost
+	/// always means the bridge does not have `vlan_filtering` on, in which
+	/// case per-port VLANs are not a thing it has.
+	pub fn set_bridge_vlan(&mut self, index: u32, vlan: VlanChange) -> io::Result<()> {
+		let VlanChange {
+			vid,
+			pvid,
+			untagged,
+			on_self,
+			add,
+		} = vlan;
+		let mut spec = AttrBuf::new();
+		spec.push(
+			dump::IFLA_BRIDGE_FLAGS,
+			&if on_self {
+				dump::BRIDGE_FLAGS_SELF
+			} else {
+				dump::BRIDGE_FLAGS_MASTER
+			}
+			.to_ne_bytes(),
+		);
+
+		// `struct bridge_vlan_info { __u16 flags; __u16 vid; }`, in that
+		// order. Two little integers, and swapping them produces a request
+		// for VLAN 0 with nonsense flags that the kernel may well accept.
+		let mut flags = 0_u16;
+		if pvid {
+			flags |= dump::BRIDGE_VLAN_INFO_PVID;
+		}
+		if untagged {
+			flags |= dump::BRIDGE_VLAN_INFO_UNTAGGED;
+		}
+		let mut vlan_info = Vec::with_capacity(4);
+		vlan_info.extend_from_slice(&flags.to_ne_bytes());
+		vlan_info.extend_from_slice(&vid.to_ne_bytes());
+		spec.push(dump::IFLA_BRIDGE_VLAN_INFO, &vlan_info);
+
+		let mut attrs = AttrBuf::new();
+		attrs.push(dump::IFLA_AF_SPEC, spec.as_bytes());
+
+		let mut body = Vec::new();
+		wire::IfInfo {
+			family: dump::AF_BRIDGE,
+			index: i32::try_from(index).unwrap_or(0),
+			..wire::IfInfo::default()
+		}
+		.encode(&mut body);
+
+		let kind = if add {
+			msg_type::RTM_SETLINK
+		} else {
+			msg_type::RTM_DELLINK
+		};
+		self.request(kind, ack_flags(), &body, &attrs)?;
 		Ok(())
 	}
 

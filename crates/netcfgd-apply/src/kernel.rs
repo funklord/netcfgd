@@ -535,6 +535,60 @@ impl Executor for KernelExecutor {
 				}
 				Ok(())
 			}
+			Op::BridgeVlanAdd {
+				iface,
+				vid,
+				pvid,
+				untagged,
+				on_self,
+			} => {
+				let index = self.index_of(iface)?;
+				self.socket
+					.set_bridge_vlan(
+						index,
+						netcfgd_netlink::ops::VlanChange {
+							vid: *vid,
+							pvid: *pvid,
+							untagged: *untagged,
+							on_self: *on_self,
+							add: true,
+						},
+					)
+					.map_err(|error| {
+						// EOPNOTSUPP here almost always means the bridge has
+						// no vlan_filtering, in which case per-port VLANs are
+						// not a thing it has -- and the errno alone says
+						// nothing about that.
+						if error.raw_os_error() == Some(95) {
+							format!(
+								"cannot put vlan {vid} on {iface}: the bridge does not have \
+								 `vlan_filtering = true`, so it has no per-port vlans"
+							)
+						} else {
+							format!("cannot put vlan {vid} on {iface}: {error}")
+						}
+					})?;
+				Ok(())
+			}
+			Op::BridgeVlanDel {
+				iface,
+				vid,
+				on_self,
+			} => {
+				let index = self.index_of(iface)?;
+				self.socket
+					.set_bridge_vlan(
+						index,
+						netcfgd_netlink::ops::VlanChange {
+							vid: *vid,
+							pvid: false,
+							untagged: false,
+							on_self: *on_self,
+							add: false,
+						},
+					)
+					.map_err(|error| format!("cannot remove vlan {vid} from {iface}: {error}"))
+			}
 			Op::BackendStop { kind, iface } => {
 				stop_backend(*kind, iface)?;
 				self.effects.stopped_backends.push((*kind, iface.clone()));

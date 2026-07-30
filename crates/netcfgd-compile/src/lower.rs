@@ -13,9 +13,9 @@ use netcfgd_model::address::{Delegated, PrefixRef, Static};
 use netcfgd_model::device::{AccessPoint, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{
-	BondConfig, BondMode, BridgeConfig, LinkSettings, MacvlanConfig, MacvlanMode, PppoeConfig,
-	Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind, VethConfig, VlanConfig, VlanProtocol,
-	VrfConfig, VxlanConfig, WgPeer, WireGuardConfig,
+	BondConfig, BondMode, BridgeConfig, BridgeVlan, LinkSettings, MacvlanConfig, MacvlanMode,
+	PppoeConfig, Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind, VethConfig, VlanConfig,
+	VlanProtocol, VrfConfig, VxlanConfig, WgPeer, WireGuardConfig,
 };
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
@@ -186,6 +186,7 @@ fn expand_members(
 			guard: None,
 			ipv6_token: None,
 			link_settings: None,
+			bridge_vlans: Vec::new(),
 		});
 	}
 }
@@ -1303,6 +1304,7 @@ fn lower_interface(
 		guard: None,
 		ipv6_token: None,
 		link_settings: None,
+		bridge_vlans: Vec::new(),
 	};
 	let mut dns = DnsPolicy::default();
 	let mut dns_touched = false;
@@ -1362,6 +1364,13 @@ fn lower_interface(
 									 its own block, such as `bridge { ... }`",
 								),
 							),
+						}
+					}
+				}
+				"vlans" => {
+					for line in as_lines(&assignment.value, diags) {
+						if let Some(vlans) = parse_bridge_vlan(&line, diags) {
+							interface.bridge_vlans.extend(vlans);
 						}
 					}
 				}
@@ -1690,6 +1699,76 @@ fn lower_wg_peer(block: &Block, diags: &mut Diagnostics) -> Option<WgPeer> {
 		allowed_ips,
 		keepalive,
 	})
+}
+
+/// One bridge VLAN: `10`, `10 pvid untagged`, or a range `10-19`.
+///
+/// Ranges are expanded here rather than carried in the model. The kernel
+/// compresses consecutive ids on the way out and this expands them on the way
+/// in, so everything between works in single VLANs and nothing has to know
+/// ranges exist.
+fn parse_bridge_vlan(entry: &Spanned<String>, diags: &mut Diagnostics) -> Option<Vec<BridgeVlan>> {
+	let mut words = entry.node.split_whitespace();
+	let head = words.next()?;
+
+	let (first, last) = if let Some((low, high)) = head.split_once('-') {
+		(low.parse::<u16>().ok()?, high.parse::<u16>().ok()?)
+	} else {
+		let vid = head.parse::<u16>().ok()?;
+		(vid, vid)
+	};
+	if first > last {
+		diags.push(Diagnostic::new(
+			entry.span,
+			format!("`{head}` counts backwards"),
+		));
+		return None;
+	}
+	// 0 is not a VLAN and 4095 is reserved. The kernel refuses both, with an
+	// errno rather than a name.
+	if first == 0 || last > 4094 {
+		diags.push(
+			Diagnostic::new(entry.span, format!("`{head}` is not a VLAN id"))
+				.with_help("between 1 and 4094"),
+		);
+		return None;
+	}
+
+	let mut pvid = false;
+	let mut untagged = false;
+	for word in words {
+		match word {
+			"pvid" => pvid = true,
+			"untagged" => untagged = true,
+			"tagged" => untagged = false,
+			other => {
+				diags.push(
+					Diagnostic::new(entry.span, format!("`{other}` is not a vlan option"))
+						.with_help("pvid, untagged, tagged"),
+				);
+				return None;
+			}
+		}
+	}
+	// A PVID is where untagged ingress lands, so a range of them would mean
+	// several answers to one question.
+	if pvid && first != last {
+		diags.push(Diagnostic::new(
+			entry.span,
+			"a range cannot be the pvid; untagged traffic joins one vlan",
+		));
+		return None;
+	}
+
+	Some(
+		(first..=last)
+			.map(|vid| BridgeVlan {
+				vid,
+				pvid,
+				untagged,
+			})
+			.collect(),
+	)
 }
 
 /// `address/length`, which is what an allowed IP is.
