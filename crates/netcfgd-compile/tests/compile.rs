@@ -454,13 +454,30 @@ fn an_impossible_prefix_length_is_refused() {
 	assert!(rendered.contains("between 0 and 32"), "got: {rendered}");
 }
 
-/// Features that exist in the model but not in this build say which milestone
-/// they arrive in, rather than reporting an unknown keyword.
+/// There is nothing left for the compiler to defer.
+///
+/// This test used to assert that a feature in the model but not in the build
+/// named its milestone. It has been repointed four times -- `network` blocks,
+/// then wireguard, then pppoe -- and now every block the language accepts is
+/// implemented. What remains unimplemented is recognised at compile time by
+/// design (decision 0018) and reported by `ncfg plan`, which
+/// `recognised_but_unimplemented_features_are_named_in_the_plan` covers.
+///
+/// So the claim this file can still make is the narrower one: a block the
+/// language does not know is an error rather than something quietly dropped.
 #[test]
-fn an_unimplemented_feature_names_its_milestone() {
-	let rendered = errors("interface ppp0 {\n\tpppoe { parent = \"eth0\" }\n}");
-	assert!(rendered.contains("M4"), "got: {rendered}");
-	assert!(rendered.contains("netcfgd-ppp"), "got: {rendered}");
+fn an_unknown_block_is_an_error_rather_than_ignored() {
+	let rendered = errors("interface eth0 {\n\tsorcery { level = 9 }\n}");
+	assert!(
+		rendered.contains("not valid inside `interface`"),
+		"got: {rendered}"
+	);
+
+	let rendered = errors("wizardry \"x\" { }");
+	assert!(
+		rendered.contains("unknown top-level block"),
+		"got: {rendered}"
+	);
 }
 
 /// Unterminated constructs are named rather than producing a cascade.
@@ -1373,4 +1390,52 @@ fn the_remaining_bridge_parameters_compile() {
 		panic!("expected a bridge");
 	};
 	assert!(!bridge.vlan_filtering);
+}
+
+/// `PPPoE`, which for a DSL line is not a nicety -- it is the only way onto the
+/// network at all.
+#[test]
+fn pppoe_compiles() {
+	let document = build_ok(
+		r#"
+interface ppp0 {
+	pppoe {
+		parent   = "eth0"
+		username = "alice@isp.example"
+		password = "@secret:dsl"
+		service  = "internet"
+	}
+	routes = "default"
+}
+"#,
+	);
+	let netcfgd_model::InterfaceKind::Pppoe(pppoe) = &document.interfaces[0].kind else {
+		panic!("expected a pppoe interface");
+	};
+	assert_eq!(pppoe.parent, "eth0");
+	assert_eq!(pppoe.username, "alice@isp.example");
+	assert_eq!(pppoe.service.as_deref(), Some("internet"));
+
+	// The route a DSL user actually needs: a point-to-point link has no
+	// gateway, so `default` with no `via` is a device route netcfgd owns --
+	// rather than one pppd installs behind its back.
+	assert_eq!(document.interfaces[0].routes.len(), 1);
+	assert_eq!(document.interfaces[0].routes[0].destination, "default");
+	assert!(document.interfaces[0].routes[0].via.is_none());
+}
+
+/// A DSL password inline would put it in version control, like every other
+/// credential here.
+#[test]
+fn a_pppoe_password_must_be_a_secret() {
+	let message = errors(
+		r#"interface ppp0 { pppoe { parent = "eth0"; username = "a"; password = "hunter2" } }"#,
+	);
+	assert!(message.contains("secret reference"), "got: {message}");
+
+	let missing = errors(r#"interface ppp0 { pppoe { parent = "eth0" } }"#);
+	assert!(missing.contains("needs a `username`"), "got: {missing}");
+
+	let parentless = errors(r#"interface ppp0 { pppoe { username = "a" } }"#);
+	assert!(parentless.contains("needs a `parent`"), "got: {parentless}");
 }

@@ -371,9 +371,62 @@ impl Builder {
 			.map(|(_, id)| *id)
 	}
 
+	/// The backend an interface needs before it can carry anything.
+	///
+	/// Three cases and one shape: an 802.1X port has not authenticated, a
+	/// radio has not associated, and a PPP interface does not exist. All three
+	/// are prerequisites rather than addressing, and all three go in the same
+	/// place in the order -- before any address, because a client started
+	/// first spends its backoff talking to something that is not listening.
+	fn plan_prerequisite(
+		&mut self,
+		interface: &Interface,
+		observed: &Observed,
+		base: &[u32],
+	) -> Vec<u32> {
+		if interface.dot1x.is_some() {
+			return self.plan_backend(interface, BackendKind::Supplicant, "dot1x", observed, base);
+		}
+		if matches!(interface.kind, InterfaceKind::Pppoe(_)) {
+			return self.plan_backend(interface, BackendKind::Pppoe, "pppoe", observed, base);
+		}
+		if self.radios.iter().any(|name| name == &interface.name) && self.has_networks {
+			// The field named is the `device` block's, not the interface's,
+			// because that is where somebody would go to turn this off.
+			return self.plan_backend(interface, BackendKind::Supplicant, "wifi", observed, base);
+		}
+		Vec::new()
+	}
+
+	/// A PPP interface that does not exist yet.
+	///
+	/// Only the dial is planned. PPP negotiates asynchronously, so the
+	/// interface appears seconds after `pppd` starts -- "waits for the
+	/// session" means "arrives on a later reconcile" rather than "later in
+	/// this plan". The daemon gets there on its own when netlink reports the
+	/// new link; `ncfg apply --oneshot` needs a second run, and the warning
+	/// says so rather than leaving a DSL user wondering why their route is
+	/// missing.
+	fn plan_ppp_session(&mut self, interface: &Interface, observed: &Observed) {
+		let name = &interface.name;
+		let base = self.gate(name);
+		self.plan_backend(interface, BackendKind::Pppoe, "pppoe", observed, &base);
+		self.warn(
+			name,
+			"the ppp session is not up yet; addressing and routes are planned once it is",
+		);
+	}
+
 	/// Rule 1: create a link before anything references it.
 	fn plan_link_creation(&mut self, interface: &Interface, observed: &Observed) {
 		if observed.link(&interface.name).is_some() {
+			return;
+		}
+		if matches!(interface.kind, InterfaceKind::Pppoe(_)) {
+			// A PPP interface is created by `pppd` when the session comes up,
+			// not by netlink. Planning a `link.create` for it would emit an
+			// action that must fail; the `backend.start` below is what brings
+			// it into existence.
 			return;
 		}
 		if matches!(interface.kind, InterfaceKind::Physical) {
@@ -405,6 +458,10 @@ impl Builder {
 	fn plan_link_attributes(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let link = observed.link(name);
+		if link.is_none() && matches!(interface.kind, InterfaceKind::Pppoe(_)) {
+			self.plan_ppp_session(interface, observed);
+			return;
+		}
 		if link.is_none()
 			&& matches!(interface.kind, InterfaceKind::Physical)
 			&& !self.appearing.iter().any(|peer| peer == name)
@@ -502,6 +559,10 @@ impl Builder {
 	fn plan_interface_contents(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let link = observed.link(name);
+		if link.is_none() && matches!(interface.kind, InterfaceKind::Pppoe(_)) {
+			self.plan_ppp_session(interface, observed);
+			return;
+		}
 		if link.is_none()
 			&& matches!(interface.kind, InterfaceKind::Physical)
 			&& !self.appearing.iter().any(|peer| peer == name)
@@ -579,19 +640,7 @@ impl Builder {
 		// listening -- and then report a failure whose real cause is two steps
 		// earlier. Decision 0008 puts wired 802.1X on the same supplicant as
 		// wifi, so this is the same op either way.
-		let mut authentication = Vec::new();
-		if interface.dot1x.is_some() {
-			authentication =
-				self.plan_backend(interface, BackendKind::Supplicant, "dot1x", observed, &base);
-		} else if self.radios.iter().any(|name| name == &interface.name) && self.has_networks {
-			// A radio carries nothing until it has associated, so the
-			// supplicant is the same kind of prerequisite as 802.1X and gets
-			// the same position in the order. The field named in the reason is
-			// the `device` block's, not the interface's, because that is where
-			// somebody would go to turn this off.
-			authentication =
-				self.plan_backend(interface, BackendKind::Supplicant, "wifi", observed, &base);
-		}
+		let authentication = self.plan_prerequisite(interface, observed, &base);
 
 		let mut addressing_ids = Vec::new();
 		for (index, source) in interface.addressing.iter().enumerate() {
@@ -1027,6 +1076,69 @@ impl Builder {
 		}
 	}
 
+	/// Whether a running backend is one the document asks for, and which
+	/// config field decides it.
+	///
+	/// **Exhaustive on the kind, deliberately.** This is the third place a new
+	/// backend has had to be taught about, and the first two were both found
+	/// the same way: the idempotence gate caught netcfgd starting something
+	/// and stopping it on the next reconcile, forever. A wildcard arm here is
+	/// what made that possible twice, so there is not one -- a kind added
+	/// without an answer fails to compile.
+	///
+	/// The field is returned alongside because an operator told a supplicant
+	/// was stopped because of `addressing` goes and looks at the wrong block.
+	fn backend_wanted(
+		&self,
+		desired: &Document,
+		backend: &netcfgd_model::ObservedBackend,
+	) -> (bool, &'static str) {
+		let on_interface = |predicate: &dyn Fn(&Interface) -> bool| {
+			desired
+				.interfaces
+				.iter()
+				.filter(|interface| interface.name == backend.interface)
+				.any(predicate)
+		};
+
+		match backend.kind {
+			BackendKind::Supplicant => (
+				self.supplicant_wanted(desired, &backend.interface),
+				"wifi/dot1x",
+			),
+			BackendKind::Dhcp4 => (
+				on_interface(&|interface| {
+					interface
+						.addressing
+						.iter()
+						.any(|source| matches!(source, AddressSource::Dhcp4(_)))
+				}),
+				"addressing",
+			),
+			BackendKind::Dhcp6 => (
+				on_interface(&|interface| {
+					interface
+						.addressing
+						.iter()
+						.any(|source| matches!(source, AddressSource::Dhcp6(_)))
+				}),
+				"addressing",
+			),
+			// The session *is* the interface, so the question is whether the
+			// document still declares one.
+			BackendKind::Pppoe => (
+				on_interface(&|interface| matches!(interface.kind, InterfaceKind::Pppoe(_))),
+				"pppoe",
+			),
+			// Not started by the planner, so not stopped by it either. A
+			// WireGuard device is configured at creation and a DNS delivery is
+			// an action rather than a process; router advertisement is not
+			// implemented. Reporting them as unwanted would stop something
+			// netcfgd never started.
+			BackendKind::WireGuard | BackendKind::Dns | BackendKind::RouterAdvert => (true, ""),
+		}
+	}
+
 	/// Whether a running supplicant is one the document asks for.
 	///
 	/// The same two conditions that start one. Getting this wrong in the
@@ -1047,32 +1159,7 @@ impl Builder {
 			if !backend.running {
 				continue;
 			}
-			// Why a backend is wanted differs by kind, and the field named in
-			// the reason has to differ with it -- an operator told a
-			// supplicant was stopped because of `addressing` would go and look
-			// at the wrong block.
-			let (wanted, field) = match backend.kind {
-				BackendKind::Supplicant => (
-					self.supplicant_wanted(desired, &backend.interface),
-					"wifi/dot1x",
-				),
-				_ => (
-					desired
-						.interfaces
-						.iter()
-						.filter(|interface| interface.name == backend.interface)
-						.any(|interface| {
-							interface.addressing.iter().any(|source| {
-								matches!(
-									(source, backend.kind),
-									(AddressSource::Dhcp4(_), BackendKind::Dhcp4)
-										| (AddressSource::Dhcp6(_), BackendKind::Dhcp6)
-								)
-							})
-						}),
-					"addressing",
-				),
-			};
+			let (wanted, field) = self.backend_wanted(desired, backend);
 			if wanted {
 				continue;
 			}
