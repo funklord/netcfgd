@@ -60,5 +60,11 @@ tolerance_percent 3
 # Then the five scope-capable DNS backends: openresolv, resolved, dnsmasq,
 # unbound and exec. +12 KB each -- the renderers are text and the delivery is
 # a process spawn or a file write, so none of them is large.
-ncfg     1124800
-netcfgd  1448472
+#
+# Then the pre-freeze format audit's findings: VRF, macvlan, the tunnel family
+# (gre/gretap/ip6gre/ipip/sit/ip6tnl/geneve), tun/tap as schema-only, a
+# spelling for parameterless kinds, and four more bridge parameters. +16 KB and
+# +37 KB -- the tunnel encoding is three attribute families that disagree about
+# numbering, which is most of it.
+ncfg     1141184
+netcfgd  1485336

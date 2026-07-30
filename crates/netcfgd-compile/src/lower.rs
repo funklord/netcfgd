@@ -13,10 +13,10 @@ use netcfgd_model::address::{Delegated, PrefixRef, Static};
 use netcfgd_model::device::{AccessPoint, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{
-	BondConfig, BondMode, BridgeConfig, VethConfig, VlanConfig, VlanProtocol, VxlanConfig, WgPeer,
-	WireGuardConfig,
+	BondConfig, BondMode, BridgeConfig, LinkSettings, MacvlanConfig, MacvlanMode, Toggle,
+	TunConfig, TunMode, TunnelConfig, TunnelKind, VethConfig, VlanConfig, VlanProtocol, VrfConfig,
+	VxlanConfig, WgPeer, WireGuardConfig,
 };
-use netcfgd_model::interface::{LinkSettings, Toggle};
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
 use netcfgd_model::{
@@ -1342,6 +1342,29 @@ fn lower_interface(
 					interface.mtu = as_u32(&assignment.value, diags);
 				}
 				"mac" => interface.mac = as_string(&assignment.value, diags),
+				// The kinds with no parameters, which therefore have no block
+				// to be declared by. `dummy` was creatable by the executor and
+				// unsayable in the config until the pre-freeze audit noticed:
+				// a dummy interface is the ordinary way to hold an address
+				// that does not depend on any cable.
+				"kind" => {
+					if let Some(name) = as_string(&assignment.value, diags) {
+						match name.as_str() {
+							"dummy" => interface.kind = InterfaceKind::Dummy,
+							"physical" => interface.kind = InterfaceKind::Physical,
+							other => diags.push(
+								Diagnostic::new(
+									assignment.span,
+									format!("`{other}` is not a parameterless interface kind"),
+								)
+								.with_help(
+									"one of dummy, physical; everything else is declared by \
+									 its own block, such as `bridge { ... }`",
+								),
+							),
+						}
+					}
+				}
 				"ipv6_token" => {
 					if let Some(text) = as_string(&assignment.value, diags) {
 						// A token is an interface identifier, so the prefix
@@ -1445,6 +1468,24 @@ fn lower_interface(
 					if let Some(kind) = lower_vxlan(inner, diags) {
 						interface.kind = kind;
 					}
+				}
+				"vrf" => {
+					if let Some(kind) = lower_vrf(inner, diags) {
+						interface.kind = kind;
+					}
+				}
+				"macvlan" => {
+					if let Some(kind) = lower_macvlan(inner, diags) {
+						interface.kind = kind;
+					}
+				}
+				"tunnel" => {
+					if let Some(kind) = lower_tunnel(inner, diags) {
+						interface.kind = kind;
+					}
+				}
+				"tun" | "tap" => {
+					interface.kind = lower_tun(inner, inner.head == "tap", diags);
 				}
 				"veth" => {
 					if let Some(kind) = lower_veth(inner, diags) {
@@ -1742,6 +1783,193 @@ fn lower_vxlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> 
 	Some(InterfaceKind::Vxlan(config))
 }
 
+fn lower_vrf(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	let mut table = None;
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"table" => table = as_u32(&assignment.value, diags),
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown vrf key `{other}`"),
+			)),
+		}
+	}
+	let Some(table) = table else {
+		diags.push(
+			Diagnostic::new(block.span, "a vrf needs a `table`").with_help(
+				"enslaving an interface moves its routes into that table; a vrf without \
+				 one isolates traffic into nowhere",
+			),
+		);
+		return None;
+	};
+	Some(InterfaceKind::Vrf(VrfConfig { table }))
+}
+
+fn lower_macvlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	let mut parent = None;
+	let mut mode = MacvlanMode::Private;
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"parent" | "dev" => parent = as_string(&assignment.value, diags),
+			"mode" => {
+				if let Some(name) = as_string(&assignment.value, diags) {
+					match name.as_str() {
+						"private" => mode = MacvlanMode::Private,
+						"vepa" => mode = MacvlanMode::Vepa,
+						"bridge" => mode = MacvlanMode::Bridge,
+						"passthru" => mode = MacvlanMode::Passthru,
+						other => diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{other}` is not a macvlan mode"),
+							)
+							.with_help("one of private, vepa, bridge, passthru"),
+						),
+					}
+				}
+			}
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown macvlan key `{other}`"),
+			)),
+		}
+	}
+	let Some(parent) = parent else {
+		diags.push(Diagnostic::new(
+			block.span,
+			"a macvlan needs a `parent` to sit on",
+		));
+		return None;
+	};
+	Some(InterfaceKind::Macvlan(MacvlanConfig { parent, mode }))
+}
+
+fn lower_tunnel(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	let mut kind = None;
+	let mut config = TunnelConfig {
+		kind: TunnelKind::Gre,
+		local: None,
+		remote: None,
+		parent: None,
+		ttl: None,
+		key: None,
+	};
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		let address = |diags: &mut Diagnostics| -> Option<std::net::IpAddr> {
+			let text = as_string(&assignment.value, diags)?;
+			if let Ok(address) = text.parse() {
+				Some(address)
+			} else {
+				diags.push(Diagnostic::new(
+					assignment.value.span,
+					format!("`{text}` is not an IP address"),
+				));
+				None
+			}
+		};
+		match assignment.key.as_str() {
+			"mode" | "kind" => {
+				if let Some(name) = as_string(&assignment.value, diags) {
+					kind = match name.as_str() {
+						"gre" => Some(TunnelKind::Gre),
+						"gretap" => Some(TunnelKind::Gretap),
+						"ip6gre" => Some(TunnelKind::Ip6gre),
+						"ipip" => Some(TunnelKind::Ipip),
+						"sit" => Some(TunnelKind::Sit),
+						"ip6tnl" => Some(TunnelKind::Ip6tnl),
+						"geneve" => Some(TunnelKind::Geneve),
+						other => {
+							diags.push(
+								Diagnostic::new(
+									assignment.span,
+									format!("`{other}` is not a tunnel mode"),
+								)
+								.with_help("one of gre, gretap, ip6gre, ipip, sit, ip6tnl, geneve"),
+							);
+							None
+						}
+					};
+				}
+			}
+			"local" => config.local = address(diags),
+			"remote" => config.remote = address(diags),
+			"parent" | "dev" => config.parent = as_string(&assignment.value, diags),
+			"ttl" => {
+				config.ttl = as_u32(&assignment.value, diags).and_then(|n| u8::try_from(n).ok());
+			}
+			"key" | "vni" => config.key = as_u32(&assignment.value, diags),
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown tunnel key `{other}`"),
+			)),
+		}
+	}
+
+	let Some(kind) = kind else {
+		diags.push(
+			Diagnostic::new(block.span, "a tunnel needs a `mode`")
+				.with_help("one of gre, gretap, ip6gre, ipip, sit, ip6tnl, geneve"),
+		);
+		return None;
+	};
+	config.kind = kind;
+
+	// The endpoints have to agree with each other and with the encapsulation.
+	// A v6 remote on an `ipip` produces a link the kernel refuses to build,
+	// with an error naming neither.
+	for (label, address) in [("local", config.local), ("remote", config.remote)] {
+		if let Some(address) = address {
+			if address.is_ipv6() != kind.is_v6() {
+				diags.push(Diagnostic::new(
+					block.span,
+					format!(
+						"a `{}` tunnel carries an IPv{} outer header, and `{label}` is IPv{}",
+						kind.name(),
+						if kind.is_v6() { 6 } else { 4 },
+						if address.is_ipv6() { 6 } else { 4 }
+					),
+				));
+				return None;
+			}
+		}
+	}
+
+	Some(InterfaceKind::Tunnel(config))
+}
+
+fn lower_tun(block: &Block, tap: bool, diags: &mut Diagnostics) -> InterfaceKind {
+	let mut config = TunConfig {
+		mode: if tap { TunMode::Tap } else { TunMode::Tun },
+		owner: None,
+		group: None,
+	};
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"owner" => config.owner = as_string(&assignment.value, diags),
+			"group" => config.group = as_string(&assignment.value, diags),
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown tun key `{other}`"),
+			)),
+		}
+	}
+	InterfaceKind::Tun(config)
+}
+
 fn lower_veth(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 	let mut peer = None;
 	for item in &block.items {
@@ -1839,6 +2067,17 @@ fn lower_bridge(block: &Block, diags: &mut Diagnostics) -> InterfaceKind {
 				}
 			}
 			"forward_delay" => config.forward_delay = as_u32(&assignment.value, diags),
+			"hello_time" => config.hello_time = as_u32(&assignment.value, diags),
+			"ageing_time" => config.ageing_time = as_u32(&assignment.value, diags),
+			"priority" => {
+				config.priority =
+					as_u32(&assignment.value, diags).and_then(|n| u16::try_from(n).ok());
+			}
+			"vlan_filtering" => {
+				if let Some(flag) = as_bool(&assignment.value, diags) {
+					config.vlan_filtering = flag;
+				}
+			}
 			other => diags.push(Diagnostic::new(
 				assignment.span,
 				format!("unknown bridge key `{other}`"),

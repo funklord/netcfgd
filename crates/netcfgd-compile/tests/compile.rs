@@ -1268,3 +1268,109 @@ interface wg0 {
 	);
 	assert!(message.contains("share the public key"), "got: {message}");
 }
+
+/// The link kinds the pre-freeze format audit turned up. Each is expressible
+/// in netifrc or networkd and was not expressible here.
+#[test]
+fn the_audit_kinds_compile() {
+	use netcfgd_model::{InterfaceKind, MacvlanMode, TunnelKind};
+
+	let document = build_ok(
+		r#"
+interface mgmt-vrf { vrf { table = 100 }; config = "null" }
+interface base0    { kind = "dummy"; config = "10.7.0.1/24" }
+interface mv0      { macvlan { parent = "base0"; mode = "bridge" }; config = "null" }
+interface gre1     { tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2" }; config = "null" }
+interface tap0     { tap { owner = "qemu" }; config = "null" }
+"#,
+	);
+
+	let kind = |name: &str| {
+		document
+			.interfaces
+			.iter()
+			.find(|interface| interface.name == name)
+			.unwrap_or_else(|| panic!("no {name}"))
+			.kind
+			.clone()
+	};
+
+	let InterfaceKind::Vrf(vrf) = kind("mgmt-vrf") else {
+		panic!("expected a vrf");
+	};
+	assert_eq!(vrf.table, 100);
+
+	// A dummy was creatable by the executor and unsayable in the config until
+	// the audit noticed -- the gap was in netcfgd's own coverage, not against
+	// a foreign format.
+	assert!(matches!(kind("base0"), InterfaceKind::Dummy));
+
+	let InterfaceKind::Macvlan(macvlan) = kind("mv0") else {
+		panic!("expected a macvlan");
+	};
+	assert_eq!(macvlan.mode, MacvlanMode::Bridge);
+
+	let InterfaceKind::Tunnel(tunnel) = kind("gre1") else {
+		panic!("expected a tunnel");
+	};
+	assert_eq!(tunnel.kind, TunnelKind::Gre);
+
+	let InterfaceKind::Tun(tun) = kind("tap0") else {
+		panic!("expected a tap");
+	};
+	assert_eq!(tun.mode, netcfgd_model::TunMode::Tap);
+}
+
+/// A VRF with no table isolates traffic into nowhere.
+#[test]
+fn a_vrf_needs_a_table() {
+	let message = errors("interface v { vrf { } }");
+	assert!(message.contains("needs a `table`"), "got: {message}");
+}
+
+/// A v6 endpoint on a v4 encapsulation produces a link the kernel refuses to
+/// build, with an error naming neither the interface nor the field.
+#[test]
+fn a_tunnel_endpoint_must_match_its_encapsulation() {
+	let message = errors(r#"interface t { tunnel { mode = "ipip"; remote = "fd00::1" } }"#);
+	assert!(message.contains("IPv4 outer header"), "got: {message}");
+	assert!(message.contains("`remote` is IPv6"), "got: {message}");
+
+	// And the v6 kinds want v6 endpoints.
+	let message = errors(r#"interface t { tunnel { mode = "ip6tnl"; local = "10.0.0.1" } }"#);
+	assert!(message.contains("IPv6 outer header"), "got: {message}");
+}
+
+/// tun and tap are in the schema and cannot be created, because they come from
+/// an ioctl rather than netlink. The config compiles so the schema is settled
+/// before the freeze; the refusal happens where the attempt would.
+#[test]
+fn a_tun_device_compiles_and_says_it_cannot_be_created() {
+	let document = build_ok(r#"interface tun0 { tun { }; config = "null" }"#);
+	assert!(matches!(
+		document.interfaces[0].kind,
+		netcfgd_model::InterfaceKind::Tun(_)
+	));
+}
+
+/// The bridge parameters netifrc sets and netcfgd could not.
+#[test]
+fn the_remaining_bridge_parameters_compile() {
+	let document = build_ok(
+		r#"interface br0 { bridge { hello_time = 3; ageing_time = 60; priority = 4096; vlan_filtering = true }; config = "null" }"#,
+	);
+	let netcfgd_model::InterfaceKind::Bridge(bridge) = &document.interfaces[0].kind else {
+		panic!("expected a bridge");
+	};
+	assert_eq!(bridge.hello_time, Some(3));
+	assert_eq!(bridge.ageing_time, Some(60));
+	assert_eq!(bridge.priority, Some(4096));
+	assert!(bridge.vlan_filtering);
+	// Off unless asked: a bridge quietly becoming VLAN-aware drops untagged
+	// traffic that used to pass.
+	let plain = build_ok(r#"interface br1 { bridge { }; config = "null" }"#);
+	let netcfgd_model::InterfaceKind::Bridge(bridge) = &plain.interfaces[0].kind else {
+		panic!("expected a bridge");
+	};
+	assert!(!bridge.vlan_filtering);
+}

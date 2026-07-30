@@ -123,6 +123,23 @@ pub struct BridgeConfig {
 	/// Forward delay in seconds.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub forward_delay: Option<u32>,
+	/// Hello interval in seconds.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub hello_time: Option<u32>,
+	/// How long a learned address survives without traffic, in seconds.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub ageing_time: Option<u32>,
+	/// Bridge priority, which decides the root in a spanning tree.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub priority: Option<u16>,
+	/// Whether the bridge is VLAN-aware.
+	///
+	/// Off by default, as in the kernel. Turning it on changes what the bridge
+	/// does with tagged frames, so it is never inferred from the presence of
+	/// VLAN interfaces elsewhere in the document -- a bridge quietly becoming
+	/// VLAN-aware would drop untagged traffic that used to pass.
+	#[serde(default)]
+	pub vlan_filtering: bool,
 }
 
 /// A bond.
@@ -174,6 +191,167 @@ pub struct VxlanConfig {
 	/// UDP port.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub port: Option<u16>,
+}
+
+/// A VRF: a routing table with an interface in front of it.
+///
+/// The reason this exists is an inconsistency the pre-freeze format audit
+/// found in netcfgd's own model. [`crate::RoutingRule`] has an `l3mdev` flag
+/// -- "match packets belonging to a VRF master" -- and nothing could create
+/// the master. A rule that can only ever match something the tool cannot build
+/// is a field that reads as supported and is not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VrfConfig {
+	/// The routing table this VRF's members use.
+	///
+	/// Required, and the whole point: enslaving an interface to a VRF moves
+	/// its routes into this table. A VRF without one would be a device that
+	/// isolates traffic into nowhere.
+	pub table: u32,
+}
+
+/// How a macvlan relates to the interface it sits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MacvlanMode {
+	/// Members cannot talk to each other, only to the outside. The default
+	/// because it is the one with no surprising reachability.
+	#[default]
+	Private,
+	/// Members reach each other through the parent's upstream switch, if the
+	/// switch reflects frames.
+	Vepa,
+	/// Members reach each other directly. The usual choice for containers.
+	Bridge,
+	/// One member, promiscuous, for passing a whole segment through.
+	Passthru,
+}
+
+impl MacvlanMode {
+	/// The name `iproute2` uses.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::Private => "private",
+			Self::Vepa => "vepa",
+			Self::Bridge => "bridge",
+			Self::Passthru => "passthru",
+		}
+	}
+}
+
+/// A macvlan: another MAC address on somebody else's NIC.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MacvlanConfig {
+	/// The interface it sits on.
+	pub parent: String,
+	/// How members see each other.
+	#[serde(default)]
+	pub mode: MacvlanMode,
+}
+
+/// Which encapsulation a point-to-point tunnel uses.
+///
+/// One variant per kernel link kind, and one model type for all of them,
+/// because they take the same parameters and differ only in the name sent to
+/// the kernel. Five `InterfaceKind` variants carrying identical fields would
+/// be five places to keep in step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelKind {
+	/// GRE over IPv4.
+	Gre,
+	/// GRE over IPv4, carrying ethernet.
+	Gretap,
+	/// GRE over IPv6.
+	Ip6gre,
+	/// IPv4 in IPv4.
+	Ipip,
+	/// IPv6 in IPv4. Also what a 6to4 or 6rd tunnel is.
+	Sit,
+	/// IPv6 in IPv6.
+	Ip6tnl,
+	/// Geneve, which is `VXLAN`'s successor and takes a remote like a tunnel.
+	Geneve,
+}
+
+impl TunnelKind {
+	/// The kernel's name for this link kind.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::Gre => "gre",
+			Self::Gretap => "gretap",
+			Self::Ip6gre => "ip6gre",
+			Self::Ipip => "ipip",
+			Self::Sit => "sit",
+			Self::Ip6tnl => "ip6tnl",
+			Self::Geneve => "geneve",
+		}
+	}
+
+	/// Whether the outer header is IPv6.
+	#[must_use]
+	pub fn is_v6(self) -> bool {
+		matches!(self, Self::Ip6gre | Self::Ip6tnl)
+	}
+}
+
+/// A point-to-point tunnel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TunnelConfig {
+	/// Which encapsulation.
+	pub kind: TunnelKind,
+	/// Local endpoint.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub local: Option<IpAddr>,
+	/// Remote endpoint.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub remote: Option<IpAddr>,
+	/// Underlay interface, where one is named.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub parent: Option<String>,
+	/// Outer TTL. Zero means inherit from the inner packet.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ttl: Option<u8>,
+	/// GRE key, for the kinds that have one.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub key: Option<u32>,
+}
+
+/// Whether a tun/tap device carries IP packets or ethernet frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TunMode {
+	/// Layer 3: IP packets, no ethernet header.
+	#[default]
+	Tun,
+	/// Layer 2: full ethernet frames.
+	Tap,
+}
+
+/// A persistent tun or tap device.
+///
+/// In the schema and not implemented, and the reason is specific: unlike every
+/// other link kind here, tun and tap are not created over rtnetlink. They come
+/// from a `TUNSETIFF` ioctl on `/dev/net/tun`, which is an ioctl outside the
+/// one crate permitted `unsafe` -- the same wall `LinkSettings` hit, and it
+/// does not fall to the generic netlink work that cleared ethtool's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TunConfig {
+	/// Layer 3 or layer 2.
+	#[serde(default)]
+	pub mode: TunMode,
+	/// User permitted to attach to it.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub owner: Option<String>,
+	/// Group permitted to attach to it.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub group: Option<String>,
 }
 
 /// A `WireGuard` peer.
@@ -265,6 +443,14 @@ pub enum InterfaceKind {
 	Dummy,
 	/// One end of a veth pair.
 	Veth(VethConfig),
+	/// A VRF master.
+	Vrf(VrfConfig),
+	/// A macvlan on another interface.
+	Macvlan(MacvlanConfig),
+	/// A point-to-point tunnel.
+	Tunnel(TunnelConfig),
+	/// A persistent tun or tap device. Unimplemented; see [`TunConfig`].
+	Tun(TunConfig),
 }
 
 /// Which daemon sends router advertisements.

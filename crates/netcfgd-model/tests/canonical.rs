@@ -150,6 +150,10 @@ fn nested_lists_sort_as_well() {
 		members: vec!["eth2".to_owned(), "eth1".to_owned()],
 		stp: false,
 		forward_delay: None,
+		hello_time: None,
+		ageing_time: None,
+		priority: None,
+		vlan_filtering: false,
 	});
 	a.interfaces.push(eth0);
 
@@ -161,6 +165,10 @@ fn nested_lists_sort_as_well() {
 		members: vec!["eth1".to_owned(), "eth2".to_owned()],
 		stp: false,
 		forward_delay: None,
+		hello_time: None,
+		ageing_time: None,
+		priority: None,
+		vlan_filtering: false,
 	});
 	b.interfaces.push(eth0);
 

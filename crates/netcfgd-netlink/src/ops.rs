@@ -33,7 +33,11 @@ const IFLA_VLAN_PROTOCOL: u16 = 5;
 const IFLA_LINK: u16 = 5;
 /// `IFLA_LINKINFO` sub-attributes for a bridge.
 const IFLA_BR_FORWARD_DELAY: u16 = 1;
+const IFLA_BR_HELLO_TIME: u16 = 2;
+const IFLA_BR_AGEING_TIME: u16 = 4;
 const IFLA_BR_STP_STATE: u16 = 5;
+const IFLA_BR_PRIORITY: u16 = 6;
+const IFLA_BR_VLAN_FILTERING: u16 = 7;
 /// `IFLA_BOND_*`.
 const IFLA_BOND_MODE: u16 = 1;
 const IFLA_BOND_MIIMON: u16 = 3;
@@ -44,6 +48,43 @@ const IFLA_VXLAN_LOCAL: u16 = 4;
 const IFLA_VXLAN_PORT: u16 = 15;
 const IFLA_VXLAN_GROUP6: u16 = 16;
 const IFLA_VXLAN_LOCAL6: u16 = 17;
+/// `IFLA_VRF_TABLE`.
+const IFLA_VRF_TABLE: u16 = 1;
+/// `IFLA_MACVLAN_MODE`.
+const IFLA_MACVLAN_MODE: u16 = 1;
+/// `IFLA_IPTUN_*`, for ipip, sit and ip6tnl.
+const IFLA_IPTUN_LOCAL: u16 = 2;
+const IFLA_IPTUN_REMOTE: u16 = 3;
+const IFLA_IPTUN_TTL: u16 = 4;
+
+/// `IFLA_GRE_*`, which are numbered differently from the ip tunnels.
+///
+/// They do not share numbering, and assuming they did is how the first version
+/// of this failed: GRE puts its flags and keys at 2..5 and the endpoints at
+/// 6 and 7, where an ip tunnel has the endpoints at 2 and 3. Sending an ip
+/// tunnel's numbering to GRE puts the local address in `IFLA_GRE_IFLAGS` and
+/// the kernel answers `EINVAL`.
+const IFLA_GRE_IFLAGS: u16 = 2;
+const IFLA_GRE_OFLAGS: u16 = 3;
+const IFLA_GRE_IKEY: u16 = 4;
+const IFLA_GRE_OKEY: u16 = 5;
+const IFLA_GRE_LOCAL: u16 = 6;
+const IFLA_GRE_REMOTE: u16 = 7;
+const IFLA_GRE_TTL: u16 = 8;
+
+/// `GRE_KEY`, the flag that says a key is present.
+///
+/// GRE carries a key only if the corresponding flag bit is set in `IFLAGS` and
+/// `OFLAGS`. Setting the key alone produces a tunnel that silently ignores it,
+/// which is worse than an error: two ends configured with different keys would
+/// pass traffic anyway.
+const GRE_KEY_FLAG: u16 = 0x2000;
+/// `IFLA_GENEVE_ID` and `REMOTE`, which are numbered on their own.
+const IFLA_GENEVE_ID: u16 = 1;
+const IFLA_GENEVE_REMOTE: u16 = 2;
+const IFLA_GENEVE_TTL: u16 = 4;
+const IFLA_GENEVE_REMOTE6: u16 = 7;
+
 /// `VETH_INFO_PEER`, whose payload is a whole nested `ifinfomsg` plus
 /// attributes rather than a plain value -- veth is the one link type created
 /// two-at-a-time, so the peer's entire definition rides inside the first.
@@ -95,6 +136,33 @@ pub enum NewLink {
 		/// The name of the other end.
 		peer: String,
 	},
+	/// A VRF master owning a routing table.
+	Vrf {
+		/// The table its members' routes go into.
+		table: u32,
+	},
+	/// A macvlan on `parent`.
+	Macvlan {
+		/// Index of the interface it sits on.
+		parent: u32,
+		/// The kernel's mode number.
+		mode: u32,
+	},
+	/// A point-to-point tunnel.
+	Tunnel {
+		/// The kernel's name for the encapsulation.
+		kind: &'static str,
+		/// Index of the underlay interface, where one is named.
+		parent: Option<u32>,
+		/// Local endpoint.
+		local: Option<std::net::IpAddr>,
+		/// Remote endpoint.
+		remote: Option<std::net::IpAddr>,
+		/// Outer TTL.
+		ttl: Option<u8>,
+		/// GRE key, where the kind has one.
+		key: Option<u32>,
+	},
 	/// A `WireGuard` device.
 	///
 	/// The link is ordinary rtnetlink; everything that makes it a tunnel --
@@ -110,6 +178,83 @@ pub struct BridgeAttrs {
 	pub stp: bool,
 	/// Forward delay in seconds.
 	pub forward_delay: Option<u32>,
+	/// Hello interval in seconds.
+	pub hello_time: Option<u32>,
+	/// Address ageing time in seconds.
+	pub ageing_time: Option<u32>,
+	/// Bridge priority.
+	pub priority: Option<u16>,
+	/// Whether the bridge is VLAN-aware.
+	pub vlan_filtering: bool,
+}
+
+/// The `INFO_DATA` for a tunnel.
+///
+/// Its own function only because the three attribute families -- geneve, GRE
+/// and the ip tunnels -- disagree about numbering, and saying so takes more
+/// room than the code does.
+fn tunnel_data(
+	data: &mut AttrBuf,
+	kind: &str,
+	local: Option<std::net::IpAddr>,
+	remote: Option<std::net::IpAddr>,
+	ttl: Option<u8>,
+	key: Option<u32>,
+) {
+	// geneve numbers its attributes independently of the ip/gre
+	// family, so it cannot share the block below -- and using the
+	// wrong numbers produces a tunnel the kernel accepts with the
+	// remote landing in a field that means something else.
+	if kind == "geneve" {
+		// A geneve tunnel needs a VNI; the model has no separate
+		// field for one, so the GRE key doubles as it. Named here
+		// because that reuse is not obvious from the config.
+		data.push_u32(IFLA_GENEVE_ID, key.unwrap_or(0));
+		if let Some(address) = remote {
+			data.push_ip(
+				if address.is_ipv6() {
+					IFLA_GENEVE_REMOTE6
+				} else {
+					IFLA_GENEVE_REMOTE
+				},
+				address,
+			);
+		}
+		if let Some(ttl) = ttl {
+			data.push_u8(IFLA_GENEVE_TTL, ttl);
+		}
+	} else if kind.contains("gre") {
+		if let Some(key) = key {
+			// The flags first: a key with no flag bit is ignored,
+			// and two ends with different keys would then pass
+			// traffic as though neither had one. One key both
+			// ways -- separate in and out keys exist and nothing
+			// has asked for them.
+			data.push(IFLA_GRE_IFLAGS, &GRE_KEY_FLAG.to_be_bytes());
+			data.push(IFLA_GRE_OFLAGS, &GRE_KEY_FLAG.to_be_bytes());
+			data.push(IFLA_GRE_IKEY, &key.to_be_bytes());
+			data.push(IFLA_GRE_OKEY, &key.to_be_bytes());
+		}
+		if let Some(address) = local {
+			data.push_ip(IFLA_GRE_LOCAL, address);
+		}
+		if let Some(address) = remote {
+			data.push_ip(IFLA_GRE_REMOTE, address);
+		}
+		if let Some(ttl) = ttl {
+			data.push_u8(IFLA_GRE_TTL, ttl);
+		}
+	} else {
+		if let Some(address) = local {
+			data.push_ip(IFLA_IPTUN_LOCAL, address);
+		}
+		if let Some(address) = remote {
+			data.push_ip(IFLA_IPTUN_REMOTE, address);
+		}
+		if let Some(ttl) = ttl {
+			data.push_u8(IFLA_IPTUN_TTL, ttl);
+		}
+	}
 }
 
 impl NewLink {
@@ -170,6 +315,16 @@ impl NewLink {
 					data.push(IFLA_VXLAN_PORT, &port.to_be_bytes());
 				}
 			}
+			Self::Vrf { table } => data.push_u32(IFLA_VRF_TABLE, *table),
+			Self::Macvlan { mode, .. } => data.push_u32(IFLA_MACVLAN_MODE, *mode),
+			Self::Tunnel {
+				kind,
+				local,
+				remote,
+				ttl,
+				key,
+				..
+			} => tunnel_data(&mut data, kind, *local, *remote, *ttl, *key),
 			Self::Veth { peer } => {
 				// The peer's whole definition, not just its name: an
 				// `ifinfomsg` followed by its own attributes, nested inside
@@ -198,6 +353,9 @@ impl NewLink {
 			Self::Vxlan { .. } => "vxlan",
 			Self::Veth { .. } => "veth",
 			Self::WireGuard => "wireguard",
+			Self::Vrf { .. } => "vrf",
+			Self::Macvlan { .. } => "macvlan",
+			Self::Tunnel { kind, .. } => kind,
 		}
 	}
 }
@@ -472,7 +630,12 @@ impl Netlink {
 		// The parent a virtual link rides on. A vlan must have one; a vxlan
 		// may, and without it the kernel routes the underlay itself.
 		if let NewLink::Vlan { parent, .. }
+		| NewLink::Macvlan { parent, .. }
 		| NewLink::Vxlan {
+			parent: Some(parent),
+			..
+		}
+		| NewLink::Tunnel {
 			parent: Some(parent),
 			..
 		} = kind
@@ -506,12 +669,24 @@ impl Netlink {
 	pub fn set_bridge_attrs(&mut self, index: u32, attrs: BridgeAttrs) -> io::Result<()> {
 		let mut data = AttrBuf::new();
 		data.push_u32(IFLA_BR_STP_STATE, u32::from(attrs.stp));
+		// The kernel counts these in hundredths of a second and the config
+		// counts them in seconds, because that is what every other tool and
+		// every piece of documentation uses. Ageing time is the same unit --
+		// which is easy to miss, since it is the one measured in minutes by
+		// habit.
 		if let Some(delay) = attrs.forward_delay {
-			// The kernel counts forward delay in hundredths of a second, and
-			// the config counts it in seconds because that is what every other
-			// tool and every piece of documentation uses.
 			data.push_u32(IFLA_BR_FORWARD_DELAY, delay.saturating_mul(100));
 		}
+		if let Some(hello) = attrs.hello_time {
+			data.push_u32(IFLA_BR_HELLO_TIME, hello.saturating_mul(100));
+		}
+		if let Some(ageing) = attrs.ageing_time {
+			data.push_u32(IFLA_BR_AGEING_TIME, ageing.saturating_mul(100));
+		}
+		if let Some(priority) = attrs.priority {
+			data.push(IFLA_BR_PRIORITY, &priority.to_ne_bytes());
+		}
+		data.push_u8(IFLA_BR_VLAN_FILTERING, u8::from(attrs.vlan_filtering));
 
 		let mut info = AttrBuf::new();
 		info.push_str(ifla::INFO_KIND, "bridge");
