@@ -103,6 +103,36 @@ is the tripwire.
 **M4 is done.** What remains for M5 onward builds on a surface that cannot move
 without saying so.
 
+## Amendment, 2026-07-30: the versioning was for users who do not exist
+
+This record wrapped the witnesses in compatibility apparatus -- a bump table,
+"every consumer of the document format refuses to read it", instructions to
+bump `SCHEMA_VERSION`. That was written as though the format had consumers. It
+does not. Nothing outside this repository reads a netcfgd document or speaks
+its socket, so a change to either breaks nothing and costs a `make
+schema-bless`.
+
+**The witnesses stay; the ceremony goes.** They earned their place the day they
+were written by finding the `kind`/`kind` collision, and they do the thing that
+is actually needed now: make a schema change *visible* in review, because none
+of the changes that break a format look like one in a diff.
+
+**What the freeze is really for is unchanged**, and it is not compatibility.
+Project.md section 8: "the model freezes before any adapter exists, so no
+adapter can shape it." The NM shim in M7 and the TUI in M6 will each want a
+field bent their way, and the freeze is what makes bending one a decision
+rather than a diff. That reason never depended on there being users.
+
+So the bump table above describes what these changes *will* mean once something
+consumes the format, and describes nothing that is true today. The tests say so
+in their failure messages rather than implying a cost nobody is paying.
+
+The reader still refuses a document from a future major, and that is kept as
+mechanism rather than ceremony -- it is the behaviour a rolling upgrade needs
+whenever there is finally something to roll. Testing it turned out to require
+patching the version into the JSON text, because this build's *serialiser*
+validates the major as well and will not write a document it would not read.
+
 ## Alternatives considered
 
 **A JSON Schema document.** Rejected: it is a second description of the model
