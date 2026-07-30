@@ -22,9 +22,9 @@
 use crate::client;
 use crate::Options;
 use netcfgd_host::state;
-use netcfgd_netlink::term;
+use netcfgd_netlink::{signals, term};
 use netcfgd_proto::Request;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
@@ -84,8 +84,16 @@ pub(crate) fn run(options: &Options) -> Result<ExitCode, String> {
 	let (raw, _) = term::enter().map_err(|error| {
 		format!("{error}\n`ncfg tui` needs a terminal; for a pipe use `ncfg status --json`")
 	})?;
-	raw.set_read_timeout(10)
+	// Non-blocking reads: `poll` decides when there is something to take, so a
+	// read that blocked would hold the loop past a signal.
+	raw.set_read_timeout(0)
 		.map_err(|error| format!("cannot set a read timeout: {error}"))?;
+	// Termination has to leave by the same path as `q`. On their default
+	// disposition `SIGTERM` and `SIGHUP` kill the process outright, and the
+	// restore below never runs -- measured, that left the operator's shell
+	// with echo off and the cursor hidden.
+	let signals =
+		signals::Signals::new().map_err(|error| format!("cannot watch for signals: {error}"))?;
 
 	let mut app = App {
 		pane: Pane::Devices,
@@ -107,7 +115,7 @@ pub(crate) fn run(options: &Options) -> Result<ExitCode, String> {
 	let _ = out.write_all(b"\x1b[?1049h\x1b[?25l");
 	app.refresh();
 
-	let result = event_loop(&mut app, &raw, &mut out);
+	let result = event_loop(&mut app, &raw, &signals, &mut out);
 
 	let _ = out.write_all(b"\x1b[?25h\x1b[?1049l");
 	let _ = out.flush();
@@ -119,30 +127,47 @@ pub(crate) fn run(options: &Options) -> Result<ExitCode, String> {
 fn event_loop(
 	app: &mut App,
 	raw: &term::RawMode,
+	signals: &signals::Signals,
 	out: &mut std::io::Stdout,
 ) -> Result<ExitCode, String> {
-	let mut input = std::io::stdin();
+	// What the terminal is believed to be showing. An unchanged frame is not
+	// sent again: the loop wakes once a second whether or not anything moved,
+	// and rewriting an identical screenful is pure traffic on the slow link
+	// this is most often used over.
+	let mut shown = String::new();
+
 	loop {
 		// Re-read the size every frame rather than catching SIGWINCH, which
-		// would need a signal handler. One ioctl per second costs nothing and
-		// it makes a resize just work.
+		// would need a fourth signal in the set for one ioctl's worth of work.
 		let size = term::size(raw.fd());
 		let frame = draw(app, size);
-		let _ = out.write_all(frame.as_bytes());
-		let _ = out.flush();
-
-		let mut byte = [0u8; 1];
-		let read = input.read(&mut byte).unwrap_or(0);
-		if read == 0 {
-			// The timeout expired. Events may have arrived, so redraw; and on
-			// the panes that watch the machine, refetch.
-			if matches!(app.pane, Pane::Devices | Pane::Plan) {
-				app.refresh();
-			}
-			continue;
+		if frame != shown {
+			let _ = out.write_all(frame.as_bytes());
+			let _ = out.flush();
+			shown = frame;
 		}
-		if !app.key(byte[0]) {
-			return Ok(ExitCode::SUCCESS);
+
+		match signals::wait(raw.fd(), signals, 1000) {
+			// Leave the way `q` leaves, so the restore below runs.
+			Ok(signals::Ready::Signal) | Err(_) => return Ok(ExitCode::SUCCESS),
+			Ok(signals::Ready::Timeout) => {
+				if matches!(app.pane, Pane::Devices | Pane::Plan) {
+					app.refresh();
+				}
+			}
+			Ok(signals::Ready::Input) => {
+				// Everything available, not one byte. A burst arrives as a
+				// burst -- an arrow key is three bytes and a paste is many --
+				// and taking one per wake would meter them out at one per
+				// poll timeout.
+				let mut buffer = [0u8; 64];
+				let read = term::read(raw.fd(), &mut buffer).unwrap_or(0);
+				for byte in buffer.iter().take(read) {
+					if !app.key(*byte) {
+						return Ok(ExitCode::SUCCESS);
+					}
+				}
+			}
 		}
 	}
 }
