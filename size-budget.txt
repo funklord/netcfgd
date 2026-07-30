@@ -1,7 +1,8 @@
 # Per-binary size limits in bytes, checked by `make size`.
 #
-# These are NOT section 10.2's tier budgets. That document sets nano at 400 KB
-# and embedded at 1 MB, and calls them "budgets to validate, not measurements".
+# These are NOT section 10.2's tier budget. That document sets embedded at 1 MB
+# and calls it a "budget to validate, not a measurement". (It also set nano at
+# 400 KB; decision 0021 dropped that tier.)
 # What is built today is the full tier: every feature compiled in, and two
 # separate static binaries that each link most of the workspace. Meeting the
 # embedded budget is M5's job, through the build profiles that compile the DSL
