@@ -1170,5 +1170,9 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Pppoe(_) => "pppoe",
 		InterfaceKind::Dummy => "dummy",
 		InterfaceKind::Veth(_) => "veth",
+		InterfaceKind::Vrf(_) => "vrf",
+		InterfaceKind::Macvlan(_) => "macvlan",
+		InterfaceKind::Tunnel(tunnel) => tunnel.kind.name(),
+		InterfaceKind::Tun(_) => "tun",
 	}
 }

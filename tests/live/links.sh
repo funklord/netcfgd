@@ -56,6 +56,14 @@ interface vx100 {
 	vxlan { id = 100; parent = "br0"; local = "10.9.0.1"; remote = "10.9.0.2"; port = 4789 }
 	config = "null"
 }
+
+# Everything below came out of the pre-freeze format audit.
+interface mgmt-vrf { vrf { table = 100 }; config = "null" }
+interface base0    { kind = "dummy"; config = "10.7.0.1/24" }
+interface mv0      { macvlan { parent = "base0"; mode = "bridge" }; config = "null" }
+interface gre1     { tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2"; key = 42 }; config = "null" }
+interface sit1     { tunnel { mode = "sit"; local = "10.7.0.1"; remote = "10.7.0.3"; ttl = 64 }; config = "null" }
+interface gnv0     { tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 }; config = "null" }
 CONF
 
 export NCFG_CONFIG_DIR="$work/etc"
@@ -111,6 +119,25 @@ contains "and its port"                "$(detail vx100)"  "dstport 4789"
 contains "a veth pair exists"          "$(ip -br link show type veth)" "veth-b@veth-a"
 contains "the declared end is enslaved" "$(detail veth-a)" "master bond0"
 contains "and so is the peer"          "$(detail veth-b)" "master bond0"
+
+# A VRF is what `RoutingRule.l3mdev` matches, and until the audit nothing could
+# create one -- a rule field that could only ever match something netcfgd could
+# not build.
+contains "a vrf owns its table"        "$(detail mgmt-vrf)" "vrf table 100"
+contains "a dummy can be declared"     "$(ip -br addr show base0)" "10.7.0.1/24"
+contains "a macvlan gets its mode"     "$(detail mv0)"    "macvlan mode bridge"
+
+# GRE and the ip tunnels do *not* share attribute numbering, which is how the
+# first version of this failed. GRE puts endpoints at 6 and 7 where sit puts
+# them at 2 and 3, so sending one numbering to the other lands the local
+# address in a flags field.
+contains "a gre tunnel gets its endpoints" "$(detail gre1)" "remote 10.7.0.2 local 10.7.0.1"
+# A key with no flag bit is silently ignored, and two ends with different keys
+# would then pass traffic as though neither had one.
+contains "and its key, which needs the flag" "$(detail gre1)" "ikey 0.0.0.42"
+contains "a sit tunnel uses the other numbering" "$(detail sit1)" "remote 10.7.0.3 local 10.7.0.1"
+contains "and its ttl"                 "$(detail sit1)"   "ttl 64"
+contains "a geneve tunnel gets its vni" "$(detail gnv0)"  "geneve id 500"
 
 # One apply, not two. This is the property the veth peer nearly broke.
 second=$("$ncfg" apply 2>&1)

@@ -47,7 +47,8 @@ pub use device::{AccessPoint, Device, DeviceMatch, MacPolicy, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
 pub use interface::{
-	BondMode, Guard, Interface, InterfaceKind, LinkSettings, RaPolicy, Toggle, VlanProtocol, WgPeer,
+	BondMode, Guard, Interface, InterfaceKind, LinkSettings, MacvlanConfig, MacvlanMode, RaPolicy,
+	Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind, VlanProtocol, VrfConfig, WgPeer,
 };
 pub use key::Key;
 pub use observed::{
