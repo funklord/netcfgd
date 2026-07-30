@@ -16,6 +16,7 @@ members = [
 	"crates/netcfgd-daemon",
 	"backends/netcfgd-dns",
 	"backends/netcfgd-supplicant",
+	"backends/netcfgd-hostapd",
 	"crates/netcfgd-cli",
 	"crates/netcfgd-bin",
 ]

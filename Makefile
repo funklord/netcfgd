@@ -217,12 +217,21 @@ packaging:
 # is exempt and is not checked here. This caught real drift the first time it
 # ran -- em dashes and section signs are easy to type and invisible in review,
 # which is exactly why the rule needs a gate rather than good intentions.
+# `backends` and `tests` are in the list for the reason the unsafe-policy gate
+# learned the hard way: a gate that cannot see half the tree enforces nothing.
+# This globbed `crates` alone until access points were written, so every line of
+# `backends/` had gone unchecked since M2 -- it happened to be clean, which is
+# luck rather than evidence. Shell scripts count as source; markdown does not,
+# and project.md section 9 says so.
+ASCII_PATHS  = crates backends tests Cargo.toml Makefile
+ASCII_KINDS  = --include='*.rs' --include='*.toml' --include='*.sh'
+
 ascii:
-	@if grep -rlP '[^\x00-\x7F]' --include='*.rs' --include='*.toml' \
-		crates Cargo.toml Makefile 2>/dev/null | grep -q .; then \
+	@if grep -rlP '[^\x00-\x7F]' $(ASCII_KINDS) \
+		$(ASCII_PATHS) 2>/dev/null | grep -q .; then \
 		echo "ascii: non-ASCII found in:"; \
-		grep -rlP '[^\x00-\x7F]' --include='*.rs' --include='*.toml' \
-			crates Cargo.toml Makefile 2>/dev/null; \
+		grep -rlP '[^\x00-\x7F]' $(ASCII_KINDS) \
+			$(ASCII_PATHS) 2>/dev/null; \
 		echo "ascii: write -- for an em dash, and 'section N' for a section sign"; \
 		exit 1; \
 	fi; \
@@ -367,6 +376,11 @@ live:
 	fi
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
+	@# Deliberately not under NCFG_LIVE: unlike wpa_supplicant, which decision
+	@# 0014 makes the floor for wireless, hostapd is an optional package that a
+	@# machine never running an access point has no reason to install (0026).
+	@# A missing one is a skip rather than a failed suite.
+	@unshare -rn sh -c "sh tests/live/ap.sh"
 	@# Association, which needs real root and a loadable mac80211_hwsim. Not
 	@# under NCFG_LIVE and not under unshare: it does its own namespace, and a
 	@# machine that cannot run it should get a skip rather than a failure.
