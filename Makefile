@@ -357,6 +357,13 @@ live:
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/qdisc.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ingress.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/readonly.sh"
+	@# The only python test. A TUI needs a pty to say anything about, and
+	@# script(1) cannot drive input reliably; see the file's own header.
+	@if command -v python3 >/dev/null 2>&1; then \
+		unshare -rn sh -c "NCFG_LIVE=1 python3 tests/live/tui.py"; \
+	else \
+		echo "tui.py: skipping: no python3"; \
+	fi
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
 	@# Association, which needs real root and a loadable mac80211_hwsim. Not

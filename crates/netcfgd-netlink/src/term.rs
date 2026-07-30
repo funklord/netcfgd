@@ -196,6 +196,32 @@ impl Drop for RawMode {
 	}
 }
 
+/// Read whatever is available, straight from the descriptor.
+///
+/// Not `std::io::Stdin`, and the difference is a bug rather than a
+/// preference. `Stdin` is `BufReader`-backed: a one-byte read pulls the whole
+/// kernel buffer into userspace and hands back one byte, so a caller waiting
+/// on the descriptor with `poll` is then told there is nothing to read while
+/// holding the next keystroke in a buffer it cannot see.
+///
+/// Measured: two bytes written together -- which is what an arrow key, a
+/// paste, or fast typing looks like -- left the second one stranded until the
+/// next poll timeout expired, a full second later.
+///
+/// # Errors
+///
+/// Returns the underlying `io::Error`.
+pub fn read(fd: RawFd, buffer: &mut [u8]) -> io::Result<usize> {
+	// SAFETY: the pointer and length come from one live, uniquely borrowed
+	// slice, so the kernel writes only within it. A negative return is the
+	// error case and is checked before the count is used.
+	let count = unsafe { libc::read(fd, buffer.as_mut_ptr().cast::<libc::c_void>(), buffer.len()) };
+	if count < 0 {
+		return Err(io::Error::last_os_error());
+	}
+	Ok(usize::try_from(count).unwrap_or(0))
+}
+
 /// Raw mode on standard input, with its size.
 ///
 /// # Errors

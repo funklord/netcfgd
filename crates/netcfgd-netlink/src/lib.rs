@@ -25,6 +25,7 @@ pub mod nft;
 pub mod ops;
 pub mod peer;
 pub mod qdisc;
+pub mod signals;
 pub mod socket;
 pub mod term;
 pub mod watch;
