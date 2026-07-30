@@ -4,7 +4,7 @@
 
 **What it is, in one line:** a Linux network configuration daemon whose plain-text config is the single source of truth, whose runtime state is greppable files in `/run`, and whose behaviour is a visible reconcile loop (`plan` then `apply`, like Terraform for interfaces).
 
-**Names:** project and daemon `netcfgd`; CLI `ncfg`; TUI is `ncfg tui` (a subcommand, not a separate binary); adapters `netcfgd-nm` and `netcfgd-restconf`; build tiers `netcfgd-nano` / `netcfgd-embedded` / `netcfgd-full`; hook env prefix `NCFG_`. Language: **Rust**.
+**Names:** project and daemon `netcfgd`; CLI `ncfg`; TUI is `ncfg tui` (a subcommand, not a separate binary); adapters `netcfgd-nm` and `netcfgd-restconf`; build tiers `netcfgd-embedded` / `netcfgd-full` (nano dropped, [0021](docs/decisions/0021-no-nano-tier.md)); hook env prefix `NCFG_`. Language: **Rust**.
 
 ---
 
@@ -48,7 +48,7 @@ Note the crate name and the installed binary name need not match — if anything
 
 ## 2. The desired-state document
 
-This is the load-bearing artifact. Everything hangs off it: the compiler emits it, the reconciler consumes it, the NM and RESTCONF adapters project onto it, the nano build ships a consumer without a producer.
+This is the load-bearing artifact. Everything hangs off it: the compiler emits it, the reconciler consumes it, the NM and RESTCONF adapters project onto it.
 
 **Encoding.** JSON for humans and `/run` introspection; CBOR for compact/embedded storage. Identical schema. The canonical form is whole-host; the per-interface files in `/run/netcfgd/desired/` are projections for convenience, not separate documents.
 
@@ -285,7 +285,7 @@ DriftPolicy = enum { Report, Reconcile, Ignore }
 
 The DSL lets you write inline shell in a `post_up { ... }` block. The **compiler materialises those blocks into files** under `/run/netcfgd/hooks/` (tmpfs, regenerated on every compile) and the document carries only `{phase, path, sha256}`.
 
-Three payoffs. The document becomes safe to transmit — a document that can carry shell is remote code execution with extra steps, and this closes that door structurally rather than by policy. The `sha256` lets drift detection notice that a hook script changed underneath you. And the nano tier, which has no hook runner, simply ignores hook entries rather than needing to parse something it cannot execute.
+Three payoffs. The document becomes safe to transmit — a document that can carry shell is remote code execution with extra steps, and this closes that door structurally rather than by policy. The `sha256` lets drift detection notice that a hook script changed underneath you. And a build without the hook runner ignores hook entries rather than needing to parse something it cannot execute.
 
 A received (non-local) document may reference only paths that already exist on the device, and the receiving side refuses hook entries entirely unless local policy opts in.
 
@@ -464,8 +464,8 @@ The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are
 
 | Gate | What it checks |
 |---|---|
-| Size budget | stripped static binary per tier: nano ≤ 400 KB, embedded ≤ 1 MB |
-| RSS budget | nano steady-state < 4 MB |
+| Size budget | stripped static binary: embedded ≤ 1 MB ([0021](docs/decisions/0021-no-nano-tier.md) dropped the 400 KB nano tier) |
+| RSS budget | steady-state < 4 MB |
 | Filesystem footprint | `find /etc/netcfgd` on a fixture install with no optional features used must match a build compiled without those features |
 | Unsafe policy | `forbid(unsafe_code)` holds everywhere except `netcfgd-netlink` |
 | Supply chain | `cargo-deny`, `cargo-audit`, pinned lockfile, stated MSRV |
@@ -473,7 +473,7 @@ The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are
 | Determinism | same config compiles to byte-identical document across runs and platforms |
 | Plan idempotence | applying a plan twice produces an empty second plan |
 
-Size posture in `Cargo.toml`: `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, static musl target. Avoid `serde_json` in the nano tier — hand-roll a minimal CBOR codec there; the ergonomic path is fine for full builds.
+Size posture in `Cargo.toml`: `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, static musl target. ~~Avoid `serde_json` in the nano tier — hand-roll a minimal CBOR codec there.~~ Measured at M5 and wrong: the JSON library is 29 KB, while the encoder and decoder generated from the model's types are 283 KB. A different codec saves nothing; see [0021](docs/decisions/0021-no-nano-tier.md).
 
 ---
 
@@ -487,7 +487,7 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 | **M2** | Daemon and safety | `netcfgd` daemon, control socket, inotify reload, drift detection, hook runner, **commit-confirm**, `ncfg explain`, `ncfg monitor`. Flat DNS backends (`WriteResolvConf`, `Resolvconf`) so ordinary single-link hosts resolve long before scopes matter. |
 | **M3** | Wifi and 802.1X | **wpa_supplicant backend; iwd deferred** — reversed from the original order, see [0014](docs/decisions/0014-wpa-supplicant-is-the-floor-not-the-fallback.md): iwd is D-Bus-only and 0008 already commits wired 802.1X to wpa_supplicant, so one integration with no new dependency covers both. Secret providers, `ncfg wifi *`, and the control-tier policy that decides who may use them ([0013](docs/decisions/0013-three-things-a-caller-may-be-allowed-to-do.md)). |
 | **M4** | Link types, DNS scopes, router side | WireGuard, bridge/bond/VLAN/VXLAN polish. Scope-capable DNS backends (0007). DHCPv6-PD, `Delegated` resolution and RA handoff (0009). PPPoE via `netcfgd-ppp`. A read of the foreign formats against the model, in place of the importers that were dropped ([0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md)) — the gap-finding was the part worth keeping. **Model, document schema and socket API freeze here** -- enforced by two witnesses under `docs/schema/`, see [0020](docs/decisions/0020-the-freeze-is-two-witnesses.md). |
-| **M5** | Embedded | Build tiers, procd integration, read-only-root support, nano consumer without compiler. `uci` import, deferred here from M4 ([0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md)) because OpenWrt is where it belongs and uci is not rewritten behind the operator. |
+| **M5** | Embedded | Getting `netcfgd-embedded` under 1 MB, procd integration, read-only-root support. ~~Nano consumer without compiler~~ — dropped, [0021](docs/decisions/0021-no-nano-tier.md). `uci` import, deferred here from M4 ([0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md)) because OpenWrt is where it belongs and uci is not rewritten behind the operator. |
 | **M6** | TUI | `ncfg tui` including the interactive plan-preview pane. |
 | **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). |
 | **M8** | Desktop | GUI + tray applet; NM shim tier 2. |
@@ -505,7 +505,7 @@ All six are answered. Each has a record under `docs/decisions/` carrying the rea
 |---|---|---|---|
 | 1 | Native syntax shape | **Blocks.** What transfers from netifrc is vocabulary, not syntax. The compat front end and `ncfg convert` were dropped in [0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md). | [0001](docs/decisions/0001-native-config-syntax.md) |
 | 2 | Route protocol constant | **110** (`0x6e`), used for both `rtm_protocol` and `IFA_PROTO`, defined once in `netcfgd-model`. Minimum kernel 5.10; `IFA_PROTO` (5.18+) detected by read-back, never by version, with the `/run` fallback below that. | [0002](docs/decisions/0002-object-ownership-tagging.md) |
-| 3 | Nano tier at all | **Kept, opt-in, floor is `netcfgd-embedded`.** Nothing before M5 may be shaped by it. Ship/no-ship is re-decided at M5 against measured compiler size, not against the current budget guess. | [0003](docs/decisions/0003-nano-tier.md) |
+| 3 | Nano tier at all | **No.** Re-decided at M5 against the measurement 0003 asked for: the compiler is 193 KB and decoding a compiled document is 283 KB, so nano would be larger than embedded and less legible. | [0021](docs/decisions/0021-no-nano-tier.md), supersedes [0003](docs/decisions/0003-nano-tier.md) |
 | 4 | Built-in DHCPv4 | **No.** Delegate to dhcpcd/udhcpc. The `Builtin` backend variant stays in the schema — unimplemented but recognised — because adding it after the M4 freeze is a major version bump. | [0004](docs/decisions/0004-dhcpv4-client-sourcing.md) |
 | 5 | Vocabulary | **`desired`/`observed`.** Decided by constraint §1.6: adopting NMDA's `intended`/`operational` would be justified solely by an adapter's convenience. `netcfgd-restconf` translates at its own boundary. | [0005](docs/decisions/0005-state-vocabulary.md) |
 | 6 | `addressing` list semantics | **Composition, with seven rules** covering multiplicity, what order is and is not for, metric derivation from list position, DNS merge, `LinkLocal` coexistence, the empty list, and per-source reconcile behaviour. | [0006](docs/decisions/0006-addressing-list-semantics.md) |

@@ -163,7 +163,7 @@ footprint:
 	[ $$fail -eq 0 ] && echo "footprint: ok"; \
 	exit $$fail
 
-# section 10.4: under 4 MB resident for the nano tier. What is measured here is
+# section 10.4: under 4 MB resident. What is measured here is
 # the full-tier daemon, so the number is a ratchet like the size one rather
 # than the tier target -- see size-budget.txt for why that distinction exists.
 # Measured at 5400 KB. The headroom is deliberate: resident size varies with

@@ -1,6 +1,6 @@
 # 0003: the nano tier stays optional, and is re-decided at M5 by measurement
 
-Status: accepted
+Status: superseded by [0021](0021-no-nano-tier.md)
 Date: 2026-07-28
 Milestone: M5 (the seam exists from M1)
 
@@ -69,3 +69,14 @@ size alone.
 twice over: flash is the constrained resource on exactly these devices, and
 the text is useless without the parser that nano exists to remove — so it
 would restore the bytes and not the capability.
+
+## Superseded, 2026-07-30
+
+By [0021](0021-no-nano-tier.md), against the measurement this record asked for.
+The compiler came in at 193 KB -- under the 30% threshold above -- and decoding
+a compiled document costs 283 KB, so the tier that exists to avoid the compiler
+would have been the larger of the two.
+
+The rule in this record worked exactly as intended: it named a number, deferred
+the decision to a point where the number could be taken, and the number said
+no. Kept rather than deleted for that reason.
