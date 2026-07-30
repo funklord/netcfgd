@@ -102,4 +102,9 @@ netcfgd
 # design section 10.3 already say so: a machine that is not a router should not
 # be carrying an nftables encoder, and the table is self-contained enough to be
 # an optional backend rather than something threaded through the model.
-total 2786264
+# +40 KB for root qdiscs: `struct tcmsg`, the set/reset/dump messages, the
+# `cake` rate encoding, the scheduler enum and its config lowering, plus a
+# planner pass and two executor arms. A third of what NAT cost, because this is
+# rtnetlink on the socket netcfgd already holds rather than a second protocol
+# -- which is the measured version of what decision 0023 predicted.
+total 2827224

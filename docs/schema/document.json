@@ -191,6 +191,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -348,6 +352,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -505,6 +513,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -667,6 +679,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -829,6 +845,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -991,6 +1011,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1153,6 +1177,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1317,6 +1345,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1484,6 +1516,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1655,6 +1691,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1817,6 +1857,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1981,6 +2025,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2143,6 +2191,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2313,6 +2365,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2478,6 +2534,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2646,6 +2706,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2809,6 +2873,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2974,6 +3042,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3137,6 +3209,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3304,6 +3380,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3487,6 +3567,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3649,6 +3733,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3811,6 +3899,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3973,6 +4065,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4136,6 +4232,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4299,6 +4399,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4462,6 +4566,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4625,6 +4733,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4788,6 +4900,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4951,6 +5067,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -5114,6 +5234,10 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
       "nat": true,
       "guard": {
         "reason": "nfs"

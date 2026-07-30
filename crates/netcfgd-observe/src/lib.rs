@@ -44,6 +44,8 @@ pub struct PriorState {
 	pub dns: Vec<netcfgd_model::AppliedDns>,
 	/// Interfaces netcfgd turned IP forwarding on for.
 	pub forwarding: Vec<String>,
+	/// Interfaces netcfgd set the root qdisc on.
+	pub qdisc: Vec<String>,
 	/// Prefixes a `DHCPv6` client reported, read from `/run`.
 	///
 	/// Prior state rather than a kernel read because a delegated prefix is not
@@ -67,6 +69,11 @@ impl PriorState {
 			.find(|(iface, dst, _)| iface == interface && dst == destination)
 			.map(|(_, _, origin)| *origin)
 	}
+}
+
+/// The root qdisc on one link, from the dump.
+fn root_qdisc(snapshot: &Snapshot, index: u32) -> Option<&netcfgd_netlink::qdisc::QdiscRecord> {
+	snapshot.qdiscs.iter().find(|record| record.index == index)
 }
 
 /// Turn a kernel snapshot plus recorded state into the observed model.
@@ -101,6 +108,9 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 			// The kernel has no protocol field for links, so this can only
 			// come from what netcfgd wrote down. A link nobody recorded is
 			// never deleted, which is the conservative direction.
+			qdisc: root_qdisc(snapshot, link.index).map(|record| record.kind.clone()),
+			qdisc_bandwidth_bits: root_qdisc(snapshot, link.index)
+				.and_then(|record| record.bandwidth_bits),
 			// Not in the netlink snapshot; filled in by `host::augment`,
 			// which is why `build` can stay pure.
 			forwarding: None,
@@ -165,6 +175,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		nat: Vec::new(),
 		nat_conflicts: Vec::new(),
 		forwarding_applied: prior.forwarding.clone(),
+		qdisc_applied: prior.qdisc.clone(),
 		links,
 		addresses,
 		routes,
@@ -333,6 +344,7 @@ mod tests {
 	#[test]
 	fn a_snapshot_becomes_a_model_with_names_resolved() {
 		let snapshot = Snapshot {
+			qdiscs: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
 			addresses: vec![
@@ -396,6 +408,7 @@ mod tests {
 		orphan.master = Some(99);
 
 		let snapshot = Snapshot {
+			qdiscs: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![member, link(3, "br0"), orphan],
 			..Snapshot::default()
@@ -413,6 +426,7 @@ mod tests {
 	#[test]
 	fn an_address_with_no_matching_link_is_dropped() {
 		let snapshot = Snapshot {
+			qdiscs: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0")],
 			addresses: vec![address(77, "10.0.0.1", 24, None)],
@@ -427,6 +441,7 @@ mod tests {
 	#[test]
 	fn only_recorded_links_are_ours() {
 		let snapshot = Snapshot {
+			qdiscs: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
 			..Snapshot::default()

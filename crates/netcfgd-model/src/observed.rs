@@ -91,6 +91,17 @@ pub struct ObservedLink {
 	/// Bridge or bond this link is enslaved to.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub master: Option<String>,
+	/// The root qdisc the kernel currently runs on this link.
+	///
+	/// Always present in practice -- there is no such thing as an interface
+	/// without one, and an interface netcfgd has never touched reports
+	/// whatever `net.core.default_qdisc` gave it. `None` means the dump did
+	/// not mention it, not that there is none.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub qdisc: Option<String>,
+	/// The shaped rate in **bits** per second, where the qdisc shapes.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub qdisc_bandwidth_bits: Option<u64>,
 	/// Whether this interface forwards, from the `forwarding` sysctls.
 	///
 	/// `Some(true)` only when both the IPv4 and the IPv6 one are set: half a
@@ -266,6 +277,14 @@ pub struct Observed {
 	/// Prefixes delegated to this host, sorted by interface.
 	#[serde(default)]
 	pub delegations: Vec<Delegation>,
+	/// Interfaces netcfgd set the root qdisc on, sorted.
+	///
+	/// Recorded for the same reason as [`Observed::forwarding_applied`]: a
+	/// qdisc carries no owner, and every interface has one whether or not
+	/// anybody chose it. An interface already running `cake` when netcfgd
+	/// first started is not netcfgd's to reset.
+	#[serde(default)]
+	pub qdisc_applied: Vec<String>,
 	/// Interfaces netcfgd turned forwarding on for, sorted.
 	///
 	/// Recorded rather than inferred, because a sysctl carries no owner. An
