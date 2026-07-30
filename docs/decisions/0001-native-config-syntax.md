@@ -75,3 +75,12 @@ argument about which one a new feature lands in first.
 **Native blocks, but sourced by a shell for interpolation.** Rejected for the
 same reason as point 1, plus it would put a shell in the dependency set that
 §1 constraint 3 exists to keep empty.
+
+## Amendment, 2026-07-30
+
+The compat front end and `ncfg convert` named above are both gone; decision
+0019 has the reasoning. Nothing else in this record changes -- the answer to
+"blocks or netifrc-style variables?" was blocks, and it still is. What changes
+is that netifrc's syntax is now nowhere in the codebase rather than in a
+feature-gated corner of it, and the vocabulary this record kept was never
+dependent on being able to read the files.
