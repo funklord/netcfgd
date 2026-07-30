@@ -1550,3 +1550,70 @@ fn a_malformed_rate_is_reported() {
 		errors("interface eth0 {\n\tqdisc { kind = \"cake\"; bandwidth = \"0mbit\" }\n}");
 	assert!(rendered.contains("would pass nothing"), "got: {rendered}");
 }
+
+/// `ingress_bandwidth` expands into a device to shape on and a redirect to it.
+#[test]
+fn ingress_shaping_expands_into_a_device_and_a_redirect() {
+	let document = build_ok(
+		"interface wan0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
+	);
+
+	let wan = document
+		.interfaces
+		.iter()
+		.find(|i| i.name == "wan0")
+		.expect("wan0");
+	assert_eq!(wan.ingress_redirect.as_deref(), Some("ifb-wan0"));
+	// Consumed by the expansion rather than left on both: two places holding
+	// the same rate is two places to disagree.
+	assert_eq!(wan.qdisc.expect("a qdisc").ingress_bandwidth_bits, None);
+
+	let ifb = document
+		.interfaces
+		.iter()
+		.find(|i| i.name == "ifb-wan0")
+		.expect("the synthesised ifb");
+	assert!(matches!(ifb.kind, netcfgd_model::InterfaceKind::Ifb));
+	let qdisc = ifb.qdisc.expect("a qdisc on the ifb");
+	assert_eq!(qdisc.bandwidth_bits, Some(50_000_000));
+	assert!(qdisc.ingress, "cake has to know it is metering arrivals");
+}
+
+/// The derived device name has to fit in IFNAMSIZ, and the arithmetic is in
+/// the message rather than left to the reader.
+#[test]
+fn an_interface_too_long_to_shape_arrivals_on_is_refused() {
+	let rendered = errors(
+		"interface twelvechars0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
+	);
+	assert!(
+		rendered.contains("too long a name to shape arriving traffic"),
+		"got: {rendered}"
+	);
+	assert!(rendered.contains("ifb-twelvechars0"), "got: {rendered}");
+}
+
+/// Only cake shapes, so only cake can shape arrivals.
+#[test]
+fn ingress_shaping_needs_cake() {
+	let rendered = errors(
+		"interface wan0 {\n\tqdisc { kind = \"fq_codel\"; ingress_bandwidth = \"50mbit\" }\n}",
+	);
+	assert!(
+		rendered.contains("cannot shape arriving traffic"),
+		"got: {rendered}"
+	);
+}
+
+/// A device that would collide with one the operator declared is refused
+/// rather than taken over.
+#[test]
+fn a_colliding_ifb_name_is_refused() {
+	let rendered = errors(
+		"interface ifb-wan0 { config = \"null\" }\ninterface wan0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
+	);
+	assert!(
+		rendered.contains("needs to create a device of that name"),
+		"got: {rendered}"
+	);
+}

@@ -50,8 +50,10 @@ pub struct Snapshot {
 	pub routes: Vec<RouteRecord>,
 	/// Every bridge VLAN, from the separate `AF_BRIDGE` dump.
 	pub bridge_vlans: Vec<dump::BridgeVlanRecord>,
-	/// Every interface's root qdisc, from the `RTM_GETQDISC` dump.
-	pub qdiscs: Vec<qdisc::QdiscRecord>,
+	/// Every interface's root qdisc, plus which carry an ingress hook.
+	pub qdiscs: qdisc::QdiscDump,
+	/// `(interface, target)` for each ingress redirect installed.
+	pub redirects: Vec<(u32, u32)>,
 	/// Whether any address in this dump carried `IFA_PROTO`.
 	///
 	/// **A lower bound, not a kernel capability check.** `false` means "no
@@ -132,9 +134,21 @@ pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
 		.collect();
 	bridge_vlans.sort_unstable();
 
-	// Root qdiscs, which need their own dump because `RTM_GETQDISC` is a
-	// different message and not an attribute of a link.
-	let qdiscs = qdisc::Qdisc::new(socket).roots()?;
+	// Qdiscs, which need their own dump because `RTM_GETQDISC` is a different
+	// message and not an attribute of a link.
+	let qdiscs = qdisc::Qdisc::new(socket).dump()?;
+
+	// And one filter dump per interface that has an ingress hook, because
+	// `RTM_GETTFILTER` will not dump across interfaces. Usually none, and at
+	// most one per shaped uplink -- so this is not the N requests it looks
+	// like on a machine that does no ingress shaping.
+	let mut redirects = Vec::new();
+	for index in &qdiscs.ingress_hooks {
+		for target in qdisc::Qdisc::new(socket).redirects_on(*index)? {
+			redirects.push((*index, target));
+		}
+	}
+	redirects.sort_unstable();
 
 	let address_proto_supported = addresses.iter().any(|address| address.proto.is_some());
 
@@ -144,6 +158,7 @@ pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
 		routes,
 		bridge_vlans,
 		qdiscs,
+		redirects,
 		address_proto_supported,
 	})
 }
