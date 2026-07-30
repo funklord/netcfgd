@@ -77,11 +77,15 @@ tolerance_percent 3
 # Then PPPoE: the compiler, the planner treating a session as a prerequisite
 # rather than a link, and the executor writing pppd's options file. +12 KB each.
 # The binaries the gate sums. A name with no number is measured, not limited.
-ncfg
+#
+# One name now, not two. `ncfg` is a symlink to `netcfgd` -- see the multi-call
+# note below -- so summing both would count the same file twice.
 netcfgd
 
-# 1 MB is design section 10.2's embedded budget. The install is over it and
-# that is M5's remaining size work -- the ratchet holds the line meanwhile.
+# 1 MB was design section 10.2's embedded budget. Superseded by 0024, which
+# measured what closing the gap would take and found no route that does not
+# give up something this project will not give up. The number below is now a
+# measurement that ratchets, like every other number in this file.
 #
 # +37 KB for bridge VLANs: a second netlink dump under AF_BRIDGE, the setter,
 # the range expansion, and the planner's per-port reconciliation.
@@ -98,10 +102,13 @@ netcfgd
 # that parses rules back -- plus the forwarding sysctls, two planner passes and
 # two executor arms.
 #
-# This is the one to reach for first when the install has to shrink. 0022 and
-# design section 10.3 already say so: a machine that is not a router should not
-# be carrying an nftables encoder, and the table is self-contained enough to be
-# an optional backend rather than something threaded through the model.
+# This was recorded as "the one to reach for first when the install has to
+# shrink". Measured at 0024 and wrong: the whole netlink crate -- nftables,
+# qdisc, filters, WireGuard, generic netlink and all of rtnetlink -- is 11,904
+# bytes of symbols. The 72 KB was model fields, their derived serde code, the
+# planner passes and the format strings, none of which an optional backend
+# removes, because a frozen document format has to parse `nat = true` on a
+# build that cannot do it.
 # +40 KB for root qdiscs: `struct tcmsg`, the set/reset/dump messages, the
 # `cake` rate encoding, the scheduler enum and its config lowering, plus a
 # planner pass and two executor arms. A third of what NAT cost, because this is
@@ -115,4 +122,19 @@ netcfgd
 # +8 KB for read-only-root support: a second config layer, `ncfg reset`, and
 # the file enumeration they share. All of it in ncfg -- the daemon did not
 # grow, because reading two directories instead of one is the same code path.
-total 2892760
+# -1149376 for merging the two binaries into one, which is 40% of the install
+# and the single largest change this file has ever recorded.
+#
+# It was measured before it was done, because the last size premise on this
+# project was inverted when checked (decision 0021). `nm` on the two release
+# binaries put 775 KB of symbols in both of them -- the model, the compiler,
+# the planner, the executor and the netlink layer, which is nearly everything
+# either program is. Shipping that twice was a quarter of the install spent on
+# identical machine code, on the class of device with single-digit megabytes of
+# flash free. The realised saving is larger than the symbol figure because a
+# second ELF also carries its own headers, relocations and unwind tables.
+#
+# So they are one file with two names, as busybox and util-linux do it. The
+# binary is `netcfgd` and `ncfg` is a symlink; each still has its own argument
+# parsing, usage text and exit codes, because they are still two programs.
+total 1743384

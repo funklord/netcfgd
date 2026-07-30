@@ -1,0 +1,19 @@
+[package]
+name        = "netcfgd-bin"
+description = "The one binary: netcfgd or ncfg, chosen by the name it is called as."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[[bin]]
+name = "netcfgd"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+netcfgd-cli    = { path = "../netcfgd-cli" }
+netcfgd-daemon = { path = "../netcfgd-daemon" }

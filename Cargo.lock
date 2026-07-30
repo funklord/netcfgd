@@ -35,6 +35,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "netcfgd-bin"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-cli",
+ "netcfgd-daemon",
+]
+
+[[package]]
 name = "netcfgd-cli"
 version = "0.0.0"
 dependencies = [

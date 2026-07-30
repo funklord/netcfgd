@@ -12,6 +12,16 @@ all: build
 
 build:
 	$(CARGO) build --workspace
+	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
+
+# `ncfg` is the second name of the one binary. Cargo cannot make a symlink, so
+# it is made here -- and it is made in the build tree as well as on install,
+# because the tests invoke `target/*/ncfg` and would otherwise be running the
+# daemon under a client's arguments.
+ncfg-link:
+	@if [ -f target/$(PROFILE)/netcfgd ]; then \
+		ln -sf netcfgd target/$(PROFILE)/ncfg; \
+	fi
 
 # Ordered cheapest first, so a formatting slip does not wait on a full test run.
 check: fmt ascii clippy unsafe-policy executor-policy packaging test size footprint rss
@@ -97,10 +107,16 @@ SYSCONFDIR ?= /etc
 # systemd to install netcfgd would be the coupling this project spends its
 # constraints avoiding. The unit files are text; they link nothing and require
 # nothing.
-install: build
+install:
+	$(CARGO) build --release
+	@$(MAKE) --no-print-directory ncfg-link PROFILE=release
 	install -d $(DESTDIR)$(SBINDIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(SYSCONFDIR)/netcfgd
 	install -m 0755 target/release/netcfgd $(DESTDIR)$(SBINDIR)/netcfgd
-	install -m 0755 target/release/ncfg $(DESTDIR)$(BINDIR)/ncfg
+	@# One binary, two names. Absolute, so it points at the installed daemon
+	@# rather than at whatever happens to sit beside it -- which means it
+	@# dangles inside a DESTDIR staging root and resolves once that root is
+	@# unpacked at /. That is what a package expects.
+	ln -sf $(SBINDIR)/netcfgd $(DESTDIR)$(BINDIR)/ncfg
 	@echo "install: netcfgd and ncfg installed; no init glue"
 	@echo "install:   make install-systemd | install-openrc | install-procd"
 	@# Constraint 2: the filesystem reflects use. conf.d/, secrets/ and hooks/
@@ -214,6 +230,7 @@ ascii:
 # question after "did it grow?" -- but the limit is on the sum.
 size:
 	@$(CARGO) build --release --quiet
+	@$(MAKE) --no-print-directory ncfg-link PROFILE=release
 	@tol=$$(awk '/^tolerance_percent/ {print $$2}' size-budget.txt); \
 	limit=$$(awk '/^total/ {print $$2}' size-budget.txt); \
 	total=0; \
@@ -309,6 +326,7 @@ FUZZ_ARGS   ?=
 # there is no network for cargo to fetch anything over.
 live:
 	$(CARGO) build --workspace
+	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
 	$(CARGO) build --tests -p netcfgd-supplicant -p netcfgd-netlink
 	@# WireGuard needs CAP_NET_ADMIN and the module; it skips without either.
 	@binary=$$(ls -t target/debug/deps/wg-* 2>/dev/null | grep -v '\.d$$' | head -1); \
