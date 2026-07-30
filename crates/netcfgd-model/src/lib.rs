@@ -54,7 +54,7 @@ pub use interface::{
 pub use key::Key;
 pub use observed::{
 	AppliedDns, BackendKind, Delegation, Observed, ObservedAddress, ObservedBackend,
-	ObservedBridgeVlan, ObservedLink, ObservedRoute, Origin, Ownership,
+	ObservedBridgeVlan, ObservedLink, ObservedRoute, ObservedRule, Origin, Ownership,
 };
 pub use route::{Route, RouteScope};
 pub use rule::{RoutingRule, RuleAction, RuleFamily};

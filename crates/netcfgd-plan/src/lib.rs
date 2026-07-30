@@ -24,6 +24,7 @@ pub mod net;
 
 pub use action::{Action, Op, Reason};
 
+use netcfgd_model::RoutingRule;
 use netcfgd_model::{
 	AddressSource, BackendKind, DnsPolicy, Document, HookPhase, Interface, InterfaceKind, Observed,
 	Origin, Route,
@@ -160,15 +161,6 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 			});
 		}
 	}
-	if !desired.rules.is_empty() {
-		builder.warnings.push(Warning {
-			message: format!(
-				"{} policy routing rule(s) are recognised but not applied by this build",
-				desired.rules.len()
-			),
-			interface: None,
-		});
-	}
 
 	builder.appearing = desired
 		.interfaces
@@ -232,6 +224,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	}
 
 	builder.plan_dns(desired, observed);
+	builder.plan_rules(desired, observed);
 	builder.plan_qdisc(desired, observed);
 	builder.plan_ingress(desired, observed);
 	builder.plan_forwarding(desired, observed);
@@ -1065,6 +1058,101 @@ impl Builder {
 		);
 	}
 
+	/// Policy routing rules, reconciled against what the kernel holds.
+	///
+	/// Keyed on `(family, priority)`, which is what the kernel keys them by --
+	/// two rules cannot share it. That is also why `priority` is mandatory in
+	/// the model: an unnumbered rule lands wherever the kernel puts it, and
+	/// two applies can produce different orders, which makes the document stop
+	/// describing the system.
+	fn plan_rules(&mut self, desired: &Document, observed: &Observed) {
+		for rule in &desired.rules {
+			let current = observed
+				.rules
+				.iter()
+				.find(|held| held.family == rule.family && held.priority == rule.priority);
+			if current.is_some_and(|held| same_rule(rule, held)) {
+				continue;
+			}
+			// A rule at this priority that is not the one wanted has to go
+			// first: the kernel keys on it, so adding would be `EEXIST`. Only
+			// where it is netcfgd's to remove -- otherwise the plan says so
+			// and changes nothing, which is what `may_remove` is for.
+			if let Some(held) = current {
+				if !held.ownership.may_remove() {
+					self.warnings.push(Warning {
+						message: format!(
+							"rule `{}` wants priority {} in {:?}, and a rule netcfgd \
+							 does not own is already there. Renumber it, or remove \
+							 the other by hand.",
+							rule.id, rule.priority, rule.family
+						),
+						interface: None,
+					});
+					continue;
+				}
+				self.push_root(
+					Op::RuleDel {
+						rule: Box::new(to_desired(held)),
+					},
+					Reason {
+						interface: None,
+						field: format!("rules.{}", rule.id),
+						desired: describe(rule),
+						observed: "a different rule at this priority".to_owned(),
+					},
+					None,
+				);
+			}
+			self.push_root(
+				Op::RuleAdd {
+					rule: Box::new(rule.clone()),
+				},
+				Reason {
+					interface: None,
+					field: format!("rules.{}", rule.id),
+					desired: describe(rule),
+					observed: current.map_or_else(
+						|| "<absent>".to_owned(),
+						|_| "a different rule at this priority".to_owned(),
+					),
+				},
+				Some(Op::RuleDel {
+					rule: Box::new(rule.clone()),
+				}),
+			);
+		}
+
+		// And anything of netcfgd's the document no longer asks for.
+		for held in &observed.rules {
+			if !held.ownership.may_remove() {
+				continue;
+			}
+			if desired
+				.rules
+				.iter()
+				.any(|rule| rule.family == held.family && rule.priority == held.priority)
+			{
+				continue;
+			}
+			let rule = to_desired(held);
+			self.push_root(
+				Op::RuleDel {
+					rule: Box::new(rule.clone()),
+				},
+				Reason {
+					interface: None,
+					field: "rules".to_owned(),
+					desired: "<absent>".to_owned(),
+					observed: describe(&rule),
+				},
+				Some(Op::RuleAdd {
+					rule: Box::new(rule),
+				}),
+			);
+		}
+	}
+
 	/// The root qdisc on each interface that names one.
 	///
 	/// Every interface always has a qdisc, so this is never "install where
@@ -1690,6 +1778,74 @@ fn render_vlan(vlan: netcfgd_model::BridgeVlan) -> String {
 	}
 	if vlan.untagged {
 		out.push_str(" untagged");
+	}
+	out
+}
+
+/// Whether a desired rule and an observed one are the same rule.
+///
+/// Every selector, not just the key. Two rules at the same priority that
+/// differ in `from` are different rules, and treating them as equal is how a
+/// changed selector silently never takes effect.
+fn same_rule(desired: &RoutingRule, observed: &netcfgd_model::ObservedRule) -> bool {
+	desired.from == observed.from
+		&& desired.to == observed.to
+		&& desired.iif == observed.iif
+		&& desired.oif == observed.oif
+		&& desired.fwmark == observed.fwmark
+		&& desired.fwmask == observed.fwmask
+		&& desired.action == observed.action
+		&& desired.suppress_prefixlength == observed.suppress_prefixlength
+		&& desired.l3mdev == observed.l3mdev
+		&& desired.invert == observed.invert
+		// A lookup names a table; the other actions do not, and the kernel
+		// reports `None` for them whatever the document says.
+		&& (desired.action != netcfgd_model::RuleAction::Lookup || desired.table == observed.table)
+}
+
+/// An observed rule as a desired one, for the ops that carry a rule.
+///
+/// The `id` is netcfgd's handle and has no kernel counterpart, so a rule that
+/// came back from a dump gets one describing where it came from rather than a
+/// fabricated name that might collide with a real one.
+fn to_desired(observed: &netcfgd_model::ObservedRule) -> RoutingRule {
+	RoutingRule {
+		id: format!("observed-{:?}-{}", observed.family, observed.priority),
+		priority: observed.priority,
+		family: observed.family,
+		from: observed.from.clone(),
+		to: observed.to.clone(),
+		iif: observed.iif.clone(),
+		oif: observed.oif.clone(),
+		fwmark: observed.fwmark,
+		fwmask: observed.fwmask,
+		table: observed.table,
+		action: observed.action,
+		suppress_prefixlength: observed.suppress_prefixlength,
+		l3mdev: observed.l3mdev,
+		invert: observed.invert,
+	}
+}
+
+/// One rule, for a plan line.
+fn describe(rule: &RoutingRule) -> String {
+	let mut out = format!("{} ", rule.priority);
+	for (label, value) in [
+		("from", rule.from.as_deref()),
+		("to", rule.to.as_deref()),
+		("iif", rule.iif.as_deref()),
+		("oif", rule.oif.as_deref()),
+	] {
+		if let Some(value) = value {
+			out.push_str(&format!("{label} {value} "));
+		}
+	}
+	if let Some(mark) = rule.fwmark {
+		out.push_str(&format!("fwmark {mark:#x} "));
+	}
+	out.push_str(rule.action.name());
+	if let Some(table) = rule.table {
+		out.push_str(&format!(" {table}"));
 	}
 	out
 }

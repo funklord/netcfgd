@@ -4,6 +4,7 @@
 //! and declares its inverse so commit-confirm can revert without deriving one
 //! after the fact -- when the network may already be unreachable.
 
+use netcfgd_model::RoutingRule;
 use netcfgd_model::{BackendKind, DnsPolicy, HookPhase, InterfaceKind, Route, WgPeer};
 use serde::{Deserialize, Serialize};
 
@@ -190,6 +191,16 @@ pub enum Op {
 		/// The policy.
 		policy: Box<DnsPolicy>,
 	},
+	/// Install a policy routing rule.
+	RuleAdd {
+		/// The rule.
+		rule: Box<RoutingRule>,
+	},
+	/// Remove one netcfgd installed.
+	RuleDel {
+		/// The rule.
+		rule: Box<RoutingRule>,
+	},
 	/// Set the root qdisc on an interface.
 	///
 	/// The root and nothing below it (decision 0023). Sent as a replace, so
@@ -309,6 +320,8 @@ impl Op {
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
+			Self::RuleAdd { .. } => "rule.add",
+			Self::RuleDel { .. } => "rule.del",
 			Self::QdiscSet { .. } => "qdisc.set",
 			Self::IngressRedirect { .. } => "ingress.redirect",
 			Self::IngressRedirectClear { .. } => "ingress.redirect.clear",
@@ -358,6 +371,10 @@ impl Op {
 			// being shaped, which on a saturated line is the difference
 			// between a working connection and an unusable one -- the same
 			// kind of loss as withdrawing a route.
+			// Withdrawing a rule sends traffic back to the main table, which
+			// on a policy-routed host is the difference between reaching a
+			// network and not.
+			| Self::RuleDel { .. }
 			| Self::IngressRedirectClear { .. } => true,
 			// Turning forwarding off cuts every host behind this interface
 			// off from everything in front of it, which is a worse
@@ -391,6 +408,11 @@ impl Op {
 			// claiming otherwise would suggest a protection that does not
 			// exist. The commit-confirm inverse is what covers this one.
 			| Self::NatReplace { .. }
+			// Adding a rule changes which table a packet consults, which can
+			// move traffic -- but a guard protects an interface, and a rule
+			// names at most one incidentally. Removing one is the disruptive
+			// direction and is covered below.
+			| Self::RuleAdd { .. }
 			| Self::CommitRevert { .. } => false,
 		}
 	}
@@ -432,7 +454,12 @@ impl Op {
 			// names several: the table is one object and replacing it is one
 			// change to the host, so a guard on any single uplink has no
 			// standing to refuse it.
-			Self::NatReplace { .. }
+			// A rule is host-wide: `iif`/`oif` are selectors, not ownership,
+			// so attributing it to an interface would let a guard on an
+			// unrelated device refuse it.
+			Self::RuleAdd { .. }
+			| Self::RuleDel { .. }
+			| Self::NatReplace { .. }
 			| Self::DnsApply { .. }
 			| Self::CommitArm { .. }
 			| Self::CommitConfirm
