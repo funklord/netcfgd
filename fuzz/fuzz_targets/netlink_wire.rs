@@ -6,10 +6,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use netcfgd_netlink::dump::{decode_address, decode_link, decode_route};
-use netcfgd_netlink::genl::{payload_attrs, GenlHeader};
-use netcfgd_netlink::inotify::Events;
-use netcfgd_netlink::wire::{error_code, Attrs, Header, IfAddr, IfInfo, Messages, RtMsg};
+use netcfgd_sys::dump::{decode_address, decode_link, decode_route};
+use netcfgd_sys::genl::{payload_attrs, GenlHeader};
+use netcfgd_sys::inotify::Events;
+use netcfgd_sys::wire::{error_code, Attrs, Header, IfAddr, IfInfo, Messages, RtMsg};
 
 fuzz_target!(|data: &[u8]| {
 	let _ = Header::decode(data);

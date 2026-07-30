@@ -22,8 +22,8 @@
 use crate::client;
 use crate::Options;
 use netcfgd_host::state;
-use netcfgd_netlink::{curses, signals, term};
 use netcfgd_proto::Request;
+use netcfgd_sys::{curses, signals, term};
 use std::ffi::c_int;
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;

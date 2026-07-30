@@ -4,9 +4,9 @@
 //! not, because a watch that silently reports nothing looks exactly like a
 //! quiet directory and only a real filesystem can tell the difference.
 
-use netcfgd_netlink::inotify::{mask, Event, Events, EVENT_HDR_LEN};
-use netcfgd_netlink::watch::Mechanism;
-use netcfgd_netlink::Watcher;
+use netcfgd_sys::inotify::{mask, Event, Events, EVENT_HDR_LEN};
+use netcfgd_sys::watch::Mechanism;
+use netcfgd_sys::Watcher;
 use std::fs;
 use std::path::PathBuf;
 

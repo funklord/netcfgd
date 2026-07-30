@@ -26,10 +26,10 @@ version = "0.0.0"
 dependencies = [
  "netcfgd-dns",
  "netcfgd-model",
- "netcfgd-netlink",
  "netcfgd-plan",
  "netcfgd-secret",
  "netcfgd-supplicant",
+ "netcfgd-sys",
  "serde",
  "serde_json",
 ]
@@ -50,10 +50,10 @@ dependencies = [
  "netcfgd-compile",
  "netcfgd-host",
  "netcfgd-model",
- "netcfgd-netlink",
  "netcfgd-observe",
  "netcfgd-plan",
  "netcfgd-proto",
+ "netcfgd-sys",
  "serde",
  "serde_json",
 ]
@@ -75,12 +75,12 @@ dependencies = [
  "netcfgd-compile",
  "netcfgd-host",
  "netcfgd-model",
- "netcfgd-netlink",
  "netcfgd-observe",
  "netcfgd-plan",
  "netcfgd-proto",
  "netcfgd-secret",
  "netcfgd-supplicant",
+ "netcfgd-sys",
  "serde_json",
 ]
 
@@ -114,18 +114,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "netcfgd-netlink"
-version = "0.0.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "netcfgd-observe"
 version = "0.0.0"
 dependencies = [
  "netcfgd-model",
- "netcfgd-netlink",
+ "netcfgd-sys",
 ]
 
 [[package]]
@@ -161,6 +154,13 @@ version = "0.0.0"
 dependencies = [
  "netcfgd-model",
  "netcfgd-secret",
+]
+
+[[package]]
+name = "netcfgd-sys"
+version = "0.0.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

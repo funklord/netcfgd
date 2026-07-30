@@ -5,8 +5,8 @@
 //! adversarial cases at the bottom are the deterministic stand-in for the fuzz
 //! target section 6 requires.
 
-use netcfgd_netlink::dump::{decode_address, decode_link, decode_route};
-use netcfgd_netlink::wire::{
+use netcfgd_sys::dump::{decode_address, decode_link, decode_route};
+use netcfgd_sys::wire::{
 	align4, build_request, error_code, flags, ifa, ifla, msg_type, rta, AttrBuf, Attrs, Header,
 	IfAddr, IfInfo, Messages, RtMsg, IFADDR_LEN, IFINFO_LEN, NLMSG_HDR_LEN, RTMSG_LEN,
 };
@@ -425,8 +425,8 @@ fn adversarial_bytes_never_panic() {
 /// runner cannot create an interface rather than failing there.
 #[test]
 fn a_subscribed_socket_observes_a_link_appearing() {
-	use netcfgd_netlink::socket::groups;
-	use netcfgd_netlink::Netlink;
+	use netcfgd_sys::socket::groups;
+	use netcfgd_sys::Netlink;
 
 	let Ok(watcher) = Netlink::open_with_groups(groups::OBSERVED) else {
 		eprintln!("skipped: no netlink socket here");
@@ -442,7 +442,7 @@ fn a_subscribed_socket_observes_a_link_appearing() {
 		return;
 	};
 	if actor
-		.create_link("ncfgwatch0", &netcfgd_netlink::NewLink::Dummy)
+		.create_link("ncfgwatch0", &netcfgd_sys::NewLink::Dummy)
 		.is_err()
 	{
 		// No CAP_NET_ADMIN here. The subscription itself is still proven by
@@ -457,7 +457,7 @@ fn a_subscribed_socket_observes_a_link_appearing() {
 	);
 
 	// Tidy up; failure here is not the test's business.
-	if let Ok(snapshot) = netcfgd_netlink::snapshot_with(&mut actor) {
+	if let Ok(snapshot) = netcfgd_sys::snapshot_with(&mut actor) {
 		if let Some(link) = snapshot.links.iter().find(|l| l.name == "ncfgwatch0") {
 			let _ = actor.delete_link(link.index);
 		}

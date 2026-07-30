@@ -7,23 +7,23 @@ Milestone: M2
 ## Context
 
 Section 1 constraint 4: `#![forbid(unsafe_code)]` everywhere except
-`netcfgd-netlink`, "which is the sole audited exception and carries its own
+`netcfgd-sys`, "which is the sole audited exception and carries its own
 fuzz targets and review bar".
 
 M2's daemon has to notice that the config directory changed. Section 7 says
-inotify. inotify is a raw syscall, and `netcfgd-netlink` is named for a
+inotify. inotify is a raw syscall, and `netcfgd-sys` is named for a
 different one.
 
 Three ways to hold that:
 
-1. Put inotify in `netcfgd-netlink` and accept that the name describes the
+1. Put inotify in `netcfgd-sys` and accept that the name describes the
    larger half rather than the whole.
 2. Add a second crate -- `netcfgd-sys`, say -- with its own `unsafe`.
 3. Avoid inotify entirely and poll mtimes, which needs no `unsafe` at all.
 
 ## Decision
 
-**inotify goes in `netcfgd-netlink`, and the fallback is kept.**
+**inotify goes in `netcfgd-sys`, and the fallback is kept.**
 
 The constraint counts crates because what it is really bounding is *audit
 surface*. A second crate with `unsafe` would be a second thing to review to
@@ -90,3 +90,15 @@ that is either wasteful or slow, with no good answer.
 ordinary rather than exotic. The failure mode -- a daemon that silently stops
 reloading -- is one an operator would not diagnose quickly, because everything
 else about it keeps working.
+
+## Note: the crate was renamed, 2026-07-30
+
+`netcfgd-netlink` became **`netcfgd-sys`** after M6. The title of this record
+was always the more accurate description of it -- one audited crate, not one
+protocol -- and the old name had stopped matching the contents some time ago:
+it holds netlink, `inotify`, `SO_PEERCRED`, termios, `signalfd` and the ncurses
+bindings, of which exactly one is netlink.
+
+References throughout this file and the others were rewritten mechanically so
+they resolve. Where an earlier record quotes a measurement against
+"`netcfgd-netlink`", it is the same crate under the older name.

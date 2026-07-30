@@ -11,14 +11,14 @@ no API for them, and no escape sequence turns off canonical input -- so it is
 `tcgetattr` and `tcsetattr`, which are `extern "C"`, which Rust requires
 `unsafe` to call.
 
-Constraint 4 puts `unsafe` in one crate: `netcfgd-netlink`. So the question
+Constraint 4 puts `unsafe` in one crate: `netcfgd-sys`. So the question
 looked like "does the TUI need an exception?", and three answers were on the
 table: amend constraint 4 for a second audited crate, shell out to `stty`, or
 give up full-screen mode.
 
 ## Decision
 
-**None of them. The termios calls go in `netcfgd-netlink`, and constraint 4 is
+**None of them. The termios calls go in `netcfgd-sys`, and constraint 4 is
 unchanged.**
 
 The question was wrong because the crate's name is wrong. It already holds
@@ -77,10 +77,11 @@ shell with no echo. The TUI treats `^C` and `q` as the same key.
 module rather than papered over; the mitigation is that every ordinary exit
 restores, and `^C` is an ordinary exit.
 
-**The crate's name now misdescribes it twice over.** `netcfgd-netlink` holds
-netlink, inotify, socket credentials and terminal control. A rename would
-touch every crate in the workspace and is not worth doing mid-milestone, but it
-should happen -- `netcfgd-sys` is what it is.
+**The crate's name misdescribed it twice over.** It held netlink, inotify,
+socket credentials and terminal control, of which one is netlink. **Done on
+2026-07-30**, between M6 and M7, which is what "not mid-milestone" meant:
+`netcfgd-netlink` is now `netcfgd-sys`. See the note at the end of
+[0012](0012-one-audited-crate-not-one-protocol.md).
 
 ## Alternatives considered
 

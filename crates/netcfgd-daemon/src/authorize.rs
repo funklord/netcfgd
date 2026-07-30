@@ -5,8 +5,8 @@
 //! part that runs.
 
 use netcfgd_model::{Control, Principal, Tier};
-use netcfgd_netlink::peer::{group_id, user_id, Peer};
 use netcfgd_proto::Request;
+use netcfgd_sys::peer::{group_id, user_id, Peer};
 
 /// Which tier a request belongs to.
 ///

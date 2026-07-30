@@ -2,7 +2,7 @@
 
 Code style for this project. Applies to every crate in the workspace — the
 pure core (`netcfgd-model`, `netcfgd-compile`, `netcfgd-plan`), the crates
-that touch the kernel (`netcfgd-netlink`, `netcfgd-observe`,
+that touch the kernel (`netcfgd-sys`, `netcfgd-observe`,
 `netcfgd-apply`), the binaries (`netcfgd`, `ncfg`), the backends and the
 adapters alike. `project.md` §9 states the rules in brief and points here
 for the detail; where the two ever disagree, project.md wins.
@@ -160,7 +160,7 @@ anything touching `rtm_protocol` and object ownership (§2.3), and every
 
 `#![forbid(unsafe_code)]` is the **first line** of every crate root, written
 identically in each, so its absence is visible at a glance rather than by
-grepping. `netcfgd-netlink` is the sole exception (§1.4) and says so in its
+grepping. `netcfgd-sys` is the sole exception (§1.4) and says so in its
 crate-level doc comment, immediately above the `#![allow(unsafe_code)]` that
 replaces it.
 

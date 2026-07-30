@@ -89,7 +89,7 @@ message types -- more surface in the one crate permitted `unsafe`, and more
 for the fuzz targets to cover. Worth knowing before starting rather than
 halfway through.
 
-*Paid, 2026-07-30.* `netcfgd-netlink::genl` resolves families and multicast
+*Paid, 2026-07-30.* `netcfgd-sys::genl` resolves families and multicast
 groups, and `nl80211` comes back as id 35 with six groups on the machine this
 was written on. The remaining work for the path above is the message types,
 not the plumbing. Notably the new module needs no `unsafe` of its own -- it is

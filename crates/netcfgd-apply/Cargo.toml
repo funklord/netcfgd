@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 netcfgd-dns     = { path = "../../backends/netcfgd-dns" }
 netcfgd-model   = { path = "../netcfgd-model" }
-netcfgd-netlink = { path = "../netcfgd-netlink" }
+netcfgd-sys = { path = "../netcfgd-sys" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
 netcfgd-secret  = { path = "../netcfgd-secret" }
 netcfgd-supplicant = { path = "../../backends/netcfgd-supplicant" }

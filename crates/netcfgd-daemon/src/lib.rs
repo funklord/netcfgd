@@ -15,10 +15,10 @@ mod state;
 mod wifi;
 
 use netcfgd_host::state as run_state;
-use netcfgd_netlink::socket::groups;
-use netcfgd_netlink::{Netlink, Watcher};
 use netcfgd_plan::PlanOptions;
 use netcfgd_proto::{Event, Request, Response, DEFAULT_SOCKET};
+use netcfgd_sys::socket::groups;
+use netcfgd_sys::{Netlink, Watcher};
 use server::Command;
 use state::{Paths, State};
 use std::path::PathBuf;

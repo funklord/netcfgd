@@ -783,7 +783,7 @@ pub enum Toggle {
 /// Nothing implements this yet, and the reason is worth stating: ethtool is
 /// reached either through `SIOCETHTOOL`, an ioctl, or through the newer
 /// generic netlink family. The first needs an `unsafe` ioctl outside
-/// `netcfgd-netlink`, which constraint 4 forbids; the second needs generic
+/// `netcfgd-sys`, which constraint 4 forbids; the second needs generic
 /// netlink family resolution, which is the same cost decision 0016 identified
 /// for `nl80211` and has not been paid. So the type is here for the M4 freeze
 /// and a config using it is refused by name.

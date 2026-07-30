@@ -1,7 +1,7 @@
 //! inotify, for noticing that the config directory changed.
 //!
 //! Not netlink, and in this crate anyway. Section 1 constraint 4 names
-//! `netcfgd-netlink` as the single crate permitted `unsafe`, so what defines
+//! `netcfgd-sys` as the single crate permitted `unsafe`, so what defines
 //! it is the audit, not the protocol -- a second crate making raw syscalls
 //! would mean a second thing to review to the same bar, which is exactly what
 //! the constraint exists to prevent. See `docs/decisions/0012`.

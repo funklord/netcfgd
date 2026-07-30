@@ -4,9 +4,9 @@
 //! anybody -- so unlike the rest of the live testing in this project, these
 //! run in `cargo test` on any Linux machine.
 
-use netcfgd_netlink::genl::{getfamily_message, payload_attrs, GenlHeader, GENL_HDR_LEN};
-use netcfgd_netlink::wire::{Header, Messages};
-use netcfgd_netlink::Genl;
+use netcfgd_sys::genl::{getfamily_message, payload_attrs, GenlHeader, GENL_HDR_LEN};
+use netcfgd_sys::wire::{Header, Messages};
+use netcfgd_sys::Genl;
 
 /// Four bytes between the netlink header and the attributes. Omitting it
 /// produces a message the kernel parses as attributes starting four bytes

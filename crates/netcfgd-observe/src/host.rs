@@ -49,7 +49,7 @@ fn forwarding(root: &std::path::Path, name: &str) -> Option<bool> {
 
 /// netcfgd's own NAT, and anyone else's.
 fn read_netfilter(observed: &mut Observed) {
-	let Ok(mut nft) = netcfgd_netlink::nft::Nft::open() else {
+	let Ok(mut nft) = netcfgd_sys::nft::Nft::open() else {
 		return;
 	};
 	observed.nat = nft.nat_uplinks().unwrap_or_default();
@@ -58,7 +58,7 @@ fn read_netfilter(observed: &mut Observed) {
 		.chains()
 		.unwrap_or_default()
 		.into_iter()
-		.filter(|chain| chain.is_source_nat() && chain.table != netcfgd_netlink::nft::TABLE)
+		.filter(|chain| chain.is_source_nat() && chain.table != netcfgd_sys::nft::TABLE)
 		.map(|chain| chain.table)
 		.collect();
 	conflicts.sort();

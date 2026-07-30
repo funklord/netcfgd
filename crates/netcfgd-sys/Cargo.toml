@@ -1,5 +1,5 @@
 [package]
-name        = "netcfgd-netlink"
+name        = "netcfgd-sys"
 description = "rtnetlink transport and codec. The only netcfgd crate permitted `unsafe`."
 version.workspace      = true
 edition.workspace      = true

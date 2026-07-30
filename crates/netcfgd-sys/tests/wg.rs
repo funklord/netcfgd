@@ -4,9 +4,9 @@
 //! without either -- unless `NCFG_LIVE` is set, which turns a skip into a
 //! failure so `make live` cannot pass by doing nothing.
 
-use netcfgd_netlink::wg::{self, Device, Peer};
-use netcfgd_netlink::wire::Attrs;
-use netcfgd_netlink::{Genl, NewLink};
+use netcfgd_sys::wg::{self, Device, Peer};
+use netcfgd_sys::wire::Attrs;
+use netcfgd_sys::{Genl, NewLink};
 use std::net::{IpAddr, SocketAddr};
 
 const NLA_F_NESTED: u16 = 0x8000;
@@ -179,7 +179,7 @@ fn a_tunnel_round_trips_through_the_kernel() {
 	let Some(mut genl) = live_or_skip() else {
 		return;
 	};
-	let Ok(mut route) = netcfgd_netlink::Netlink::open() else {
+	let Ok(mut route) = netcfgd_sys::Netlink::open() else {
 		println!("skipping: no rtnetlink socket");
 		return;
 	};
@@ -233,7 +233,7 @@ fn removing_a_peer_from_the_document_removes_it_from_the_kernel() {
 	let Some(mut genl) = live_or_skip() else {
 		return;
 	};
-	let Ok(mut route) = netcfgd_netlink::Netlink::open() else {
+	let Ok(mut route) = netcfgd_sys::Netlink::open() else {
 		return;
 	};
 	if route.create_link("wg-drop", &NewLink::WireGuard).is_err() {
