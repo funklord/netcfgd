@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+# netcfgd under OpenRC, for Gentoo and Alpine.
+#
+# The audience decision 0001 and 0007 keep pointing at: no systemd anywhere,
+# and the same world that already runs dhcpcd and openresolv, which netcfgd
+# delegates to.
+
+name="netcfgd"
+description="Network configuration daemon"
+command="/usr/sbin/netcfgd"
+command_background="yes"
+pidfile="/run/netcfgd.pid"
+output_log="/var/log/netcfgd.log"
+error_log="/var/log/netcfgd.log"
+
+depend() {
+	# `provide net` is what makes services with `need net` wait for this, the
+	# same way netifrc's own scripts do -- so netcfgd drops into the slot
+	# already understood rather than asking every dependent to learn a name.
+	provide net
+	need localmount
+	before logger
+	after bootmisc
+}
+
+start_pre() {
+	checkpath --directory --mode 0755 /run/netcfgd
+}
