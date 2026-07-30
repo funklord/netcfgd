@@ -7,7 +7,7 @@ members = [
 	"crates/netcfgd-model",
 	"crates/netcfgd-compile",
 	"crates/netcfgd-plan",
-	"crates/netcfgd-netlink",
+	"crates/netcfgd-sys",
 	"crates/netcfgd-observe",
 	"crates/netcfgd-apply",
 	"crates/netcfgd-proto",

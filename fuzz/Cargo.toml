@@ -13,7 +13,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys   = "0.4"
-netcfgd-netlink = { path = "../crates/netcfgd-netlink" }
+netcfgd-sys = { path = "../crates/netcfgd-sys" }
 netcfgd-compile = { path = "../crates/netcfgd-compile" }
 netcfgd-model   = { path = "../crates/netcfgd-model" }
 

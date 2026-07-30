@@ -12,4 +12,4 @@ workspace = true
 
 [dependencies]
 netcfgd-model   = { path = "../netcfgd-model" }
-netcfgd-netlink = { path = "../netcfgd-netlink" }
+netcfgd-sys = { path = "../netcfgd-sys" }

@@ -2,13 +2,13 @@
 //!
 //! No epoll, no async runtime. A blocking accept and a blocking read per
 //! connection, with `mpsc` carrying the work to a single-threaded state
-//! machine. That keeps every crate but `netcfgd-netlink` free of `unsafe`
+//! machine. That keeps every crate but `netcfgd-sys` free of `unsafe`
 //! (constraint 4), keeps the daemon's state free of locks, and costs a thread
 //! per client on a socket that will normally have one or two.
 
 use netcfgd_model::Control;
-use netcfgd_netlink::peer::{group_id, Peer};
 use netcfgd_proto::{read_message, write_message, Event, Request, Response};
+use netcfgd_sys::peer::{group_id, Peer};
 use std::io::{BufReader, BufWriter};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -150,7 +150,7 @@ fn handle(stream: UnixStream, commands: &Sender<Command>) {
 	// Read once, at accept time, rather than per request: the credentials
 	// belong to the connection, and re-reading them would only widen the
 	// window in which the peer's pid could be recycled.
-	let Ok(peer) = netcfgd_netlink::credentials(&stream) else {
+	let Ok(peer) = netcfgd_sys::credentials(&stream) else {
 		return;
 	};
 	let Ok(write_half) = stream.try_clone() else {

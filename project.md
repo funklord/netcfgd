@@ -40,7 +40,7 @@ Note the crate name and the installed binary name need not match — if anything
 1. **Config files are the only authority.** Anything netcfgd does traces to a file under `/etc/netcfgd/`. Runtime state in `/run/netcfgd/` is derived and disposable.
 2. **The filesystem reflects use, not capability.** A default install is `netcfgd.conf` plus `conf.d/`. Nothing else appears until a feature is actually used. CI enforces this against a fixture (§6).
 3. **Core has no mandatory dependencies** beyond libc and the kernel. No D-Bus, no glib, no polkit, no systemd. Adapters carry their own dependencies in their own packages.
-4. **`#![forbid(unsafe_code)]` everywhere except `netcfgd-netlink`**, which is the sole audited exception and carries its own fuzz targets and review bar.
+4. **`#![forbid(unsafe_code)]` everywhere except `netcfgd-sys`**, which is the sole audited exception and carries its own fuzz targets and review bar.
 5. **The desired-state document never contains secret material.** Only `SecretRef` indirections. This is invariant across local files, `/run` state, and any future wire transmission.
 6. **The one-way rule.** No change to the model, config language or socket API may be justified *solely* by an adapter's needs (NM, RESTCONF/YANG, or anything else). If an adapter wants a concept, it must independently be something a local user would want in their own config file.
 7. **`ncfg plan` survives to the smallest build.** Not being a black box is the product; a black box on an embedded device with no console is worse than one on a laptop.
@@ -440,7 +440,7 @@ netcfgd/
   crates/
     netcfgd-model/              # document types, serde, canonical encode. NO I/O.
     netcfgd-compile/            # DSL -> model. Pure.
-    netcfgd-netlink/            # rtnetlink. ONLY crate permitted `unsafe`.
+    netcfgd-sys/            # rtnetlink. ONLY crate permitted `unsafe`.
     netcfgd-observe/            # netlink + backend reports -> observed model
     netcfgd-plan/               # diff(desired, observed) -> Plan. Pure.
     netcfgd-apply/              # executes a Plan
@@ -472,7 +472,7 @@ The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are
 | Size budget | stripped static binary: embedded ≤ 1 MB ([0021](docs/decisions/0021-no-nano-tier.md) dropped the 400 KB nano tier) |
 | RSS budget | steady-state < 4 MB |
 | Filesystem footprint | `find /etc/netcfgd` on a fixture install with no optional features used must match a build compiled without those features |
-| Unsafe policy | `forbid(unsafe_code)` holds everywhere except `netcfgd-netlink` |
+| Unsafe policy | `forbid(unsafe_code)` holds everywhere except `netcfgd-sys` |
 | Supply chain | `cargo-deny`, `cargo-audit`, pinned lockfile, stated MSRV |
 | Fuzzing | every parser — DSL, netlink messages, backend IPC — has a `cargo-fuzz` target running in CI |
 | Determinism | same config compiles to byte-identical document across runs and platforms |

@@ -38,7 +38,7 @@ clippy:
 test:
 	$(CARGO) test --workspace
 
-# section 1 constraint 4: forbid(unsafe_code) holds everywhere except netcfgd-netlink,
+# section 1 constraint 4: forbid(unsafe_code) holds everywhere except netcfgd-sys,
 # which is the sole audited exception. Checked by reading the crate roots rather
 # than by trusting that nobody removed the attribute, since its absence is
 # silent -- the code still compiles, it just stops being checked.
@@ -57,7 +57,7 @@ unsafe-policy:
 	for root in $$roots; do \
 		[ -f "$$root" ] || continue; \
 		crate=$$(basename $$(dirname $$(dirname "$$root"))); \
-		if [ "$$crate" = "netcfgd-netlink" ]; then \
+		if [ "$$crate" = "netcfgd-sys" ]; then \
 			continue; \
 		fi; \
 		if ! head -n 1 "$$root" | grep -q '^#!\[forbid(unsafe_code)\]$$'; then \
@@ -65,10 +65,10 @@ unsafe-policy:
 			fail=1; \
 		fi; \
 	done; \
-	if [ ! -d crates/netcfgd-netlink ]; then \
+	if [ ! -d crates/netcfgd-sys ]; then \
 		:; \
-	elif ! grep -q 'SAFETY:' -r crates/netcfgd-netlink/src 2>/dev/null; then \
-		echo "unsafe-policy: netcfgd-netlink has no SAFETY comments"; \
+	elif ! grep -q 'SAFETY:' -r crates/netcfgd-sys/src 2>/dev/null; then \
+		echo "unsafe-policy: netcfgd-sys has no SAFETY comments"; \
 		fail=1; \
 	fi; \
 	[ $$fail -eq 0 ] && echo "unsafe-policy: ok"; \
@@ -337,7 +337,7 @@ FUZZ_ARGS   ?=
 live:
 	$(CARGO) build --workspace
 	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
-	$(CARGO) build --tests -p netcfgd-supplicant -p netcfgd-netlink
+	$(CARGO) build --tests -p netcfgd-supplicant -p netcfgd-sys
 	@# WireGuard needs CAP_NET_ADMIN and the module; it skips without either.
 	@binary=$$(ls -t target/debug/deps/wg-* 2>/dev/null | grep -v '\.d$$' | head -1); \
 	if [ -n "$$binary" ]; then \
