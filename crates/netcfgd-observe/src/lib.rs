@@ -19,6 +19,7 @@
 pub mod host;
 
 use netcfgd_model::route::NETCFGD_PROTO;
+use netcfgd_model::ObservedRule;
 use netcfgd_model::{
 	Observed, ObservedAddress, ObservedBackend, ObservedLink, ObservedRoute, Origin, Ownership,
 };
@@ -70,6 +71,52 @@ impl PriorState {
 			.iter()
 			.find(|(iface, dst, _)| iface == interface && dst == destination)
 			.map(|(_, _, origin)| *origin)
+	}
+}
+
+/// One rule, with ownership decided the way a route's is.
+///
+/// `FRA_PROTOCOL` round-trips through the kernel, so unlike a link this needs
+/// no recorded state: a rule carrying 110 is netcfgd's and nothing else is.
+/// A kernel too old for the attribute reports 0 on everything, which reads as
+/// foreign -- so netcfgd installs and never removes, which is the safe way to
+/// be wrong.
+fn observed_rule(record: &netcfgd_sys::rule::RuleRecord) -> ObservedRule {
+	let cidr = |selector: Option<(std::net::IpAddr, u8)>| {
+		selector.map(|(address, prefix)| format!("{address}/{prefix}"))
+	};
+	ObservedRule {
+		priority: record.priority,
+		// `AF_INET6`. Named here rather than pulled from libc, which this
+		// crate does not depend on and should not start to for one constant.
+		family: if record.family == 10 {
+			netcfgd_model::RuleFamily::Inet6
+		} else {
+			netcfgd_model::RuleFamily::Inet
+		},
+		from: cidr(record.from),
+		to: cidr(record.to),
+		iif: record.iif.clone(),
+		oif: record.oif.clone(),
+		fwmark: record.fwmark,
+		fwmask: record.fwmask,
+		// Zero is `RT_TABLE_UNSPEC`, which for an action other than a lookup
+		// is simply "no table" rather than "table zero".
+		table: (record.table != 0).then_some(record.table),
+		action: match record.action {
+			netcfgd_sys::rule::FR_ACT_BLACKHOLE => netcfgd_model::RuleAction::Blackhole,
+			netcfgd_sys::rule::FR_ACT_UNREACHABLE => netcfgd_model::RuleAction::Unreachable,
+			netcfgd_sys::rule::FR_ACT_PROHIBIT => netcfgd_model::RuleAction::Prohibit,
+			_ => netcfgd_model::RuleAction::Lookup,
+		},
+		suppress_prefixlength: record.suppress_prefixlength,
+		l3mdev: record.l3mdev,
+		invert: record.invert,
+		ownership: if record.protocol == NETCFGD_PROTO {
+			Ownership::Ours
+		} else {
+			Ownership::Foreign
+		},
 	}
 }
 
@@ -202,6 +249,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		.collect();
 
 	let mut observed = Observed {
+		rules: snapshot.rules.iter().map(observed_rule).collect(),
 		nat: Vec::new(),
 		nat_conflicts: Vec::new(),
 		forwarding_applied: prior.forwarding.clone(),
@@ -377,6 +425,7 @@ mod tests {
 		let snapshot = Snapshot {
 			qdiscs: netcfgd_sys::qdisc::QdiscDump::default(),
 			redirects: Vec::new(),
+			rules: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
 			addresses: vec![
@@ -442,6 +491,7 @@ mod tests {
 		let snapshot = Snapshot {
 			qdiscs: netcfgd_sys::qdisc::QdiscDump::default(),
 			redirects: Vec::new(),
+			rules: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![member, link(3, "br0"), orphan],
 			..Snapshot::default()
@@ -461,6 +511,7 @@ mod tests {
 		let snapshot = Snapshot {
 			qdiscs: netcfgd_sys::qdisc::QdiscDump::default(),
 			redirects: Vec::new(),
+			rules: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0")],
 			addresses: vec![address(77, "10.0.0.1", 24, None)],
@@ -477,6 +528,7 @@ mod tests {
 		let snapshot = Snapshot {
 			qdiscs: netcfgd_sys::qdisc::QdiscDump::default(),
 			redirects: Vec::new(),
+			rules: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
 			..Snapshot::default()

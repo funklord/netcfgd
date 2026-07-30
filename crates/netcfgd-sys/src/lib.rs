@@ -27,6 +27,7 @@ pub mod nft;
 pub mod ops;
 pub mod peer;
 pub mod qdisc;
+pub mod rule;
 pub mod signals;
 pub mod socket;
 pub mod term;
@@ -58,6 +59,8 @@ pub struct Snapshot {
 	pub qdiscs: qdisc::QdiscDump,
 	/// `(interface, target)` for each ingress redirect installed.
 	pub redirects: Vec<(u32, u32)>,
+	/// Every policy routing rule, from the `RTM_GETRULE` dump.
+	pub rules: Vec<rule::RuleRecord>,
 	/// Whether any address in this dump carried `IFA_PROTO`.
 	///
 	/// **A lower bound, not a kernel capability check.** `false` means "no
@@ -154,6 +157,8 @@ pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
 	}
 	redirects.sort_unstable();
 
+	let rules = socket.rules()?;
+
 	let address_proto_supported = addresses.iter().any(|address| address.proto.is_some());
 
 	Ok(Snapshot {
@@ -163,6 +168,7 @@ pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
 		bridge_vlans,
 		qdiscs,
 		redirects,
+		rules,
 		address_proto_supported,
 	})
 }

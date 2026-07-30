@@ -255,6 +255,30 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 			Op::IngressRedirect { .. } | Op::IngressRedirectClear { .. } => {
 				simulate_ingress(&action.op, observed);
 			}
+			Op::RuleAdd { rule } => observed.rules.push(netcfgd_model::ObservedRule {
+				priority: rule.priority,
+				family: rule.family,
+				from: rule.from.clone(),
+				to: rule.to.clone(),
+				iif: rule.iif.clone(),
+				oif: rule.oif.clone(),
+				fwmark: rule.fwmark,
+				fwmask: rule.fwmask,
+				// The kernel reports no table for the non-lookup actions,
+				// whatever the document said. A fake that echoed the desired
+				// value back would hide a real mismatch.
+				table: (rule.action == netcfgd_model::RuleAction::Lookup)
+					.then_some(rule.table)
+					.flatten(),
+				action: rule.action,
+				suppress_prefixlength: rule.suppress_prefixlength,
+				l3mdev: rule.l3mdev,
+				invert: rule.invert,
+				ownership: Ownership::Ours,
+			}),
+			Op::RuleDel { rule } => observed
+				.rules
+				.retain(|held| !(held.family == rule.family && held.priority == rule.priority)),
 			Op::SysctlSetForwarding { iface, enabled } => {
 				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
 					link.forwarding = Some(*enabled);
@@ -1019,16 +1043,15 @@ fn removing_dot1x_stops_the_supplicant() {
 	);
 }
 
-/// The M4 freeze put three features in the schema that nothing implements.
-/// The failure mode to guard against is not that they do nothing -- that is
-/// intended -- but that they do nothing *silently*, so a plan reports "one
-/// action" about a config that asked for four things.
+/// The M4 freeze put four features in the schema that nothing implemented.
+/// Policy routing rules are now built, so three remain. The failure mode to
+/// guard against is not that they do nothing -- that is intended -- but that
+/// they do nothing *silently*, so a plan reports "one action" about a config
+/// that asked for several things.
 #[test]
 fn recognised_but_unimplemented_features_are_named_in_the_plan() {
 	let document = document(
 		r#"
-rule vpn { priority = 100; fwmark = 1; lookup = 42 }
-
 access_point "guest" {
 	device = "wlan0"
 	wifi   { open = true }
@@ -1052,12 +1075,7 @@ interface eth0 {
 		.map(|warning| warning.message.as_str())
 		.collect();
 
-	for expected in [
-		"access point `guest`",
-		"ethtool",
-		"ipv6_token",
-		"policy routing rule",
-	] {
+	for expected in ["access point `guest`", "ethtool", "ipv6_token"] {
 		assert!(
 			warnings.iter().any(|message| message.contains(expected)),
 			"nothing warned about {expected}: {warnings:?}"
@@ -1893,4 +1911,133 @@ fn a_redirect_netcfgd_did_not_install_is_left_alone() {
 		"{:?}",
 		names(&plan)
 	);
+}
+
+/// A rule is installed once and then left alone.
+#[test]
+fn a_rule_is_installed_once_and_then_left_alone() {
+	let desired = document(
+		r#"
+		interface eth0 { config = "10.0.0.2/24" }
+		rule "uplink" {
+			priority = 1000
+			from     = "10.9.0.0/16"
+			lookup   = 100
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	let plan = settle(&desired, &mut observed);
+
+	assert!(names(&plan).contains(&"rule.add"), "{:?}", names(&plan));
+	assert_eq!(observed.rules.len(), 1);
+	assert_eq!(observed.rules[0].priority, 1000);
+}
+
+/// Changing a selector reinstalls: the kernel keys on priority, so the old one
+/// has to go first or the add is EEXIST.
+#[test]
+fn changing_a_selector_replaces_the_rule() {
+	let desired = document(
+		r#"
+		interface eth0 { config = "10.0.0.2/24" }
+		rule "uplink" {
+			priority = 1000
+			from     = "10.8.0.0/16"
+			lookup   = 100
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.rules.push(netcfgd_model::ObservedRule {
+		priority: 1000,
+		family: netcfgd_model::RuleFamily::Inet,
+		from: Some("10.9.0.0/16".to_owned()),
+		to: None,
+		iif: None,
+		oif: None,
+		fwmark: None,
+		fwmask: None,
+		table: Some(100),
+		action: netcfgd_model::RuleAction::Lookup,
+		suppress_prefixlength: None,
+		l3mdev: false,
+		invert: false,
+		ownership: Ownership::Ours,
+	});
+
+	let plan = settle(&desired, &mut observed);
+	let names = names(&plan);
+	assert!(names.contains(&"rule.del"), "{names:?}");
+	assert!(
+		position(&plan, "rule.del") < position(&plan, "rule.add"),
+		"the old rule must go before the new one: {names:?}"
+	);
+	assert_eq!(observed.rules[0].from.as_deref(), Some("10.8.0.0/16"));
+}
+
+/// A rule netcfgd did not install is never removed, and the collision is
+/// reported rather than resolved.
+#[test]
+fn a_foreign_rule_at_the_same_priority_is_reported_not_removed() {
+	let desired = document(
+		r#"
+		interface eth0 { config = "10.0.0.2/24" }
+		rule "uplink" {
+			priority = 1000
+			lookup   = 100
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.rules.push(netcfgd_model::ObservedRule {
+		priority: 1000,
+		family: netcfgd_model::RuleFamily::Inet,
+		from: None,
+		to: None,
+		iif: None,
+		oif: None,
+		fwmark: None,
+		fwmask: None,
+		table: Some(254),
+		action: netcfgd_model::RuleAction::Lookup,
+		suppress_prefixlength: None,
+		l3mdev: false,
+		invert: false,
+		ownership: Ownership::Foreign,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(!names(&plan).contains(&"rule.del"), "{:?}", names(&plan));
+	assert!(plan
+		.warnings
+		.iter()
+		.any(|w| w.message.contains("netcfgd does not own")));
+}
+
+/// Dropping a rule from the document removes it.
+#[test]
+fn removing_a_rule_from_the_config_withdraws_it() {
+	let desired = document("interface eth0 { config = \"10.0.0.2/24\" }");
+	let mut observed = observed_with(&["eth0"]);
+	observed.rules.push(netcfgd_model::ObservedRule {
+		priority: 1000,
+		family: netcfgd_model::RuleFamily::Inet,
+		from: None,
+		to: None,
+		iif: None,
+		oif: None,
+		fwmark: None,
+		fwmask: None,
+		table: Some(100),
+		action: netcfgd_model::RuleAction::Lookup,
+		suppress_prefixlength: None,
+		l3mdev: false,
+		invert: false,
+		ownership: Ownership::Ours,
+	});
+
+	let plan = settle(&desired, &mut observed);
+	assert!(names(&plan).contains(&"rule.del"));
+	assert!(observed.rules.is_empty());
 }
