@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy executor-policy ascii size footprint rss live schema-bless fuzz deny clean
+.PHONY: all check build test fmt fmt-fix clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-systemd install-openrc install-procd fuzz deny clean
 
 all: build
 
@@ -14,7 +14,7 @@ build:
 	$(CARGO) build --workspace
 
 # Ordered cheapest first, so a formatting slip does not wait on a full test run.
-check: fmt ascii clippy unsafe-policy executor-policy test size footprint rss
+check: fmt ascii clippy unsafe-policy executor-policy packaging test size footprint rss
 
 fmt:
 	$(CARGO) fmt --check
@@ -82,6 +82,46 @@ executor-policy:
 	fi; \
 	echo "executor-policy: ok"
 
+DESTDIR ?=
+PREFIX  ?= /usr
+SBINDIR ?= $(PREFIX)/sbin
+BINDIR  ?= $(PREFIX)/bin
+SYSCONFDIR ?= /etc
+
+# Two binaries and a config directory. Nothing else, and nothing that makes
+# installing netcfgd install anything of anybody else's.
+#
+# The init glue is deliberately not here. Each `install-*` target below writes
+# one file for one init system, and a machine gets the one it runs -- installing
+# a systemd unit on a machine without systemd would be litter, and depending on
+# systemd to install netcfgd would be the coupling this project spends its
+# constraints avoiding. The unit files are text; they link nothing and require
+# nothing.
+install: build
+	install -d $(DESTDIR)$(SBINDIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(SYSCONFDIR)/netcfgd
+	install -m 0755 target/release/netcfgd $(DESTDIR)$(SBINDIR)/netcfgd
+	install -m 0755 target/release/ncfg $(DESTDIR)$(BINDIR)/ncfg
+	@echo "install: netcfgd and ncfg installed; no init glue"
+	@echo "install:   make install-systemd | install-openrc | install-procd"
+	@# Constraint 2: the filesystem reflects use. conf.d/, secrets/ and hooks/
+	@# appear when something needs them, so they are not created here.
+
+install-systemd:
+	install -d $(DESTDIR)/usr/lib/systemd/system
+	install -m 0644 packaging/systemd/netcfgd.service \
+		$(DESTDIR)/usr/lib/systemd/system/netcfgd.service
+	@echo "install-systemd: netcfgd.service installed, not enabled"
+	@echo "install-systemd:   to make netcfgd the only network daemon, see"
+	@echo "install-systemd:   packaging/systemd/netcfgd-exclusive.conf"
+
+install-openrc:
+	install -d $(DESTDIR)$(SYSCONFDIR)/init.d
+	install -m 0755 packaging/openrc/netcfgd $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
+
+install-procd:
+	install -d $(DESTDIR)$(SYSCONFDIR)/init.d
+	install -m 0755 packaging/procd/netcfgd $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
+
 # M4 froze the document schema and the socket API. The freeze is enforced by
 # two witnesses under docs/schema/: one document with every field and variant
 # populated, and one of every socket message. Any change to either wire form
@@ -96,6 +136,56 @@ schema-bless:
 	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-proto --test frozen >/dev/null
 	@echo "schema-bless: witnesses rewritten; `git diff --stat docs/schema | tail -1`"
 	@echo "schema-bless: say in the commit whether this is a minor or a major bump"
+
+# The init glue is data, so nothing compiles it and a typo would be found by
+# whoever first tried to boot. These are the checks that can be made without an
+# init system to hand: every script parses, the unit passes systemd's own
+# verifier where it exists, and every binary path the scripts name is one the
+# install targets actually create -- which is the mistake that turns a working
+# daemon into one that silently never starts.
+#
+# The path check extracts what the scripts *declare* -- the Exec lines, the
+# OpenRC `command=`, procd's `command` parameter -- rather than grepping for
+# paths that look right. The first version did the latter and tested nothing: a
+# unit pointing at /usr/local/bin/netcfgd matched no pattern and so raised
+# nothing, and /usr/sbin/netcfgdd matched as a prefix of the correct path and
+# passed. Both were caught by deliberately breaking it. There is also a guard
+# below against the extraction itself finding nothing, which is the failure
+# mode a check like this dies of quietly.
+#
+# No backticks anywhere in this recipe. The first version put one in a message
+# and make handed it to the shell, which ran the install target it was warning
+# about.
+packaging:
+	@fail=0; \
+	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
+		echo "packaging: no Exec lines found -- the extraction below is checking nothing"; \
+		exit 1; \
+	fi; \
+	for script in packaging/openrc/netcfgd packaging/procd/netcfgd; do \
+		sh -n "$$script" || { echo "packaging: $$script does not parse"; fail=1; }; \
+	done; \
+	if command -v systemd-analyze >/dev/null 2>&1; then \
+		out=$$(systemd-analyze verify packaging/systemd/netcfgd.service 2>&1 \
+			| grep -v 'is not executable'); \
+		if [ -n "$$out" ]; then echo "$$out"; fail=1; fi; \
+	fi; \
+	installed="$(SBINDIR)/netcfgd $(BINDIR)/ncfg"; \
+	declared=$$( { \
+		sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service; \
+		sed -n 's/^command="\([^"]*\)".*/\1/p' packaging/openrc/netcfgd; \
+		sed -n 's/.*procd_set_param command \([^ ]*\).*/\1/p' packaging/procd/netcfgd; \
+		sed -n 's/^\t*\(\/[^ ]*ncfg\) .*/\1/p' packaging/procd/netcfgd; \
+	} | sort -u); \
+	for path in $$declared; do \
+		case "$$installed" in \
+		*"$$path"*) ;; \
+		*) echo "packaging: $$path is named by an init script and never installed"; \
+		   fail=1 ;; \
+		esac; \
+	done; \
+	[ $$fail -eq 0 ] && echo "packaging: ok"; \
+	exit $$fail
 
 # code-style.md section 4: source, comments and doc comments are ASCII. Markdown
 # is exempt and is not checked here. This caught real drift the first time it
