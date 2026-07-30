@@ -91,10 +91,7 @@ reason to want them.
 policy, and a filter that matched on `fwmark` would additionally depend on
 something 0022 says netcfgd never sets.
 
-**Ingress shaping.** Genuinely useful -- it is the other half of fixing
-bufferbloat on an asymmetric line -- and out anyway, because it needs an `ifb`
-device and a `mirred` redirect filter, which is the filter machinery this
-record just refused. An operator who wants it has `pre_up`.
+**Ingress shaping** was excluded here and is now in; see the amendment below.
 
 **Per-queue and multiqueue configuration.** `mq`, per-txq qdiscs, XPS. These
 are driver tuning, and design section 8.4 already puts driver tuning with
@@ -120,6 +117,69 @@ gigabit interface to 1 kbit, because it has no way to know what the circuit
 behind it carries -- that is the operator's fact, which is why it is in the
 config at all.
 
+## Amendment: ingress shaping is in
+
+Date: 2026-07-30
+
+The exclusion above was wrong, and the reason it gives is the reason it was
+wrong. It reads:
+
+> it needs an `ifb` device and a `mirred` redirect filter, which is the filter
+> machinery this record just refused
+
+That treats "a filter" as one thing. It is two. What this record refuses is a
+**classification language** -- an operator writing rules that decide which
+traffic is which, which needs a model of what traffic matters and a syntax to
+express it. What ingress shaping needs is a **fixed redirect**: one `matchall`
+classifier, matching every packet unconditionally, with one `mirred` action
+whose only variable is which device the traffic lands on.
+
+The second is plumbing. It is generated, never written; it has no selectors; it
+cannot express a preference because it treats every packet identically. Calling
+it "the filter machinery" and refusing it on that basis confused the mechanism
+with what the mechanism is usually for -- and the cost of that confusion was
+leaving out the other half of the one problem this whole record exists to
+solve. A shaped uplink with an unshaped downlink is still bufferbloated; the
+queue has just moved to the far end, where nothing on this machine can reach
+it.
+
+So: **netcfgd may generate one match-all redirect per interface that asks to
+shape arriving traffic, and no other filter.** The test is the same as 0022's
+for NAT rules -- if its content is derivable from the document without a model
+of traffic, it is in scope. `redirect everything on wan0 to ifb-wan0` is.
+Anything with a selector in it is not, and never will be.
+
+### The device is synthesised, like a bridge member
+
+`ingress_bandwidth = "50mbit"` on an interface expands, at compile time, into
+an `ifb-<name>` interface with a `cake` shaper on it plus a redirect on the
+original. That is the same expansion `bridge { members = ... }` already gets,
+and it is done in the compiler rather than the executor so the whole thing is
+in the document: `ncfg plan` names the device it will create, teardown goes
+through ordinary link ownership, and nothing below the model has to know that
+an `ifb` is special.
+
+The name is derived rather than configurable. `IFNAMSIZ` gives 15 characters
+and `ifb-` costs 4, so an interface named longer than 11 is refused at compile
+time with the arithmetic in the message -- the alternative is a device the
+kernel truncates into a collision.
+
+### Why `cake` is told it is on the way in
+
+Shaping arrivals is not symmetric with shaping departures. Outbound, the shaper
+meters what it sends. Inbound, the packets are already here and the only lever
+is dropping, so the rate has to account for what the sender will retransmit.
+`TCA_CAKE_INGRESS` is that adjustment, and without it an ingress shaper
+undershoots -- which presents as "the shaper is too aggressive" rather than as
+a missing flag.
+
+### What this does not change
+
+Everything else in "What is out" stands. No class hierarchies, no selectors, no
+per-queue tuning. The redirect is a fixed shape netcfgd emits or does not emit;
+there is no syntax for describing a different one, which is what keeps this
+from being the first step into a traffic policy language.
+
 ## Alternatives considered
 
 **Model all of `tc`.** Rejected on the size of the language, and on the same
@@ -136,6 +196,12 @@ Tempting because it is one sysctl. Rejected: it is machine-wide, so it cannot
 say "shape the uplink and leave the LAN alone", which is the only configuration
 anybody actually wants. It also only affects interfaces brought up afterwards,
 so its effect depends on ordering.
+
+**Leaving ingress to a `pre_up` hook**, as this record originally said. Rejected
+by the amendment: it is three interacting objects that have to be created in
+order, torn down together, and kept consistent with a rate that lives in the
+config -- which is reconciliation, and is the thing netcfgd is for. A hook
+would have the operator hand-maintaining what the document already knows.
 
 **A `bufferbloat = true` flag** that picks a qdisc automatically. Rejected as
 the kind of magic that is unexplainable when wrong: the operator cannot tell

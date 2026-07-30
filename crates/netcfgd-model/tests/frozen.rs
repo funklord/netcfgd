@@ -203,7 +203,10 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 		qdisc: Some(QdiscPolicy {
 			kind: QdiscKind::Cake,
 			bandwidth_bits: Some(100_000_000),
+			ingress_bandwidth_bits: Some(50_000_000),
+			ingress: true,
 		}),
+		ingress_redirect: Some("ifb-eth0".to_owned()),
 		guard: Some(Guard {
 			reason: "nfs".to_owned(),
 		}),
@@ -346,6 +349,10 @@ fn credentialled_kinds() -> Vec<(&'static str, InterfaceKind)> {
 				group: Some("kvm".to_owned()),
 			}),
 		),
+		// Never written by hand -- the compiler synthesises one per interface
+		// that shapes arriving traffic -- but it is in the document, and the
+		// witness covers the document rather than the config.
+		("ifb", InterfaceKind::Ifb),
 	]
 }
 

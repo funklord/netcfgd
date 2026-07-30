@@ -38,6 +38,8 @@ pub struct Effects {
 	pub forwarding: Vec<(String, bool)>,
 	/// `(interface, set)` for each root qdisc changed. `false` is a reset.
 	pub qdisc: Vec<(String, bool)>,
+	/// `(interface, set)` for each ingress redirect changed.
+	pub ingress: Vec<(String, bool)>,
 }
 
 /// Executes actions against rtnetlink and the backend helpers.
@@ -688,6 +690,7 @@ impl Executor for KernelExecutor {
 				iface,
 				kind,
 				bandwidth_bits,
+				ingress,
 			} => {
 				let index = self.index_of(iface)?;
 				netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket)
@@ -696,6 +699,7 @@ impl Executor for KernelExecutor {
 						&netcfgd_netlink::qdisc::RootQdisc {
 							kind,
 							bandwidth_bits: *bandwidth_bits,
+							ingress: *ingress,
 						},
 					)
 					.map_err(|error| {
@@ -719,6 +723,41 @@ impl Executor for KernelExecutor {
 						format!("cannot restore the default qdisc on {iface}: {error}")
 					})?;
 				self.effects.qdisc.push((iface.clone(), false));
+				Ok(())
+			}
+			Op::IngressRedirect { iface, target } => {
+				let index = self.index_of(iface)?;
+				let target_index = self.index_of(target)?;
+				let mut tc = netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket);
+				// The hook first, then the filter that hangs off it: the
+				// kernel has nowhere to put a classifier until the ingress
+				// qdisc exists, and the error for that says only EINVAL.
+				tc.add_ingress(index).map_err(|error| {
+					format!("cannot attach the ingress hook to {iface}: {error}")
+				})?;
+				tc.redirect_ingress(index, target_index).map_err(|error| {
+					if error.kind() == std::io::ErrorKind::NotFound {
+						format!(
+							"cannot redirect {iface} to {target}: this kernel is \
+							 missing `cls_matchall` or `act_mirred`"
+						)
+					} else {
+						format!("cannot redirect {iface} to {target}: {error}")
+					}
+				})?;
+				self.effects.ingress.push((iface.clone(), true));
+				Ok(())
+			}
+			Op::IngressRedirectClear { iface } => {
+				let index = self.index_of(iface)?;
+				// Removing the hook takes every filter on it, so there is
+				// nothing to delete separately.
+				netcfgd_netlink::qdisc::Qdisc::new(&mut self.socket)
+					.delete_ingress(index)
+					.map_err(|error| {
+						format!("cannot remove the ingress hook from {iface}: {error}")
+					})?;
+				self.effects.ingress.push((iface.clone(), false));
 				Ok(())
 			}
 			Op::SysctlSetForwarding { iface, enabled } => {
@@ -851,6 +890,7 @@ fn new_link(
 			ttl: tunnel.ttl,
 			key: tunnel.key,
 		}),
+		InterfaceKind::Ifb => Ok(NewLink::Ifb),
 		InterfaceKind::Tun(_) => Err(format!(
 			"{name} is a tun/tap device, which this build cannot create: they come from a \
 			 TUNSETIFF ioctl on /dev/net/tun rather than from netlink, and that is outside \
@@ -879,6 +919,7 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Macvlan(_) => "macvlan",
 		InterfaceKind::Tunnel(tunnel) => tunnel.mode.name(),
 		InterfaceKind::Tun(_) => "tun",
+		InterfaceKind::Ifb => "ifb",
 	}
 }
 

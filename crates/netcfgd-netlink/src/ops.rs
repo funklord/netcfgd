@@ -132,6 +132,13 @@ pub enum NewLink {
 		/// Destination UDP port.
 		port: Option<u16>,
 	},
+	/// An intermediate functional block, which exists to be redirected to.
+	///
+	/// The kernel cannot shape traffic on the way in -- there is no queue to
+	/// hold it, because the packets have already arrived. An `ifb` is the
+	/// standard way round that: received traffic is redirected onto it, where
+	/// it becomes egress and can be queued like anything else.
+	Ifb,
 	/// A veth pair. Creating one end creates both.
 	Veth {
 		/// The name of the other end.
@@ -282,7 +289,7 @@ impl NewLink {
 	fn info_data(&self, name: &str) -> Option<AttrBuf> {
 		let mut data = AttrBuf::new();
 		match self {
-			Self::Bridge | Self::Dummy | Self::WireGuard => return None,
+			Self::Bridge | Self::Dummy | Self::WireGuard | Self::Ifb => return None,
 			Self::Vlan { id, protocol, .. } => {
 				data.push(IFLA_VLAN_ID, &id.to_ne_bytes());
 				// Big-endian: it is an ethertype, and the kernel reads it as
@@ -371,6 +378,7 @@ impl NewLink {
 			Self::Vlan { .. } => "vlan",
 			Self::Bond { .. } => "bond",
 			Self::Vxlan { .. } => "vxlan",
+			Self::Ifb => "ifb",
 			Self::Veth { .. } => "veth",
 			Self::WireGuard => "wireguard",
 			Self::Vrf { .. } => "vrf",

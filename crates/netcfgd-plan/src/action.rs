@@ -202,6 +202,8 @@ pub enum Op {
 		kind: String,
 		/// Shaped rate in bits per second, for the schedulers that shape.
 		bandwidth_bits: Option<u64>,
+		/// Whether this shaper is metering traffic that has already arrived.
+		ingress: bool,
 	},
 	/// Put the kernel's default root qdisc back.
 	///
@@ -210,6 +212,23 @@ pub enum Op {
 	/// immediately. There is no state in between and nothing to restore.
 	QdiscReset {
 		/// Interface name.
+		iface: String,
+	},
+	/// Send everything arriving on an interface to another device.
+	///
+	/// An ingress qdisc plus one `matchall` classifier with one `mirred`
+	/// action -- the only filter netcfgd generates, and it carries no policy:
+	/// it matches every packet unconditionally and the sole variable is where
+	/// they land. Decision 0023's amendment.
+	IngressRedirect {
+		/// Interface traffic arrives on.
+		iface: String,
+		/// Device it is redirected to.
+		target: String,
+	},
+	/// Remove the ingress qdisc, and the redirect hanging off it.
+	IngressRedirectClear {
+		/// Interface traffic arrives on.
 		iface: String,
 	},
 	/// Turn IP forwarding on or off for one interface.
@@ -291,6 +310,8 @@ impl Op {
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
 			Self::QdiscSet { .. } => "qdisc.set",
+			Self::IngressRedirect { .. } => "ingress.redirect",
+			Self::IngressRedirectClear { .. } => "ingress.redirect.clear",
 			Self::QdiscReset { .. } => "qdisc.reset",
 			Self::SysctlSetForwarding { .. } => "sysctl.set_forwarding",
 			Self::NatReplace { .. } => "nat.replace",
@@ -332,7 +353,12 @@ impl Op {
 			// Removing a VLAN from a port stops traffic in it reaching that
 			// port, which is the same kind of interruption as taking an
 			// address away.
-			| Self::BridgeVlanDel { .. } => true,
+			| Self::BridgeVlanDel { .. }
+			// Clearing a redirect stops everything arriving on the interface
+			// being shaped, which on a saturated line is the difference
+			// between a working connection and an unusable one -- the same
+			// kind of loss as withdrawing a route.
+			| Self::IngressRedirectClear { .. } => true,
 			// Turning forwarding off cuts every host behind this interface
 			// off from everything in front of it, which is a worse
 			// interruption than taking one address away. Turning it on
@@ -358,6 +384,7 @@ impl Op {
 			// already dropping packets from bufferbloat.
 			| Self::QdiscSet { .. }
 			| Self::QdiscReset { .. }
+			| Self::IngressRedirect { .. }
 			// Not because replacing the table is harmless -- withdrawing NAT
 			// cuts off a whole LAN. It is because `interface()` returns
 			// nothing for this op, so no guard can match it anyway, and
@@ -394,6 +421,8 @@ impl Op {
 			| Self::SysctlSetForwarding { iface, .. }
 			| Self::QdiscSet { iface, .. }
 			| Self::QdiscReset { iface }
+			| Self::IngressRedirect { iface, .. }
+			| Self::IngressRedirectClear { iface }
 			| Self::HookRun { iface, .. } => Some(iface),
 			Self::WifiSetProfiles { device, .. }
 			| Self::WifiAssociate { device, .. }

@@ -690,15 +690,19 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 			println!("    vlan {}{flags}", vlan.vid);
 		}
 		if let Some(kind) = &link.qdisc {
-			let shaped = link
-				.qdisc_bandwidth_bits
-				.map_or_else(String::new, |bits| format!(" at {bits} bit/s"));
+			let shaped = link.qdisc_bandwidth_bits.map_or_else(String::new, |bits| {
+				let inbound = if link.qdisc_ingress { " inbound" } else { "" };
+				format!(" at {bits} bit/s{inbound}")
+			});
 			let ours = if observed.qdisc_applied.contains(&link.name) {
 				""
 			} else {
 				" [kernel default or set elsewhere]"
 			};
 			println!("    qdisc {kind}{shaped}{ours}");
+		}
+		if let Some(target) = &link.ingress_redirect {
+			println!("    ingress redirected to {target}");
 		}
 		if observed.nat.contains(&link.name) {
 			println!("    masquerade");

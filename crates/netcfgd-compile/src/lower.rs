@@ -42,6 +42,11 @@ pub fn lower(
 	// `(member, master, where the master's block is)`, so a conflict points at
 	// the line that declared the membership rather than at the top of a file.
 	let mut memberships: Vec<(String, String, crate::diag::Span)> = Vec::new();
+	// `(interface, where its block is)` for each one asking to shape arriving
+	// traffic. Collected here rather than found later because the expansion
+	// can fail -- on a name too long for the kernel -- and a diagnostic
+	// pointing at the top of the file would be useless.
+	let mut ingress_shapers: Vec<(String, crate::diag::Span)> = Vec::new();
 
 	for assignment in &merged.assignments {
 		lower_global_key(&mut document, assignment, &mut diagnostics);
@@ -67,6 +72,12 @@ pub fn lower(
 					};
 					for member in members {
 						memberships.push((member, interface.name.clone(), block.span));
+					}
+					if interface
+						.qdisc
+						.is_some_and(|policy| policy.ingress_bandwidth_bits.is_some())
+					{
+						ingress_shapers.push((interface.name.clone(), block.span));
 					}
 					document.interfaces.push(interface);
 				}
@@ -104,12 +115,126 @@ pub fn lower(
 	}
 
 	expand_members(&mut document, &memberships, &mut diagnostics);
+	expand_ingress_shapers(&mut document, &ingress_shapers, &mut diagnostics);
 
 	if diagnostics.is_empty() {
 		Ok(document)
 	} else {
 		Err(diagnostics)
 	}
+}
+
+/// The longest interface name the kernel will take.
+///
+/// `IFNAMSIZ` is 16 including the terminator, so 15 characters.
+const IFNAMSIZ_MAX: usize = 15;
+
+/// Turn `ingress_bandwidth` into an `ifb` device plus a redirect.
+///
+/// The kernel cannot queue traffic on the way in, because by the time it can
+/// be classified it has already arrived. The standard answer -- and the only
+/// one -- is to redirect it onto an intermediate device, where it becomes
+/// egress and can be shaped like anything else.
+///
+/// Synthesised here rather than built at apply time so that the whole thing is
+/// in the document: `ncfg plan` names the device it will create, teardown goes
+/// through the ordinary link machinery, and nothing in the executor has to
+/// know that an `ifb` is special.
+///
+/// The same shape as [`expand_members`], and for the same reason: the model
+/// holds what the kernel works in, and the config holds what an operator wants
+/// to say.
+fn expand_ingress_shapers(
+	document: &mut Document,
+	shapers: &[(String, crate::diag::Span)],
+	diags: &mut Diagnostics,
+) {
+	let mut wanted = Vec::new();
+	for (name, span) in shapers {
+		let device = format!("ifb-{name}");
+		if device.len() > IFNAMSIZ_MAX {
+			diags.push(
+				Diagnostic::new(
+					*span,
+					format!("`{name}` is too long a name to shape arriving traffic on"),
+				)
+				.with_help(format!(
+					"ingress shaping needs a device called `{device}`, and the kernel \
+					 allows {IFNAMSIZ_MAX} characters; rename the interface to {} or \
+					 fewer",
+					IFNAMSIZ_MAX - "ifb-".len()
+				)),
+			);
+			continue;
+		}
+
+		// A name collision means the operator already has an interface called
+		// `ifb-something`. Refused rather than merged: netcfgd would otherwise
+		// take over a device somebody else declared.
+		if document
+			.interfaces
+			.iter()
+			.any(|interface| interface.name == device)
+		{
+			diags.push(Diagnostic::new(
+				*span,
+				format!(
+					"`{device}` is declared, and ingress shaping on `{name}` needs to \
+					 create a device of that name"
+				),
+			));
+			continue;
+		}
+
+		let rate = document
+			.interfaces
+			.iter_mut()
+			.find(|interface| interface.name == *name)
+			.and_then(|interface| {
+				interface.ingress_redirect = Some(device.clone());
+				interface
+					.qdisc
+					.as_mut()
+					.and_then(|policy| policy.ingress_bandwidth_bits.take())
+			});
+		if let Some(rate) = rate {
+			wanted.push((device, rate));
+		}
+	}
+
+	for (device, rate) in wanted {
+		document.interfaces.push(Interface {
+			name: device,
+			kind: InterfaceKind::Ifb,
+			enabled: true,
+			mtu: None,
+			mac: None,
+			addressing: Vec::new(),
+			routes: Vec::new(),
+			dns: None,
+			hooks: Vec::new(),
+			nat: None,
+			qdisc: Some(QdiscPolicy {
+				kind: QdiscKind::Cake,
+				bandwidth_bits: Some(rate),
+				ingress_bandwidth_bits: None,
+				ingress: true,
+			}),
+			ingress_redirect: None,
+			on_drift: None,
+			master: None,
+			dot1x: None,
+			advertise: None,
+			forwarding: None,
+			guard: None,
+			ipv6_token: None,
+			link_settings: None,
+			preference: None,
+			bridge_vlans: Vec::new(),
+		});
+	}
+
+	document.interfaces.sort_by(|a, b| a.name.cmp(&b.name));
 }
 
 /// Turn `bridge { members = ... }` into `master` on each member.
@@ -185,6 +310,7 @@ fn expand_members(
 			forwarding: None,
 			nat: None,
 			qdisc: None,
+			ingress_redirect: None,
 			guard: None,
 			ipv6_token: None,
 			link_settings: None,
@@ -1301,6 +1427,7 @@ fn lower_interface(
 		hooks: Vec::new(),
 		nat: None,
 		qdisc: None,
+		ingress_redirect: None,
 		on_drift: None,
 		master: None,
 		dot1x: None,
@@ -1427,6 +1554,8 @@ fn lower_interface(
 						qdisc_kind(&name, assignment.span, diags).map(|kind| QdiscPolicy {
 							kind,
 							bandwidth_bits: None,
+							ingress_bandwidth_bits: None,
+							ingress: false,
 						})
 					});
 				}
@@ -2280,6 +2409,8 @@ fn lower_qdisc(block: &Block, diags: &mut Diagnostics) -> Option<QdiscPolicy> {
 	let mut kind = None;
 	let mut bandwidth_bits = None;
 	let mut bandwidth_span = None;
+	let mut ingress_bandwidth_bits = None;
+	let mut ingress_span = None;
 
 	for item in &block.items {
 		let Item::Assignment(assignment) = item else {
@@ -2301,6 +2432,11 @@ fn lower_qdisc(block: &Block, diags: &mut Diagnostics) -> Option<QdiscPolicy> {
 				bandwidth_bits = as_string(&assignment.value, diags)
 					.and_then(|text| rate_bits(&text, assignment.span, diags));
 			}
+			"ingress_bandwidth" => {
+				ingress_span = Some(assignment.span);
+				ingress_bandwidth_bits = as_string(&assignment.value, diags)
+					.and_then(|text| rate_bits(&text, assignment.span, diags));
+			}
 			other => diags.push(Diagnostic::new(
 				assignment.span,
 				format!("unknown qdisc key `{other}`"),
@@ -2319,6 +2455,20 @@ fn lower_qdisc(block: &Block, diags: &mut Diagnostics) -> Option<QdiscPolicy> {
 	// Refused rather than ignored. A rate on `fq_codel` is somebody expecting
 	// their line to be shaped, and silently dropping it would leave them with
 	// an unshaped uplink and a config that says otherwise.
+	if ingress_bandwidth_bits.is_some() && !kind.shapes() {
+		diags.push(
+			Diagnostic::new(
+				ingress_span.unwrap_or(block.span),
+				format!("`{}` cannot shape arriving traffic", kind.name()),
+			)
+			.with_help(
+				"ingress shaping puts `cake` on an `ifb` device, so the scheduler has \
+				 to be `cake`",
+			),
+		);
+		return None;
+	}
+
 	if bandwidth_bits.is_some() && !kind.shapes() {
 		diags.push(
 			Diagnostic::new(
@@ -2336,6 +2486,8 @@ fn lower_qdisc(block: &Block, diags: &mut Diagnostics) -> Option<QdiscPolicy> {
 	Some(QdiscPolicy {
 		kind,
 		bandwidth_bits,
+		ingress_bandwidth_bits,
+		ingress: false,
 	})
 }
 

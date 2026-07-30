@@ -46,6 +46,8 @@ pub struct PriorState {
 	pub forwarding: Vec<String>,
 	/// Interfaces netcfgd set the root qdisc on.
 	pub qdisc: Vec<String>,
+	/// Interfaces netcfgd installed an ingress redirect on.
+	pub ingress: Vec<String>,
 	/// Prefixes a `DHCPv6` client reported, read from `/run`.
 	///
 	/// Prior state rather than a kernel read because a delegated prefix is not
@@ -71,9 +73,62 @@ impl PriorState {
 	}
 }
 
+/// The name of a link, by index.
+fn link_name(snapshot: &Snapshot, index: u32) -> Option<&str> {
+	snapshot
+		.links
+		.iter()
+		.find(|link| link.index == index)
+		.map(|link| link.name.as_str())
+}
+
+/// One link, with everything the dumps and the recorded state say about it.
+fn observed_link(
+	link: &netcfgd_netlink::LinkRecord,
+	snapshot: &Snapshot,
+	prior: &PriorState,
+) -> ObservedLink {
+	ObservedLink {
+		name: link.name.clone(),
+		index: link.index,
+		kind: link.kind.clone(),
+		up: link.up,
+		carrier: link.carrier,
+		mtu: link.mtu,
+		mac: link.mac.clone(),
+		master: link
+			.master
+			.and_then(|index| link_name(snapshot, index).map(ToOwned::to_owned)),
+		// The kernel has no protocol field for links, so this can only
+		// come from what netcfgd wrote down. A link nobody recorded is
+		// never deleted, which is the conservative direction.
+		qdisc: root_qdisc(snapshot, link.index).map(|record| record.kind.clone()),
+		qdisc_ingress: root_qdisc(snapshot, link.index).is_some_and(|record| record.ingress),
+		ingress_redirect: snapshot
+			.redirects
+			.iter()
+			.find(|(index, _)| *index == link.index)
+			.and_then(|(_, target)| link_name(snapshot, *target).map(ToOwned::to_owned)),
+		qdisc_bandwidth_bits: root_qdisc(snapshot, link.index)
+			.and_then(|record| record.bandwidth_bits),
+		// Not in the netlink snapshot; filled in by `host::augment`,
+		// which is why `build` can stay pure.
+		forwarding: None,
+		ownership: if prior.created_links.contains(&link.name) {
+			Ownership::Ours
+		} else {
+			Ownership::Unknown
+		},
+	}
+}
+
 /// The root qdisc on one link, from the dump.
 fn root_qdisc(snapshot: &Snapshot, index: u32) -> Option<&netcfgd_netlink::qdisc::QdiscRecord> {
-	snapshot.qdiscs.iter().find(|record| record.index == index)
+	snapshot
+		.qdiscs
+		.roots
+		.iter()
+		.find(|record| record.index == index)
 }
 
 /// Turn a kernel snapshot plus recorded state into the observed model.
@@ -94,32 +149,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 	let links = snapshot
 		.links
 		.iter()
-		.map(|link| ObservedLink {
-			name: link.name.clone(),
-			index: link.index,
-			kind: link.kind.clone(),
-			up: link.up,
-			carrier: link.carrier,
-			mtu: link.mtu,
-			mac: link.mac.clone(),
-			master: link
-				.master
-				.and_then(|index| name_of(index).map(ToOwned::to_owned)),
-			// The kernel has no protocol field for links, so this can only
-			// come from what netcfgd wrote down. A link nobody recorded is
-			// never deleted, which is the conservative direction.
-			qdisc: root_qdisc(snapshot, link.index).map(|record| record.kind.clone()),
-			qdisc_bandwidth_bits: root_qdisc(snapshot, link.index)
-				.and_then(|record| record.bandwidth_bits),
-			// Not in the netlink snapshot; filled in by `host::augment`,
-			// which is why `build` can stay pure.
-			forwarding: None,
-			ownership: if prior.created_links.contains(&link.name) {
-				Ownership::Ours
-			} else {
-				Ownership::Unknown
-			},
-		})
+		.map(|link| observed_link(link, snapshot, prior))
 		.collect();
 
 	let addresses = snapshot
@@ -175,6 +205,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		nat: Vec::new(),
 		nat_conflicts: Vec::new(),
 		forwarding_applied: prior.forwarding.clone(),
+		ingress_applied: prior.ingress.clone(),
 		qdisc_applied: prior.qdisc.clone(),
 		links,
 		addresses,
@@ -344,7 +375,8 @@ mod tests {
 	#[test]
 	fn a_snapshot_becomes_a_model_with_names_resolved() {
 		let snapshot = Snapshot {
-			qdiscs: Vec::new(),
+			qdiscs: netcfgd_netlink::qdisc::QdiscDump::default(),
+			redirects: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
 			addresses: vec![
@@ -408,7 +440,8 @@ mod tests {
 		orphan.master = Some(99);
 
 		let snapshot = Snapshot {
-			qdiscs: Vec::new(),
+			qdiscs: netcfgd_netlink::qdisc::QdiscDump::default(),
+			redirects: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![member, link(3, "br0"), orphan],
 			..Snapshot::default()
@@ -426,7 +459,8 @@ mod tests {
 	#[test]
 	fn an_address_with_no_matching_link_is_dropped() {
 		let snapshot = Snapshot {
-			qdiscs: Vec::new(),
+			qdiscs: netcfgd_netlink::qdisc::QdiscDump::default(),
+			redirects: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0")],
 			addresses: vec![address(77, "10.0.0.1", 24, None)],
@@ -441,7 +475,8 @@ mod tests {
 	#[test]
 	fn only_recorded_links_are_ours() {
 		let snapshot = Snapshot {
-			qdiscs: Vec::new(),
+			qdiscs: netcfgd_netlink::qdisc::QdiscDump::default(),
+			redirects: Vec::new(),
 			bridge_vlans: Vec::new(),
 			links: vec![link(2, "eth0"), link(3, "br0")],
 			..Snapshot::default()

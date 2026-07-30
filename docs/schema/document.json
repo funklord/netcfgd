@@ -191,9 +191,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -352,9 +355,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -513,9 +519,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -679,9 +688,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -845,9 +857,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -1011,9 +1026,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -1177,9 +1195,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -1345,9 +1366,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -1516,9 +1540,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -1691,9 +1718,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -1857,9 +1887,181 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "nat": true,
+      "guard": {
+        "reason": "nfs"
+      },
+      "ipv6_token": "::5",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
+      },
+      "preference": 100,
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-ifb",
+      "kind": {
+        "kind": "ifb"
+      },
+      "enabled": true,
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.1/24",
+          "peer": "192.0.2.2",
+          "preferred_lifetime": 3600,
+          "valid_lifetime": 7200
+        },
+        {
+          "source": "dhcp4",
+          "hostname_mode": "send_fqdn",
+          "client_id": "01:02",
+          "metric": 100,
+          "request_options": [
+            121
+          ],
+          "backend": "dhcpcd"
+        },
+        {
+          "source": "dhcp6",
+          "mode": "managed",
+          "rapid_commit": true,
+          "prefix_delegation": {
+            "hint": "2001:db8::/56",
+            "length": 56
+          }
+        },
+        {
+          "source": "slaac",
+          "privacy": "prefer_temporary"
+        },
+        {
+          "source": "delegated",
+          "prefix": {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 1
+          },
+          "suffix": "::1/64"
+        },
+        {
+          "source": "link_local"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.254",
+          "metric": 200,
+          "table": 254,
+          "src": "192.0.2.1",
+          "scope": "link",
+          "onlink": true,
+          "proto": 110
+        }
+      ],
+      "dns": {
+        "mode": "openresolv",
+        "servers": [
+          {
+            "addr": "192.0.2.53",
+            "port": 853,
+            "sni": "dns.example"
+          }
+        ],
+        "search": [
+          "example"
+        ],
+        "domains": [
+          {
+            "suffix": "corp.example",
+            "exclusive": true
+          }
+        ],
+        "options": [
+          "ndots:2"
+        ],
+        "dnssec": "yes",
+        "transport": "tls"
+      },
+      "hooks": [
+        {
+          "phase": "post_up",
+          "path": "/run/netcfgd/hooks/eth0.0",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "run_as": "nobody",
+          "timeout": 30
+        }
+      ],
+      "on_drift": "reconcile",
+      "master": "br0",
+      "dot1x": {
+        "method": "peap",
+        "identity": "dave",
+        "anonymous_identity": "anonymous",
+        "password": {
+          "provider": "file",
+          "name": "dot1x"
+        },
+        "ca_cert": "/etc/ssl/ca.pem",
+        "client_cert": "/etc/ssl/client.pem",
+        "private_key": {
+          "provider": "exec",
+          "name": "key"
+        },
+        "phase2": "auth=MSCHAPV2"
+      },
+      "advertise": {
+        "backend": "odhcpd",
+        "prefixes": [
+          {
+            "source": "wan0",
+            "index": 0,
+            "subnet": 0
+          }
+        ],
+        "managed": true,
+        "other_config": true,
+        "dns": true,
+        "lifetime": 1800
+      },
+      "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -2025,9 +2227,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -2191,9 +2396,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -2365,9 +2573,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -2534,9 +2745,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -2706,9 +2920,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -2873,9 +3090,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -3042,9 +3262,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -3209,9 +3432,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -3380,9 +3606,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -3567,9 +3796,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -3733,9 +3965,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -3899,9 +4134,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -4065,9 +4303,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -4232,9 +4473,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -4399,9 +4643,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -4566,9 +4813,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -4733,9 +4983,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -4900,9 +5153,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -5067,9 +5323,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {
@@ -5234,9 +5493,12 @@
         "lifetime": 1800
       },
       "forwarding": true,
+      "ingress_redirect": "ifb-eth0",
       "qdisc": {
         "kind": "cake",
-        "bandwidth_bits": 100000000
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
       },
       "nat": true,
       "guard": {

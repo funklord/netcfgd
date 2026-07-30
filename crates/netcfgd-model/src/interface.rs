@@ -481,6 +481,13 @@ pub enum InterfaceKind {
 	Tunnel(TunnelConfig),
 	/// A persistent tun or tap device. Unimplemented; see [`TunConfig`].
 	Tun(TunConfig),
+	/// An intermediate functional block, which exists to be redirected to.
+	///
+	/// Never written by hand. netcfgd synthesises one per interface that asks
+	/// for `ingress_bandwidth`, the same way it synthesises an interface for a
+	/// bridge member that has no block of its own -- so link creation,
+	/// ownership and teardown all work on it without knowing what it is for.
+	Ifb,
 }
 
 /// Which queueing discipline a link drains its transmit queue with.
@@ -542,6 +549,24 @@ pub struct QdiscPolicy {
 	/// by eight in front of every reader.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub bandwidth_bits: Option<u64>,
+	/// Shaped rate for traffic arriving on this interface, in bits per second.
+	///
+	/// The kernel cannot queue on the way in -- the packets are already here
+	/// -- so this is not another number on the same qdisc. Asking for it makes
+	/// netcfgd build an `ifb` device, redirect everything arriving here onto
+	/// it, and shape it there, where it has become egress. Decision 0023's
+	/// amendment covers why that is allowed to use a filter when nothing else
+	/// is.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ingress_bandwidth_bits: Option<u64>,
+	/// Whether this shaper is metering traffic that has already arrived.
+	///
+	/// Set on the `cake` that sits on the `ifb`, never on an interface the
+	/// operator named. It changes what the shaper counts: outbound it meters
+	/// what it sends, inbound its only lever is dropping, so it has to account
+	/// for what the sender will retransmit.
+	#[serde(skip_serializing_if = "std::ops::Not::not", default)]
+	pub ingress: bool,
 }
 
 /// Which daemon sends router advertisements.
@@ -657,6 +682,13 @@ pub struct Interface {
 	/// its neighbours.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub forwarding: Option<bool>,
+	/// Where traffic arriving on this interface is redirected to.
+	///
+	/// Synthesised, never written: it is the `ifb` that `ingress_bandwidth`
+	/// asks for. Named in the document rather than derived at apply time so
+	/// that `ncfg plan` can say which device the redirect points at.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ingress_redirect: Option<String>,
 	/// How this link drains its transmit queue.
 	///
 	/// The root qdisc and nothing below it: decision 0023 draws the same line
