@@ -137,9 +137,14 @@ netcfgd
 # So they are one file with two names, as busybox and util-linux do it. The
 # binary is `netcfgd` and `ncfg` is a symlink; each still has its own argument
 # parsing, usage text and exit codes, because they are still two programs.
-# +28 KB for `ncfg tui`: four panes, the frame builder, and the termios layer
-# in the audited crate. Small because it reads answers as raw JSON rather than
-# pulling in the derived deserialiser for the document -- the same reason the
-# client's `Answer` type is narrow, and worth about ten times what the TUI
-# itself costs.
+# +28 KB for `ncfg tui`: four panes, and the ncurses layer in the audited
+# crate. Small because it reads answers as raw JSON rather than pulling in the
+# derived deserialiser for the document -- the same reason the client's
+# `Answer` type is narrow, and worth about ten times what the TUI itself costs.
+#
+# The figure is unchanged from the hand-rolled ANSI version this replaced,
+# which is not a coincidence about the code: 28672 is exactly seven pages, the
+# linker pads to page boundaries, and so this gate cannot see a difference
+# smaller than 4 KB. `--no-default-features` drops the TUI and links no ncurses,
+# returning the binary to 1743384 -- the size it was before any TUI existed.
 total 1772056
