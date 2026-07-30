@@ -29,6 +29,7 @@ pub fn augment(observed: &mut Observed) {
 		link.forwarding = forwarding(&root, &link.name);
 	}
 	read_netfilter(observed);
+	read_offloads(observed);
 }
 
 /// Whether an interface forwards, from both families' sysctls.
@@ -45,6 +46,41 @@ fn forwarding(root: &std::path::Path, name: &str) -> Option<bool> {
 	// IPv6-disabled kernel, where reporting the IPv4 answer alone would have
 	// the planner satisfied by half a change it can never complete.
 	Some(read("ipv4")? && read("ipv6")?)
+}
+
+/// Every managed offload that is on, per interface.
+///
+/// One request per link, which is one more round trip than a dump would be --
+/// but ethtool has no dump: its messages are per-device by construction. On a
+/// laptop that is a handful of requests and on a router a few dozen, each
+/// costing microseconds.
+///
+/// A device with no ethtool operations answers `EOPNOTSUPP`, which is most
+/// virtual interfaces and is not an error. So is a kernel older than 5.6, which
+/// has no `ethtool` family at all -- there the list is empty everywhere and
+/// nothing is planned, which is the honest outcome.
+fn read_offloads(observed: &mut Observed) {
+	let Ok(mut ethtool) = netcfgd_sys::ethtool::Ethtool::open() else {
+		return;
+	};
+	let managed: Vec<&str> = netcfgd_model::interface::offload_names::GRO
+		.iter()
+		.chain(netcfgd_model::interface::offload_names::GSO)
+		.chain(netcfgd_model::interface::offload_names::TSO)
+		.chain(netcfgd_model::interface::offload_names::RX_CHECKSUM)
+		.chain(netcfgd_model::interface::offload_names::TX_CHECKSUM)
+		.copied()
+		.collect();
+
+	for link in &mut observed.links {
+		let Ok(active) = ethtool.active_features(&link.name) else {
+			continue;
+		};
+		link.offloads = active
+			.into_iter()
+			.filter(|name| managed.contains(&name.as_str()))
+			.collect();
+	}
 }
 
 /// netcfgd's own NAT, and anyone else's.

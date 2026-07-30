@@ -117,6 +117,60 @@ impl Plan {
 	}
 }
 
+/// Say what the document asks for that this build does not do.
+///
+/// Split out of [`plan`] only for length. The failure mode these guard against
+/// is not that a feature does nothing -- that is intended and recorded -- but
+/// that it does nothing *silently*, so a plan reports "one action" about a
+/// config that asked for several things.
+fn warn_unapplied(builder: &mut Builder, desired: &Document) {
+	for access_point in &desired.access_points {
+		builder.warnings.push(Warning {
+			message: format!(
+				"access point `{}` is in the configuration but this build cannot run one; \
+				 it is recognised, not applied",
+				access_point.id
+			),
+			interface: Some(access_point.device.clone()),
+		});
+	}
+	for interface in &desired.interfaces {
+		// The offloads are applied; the rest of the `ethtool` block is not, and
+		// says so field by field rather than as one blanket sentence -- an
+		// operator who set only `gro` should not be told their config is
+		// ignored.
+		if let Some(settings) = &interface.link_settings {
+			let unapplied: Vec<&str> = [
+				(
+					"autoneg",
+					settings.autoneg != netcfgd_model::Toggle::Unmanaged,
+				),
+				("speed", settings.speed.is_some()),
+				("duplex", settings.duplex.is_some()),
+				("wol", settings.wol.is_some()),
+				("rx_ring", settings.rx_ring.is_some()),
+				("tx_ring", settings.tx_ring.is_some()),
+			]
+			.into_iter()
+			.filter_map(|(name, set)| set.then_some(name))
+			.collect();
+			if !unapplied.is_empty() {
+				builder.warnings.push(Warning {
+					message: format!(
+						"`{}` in the ethtool block are recognised but not applied by \
+						 this build. They can only be exercised against a physical \
+						 NIC, and an encoder nobody has run against one is how the \
+						 last three netlink bugs here got in. The offloads are \
+						 applied.",
+						unapplied.join("`, `")
+					),
+					interface: Some(interface.name.clone()),
+				});
+			}
+		}
+	}
+}
+
 /// Compute what would have to change for `observed` to satisfy `desired`.
 #[must_use]
 pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> Plan {
@@ -134,27 +188,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// make an upgrade path into a rewrite. What must not happen is silence --
 	// a plan that omits them without saying so reports "nothing to do" about
 	// a config that asks for two things.
-	for access_point in &desired.access_points {
-		builder.warnings.push(Warning {
-			message: format!(
-				"access point `{}` is in the configuration but this build cannot run one; \
-				 it is recognised, not applied",
-				access_point.id
-			),
-			interface: Some(access_point.device.clone()),
-		});
-	}
-	for interface in &desired.interfaces {
-		if interface.link_settings.is_some() {
-			builder.warnings.push(Warning {
-				message: "`ethtool` settings are recognised but not applied by this build; \
-					 reaching them needs either an ioctl outside the audited crate or \
-					 generic netlink family resolution (docs/decisions/0016)"
-					.to_owned(),
-				interface: Some(interface.name.clone()),
-			});
-		}
-	}
+	warn_unapplied(&mut builder, desired);
 
 	builder.appearing = desired
 		.interfaces
@@ -218,6 +252,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	}
 
 	builder.plan_dns(desired, observed);
+	builder.plan_offloads(desired, observed);
 	builder.plan_ipv6_token(desired, observed);
 	builder.plan_rules(desired, observed);
 	builder.plan_qdisc(desired, observed);
@@ -1060,6 +1095,91 @@ impl Builder {
 	/// the model: an unnumbered rule lands wherever the kernel puts it, and
 	/// two applies can produce different orders, which makes the document stop
 	/// describing the system.
+	/// Driver offloads, for each interface whose `ethtool` block sets any.
+	///
+	/// Only the ones the document names. A mask bitset means "change exactly
+	/// these", so an offload nobody mentioned keeps whatever the driver chose,
+	/// which is the same posture netcfgd takes to every other object it did
+	/// not install.
+	fn plan_offloads(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			let Some(settings) = &interface.link_settings else {
+				continue;
+			};
+			// The link may not exist yet -- this is the first apply and it is
+			// about to be created. Nothing is known about its offloads then,
+			// so every named one is planned and the action waits on the
+			// creation. Skipping instead is what made a fresh apply leave the
+			// offloads at the driver default and need a second run.
+			let link = observed.link(&interface.name);
+
+			let mut wanted: Vec<(String, bool)> = Vec::new();
+			for (toggle, names) in [
+				(settings.gro, netcfgd_model::interface::offload_names::GRO),
+				(settings.gso, netcfgd_model::interface::offload_names::GSO),
+				(settings.tso, netcfgd_model::interface::offload_names::TSO),
+				(
+					settings.rx_checksum,
+					netcfgd_model::interface::offload_names::RX_CHECKSUM,
+				),
+				(
+					settings.tx_checksum,
+					netcfgd_model::interface::offload_names::TX_CHECKSUM,
+				),
+			] {
+				let on = match toggle {
+					netcfgd_model::Toggle::Unmanaged => continue,
+					netcfgd_model::Toggle::On => true,
+					netcfgd_model::Toggle::Off => false,
+				};
+				// "On" for a field covering several kernel features means any
+				// of them; "off" means all of them. That is what `ethtool -K
+				// dev tx on|off` does, and transmit checksumming is three
+				// features because a driver offers whichever its hardware has.
+				let held = link.is_some_and(|link| names.iter().any(|name| held_on(link, name)));
+				if link.is_some() && held == on {
+					continue;
+				}
+				for name in names {
+					wanted.push(((*name).to_owned(), on));
+				}
+			}
+			if wanted.is_empty() {
+				continue;
+			}
+			wanted.sort();
+
+			let describe = |features: &[(String, bool)]| {
+				features
+					.iter()
+					.map(|(name, on)| format!("{name}={on}"))
+					.collect::<Vec<_>>()
+					.join(" ")
+			};
+			let inverse: Vec<(String, bool)> = wanted
+				.iter()
+				.map(|(name, _)| (name.clone(), link.is_some_and(|link| held_on(link, name))))
+				.collect();
+			self.push(
+				Op::LinkSetOffloads {
+					name: interface.name.clone(),
+					features: wanted.clone(),
+				},
+				Reason {
+					interface: Some(interface.name.clone()),
+					field: "ethtool".to_owned(),
+					desired: describe(&wanted),
+					observed: describe(&inverse),
+				},
+				self.gate(&interface.name),
+				Some(Op::LinkSetOffloads {
+					name: interface.name.clone(),
+					features: inverse,
+				}),
+			);
+		}
+	}
+
 	/// The IPv6 interface identifier on each interface that names one.
 	///
 	/// Only where the document asks. A token nobody asked for is not removed:
@@ -1819,6 +1939,11 @@ fn render_vlan(vlan: netcfgd_model::BridgeVlan) -> String {
 		out.push_str(" untagged");
 	}
 	out
+}
+
+/// Whether one kernel feature name is currently on.
+fn held_on(link: &netcfgd_model::ObservedLink, name: &str) -> bool {
+	link.offloads.iter().any(|held| held == name)
 }
 
 /// Whether a desired rule and an observed one are the same rule.

@@ -802,6 +802,9 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 			};
 			println!("    vlan {}{flags}", vlan.vid);
 		}
+		if !link.offloads.is_empty() {
+			println!("    offloads {}", link.offloads.join(" "));
+		}
 		if let Some(kind) = &link.qdisc {
 			let shaped = link.qdisc_bandwidth_bits.map_or_else(String::new, |bits| {
 				let inbound = if link.qdisc_ingress { " inbound" } else { "" };

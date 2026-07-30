@@ -45,6 +45,11 @@ pub struct Effects {
 /// Executes actions against rtnetlink and the backend helpers.
 pub struct KernelExecutor {
 	socket: Netlink,
+	/// The ethtool connection, opened the first time an offload is changed.
+	///
+	/// Lazy for the same reason as the netfilter socket: most machines never
+	/// touch an offload, and resolving the family is a round trip.
+	ethtool: Option<netcfgd_sys::ethtool::Ethtool>,
 	/// The netfilter socket, opened the first time NAT is actually changed.
 	///
 	/// Lazy because most machines are not routers: opening it eagerly would
@@ -110,6 +115,7 @@ impl KernelExecutor {
 		let snapshot = netcfgd_sys::snapshot_with(&mut socket)?;
 		Ok(Self {
 			socket,
+			ethtool: None,
 			nft: None,
 			indices: snapshot
 				.links
@@ -685,6 +691,31 @@ impl Executor for KernelExecutor {
 						Ok(())
 					}
 				}
+			}
+			Op::LinkSetOffloads { name, features } => {
+				let ethtool = match &mut self.ethtool {
+					Some(ethtool) => ethtool,
+					slot => {
+						slot.insert(netcfgd_sys::ethtool::Ethtool::open().map_err(|error| {
+							format!(
+								"cannot reach ethtool: {error}. Offloads need the \
+								 `ethtool` generic netlink family, which is Linux 5.6 \
+								 or newer"
+							)
+						})?)
+					}
+				};
+				let wanted: Vec<(&str, bool)> = features
+					.iter()
+					.map(|(feature, on)| (feature.as_str(), *on))
+					.collect();
+				ethtool.set_features(name, &wanted).map_err(|error| {
+					format!(
+						"cannot set offloads on {name}: {error}. A driver that does not \
+						 know a feature refuses the whole request, so nothing changed."
+					)
+				})?;
+				Ok(())
 			}
 			Op::LinkSetIpv6Token { name, token } => {
 				let index = self.index_of(name)?;

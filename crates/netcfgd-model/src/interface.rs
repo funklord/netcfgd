@@ -778,15 +778,47 @@ pub enum Toggle {
 	Off,
 }
 
+/// The kernel feature names each offload field maps onto.
+///
+/// In the model rather than in `netcfgd-sys` because the planner needs them
+/// and the planner is pure -- it must not depend on the crate that talks to
+/// the kernel. The executor reads them from here too, so there is one list.
+///
+/// One field can cover several features: transmit checksumming is three,
+/// because a driver offers whichever of them its hardware does.
+pub mod offload_names {
+	/// Generic receive offload.
+	pub const GRO: &[&str] = &["rx-gro"];
+	/// Generic segmentation offload.
+	pub const GSO: &[&str] = &["tx-generic-segmentation"];
+	/// TCP segmentation offload.
+	pub const TSO: &[&str] = &["tx-tcp-segmentation"];
+	/// Receive checksum offload.
+	pub const RX_CHECKSUM: &[&str] = &["rx-checksum"];
+	/// Transmit checksum offload, in all the spellings a driver may have.
+	pub const TX_CHECKSUM: &[&str] = &[
+		"tx-checksum-ip-generic",
+		"tx-checksum-ipv4",
+		"tx-checksum-ipv6",
+	];
+}
+
 /// Driver-level link settings, the `ethtool` surface.
 ///
-/// Nothing implements this yet, and the reason is worth stating: ethtool is
-/// reached either through `SIOCETHTOOL`, an ioctl, or through the newer
-/// generic netlink family. The first needs an `unsafe` ioctl outside
-/// `netcfgd-sys`, which constraint 4 forbids; the second needs generic
-/// netlink family resolution, which is the same cost decision 0016 identified
-/// for `nl80211` and has not been paid. So the type is here for the M4 freeze
-/// and a config using it is refused by name.
+/// **The offloads are applied; the rest is not.** ethtool is reached either
+/// through `SIOCETHTOOL`, an ioctl the unsafe policy forbids outside
+/// `netcfgd-sys`, or through its generic netlink family -- and family
+/// resolution was built for `WireGuard` at M4, so that route is open and the
+/// offloads go through it.
+///
+/// `autoneg`, `speed`, `duplex`, `wol`, `rx_ring` and `tx_ring` stay
+/// unimplemented, and the reason is verification rather than effort. A veth
+/// takes a features message; it refuses a link-modes set with a bare `EINVAL`,
+/// and ring and wake-on-LAN messages are `EOPNOTSUPP` on anything that is not
+/// a physical NIC. Every netlink bug this project has shipped was found by
+/// writing to a real kernel and reading it back, so settings that can only be
+/// exercised against hardware the test suite cannot safely write to are left
+/// alone and reported field by field in the plan.
 ///
 /// Deliberately not exhaustive of what ethtool can do. These are the settings
 /// people actually put in configuration management -- offloads that break

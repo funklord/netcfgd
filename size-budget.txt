@@ -154,4 +154,9 @@ netcfgd
 # +4 KB for `ipv6_token`: one setter through IFLA_AF_SPEC, the token read out
 # of the link dump, a planner pass and an executor arm. Small because the dump
 # already carried it -- reading it needed no second request.
-total 1796632
+# +16 KB for the ethtool offloads: the generic-netlink family, the named
+# bitset encoder and decoder, a per-link query in the observation and a planner
+# pass. The family resolution itself was already there, built for WireGuard --
+# which is what made this reachable at all, since decision 0016 had put it
+# behind either that or an ioctl the unsafe policy forbids.
+total 1813016

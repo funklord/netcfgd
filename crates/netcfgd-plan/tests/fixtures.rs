@@ -34,6 +34,7 @@ fn link(name: &str) -> ObservedLink {
 		mtu: 1500,
 		mac: None,
 		master: None,
+		offloads: Vec::new(),
 		ipv6_token: None,
 		qdisc: Some("noqueue".to_owned()),
 		qdisc_bandwidth_bits: None,
@@ -286,6 +287,17 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 			}
 			Op::IngressRedirect { .. } | Op::IngressRedirectClear { .. } => {
 				simulate_ingress(&action.op, observed);
+			}
+			Op::LinkSetOffloads { name, features } => {
+				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
+					for (feature, on) in features {
+						link.offloads.retain(|held| held != feature);
+						if *on {
+							link.offloads.push(feature.clone());
+						}
+					}
+					link.offloads.sort();
+				}
 			}
 			Op::LinkSetIpv6Token { name, token } => {
 				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
@@ -1060,7 +1072,8 @@ fn removing_dot1x_stops_the_supplicant() {
 }
 
 /// The M4 freeze put four features in the schema that nothing implemented.
-/// Policy routing rules and `ipv6_token` are now built, so two remain. The failure mode to
+/// Rules, `ipv6_token` and the ethtool offloads are built; access points and
+/// the rest of the ethtool block are not. The failure mode to
 /// guard against is not that they do nothing -- that is intended -- but that
 /// they do nothing *silently*, so a plan reports "one action" about a config
 /// that asked for several things.
@@ -1074,7 +1087,7 @@ access_point "guest" {
 }
 
 interface eth0 {
-	ethtool { gro = "off" }
+	ethtool { gro = "off"; speed = 1000; wol = "g" }
 	config = "null"
 }
 "#,
@@ -1090,7 +1103,7 @@ interface eth0 {
 		.map(|warning| warning.message.as_str())
 		.collect();
 
-	for expected in ["access point `guest`", "ethtool"] {
+	for expected in ["access point `guest`", "`speed`, `wol`"] {
 		assert!(
 			warnings.iter().any(|message| message.contains(expected)),
 			"nothing warned about {expected}: {warnings:?}"
@@ -2131,4 +2144,114 @@ fn a_token_nobody_asked_about_is_left_alone() {
 		observed.link("eth0").and_then(|l| l.ipv6_token.as_deref()),
 		Some("::9")
 	);
+}
+
+/// An offload is set once and then left alone.
+#[test]
+fn an_offload_is_set_once_and_then_left_alone() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config  = "10.0.0.2/24"
+			ethtool { gro = "off" }
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.offloads = vec!["rx-gro".to_owned()];
+	}
+
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		names(&plan).contains(&"link.set_offloads"),
+		"{:?}",
+		names(&plan)
+	);
+	assert!(observed.link("eth0").is_some_and(|l| l.offloads.is_empty()));
+}
+
+/// An offload already in the wanted state plans nothing.
+#[test]
+fn an_offload_already_correct_plans_nothing() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config  = "10.0.0.2/24"
+			ethtool { gro = "on" }
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.offloads = vec!["rx-gro".to_owned()];
+	}
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"link.set_offloads"),
+		"{:?}",
+		names(&plan)
+	);
+}
+
+/// An offload the document does not mention is not touched.
+///
+/// The kernel takes a mask bitset, so a request names exactly what changes.
+/// Sending the full set would turn off every offload the config is silent
+/// about, which is most of them.
+#[test]
+fn an_unmentioned_offload_is_not_in_the_request() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config  = "10.0.0.2/24"
+			ethtool { gro = "off" }
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.offloads = vec!["rx-gro".to_owned(), "tx-tcp-segmentation".to_owned()];
+	}
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|a| a.op.name() == "link.set_offloads")
+		.expect("an offload action");
+	let netcfgd_plan::Op::LinkSetOffloads { features, .. } = &action.op else {
+		panic!("wrong op");
+	};
+	assert_eq!(features, &vec![("rx-gro".to_owned(), false)]);
+}
+
+/// Transmit checksumming is several kernel features and moves together.
+#[test]
+fn transmit_checksumming_covers_every_spelling() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config  = "10.0.0.2/24"
+			ethtool { tx_checksum = "off" }
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.offloads = vec!["tx-checksum-ip-generic".to_owned()];
+	}
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|a| a.op.name() == "link.set_offloads")
+		.expect("an offload action");
+	let netcfgd_plan::Op::LinkSetOffloads { features, .. } = &action.op else {
+		panic!("wrong op");
+	};
+	assert_eq!(features.len(), 3, "{features:?}");
+	assert!(features.iter().all(|(_, on)| !on));
 }
