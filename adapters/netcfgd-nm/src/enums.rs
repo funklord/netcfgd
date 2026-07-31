@@ -175,6 +175,36 @@ pub(crate) mod ap_security {
 	pub(crate) const KEY_MGMT_OWE_TM: u32 = 0x1000;
 }
 
+/// `NMActiveConnectionState`.
+pub(crate) mod active_state {
+	/// Not known.
+	pub(crate) const UNKNOWN: u32 = 0;
+	/// Coming up.
+	pub(crate) const ACTIVATING: u32 = 1;
+	/// Up.
+	pub(crate) const ACTIVATED: u32 = 2;
+	/// Going away.
+	pub(crate) const DEACTIVATING: u32 = 3;
+	/// Gone.
+	pub(crate) const DEACTIVATED: u32 = 4;
+}
+
+/// `NMActivationStateFlags`, the subset clients read.
+pub(crate) mod activation_flag {
+	/// Nothing.
+	pub(crate) const NONE: u32 = 0;
+	/// This activation is a controller for others.
+	pub(crate) const IS_MASTER: u32 = 0x1;
+	/// It is a port of some controller.
+	pub(crate) const IS_SLAVE: u32 = 0x2;
+	/// Layer 2 is up.
+	pub(crate) const LAYER2_READY: u32 = 0x4;
+	/// It has IPv4.
+	pub(crate) const IP4_READY: u32 = 0x8;
+	/// It has IPv6.
+	pub(crate) const IP6_READY: u32 = 0x10;
+}
+
 /// `NMDeviceCapabilities`.
 pub(crate) mod capability {
 	/// The device is supported by this daemon.

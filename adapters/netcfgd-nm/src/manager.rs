@@ -73,6 +73,90 @@ impl Manager {
 		self.device_paths()
 	}
 
+	/// Activate a profile on a device.
+	///
+	/// For a `network` block this is `ncfg wifi connect` reached over D-Bus,
+	/// with decision 0013's boundary intact: it joins what the configuration
+	/// already describes and cannot create anything. For an `interface` block
+	/// there is nothing to activate -- netcfgd brings interfaces up because the
+	/// configuration says to -- so an interface that is already up answers
+	/// success and one that is down explains why.
+	///
+	/// # Errors
+	///
+	/// Returns netcfgd's own message.
+	fn activate_connection(
+		&self,
+		connection: OwnedObjectPath,
+		device: OwnedObjectPath,
+		specific_object: OwnedObjectPath,
+	) -> zbus::fdo::Result<OwnedObjectPath> {
+		// The access point to prefer, which netcfgd's socket has no argument
+		// for: `ncfg wifi connect` names a `network` block and lets the
+		// supplicant choose the BSS. Pinning one is a `bssid_pin` in the
+		// configuration, which is where it belongs.
+		let _ = specific_object;
+		let identity = self
+			.state
+			.profiles()
+			.into_iter()
+			.find(|(_, number)| crate::settings::path_for(*number) == connection)
+			.map(|(profile, _)| profile.identity())
+			.ok_or_else(|| {
+				zbus::fdo::Error::Failed(format!("{connection} is not a netcfgd profile"))
+			})?;
+
+		let interface = self
+			.state
+			.devices()
+			.into_iter()
+			.find(|(_, number)| crate::device::path_for(*number) == device)
+			.map(|(name, _)| name)
+			.ok_or_else(|| {
+				zbus::fdo::Error::Failed(format!(
+					"{device} is not a device netcfgd knows about. Activating a profile \
+					 needs to be told which interface to use"
+				))
+			})?;
+
+		self.state
+			.activate(&identity, &interface)
+			.map_err(zbus::fdo::Error::Failed)?;
+
+		// The path of the activation this produced. netcfgd applies
+		// asynchronously, so the object may not exist for another moment --
+		// the number is assigned here so the path a client is handed is the
+		// one that will appear.
+		let activation = crate::state::Activation {
+			identity,
+			interface,
+		};
+		Ok(crate::active::path_for(
+			self.state.active_number(&activation),
+		))
+	}
+
+	/// Take a connection down.
+	///
+	/// # Errors
+	///
+	/// Returns netcfgd's own message.
+	fn deactivate_connection(&self, active: OwnedObjectPath) -> zbus::fdo::Result<()> {
+		let activation = self
+			.state
+			.active()
+			.into_iter()
+			.find(|activation| {
+				crate::active::path_for(self.state.active_number(activation)) == active
+			})
+			.ok_or_else(|| {
+				zbus::fdo::Error::Failed(format!("{active} is not an active connection"))
+			})?;
+		self.state
+			.deactivate(&activation)
+			.map_err(zbus::fdo::Error::Failed)
+	}
+
 	/// Find a device by kernel name.
 	///
 	/// # Errors
@@ -143,17 +227,38 @@ impl Manager {
 
 	#[zbus(property)]
 	fn active_connections(&self) -> Vec<OwnedObjectPath> {
-		Vec::new()
+		self.state
+			.active()
+			.iter()
+			.map(|activation| crate::active::path_for(self.state.active_number(activation)))
+			.collect()
 	}
 
+	/// The activation carrying the default route.
+	///
+	/// What a desktop's icon is drawn from. A machine with two uplinks has one
+	/// answer and it changes as carriers come and go, so it is asked of the
+	/// observed routes rather than of the configuration's preferences.
 	#[zbus(property)]
 	fn primary_connection(&self) -> OwnedObjectPath {
-		device::no_object()
+		self.state
+			.active()
+			.iter()
+			.find(|activation| self.state.has_default_route(&activation.interface, false))
+			.map_or_else(device::no_object, |activation| {
+				crate::active::path_for(self.state.active_number(activation))
+			})
 	}
 
 	#[zbus(property)]
 	fn primary_connection_type(&self) -> String {
-		String::new()
+		self.state
+			.active()
+			.iter()
+			.find(|activation| self.state.has_default_route(&activation.interface, false))
+			.and_then(|activation| self.state.profile(&activation.identity))
+			.map(|profile| profile.kind().to_owned())
+			.unwrap_or_default()
 	}
 
 	#[zbus(property)]
@@ -272,8 +377,9 @@ impl Compat {
 			("devices".to_owned(), true),
 			("device_state".to_owned(), true),
 			("wifi_scan".to_owned(), true),
-			("connections".to_owned(), false),
-			("activation".to_owned(), false),
+			("connections".to_owned(), true),
+			("activation".to_owned(), true),
+			("profile_writes".to_owned(), false),
 			("secret_agents".to_owned(), false),
 		]
 		.into_iter()

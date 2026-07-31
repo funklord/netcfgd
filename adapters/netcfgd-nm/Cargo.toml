@@ -56,6 +56,12 @@ zbus = { version = "5", default-features = false, features = ["async-io", "block
 # documentation for that case shows exactly this call. It is already in the
 # tree as zbus's own executor, so it costs nothing beyond naming it.
 async-io = "2"
+# UUIDv5, for connection identifiers. Design section 9.3 derives them rather
+# than storing them, because a stored UUID is state outside the configuration
+# files and constraint 1 forbids that -- so the same config produces the same
+# identifiers on any machine. Deriving means SHA-1, and hand-rolling a hash to
+# avoid a dependency is the trade this project does not make.
+uuid = { version = "1", features = ["v5"] }
 
 [lints.rust]
 unsafe_code     = "forbid"
@@ -71,3 +77,7 @@ pedantic = { level = "warn", priority = -1 }
 # lint is right about the function and wrong about the situation; the
 # alternative is fifty individual allows on the fifty places it fires.
 unused_self = "allow"
+# A D-Bus method argument arrives by value because the interface macro
+# deserialises it off the wire; there is no borrowed form for it to take. Same
+# shape as the lint above: right about the function, wrong about the situation.
+needless_pass_by_value = "allow"

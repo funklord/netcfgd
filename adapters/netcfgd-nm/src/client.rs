@@ -141,6 +141,64 @@ pub(crate) fn associated(socket: &Path, interface: &str) -> Result<Option<String
 	}
 }
 
+/// Re-read the configuration directory.
+///
+/// # Errors
+///
+/// Returns netcfgd's own message, which for a config that does not compile is
+/// the diagnostics -- exactly what a client should show.
+pub(crate) fn reload(socket: &Path) -> Result<(), String> {
+	match ask(socket, &Request::Reload)? {
+		Response::Ok => Ok(()),
+		other => Err(format!(
+			"asked netcfgd to reload and got {}",
+			describe(&other)
+		)),
+	}
+}
+
+/// Join a network the configuration already describes.
+///
+/// Decision 0013's boundary, unchanged by being reached over D-Bus: this can
+/// join what somebody with the admin tier wrote down, and nothing else. The
+/// shim holds no privilege the CLI does not.
+///
+/// # Errors
+///
+/// Returns netcfgd's own message, including its refusal when the network is
+/// not in the configuration.
+pub(crate) fn connect(socket: &Path, interface: &str, network: &str) -> Result<(), String> {
+	let request = Request::WifiConnect {
+		interface: interface.to_owned(),
+		network: network.to_owned(),
+	};
+	match ask(socket, &request)? {
+		Response::Ok => Ok(()),
+		other => Err(format!(
+			"asked netcfgd to connect and got {}",
+			describe(&other)
+		)),
+	}
+}
+
+/// Leave the current network without forgetting it.
+///
+/// # Errors
+///
+/// Returns netcfgd's own message.
+pub(crate) fn disconnect(socket: &Path, interface: &str) -> Result<(), String> {
+	let request = Request::WifiDisconnect {
+		interface: interface.to_owned(),
+	};
+	match ask(socket, &request)? {
+		Response::Ok => Ok(()),
+		other => Err(format!(
+			"asked netcfgd to disconnect and got {}",
+			describe(&other)
+		)),
+	}
+}
+
 /// What a response is, for an error message.
 ///
 /// Named rather than silently ignored: a client that treats an unexpected
