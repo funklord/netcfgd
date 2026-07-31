@@ -1,0 +1,43 @@
+# cargo-deny for the NM shim, which is a different question from the core's.
+#
+# The core's deny.toml lists every crate it may depend on, transitively, and
+# that list is twelve entries long -- it is constraint 3 written where a tool
+# can check it. Copying that approach here would mean enumerating zbus's
+# ninety-odd transitive dependencies by hand and re-enumerating them on every
+# update, which is bookkeeping rather than a decision, and the list would stop
+# being read within a month.
+#
+# What matters here instead is the two things that can actually hurt: a
+# dependency with an advisory against it, and a license that would change the
+# terms netcfgd is distributed under. Both are checked, at the same bar as the
+# core.
+#
+# The containment question -- "has any of this reached netcfgd itself?" -- is
+# not asked here at all. It is asked by `make nm-containment`, against the
+# core's lockfile, because that is where the answer lives.
+
+[graph]
+targets = [{ triple = "x86_64-unknown-linux-gnu" }, { triple = "aarch64-unknown-linux-gnu" }]
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# The same permissive-only rule as the core. An adapter is still distributed as
+# part of this project, so a copyleft dependency here would be the same problem
+# arriving through a side door.
+allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "Unicode-3.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib"]
+confidence-threshold = 0.9
+
+[bans]
+# Warn, where the core denies. A D-Bus stack pulls in `windows-sys` twice on
+# some resolutions through crates nobody here chose, and failing the build over
+# a duplicate in a dependency of a dependency would mean either pinning
+# somebody else's tree or turning the check off. Warning keeps it visible
+# without making it somebody's afternoon.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
