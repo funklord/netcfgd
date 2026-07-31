@@ -42,6 +42,7 @@ fn link(name: &str) -> ObservedLink {
 		ingress_redirect: None,
 		forwarding: None,
 		ownership: Ownership::Unknown,
+		private_key_loaded: false,
 	}
 }
 
@@ -1268,6 +1269,191 @@ interface wlan0 { config = "192.168.9.1/24" }
 	assert!(
 		start.depends_on.contains(&up.id),
 		"hostapd was started without waiting for the link"
+	);
+}
+
+/// A `WireGuard` interface on `wg0`, with the device block the test needs.
+fn wireguard_document(device: &str) -> Document {
+	document(&format!(
+		r#"
+{device}
+
+interface wg0 {{
+	wireguard {{
+		private_key = "@secret:wg0"
+		peer hub {{
+			public_key  = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+			allowed_ips = "10.0.0.0/24"
+		}}
+	}}
+	config = "10.0.0.5/32"
+}}
+"#
+	))
+}
+
+/// `wg0` present, with or without a private key loaded in the kernel.
+fn wireguard_observed(keyed: bool) -> Observed {
+	let mut observed = observed_with(&["wg0"]);
+	"wireguard".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].private_key_loaded = keyed;
+	observed
+}
+
+/// Decision 0042. Walking away from a `WireGuard` key leaves whoever ends up
+/// with the hardware able to be this host on that network, and revoking it is
+/// an act by every peer rather than anything netcfgd or the operator can do
+/// here.
+#[test]
+fn unmanaging_a_device_holding_a_wireguard_key_is_not_done_silently() {
+	let desired = wireguard_document("device wg0 { managed = false }");
+	let observed = wireguard_observed(true);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan.strands_credentials(), "got {:?}", plan.stranded);
+	let stranded = &plan.stranded[0];
+	assert_eq!(stranded.interface, "wg0");
+	assert!(
+		stranded.credential.contains("private key"),
+		"got {:?}",
+		stranded.credential
+	);
+	// Both ways out, because a notice an operator cannot act on is a complaint.
+	assert!(stranded.remove_with.contains("on_unmanage = \"clear\""));
+	assert!(stranded.consent_with.contains("--strand-credentials wg0"));
+	// Nothing is dropped from the plan: `managed = false` already means no
+	// actions for the device, so there is nothing to withhold.
+	assert!(!plan.was_refused());
+}
+
+/// The consent is per device, and it is the whole of what the flag does.
+#[test]
+fn consenting_to_one_device_settles_it() {
+	let desired = wireguard_document("device wg0 { managed = false }");
+	let observed = wireguard_observed(true);
+	let options = PlanOptions {
+		strand_credentials: vec!["wg0".to_owned()],
+		..PlanOptions::default()
+	};
+	assert!(!plan(&desired, &observed, &options).strands_credentials());
+
+	// And consenting to a different device does not settle this one, which is
+	// the reason the flag names a device rather than being a blanket --force.
+	let elsewhere = PlanOptions {
+		strand_credentials: vec!["wg1".to_owned()],
+		..PlanOptions::default()
+	};
+	assert!(plan(&desired, &observed, &elsewhere).strands_credentials());
+}
+
+/// `on_unmanage = "clear"` deletes the link netcfgd created, and the key goes
+/// with it. Reporting a hazard the operator has already dealt with is how a
+/// notice becomes something people pass over.
+#[test]
+fn clearing_is_the_answer_and_is_not_reported_as_the_problem() {
+	let desired = wireguard_document(r#"device wg0 { managed = false; on_unmanage = "clear" }"#);
+	let plan = plan(&desired, &wireguard_observed(true), &PlanOptions::default());
+	assert!(!plan.strands_credentials(), "got {:?}", plan.stranded);
+}
+
+/// The kernel decides this, not the document. A document that declares a key
+/// for an interface that was never applied strands nothing, and a notice about
+/// it would be a notice about a file.
+#[test]
+fn a_key_that_was_never_loaded_is_not_stranded() {
+	let desired = wireguard_document("device wg0 { managed = false }");
+	let unkeyed = plan(
+		&desired,
+		&wireguard_observed(false),
+		&PlanOptions::default(),
+	);
+	assert!(!unkeyed.strands_credentials(), "got {:?}", unkeyed.stranded);
+
+	// And the keyed case differs only in that one bit, so the check above
+	// cannot be passing because the whole feature is switched off.
+	let keyed = plan(&desired, &wireguard_observed(true), &PlanOptions::default());
+	assert!(keyed.strands_credentials());
+}
+
+/// A managed device is not walking away from anything.
+#[test]
+fn a_managed_wireguard_device_strands_nothing() {
+	let desired = wireguard_document("");
+	let plan = plan(&desired, &wireguard_observed(true), &PlanOptions::default());
+	assert!(!plan.strands_credentials(), "got {:?}", plan.stranded);
+}
+
+/// The narrow test decision 0042 turns on, checked by walking away from two
+/// devices at once and reporting exactly one of them.
+///
+/// A supplicant's passphrases and a running hostapd's generated configuration
+/// are copies of material sitting in the secrets directory on the same disk,
+/// which neither policy touches -- so the operator cannot fix that exposure by
+/// deciding, and a notice offering them the choice would offer a choice that
+/// changes nothing.
+///
+/// **Both devices are in one document deliberately.** The first version of this
+/// asserted only that the radio produced no notice, and it still passed with
+/// the rule widened to every unmanaged interface -- because the radio has no
+/// key loaded, so the *kind* check was never what excluded it. A check that
+/// expects nothing is satisfied by the feature being off. This one fails at
+/// zero notices and at two.
+#[test]
+fn a_radio_holding_passphrases_is_not_stranding_and_a_key_still_is() {
+	let desired = document(
+		r#"
+device wlan0 { managed = false; wifi { } }
+device wg0   { managed = false }
+
+network "Home" { wifi { psk = "@secret:home" }; config = "dhcp" }
+
+interface wlan0 { config = "dhcp" }
+
+interface wg0 {
+	wireguard {
+		private_key = "@secret:wg0"
+		peer hub {
+			public_key  = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+			allowed_ips = "10.0.0.0/24"
+		}
+	}
+	config = "10.0.0.5/32"
+}
+"#,
+	);
+	let mut observed = observed_with(&["wlan0", "wg0"]);
+	for link in &mut observed.links {
+		link.up = true;
+	}
+	"wireguard".clone_into(&mut observed.links[1].kind);
+	observed.links[1].private_key_loaded = true;
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::Supplicant,
+		interface: "wlan0".to_owned(),
+		running: true,
+		access_control: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let named: Vec<&str> = plan
+		.stranded
+		.iter()
+		.map(|stranded| stranded.interface.as_str())
+		.collect();
+	assert_eq!(
+		named,
+		["wg0"],
+		"a WPA passphrase is revoked at the access point and sits in the secrets \
+		 directory whichever policy is chosen; a WireGuard key is neither"
+	);
+	// The radio is still spoken about -- as the warning it always was.
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("passphrases")),
+		"got {:?}",
+		plan.warnings
 	);
 }
 

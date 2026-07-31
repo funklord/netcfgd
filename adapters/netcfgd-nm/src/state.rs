@@ -1032,6 +1032,7 @@ mod tests {
 			ingress_redirect: None,
 			forwarding: None,
 			ownership: netcfgd_model::Ownership::Unknown,
+			private_key_loaded: false,
 		}
 	}
 

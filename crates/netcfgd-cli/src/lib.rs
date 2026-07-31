@@ -59,12 +59,17 @@ options:
                            window has to outlive this command.
   --allow-disruption IFACE consent to disrupting one guarded interface;
                            repeatable, and deliberately not a blanket --force
+  --strand-credentials DEV consent to unmanaging one device while leaving a
+                           key on it that cannot be revoked; repeatable.
+                           `on_unmanage = \"clear\"` is the durable answer
   -h, --help               this text
 
 exit codes:
   0  the desired state was reached, or already held
   1  an action failed, or the config did not compile
   3  a guard refused a disruptive action; nothing else failed
+  4  the config walks away from a credential nobody can revoke, and has not
+     said whether that is meant. Nothing else failed
 ";
 
 /// The entry point, called by the multi-call binary rather than by the
@@ -94,6 +99,7 @@ pub(crate) struct Options {
 	json: bool,
 	confirm: Option<u32>,
 	allow_disruption: Vec<String>,
+	strand_credentials: Vec<String>,
 }
 
 fn run(arguments: &[String]) -> Result<ExitCode, String> {
@@ -136,6 +142,7 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 		json: false,
 		confirm: None,
 		allow_disruption: Vec::new(),
+		strand_credentials: Vec::new(),
 	};
 	let mut index = 0;
 	while index < arguments.len() {
@@ -160,6 +167,9 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 			"--allow-disruption" => options
 				.allow_disruption
 				.push(take_value("--allow-disruption")?),
+			"--strand-credentials" => options
+				.strand_credentials
+				.push(take_value("--strand-credentials")?),
 			"--json" => options.json = true,
 			"--yes" => options.yes = true,
 			// There is no daemon yet, so oneshot is the only mode there is.
@@ -238,6 +248,7 @@ fn build_plan(
 		confirm_window: options.confirm,
 		revert_to: None,
 		allow_disruption: options.allow_disruption.clone(),
+		strand_credentials: options.strand_credentials.clone(),
 	};
 	let plan = plan(&document, &observed, &plan_options);
 	Ok((plan, document, observed, run_dir))
@@ -299,6 +310,7 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		let request = netcfgd_proto::Request::Apply {
 			confirm: Some(seconds),
 			allow_disruption: options.allow_disruption.clone(),
+			strand_credentials: options.strand_credentials.clone(),
 		};
 		return match client::ask(&client::socket_path(&run_dir), &request)? {
 			client::Answer::Journal(journal) => {
@@ -323,16 +335,14 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 
 	if plan.is_empty() {
 		if !options.json {
-			if plan.was_refused() {
+			if plan.was_refused() || plan.strands_credentials() {
 				print_refusals(&plan);
+				print_stranded(&plan);
 			} else {
 				println!("nothing to do");
 			}
 		}
-		if plan.was_refused() {
-			return Ok(ExitCode::from(3));
-		}
-		return Ok(ExitCode::SUCCESS);
+		return Ok(outcome(&plan));
 	}
 
 	let mut executor = KernelExecutor::new()
@@ -370,8 +380,9 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		}
 	}
 
-	if !options.json && plan.was_refused() {
+	if !options.json {
 		print_refusals(&plan);
+		print_stranded(&plan);
 	}
 
 	if let Some(failure) = journal.failure() {
@@ -388,13 +399,29 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		return Ok(ExitCode::from(1));
 	}
 
-	// A refusal means the desired state was not reached, whether or not some
-	// actions ran. Exiting zero here would tell a script convergence happened
-	// when the very change it asked for is the one that did not.
+	Ok(outcome(&plan))
+}
+
+/// The exit code for a plan that did not fail.
+///
+/// A refusal means the desired state was not reached, whether or not some
+/// actions ran. Exiting zero there would tell a script convergence happened
+/// when the very change it asked for is the one that did not.
+///
+/// Stranding is a separate code because it has a separate remedy. A script
+/// that saw 3 and re-ran with `--allow-disruption` would be answering a
+/// question nobody asked, and the state it left behind -- a key on hardware
+/// walking out of the building -- is the one this exists to stop being
+/// silent about. Refusal wins when both apply: it is the one where netcfgd
+/// did not do something it was asked.
+fn outcome(plan: &Plan) -> ExitCode {
 	if plan.was_refused() {
-		return Ok(ExitCode::from(3));
+		return ExitCode::from(3);
 	}
-	Ok(ExitCode::SUCCESS)
+	if plan.strands_credentials() {
+		return ExitCode::from(4);
+	}
+	ExitCode::SUCCESS
 }
 
 /// Answer "why is it like this?" locally.
@@ -1017,6 +1044,7 @@ fn print_plan(plan: &Plan) {
 		}
 	}
 	print_refusals(plan);
+	print_stranded(plan);
 }
 
 /// What a guard stopped, and the exact command that consents to it.
@@ -1035,6 +1063,24 @@ fn print_refusals(plan: &Plan) {
 			describe(&refusal.op, &refusal.reason)
 		);
 		println!("         to allow it:     {}", refusal.override_with);
+	}
+}
+
+/// What a plan walks away from that cannot be taken back.
+///
+/// Both ways out are printed, and the config one first: the flag consents for
+/// one run, and the config key is the answer that is still there next time
+/// somebody reads the file. Printing them the other way round would make the
+/// flag look like the fix.
+fn print_stranded(plan: &Plan) {
+	for stranded in &plan.stranded {
+		println!(
+			"stranded: unmanaging {} leaves {}",
+			stranded.interface, stranded.credential
+		);
+		println!("          it cannot be revoked: {}", stranded.irrevocable);
+		println!("          to remove it:  {}", stranded.remove_with);
+		println!("          to leave it:   {}", stranded.consent_with);
 	}
 }
 
