@@ -227,6 +227,13 @@ impl Device {
 
 	#[zbus(property)]
 	fn state_reason(&self) -> (u32, u32) {
+		// Unmanaged outranks everything, including having an address: the
+		// device may well be working, and netcfgd is not the reason. NM's own
+		// idiom is that an unmanaged device reports `UNMANAGED` whatever it is
+		// doing, so a client shows it and offers nothing.
+		if !self.state.is_managed(&self.interface) {
+			return (device_state::UNMANAGED, state_reason::NONE);
+		}
 		let Some(link) = self.link() else {
 			return (device_state::UNAVAILABLE, state_reason::UNKNOWN);
 		};
@@ -248,11 +255,7 @@ impl Device {
 
 	#[zbus(property)]
 	fn managed(&self) -> bool {
-		// Every link netcfgd reports is one netcfgd is willing to talk about.
-		// A device the config marks `managed = false` is a later commit's
-		// problem, and reporting it as managed now would be a lie a client
-		// acts on.
-		true
+		self.state.is_managed(&self.interface)
 	}
 
 	#[zbus(property)]
