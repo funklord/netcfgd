@@ -334,18 +334,31 @@ impl Device {
 		crate::enums::connectivity::UNKNOWN
 	}
 
-	// The four configuration objects, and the active connection. Each is "/",
-	// NM's spelling for "no such object" -- they arrive with the commits that
-	// implement them, and an object path pointing at nothing that exists is
-	// how a client gets an error instead of an empty panel.
+	/// The addressing this device actually has, in each family.
+	///
+	/// What a settings panel's "Details" tab reads. These were `/` until the
+	/// objects behind them existed, and a panel opened on a working connection
+	/// showed nothing at all.
 	#[zbus(property)]
 	fn ip4_config(&self) -> OwnedObjectPath {
-		no_object()
+		self.state
+			.devices()
+			.into_iter()
+			.find(|(name, _)| name == &self.interface)
+			.map_or_else(no_object, |(_, number)| {
+				crate::ipconfig::path_for(number, false)
+			})
 	}
 
 	#[zbus(property)]
 	fn ip6_config(&self) -> OwnedObjectPath {
-		no_object()
+		self.state
+			.devices()
+			.into_iter()
+			.find(|(name, _)| name == &self.interface)
+			.map_or_else(no_object, |(_, number)| {
+				crate::ipconfig::path_for(number, true)
+			})
 	}
 
 	#[zbus(property)]

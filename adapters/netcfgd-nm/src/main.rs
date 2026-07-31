@@ -27,6 +27,7 @@ mod client;
 mod device;
 mod emit;
 mod enums;
+mod ipconfig;
 mod manager;
 mod settings;
 mod state;
@@ -347,6 +348,8 @@ fn publish(
 		let _ = server.remove::<device::Wired, _>(&path);
 		let _ = server.remove::<device::Generic, _>(&path);
 		let _ = server.remove::<device::Loopback, _>(&path);
+		let _ = server.remove::<ipconfig::Ip4Config, _>(ipconfig::path_for(*number, false));
+		let _ = server.remove::<ipconfig::Ip6Config, _>(ipconfig::path_for(*number, true));
 		server
 			.remove::<device::Device, _>(&path)
 			.map_err(|error| format!("cannot stop serving {name} at {path}: {error}"))?;
@@ -384,6 +387,23 @@ fn publish(
 		};
 		kind_interface
 			.map_err(|error| format!("cannot serve the kind interface of {path}: {error}"))?;
+
+		// One address configuration object per device per family. They are
+		// registered with the device rather than on demand, because the paths
+		// the device advertises have to exist when a client follows them --
+		// which is the same lesson AddConnection taught.
+		server
+			.at(
+				ipconfig::path_for(number, false),
+				ipconfig::Ip4Config::new(Arc::clone(state), name.clone()),
+			)
+			.map_err(|error| format!("cannot serve the ipv4 config of {name}: {error}"))?;
+		server
+			.at(
+				ipconfig::path_for(number, true),
+				ipconfig::Ip6Config::new(Arc::clone(state), name.clone()),
+			)
+			.map_err(|error| format!("cannot serve the ipv6 config of {name}: {error}"))?;
 	}
 
 	Ok(())
