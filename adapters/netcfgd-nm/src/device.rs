@@ -166,7 +166,10 @@ impl Device {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.Device")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device",
+	introspection_docs = false
+)]
 impl Device {
 	/// The kernel name.
 	#[zbus(property)]
@@ -416,7 +419,10 @@ impl Wired {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.Device.Wired")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device.Wired",
+	introspection_docs = false
+)]
 impl Wired {
 	#[zbus(property)]
 	fn hw_address(&self) -> String {
@@ -461,7 +467,10 @@ impl Wired {
 /// client knows which of NM's device classes to build.
 pub(crate) struct Loopback;
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.Device.Loopback")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device.Loopback",
+	introspection_docs = false
+)]
 impl Loopback {}
 
 /// Anything netcfgd can create that NM has no specific class for.
@@ -478,7 +487,10 @@ impl Generic {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.Device.Generic")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device.Generic",
+	introspection_docs = false
+)]
 impl Generic {
 	#[zbus(property)]
 	fn hw_address(&self) -> String {
@@ -518,7 +530,10 @@ impl Wireless {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.Device.Wireless")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device.Wireless",
+	introspection_docs = false
+)]
 impl Wireless {
 	#[zbus(property)]
 	fn hw_address(&self) -> String {
@@ -548,9 +563,31 @@ impl Wireless {
 		0
 	}
 
+	/// What the radio can negotiate.
+	///
+	/// Not zero, and the difference matters more than it looks: libnm checks
+	/// this before it will even offer a profile, so a radio reporting nothing
+	/// makes every secured network "not compatible with the device" and the
+	/// activation never reaches netcfgd at all. That is what `nmcli connection
+	/// up` said until this was written.
+	///
+	/// netcfgd cannot ask the radio what it supports -- it delegates to
+	/// `wpa_supplicant` and does not speak nl80211's capability dump -- so this
+	/// is what any radio a supplicant will drive can do: both cipher suites,
+	/// both WPA generations, and both bands. A card too old for RSN would be
+	/// described generously here and fail at association with the supplicant's
+	/// own message, which is a better failure than being invisible.
 	#[zbus(property)]
 	fn wireless_capabilities(&self) -> u32 {
-		0
+		use crate::enums::wifi_capability as capability;
+		capability::CIPHER_TKIP
+			| capability::CIPHER_CCMP
+			| capability::WPA
+			| capability::RSN
+			| capability::AP
+			| capability::FREQ_VALID
+			| capability::FREQ_2GHZ
+			| capability::FREQ_5GHZ
 	}
 
 	/// When the last scan finished, in `CLOCK_BOOTTIME` milliseconds.

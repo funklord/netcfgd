@@ -291,7 +291,10 @@ impl Settings {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.Settings")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Settings",
+	introspection_docs = false
+)]
 impl Settings {
 	/// Every profile netcfgd's configuration describes.
 	fn list_connections(&self) -> Vec<OwnedObjectPath> {
@@ -526,7 +529,10 @@ impl Connection {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.Settings.Connection")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Settings.Connection",
+	introspection_docs = false
+)]
 impl Connection {
 	/// The profile, as NM's settings dictionary.
 	///

@@ -51,6 +51,44 @@ impl Manager {
 		Self { state }
 	}
 
+	/// Get a credential from a registered agent and store it.
+	///
+	/// Storing it is a write to the operator's configuration directory, so it
+	/// goes through the same `admin` tier check every other write does
+	/// (decision 0030). A desktop that may not change the configuration may not
+	/// fill in its secrets either -- the two are the same permission, and the
+	/// second is how you would work around the first.
+	async fn supply_secret(
+		&self,
+		bus: &zbus::Connection,
+		header: &zbus::message::Header<'_>,
+		identity: &str,
+		name: &str,
+		profile_path: &OwnedObjectPath,
+	) -> zbus::fdo::Result<()> {
+		let settings = self
+			.state
+			.profile(identity)
+			.map(|profile| crate::settings::settings_of(&profile))
+			.unwrap_or_default();
+
+		let Some(passphrase) =
+			crate::agent::ask_for_passphrase(bus, &self.state, &settings, profile_path)
+				.await
+				.map_err(zbus::fdo::Error::Failed)?
+		else {
+			// Nobody to ask. netcfgd's own message about the missing secret is
+			// better than one about agents, so this says nothing and lets the
+			// activation fail on its own terms.
+			return Ok(());
+		};
+
+		let caller = crate::settings::caller_uid(header, bus).await?;
+		crate::store::may_write(caller, &self.state.admin_principal())
+			.map_err(zbus::fdo::Error::AuthFailed)?;
+		crate::store::save_secret(name, &passphrase).map_err(zbus::fdo::Error::Failed)
+	}
+
 	fn device_paths(&self) -> Vec<OwnedObjectPath> {
 		self.state
 			.devices()
@@ -60,7 +98,7 @@ impl Manager {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager")]
+#[zbus::interface(name = "org.freedesktop.NetworkManager", introspection_docs = false)]
 impl Manager {
 	/// Every device netcfgd can see.
 	fn get_devices(&self) -> Vec<OwnedObjectPath> {
@@ -85,11 +123,13 @@ impl Manager {
 	/// # Errors
 	///
 	/// Returns netcfgd's own message.
-	fn activate_connection(
+	async fn activate_connection(
 		&self,
 		connection: OwnedObjectPath,
 		device: OwnedObjectPath,
 		specific_object: OwnedObjectPath,
+		#[zbus(header)] header: zbus::message::Header<'_>,
+		#[zbus(connection)] bus: &zbus::Connection,
 	) -> zbus::fdo::Result<OwnedObjectPath> {
 		// The access point to prefer, which netcfgd's socket has no argument
 		// for: `ncfg wifi connect` names a `network` block and lets the
@@ -118,6 +158,16 @@ impl Manager {
 					 needs to be told which interface to use"
 				))
 			})?;
+
+		// A network whose passphrase is a reference to a file that does not
+		// exist is a question netcfgd cannot answer and a desktop can. Asking
+		// before connecting rather than after failing keeps the trigger
+		// deterministic: no error string is parsed, and the provider is
+		// consulted rather than guessed at.
+		if let Some(name) = self.state.missing_secret(&identity) {
+			self.supply_secret(bus, &header, &identity, &name, &connection)
+				.await?;
+		}
 
 		self.state
 			.activate(&identity, &interface)
@@ -352,7 +402,7 @@ impl Manager {
 /// that wants to know it is talking to netcfgd can ask here; nothing has to.
 pub(crate) struct Compat;
 
-#[zbus::interface(name = "org.netcfgd.Compat")]
+#[zbus::interface(name = "org.netcfgd.Compat", introspection_docs = false)]
 impl Compat {
 	/// What this actually is.
 	#[zbus(property)]
@@ -381,7 +431,7 @@ impl Compat {
 			("activation".to_owned(), true),
 			("profile_writes".to_owned(), true),
 			("profile_writes_wifi_only".to_owned(), true),
-			("secret_agents".to_owned(), false),
+			("secret_agents".to_owned(), true),
 		]
 		.into_iter()
 		.collect()

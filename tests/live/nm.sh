@@ -109,6 +109,13 @@ interface radio0 {
 network "HomeFiber" {
 	wifi { psk = "@secret:home"; proto = "wpa3" }
 }
+
+# A network whose credential is referenced and does not exist. Before the
+# secret agent bridge this was a dead end: netcfgd said the secret was not
+# found and there was nothing a desktop could do about it.
+network "Prompted" {
+	wifi { psk = "@secret:Prompted"; proto = "wpa2" }
+}
 CONF
 
 # A radio, without a radio. The fake supplicant answers the four commands
@@ -347,8 +354,8 @@ else
 	# profile named `radio0` would be a thing in every client's list that
 	# cannot be activated and is not an ethernet.
 	check "every interface block is a profile" \
-		"$(connections | awk -F: '{print $1}' | sort | tr '\n' ' ')" \
-		"HomeFiber probe0 quiet0 "
+		"$(connections | awk -F: '{print $1}' | LC_ALL=C sort | tr '\n' ' ')" \
+		"HomeFiber Prompted probe0 quiet0 "
 	check "and a radio's interface block is not one" \
 		"$(connections | grep -c '^radio0:' || true)" "0"
 	check "the wifi profile is wireless" \
@@ -499,6 +506,139 @@ else
 	check "and netcfgd no longer has the network" \
 		"$("$repo/target/debug/ncfg" show 2>/dev/null |
 			grep -c '"id": "Roaming"' || true)" "0"
+
+	# --------------------------------------------------- the secret agent
+
+	# Every object's introspection has to be XML. That sounds like it could not
+	# fail, and it did: zbus copies doc comments into the introspection data,
+	# and `--` is illegal inside an XML comment -- which is exactly what this
+	# project's own style rule says to write instead of an em dash. Every
+	# interface here was malformed, and only a client that introspects (which
+	# dbus-python does by default, and GDBus does not) ever noticed.
+	if command -v python3 >/dev/null 2>&1; then
+		malformed=$(DBUS_SYSTEM_BUS_ADDRESS="$address" python3 - <<'PYEOF'
+import sys
+import xml.parsers.expat
+
+import dbus
+
+# Every kind of object the shim serves, one of each.
+PATHS = [
+    "/org/freedesktop/NetworkManager",
+    "/org/freedesktop/NetworkManager/Settings",
+    "/org/freedesktop/NetworkManager/AgentManager",
+    "/org/freedesktop/NetworkManager/Devices/1",
+]
+
+bus = dbus.SystemBus()
+bad = []
+for path in PATHS:
+    obj = bus.get_object("org.freedesktop.NetworkManager", path, introspect=False)
+    data = obj.Introspect(dbus_interface="org.freedesktop.DBus.Introspectable")
+    parser = xml.parsers.expat.ParserCreate()
+    try:
+        parser.Parse(data, True)
+    except xml.parsers.expat.ExpatError as error:
+        bad.append(f"{path}: {error}")
+
+print(len(bad))
+for line in bad:
+    print(line, file=sys.stderr)
+PYEOF
+)
+		check "every object's introspection is well-formed xml" "$malformed" "0"
+	fi
+
+	# A network whose credential does not exist, and nobody to ask. netcfgd's
+	# own message is the useful one here; a shim that invented a complaint
+	# about missing agents would send the operator looking for a desktop
+	# problem on a machine with no desktop.
+	#
+	# Through busctl rather than nmcli, and that is the point rather than a
+	# convenience: `nmcli connection up` registers a secret agent of its own
+	# before it activates anything, so "no agent is registered" is a state
+	# nmcli cannot be used to observe. It was written with nmcli first and hung
+	# for twenty seconds -- the shim asking nmcli's agent, and nmcli, not being
+	# in interactive mode, never answering.
+	if command -v busctl >/dev/null 2>&1; then
+		# The UUID is derived from the configuration, so a test can compute it
+		# rather than hunt for it -- which is the property decision 0029 built
+		# the derivation for.
+		prompted_path=$(busctl --user --address="$address" call \
+			org.freedesktop.NetworkManager /org/freedesktop/NetworkManager/Settings \
+			org.freedesktop.NetworkManager.Settings GetConnectionByUuid \
+			s 01db0f38-75b0-589c-8a47-a7e125a1b0e5 2>/dev/null |
+			awk '{print $2}' | tr -d '"')
+		radio_dev=$(busctl --user --address="$address" call \
+			org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+			org.freedesktop.NetworkManager GetDeviceByIpIface s radio0 2>/dev/null |
+			awk '{print $2}' | tr -d '"')
+		check "with no agent, the missing secret is netcfgd's own message" \
+			"$(timeout 20 busctl --user --address="$address" call \
+				org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+				org.freedesktop.NetworkManager ActivateConnection ooo \
+				"$prompted_path" "$radio_dev" / 2>&1 |
+				grep -c 'secret `Prompted` was not found' || true)" "1"
+	fi
+
+	if command -v python3 >/dev/null 2>&1 && python3 -c 'import dbus' 2>/dev/null; then
+		# An agent that refuses, the way a user pressing Escape does. The
+		# activation must fail *and* leave nothing behind: a half-written
+		# credential for a network nobody joined is worse than no credential.
+		python3 "$repo/tests/live/fake_agent.py" --cancel refused \
+			> "$work/agent-cancel.log" 2>&1 &
+		cancel_agent=$!
+		waited=0
+		until grep -q registered "$work/agent-cancel.log" 2>/dev/null; do
+			waited=$((waited + 1))
+			[ "$waited" -gt 100 ] && break
+			sleep 0.1
+		done
+		check "a cancelled prompt is reported as such" \
+			"$(timeout 25 nmcli connection up Prompted ifname radio0 2>&1 |
+				grep -c 'did not supply a passphrase' || true)" "1"
+		check "and writes no credential" \
+			"$([ -f "$work/etc/secrets/Prompted" ] && echo yes || echo no)" "no"
+		kill "$cancel_agent" 2>/dev/null
+		wait "$cancel_agent" 2>/dev/null || true
+
+		# And one that answers.
+		python3 "$repo/tests/live/fake_agent.py" supersecretpass \
+			> "$work/agent.log" 2>&1 &
+		agent=$!
+		waited=0
+		until grep -q registered "$work/agent.log" 2>/dev/null; do
+			waited=$((waited + 1))
+			[ "$waited" -gt 100 ] && break
+			sleep 0.1
+		done
+
+		before=$(wc -l < "$work/fake.log")
+		timeout 25 nmcli connection up Prompted ifname radio0 > "$work/prompted.log" 2>&1 || true
+
+		check "the agent was asked for the right setting" \
+			"$(grep -c 'setting=802-11-wireless-security' "$work/agent.log" || true)" "1"
+		# Flags 5 is ALLOW_INTERACTION|USER_REQUESTED: a person is waiting, so
+		# an agent may put a dialog on the screen. Without them a real applet
+		# would refuse silently rather than prompt.
+		check "and told that a person is waiting" \
+			"$(grep -c 'flags=5' "$work/agent.log" || true)" "1"
+
+		check "the passphrase reached netcfgd's provider" \
+			"$(cat "$work/etc/secrets/Prompted" 2>/dev/null)" "supersecretpass"
+		check "readable by nobody else" \
+			"$(stat -c '%a' "$work/etc/secrets/Prompted" 2>/dev/null)" "600"
+		# The whole point of the bridge: the value goes to the provider and the
+		# configuration keeps the reference it already had.
+		check "and the configuration still holds only a reference" \
+			"$(grep -c 'supersecretpass' "$work/etc/netcfgd.conf" || true)" "0"
+
+		check "and the activation then reached the supplicant" \
+			"$(tail -n +$((before + 1)) "$work/fake.log" | grep -c 'SELECT_NETWORK' || true)" "1"
+
+		kill "$agent" 2>/dev/null
+		wait "$agent" 2>/dev/null || true
+	fi
 fi
 
 echo

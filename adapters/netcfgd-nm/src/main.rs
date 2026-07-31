@@ -22,6 +22,7 @@
 
 mod accesspoint;
 mod active;
+mod agent;
 mod client;
 mod device;
 mod emit;
@@ -41,6 +42,8 @@ const BUS_NAME: &str = "org.freedesktop.NetworkManager";
 const MANAGER_PATH: &str = "/org/freedesktop/NetworkManager";
 /// The connection profile store.
 const SETTINGS_PATH: &str = "/org/freedesktop/NetworkManager/Settings";
+/// Where clients register secret agents.
+const AGENT_MANAGER_PATH: &str = "/org/freedesktop/NetworkManager/AgentManager";
 
 fn main() -> std::process::ExitCode {
 	match run() {
@@ -119,36 +122,7 @@ fn serve(session: bool) -> Result<(), String> {
 		}
 	};
 
-	let builder = if session {
-		connection::Builder::session()
-	} else {
-		connection::Builder::system()
-	}
-	.map_err(|error| format!("cannot reach the message bus: {error}"))?;
-
-	// The name is deliberately *not* requested here. The objects go up first,
-	// and the name is asked for below with flags this cares about -- a client
-	// that sees the name appear is entitled to find a device tree behind it.
-	let connection = builder
-		.serve_at(MANAGER_PATH, manager::Manager::new(Arc::clone(&state)))
-		.map_err(|error| format!("cannot serve the manager object: {error}"))?
-		.serve_at(MANAGER_PATH, manager::Compat)
-		.map_err(|error| format!("cannot serve the compat object: {error}"))?
-		.serve_at(SETTINGS_PATH, settings::Settings::new(Arc::clone(&state)))
-		.map_err(|error| format!("cannot serve the settings object: {error}"))?
-		.build()
-		.map_err(|error| format!("cannot reach the message bus: {error}"))?;
-
-	// zbus serves ObjectManager itself, at the path asked for. NM puts it at
-	// /org/freedesktop rather than under its own object, which libnm depends
-	// on -- it calls GetManagedObjects there to build its whole cache in one
-	// round trip. Confirmed against a running NetworkManager 1.52 rather than
-	// taken from the specification, because the design doc had it down as an
-	// open question.
-	connection
-		.object_server()
-		.at("/org/freedesktop", zbus::fdo::ObjectManager)
-		.map_err(|error| format!("cannot serve the object manager: {error}"))?;
+	let connection = open_bus(session, &state)?;
 
 	publish(&connection, &state, &changes)?;
 	state.refresh_associations();
@@ -260,6 +234,48 @@ fn serve(session: bool) -> Result<(), String> {
 /// resolves itself when the next client asks.
 fn sender_of(state: &Arc<State>, radio: &str) -> Result<(), String> {
 	state.request_scan(radio)
+}
+
+/// Connect to the bus and put the fixed objects up.
+///
+/// The name is deliberately *not* requested here. The objects go up first, and
+/// the name is asked for afterwards -- a client that sees the name appear is
+/// entitled to find a device tree behind it.
+fn open_bus(session: bool, state: &Arc<State>) -> Result<zbus::blocking::Connection, String> {
+	let builder = if session {
+		connection::Builder::session()
+	} else {
+		connection::Builder::system()
+	}
+	.map_err(|error| format!("cannot reach the message bus: {error}"))?;
+
+	let connection = builder
+		.serve_at(MANAGER_PATH, manager::Manager::new(Arc::clone(state)))
+		.map_err(|error| format!("cannot serve the manager object: {error}"))?
+		.serve_at(MANAGER_PATH, manager::Compat)
+		.map_err(|error| format!("cannot serve the compat object: {error}"))?
+		.serve_at(SETTINGS_PATH, settings::Settings::new(Arc::clone(state)))
+		.map_err(|error| format!("cannot serve the settings object: {error}"))?
+		.serve_at(
+			AGENT_MANAGER_PATH,
+			agent::AgentManager::new(Arc::clone(state)),
+		)
+		.map_err(|error| format!("cannot serve the agent manager: {error}"))?
+		.build()
+		.map_err(|error| format!("cannot reach the message bus: {error}"))?;
+
+	// zbus serves ObjectManager itself, at the path asked for. NM puts it at
+	// /org/freedesktop rather than under its own object, which libnm depends
+	// on -- it calls GetManagedObjects there to build its whole cache in one
+	// round trip. Confirmed against a running NetworkManager 1.52 rather than
+	// taken from the specification, because the design doc had it down as an
+	// open question.
+	connection
+		.object_server()
+		.at("/org/freedesktop", zbus::fdo::ObjectManager)
+		.map_err(|error| format!("cannot serve the object manager: {error}"))?;
+
+	Ok(connection)
 }
 
 /// Take `org.freedesktop.NetworkManager`, or say why not and stop.
