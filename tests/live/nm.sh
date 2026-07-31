@@ -61,6 +61,11 @@ mkdir -p "$work/etc" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
+# Emphatically not the host's. A network namespace is not a mount namespace, so
+# without this the DNS backend writes the resolver configuration of the machine
+# running the test -- which it tried to do, and was saved from only by the user
+# namespace having no permission to write a root-owned file.
+export NCFG_RESOLV_CONF="$work/resolv.conf"
 
 failures=0
 check() {
@@ -84,9 +89,18 @@ export NCFG_WPA_CTRL_DIR="$work/ctrl"
 # the link, so the shim does too -- which is what lets a machine with no
 # wireless hardware exercise the wireless half at all.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
+global {
+	dns {
+		mode    = "write_resolv_conf"
+		servers = ["10.0.0.1", "2001:db8::1"]
+		search  = ["vibes.se"]
+	}
+}
+
 interface probe0 {
 	kind   = "dummy"
-	config = "10.7.7.1/24"
+	config = ["10.7.7.1/24", "2001:db8:7::1/64"]
+	routes = ["default via 10.7.7.254", "10.9.0.0/16 via 10.7.7.9 metric 600"]
 }
 
 interface quiet0 {
@@ -439,6 +453,57 @@ else
 			"$(busctl --user --address="$address" call org.freedesktop.NetworkManager \
 				"$conn_path" org.freedesktop.NetworkManager.Settings.Connection \
 				GetSettings 2>&1 | grep -c 'hunter2hunter2' || true)" "0"
+	fi
+
+	# ------------------------------------------------- what a panel shows
+
+	# The Details tab of a settings panel, which was empty until the address
+	# configuration objects existed: `Device.Ip4Config` was "/", NM's spelling
+	# for "no object", so a panel opened on a working connection showed
+	# nothing at all.
+	details() { nmcli device show probe0 2>/dev/null; }
+	detail() { details | awk -v want="$1" '$1 == want":" { print $2 }'; }
+
+	check "the address a panel shows is the one netcfgd applied" \
+		"$(detail 'IP4.ADDRESS[1]')" "10.7.7.1/24"
+	check "and the gateway is the next hop of the default route" \
+		"$(detail IP4.GATEWAY)" "10.7.7.254"
+	check "the nameservers come from what was applied, not from the config" \
+		"$(detail 'IP4.DNS[1]')" "10.0.0.1"
+	check "and the search domains with them" \
+		"$(detail 'IP4.SEARCHES[1]')" "vibes.se"
+
+	# A route with a next hop and a metric, which is the entry that exercises
+	# every optional field at once.
+	check "a route keeps its next hop and metric" \
+		"$(details | grep -c 'dst = 10.9.0.0/16, nh = 10.7.7.9, mt = 600' || true)" "1"
+
+	# Both families, from one device, through two objects with different
+	# signatures for the same idea.
+	check "the ipv6 address is there too" \
+		"$(details | grep -c '2001:db8:7::1/64' || true)" "1"
+	check "and the ipv6 nameserver" \
+		"$(details | grep -c '2001:db8::1' || true)" "1"
+
+	# The deprecated packed form against the modern one. NM still serves both,
+	# and the packed integers are the half that is easy to get subtly wrong --
+	# 10.7.7.1 is 0x0107070a read as a little-endian word.
+	if command -v busctl >/dev/null 2>&1; then
+		probe_dev=$(busctl --user --address="$address" call \
+			org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+			org.freedesktop.NetworkManager GetDeviceByIpIface s probe0 2>/dev/null |
+			awk '{print $2}' | tr -d '"')
+		ip4_path=$(busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$probe_dev" \
+			org.freedesktop.NetworkManager.Device Ip4Config 2>/dev/null |
+			awk '{print $2}' | tr -d '"')
+		check "the device points at a real address object" \
+			"$(printf '%s' "$ip4_path" | grep -c '^/org/freedesktop/NetworkManager/IP4Config/' || true)" "1"
+		check "and its deprecated packed form agrees with the address" \
+			"$(busctl --user --address="$address" get-property \
+				org.freedesktop.NetworkManager "$ip4_path" \
+				org.freedesktop.NetworkManager.IP4Config Addresses 2>/dev/null |
+				grep -c '17237770 24' || true)" "1"
 	fi
 
 	# ------------------------------------------------------- the write path

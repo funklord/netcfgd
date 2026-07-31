@@ -851,6 +851,91 @@ impl State {
 			.cloned()
 	}
 
+	/// Every address on an interface, as netcfgd reports them.
+	#[must_use]
+	pub(crate) fn addresses_of(&self, interface: &str) -> Vec<String> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner
+			.observed
+			.addresses
+			.iter()
+			.filter(|address| address.interface == interface)
+			.map(|address| address.address.clone())
+			.collect()
+	}
+
+	/// Every route on an interface: `(destination, via, metric)`.
+	#[must_use]
+	pub(crate) fn routes_of(
+		&self,
+		interface: &str,
+	) -> Vec<(String, Option<std::net::IpAddr>, Option<u32>)> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner
+			.observed
+			.routes
+			.iter()
+			.filter(|route| route.interface == interface)
+			.map(|route| (route.destination.clone(), route.via, route.metric))
+			.collect()
+	}
+
+	/// The next hop of an interface's default route, in one family.
+	///
+	/// What NM calls the gateway. netcfgd has no such field -- it has routes,
+	/// and the gateway is the next hop of the default one, which is the same
+	/// thing said without a special case.
+	#[must_use]
+	pub(crate) fn gateway_of(&self, interface: &str, v6: bool) -> Option<std::net::IpAddr> {
+		self.routes_of(interface)
+			.into_iter()
+			.find(|(destination, via, _)| {
+				(destination == "default" || destination == "::/0" || destination == "0.0.0.0/0")
+					&& via.is_some_and(|via| via.is_ipv6() == v6)
+			})
+			.and_then(|(_, via, _)| via)
+	}
+
+	/// Every nameserver netcfgd has applied.
+	///
+	/// From the applied DNS rather than from the configuration: what a panel
+	/// shows should be what resolution actually uses, and decision 0007's whole
+	/// point is that those can differ per scope.
+	#[must_use]
+	pub(crate) fn nameservers(&self) -> Vec<std::net::IpAddr> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner
+			.observed
+			.dns
+			.iter()
+			.flat_map(|applied| applied.policy.servers.iter().map(|server| server.addr))
+			.collect()
+	}
+
+	/// Every search domain netcfgd has applied.
+	#[must_use]
+	pub(crate) fn search_domains(&self) -> Vec<String> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner
+			.observed
+			.dns
+			.iter()
+			.flat_map(|applied| applied.policy.search.iter().cloned())
+			.collect()
+	}
+
 	/// Whether an interface carries an address that means something.
 	///
 	/// The difference between NM's `DISCONNECTED` and `ACTIVATED`: a link that
