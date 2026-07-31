@@ -1,8 +1,13 @@
 # 0044: The modem helper is contained the way an adapter is
 
-Status: accepted
+Status: accepted, amended by [0045](0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
 Date: 2026-07-31
 Supersedes: [0043](0043-mbim-is-ours-and-the-quirks-are-a-table.md)
+
+> **Amended.** The containment stands; naming ModemManager as *the* helper does
+> not. 0045 makes the `/run` contract the decision and the helper plural --
+> `umbim` needs no glib and no bus, `mbimcli` needs no bus, and the 16 MB router
+> this record wrote off has an answer after all.
 
 ## Context
 
