@@ -194,6 +194,20 @@ fn warn_unmanaged(builder: &mut Builder, desired: &Document) {
 		// configuration under /run. Withdrawing those on the way out is not
 		// implemented and is a decision rather than an oversight -- the flag
 		// means "stop operating", and taking a key out is an operation.
+		if builder.clearing.iter().any(|clearing| clearing == &name) {
+			builder.warnings.push(Warning {
+				message: format!(
+					"`{name}` is `managed = false` with `on_unmanage = \"clear\"`: netcfgd \
+					 removes everything it owns on it -- addresses and routes carrying its \
+					 tag, backends it started, and the credentials those hold -- and then \
+					 leaves it alone. Anything it did not put there is left exactly as it \
+					 is. The plan above is what is left to remove; an empty one means it \
+					 is done"
+				),
+				interface: Some(name),
+			});
+			continue;
+		}
 		builder.warnings.push(Warning {
 			message: format!(
 				"`{name}` is `managed = false`, so netcfgd will not touch it -- the \
@@ -201,8 +215,7 @@ fn warn_unmanaged(builder: &mut Builder, desired: &Document) {
 				 already configured stays exactly as it is, and that includes \
 				 credentials: a WireGuard key stays loaded, a supplicant netcfgd started \
 				 keeps its passphrases, and a running hostapd keeps its generated \
-				 configuration. Take those out before setting the flag if the device is \
-				 leaving your hands"
+				 configuration. Set `on_unmanage = \"clear\"` to have them removed first"
 			),
 			interface: Some(name),
 		});
@@ -311,6 +324,12 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		.devices
 		.iter()
 		.filter(|device| !device.managed)
+		.map(|device| device.name.clone())
+		.collect();
+	builder.clearing = desired
+		.devices
+		.iter()
+		.filter(|device| !device.managed && device.on_unmanage == netcfgd_model::OnUnmanage::Clear)
 		.map(|device| device.name.clone())
 		.collect();
 
@@ -446,6 +465,20 @@ struct Builder {
 	/// actions against it. Enforced in [`Builder::push`] now, which is the one
 	/// place every action goes through.
 	unmanaged: Vec<String>,
+	/// Unmanaged devices whose policy is to be emptied first.
+	///
+	/// `on_unmanage = "clear"` says the desired state is that netcfgd owns
+	/// nothing on the device. That is a state rather than a transition, so it
+	/// needs no edge detection: teardown decides as if the interface were not
+	/// in the document, removes what is tagged as ours, and finds nothing to
+	/// do on every plan after that.
+	clearing: Vec<String>,
+	/// Whether the teardown passes are running.
+	///
+	/// The forward passes must not touch a clearing device -- planning an
+	/// address and removing it in the same plan is a loop, not a convergence --
+	/// so the exemption in [`Builder::push`] applies during teardown only.
+	tearing_down: bool,
 }
 
 impl Builder {
@@ -493,7 +526,9 @@ impl Builder {
 		// device up front. One warning naming the device beats three naming
 		// each action it did not take.
 		if let Some(interface) = op.interface() {
-			if self.unmanaged.iter().any(|name| name == interface) {
+			let unmanaged = self.unmanaged.iter().any(|name| name == interface);
+			let clearing = self.tearing_down && self.clearing.iter().any(|name| name == interface);
+			if unmanaged && !clearing {
 				return u32::MAX;
 			}
 		}
@@ -1795,10 +1830,29 @@ impl Builder {
 	/// addresses, then backends, then links. The four steps are separate
 	/// functions so that order is the only thing this one expresses.
 	fn plan_teardown(&mut self, desired: &Document, observed: &Observed) {
+		self.tearing_down = true;
+
+		// A device being cleared is decided about as if its `interface` block
+		// were not there: the desired state is that netcfgd owns nothing on
+		// it, and every teardown pass already knows how to remove what the
+		// document does not want. Filtering the document once beats teaching
+		// four passes about a policy none of them otherwise cares about.
+		let filtered;
+		let desired = if self.clearing.is_empty() {
+			desired
+		} else {
+			let mut copy = desired.clone();
+			copy.interfaces
+				.retain(|interface| !self.clearing.iter().any(|name| name == &interface.name));
+			filtered = copy;
+			&filtered
+		};
+
 		self.teardown_routes(desired, observed);
 		self.teardown_addresses(desired, observed);
 		self.teardown_backends(desired, observed);
 		self.teardown_links(desired, observed);
+		self.tearing_down = false;
 	}
 
 	fn teardown_routes(&mut self, desired: &Document, observed: &Observed) {

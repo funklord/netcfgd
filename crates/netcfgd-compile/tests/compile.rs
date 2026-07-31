@@ -1034,6 +1034,33 @@ fn an_empty_ethtool_block_produces_nothing() {
 
 /// An access point is bound to one radio, unlike a `network`, which
 /// deliberately is not.
+/// The policy for what happens on the way out of being managed.
+#[test]
+fn a_device_can_say_what_to_do_when_it_stops_being_managed() {
+	let document = build_ok(r#"device wlan0 { managed = false; on_unmanage = "clear" }"#);
+	assert_eq!(
+		document.devices[0].on_unmanage,
+		netcfgd_model::OnUnmanage::Clear
+	);
+
+	// The default is to walk away, which is what a device that says nothing
+	// gets -- and what decision 0035 settled on.
+	let quiet = build_ok(r"device wlan0 { managed = false }");
+	assert_eq!(
+		quiet.devices[0].on_unmanage,
+		netcfgd_model::OnUnmanage::Leave
+	);
+
+	// A policy nobody implements is refused by name rather than ignored, and
+	// the help says which one to reach for.
+	let message = errors(r#"device wlan0 { on_unmanage = "burn" }"#);
+	assert!(
+		message.contains("`burn` is not an `on_unmanage` policy"),
+		"{message}"
+	);
+	assert!(message.contains("leaving your hands"), "{message}");
+}
+
 #[test]
 fn an_access_point_compiles_and_names_its_radio() {
 	let document = build_ok(
