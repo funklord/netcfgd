@@ -169,6 +169,9 @@ fn observed_link(
 		} else {
 			Ownership::Unknown
 		},
+		// Generic netlink rather than the link dump, so this is filled in by
+		// `host::augment` for the same reason `forwarding` and `offloads` are.
+		private_key_loaded: false,
 	}
 }
 

@@ -1,7 +1,7 @@
 {"request":"hello"}
 {"request":"status"}
 {"request":"plan"}
-{"request":"apply","confirm":90,"allow_disruption":["eth0"]}
+{"request":"apply","confirm":90,"allow_disruption":["eth0"],"strand_credentials":["wg0"]}
 {"request":"confirm"}
 {"request":"revert"}
 {"request":"reload"}
