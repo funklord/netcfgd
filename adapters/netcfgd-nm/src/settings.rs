@@ -89,6 +89,15 @@ impl Profile {
 		}
 	}
 
+	/// Its DNS policy, where it has one.
+	#[must_use]
+	pub(crate) fn dns(&self) -> Option<&netcfgd_model::DnsPolicy> {
+		match self {
+			Self::Network(network) => network.dns.as_ref(),
+			Self::Interface(interface) => interface.dns.as_ref(),
+		}
+	}
+
 	/// The routes it asks for.
 	#[must_use]
 	pub(crate) fn routes(&self) -> &[netcfgd_model::Route] {
@@ -142,6 +151,46 @@ fn text(value: impl Into<String>) -> OwnedValue {
 
 fn number(value: u32) -> OwnedValue {
 	OwnedValue::try_from(Value::from(value)).expect("a number owns itself")
+}
+
+/// NM's `NM_METERED_YES`.
+pub(crate) const METERED_YES: i32 = 1;
+/// NM's `NM_METERED_NO`.
+pub(crate) const METERED_NO: i32 = 2;
+
+fn signed(value: i32) -> OwnedValue {
+	OwnedValue::try_from(Value::from(value)).expect("a number owns itself")
+}
+
+fn strings(values: Vec<String>) -> OwnedValue {
+	OwnedValue::try_from(Value::from(values)).expect("an array of strings owns itself")
+}
+
+/// Nameservers in NM's deprecated packed form.
+///
+/// `au` for IPv4 and `aay` for IPv6, which is the same split the address
+/// configuration objects have and for the same reason: an IPv6 address does not
+/// fit in a `u32`.
+fn packed_servers(servers: &[std::net::IpAddr], v6: bool) -> OwnedValue {
+	if v6 {
+		let octets: Vec<Vec<u8>> = servers
+			.iter()
+			.filter_map(|address| match address {
+				std::net::IpAddr::V6(v6) => Some(v6.octets().to_vec()),
+				std::net::IpAddr::V4(_) => None,
+			})
+			.collect();
+		OwnedValue::try_from(Value::from(octets)).expect("an array owns itself")
+	} else {
+		let words: Vec<u32> = servers
+			.iter()
+			.filter_map(|address| match address {
+				std::net::IpAddr::V4(v4) => Some(crate::ipconfig::packed(*v4)),
+				std::net::IpAddr::V6(_) => None,
+			})
+			.collect();
+		OwnedValue::try_from(Value::from(words)).expect("an array owns itself")
+	}
 }
 
 fn flag(value: bool) -> OwnedValue {
@@ -246,6 +295,22 @@ pub(crate) fn settings_of(profile: &Profile) -> Dict {
 	if let Some(interface) = profile.interface() {
 		connection.insert("interface-name".to_owned(), text(interface));
 	}
+	if let Profile::Network(network) = profile {
+		connection.insert("autoconnect".to_owned(), flag(network.autoconnect));
+		connection.insert("autoconnect-priority".to_owned(), signed(network.priority));
+		// NM's `connection.metered` is a tri-state and netcfgd's is a boolean,
+		// so `false` becomes an explicit "no" rather than "unknown". An
+		// operator who wrote `metered = false` said something, and reporting it
+		// as unknown would have a desktop guess at it instead.
+		connection.insert(
+			"metered".to_owned(),
+			signed(if network.metered {
+				METERED_YES
+			} else {
+				METERED_NO
+			}),
+		);
+	}
 	dict.insert("connection".to_owned(), connection);
 
 	match profile {
@@ -277,8 +342,15 @@ pub(crate) fn settings_of(profile: &Profile) -> Dict {
 
 			insert_ip(&mut dict, profile);
 		}
-		Profile::Interface(_) => {
-			dict.insert("802-3-ethernet".to_owned(), Group::new());
+		Profile::Interface(interface) => {
+			let mut ethernet = Group::new();
+			// The one per-connection option that lives on an interface rather
+			// than a network: netcfgd has no per-SSID MTU, and a client asking
+			// for one is told so in the file it gets back.
+			if let Some(mtu) = interface.mtu {
+				ethernet.insert("mtu".to_owned(), number(mtu));
+			}
+			dict.insert("802-3-ethernet".to_owned(), ethernet);
 			insert_ip(&mut dict, profile);
 		}
 	}
@@ -295,14 +367,12 @@ pub(crate) fn settings_of(profile: &Profile) -> Dict {
 fn insert_ip(dict: &mut Dict, profile: &Profile) {
 	for v6 in [false, true] {
 		let mut group = Group::new();
-		group.insert(
-			"method".to_owned(),
-			text(if v6 {
-				ipv6_method(profile.addressing())
-			} else {
-				ipv4_method(profile.addressing())
-			}),
-		);
+		let method = if v6 {
+			ipv6_method(profile.addressing())
+		} else {
+			ipv4_method(profile.addressing())
+		};
+		group.insert("method".to_owned(), text(method));
 
 		let addresses: Vec<HashMap<String, OwnedValue>> = profile
 			.addressing()
@@ -337,6 +407,37 @@ fn insert_ip(dict: &mut Dict, profile: &Profile) {
 			.collect();
 		if !routes.is_empty() {
 			group.insert("route-data".to_owned(), array_of(routes));
+		}
+
+		// The profile's own DNS, in both of NM's spellings. `dns-data` is what
+		// a current client sends and reads; `dns` is the packed form that
+		// older ones still use, and serving only one of them works until it
+		// does not.
+		//
+		// Only where the method allows it. libnm validates the whole
+		// dictionary before it will activate anything, and `ipv4.dns` beside
+		// `method=disabled` is invalid -- so a network with nameservers and no
+		// addressing in that family had a profile no client would connect
+		// with. Losing the field is much cheaper than losing the profile, and
+		// NM has no way to say "no addressing, but these nameservers" anyway.
+		let carries_dns = !matches!(method, "disabled" | "ignore");
+		if let Some(policy) = profile.dns().filter(|_| carries_dns) {
+			let servers: Vec<std::net::IpAddr> = policy
+				.servers
+				.iter()
+				.map(|server| server.addr)
+				.filter(|address| address.is_ipv6() == v6)
+				.collect();
+			if !servers.is_empty() {
+				group.insert(
+					"dns-data".to_owned(),
+					strings(servers.iter().map(ToString::to_string).collect()),
+				);
+				group.insert("dns".to_owned(), packed_servers(&servers, v6));
+			}
+			if !policy.search.is_empty() {
+				group.insert("dns-search".to_owned(), strings(policy.search.clone()));
+			}
 		}
 
 		dict.insert(if v6 { "ipv6" } else { "ipv4" }.to_owned(), group);
@@ -1019,6 +1120,56 @@ mod tests {
 		assert_eq!(ipv4_method(&[]), "disabled");
 		assert_eq!(ipv6_method(&[]), "ignore");
 		assert_eq!(ipv6_method(&[AddressSource::LinkLocal]), "link-local");
+	}
+
+	/// Nameservers on a family with no addressing make the whole profile
+	/// invalid.
+	///
+	/// libnm validates the dictionary before it will activate anything, and
+	/// `ipv4.dns` beside `method=disabled` fails that check -- so a network
+	/// with nameservers and no IPv4 had a profile no client would connect
+	/// with, and the error named the DNS rather than the addressing. Losing
+	/// one field is much cheaper than losing the profile.
+	#[test]
+	fn dns_is_left_out_where_the_method_would_make_it_invalid() {
+		use netcfgd_model::{DnsPolicy, DnsServer};
+
+		let mut network = match network("Quiet", Security::Open) {
+			Profile::Network(network) => *network,
+			Profile::Interface(_) => unreachable!("built as a network"),
+		};
+		network.dns = Some(DnsPolicy {
+			servers: vec![DnsServer {
+				addr: "9.9.9.9".parse().expect("an address"),
+				port: None,
+				sni: None,
+			}],
+			..DnsPolicy::default()
+		});
+
+		// No addressing at all: `method` is `disabled`, so no nameservers.
+		network.addressing = Vec::new();
+		let quiet = settings_of(&Profile::Network(Box::new(network.clone())));
+		assert_eq!(
+			string_of(&quiet, "ipv4", "method").as_deref(),
+			Some("disabled")
+		);
+		assert!(
+			quiet
+				.get("ipv4")
+				.is_some_and(|group| !group.contains_key("dns-data")),
+			"a disabled family must not carry nameservers"
+		);
+
+		// With addressing, the same policy is reported.
+		network.addressing = vec![AddressSource::Dhcp4(
+			netcfgd_model::address::Dhcp4::default(),
+		)];
+		let live = settings_of(&Profile::Network(Box::new(network)));
+		assert_eq!(string_of(&live, "ipv4", "method").as_deref(), Some("auto"));
+		assert!(live
+			.get("ipv4")
+			.is_some_and(|group| group.contains_key("dns-data")));
 	}
 
 	/// A wifi profile is not bound to an interface. An SSID may be in range of
