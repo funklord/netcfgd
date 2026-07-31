@@ -209,4 +209,9 @@ netcfgd
 # applied. No protocol, no dependency and no new netlink -- netcfgd's half of
 # this feature is reading a file, which is the whole point of decisions 0044 and
 # 0045.
-total 1939992
+# +4 KB for the addressing source that consumes the report: an enum variant
+# with its serde, a compiler keyword, a planner arm and the teardown arm that
+# makes withdrawal work. Four kilobytes because the address path was already
+# there -- this source adds a place the value comes from, not a way to install
+# one.
+total 1944088

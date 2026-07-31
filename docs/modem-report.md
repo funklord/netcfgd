@@ -84,20 +84,22 @@ maintaining, and the next person to read it will believe it.
 
 ## What netcfgd does with it
 
-Today: reads it, and shows it in `ncfg status`. That is the whole of it, and it
-is deliberately the whole of it -- the file reader landed before the addressing
-source that consumes it, so that helper authors have something stable to write
-against while that half is built.
+**`address=`** is applied, when the document asks for it. An `interface` block
+saying `config = "modem"` gets the reported addresses installed, tagged as
+netcfgd's, and withdrawn again when the report stops naming them -- so
+truncating the file when the bearer drops really does take the address off the
+interface.
 
-Next: an `addressing` source so that an `interface` block can say its addresses
-come from the modem, at which point netcfgd installs them with its own tag and
-removes them when the report empties. That is a schema change and is not made
-casually.
+**`gateway=` and `dns=` are read and shown and not yet applied.** `ncfg status`
+marks them as reported, and nothing installs a route or a resolver from them
+yet. A helper should report them anyway: they are the contract, and the day
+netcfgd consumes them no helper has to change.
 
-netcfgd will **not** configure the interface from this file until a document
-asks it to. A helper must not assume its report has been applied, and must not
-apply the addresses itself: two writers on one interface is the failure this
-whole project is arranged to avoid.
+netcfgd will not configure the interface at all until a document asks it to --
+an `interface` with no `modem` source gets nothing, however complete the report.
+A helper must not assume its report has been applied, and must never apply the
+addresses itself: two writers on one interface is the failure this whole project
+is arranged to avoid.
 
 ## What a helper is
 

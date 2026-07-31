@@ -39,8 +39,8 @@ pub mod security;
 pub mod wifi;
 
 pub use address::{
-	derive_from_delegation, AddressSource, Delegated, Dhcp4, Dhcp6, PdRequest, PrefixRef, Slaac,
-	Static,
+	derive_from_delegation, AddressSource, Delegated, Dhcp4, Dhcp6, Modem, PdRequest, PrefixRef,
+	Slaac, Static,
 };
 pub use control::{Control, Principal, Tier};
 pub use device::{

@@ -1272,6 +1272,105 @@ interface wlan0 { config = "192.168.9.1/24" }
 	);
 }
 
+/// An interface whose addresses come from a modem helper's report.
+fn modem_document() -> Document {
+	document(r#"interface wwan0 { kind = "dummy"; config = "modem" }"#)
+}
+
+/// `wwan0` present, with a helper reporting these addresses.
+fn modem_observed(addresses: &[&str]) -> Observed {
+	let mut observed = observed_with(&["wwan0"]);
+	observed.links[0].up = true;
+	observed.modems.push(netcfgd_model::ObservedModem {
+		interface: "wwan0".to_owned(),
+		addresses: addresses.iter().map(|a| (*a).to_owned()).collect(),
+		gateways: Vec::new(),
+		nameservers: Vec::new(),
+	});
+	observed
+}
+
+/// The point of the source. A helper reported an address; netcfgd installs it,
+/// because the helper deliberately does not (`docs/modem-report.md`).
+#[test]
+fn an_address_a_modem_helper_reported_is_installed() {
+	let desired = modem_document();
+	let mut observed = modem_observed(&["10.64.1.23/30"]);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(names(&plan), ["addr.add"]);
+	let added = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "addr.add")
+		.expect("an addr.add");
+	assert!(
+		matches!(&added.op, Op::AddrAdd { addr, iface, .. }
+			if addr == "10.64.1.23/30" && iface == "wwan0"),
+		"got {:?}",
+		added.op
+	);
+	// The reason sends the reader to the report rather than to the document,
+	// because the document only names the source -- the value came from a file
+	// somebody else wrote.
+	assert!(
+		added.reason.desired.contains("reported by a modem helper"),
+		"got {:?}",
+		added.reason
+	);
+}
+
+/// Rule 7 for this source. A bearer that goes down empties the report, and the
+/// address stops being wanted -- unlike a lease there is no client holding it
+/// and no backend to restart, so the address is netcfgd's to withdraw.
+#[test]
+fn an_address_the_report_stops_naming_is_withdrawn() {
+	let desired = modem_document();
+	let mut observed = modem_observed(&["10.64.1.23/30"]);
+	settle(&desired, &mut observed);
+
+	// The bearer drops. The helper truncates its report, as the contract asks.
+	observed.modems[0].addresses.clear();
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(names(&plan), ["addr.del"]);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("bearer is down")),
+		"got {:?}",
+		plan.warnings
+	);
+}
+
+/// No report at all is a different thing from a report with nothing in it, and
+/// an operator needs to know which -- one means look at netcfgd, the other
+/// means look at the helper.
+#[test]
+fn no_report_and_an_empty_report_say_different_things() {
+	let desired = modem_document();
+
+	let mut nothing = observed_with(&["wwan0"]);
+	nothing.links[0].up = true;
+	let plan = settle(&desired, &mut nothing);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("no helper has reported")),
+		"got {:?}",
+		plan.warnings
+	);
+
+	let mut empty = modem_observed(&[]);
+	let plan = settle(&desired, &mut empty);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("bearer is down")),
+		"got {:?}",
+		plan.warnings
+	);
+}
+
 /// A `WireGuard` interface on `wg0`, with the device block the test needs.
 fn wireguard_document(device: &str) -> Document {
 	document(&format!(
