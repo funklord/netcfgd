@@ -1,0 +1,114 @@
+# The modem report
+
+**Status: stable. This is a contract, not an implementation detail.**
+
+A modem helper connects a cellular bearer and writes down what the network gave
+it. netcfgd reads that file and treats it the way it treats a lease. The two
+halves do not otherwise know about each other -- no library, no socket, no bus.
+
+This document is the whole interface. If you are writing a helper you should not
+need to read netcfgd's source, and if you find you did, that is a bug in this
+page.
+
+Decisions [0044](decisions/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)
+and [0045](decisions/0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
+say why it is shaped this way.
+
+## Where
+
+```
+/run/netcfgd/modem/<interface>
+```
+
+One file per interface, named for the network interface the bearer runs on --
+`wwan0`, `wwx00…`, whatever the kernel called it. That is the same shape as
+`/run/netcfgd/prefixes/<interface>`, which a `DHCPv6` client's hook already
+writes.
+
+`/run/netcfgd` is netcfgd's run directory and moves with `$NCFG_RUN_DIR`, which
+a helper should honour so it can be tested somewhere other than `/run`.
+
+## What
+
+Lines of `key=value`. Not JSON.
+
+That is deliberate and is the same call the prefix file makes: the thing writing
+this is very often a shell script wrapped around `umbim` or `mbimcli`, and a
+shell script that has to emit valid JSON is a shell script that will one day
+emit invalid JSON. This is a format a helper cannot get wrong.
+
+```
+# wwan0, connected 2026-07-31T14:02:11Z via three.co.uk
+address=10.64.1.23/30
+gateway=10.64.1.24
+dns=8.8.8.8
+dns=2001:4860:4860::8888
+```
+
+| key | repeats | meaning |
+|---|---|---|
+| `address` | yes | An address the network assigned, in CIDR form. IPv4 or IPv6. |
+| `gateway` | yes | A next hop. IPv4 or IPv6; give both on a dual-stack bearer. |
+| `dns` | yes | A nameserver. IPv4 or IPv6. |
+
+Rules, all of which a helper can follow without thinking hard:
+
+- **Blank lines and lines beginning `#` are ignored.** Put whatever you like in
+  a comment; netcfgd will not read it and neither will it complain.
+- **Whitespace around the key and the value is trimmed.** `address = 10.0.0.1/32`
+  is the same as `address=10.0.0.1/32`.
+- **Unknown keys are ignored, and this is a promise.** A helper may report
+  `mtu=`, `apn=`, `operator=` or anything else it knows; a netcfgd that does not
+  understand a key skips it rather than rejecting the file. That is what lets
+  helpers run ahead of netcfgd instead of waiting for it.
+- **A malformed value is skipped, not fatal.** One unparseable address does not
+  discard the rest of the file. A bearer that came up with a usable v4 address
+  and a mangled v6 one should still get the v4.
+- **Order does not matter**, except among repeats of the same key, which are
+  kept in the order written.
+
+## When
+
+**Write the file after the bearer is up and you know its configuration.**
+Write it atomically -- write a temporary file in the same directory and
+`rename(2)` it over the target -- because netcfgd may read at any moment and a
+half-written file is a file it will believe.
+
+**Truncate it to empty when the bearer goes down.** An empty file and a missing
+file both mean "no addresses", and they differ only in that the empty one says
+so deliberately. Prefer the empty file while the helper is running: it
+distinguishes "connected to nothing" from "nobody is watching this modem".
+
+**Remove it when the helper stops.** A file left behind is a report nothing is
+maintaining, and the next person to read it will believe it.
+
+## What netcfgd does with it
+
+Today: reads it, and shows it in `ncfg status`. That is the whole of it, and it
+is deliberately the whole of it -- the file reader landed before the addressing
+source that consumes it, so that helper authors have something stable to write
+against while that half is built.
+
+Next: an `addressing` source so that an `interface` block can say its addresses
+come from the modem, at which point netcfgd installs them with its own tag and
+removes them when the report empties. That is a schema change and is not made
+casually.
+
+netcfgd will **not** configure the interface from this file until a document
+asks it to. A helper must not assume its report has been applied, and must not
+apply the addresses itself: two writers on one interface is the failure this
+whole project is arranged to avoid.
+
+## What a helper is
+
+Anything that writes the file. Three are known to be possible and none of them
+is privileged by netcfgd:
+
+- **`umbim`** on OpenWrt -- `+libubox +kmod-usb-net-cdc-mbim +wwan`, no glib and
+  no D-Bus, on hardware where nothing heavier fits.
+- **`mbimcli`** from `libmbim-utils` -- `--connect="access-string=APN,..."` then
+  `--query-ip-configuration`. Links no `libdbus` and no `libsystemd`.
+- **ModemManager**, over D-Bus, on a machine already running it -- which is
+  where the vendor quirk handling for non-conforming modems lives.
+
+netcfgd does not start, supervise or speak to any of them. It reads a file.
