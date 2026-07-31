@@ -43,7 +43,10 @@ pub use address::{
 	Static,
 };
 pub use control::{Control, Principal, Tier};
-pub use device::{AccessPoint, Device, DeviceMatch, MacPolicy, OnUnmanage, WifiDevicePolicy};
+pub use device::{
+	normalize_station, AccessControl, AccessPoint, AclPolicy, Device, DeviceMatch, MacPolicy,
+	OnUnmanage, WifiDevicePolicy,
+};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
 pub use interface::{

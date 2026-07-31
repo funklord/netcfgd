@@ -14,7 +14,7 @@
 //! spells its key management `SAE` is a test nobody writes twelve of.
 
 use netcfgd_model::security::PskProto;
-use netcfgd_model::{AccessPoint, Security};
+use netcfgd_model::{AccessPoint, AclPolicy, Security};
 use std::path::Path;
 
 /// One `key=value` line of the file.
@@ -138,6 +138,32 @@ impl std::fmt::Display for Unsupported {
 }
 
 impl std::error::Error for Unsupported {}
+
+/// Where the station list for one device is written.
+///
+/// Beside the generated configuration and named after the device, so that an
+/// operator who finds one file knows what the other is. Taking the directory
+/// as text rather than a `Path` because this is going into a configuration
+/// file, and the caller has already established that the path is UTF-8.
+#[must_use]
+pub fn acl_file(ctrl_dir: &str, device: &str) -> String {
+	format!("{ctrl_dir}/{device}.acl")
+}
+
+/// The station list, one address per line, as hostapd reads it.
+///
+/// hostapd accepts an optional VLAN id after the address, which nothing here
+/// writes: putting a station on a VLAN is an `interface` question and the
+/// document says it there.
+#[must_use]
+pub fn acl_contents(stations: &[String]) -> String {
+	let mut out = String::new();
+	for station in stations {
+		out.push_str(station);
+		out.push('\n');
+	}
+	out
+}
 
 /// The 2.4 GHz band, as hostapd spells the mode and the document spells the
 /// band.
@@ -284,7 +310,7 @@ pub fn config(
 	let mut lines = vec![
 		Line::plain("interface", access_point.device.clone()),
 		Line::plain("driver", "nl80211"),
-		Line::plain("ctrl_interface", ctrl_dir),
+		Line::plain("ctrl_interface", ctrl_dir.clone()),
 		// `ssid2` rather than `ssid`, because an SSID is 0..32 arbitrary octets
 		// (section 2.1) and `ssid=` is text. `ssid2=` takes bare hex, which is
 		// exactly what the model already holds -- verified against hostapd 2.10,
@@ -321,6 +347,19 @@ pub fn config(
 		// a beacon whose SSID is the right length and all zeroes, which some
 		// clients handle worse and which hides nothing extra.
 		lines.push(Line::plain("ignore_broadcast_ssid", "1"));
+	}
+
+	if let Some(acl) = &access_point.access_control {
+		// The list goes in its own file rather than inline, because hostapd has
+		// no inline form -- `macaddr_acl` selects which file to read. Naming
+		// the file unconditionally, even for an empty list, keeps hostapd from
+		// starting with the previous run's list still on disk and unreferenced.
+		lines.push(Line::plain("macaddr_acl", acl.policy.macaddr_acl()));
+		let key = match acl.policy {
+			AclPolicy::Deny => "deny_mac_file",
+			AclPolicy::Allow => "accept_mac_file",
+		};
+		lines.push(Line::plain(key, acl_file(&ctrl_dir, &access_point.device)));
 	}
 
 	match &access_point.security {
@@ -378,7 +417,7 @@ mod tests {
 	use super::*;
 	use netcfgd_model::secret::{SecretProvider, SecretRef};
 	use netcfgd_model::security::PskConfig;
-	use netcfgd_model::Ssid;
+	use netcfgd_model::{AccessControl, Ssid};
 
 	fn access_point(security: Security) -> AccessPoint {
 		AccessPoint {
@@ -390,6 +429,7 @@ mod tests {
 			band: None,
 			hidden: false,
 			regdom: None,
+			access_control: None,
 		}
 	}
 
@@ -622,5 +662,56 @@ mod tests {
 
 		let real = to_file("guest", &lines);
 		assert!(real.contains("wpa_passphrase=hunter2hunter2"));
+	}
+
+	#[test]
+	fn a_deny_list_selects_the_deny_file_and_an_allow_list_the_accept_file() {
+		let mut point = access_point(Security::Open);
+		point.access_control = Some(AccessControl {
+			policy: AclPolicy::Deny,
+			stations: vec!["aa:bb:cc:dd:ee:ff".to_owned()],
+		});
+		let lines = rendered(&point, None);
+		assert_eq!(value_of(&lines, "macaddr_acl"), Some("0"));
+		assert_eq!(
+			value_of(&lines, "deny_mac_file"),
+			Some("/run/netcfgd/hostapd/wlan0.acl")
+		);
+		// The two files are alternatives in hostapd, so naming both would leave
+		// one of them silently unread.
+		assert_eq!(value_of(&lines, "accept_mac_file"), None);
+
+		point.access_control = Some(AccessControl {
+			policy: AclPolicy::Allow,
+			stations: vec!["aa:bb:cc:dd:ee:ff".to_owned()],
+		});
+		let lines = rendered(&point, None);
+		assert_eq!(value_of(&lines, "macaddr_acl"), Some("1"));
+		assert_eq!(
+			value_of(&lines, "accept_mac_file"),
+			Some("/run/netcfgd/hostapd/wlan0.acl")
+		);
+		assert_eq!(value_of(&lines, "deny_mac_file"), None);
+	}
+
+	#[test]
+	fn no_access_control_block_says_nothing_about_acls() {
+		let lines = rendered(&access_point(Security::Open), None);
+		// Not `macaddr_acl=0`: an access point that never mentions an ACL and
+		// one whose deny list is empty behave the same, but only the second
+		// should leave a file behind for somebody to find and believe.
+		assert_eq!(value_of(&lines, "macaddr_acl"), None);
+	}
+
+	#[test]
+	fn the_station_file_is_one_address_per_line() {
+		assert_eq!(acl_contents(&[]), "");
+		assert_eq!(
+			acl_contents(&[
+				"aa:bb:cc:dd:ee:ff".to_owned(),
+				"00:11:22:33:44:55".to_owned()
+			]),
+			"aa:bb:cc:dd:ee:ff\n00:11:22:33:44:55\n"
+		);
 	}
 }

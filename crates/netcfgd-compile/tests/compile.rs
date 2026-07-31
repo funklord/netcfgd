@@ -2,7 +2,7 @@
 
 use netcfgd_compile::{compile, Diagnostics, HookSink, NoHooks, SourceMap};
 use netcfgd_model::dns::DnsMode;
-use netcfgd_model::{AddressSource, Document, HookPhase, HookRef, InterfaceKind};
+use netcfgd_model::{AclPolicy, AddressSource, Document, HookPhase, HookRef, InterfaceKind};
 
 /// A hook sink that records instead of writing.
 ///
@@ -1078,6 +1078,77 @@ access_point "guest" {
 
 	let message = errors(r#"access_point "guest" { wifi { open = true } }"#);
 	assert!(message.contains("which radio runs it"), "got: {message}");
+}
+
+/// The single-host half of Ubiquiti-style roaming (decision 0036): a station is
+/// kept off every access point except the one meant to serve it.
+#[test]
+fn an_access_control_block_carries_one_station_list() {
+	let document = build_ok(
+		r#"
+access_point "guest" {
+	device = "wlan0"
+	wifi   { open = true }
+	access_control { deny = ["AA-BB-CC-DD-EE-FF", "00:11:22:33:44:55"] }
+}
+"#,
+	);
+	let acl = document.access_points[0]
+		.access_control
+		.as_ref()
+		.expect("the block compiles");
+	assert_eq!(acl.policy, AclPolicy::Deny);
+	// Normalised to hostapd's spelling and sorted, so that the same two
+	// stations written either way give the same document.
+	assert_eq!(acl.stations, ["00:11:22:33:44:55", "aa:bb:cc:dd:ee:ff"]);
+
+	let allow = build_ok(
+		r#"
+access_point "guest" {
+	device = "wlan0"
+	wifi   { open = true }
+	access_control { allow = "aa:bb:cc:dd:ee:ff" }
+}
+"#,
+	);
+	let acl = allow.access_points[0]
+		.access_control
+		.as_ref()
+		.expect("a bare string is a one-element list");
+	assert_eq!(acl.policy, AclPolicy::Allow);
+	assert_eq!(acl.stations, ["aa:bb:cc:dd:ee:ff"]);
+}
+
+#[test]
+fn an_access_point_has_one_station_list_rather_than_two() {
+	// hostapd reads the accept list or the deny list, never both, so a
+	// configuration naming both would have half of it silently ignored.
+	let message = errors(
+		r#"
+access_point "guest" {
+	device = "wlan0"
+	wifi   { open = true }
+	access_control { deny = "aa:bb:cc:dd:ee:ff"; allow = "00:11:22:33:44:55" }
+}
+"#,
+	);
+	assert!(message.contains("one station list"), "got: {message}");
+
+	// And what is not an address is refused where it was written, rather than
+	// handed to hostapd to fail on later.
+	let message = errors(
+		r#"
+access_point "guest" {
+	device = "wlan0"
+	wifi   { open = true }
+	access_control { deny = "aabbccddeeff" }
+}
+"#,
+	);
+	assert!(
+		message.contains("six colon-separated octets"),
+		"got: {message}"
+	);
 }
 
 /// A VLAN interface is conventionally named `eth0.42`, and design section 3.2

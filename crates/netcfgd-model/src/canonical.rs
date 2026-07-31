@@ -21,6 +21,17 @@ impl Document {
 		self.rules.sort();
 		self.access_points.sort_by(|a, b| a.id.cmp(&b.id));
 
+		for access_point in &mut self.access_points {
+			// A station list is a set. Two operators writing the same stations
+			// in a different order mean the same access point, and an
+			// unsorted list would give them different document hashes and so a
+			// spurious change to reconcile.
+			if let Some(acl) = &mut access_point.access_control {
+				acl.stations.sort();
+				acl.stations.dedup();
+			}
+		}
+
 		for interface in &mut self.interfaces {
 			interface.routes.sort();
 			interface.hooks.sort();
