@@ -170,6 +170,26 @@ pub struct Slaac {
 	pub privacy: SlaacPrivacy,
 }
 
+/// Addresses a modem helper reported for this interface.
+///
+/// The bearer's configuration is decided by the cellular network and told to
+/// netcfgd through a file -- `docs/modem-report.md` is the contract, and
+/// decisions 0044 and 0045 say why netcfgd neither connects the bearer nor
+/// speaks a modem protocol to do it.
+///
+/// Unlike [`Dhcp4`], there is no backend to start: the helper is already
+/// running and netcfgd does not supervise it. Unlike [`Delegated`], the value
+/// is not derived from anything -- it is used as reported. What netcfgd does is
+/// install what the report says, with its own tag, and withdraw it when the
+/// report stops saying it.
+///
+/// A struct with no fields yet rather than a unit variant, so that the first
+/// thing worth configuring here -- a metric, an APN the helper should be told
+/// about -- is a field rather than a second variant.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Modem {}
+
 /// One way an interface acquires addresses.
 ///
 /// The list of these on an interface is a composition, not a set of
@@ -193,6 +213,8 @@ pub enum AddressSource {
 	/// than being a fallback; a timeout-triggered fallback would be state
 	/// hidden in the reconciler that no config file explains.
 	LinkLocal,
+	/// Whatever a modem helper reported for this interface.
+	Modem(Modem),
 }
 
 impl AddressSource {
@@ -206,6 +228,7 @@ impl AddressSource {
 			Self::Dhcp6(_) => "dhcp6",
 			Self::Slaac(_) => "slaac",
 			Self::LinkLocal => "link_local",
+			Self::Modem(_) => "modem",
 		}
 	}
 
@@ -218,7 +241,7 @@ impl AddressSource {
 	pub fn is_singleton(&self) -> bool {
 		matches!(
 			self,
-			Self::Dhcp4(_) | Self::Dhcp6(_) | Self::Slaac(_) | Self::LinkLocal
+			Self::Dhcp4(_) | Self::Dhcp6(_) | Self::Slaac(_) | Self::LinkLocal | Self::Modem(_)
 		)
 	}
 }

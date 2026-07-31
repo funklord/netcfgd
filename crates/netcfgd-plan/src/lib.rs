@@ -1176,7 +1176,92 @@ impl Builder {
 			AddressSource::Delegated(delegated) => {
 				self.plan_delegated(interface, delegated, &field, observed, base)
 			}
+			AddressSource::Modem(_) => self.plan_modem(interface, &field, observed, base),
 		}
+	}
+
+	/// The addresses a modem helper reported for this interface.
+	///
+	/// The third source whose value comes from outside the document, and the
+	/// only one netcfgd installs itself. A `Dhcp4` source starts a client and
+	/// the client installs the address; a modem helper deliberately does not
+	/// (`docs/modem-report.md` forbids it, because two writers on one interface
+	/// is the failure this project is arranged around). So the report is read
+	/// and the addresses are netcfgd's to add, tagged as netcfgd's.
+	///
+	/// **No report is not an error.** A helper that has not connected yet, or
+	/// is not running, leaves nothing to install -- exactly like a delegation
+	/// that has not arrived. The warning says which, because "no addresses on
+	/// the modem" has two very different causes and an operator needs to know
+	/// whether to look at netcfgd or at the helper.
+	fn plan_modem(
+		&mut self,
+		interface: &Interface,
+		field: &str,
+		observed: &Observed,
+		base: &[u32],
+	) -> Vec<u32> {
+		let name = &interface.name;
+		let Some(report) = observed
+			.modems
+			.iter()
+			.find(|modem| &modem.interface == name)
+		else {
+			self.warn(
+				name,
+				format!(
+					"`{name}` takes its addresses from a modem, and no helper has reported \
+					 one -- nothing is written at /run/netcfgd/modem/{name}. Addresses are \
+					 planned when a helper reports them; see docs/modem-report.md"
+				),
+			);
+			return Vec::new();
+		};
+
+		if report.addresses.is_empty() {
+			// A report with no addresses is a bearer that is down, and the
+			// helper said so deliberately. Distinct from the case above, and
+			// worth distinguishing: this one means the modem stack is working
+			// and the network has not given us anything.
+			self.warn(
+				name,
+				format!("the modem helper on `{name}` reports no addresses, so the bearer is down"),
+			);
+			return Vec::new();
+		}
+
+		let mut ids = Vec::new();
+		for address in &report.addresses {
+			if observed
+				.addresses_on(name)
+				.any(|held| &held.address == address)
+			{
+				continue;
+			}
+			// Rule 3's second half, as for a static address: an address may go
+			// on a link that is down, so this does not wait for `link.up`.
+			let id = self.push(
+				Op::AddrAdd {
+					iface: name.clone(),
+					addr: address.clone(),
+					preferred_lifetime: None,
+					valid_lifetime: None,
+				},
+				Reason::absent(
+					name,
+					field,
+					format!("{address} (reported by a modem helper)"),
+				),
+				base.to_vec(),
+				Some(Op::AddrDel {
+					iface: name.clone(),
+					addr: address.clone(),
+				}),
+			);
+			self.added.push((name.clone(), address.clone(), id));
+			ids.push(id);
+		}
+		ids
 	}
 
 	/// An address derived from a prefix the ISP delegated.
@@ -2026,6 +2111,23 @@ impl Builder {
 								.ok()
 							})
 							.is_some_and(|derived| derived == address.address),
+						// A reported address is as wanted as a literal one, and
+						// for the same reason the delegated arm exists: the
+						// document names a source rather than a value, so
+						// answering "is this wanted?" means reading the report
+						// again. Without this arm the same plan would add the
+						// address and delete it, forever.
+						//
+						// It is also rule 7 for this source. A bearer that goes
+						// down empties the report, the address stops being
+						// wanted here, and the teardown removes it -- which is
+						// right, because unlike a lease there is no client
+						// holding it and no backend to restart.
+						AddressSource::Modem(_) => observed
+							.modems
+							.iter()
+							.find(|modem| modem.interface == address.interface)
+							.is_some_and(|modem| modem.addresses.contains(&address.address)),
 						_ => false,
 					})
 				});

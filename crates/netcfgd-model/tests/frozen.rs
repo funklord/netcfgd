@@ -68,7 +68,61 @@ fn key(seed: u8) -> Key {
 }
 
 /// Every addressing source, so none can be renamed unnoticed.
+///
+/// **And so none can be *added* unnoticed**, which this list did not manage on
+/// its own: `AddressSource::Modem` was added and the witness did not move,
+/// because a witness is a sample document and a sample cannot notice a variant
+/// nobody put in it. The gate said "every variant present" and nothing checked
+/// it -- the same shape as every other gate this project has caught passing on
+/// an incomplete input set.
+///
+/// So there are now two checks below, and between them a new variant cannot
+/// reach the schema unnoticed: the exhaustive match stops this file compiling,
+/// and the assertion catches the case the compiler cannot see -- an arm written
+/// with no sample added. Either way the witness moves and `make schema-bless`
+/// has to be run deliberately.
 fn every_address_source() -> Vec<AddressSource> {
+	let sources = every_address_source_sample();
+
+	// Two checks, and the first one is a *compile* error rather than a failing
+	// assertion. That is the point: adding a variant to `AddressSource` stops
+	// this file building until somebody writes an arm, and writing the arm is
+	// what reminds them to add the sample below. Never a `_` arm -- a wildcard
+	// here restores exactly the hole this closes.
+	let name = |source: &AddressSource| match source {
+		AddressSource::Static(_) => "static",
+		AddressSource::Dhcp4(_) => "dhcp4",
+		AddressSource::Dhcp6(_) => "dhcp6",
+		AddressSource::Slaac(_) => "slaac",
+		AddressSource::Delegated(_) => "delegated",
+		AddressSource::LinkLocal => "link_local",
+		AddressSource::Modem(_) => "modem",
+	};
+
+	// And this one does fail at runtime, for the case the compiler cannot see:
+	// an arm written above with no sample added below. Sorted and compared as a
+	// set, so it says which one is missing rather than that a count is wrong.
+	let mut present: Vec<&str> = sources.iter().map(name).collect();
+	present.sort_unstable();
+	present.dedup();
+	assert_eq!(
+		present,
+		[
+			"delegated",
+			"dhcp4",
+			"dhcp6",
+			"link_local",
+			"modem",
+			"slaac",
+			"static"
+		],
+		"the witness is missing a sample for an addressing source, so the frozen \
+		 surface would not move when that source changed"
+	);
+	sources
+}
+
+fn every_address_source_sample() -> Vec<AddressSource> {
 	vec![
 		AddressSource::Static(Static {
 			address: "192.0.2.1/24".to_owned(),
@@ -103,6 +157,7 @@ fn every_address_source() -> Vec<AddressSource> {
 			suffix: "::1/64".to_owned(),
 		}),
 		AddressSource::LinkLocal,
+		AddressSource::Modem(netcfgd_model::Modem::default()),
 	]
 }
 
