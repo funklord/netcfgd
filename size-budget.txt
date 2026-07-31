@@ -204,4 +204,9 @@ netcfgd
 # most of this is the type crossing two boundaries. What it is not is a second
 # netlink protocol: `wg::get_device` was written for M4 and had never been
 # called outside a test, so reading a key back cost nothing new.
-total 1931800
+# +8 KB for the modem reporting contract: the observed type with its serde, the
+# key=value reader, and the status rendering that says a report was seen and not
+# applied. No protocol, no dependency and no new netlink -- netcfgd's half of
+# this feature is reading a file, which is the whole point of decisions 0044 and
+# 0045.
+total 1939992
