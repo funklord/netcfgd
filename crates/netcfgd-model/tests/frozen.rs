@@ -29,7 +29,8 @@ use netcfgd_model::address::{
 	Static,
 };
 use netcfgd_model::device::{
-	AccessPoint, Device, DeviceMatch, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy,
+	AccessControl, AccessPoint, AclPolicy, Device, DeviceMatch, MacPolicy, Powersave, WifiBackend,
+	WifiDevicePolicy,
 };
 use netcfgd_model::dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 use netcfgd_model::hook::{HookPhase, HookRef};
@@ -506,6 +507,10 @@ fn witness() -> Document {
 			band: Some("2.4".to_owned()),
 			hidden: true,
 			regdom: Some("SE".to_owned()),
+			access_control: Some(AccessControl {
+				policy: AclPolicy::Deny,
+				stations: vec!["aa:bb:cc:dd:ee:ff".to_owned()],
+			}),
 		}],
 	};
 	document.interfaces.extend(every_tunnel_kind());

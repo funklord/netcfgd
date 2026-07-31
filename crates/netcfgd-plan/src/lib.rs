@@ -24,7 +24,7 @@ pub mod net;
 
 pub use action::{Action, Op, Reason};
 
-use netcfgd_model::RoutingRule;
+use netcfgd_model::{AclPolicy, RoutingRule};
 use netcfgd_model::{
 	AddressSource, BackendKind, DnsPolicy, Document, HookPhase, Interface, InterfaceKind, Observed,
 	Origin, Route,
@@ -242,6 +242,25 @@ fn warn_access_points(builder: &mut Builder, desired: &Document) {
 				),
 				interface: Some(device.clone()),
 			});
+		}
+
+		// An empty allow list is a legitimate thing to write -- it is how an
+		// access point is closed without taking it down -- and an easy thing to
+		// arrive at by deleting the last station from a list. It compiles
+		// either way, because a compile diagnostic is a failure and this is
+		// not one, so the difference between the two is said here.
+		if let Some(acl) = &access_point.access_control {
+			if matches!(acl.policy, AclPolicy::Allow) && acl.stations.is_empty() {
+				builder.warnings.push(Warning {
+					message: format!(
+						"access point `{}` has an empty `allow` list, so no station can \
+						 associate with it at all. Remove the `access_control` block to let \
+						 everyone in",
+						access_point.id
+					),
+					interface: Some(device.clone()),
+				});
+			}
 		}
 
 		// One radio, one BSS. Multiple would be `bss=` sections in hostapd's

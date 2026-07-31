@@ -10,7 +10,9 @@ use crate::hook::HookSink;
 use crate::merge::Merged;
 use crate::provenance::{field_path, interface_path, Provenance};
 use netcfgd_model::address::{Delegated, PrefixRef, Static};
-use netcfgd_model::device::{AccessPoint, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy};
+use netcfgd_model::device::{
+	AccessControl, AccessPoint, AclPolicy, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy,
+};
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{
 	BondConfig, BondMode, BridgeConfig, BridgeVlan, LinkSettings, MacvlanConfig, MacvlanMode,
@@ -716,6 +718,7 @@ fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPo
 		band: None,
 		hidden: false,
 		regdom: None,
+		access_control: None,
 	};
 	let mut security_seen = false;
 
@@ -762,6 +765,9 @@ fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPo
 				lower_network_wifi(inner, &mut carrier, diags);
 				access_point.security = carrier.security;
 			}
+			Item::Block(inner) if inner.head == "access_control" => {
+				access_point.access_control = lower_access_control(inner, diags);
+			}
 			Item::Block(inner) => diags.push(Diagnostic::new(
 				inner.span,
 				format!("`{}` is not valid inside `access_point`", inner.head),
@@ -794,6 +800,79 @@ fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPo
 	}
 
 	Some(access_point)
+}
+
+/// An `access_control` block: which stations an access point talks to.
+///
+/// ```text
+/// access_control { deny = ["aa:bb:cc:dd:ee:ff"] }
+/// access_control { allow = ["aa:bb:cc:dd:ee:ff"] }
+/// ```
+///
+/// The two are alternatives rather than filters that combine, because hostapd
+/// reads one list or the other and never both (`macaddr_acl`). Writing both is
+/// refused here rather than resolved by precedence: a precedence rule would
+/// mean an operator's deny list quietly did nothing.
+fn lower_access_control(block: &Block, diags: &mut Diagnostics) -> Option<AccessControl> {
+	let mut policy = None;
+	let mut stations: Vec<String> = Vec::new();
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			if let Item::Block(inner) = item {
+				diags.push(Diagnostic::new(
+					inner.span,
+					format!("`{}` is not valid inside `access_control`", inner.head),
+				));
+			}
+			continue;
+		};
+		let chosen = match assignment.key.as_str() {
+			"deny" => AclPolicy::Deny,
+			"allow" => AclPolicy::Allow,
+			other => {
+				diags.push(Diagnostic::new(
+					assignment.span,
+					format!("unknown access_control key `{other}`"),
+				));
+				continue;
+			}
+		};
+		if let Some(already) = policy {
+			if already != chosen {
+				diags.push(
+					Diagnostic::new(
+						assignment.span,
+						"an access point has one station list, not both an allow and a deny",
+					)
+					.with_help(
+						"hostapd reads either the accept list or the deny list, never both; \
+						 say which one this access point means",
+					),
+				);
+				return None;
+			}
+		}
+		policy = Some(chosen);
+
+		for word in as_words(&assignment.value, diags) {
+			match netcfgd_model::normalize_station(&word.node) {
+				Ok(station) => stations.push(station),
+				Err(error) => diags.push(Diagnostic::new(word.span, error)),
+			}
+		}
+	}
+
+	// An empty deny list is what every access point without this block already
+	// has, so it means nothing and is accepted in silence. An empty *allow*
+	// list means no station may associate at all, which is a strange thing to
+	// write by accident and a legitimate thing to write on purpose -- so it
+	// compiles, and the planner warns about it. A `Diagnostic` here is a
+	// failure, and this is not one.
+	Some(AccessControl {
+		policy: policy?,
+		stations,
+	})
 }
 
 /// A throwaway station profile, for parsing security out of a context that has
