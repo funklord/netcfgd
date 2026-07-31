@@ -1366,6 +1366,100 @@ interface wlan0 { config = "null" }
 	);
 }
 
+/// `managed = false` means netcfgd never touches the device.
+///
+/// The model has said so since M1 and the planner honoured it in exactly one
+/// place -- the filter that decides which devices are radios. Everything else
+/// ignored it, so the escape hatch documented in first-run.md for handing an
+/// interface to another daemon planned three actions against it.
+#[test]
+fn an_unmanaged_device_is_not_touched() {
+	let desired = document(
+		r#"
+device probe0 { managed = false }
+
+interface probe0 {
+	kind   = "dummy"
+	config = "10.5.5.1/24"
+}
+
+interface probe1 {
+	kind   = "dummy"
+	config = "10.6.6.1/24"
+}
+"#,
+	);
+	let plan = plan(&desired, &observed_with(&[]), &PlanOptions::default());
+
+	// Nothing for the unmanaged one, everything for its neighbour -- which is
+	// what stops this passing because the planner did nothing at all.
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| action.op.interface() == Some("probe0")),
+		"{:?}",
+		names(&plan)
+	);
+	assert!(plan
+		.actions
+		.iter()
+		.any(|action| action.op.interface() == Some("probe1")));
+
+	// And it says so: a plan that silently does nothing about a block somebody
+	// wrote is the failure this project keeps refusing to ship.
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("managed = false")),
+		"{:?}",
+		plan.warnings
+	);
+}
+
+/// Walking away means walking away: a device that netcfgd configured before
+/// the flag was set is left exactly as it is, rather than torn down.
+///
+/// The alternative -- release what we own, then stop -- would make marking
+/// something unmanaged briefly disrupt it, which is the opposite of what the
+/// flag is reached for.
+#[test]
+fn an_unmanaged_device_is_not_torn_down_either() {
+	let desired = document("device probe0 { managed = false }");
+	let mut observed = observed_with(&["probe0"]);
+	observed.links[0].up = true;
+	observed.links[0].ownership = Ownership::Ours;
+	observed.addresses.push(ObservedAddress {
+		interface: "probe0".to_owned(),
+		address: "10.5.5.1/24".to_owned(),
+		proto: None,
+		ownership: Ownership::Ours,
+		origin: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan.is_empty(), "{:?}", names(&plan));
+}
+
+/// An unmanaged interface's DNS scope is not applied either. `dns.apply` is
+/// host-wide and names no interface, so it is the one action the check in
+/// `push` cannot see.
+#[test]
+fn an_unmanaged_interface_contributes_no_dns_scope() {
+	let desired = document(
+		r#"
+device probe0 { managed = false }
+
+interface probe0 {
+	kind = "dummy"
+	dns  { mode = "write_resolv_conf"; servers = ["10.5.5.53"] }
+}
+"#,
+	);
+	let plan = plan(&desired, &observed_with(&[]), &PlanOptions::default());
+	assert!(!names(&plan).contains(&"dns.apply"), "{:?}", names(&plan));
+}
+
 /// Decision 0009: the document holds a reference and the plan holds the value.
 /// Until the lease arrives there is nothing to plan and the operator is told
 /// what is being waited for -- the config is right, the answer is "later".

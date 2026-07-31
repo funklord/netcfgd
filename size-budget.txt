@@ -168,4 +168,8 @@ netcfgd
 # Recorded rather than left to ride the 3% tolerance, for the reason at the top
 # of this file: the tolerance is for compiler-version noise, and spending it on
 # a feature makes the next feature fail the gate for the wrong reason.
-total 1845784
+# +8 KB for honouring `managed = false`: one check at the planner's action
+# choke point, the DNS scope exception beside it, and the warning that names
+# the credentials walking away leaves behind. Small because the enforcement is
+# one place rather than eleven -- which was the point of putting it there.
+total 1853976

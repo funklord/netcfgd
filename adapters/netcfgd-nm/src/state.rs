@@ -655,6 +655,28 @@ impl State {
 		declared || crate::device::has_sysfs_wireless(interface)
 	}
 
+	/// Whether netcfgd will touch this interface at all.
+	///
+	/// `device X { managed = false }` means it will not (the planner enforces
+	/// that at its own choke point), so NM's `Managed` has to say so. This
+	/// property is what a client reads before offering to do anything with a
+	/// device, and reporting an unmanaged one as managed is how a desktop comes
+	/// to offer a connect button that quietly does nothing.
+	#[must_use]
+	pub(crate) fn is_managed(&self, interface: &str) -> bool {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner.document.as_ref().is_none_or(|document| {
+			document
+				.devices
+				.iter()
+				.find(|device| device.name == interface)
+				.is_none_or(|device| device.managed)
+		})
+	}
+
 	/// What the configuration says a network's security is.
 	#[must_use]
 	pub(crate) fn security_of(&self, network_id: &str) -> Option<Security> {

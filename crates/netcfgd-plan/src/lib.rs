@@ -172,6 +172,43 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 /// and is not -- which is the failure this whole function exists to prevent.
 /// None of them is an error: the document is valid, and a later release or a
 /// second `interface` block makes each one work.
+/// Say which interfaces the configuration describes and netcfgd will not touch.
+///
+/// Only where a `device` block says `managed = false` *and* an `interface`
+/// block describes it: an unmanaged device nobody wrote configuration for is
+/// not a surprise worth reporting, while one with a full interface block is a
+/// plan that will do nothing and needs to say why.
+fn warn_unmanaged(builder: &mut Builder, desired: &Document) {
+	for name in builder.unmanaged.clone() {
+		if !desired
+			.interfaces
+			.iter()
+			.any(|interface| interface.name == name)
+		{
+			continue;
+		}
+		// Named specifically rather than as "left as it is", because three of
+		// the things left behind hold credentials: a WireGuard private key
+		// stays loaded in the kernel, a supplicant netcfgd started keeps the
+		// passphrases it was given, and a running hostapd keeps its generated
+		// configuration under /run. Withdrawing those on the way out is not
+		// implemented and is a decision rather than an oversight -- the flag
+		// means "stop operating", and taking a key out is an operation.
+		builder.warnings.push(Warning {
+			message: format!(
+				"`{name}` is `managed = false`, so netcfgd will not touch it -- the \
+				 `interface {name}` block is read and then not acted on. Whatever is \
+				 already configured stays exactly as it is, and that includes \
+				 credentials: a WireGuard key stays loaded, a supplicant netcfgd started \
+				 keeps its passphrases, and a running hostapd keeps its generated \
+				 configuration. Take those out before setting the flag if the device is \
+				 leaving your hands"
+			),
+			interface: Some(name),
+		});
+	}
+}
+
 fn warn_access_points(builder: &mut Builder, desired: &Document) {
 	for access_point in &desired.access_points {
 		let device = &access_point.device;
@@ -270,6 +307,12 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		.iter()
 		.map(|access_point| access_point.device.clone())
 		.collect();
+	builder.unmanaged = desired
+		.devices
+		.iter()
+		.filter(|device| !device.managed)
+		.map(|device| device.name.clone())
+		.collect();
 
 	// What the document asks for that this build does not do. Warned at plan
 	// time rather than refused at compile time: the config is valid and will
@@ -282,6 +325,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// radio and whether there are networks to join, and reading those while
 	// they were still empty made one of its three warnings unreachable.
 	warn_unapplied(&mut builder, desired);
+	warn_unmanaged(&mut builder, desired);
 
 	for interface in &desired.interfaces {
 		if let Some(guard) = &interface.guard {
@@ -393,6 +437,15 @@ struct Builder {
 	/// document -- decides what it is told. A plan that carried the SSID and the
 	/// channel would be a second copy of the configuration to keep in step.
 	access_point_devices: Vec<String>,
+	/// Devices a `device` block marks `managed = false`.
+	///
+	/// The model says netcfgd never touches these at all, and for a long time
+	/// that was true of exactly one thing: the filter that decides which
+	/// devices are radios. Everything else ignored it, so the escape hatch
+	/// documented for handing an interface to another daemon planned three
+	/// actions against it. Enforced in [`Builder::push`] now, which is the one
+	/// place every action goes through.
+	unmanaged: Vec<String>,
 }
 
 impl Builder {
@@ -430,6 +483,20 @@ impl Builder {
 	}
 
 	fn push(&mut self, op: Op, reason: Reason, depends_on: Vec<u32>, inverse: Option<Op>) -> u32 {
+		// `managed = false` means netcfgd never touches the device -- including
+		// not tearing down what it configured before the flag was set, which is
+		// what "no further operation" was decided to mean. Dropped here rather
+		// than guarded at each of the eleven passes that could emit one,
+		// because a pass added later would not know to ask.
+		//
+		// Silently, because the warning that explains it is emitted once per
+		// device up front. One warning naming the device beats three naming
+		// each action it did not take.
+		if let Some(interface) = op.interface() {
+			if self.unmanaged.iter().any(|name| name == interface) {
+				return u32::MAX;
+			}
+		}
 		if self.refused(&op, &reason) {
 			// Nothing is emitted, so nothing downstream can depend on it. The
 			// refusal carries what would have happened.
@@ -1686,6 +1753,12 @@ impl Builder {
 			scopes.push(("globals".to_owned(), &desired.globals.dns));
 		}
 		for interface in &desired.interfaces {
+			// An unmanaged interface contributes no scope. `DnsApply` is
+			// host-wide, so it names no interface and the check in `push` does
+			// not see it -- this is the one place that has to ask directly.
+			if self.unmanaged.iter().any(|name| name == &interface.name) {
+				continue;
+			}
 			if let Some(policy) = &interface.dns {
 				scopes.push((interface.name.clone(), policy));
 			}
