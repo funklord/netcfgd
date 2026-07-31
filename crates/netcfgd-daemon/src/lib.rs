@@ -503,6 +503,9 @@ fn answer(
 		// none of them can create a network -- the `wifi` tier joins what the
 		// configuration already describes and nothing else (decision 0013).
 		Request::WifiScan { interface } => wifi::scan(state.desired.as_ref(), interface),
+		Request::ApStations { interface } => {
+			wifi::ap_stations(state.desired.as_ref(), &state.paths.run, interface)
+		}
 		Request::WifiStatus { interface } => wifi::status(state.desired.as_ref(), interface),
 		Request::WifiConnect { interface, network } => wifi::connect_to(
 			state.desired.as_ref(),

@@ -33,6 +33,7 @@ usage:
   ncfg wifi SUBCOMMAND      wireless, via netcfgd. SUBCOMMAND is one of:
                              scan       [IFACE]  list access points in range
                              status     [IFACE]  what the radio is doing
+                             clients    [IFACE]  who is on the access point
                              connect ID [IFACE]  join a configured network
                              disconnect [IFACE]  leave it, keeping the config
                            IFACE may be omitted when the config describes one
@@ -558,9 +559,13 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 		"disconnect" => netcfgd_proto::Request::WifiDisconnect {
 			interface: wireless_interface(rest.first(), options)?,
 		},
+		"clients" => netcfgd_proto::Request::ApStations {
+			interface: wireless_interface(rest.first(), options)?,
+		},
 		other => {
 			return Err(format!(
-				"unknown wifi subcommand `{other}`; try scan, status, connect or disconnect"
+				"unknown wifi subcommand `{other}`; try scan, status, clients, connect or \
+				 disconnect"
 			))
 		}
 	};
@@ -572,6 +577,10 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 		}
 		client::Answer::WifiStatus(state) => {
 			render_wifi_status(&state, options.json)?;
+			Ok(ExitCode::SUCCESS)
+		}
+		client::Answer::ApStations(report) => {
+			render_stations(&report, options.json)?;
 			Ok(ExitCode::SUCCESS)
 		}
 		client::Answer::Ok => {
@@ -588,6 +597,117 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 		client::Answer::Error { message } => Err(message),
 		other => Err(format!("the daemon sent {}", other.describe())),
 	}
+}
+
+/// A duration a person reads at a glance rather than a seconds count.
+fn duration(seconds: u64) -> String {
+	let (hours, minutes, seconds) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+	if hours > 0 {
+		format!("{hours}h{minutes:02}m")
+	} else if minutes > 0 {
+		format!("{minutes}m{seconds:02}s")
+	} else {
+		format!("{seconds}s")
+	}
+}
+
+/// Bytes in the units the number is actually in.
+///
+/// Integer arithmetic rather than a float divide: a byte counter is a `u64`,
+/// and casting one to `f64` loses precision above 2^53 -- which clippy refuses
+/// and is right to. One decimal place is all this shows anyway.
+fn bytes(count: u64) -> String {
+	for (limit, suffix) in [(1_000_000_000_u64, "G"), (1_000_000, "M"), (1_000, "k")] {
+		if count >= limit {
+			let whole = count / limit;
+			let tenths = (count % limit) * 10 / limit;
+			return format!("{whole}.{tenths}{suffix}");
+		}
+	}
+	format!("{count}B")
+}
+
+/// Who is on an access point.
+///
+/// A station hostapd could not read statistics for still appears, with dashes
+/// where the numbers would be. Hiding it would be the worst way for this to be
+/// wrong: the whole point is knowing who is connected, and a client that is
+/// there is more important than the signal strength that is not.
+fn render_stations(report: &netcfgd_proto::StationReport, json: bool) -> Result<(), String> {
+	if json {
+		println!(
+			"{}",
+			serde_json::to_string_pretty(report).map_err(|error| error.to_string())?
+		);
+		return Ok(());
+	}
+	if report.stations.is_empty() {
+		println!(
+			"nothing is associated with `{}` on {}",
+			report.access_point, report.interface
+		);
+		return Ok(());
+	}
+
+	println!(
+		"{} station{} on `{}` ({})",
+		report.stations.len(),
+		if report.stations.len() == 1 { "" } else { "s" },
+		report.access_point,
+		report.interface
+	);
+	println!();
+	println!(
+		"{:<17}  {:>7}  {:>9}  {:>7}  {:>8}  {:>8}",
+		"ADDRESS", "SIGNAL", "CONNECTED", "IDLE", "RX", "TX"
+	);
+
+	let mut anomalies = 0;
+	for station in &report.stations {
+		let signal = station
+			.signal
+			.map_or_else(|| "--".to_owned(), |dbm| format!("{dbm} dBm"));
+		let connected = station
+			.connected_seconds
+			.map_or_else(|| "--".to_owned(), duration);
+		let idle = station
+			.inactive_msec
+			.map_or_else(|| "--".to_owned(), |msec| duration(msec / 1000));
+		let rx = station.rx_bytes.map_or_else(|| "--".to_owned(), bytes);
+		let tx = station.tx_bytes.map_or_else(|| "--".to_owned(), bytes);
+
+		// The note says what is *surprising*, which is the opposite thing
+		// under the two policies: a listed station is expected under `allow`
+		// and should be impossible under `deny`.
+		let note = match (report.access_control, station.listed) {
+			(Some(netcfgd_model::AclPolicy::Deny), true) => {
+				anomalies += 1;
+				"  <- on the deny list and still connected"
+			}
+			(Some(netcfgd_model::AclPolicy::Allow), false) => {
+				anomalies += 1;
+				"  <- not on the allow list and still connected"
+			}
+			_ if !station.authorized => "  (associated, not authorized)",
+			_ => "",
+		};
+
+		println!(
+			"{:<17}  {signal:>7}  {connected:>9}  {idle:>7}  {rx:>8}  {tx:>8}{note}",
+			station.address
+		);
+	}
+
+	if anomalies > 0 {
+		println!();
+		println!(
+			"An arrow means the station list changed and hostapd was not told: the list is \n\
+			 read once at startup. Restarting the access point applies it and disconnects \n\
+			 everyone; converging it over the control socket instead is not implemented \n\
+			 (docs/decisions/0039)."
+		);
+	}
+	Ok(())
 }
 
 fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), String> {

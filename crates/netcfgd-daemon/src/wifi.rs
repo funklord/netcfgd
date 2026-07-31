@@ -13,7 +13,7 @@
 
 use netcfgd_model::device::WifiBackend;
 use netcfgd_model::{Document, Ssid, WifiNetwork};
-use netcfgd_proto::{Response, ScanEntry, ScanReport, WifiState};
+use netcfgd_proto::{Response, ScanEntry, ScanReport, StationEntry, StationReport, WifiState};
 use netcfgd_secret::Resolver;
 use netcfgd_supplicant::protocol::{
 	parse_network_list, parse_scan_results, parse_status, status_field,
@@ -278,4 +278,67 @@ pub(crate) fn disconnect(document: Option<&Document>, interface: &str) -> Respon
 		Ok(()) => Response::Ok,
 		Err(error) => Response::error(format!("cannot disconnect `{interface}`: {error}")),
 	}
+}
+
+/// Who is associated with an access point this machine runs.
+///
+/// The `access_point` block is found first, and its absence is the answer
+/// rather than an error about a socket: an interface with no access point on
+/// it has no stations, and saying "no control socket" would send an operator
+/// looking for a broken hostapd that was never meant to exist.
+pub(crate) fn ap_stations(
+	document: Option<&Document>,
+	run_dir: &Path,
+	interface: &str,
+) -> Response {
+	let Some(access_point) = document.and_then(|document| {
+		document
+			.access_points
+			.iter()
+			.find(|access_point| access_point.device == interface)
+	}) else {
+		return Response::error(format!(
+			"`{interface}` runs no access point, so nothing is associated with it. \
+			 An `access_point` block naming `device = \"{interface}\"` is what would \
+			 put one there"
+		));
+	};
+
+	let found = match netcfgd_hostapd::stations(run_dir, interface) {
+		Ok(found) => found,
+		Err(message) => return Response::error(message),
+	};
+
+	// Whether the ACL names a station is answered from the document rather
+	// than from hostapd, deliberately: the document is the authority
+	// (constraint 1), and the difference between the two is the thing worth
+	// seeing. A station that is connected *and* listed on a deny list means
+	// hostapd has not been told about a list that changed.
+	let listed = |address: &str| {
+		access_point
+			.access_control
+			.as_ref()
+			.is_some_and(|acl| acl.stations.iter().any(|station| station == address))
+	};
+
+	let stations = found
+		.into_iter()
+		.map(|station| StationEntry {
+			listed: listed(&station.address),
+			address: station.address,
+			authorized: station.authorized,
+			signal: station.signal_dbm,
+			connected_seconds: station.connected_seconds,
+			inactive_msec: station.inactive_msec,
+			rx_bytes: station.rx_bytes,
+			tx_bytes: station.tx_bytes,
+		})
+		.collect();
+
+	Response::ApStations(Box::new(StationReport {
+		interface: interface.to_owned(),
+		access_point: access_point.id.clone(),
+		access_control: access_point.access_control.as_ref().map(|acl| acl.policy),
+		stations,
+	}))
 }

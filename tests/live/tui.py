@@ -12,7 +12,7 @@ binary links, and this links nothing.
 
 What it covers is what only a terminal can show:
 
-  * the four panes draw, and the tab bar tracks which one is showing;
+  * the five panes draw, and the tab bar tracks which one is showing;
   * `q` exits cleanly;
   * `a` then `y` runs apply-then-confirm through the daemon;
   * SIGTERM and SIGHUP restore the terminal.
@@ -157,6 +157,7 @@ def panes(session):
         (b"p", "nothing to do"),
         (b"e", "waiting for events"),
         (b"w", "no scan"),
+        (b"s", "associated"),
     ):
         seen.clear()
         os.write(master, key)
