@@ -432,6 +432,7 @@ impl Compat {
 			("profile_writes".to_owned(), true),
 			("profile_writes_wifi_only".to_owned(), true),
 			("secret_agents".to_owned(), true),
+			("ip_config".to_owned(), true),
 		]
 		.into_iter()
 		.collect()

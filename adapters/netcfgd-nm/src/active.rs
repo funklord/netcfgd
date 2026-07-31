@@ -42,6 +42,17 @@ impl Active {
 		self.state.profile(&self.activation.identity)
 	}
 
+	/// The address configuration object for the device this runs on.
+	fn config_path(&self, v6: bool) -> OwnedObjectPath {
+		self.state
+			.devices()
+			.into_iter()
+			.find(|(name, _)| name == &self.activation.interface)
+			.map_or_else(device::no_object, |(_, number)| {
+				crate::ipconfig::path_for(number, v6)
+			})
+	}
+
 	/// Whether this pairing is still one netcfgd reports.
 	fn live(&self) -> bool {
 		self.state
@@ -164,14 +175,18 @@ impl Active {
 		device::no_object()
 	}
 
+	/// The same objects the device points at.
+	///
+	/// A panel may read either, and they must agree: one activation on one
+	/// device has one set of addresses, and two answers would be two of them.
 	#[zbus(property)]
 	fn ip4_config(&self) -> OwnedObjectPath {
-		device::no_object()
+		self.config_path(false)
 	}
 
 	#[zbus(property)]
 	fn ip6_config(&self) -> OwnedObjectPath {
-		device::no_object()
+		self.config_path(true)
 	}
 
 	#[zbus(property)]
