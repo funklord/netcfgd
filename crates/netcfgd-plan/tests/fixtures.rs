@@ -220,7 +220,85 @@ fn simulate_rule(op: &Op, observed: &mut Observed) {
 	}
 }
 
-fn simulate(plan: &Plan, observed: &mut Observed) {
+/// What a freshly started access point holds, which is what the document says.
+///
+/// hostapd reads the generated station list once, at startup, and netcfgd
+/// writes the policy record into the same file -- so this is the one moment the
+/// live lists and the document are guaranteed to agree.
+fn started_access_control(
+	kind: BackendKind,
+	iface: &str,
+	desired: &Document,
+) -> Option<netcfgd_model::ObservedAccessControl> {
+	if kind != BackendKind::AccessPoint {
+		return None;
+	}
+	let access_point = desired
+		.access_points
+		.iter()
+		.find(|access_point| access_point.device == iface)?;
+	let (policy, stations) = match &access_point.access_control {
+		Some(acl) => (
+			netcfgd_model::ObservedPolicy::Set(acl.policy),
+			acl.stations.clone(),
+		),
+		// No block, so hostapd was given no `macaddr_acl` and netcfgd wrote no
+		// station list to record one in.
+		None => (netcfgd_model::ObservedPolicy::Unset, Vec::new()),
+	};
+	let listed = |wanted| {
+		if matches!(policy, netcfgd_model::ObservedPolicy::Set(held) if held == wanted) {
+			stations.clone()
+		} else {
+			Vec::new()
+		}
+	};
+	Some(netcfgd_model::ObservedAccessControl {
+		policy,
+		denied: listed(netcfgd_model::AclPolicy::Deny),
+		accepted: listed(netcfgd_model::AclPolicy::Allow),
+	})
+}
+
+/// hostapd's lists, changed the way `ADD_MAC` and `DEL_MAC` change them.
+fn simulate_access_control(op: &Op, observed: &mut Observed) {
+	let (Op::AccessControlAdd {
+		iface,
+		list,
+		station,
+	}
+	| Op::AccessControlDel {
+		iface,
+		list,
+		station,
+	}) = op
+	else {
+		return;
+	};
+	let Some(live) = observed
+		.backends
+		.iter_mut()
+		.find(|backend| backend.kind == BackendKind::AccessPoint && &backend.interface == iface)
+		.and_then(|backend| backend.access_control.as_mut())
+	else {
+		return;
+	};
+	let held = match list {
+		netcfgd_model::AclPolicy::Deny => &mut live.denied,
+		netcfgd_model::AclPolicy::Allow => &mut live.accepted,
+	};
+	held.retain(|entry| entry != station);
+	if matches!(op, Op::AccessControlAdd { .. }) {
+		held.push(station.clone());
+	}
+	// hostapd sorts its lists on every add (`qsort` by address in
+	// `hostapd_ctrl_iface_acl_add_mac`), and the parser sorts what it reads
+	// back. A simulator that did not would let a plan pass the idempotence gate
+	// while differing from the live list on ordering alone.
+	held.sort();
+}
+
+fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 	for action in &plan.actions {
 		match &action.op {
 			Op::LinkCreate { name, .. } => {
@@ -271,6 +349,13 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 				kind: *kind,
 				interface: iface.clone(),
 				running: true,
+				// A restarted access point re-reads the file netcfgd wrote from
+				// the document, so what it holds afterwards is what the document
+				// says -- policy record included. Simulating this as "netcfgd
+				// could not ask" would make the planner skip it, and the
+				// idempotence gate would then pass because the feature was
+				// invisible rather than because it converged.
+				access_control: started_access_control(*kind, iface, desired),
 			}),
 			Op::BackendStop { kind, iface } => observed
 				.backends
@@ -321,6 +406,9 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 			Op::BridgeVlanAdd { .. } | Op::BridgeVlanDel { .. } => {
 				simulate_vlan(&action.op, observed);
 			}
+			Op::AccessControlAdd { .. } | Op::AccessControlDel { .. } => {
+				simulate_access_control(&action.op, observed);
+			}
 			_ => {}
 		}
 	}
@@ -331,7 +419,7 @@ fn simulate(plan: &Plan, observed: &mut Observed) {
 /// empty.
 fn settle(desired: &Document, observed: &mut Observed) -> Plan {
 	let first = plan(desired, observed, &PlanOptions::default());
-	simulate(&first, observed);
+	simulate(&first, observed, desired);
 	let second = plan(desired, observed, &PlanOptions::default());
 	assert!(
 		second.is_empty(),
@@ -524,7 +612,7 @@ fn hooks_bracket_the_interface_lifecycle() {
 
 	let mut observed = observed_with(&["eth0"]);
 	let plan = plan(&desired, &observed, &PlanOptions::default());
-	simulate(&plan, &mut observed);
+	simulate(&plan, &mut observed, &desired);
 
 	let hooks: Vec<usize> = plan
 		.actions
@@ -667,6 +755,7 @@ fn a_lease_address_is_left_to_its_backend() {
 		kind: BackendKind::Dhcp4,
 		interface: "eth0".to_owned(),
 		running: true,
+		access_control: None,
 	});
 	// The lease produced this, and it is tagged as ours.
 	observed.addresses.push(ObservedAddress {
@@ -694,6 +783,7 @@ fn removing_dhcp_stops_the_backend() {
 		kind: BackendKind::Dhcp4,
 		interface: "eth0".to_owned(),
 		running: true,
+		access_control: None,
 	});
 
 	let plan = settle(&desired, &mut observed);
@@ -1054,6 +1144,7 @@ fn removing_dot1x_stops_the_supplicant() {
 		kind: BackendKind::Supplicant,
 		interface: "eth0".to_owned(),
 		running: true,
+		access_control: None,
 	});
 
 	let document = document(r#"interface eth0 { config = "null" }"#);
@@ -1180,6 +1271,267 @@ interface wlan0 { config = "192.168.9.1/24" }
 	);
 }
 
+/// A document with an access point on `wlan0`, optionally with a station list.
+fn access_point_document(access_control: Option<&str>) -> Document {
+	document(&format!(
+		r#"
+device wlan0 {{ wifi {{ }} }}
+
+access_point "guest" {{
+	device  = "wlan0"
+	channel = 6
+	wifi    {{ open = true }}
+	{}
+}}
+
+interface wlan0 {{ config = "null" }}
+"#,
+		access_control.unwrap_or("")
+	))
+}
+
+/// A running access point, holding what the given lists say.
+fn running_access_point(
+	observed: &mut Observed,
+	policy: netcfgd_model::ObservedPolicy,
+	denied: &[&str],
+	accepted: &[&str],
+) {
+	let owned = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect();
+	observed.links[0].up = true;
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: true,
+		access_control: Some(netcfgd_model::ObservedAccessControl {
+			policy,
+			denied: owned(denied),
+			accepted: owned(accepted),
+		}),
+	});
+}
+
+/// The point of decision 0041: an edited deny list reaches a running hostapd
+/// without restarting it. Before this, a station added to the list stayed
+/// associated until somebody restarted the access point by hand.
+#[test]
+fn an_edited_deny_list_converges_without_restarting_hostapd() {
+	let desired = access_point_document(Some(
+		r#"access_control { deny = ["00:11:22:33:44:55", "aa:bb:cc:dd:ee:ff"] }"#,
+	));
+	let mut observed = observed_with(&["wlan0"]);
+	// hostapd read the list at startup and holds the first address only.
+	running_access_point(
+		&mut observed,
+		netcfgd_model::ObservedPolicy::Set(netcfgd_model::AclPolicy::Deny),
+		&["00:11:22:33:44:55"],
+		&[],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(names(&plan), ["access_control.add"]);
+	assert!(
+		!names(&plan).iter().any(|name| name.starts_with("backend.")),
+		"restarting hostapd deauthenticates every client on the radio, which is \
+		 what converging over the control socket exists to avoid: {:?}",
+		names(&plan)
+	);
+
+	let added = &plan.actions[0];
+	assert!(
+		matches!(&added.op, Op::AccessControlAdd { station, list, iface }
+			if station == "aa:bb:cc:dd:ee:ff"
+				&& *list == netcfgd_model::AclPolicy::Deny
+				&& iface == "wlan0"),
+		"got {:?}",
+		added.op
+	);
+	assert_eq!(added.reason.field, "access_point.access_control.stations");
+	// Denying somebody takes their device off the network -- hostapd's
+	// `DENY_ACL ADD_MAC` disassociates it -- so the guard has to see it.
+	assert!(added.op.is_disruptive());
+}
+
+/// A station taken out of the deny list gets let back on, and that direction
+/// interrupts nobody.
+#[test]
+fn a_station_removed_from_the_list_is_taken_off_hostapds() {
+	let desired = access_point_document(Some(r#"access_control { deny = ["00:11:22:33:44:55"] }"#));
+	let mut observed = observed_with(&["wlan0"]);
+	running_access_point(
+		&mut observed,
+		netcfgd_model::ObservedPolicy::Set(netcfgd_model::AclPolicy::Deny),
+		&["00:11:22:33:44:55", "aa:bb:cc:dd:ee:ff"],
+		&[],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(names(&plan), ["access_control.del"]);
+	assert!(
+		!plan.actions[0].op.is_disruptive(),
+		"letting a station back on interrupts nobody, and a guard that blocked \
+		 it would block the repair for a deny list with the wrong address in it"
+	);
+}
+
+/// hostapd's `hostapd_check_acl` consults the accept list *first* and the deny
+/// list second, whatever `macaddr_acl` says -- so a station left on the accept
+/// list is accepted despite being on the deny list the document wrote. The list
+/// the policy does not name is not inert, and leaving it alone would leave a
+/// deny list that looks applied and is not.
+#[test]
+fn the_list_the_policy_does_not_name_is_emptied_too() {
+	let desired = access_point_document(Some(r#"access_control { deny = ["aa:bb:cc:dd:ee:ff"] }"#));
+	let mut observed = observed_with(&["wlan0"]);
+	running_access_point(
+		&mut observed,
+		netcfgd_model::ObservedPolicy::Set(netcfgd_model::AclPolicy::Deny),
+		&["aa:bb:cc:dd:ee:ff"],
+		&["aa:bb:cc:dd:ee:ff"],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(names(&plan), ["access_control.del"]);
+	assert!(
+		matches!(&plan.actions[0].op, Op::AccessControlDel { list, .. }
+			if *list == netcfgd_model::AclPolicy::Allow),
+		"the entry overriding the deny list is the one that has to go: {:?}",
+		plan.actions[0].op
+	);
+}
+
+/// The policy is the one thing that cannot be converged in place: `macaddr_acl`
+/// is only read at startup, and converging the lists without it would enforce
+/// the new list under the old default. A document changed from `deny` to
+/// `allow` would leave every unlisted station accepted -- an open network,
+/// reported as applied.
+#[test]
+fn a_changed_policy_restarts_the_access_point_rather_than_converging_blind() {
+	let desired =
+		access_point_document(Some(r#"access_control { allow = ["aa:bb:cc:dd:ee:ff"] }"#));
+	let mut observed = observed_with(&["wlan0"]);
+	running_access_point(
+		&mut observed,
+		netcfgd_model::ObservedPolicy::Set(netcfgd_model::AclPolicy::Deny),
+		&["00:11:22:33:44:55"],
+		&[],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(names(&plan), ["backend.stop", "backend.start"]);
+	assert!(
+		!names(&plan)
+			.iter()
+			.any(|name| name.starts_with("access_control.")),
+		"converging the lists under a policy hostapd has not been told about is \
+		 exactly the silent failure this restart exists to prevent: {:?}",
+		names(&plan)
+	);
+
+	let start = &plan.actions[1];
+	assert!(
+		start.depends_on.contains(&plan.actions[0].id),
+		"hostapd was started before it was stopped"
+	);
+	assert_eq!(
+		plan.actions[0].reason.field,
+		"access_point.access_control.policy"
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("deauthenticated")),
+		"a restart takes every station off the radio and has to say so: {:?}",
+		plan.warnings
+	);
+}
+
+/// Deleting the whole block is a policy change too, in the direction that stops
+/// enforcing one. It cannot be an empty deny list: `macaddr_acl` stays at
+/// whatever hostapd was started with, and under `allow` an emptied accept list
+/// is a network nobody can join.
+#[test]
+fn deleting_the_block_restarts_rather_than_emptying_the_list() {
+	let desired = access_point_document(None);
+	let mut observed = observed_with(&["wlan0"]);
+	running_access_point(
+		&mut observed,
+		netcfgd_model::ObservedPolicy::Set(netcfgd_model::AclPolicy::Allow),
+		&[],
+		&["aa:bb:cc:dd:ee:ff"],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(names(&plan), ["backend.stop", "backend.start"]);
+}
+
+/// No record of what hostapd was started with means netcfgd cannot tell which
+/// list it consults by default. Nothing may be converged from there -- under
+/// `deny` an emptied accept list is nothing and under `allow` it is a lockout --
+/// so it says so instead of guessing.
+#[test]
+fn an_unrecorded_policy_converges_nothing_and_says_why() {
+	let desired = access_point_document(Some(r#"access_control { deny = ["aa:bb:cc:dd:ee:ff"] }"#));
+	let mut observed = observed_with(&["wlan0"]);
+	running_access_point(
+		&mut observed,
+		netcfgd_model::ObservedPolicy::Unknown,
+		&[],
+		&["00:11:22:33:44:55"],
+	);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		names(&plan).is_empty(),
+		"converging against a guess is how an access point ends up closed: {:?}",
+		names(&plan)
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("no record")),
+		"silence here reports a station list as applied when it was not: {:?}",
+		plan.warnings
+	);
+}
+
+/// An access point netcfgd cannot reach has no in-memory list to converge. It
+/// reads the generated file when it starts, and that file is already the
+/// document.
+///
+/// The reachable half is asserted alongside deliberately. This is a check that
+/// expects *nothing*, and the whole feature being broken would satisfy it
+/// perfectly -- so the same document against the same access point, differing
+/// only in whether netcfgd could ask it, has to produce the action.
+#[test]
+fn an_unreachable_access_point_is_not_converged_against() {
+	let desired = access_point_document(Some(r#"access_control { deny = ["aa:bb:cc:dd:ee:ff"] }"#));
+
+	let mut unreachable = observed_with(&["wlan0"]);
+	unreachable.links[0].up = true;
+	unreachable.backends.push(ObservedBackend {
+		kind: BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: true,
+		access_control: None,
+	});
+	let plan = settle(&desired, &mut unreachable);
+	assert!(names(&plan).is_empty(), "got {:?}", names(&plan));
+
+	let mut reachable = observed_with(&["wlan0"]);
+	running_access_point(
+		&mut reachable,
+		netcfgd_model::ObservedPolicy::Set(netcfgd_model::AclPolicy::Deny),
+		&[],
+		&[],
+	);
+	assert_eq!(
+		names(&settle(&desired, &mut reachable)),
+		["access_control.add"],
+		"the empty plan above would pass just as well with the feature removed"
+	);
+}
+
 /// Deleting the block stops the access point. The radio is still a radio, so
 /// "is this device wireless" is the wrong question to ask here -- the right
 /// one is whether the document still names an access point on it.
@@ -1192,6 +1544,7 @@ fn an_access_point_stops_when_its_block_goes() {
 		kind: BackendKind::AccessPoint,
 		interface: "wlan0".to_owned(),
 		running: true,
+		access_control: None,
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 
@@ -1281,6 +1634,7 @@ interface wlan0 { config = "null" }
 		kind: BackendKind::Supplicant,
 		interface: "wlan0".to_owned(),
 		running: true,
+		access_control: None,
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 
@@ -1662,7 +2016,7 @@ interface br-lan { config = "@pd:wan0=::1/64" }
 	// Converge on the first delegation.
 	let mut observed = with_delegation(&["wan0", "br-lan"], "wan0", &["2001:db8:1111::/56"]);
 	let first = plan(&document, &observed, &PlanOptions::default());
-	simulate(&first, &mut observed);
+	simulate(&first, &mut observed, &document);
 	assert!(observed
 		.addresses_on("br-lan")
 		.any(|address| address.address == "2001:db8:1111::1/64"));
@@ -1683,7 +2037,7 @@ interface br-lan { config = "@pd:wan0=::1/64" }
 		"the old address is no longer wanted and must go: {ops:?}"
 	);
 
-	simulate(&second, &mut observed);
+	simulate(&second, &mut observed, &document);
 	let remaining: Vec<&str> = observed
 		.addresses_on("br-lan")
 		.map(|address| address.address.as_str())
@@ -1809,6 +2163,7 @@ interface ppp0 {
 		kind: BackendKind::Pppoe,
 		interface: "ppp0".to_owned(),
 		running: true,
+		access_control: None,
 	});
 
 	let plan = plan(&document, &observed, &PlanOptions::default());
@@ -2028,7 +2383,7 @@ fn losing_carrier_withdraws_the_route() {
 		names(&plan)
 	);
 
-	simulate(&plan, &mut observed);
+	simulate(&plan, &mut observed, &document);
 	assert!(
 		observed.routes_on("eth0").next().is_none(),
 		"the route down the dead cable has to go"

@@ -462,6 +462,7 @@ live:
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/stations.sh"
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/acl.sh"
 	@# Deliberately not under NCFG_LIVE: unlike wpa_supplicant, which decision
 	@# 0014 makes the floor for wireless, hostapd is an optional package that a
 	@# machine never running an access point has no reason to install (0026).

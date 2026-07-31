@@ -194,8 +194,13 @@ print(sum(1 for s in json.load(open(sys.argv[1]))["stations"] if s["listed"]))' 
 "$ncfg" wifi clients ap0 > "$work/denied.txt" 2>&1 || true
 check "the text output names the contradiction" \
 	"$(grep -c 'on the deny list and still connected' "$work/denied.txt" || true)" "1"
+# What the arrow means changed with decision 0041: netcfgd now converges the
+# list over the control socket, so this is a state that lasts until the next
+# reconcile rather than one somebody has to restart an access point to clear.
+# Saying the old thing would send an operator to deauthenticate every client on
+# the radio for something about to fix itself.
 check "and says what to do about it" \
-	"$(grep -c 'hostapd was not told' "$work/denied.txt" || true)" "1"
+	"$(grep -c 'ncfg apply. does it now' "$work/denied.txt" || true)" "1"
 check "the station with no statistics shows dashes rather than zeroes" \
 	"$(grep -c 'aa:bb:cc:dd:ee:ff .*--' "$work/denied.txt" || true)" "1"
 

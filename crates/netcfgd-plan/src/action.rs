@@ -5,7 +5,7 @@
 //! after the fact -- when the network may already be unreachable.
 
 use netcfgd_model::RoutingRule;
-use netcfgd_model::{BackendKind, DnsPolicy, HookPhase, InterfaceKind, Route, WgPeer};
+use netcfgd_model::{AclPolicy, BackendKind, DnsPolicy, HookPhase, InterfaceKind, Route, WgPeer};
 use serde::{Deserialize, Serialize};
 
 /// What an action does.
@@ -158,6 +158,32 @@ pub enum Op {
 	WifiDisassociate {
 		/// Which device.
 		device: String,
+	},
+	/// Put one station on one of a running access point's lists.
+	///
+	/// Per station rather than one action for the whole list, because hostapd's
+	/// control socket is per station: `ADD_MAC` and `DEL_MAC` take one address
+	/// each, and there is no transaction to be had. That is the opposite call
+	/// from [`Op::NatReplace`] for the opposite reason -- nftables *is* one
+	/// transaction, and splitting it would describe states the kernel never
+	/// passes through, while joining these would describe one action that half
+	/// happened.
+	AccessControlAdd {
+		/// Which access point's radio.
+		iface: String,
+		/// Which of hostapd's two lists, named by the policy that reads it.
+		list: AclPolicy,
+		/// The station, normalised.
+		station: String,
+	},
+	/// Take one station off one of them.
+	AccessControlDel {
+		/// Which access point's radio.
+		iface: String,
+		/// Which of hostapd's two lists, named by the policy that reads it.
+		list: AclPolicy,
+		/// The station, normalised.
+		station: String,
 	},
 	/// Set the regulatory domain.
 	WifiSetRegdom {
@@ -336,6 +362,8 @@ impl Op {
 			Self::WifiAssociate { .. } => "wifi.associate",
 			Self::WifiDisassociate { .. } => "wifi.disassociate",
 			Self::WifiSetRegdom { .. } => "wifi.set_regdom",
+			Self::AccessControlAdd { .. } => "access_control.add",
+			Self::AccessControlDel { .. } => "access_control.del",
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
@@ -403,6 +431,19 @@ impl Op {
 			// interrupts nothing, so a guard has no reason to block it and
 			// blocking it would leave a router that cannot route.
 			Self::SysctlSetForwarding { enabled, .. } => !enabled,
+			// Directional for the same reason, and it is hostapd that makes it
+			// so rather than a judgement here: `DENY_ACL ADD_MAC` calls
+			// `hostapd_disassoc_deny_mac` and `ACCEPT_ACL DEL_MAC` calls
+			// `hostapd_disassoc_accept_mac`, so those two take a device off the
+			// network as part of doing what they were asked. The other two
+			// directions grant access and interrupt nobody.
+			//
+			// A guard on the radio therefore blocks exactly the edit that
+			// disconnects somebody, which is what an operator adding a station
+			// to a deny list is doing on purpose -- and what an operator
+			// deleting the wrong line from an allow list is doing by accident.
+			Self::AccessControlAdd { list, .. } => *list == AclPolicy::Deny,
+			Self::AccessControlDel { list, .. } => *list == AclPolicy::Allow,
 			Self::LinkCreate { .. }
 			| Self::LinkUp { .. }
 			| Self::AddrAdd { .. }
@@ -480,6 +521,9 @@ impl Op {
 			| Self::IngressRedirect { iface, .. }
 			| Self::IngressRedirectClear { iface }
 			| Self::HookRun { iface, .. } => Some(iface),
+			Self::AccessControlAdd { iface, .. } | Self::AccessControlDel { iface, .. } => {
+				Some(iface)
+			}
 			Self::WifiSetProfiles { device, .. }
 			| Self::WifiAssociate { device, .. }
 			| Self::WifiDisassociate { device }

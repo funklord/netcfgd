@@ -1,21 +1,24 @@
 //! The parts of the observation that are not rtnetlink.
 //!
-//! Two things netcfgd now configures cannot be read from the link dump: the
-//! `forwarding` sysctls, which live in `/proc/sys`, and the nftables table,
-//! which is a different netlink protocol. Both are read here so that
+//! Three things netcfgd now configures cannot be read from the link dump: the
+//! `forwarding` sysctls, which live in `/proc/sys`; the nftables table, which is
+//! a different netlink protocol; and a running access point's station lists,
+//! which are another process's memory. All are read here so that
 //! [`crate::build`] stays a pure function of a snapshot -- the diffing rules
-//! for NAT and forwarding are then testable without a kernel, in the same way
-//! address ownership already is.
+//! for NAT, forwarding and access control are then testable without a kernel,
+//! in the same way address ownership already is.
 //!
-//! Nothing in here fails the observation. A machine with no `nf_tables` and a
-//! container with no writable `/proc/sys` are both ordinary, and the honest
-//! reading in each case is "netcfgd has installed nothing", which is what an
-//! empty list and a `None` say. What must not happen is a daemon that refuses
-//! to start on a kernel that simply does not have a feature nobody asked for.
+//! Nothing in here fails the observation. A machine with no `nf_tables`, a
+//! container with no writable `/proc/sys` and an access point that died between
+//! the record being written and the socket being opened are all ordinary, and
+//! the honest reading in each case is "netcfgd has installed nothing" or "there
+//! is nothing to ask", which is what an empty list and a `None` say. What must
+//! not happen is a daemon that refuses to start on a kernel that simply does
+//! not have a feature nobody asked for.
 
 use netcfgd_model::Observed;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Where the sysctls live, overridable so this is testable without root.
 fn proc_root() -> PathBuf {
@@ -23,13 +26,47 @@ fn proc_root() -> PathBuf {
 }
 
 /// Fill in everything the netlink snapshot could not supply.
-pub fn augment(observed: &mut Observed) {
+pub fn augment(observed: &mut Observed, run_dir: &Path) {
 	let root = proc_root();
 	for link in &mut observed.links {
 		link.forwarding = forwarding(&root, &link.name);
 	}
 	read_netfilter(observed);
 	read_offloads(observed);
+	read_access_control(observed, run_dir);
+}
+
+/// What a running access point holds in its access control lists.
+///
+/// Asked only of a backend netcfgd believes is running, and only of an access
+/// point. That is the whole guard against reading a leftover: the recorded
+/// policy comes from a file under `/run` that outlives the process that read
+/// it, so the file alone would happily describe an access point that exited an
+/// hour ago.
+///
+/// Failure leaves the field `None` rather than emptying it, and the difference
+/// matters more here than anywhere else in this module. An empty
+/// [`netcfgd_model::ObservedAccessControl`] means "hostapd denies nobody",
+/// which the planner would converge by adding every station in the document --
+/// harmless. `None` means "netcfgd could not ask", which it must not act on at
+/// all: converging an unreadable list is converging against a guess.
+fn read_access_control(observed: &mut Observed, run_dir: &Path) {
+	for backend in &mut observed.backends {
+		if backend.kind != netcfgd_model::BackendKind::AccessPoint || !backend.running {
+			continue;
+		}
+		let Ok(live) = netcfgd_hostapd::acl::read(run_dir, &backend.interface) else {
+			// hostapd is gone, or was never reachable. Recorded state said it
+			// was running and the socket says otherwise; the socket is closer
+			// to the truth, and saying nothing is the honest answer.
+			continue;
+		};
+		backend.access_control = Some(netcfgd_model::ObservedAccessControl {
+			policy: netcfgd_hostapd::recorded_policy(run_dir, &backend.interface),
+			denied: live.denied,
+			accepted: live.accepted,
+		});
+	}
 }
 
 /// Whether an interface forwards, from both families' sysctls.

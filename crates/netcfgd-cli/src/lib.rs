@@ -225,7 +225,8 @@ fn compile_with_provenance(
 
 fn observe(run_dir: &std::path::Path) -> Result<Observed, String> {
 	let prior = state::prior_state(run_dir);
-	netcfgd_observe::current(&prior).map_err(|error| format!("could not read the kernel: {error}"))
+	netcfgd_observe::current(&prior, run_dir)
+		.map_err(|error| format!("could not read the kernel: {error}"))
 }
 
 fn build_plan(
@@ -700,11 +701,17 @@ fn render_stations(report: &netcfgd_proto::StationReport, json: bool) -> Result<
 
 	if anomalies > 0 {
 		println!();
+		// What this means changed with decision 0041, and saying the old thing
+		// would send an operator to restart an access point that was about to
+		// fix itself. hostapd still reads its file once at startup, but netcfgd
+		// now converges the live list over the control socket, so an arrow is a
+		// state that lasts until the next reconcile rather than until somebody
+		// intervenes. `ncfg apply` is the way to stop waiting.
 		println!(
-			"An arrow means the station list changed and hostapd was not told: the list is \n\
-			 read once at startup. Restarting the access point applies it and disconnects \n\
-			 everyone; converging it over the control socket instead is not implemented \n\
-			 (docs/decisions/0039)."
+			"An arrow means hostapd's live list does not match the document yet: it reads \n\
+			 the file once at startup and netcfgd converges the difference over the control \n\
+			 socket. `ncfg apply` does it now; if an arrow survives that, `ncfg plan` says \n\
+			 why (docs/decisions/0041)."
 		);
 	}
 	Ok(())

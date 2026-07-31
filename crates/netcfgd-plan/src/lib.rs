@@ -417,6 +417,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	builder.plan_ingress(desired, observed);
 	builder.plan_forwarding(desired, observed);
 	builder.plan_nat(desired, observed);
+	builder.plan_access_control(desired, observed);
 
 	// Teardown comes last, so a change to an address is make-before-break: the
 	// new address is in place before the old one goes. On a machine being
@@ -2087,6 +2088,197 @@ impl Builder {
 			return false;
 		}
 		self.radios.iter().any(|name| name == iface) && self.has_networks
+	}
+
+	/// Converge a running access point's station lists against the document.
+	///
+	/// Decision 0041. hostapd reads `deny_mac_file` once, at startup, so up to
+	/// here an edited `access_control` block did nothing at all until somebody
+	/// restarted the access point -- and restarting deauthenticates every client
+	/// on the radio, which for a feature whose purpose is a smooth handoff is
+	/// worse than the gap it closes.
+	///
+	/// Only for an access point that is **running and reachable**. One that is
+	/// not has no in-memory list to converge: it reads the generated file when
+	/// it starts, and that file is already the document.
+	fn plan_access_control(&mut self, desired: &Document, observed: &Observed) {
+		for access_point in &desired.access_points {
+			let device = &access_point.device;
+			let Some(live) = observed
+				.backends
+				.iter()
+				.find(|backend| {
+					backend.kind == BackendKind::AccessPoint
+						&& &backend.interface == device
+						&& backend.running
+				})
+				.and_then(|backend| backend.access_control.as_ref())
+			else {
+				continue;
+			};
+
+			let wanted = access_point.access_control.as_ref();
+			let running = live.policy;
+			let policy = match (running, wanted.map(|acl| acl.policy)) {
+				// No record, so netcfgd does not know which list this hostapd
+				// consults by default. Nothing may be converged from here:
+				// under `deny` an empty accept list is nothing, and under
+				// `allow` it is a network nobody can join. Converging against a
+				// guess is how an access point ends up closed at three in the
+				// morning.
+				(netcfgd_model::ObservedPolicy::Unknown, _) => {
+					self.warn(
+						device,
+						format!(
+							"netcfgd has no record of which access control policy the access \
+							 point running on {device} was started with, so its station list is \
+							 left alone. Restarting it writes the record"
+						),
+					);
+					continue;
+				}
+				// Running what the document asks for. This is the ordinary case
+				// and the one the whole feature is for.
+				(netcfgd_model::ObservedPolicy::Set(running), Some(policy))
+					if running == policy =>
+				{
+					Some(policy)
+				}
+				(netcfgd_model::ObservedPolicy::Unset, None) => None,
+				// Anything else is a policy change, which `macaddr_acl` cannot
+				// take over the control socket -- and converging the lists
+				// without it would enforce the new list under the old default.
+				// A document changed from `deny` to `allow` would leave every
+				// unlisted station accepted, reported as applied.
+				_ => {
+					self.restart_access_point(device, running, wanted.map(|acl| acl.policy));
+					continue;
+				}
+			};
+
+			// Both lists, always. hostapd's `hostapd_check_acl` consults the
+			// accept list *first* and the deny list second, whatever
+			// `macaddr_acl` says -- that value decides only what happens to an
+			// address in neither. So a station left on the accept list overrides
+			// the deny list that is supposed to be refusing it, and leaving the
+			// unused list alone would be leaving the failure this feature exists
+			// to remove.
+			let stations = wanted.map_or(&[][..], |acl| acl.stations.as_slice());
+			for list in [AclPolicy::Deny, AclPolicy::Allow] {
+				let want: &[String] = if Some(list) == policy { stations } else { &[] };
+				self.converge_list(device, list, want, live.list(list));
+			}
+		}
+	}
+
+	/// Add and remove until one of hostapd's lists holds what the document says.
+	fn converge_list(&mut self, device: &str, list: AclPolicy, want: &[String], live: &[String]) {
+		let field = "access_point.access_control.stations";
+
+		for station in want.iter().filter(|station| !live.contains(station)) {
+			self.push_root(
+				Op::AccessControlAdd {
+					iface: device.to_owned(),
+					list,
+					station: station.clone(),
+				},
+				Reason::absent(device, field, format!("{station} ({list:?})")),
+				Some(Op::AccessControlDel {
+					iface: device.to_owned(),
+					list,
+					station: station.clone(),
+				}),
+			);
+		}
+		for station in live.iter().filter(|station| !want.contains(station)) {
+			self.push_root(
+				Op::AccessControlDel {
+					iface: device.to_owned(),
+					list,
+					station: station.clone(),
+				},
+				Reason::unwanted(device, field, format!("{station} ({list:?})")),
+				Some(Op::AccessControlAdd {
+					iface: device.to_owned(),
+					list,
+					station: station.clone(),
+				}),
+			);
+		}
+	}
+
+	/// Restart an access point whose access control policy changed.
+	///
+	/// The one change to an `access_control` block that cannot be made in place.
+	/// `macaddr_acl` is settable over the control socket, but nothing
+	/// disassociates on the change and nothing reports it back, so netcfgd would
+	/// be converging a value it could never confirm -- and the failure mode is
+	/// an open network reported as a closed one.
+	///
+	/// Restarting is honest about its cost instead. It is also the only part of
+	/// an access point's configuration anything notices changing today: an
+	/// edited SSID or channel is still invisible to the planner, which is older
+	/// and wider than this.
+	fn restart_access_point(
+		&mut self,
+		device: &str,
+		running: netcfgd_model::ObservedPolicy,
+		wanted: Option<AclPolicy>,
+	) {
+		let render = |policy: Option<AclPolicy>| {
+			policy.map_or_else(|| "<absent>".to_owned(), |policy| format!("{policy:?}"))
+		};
+		let observed = match running {
+			netcfgd_model::ObservedPolicy::Set(policy) => format!("{policy:?}"),
+			netcfgd_model::ObservedPolicy::Unset => "<absent>".to_owned(),
+			netcfgd_model::ObservedPolicy::Unknown => "<unknown>".to_owned(),
+		};
+		let reason = Reason::differs(
+			device,
+			"access_point.access_control.policy",
+			render(wanted),
+			observed,
+		);
+
+		self.warn(
+			device,
+			format!(
+				"the access control policy on {device} changed, which hostapd only reads at \
+				 startup, so the access point is restarted -- every station associated with it \
+				 is deauthenticated and reconnects. Changing the stations in a list does not \
+				 cost this"
+			),
+		);
+
+		let stop = self.push_root(
+			Op::BackendStop {
+				kind: BackendKind::AccessPoint,
+				iface: device.to_owned(),
+			},
+			reason.clone(),
+			Some(Op::BackendStart {
+				kind: BackendKind::AccessPoint,
+				iface: device.to_owned(),
+			}),
+		);
+		// Refused by a guard, or dropped for an unmanaged device. Emitting the
+		// start on its own would bring the access point up a second time rather
+		// than back up, so there is nothing further to plan.
+		if stop == u32::MAX {
+			return;
+		}
+		self.push(
+			Op::BackendStart {
+				kind: BackendKind::AccessPoint,
+				iface: device.to_owned(),
+			},
+			reason,
+			vec![stop],
+			Some(Op::BackendStop {
+				kind: BackendKind::AccessPoint,
+				iface: device.to_owned(),
+			}),
+		);
 	}
 
 	fn teardown_backends(&mut self, desired: &Document, observed: &Observed) {

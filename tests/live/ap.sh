@@ -199,17 +199,29 @@ check "at mode 0644" "$(stat -c '%a' "$acl" 2>/dev/null)" "644"
 # Normalised on the way in: written in two spellings and two cases, stored in
 # the one form hostapd prints, sorted so the document is canonical.
 check "the stations are normalised and sorted" \
-	"$(tr '\n' ' ' < "$acl")" "00:11:22:33:44:55 aa:bb:cc:dd:ee:ff "
+	"$(grep -v '^#' "$acl" | tr '\n' ' ')" "00:11:22:33:44:55 aa:bb:cc:dd:ee:ff "
+# The first line records which policy hostapd was started with (decision 0041).
+# `macaddr_acl` is not readable over the control socket, so without this netcfgd
+# could converge the lists of a running access point without knowing which one
+# it consults -- and a document flipped from `deny` to `allow` would be applied
+# as an open network.
+check "and the policy is recorded above them" \
+	"$(head -1 "$acl")" "# netcfgd policy: deny"
 
 # The reference tool again, and the reason this check is worth its cost:
 # hostapd validates `deny_mac_file` by reading it at parse time, so a path that
 # is wrong or a file that is malformed is an error here rather than a silently
-# unenforced ACL.
+# unenforced ACL. That is also what makes the record above safe rather than
+# merely believed to be: `hostapd_config_read_maclist` skips a line whose first
+# byte is `#`, and this is the check that says so about a real hostapd instead
+# of about its source.
 "$hostapd" "$conf" > "$work/parse2.log" 2>&1 || true
-check "hostapd accepts the acl configuration" \
+check "hostapd accepts the acl configuration, record and all" \
 	"$(grep -c 'errors found in configuration file' "$work/parse2.log" || true)" "0"
 check "and read the list rather than ignoring it" \
 	"$(grep -c 'Line [0-9]*: .*macaddr_acl\|Line [0-9]*: .*deny_mac' "$work/parse2.log" || true)" "0"
+check "and did not mistake the record for an address" \
+	"$(grep -c 'Invalid MAC address' "$work/parse2.log" || true)" "0"
 
 # An access point whose block goes away must not leave a list behind. The next
 # person to look would find an ACL and believe it.

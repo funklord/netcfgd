@@ -39,6 +39,8 @@ pub struct Client {
 	local: PathBuf,
 	/// The interface this socket belongs to, for diagnostics.
 	interface: String,
+	/// How long to wait for a reply on this connection.
+	timeout: Duration,
 }
 
 impl Client {
@@ -49,6 +51,27 @@ impl Client {
 	/// Returns an error if the socket does not exist, cannot be bound to, or
 	/// does not answer `PING`.
 	pub fn connect(dir: &Path, interface: &str) -> io::Result<Self> {
+		Self::connect_within(dir, interface, REPLY_TIMEOUT)
+	}
+
+	/// The same, waiting less than the default for every reply including the
+	/// opening `PING`.
+	///
+	/// The `PING` is why this is a parameter rather than something set on a
+	/// connection afterwards. It happens inside the connect, so a deadline
+	/// applied to the returned client is a deadline that never covers the one
+	/// round trip a wedged daemon is most likely to eat -- which is exactly what
+	/// it did here, measured at ten seconds against a process that had bound its
+	/// socket and stopped answering.
+	///
+	/// Shortening only: a longer value than the default is clamped, so this
+	/// cannot be used to make a scan time out.
+	///
+	/// # Errors
+	///
+	/// The same as [`Client::connect`].
+	pub fn connect_within(dir: &Path, interface: &str, timeout: Duration) -> io::Result<Self> {
+		let timeout = timeout.min(REPLY_TIMEOUT);
 		let remote = dir.join(interface);
 		if !remote.exists() {
 			return Err(io::Error::new(
@@ -77,7 +100,7 @@ impl Client {
 				),
 			)
 		})?;
-		socket.set_read_timeout(Some(REPLY_TIMEOUT))?;
+		socket.set_read_timeout(Some(timeout))?;
 		socket.connect(&remote).map_err(|error| {
 			let _ = std::fs::remove_file(&local);
 			io::Error::new(
@@ -90,6 +113,7 @@ impl Client {
 			socket,
 			local,
 			interface: interface.to_owned(),
+			timeout,
 		};
 		client.ping()?;
 		Ok(client)
@@ -127,7 +151,7 @@ impl Client {
 		// interleaved with replies. Reading one as the answer to a command is
 		// the classic bug in a `wpa_supplicant` client -- it produces a status
 		// display that occasionally reports the previous command's outcome.
-		let deadline = Instant::now() + REPLY_TIMEOUT;
+		let deadline = Instant::now() + self.timeout;
 		let mut buffer = vec![0_u8; 8192];
 		loop {
 			let read = self.socket.recv(&mut buffer)?;
