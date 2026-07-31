@@ -506,6 +506,64 @@ else
 				grep -c '17237770 24' || true)" "1"
 	fi
 
+	# ------------------------------------------ static addressing, both ways
+
+	# What a panel reads when it opens a profile for editing. The method alone
+	# was enough while nothing read the rest; a panel reporting `manual` with
+	# an empty address table is one where pressing save deletes the address.
+	if command -v busctl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+		probe_profile=$(busctl --user --address="$address" call \
+			org.freedesktop.NetworkManager /org/freedesktop/NetworkManager/Settings \
+			org.freedesktop.NetworkManager.Settings GetConnectionByUuid \
+			s 495c0b54-eb91-5818-92fe-63725172fd96 2>/dev/null | awk '{print $2}' | tr -d '"')
+
+		# Through JSON rather than by grepping busctl's prose. The first
+		# version matched on `"method" "s" "manual"` and found nothing --
+		# busctl prints the type without quotes, and wraps -- so five checks
+		# passed a value they had never seen.
+		ip4() {
+			busctl --user --address="$address" --json=short call \
+				org.freedesktop.NetworkManager "$probe_profile" \
+				org.freedesktop.NetworkManager.Settings.Connection GetSettings 2>/dev/null |
+				python3 "$repo/tests/live/nm_setting.py" ipv4 "$1"
+		}
+
+		check "a static profile reports its method" "$(ip4 method)" "manual"
+		check "and the address a panel would draw, with its prefix" \
+			"$(ip4 address)" "10.7.7.1/24"
+		check "the gateway is the default route's next hop" \
+			"$(ip4 gateway)" "10.7.7.254"
+		# And not also in the route table: NM keeps the default route's next hop
+		# in `gateway` and everything else in `route-data`, so reporting it in
+		# both would draw a duplicate row in every panel.
+		check "a non-default route is in the route table, and the default is not" \
+			"$(ip4 routes)" "10.9.0.0/16"
+	fi
+
+	# And back the other way: a client creating a network with a static address
+	# has to produce a config line an operator would have written.
+	nmcli connection add type wifi ifname '*' con-name Office ssid Office \
+		ipv4.method manual ipv4.addresses 192.0.2.5/24 ipv4.gateway 192.0.2.1 \
+		ipv4.routes "10.0.0.0/8 192.0.2.9 600" \
+		> "$work/static.log" 2>&1 || true
+	office="$work/etc/conf.d/nm-Office.conf"
+
+	# The address is in the config list. Not the whole line: nmcli defaults
+	# ipv6.method to auto, so `slaac` is in there beside it -- which is nmcli
+	# asking for something real rather than noise to assert away.
+	check "a static address written from a client becomes a config line" \
+		"$(grep -c 'config = \["192.0.2.5/24"' "$office" 2>/dev/null || true)" "1"
+	check "and the ipv6 method nmcli defaulted to came with it" \
+		"$(grep -c '"slaac"' "$office" 2>/dev/null || true)" "1"
+	check "the gateway comes back as a default route" \
+		"$(grep -c 'default via 192.0.2.1' "$office" 2>/dev/null || true)" "1"
+	check "and the other route keeps its next hop and metric" \
+		"$(grep -c '10.0.0.0/8 via 192.0.2.9 metric 600' "$office" 2>/dev/null || true)" "1"
+	check "netcfgd accepts what was written" \
+		"$("$repo/target/debug/ncfg" show 2>/dev/null | grep -c '"id": "Office"' || true)" "1"
+
+	timeout 15 nmcli connection delete Office > /dev/null 2>&1 || true
+
 	# ------------------------------------------------------- the write path
 
 	# Design section 9.4: a GUI is just another editor of config files. What
