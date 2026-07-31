@@ -59,12 +59,15 @@ check() {
 # `wwan0` from `cdc_mbim`.
 ip link add wwan0 type dummy
 ip link set wwan0 up
-cat > "$work/etc/netcfgd.conf" <<'CONF'
+write_config() {
+	cat > "$work/etc/netcfgd.conf" <<CONF
 interface wwan0 {
 	kind   = "dummy"
-	config = "null"
+	config = "$1"
 }
 CONF
+}
+write_config null
 
 # The directory the contract names. A helper creates it; netcfgd does not,
 # because netcfgd is not the one reporting.
@@ -141,6 +144,42 @@ check "an empty report is a bearer that is down, and says so" "$(seen)" "empty"
 
 rm -f "$work/run/modem/wwan0"
 check "and a removed report is nobody watching" "$(seen)" "no report"
+
+# ------------------------------------ and now the source that consumes it
+
+# `config = "modem"` is the document saying where this interface's addresses
+# come from. The helper still does not install anything -- netcfgd does, from
+# what the helper reported, with its own tag. That is the whole point of the
+# split: one writer.
+write_config modem
+report <<'EOF'
+address=10.64.1.23/30
+EOF
+"$ncfg" apply > "$work/apply.txt" 2>&1 || true
+check "netcfgd installs the address the helper reported" \
+	"$(ip -4 addr show wwan0 | grep -c '10.64.1.23/30' || true)" "1"
+# Tagged as netcfgd's, which is what lets it be withdrawn again. An address
+# nobody owns is one netcfgd will never remove (decision 0002).
+check "and tags it as its own" \
+	"$("$ncfg" status --json | python3 -c '
+import json,sys
+o = json.load(sys.stdin)
+print([a["ownership"] for a in o["addresses"]
+       if a["interface"] == "wwan0" and a["address"] == "10.64.1.23/30"][0])')" "ours"
+
+# Converged: a second apply does nothing, which is the check that the source
+# is not adding an address the teardown then removes on every reconcile.
+"$ncfg" plan > "$work/replan.txt" 2>&1 || true
+check "and the next plan has nothing to do" \
+	"$(grep -c 'addr\.' "$work/replan.txt" || true)" "0"
+
+# The bearer drops. The helper truncates its report, as the contract asks, and
+# the address goes -- rule 7 for this source. Unlike a lease there is no client
+# holding it and no backend to restart, so it is netcfgd's to withdraw.
+report < /dev/null
+"$ncfg" apply > "$work/down.txt" 2>&1 || true
+check "and withdraws it when the bearer goes down" \
+	"$(ip -4 addr show wwan0 | grep -c '10.64.1.23/30' || true)" "0"
 
 echo
 if [ "$failures" -eq 0 ]; then
