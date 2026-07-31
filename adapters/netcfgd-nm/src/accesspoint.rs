@@ -167,7 +167,10 @@ impl AccessPoint {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.AccessPoint")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.AccessPoint",
+	introspection_docs = false
+)]
 impl AccessPoint {
 	/// The network name, as octets.
 	///

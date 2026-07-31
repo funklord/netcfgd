@@ -65,6 +65,8 @@ pub(crate) struct State {
 	inner: Mutex<Inner>,
 	/// How to reach the main loop.
 	jobs: Mutex<Option<std::sync::mpsc::Sender<Job>>>,
+	/// Secret agents that have registered.
+	agents: crate::agent::Agents,
 }
 
 #[derive(Default)]
@@ -216,7 +218,38 @@ impl State {
 				..Inner::default()
 			}),
 			jobs: Mutex::new(None),
+			agents: crate::agent::Agents::default(),
 		}
+	}
+
+	/// The registered secret agents.
+	#[must_use]
+	pub(crate) fn agents(&self) -> &crate::agent::Agents {
+		&self.agents
+	}
+
+	/// The credential a profile needs and does not have, if that is the case.
+	///
+	/// Only for the `file` provider, and only when the file is missing. The
+	/// other providers are somebody else's store -- `pass` may be locked, an
+	/// `exec` may be about to succeed -- and a shim that decided they were
+	/// empty would put a dialog in front of a user who had already answered
+	/// the question elsewhere.
+	#[must_use]
+	pub(crate) fn missing_secret(&self, identity: &str) -> Option<String> {
+		let crate::settings::Profile::Network(network) = self.profile(identity)? else {
+			return None;
+		};
+		let netcfgd_model::Security::Psk(psk) = &network.security else {
+			return None;
+		};
+		if psk.passphrase.provider != netcfgd_model::SecretProvider::File {
+			return None;
+		}
+		if crate::store::has_secret(&psk.passphrase.name) {
+			return None;
+		}
+		Some(psk.passphrase.name.clone())
 	}
 
 	/// Tell the state how to reach the main loop.

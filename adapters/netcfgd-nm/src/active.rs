@@ -51,7 +51,10 @@ impl Active {
 	}
 }
 
-#[zbus::interface(name = "org.freedesktop.NetworkManager.Connection.Active")]
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Connection.Active",
+	introspection_docs = false
+)]
 impl Active {
 	/// The profile this activates.
 	#[zbus(property)]
