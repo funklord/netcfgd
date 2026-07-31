@@ -214,6 +214,7 @@ fn describe(response: &Response) -> &'static str {
 		Response::Event(_) => "an event",
 		Response::WifiScan(_) => "a scan",
 		Response::WifiStatus(_) => "a radio status",
+		Response::ApStations(_) => "a station list",
 		Response::Ok => "ok",
 		Response::Error { .. } => "an error",
 	}

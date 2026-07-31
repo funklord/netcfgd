@@ -22,8 +22,10 @@
 //! reaches it unchanged.
 
 pub mod render;
+pub mod station;
 
 pub use render::{config, to_file, to_redacted, Line, Unsupported};
+pub use station::{stations, Station};
 
 use netcfgd_model::AccessPoint;
 use netcfgd_secret::Resolver;

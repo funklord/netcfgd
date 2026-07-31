@@ -26,7 +26,19 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		| Request::Monitor
 		// Asking what the radio is doing is reading, and a status display that
 		// needs the wifi tier is a status display that ends up being given it.
-		| Request::WifiStatus { .. } => Tier::Observe,
+		| Request::WifiStatus { .. }
+		// Listing associated stations is reading too, and the same argument
+		// applies twice over: a client list is what a monitoring display is
+		// for, and a tier that could change the network to see it would be
+		// worse for everyone.
+		//
+		// It is worth naming what this exposes, because it is not the same
+		// kind of reading as the rest of this tier. A station list is other
+		// people's hardware addresses and how strong their signal is, which is
+		// a proximity sensor for anybody granted `observe`. Under the default
+		// policy that is root; a site that opens `observe` to `any` is opening
+		// this too, deliberately.
+		| Request::ApStations { .. } => Tier::Observe,
 
 		// Scanning is not reading: it transmits probe requests, it interrupts
 		// whatever the radio was doing, and it is one of the things design

@@ -17,7 +17,7 @@ pub mod codec;
 pub use codec::{read_message, write_message, Framed};
 
 use netcfgd_apply::Journal;
-use netcfgd_model::{Document, Observed, Version};
+use netcfgd_model::{AclPolicy, Document, Observed, Version};
 use netcfgd_plan::Plan;
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +95,17 @@ pub enum Request {
 		/// Which interface.
 		interface: String,
 	},
+
+	/// Who is associated with an access point this machine runs.
+	///
+	/// A live query rather than a field of [`Response::Status`]: there is no
+	/// desired station list to reconcile against, so putting stations in the
+	/// observation would give the planner state that changes with who is in
+	/// the building.
+	ApStations {
+		/// Which interface runs the access point.
+		interface: String,
+	},
 }
 
 /// What `explain` is being asked about.
@@ -149,6 +160,8 @@ pub enum Response {
 	WifiScan(Box<ScanReport>),
 	/// What a radio is doing.
 	WifiStatus(Box<WifiState>),
+	/// Who is associated with an access point.
+	ApStations(Box<StationReport>),
 	/// The request succeeded and had nothing to return.
 	Ok,
 	/// The request failed.
@@ -233,6 +246,69 @@ pub struct ScanEntry {
 	pub configured: Option<String>,
 }
 
+/// Who is associated with one access point.
+///
+/// Wrapping the list for the same reason [`ScanReport`] does: serde cannot
+/// serialise a tagged newtype variant containing a sequence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StationReport {
+	/// Which interface runs the access point.
+	pub interface: String,
+	/// The `access_point` block's id.
+	pub access_point: String,
+	/// Which way the access point's station list reads, when it has one.
+	///
+	/// Carried here rather than left implicit, because `listed` on an entry
+	/// means opposite things under the two policies and a client would
+	/// otherwise have to guess which.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub access_control: Option<AclPolicy>,
+	/// Who is associated, by address.
+	pub stations: Vec<StationEntry>,
+}
+
+/// One associated station.
+///
+/// Every field but the address is optional because hostapd omits the whole
+/// statistics block when it cannot read them from the driver. A client that
+/// required them would hide a station that is really there, which is the worst
+/// way for this to be wrong.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StationEntry {
+	/// Hardware address, lowercase and colon-separated -- the same spelling an
+	/// `access_control` list uses, so that denying the station somebody can
+	/// see is a copy rather than a translation.
+	pub address: String,
+	/// Whether it finished authenticating rather than merely associating. An
+	/// unauthorized station is present and cannot pass traffic.
+	pub authorized: bool,
+	/// Whether the access point's own `access_control` list names it.
+	///
+	/// The field that makes the two halves of decision 0039 one feature. Under
+	/// a `deny` policy a listed station that is nonetheless connected means
+	/// hostapd was never told about a list that changed -- which is exactly
+	/// the gap the runtime path closes. Under `allow` it is the ordinary case
+	/// and an *un*listed station is the anomaly.
+	pub listed: bool,
+	/// Signal level in dBm. Closer to zero is stronger.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub signal: Option<i32>,
+	/// Seconds since it associated.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub connected_seconds: Option<u64>,
+	/// Milliseconds since the access point last heard from it.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub inactive_msec: Option<u64>,
+	/// Bytes received from the station.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub rx_bytes: Option<u64>,
+	/// Bytes sent to the station.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub tx_bytes: Option<u64>,
+}
+
 /// What a wireless interface is doing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -303,5 +379,48 @@ impl Response {
 		Self::Error {
 			message: message.to_string(),
 		}
+	}
+}
+
+#[cfg(test)]
+mod shape_tests {
+	use super::*;
+
+	/// The JSON a client actually reads off the socket.
+	///
+	/// The tagged-enum wrapping means a report's fields are flattened beside
+	/// the tag rather than nested under a key, so a client looking for the
+	/// wrong field name gets `None` and renders nothing rather than failing.
+	/// That is exactly what happened to the TUI's wifi pane.
+	#[test]
+	fn a_report_flattens_its_fields_beside_the_tag() {
+		let response = Response::WifiScan(Box::new(ScanReport {
+			interface: "wl0".to_owned(),
+			access_points: Vec::new(),
+		}));
+		let value: serde_json::Value =
+			serde_json::from_str(&serde_json::to_string(&response).expect("serialises"))
+				.expect("valid json");
+		assert_eq!(value["response"], "wifi_scan");
+		assert_eq!(value["interface"], "wl0");
+		assert!(value.get("access_points").is_some(), "{value}");
+		// The name the TUI was looking for, which never existed.
+		assert!(value.get("entries").is_none(), "{value}");
+	}
+
+	#[test]
+	fn a_station_report_does_the_same() {
+		let response = Response::ApStations(Box::new(StationReport {
+			interface: "ap0".to_owned(),
+			access_point: "guest".to_owned(),
+			access_control: None,
+			stations: Vec::new(),
+		}));
+		let value: serde_json::Value =
+			serde_json::from_str(&serde_json::to_string(&response).expect("serialises"))
+				.expect("valid json");
+		assert_eq!(value["response"], "ap_stations");
+		assert_eq!(value["access_point"], "guest");
+		assert!(value.get("stations").is_some(), "{value}");
 	}
 }
