@@ -34,8 +34,15 @@ pub(crate) fn no_object() -> OwnedObjectPath {
 /// supplicant with: `/sys/class/net/<name>/wireless` exists for a radio and
 /// does not for anything else. Cheaper than asking nl80211 and it needs no
 /// privilege.
+///
+/// The fallback rather than the answer: [`crate::state::State::is_radio`] asks
+/// the document first. A `device` block with a `wifi` section is netcfgd's own
+/// definition of a radio -- it is what makes the planner start a supplicant --
+/// and deferring to it means the shim and the daemon cannot disagree about
+/// which interfaces are wireless. This covers a radio with no `device` block,
+/// which is a machine that has one and has not configured it.
 #[must_use]
-pub(crate) fn is_wireless(interface: &str) -> bool {
+pub(crate) fn has_sysfs_wireless(interface: &str) -> bool {
 	std::path::Path::new("/sys/class/net")
 		.join(interface)
 		.join("wireless")
@@ -71,20 +78,29 @@ pub(crate) enum Flavour {
 }
 
 /// What flavour a link is.
+///
+/// `radio` is the caller's answer to "is this wireless", which is a question
+/// about the configuration and sysfs rather than about the link -- taking it as
+/// an argument is what keeps this a pure function of things a test can supply.
 #[must_use]
-pub(crate) fn flavour_of(link: &ObservedLink) -> Flavour {
+pub(crate) fn flavour_of(link: &ObservedLink, radio: bool) -> Flavour {
+	// Being a radio outranks the link kind, and outranks being called `lo`.
+	// That is not a convenience: netcfgd's planner starts a supplicant on any
+	// managed device carrying a `wifi` block, whatever the kernel calls the
+	// link, so a shim that decided otherwise would show a device as wired
+	// while the daemon drove it as wireless. Agreeing with the daemon is worth
+	// more than second-guessing the operator.
+	if radio {
+		return Flavour::Wireless;
+	}
 	if link.name == "lo" {
 		return Flavour::Loopback;
 	}
 	// An empty kind is what the kernel reports for a device with no rtnetlink
-	// link-kind: a real NIC. Which of the two it is comes from sysfs, not from
-	// the name -- `eth0` is a convention, not a fact.
+	// link-kind: a real NIC. Which of the two it is does not come from the name
+	// -- `eth0` is a convention, not a fact.
 	if link.kind.is_empty() {
-		if is_wireless(&link.name) {
-			Flavour::Wireless
-		} else {
-			Flavour::Wired
-		}
+		Flavour::Wired
 	} else {
 		Flavour::Generic
 	}
@@ -97,8 +113,8 @@ pub(crate) fn flavour_of(link: &ObservedLink) -> Flavour {
 /// else: generic is NM's own word for a real device it has no special handling
 /// for, while unknown is what clients draw as a fault.
 #[must_use]
-pub(crate) fn type_of(link: &ObservedLink) -> u32 {
-	match flavour_of(link) {
+pub(crate) fn type_of(link: &ObservedLink, radio: bool) -> u32 {
+	match flavour_of(link, radio) {
 		Flavour::Loopback => device_type::LOOPBACK,
 		Flavour::Wireless => device_type::WIFI,
 		Flavour::Wired => device_type::ETHERNET,
@@ -196,7 +212,9 @@ impl Device {
 
 	#[zbus(property)]
 	fn device_type(&self) -> u32 {
-		self.link().as_ref().map_or(device_type::UNKNOWN, type_of)
+		self.link().as_ref().map_or(device_type::UNKNOWN, |link| {
+			type_of(link, self.state.is_radio(&self.interface))
+		})
 	}
 
 	#[zbus(property)]
@@ -496,28 +514,97 @@ impl Wireless {
 		0
 	}
 
+	/// When the last scan finished, in `CLOCK_BOOTTIME` milliseconds.
+	///
+	/// Milliseconds here and seconds on an access point's `LastSeen`, which is
+	/// not a mistake to tidy up: NM defines the two properties on different
+	/// units, clients divide accordingly, and being consistent with ourselves
+	/// would be inconsistent with every reader.
+	///
+	/// -1 means never, which is what a radio reports until something asks it to
+	/// scan.
 	#[zbus(property)]
 	fn last_scan(&self) -> i64 {
-		// -1 is NM's "never scanned". Scan results arrive with the commit that
-		// adds AccessPoint objects; claiming a scan time without them would
-		// make a client wait for results that are not coming.
-		-1
+		self.state
+			.last_scan_seconds(&self.interface)
+			.map_or(-1, |seconds| i64::from(seconds) * 1000)
 	}
 
 	#[zbus(property)]
 	fn access_points(&self) -> Vec<OwnedObjectPath> {
-		Vec::new()
+		self.state
+			.access_points(&self.interface)
+			.into_iter()
+			.map(|(_, number)| crate::accesspoint::path_for(number))
+			.collect()
 	}
 
 	#[zbus(property)]
 	fn active_access_point(&self) -> OwnedObjectPath {
-		no_object()
+		self.state
+			.associated_number(&self.interface)
+			.map_or_else(no_object, crate::accesspoint::path_for)
 	}
 
 	/// Every access point this radio can see.
 	fn get_all_access_points(&self) -> Vec<OwnedObjectPath> {
-		Vec::new()
+		self.access_points()
 	}
+
+	/// The deprecated spelling, which `nm-applet` still calls on older paths.
+	fn get_access_points(&self) -> Vec<OwnedObjectPath> {
+		self.access_points()
+	}
+
+	/// Scan, now.
+	///
+	/// The one method here that makes the radio do something, which is why
+	/// nothing else triggers a scan: NM clients call this when a menu opens,
+	/// and a shim that scanned on a timer would keep a radio busy for nobody.
+	///
+	/// The options dictionary is accepted and ignored. NM uses it to carry a
+	/// list of SSIDs to probe for, which is how hidden networks are found;
+	/// netcfgd's socket takes no such argument, and inventing one for this
+	/// would be the adapter shaping the core that constraint 6 forbids.
+	///
+	/// # Errors
+	///
+	/// Returns netcfgd's own message. "No supplicant is running on wlan0" is
+	/// the useful half of a failed scan, and passing it through means the
+	/// applet shows it.
+	// The macro generates a reference to the argument whether it is used or
+	// not, so an underscore name is both required and complained about.
+	#[allow(clippy::used_underscore_binding)]
+	fn request_scan(
+		&self,
+		options: std::collections::HashMap<String, zbus::zvariant::Value<'_>>,
+	) -> zbus::fdo::Result<()> {
+		// Accepted and dropped, deliberately and visibly. An underscore name
+		// would say the same thing less loudly, and the interface macro
+		// references the binding either way.
+		drop(options);
+		self.state
+			.request_scan(&self.interface)
+			.map_err(zbus::fdo::Error::Failed)
+	}
+
+	/// An access point came into range.
+	///
+	/// libnm keeps its own list and updates it from these rather than re-reading
+	/// the property, so an applet whose menu is open while a scan completes
+	/// depends on this to show what arrived.
+	#[zbus(signal)]
+	pub(crate) async fn access_point_added(
+		emitter: &zbus::object_server::SignalEmitter<'_>,
+		access_point: zbus::zvariant::ObjectPath<'_>,
+	) -> zbus::Result<()>;
+
+	/// And went out of it.
+	#[zbus(signal)]
+	pub(crate) async fn access_point_removed(
+		emitter: &zbus::object_server::SignalEmitter<'_>,
+		access_point: zbus::zvariant::ObjectPath<'_>,
+	) -> zbus::Result<()>;
 }
 
 #[cfg(test)]
@@ -550,8 +637,29 @@ mod tests {
 	/// from a NIC.
 	#[test]
 	fn the_loopback_is_a_loopback_and_not_an_ethernet() {
-		assert_eq!(flavour_of(&link("lo", "")), Flavour::Loopback);
-		assert_eq!(type_of(&link("lo", "")), 32);
+		assert_eq!(flavour_of(&link("lo", ""), false), Flavour::Loopback);
+		assert_eq!(type_of(&link("lo", ""), false), 32);
+	}
+
+	/// A `device` block with a `wifi` section makes a radio, whatever the
+	/// kernel calls the link. That is what netcfgd's planner does -- it starts
+	/// a supplicant on any managed device with that block -- and a shim
+	/// disagreeing would show a device as wired while the daemon drove it as
+	/// wireless.
+	#[test]
+	fn the_configuration_decides_what_is_a_radio() {
+		assert_eq!(flavour_of(&link("wlan0", ""), true), Flavour::Wireless);
+		assert_eq!(type_of(&link("wlan0", ""), true), 2);
+		// Including over a link kind, which is how a test without a radio
+		// arranges to have one.
+		assert_eq!(
+			flavour_of(&link("probe0", "dummy"), true),
+			Flavour::Wireless
+		);
+		assert_eq!(
+			flavour_of(&link("probe0", "dummy"), false),
+			Flavour::Generic
+		);
 	}
 
 	/// Everything with a link kind is generic, and specifically not `UNKNOWN`.
@@ -563,11 +671,11 @@ mod tests {
 	fn everything_with_a_link_kind_is_generic_rather_than_unknown() {
 		for kind in ["bridge", "bond", "vlan", "wireguard", "gre", "ifb", "dummy"] {
 			assert_eq!(
-				flavour_of(&link("x0", kind)),
+				flavour_of(&link("x0", kind), false),
 				Flavour::Generic,
 				"for kind {kind}"
 			);
-			assert_eq!(type_of(&link("x0", kind)), 14, "for kind {kind}");
+			assert_eq!(type_of(&link("x0", kind), false), 14, "for kind {kind}");
 		}
 	}
 
@@ -579,8 +687,8 @@ mod tests {
 	fn the_type_number_always_agrees_with_the_flavour() {
 		for (kind, flavour, number) in [("bridge", Flavour::Generic, 14), ("", Flavour::Wired, 1)] {
 			let link = link("probe0", kind);
-			assert_eq!(flavour_of(&link), flavour);
-			assert_eq!(type_of(&link), number);
+			assert_eq!(flavour_of(&link, false), flavour);
+			assert_eq!(type_of(&link, false), number);
 		}
 	}
 

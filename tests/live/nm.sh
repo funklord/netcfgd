@@ -50,6 +50,7 @@ daemon=
 bus=
 shim_pid=
 cleanup() {
+	[ -n "${fake:-}" ] && kill "$fake" 2>/dev/null
 	[ -n "$shim_pid" ] && kill "$shim_pid" 2>/dev/null
 	[ -n "$bus" ] && kill "$bus" 2>/dev/null
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
@@ -73,6 +74,15 @@ check() {
 	fi
 }
 
+mkdir -p "$work/etc/secrets" "$work/ctrl"
+printf 'hunter2hunter2' > "$work/etc/secrets/home"
+chmod 600 "$work/etc/secrets/home"
+export NCFG_WPA_CTRL_DIR="$work/ctrl"
+
+# `radio0` is a dummy the configuration declares as a radio. netcfgd's planner
+# treats any managed device with a `wifi` block as one whatever the kernel calls
+# the link, so the shim does too -- which is what lets a machine with no
+# wireless hardware exercise the wireless half at all.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 interface probe0 {
 	kind   = "dummy"
@@ -82,7 +92,41 @@ interface probe0 {
 interface quiet0 {
 	kind = "dummy"
 }
+
+device radio0 {
+	wifi { backend = "wpa_supplicant" }
+}
+
+interface radio0 {
+	kind = "dummy"
+}
+
+# WPA3 deliberately, and not the WPA2 the scan flags say. The shim guesses
+# WPA2-PSK for a secured network it has no configuration for, so a configured
+# network that is also WPA2 makes the "the document is consulted" check pass
+# whether it is consulted or not -- which is what happened, and was found by
+# removing the lookup and watching the test still pass.
+network "HomeFiber" {
+	wifi { psk = "@secret:home"; proto = "wpa3" }
+}
 CONF
+
+# A radio, without a radio. The fake supplicant answers the four commands
+# netcfgd sends with canned scan results, so everything downstream of "the scan
+# returned" -- which for the shim is all of the arithmetic a client renders --
+# can be checked against known inputs. wifi.sh drives a *real* supplicant and is
+# what proves the protocol parsing; this proves the translation.
+fake=
+if command -v python3 >/dev/null 2>&1; then
+	python3 "$repo/tests/live/fake_supplicant.py" "$work/ctrl" radio0 > "$work/fake.log" 2>&1 &
+	fake=$!
+	waited=0
+	while [ ! -e "$work/ctrl/radio0" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 50 ] && break
+		sleep 0.1
+	done
+fi
 
 "$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
 daemon=$!
@@ -213,6 +257,84 @@ until [ -z "$(field quiet0)" ]; do
 done
 check "a link that goes away leaves the device list" "$(field quiet0)" ""
 check "and the others are still there" "$(field probe0)" "dummy:connected"
+
+# ----------------------------------------------------------------- wireless
+
+if [ -z "$fake" ]; then
+	echo "nm.sh: skipping the wireless checks: no python3 for the fake radio"
+else
+	check "a device the config calls a radio is wifi, whatever the link kind" \
+		"$(devices | awk -F: '$1 == "radio0" { print $2 }')" "wifi"
+
+	wifi() { nmcli --terse --fields "$1" device wifi list --rescan no 2>/dev/null; }
+
+	check "every access point the scan found is listed" \
+		"$(wifi SSID | grep -c .)" "3"
+	check "and the names came through" \
+		"$(wifi SSID | sort | tr '\n' ' ')" "Cafe Distant HomeFiber "
+
+	# The conversion NM clients draw signal bars from. -40 dBm is the top of
+	# NM's scale, -100 the bottom, and -53 is the level that produces the 79 a
+	# real NetworkManager reported while this was written.
+	strength_of() {
+		nmcli --terse --fields SSID,SIGNAL device wifi list --rescan no 2>/dev/null |
+			awk -F: -v want="$1" '$1 == want { print $2 }'
+	}
+	check "the strongest is at the top of NM's scale" "$(strength_of Cafe)" "100"
+	check "the weakest is at the bottom" "$(strength_of Distant)" "0"
+	check "and one in between matches what a real daemon reported" \
+		"$(strength_of HomeFiber)" "79"
+
+	# Security comes from the configuration where there is one, and from a
+	# guess where there is not. Both must produce something an applet can act
+	# on -- an empty SECURITY column on a secured network means "open" to a
+	# user, which is the one wrong answer that matters.
+	security_of() {
+		nmcli --terse --fields SSID,SECURITY device wifi list --rescan no 2>/dev/null |
+			awk -F: -v want="$1" '$1 == want { print $2 }'
+	}
+	check "a configured network reports the security the config gives it" \
+		"$(security_of HomeFiber)" "WPA3"
+	check "an open network reports none" "$(security_of Cafe)" ""
+	check "and an unconfigured secured one is guessed, not left blank" \
+		"$(security_of Distant)" "WPA2"
+
+	# Which access point the radio is on. Asserted through busctl rather than
+	# through nmcli's IN-USE column: that column is populated from the active
+	# *connection*, which needs Settings and ActiveConnection objects this
+	# build does not have yet. ActiveAccessPoint is the property the shim
+	# implements, so it is the property the test reads.
+	if command -v busctl >/dev/null 2>&1; then
+		radio_path=$(busctl --user --address="$address" call \
+			org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+			org.freedesktop.NetworkManager GetDeviceByIpIface s radio0 2>/dev/null |
+			awk '{print $2}' | tr -d '"')
+		active=$(busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$radio_path" \
+			org.freedesktop.NetworkManager.Device.Wireless ActiveAccessPoint 2>/dev/null |
+			awk '{print $2}' | tr -d '"')
+		# The SSID as octets, which is how NM carries it. "HomeFiber" is
+		# 9 bytes starting with 72 ('H').
+		ssid=$(busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$active" \
+			org.freedesktop.NetworkManager.AccessPoint Ssid 2>/dev/null)
+		check "the radio reports which access point it is on" \
+			"$ssid" "ay 9 72 111 109 101 70 105 98 101 114"
+	fi
+
+	# RequestScan is a request: NM's own semantics have it return immediately
+	# and the results arrive as signals. What must not happen is an error.
+	check "a client can ask for a scan" \
+		"$(nmcli device wifi rescan ifname radio0 2>&1 | grep -c Error || true)" "0"
+
+	# A device that is not a radio has no Wireless interface at all, so the
+	# refusal a client sees comes from libnm before the call is made. The
+	# shim's own refusal is unreachable this way and is covered by a unit test
+	# instead; what this asserts is that the answer is "no" rather than a scan
+	# that would never produce anything.
+	check "asking a non-radio to scan is refused" \
+		"$(nmcli device wifi rescan ifname probe0 2>&1 | grep -ci "error\|not a wi" || true)" "1"
+fi
 
 echo
 if [ "$failures" -eq 0 ]; then

@@ -75,6 +75,72 @@ pub(crate) fn observed(socket: &Path) -> Result<Observed, String> {
 	}
 }
 
+/// The compiled desired-state document.
+///
+/// # Errors
+///
+/// Returns a message if the daemon cannot be reached or answers with something
+/// other than a document.
+pub(crate) fn document(socket: &Path) -> Result<netcfgd_model::Document, String> {
+	match ask(socket, &Request::Show)? {
+		Response::Document(document) => Ok(*document),
+		other => Err(format!(
+			"asked netcfgd for the document and got {}",
+			describe(&other)
+		)),
+	}
+}
+
+/// Scan for access points on a radio.
+///
+/// This is the one request here that makes the hardware do something, so it is
+/// only sent when a client asks -- `RequestScan`, or the first time a radio is
+/// published. NM clients call it when a menu opens, which is exactly when a
+/// scan is wanted; scanning on a timer would keep a radio busy for nobody.
+///
+/// # Errors
+///
+/// Returns netcfgd's own message. A radio with no supplicant running says so,
+/// and passing that through unchanged is more use than "scan failed".
+pub(crate) fn scan(
+	socket: &Path,
+	interface: &str,
+) -> Result<Vec<netcfgd_proto::ScanEntry>, String> {
+	let request = Request::WifiScan {
+		interface: interface.to_owned(),
+	};
+	match ask(socket, &request)? {
+		Response::WifiScan(report) => Ok(report.access_points),
+		other => Err(format!(
+			"asked netcfgd to scan and got {}",
+			describe(&other)
+		)),
+	}
+}
+
+/// Which access point a radio is associated with, if any.
+///
+/// # Errors
+///
+/// Returns netcfgd's own message.
+pub(crate) fn associated(socket: &Path, interface: &str) -> Result<Option<String>, String> {
+	let request = Request::WifiStatus {
+		interface: interface.to_owned(),
+	};
+	match ask(socket, &request)? {
+		// An unassociated radio reports a state and no BSSID. The supplicant
+		// also spells "not associated" as an all-zero address, which is not a
+		// BSSID any scan will match, so it is read as absence.
+		Response::WifiStatus(status) => Ok(status
+			.bssid
+			.filter(|bssid| bssid != "00:00:00:00:00:00" && !bssid.is_empty())),
+		other => Err(format!(
+			"asked netcfgd for radio status and got {}",
+			describe(&other)
+		)),
+	}
+}
+
 /// What a response is, for an error message.
 ///
 /// Named rather than silently ignored: a client that treats an unexpected

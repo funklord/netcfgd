@@ -271,7 +271,7 @@ impl Compat {
 		[
 			("devices".to_owned(), true),
 			("device_state".to_owned(), true),
-			("wifi_scan".to_owned(), false),
+			("wifi_scan".to_owned(), true),
 			("connections".to_owned(), false),
 			("activation".to_owned(), false),
 			("secret_agents".to_owned(), false),

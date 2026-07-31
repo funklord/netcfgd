@@ -6,7 +6,8 @@
 //! function of that snapshot, which is what makes the whole surface testable
 //! by handing it an `Observed` and asking what NM would have said.
 
-use netcfgd_model::{Observed, ObservedLink};
+use netcfgd_model::{Document, Observed, ObservedLink, Security};
+use netcfgd_proto::ScanEntry;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -30,11 +31,30 @@ pub(crate) fn is_link_local(address: &str) -> bool {
 	lowered.starts_with("fe80:") || lowered.starts_with("169.254.")
 }
 
+/// Something the main loop has to do, from somewhere that cannot do it.
+///
+/// Only one thing so far. A D-Bus method runs on zbus's own thread and has no
+/// access to the object server from a blocking context, and a scan has to end
+/// with objects being registered and signals emitted. So `RequestScan` posts
+/// the job and returns, which is also what NM's own semantics ask for: the
+/// call is a request, and the results arrive later as `AccessPointAdded` and a
+/// changed `LastScan`. Blocking the caller until the radio finished would be a
+/// different method than the one clients think they are calling.
+#[derive(Debug)]
+pub(crate) enum Job {
+	/// Re-read the observed state.
+	Refresh,
+	/// Scan on one radio.
+	Scan(String),
+}
+
 /// Everything the shim knows.
 pub(crate) struct State {
 	/// Where netcfgd listens.
 	socket: PathBuf,
 	inner: Mutex<Inner>,
+	/// How to reach the main loop.
+	jobs: Mutex<Option<std::sync::mpsc::Sender<Job>>>,
 }
 
 #[derive(Default)]
@@ -49,6 +69,28 @@ struct Inner {
 	numbers: BTreeMap<String, u32>,
 	/// The next number to hand out.
 	next: u32,
+	/// The compiled document, for the things an observation cannot say.
+	///
+	/// Two of them so far: which devices netcfgd treats as radios, and what
+	/// security a configured network actually uses. Both are the configuration
+	/// answering rather than the shim guessing, which is the whole shape of
+	/// this program.
+	document: Option<Document>,
+	/// The last scan on each radio, newest first as netcfgd sorted it.
+	scans: BTreeMap<String, Vec<ScanEntry>>,
+	/// `(interface, bssid)` to the number in its D-Bus path.
+	///
+	/// Never reused, for the reason device numbers are not: an applet holds
+	/// `/AccessPoint/7` while its menu is open, and handing that path to a
+	/// different network mid-scan would have the user click on one name and
+	/// join another.
+	ap_numbers: BTreeMap<(String, String), u32>,
+	/// The next access point number to hand out.
+	next_ap: u32,
+	/// Seconds since boot at the last scan of each radio.
+	last_scan: BTreeMap<String, i32>,
+	/// The BSSID each radio is associated with, where it is.
+	associated: BTreeMap<String, String>,
 }
 
 /// What changed about the device list across a refresh.
@@ -64,6 +106,15 @@ pub(crate) struct Changes {
 	pub(crate) removed: Vec<(String, u32)>,
 }
 
+/// What changed about one radio's access points across a scan.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct ApChanges {
+	/// `(interface, bssid, number)` for each access point that appeared.
+	pub(crate) added: Vec<(String, String, u32)>,
+	/// The same for each that is no longer in range.
+	pub(crate) removed: Vec<(String, String, u32)>,
+}
+
 impl State {
 	/// A state that has spoken to nobody yet.
 	#[must_use]
@@ -75,9 +126,254 @@ impl State {
 				// daemon does it, so a client with an off-by-one bug nobody
 				// has found will not find it here.
 				next: 1,
+				next_ap: 1,
 				..Inner::default()
 			}),
+			jobs: Mutex::new(None),
 		}
+	}
+
+	/// Tell the state how to reach the main loop.
+	pub(crate) fn set_jobs(&self, sender: std::sync::mpsc::Sender<Job>) {
+		let mut jobs = self
+			.jobs
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		*jobs = Some(sender);
+	}
+
+	/// Ask for a scan on a radio.
+	///
+	/// Returns as soon as the job is posted, which is what NM's `RequestScan`
+	/// means. The refusals here are the ones that can be decided without
+	/// touching the radio; anything the scan itself fails at arrives as no new
+	/// access points, and netcfgd's message is logged rather than returned,
+	/// because by then the caller has gone.
+	///
+	/// # Errors
+	///
+	/// Returns a message if the interface is not a radio netcfgd knows about,
+	/// or if the main loop is gone.
+	pub(crate) fn request_scan(&self, interface: &str) -> Result<(), String> {
+		if !self.is_radio(interface) {
+			return Err(format!(
+				"{interface} is not a radio netcfgd manages. A wireless device needs a \
+				 `device {interface} {{ wifi {{ }} }}` block before netcfgd will drive it"
+			));
+		}
+		let jobs = self
+			.jobs
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let Some(sender) = jobs.as_ref() else {
+			return Err("the shim is still starting up".to_owned());
+		};
+		sender
+			.send(Job::Scan(interface.to_owned()))
+			.map_err(|_| "the shim is shutting down".to_owned())
+	}
+
+	/// Scan, and take the result. Called from the main loop.
+	///
+	/// # Errors
+	///
+	/// Returns netcfgd's own message.
+	pub(crate) fn rescan(&self, interface: &str) -> Result<ApChanges, String> {
+		let entries = crate::client::scan(&self.socket, interface)?;
+		Ok(self.adopt_scan(interface, entries))
+	}
+
+	/// Ask which access point each radio is on, and record it.
+	pub(crate) fn refresh_associations(&self) {
+		for (interface, _) in self.devices() {
+			if !self.is_radio(&interface) {
+				continue;
+			}
+			// A radio with no supplicant answers with an error, which is not
+			// worth reporting on every reconcile -- it is the ordinary state of
+			// a radio the configuration has not been applied to yet.
+			if let Ok(bssid) = crate::client::associated(&self.socket, &interface) {
+				self.adopt_association(&interface, bssid);
+			}
+		}
+	}
+
+	/// Every radio netcfgd knows about.
+	#[must_use]
+	pub(crate) fn radios(&self) -> Vec<String> {
+		self.devices()
+			.into_iter()
+			.map(|(name, _)| name)
+			.filter(|name| self.is_radio(name))
+			.collect()
+	}
+
+	/// Take the compiled document as the current one.
+	pub(crate) fn adopt_document(&self, document: Option<Document>) {
+		let mut inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner.document = document;
+	}
+
+	/// Whether netcfgd treats this interface as a radio.
+	///
+	/// The document first, and sysfs only as a fallback. `device wlan0 { wifi
+	/// {} }` is what makes netcfgd start a supplicant on an interface -- it is
+	/// the planner's own definition of a radio -- so it is the right answer
+	/// here too, and it is the one that can be arranged in a test on a machine
+	/// with no wireless hardware.
+	#[must_use]
+	pub(crate) fn is_radio(&self, interface: &str) -> bool {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let declared = inner.document.as_ref().is_some_and(|document| {
+			document
+				.devices
+				.iter()
+				.any(|device| device.name == interface && device.managed && device.wifi.is_some())
+		});
+		drop(inner);
+		declared || crate::device::has_sysfs_wireless(interface)
+	}
+
+	/// What the configuration says a network's security is.
+	#[must_use]
+	pub(crate) fn security_of(&self, network_id: &str) -> Option<Security> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner.document.as_ref().and_then(|document| {
+			document
+				.networks
+				.iter()
+				.find(|network| network.id == network_id)
+				.map(|network| network.security.clone())
+		})
+	}
+
+	/// Take a scan result as the current one for a radio, and say what moved.
+	pub(crate) fn adopt_scan(&self, interface: &str, entries: Vec<ScanEntry>) -> ApChanges {
+		let mut inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let mut changes = ApChanges::default();
+		// Held outside the loop because the map is borrowed by the entry API
+		// while a number is being handed out, and `inner.next_ap` cannot be
+		// read through that borrow.
+		let mut next_ap = inner.next_ap;
+
+		for entry in &entries {
+			let key = (interface.to_owned(), entry.bssid.clone());
+			if let std::collections::btree_map::Entry::Vacant(slot) = inner.ap_numbers.entry(key) {
+				let number = next_ap;
+				next_ap += 1;
+				slot.insert(number);
+				changes
+					.added
+					.push((interface.to_owned(), entry.bssid.clone(), number));
+			}
+		}
+		inner.next_ap = next_ap;
+
+		let seen: Vec<String> = entries.iter().map(|entry| entry.bssid.clone()).collect();
+		inner.ap_numbers.retain(|(iface, bssid), number| {
+			if iface != interface || seen.contains(bssid) {
+				true
+			} else {
+				changes
+					.removed
+					.push((iface.clone(), bssid.clone(), *number));
+				false
+			}
+		});
+
+		inner.scans.insert(interface.to_owned(), entries);
+		inner
+			.last_scan
+			.insert(interface.to_owned(), crate::accesspoint::boot_seconds());
+		changes
+	}
+
+	/// One entry from the last scan on a radio.
+	#[must_use]
+	pub(crate) fn scan_entry(&self, interface: &str, bssid: &str) -> Option<ScanEntry> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner
+			.scans
+			.get(interface)?
+			.iter()
+			.find(|entry| entry.bssid == bssid)
+			.cloned()
+	}
+
+	/// Every access point on a radio, with its number, strongest first.
+	///
+	/// Scan order, not sorted here: netcfgd already returns them strongest
+	/// first, and that is the order an applet's menu should be in.
+	#[must_use]
+	pub(crate) fn access_points(&self, interface: &str) -> Vec<(String, u32)> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let Some(entries) = inner.scans.get(interface) else {
+			return Vec::new();
+		};
+		entries
+			.iter()
+			.filter_map(|entry| {
+				inner
+					.ap_numbers
+					.get(&(interface.to_owned(), entry.bssid.clone()))
+					.map(|number| (entry.bssid.clone(), *number))
+			})
+			.collect()
+	}
+
+	/// When the last scan on a radio finished, in seconds since boot.
+	#[must_use]
+	pub(crate) fn last_scan_seconds(&self, interface: &str) -> Option<i32> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner.last_scan.get(interface).copied()
+	}
+
+	/// Record which access point a radio is associated with.
+	pub(crate) fn adopt_association(&self, interface: &str, bssid: Option<String>) {
+		let mut inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		match bssid {
+			Some(bssid) => inner.associated.insert(interface.to_owned(), bssid),
+			None => inner.associated.remove(interface),
+		};
+	}
+
+	/// The number of the access point a radio is on, if it is on one this scan
+	/// found.
+	#[must_use]
+	pub(crate) fn associated_number(&self, interface: &str) -> Option<u32> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let bssid = inner.associated.get(interface)?;
+		inner
+			.ap_numbers
+			.get(&(interface.to_owned(), bssid.clone()))
+			.copied()
 	}
 
 	/// Ask netcfgd what the machine looks like, and say what moved.
@@ -217,6 +513,18 @@ mod tests {
 		}
 	}
 
+	fn entry(bssid: &str, signal: i32) -> ScanEntry {
+		ScanEntry {
+			bssid: bssid.to_owned(),
+			frequency: 2412,
+			signal,
+			secured: true,
+			ssid: "686f6d65".to_owned(),
+			name: Some("home".to_owned()),
+			configured: None,
+		}
+	}
+
 	fn observed(names: &[&str]) -> Observed {
 		Observed {
 			links: names.iter().map(|name| link(name)).collect(),
@@ -274,6 +582,76 @@ mod tests {
 		// Not a prefix match on the text: this is a routable address that
 		// merely starts with the same digits.
 		assert!(!is_link_local("169.25.4.1/24"));
+	}
+
+	/// Scanning something that is not a radio is refused by name.
+	///
+	/// Not reachable through `nmcli`, which refuses before it calls: a device
+	/// with no `.Device.Wireless` interface has no `RequestScan` to reach. It
+	/// is reachable by anything speaking D-Bus directly, and the message is
+	/// the difference between "netcfgd does not manage this as a radio" and a
+	/// scan that silently never produces results.
+	#[test]
+	fn scanning_something_that_is_not_a_radio_says_so() {
+		let state = State::new(PathBuf::from("/nowhere"));
+		state.adopt(observed(&["eth0"]));
+		let refusal = state.request_scan("eth0").expect_err("eth0 is not a radio");
+		assert!(refusal.contains("not a radio"), "{refusal}");
+		assert!(
+			refusal.contains("device eth0 { wifi { } }"),
+			"the refusal has to say what would make it one: {refusal}"
+		);
+	}
+
+	/// Access point numbers behave like device numbers: handed out once, never
+	/// reused. An applet holds `/AccessPoint/7` while its menu is open, and
+	/// giving that path to a different network between scans would have the
+	/// user click one name and join another.
+	#[test]
+	fn access_point_numbers_are_stable_across_scans() {
+		let state = State::new(PathBuf::from("/nowhere"));
+		let first = state.adopt_scan("wlan0", vec![entry("aa:aa:aa:aa:aa:aa", -50)]);
+		assert_eq!(
+			first.added,
+			vec![("wlan0".to_owned(), "aa:aa:aa:aa:aa:aa".to_owned(), 1)]
+		);
+
+		// Seen again: same number, nothing announced.
+		let again = state.adopt_scan("wlan0", vec![entry("aa:aa:aa:aa:aa:aa", -60)]);
+		assert_eq!(again, ApChanges::default());
+		// And the entry was replaced, so the signal level is the new one.
+		assert_eq!(
+			state
+				.scan_entry("wlan0", "aa:aa:aa:aa:aa:aa")
+				.map(|e| e.signal),
+			Some(-60)
+		);
+
+		// Out of range, then back: a new number, because the client was told
+		// the old object went away.
+		let gone = state.adopt_scan("wlan0", Vec::new());
+		assert_eq!(
+			gone.removed,
+			vec![("wlan0".to_owned(), "aa:aa:aa:aa:aa:aa".to_owned(), 1)]
+		);
+		let back = state.adopt_scan("wlan0", vec![entry("aa:aa:aa:aa:aa:aa", -50)]);
+		assert_eq!(
+			back.added,
+			vec![("wlan0".to_owned(), "aa:aa:aa:aa:aa:aa".to_owned(), 2)]
+		);
+	}
+
+	/// A scan on one radio must not remove another radio's access points. Two
+	/// radios in one laptop is ordinary, and the first version of this
+	/// retained on bssid alone.
+	#[test]
+	fn a_scan_on_one_radio_leaves_the_other_alone() {
+		let state = State::new(PathBuf::from("/nowhere"));
+		state.adopt_scan("wlan0", vec![entry("aa:aa:aa:aa:aa:aa", -50)]);
+		let other = state.adopt_scan("wlan1", vec![entry("bb:bb:bb:bb:bb:bb", -50)]);
+		assert!(other.removed.is_empty(), "{other:?}");
+		assert_eq!(state.access_points("wlan0").len(), 1);
+		assert_eq!(state.access_points("wlan1").len(), 1);
 	}
 
 	#[test]

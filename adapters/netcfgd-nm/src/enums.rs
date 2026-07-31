@@ -127,6 +127,54 @@ pub(crate) mod wifi_mode {
 	pub(crate) const AP: u32 = 3;
 }
 
+/// `NM80211ApFlags`: what an access point advertises about itself.
+pub(crate) mod ap_flag {
+	/// Nothing.
+	pub(crate) const NONE: u32 = 0;
+	/// Joining it needs a credential. This is the lock icon.
+	pub(crate) const PRIVACY: u32 = 0x1;
+	/// It offers WPS.
+	pub(crate) const WPS: u32 = 0x2;
+}
+
+/// `NM80211ApSecurityFlags`: what it will negotiate.
+///
+/// Checked against a running `NetworkManager` 1.52 rather than transcribed and
+/// hoped for. A WPA2/WPA3 transition access point on the network this was
+/// written on reports `RsnFlags` 1416, which is exactly
+/// `PAIR_CCMP | GROUP_CCMP | KEY_MGMT_PSK | KEY_MGMT_SAE` -- so four of these
+/// constants are confirmed by one number, and [`crate::accesspoint`] asserts it.
+pub(crate) mod ap_security {
+	/// Nothing.
+	pub(crate) const NONE: u32 = 0x0;
+	/// 40-bit WEP as the pairwise cipher.
+	pub(crate) const PAIR_WEP40: u32 = 0x1;
+	/// 104-bit WEP as the pairwise cipher.
+	pub(crate) const PAIR_WEP104: u32 = 0x2;
+	/// TKIP as the pairwise cipher.
+	pub(crate) const PAIR_TKIP: u32 = 0x4;
+	/// CCMP as the pairwise cipher.
+	pub(crate) const PAIR_CCMP: u32 = 0x8;
+	/// 40-bit WEP as the group cipher.
+	pub(crate) const GROUP_WEP40: u32 = 0x10;
+	/// 104-bit WEP as the group cipher.
+	pub(crate) const GROUP_WEP104: u32 = 0x20;
+	/// TKIP as the group cipher.
+	pub(crate) const GROUP_TKIP: u32 = 0x40;
+	/// CCMP as the group cipher.
+	pub(crate) const GROUP_CCMP: u32 = 0x80;
+	/// A pre-shared key.
+	pub(crate) const KEY_MGMT_PSK: u32 = 0x100;
+	/// 802.1X against a RADIUS server.
+	pub(crate) const KEY_MGMT_802_1X: u32 = 0x200;
+	/// WPA3's simultaneous authentication of equals.
+	pub(crate) const KEY_MGMT_SAE: u32 = 0x400;
+	/// Opportunistic wireless encryption.
+	pub(crate) const KEY_MGMT_OWE: u32 = 0x800;
+	/// OWE in transition mode.
+	pub(crate) const KEY_MGMT_OWE_TM: u32 = 0x1000;
+}
+
 /// `NMDeviceCapabilities`.
 pub(crate) mod capability {
 	/// The device is supported by this daemon.
