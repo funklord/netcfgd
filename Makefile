@@ -371,11 +371,25 @@ footprint:
 # section 10.4: under 4 MB resident. What is measured here is
 # the full-tier daemon, so the number is a ratchet like the size one rather
 # than the tier target -- see size-budget.txt for why that distinction exists.
-# Measured at 5400 KB. The headroom is deliberate: resident size varies with
-# allocator behaviour and page reclaim in a way binary size does not, so a
-# limit set at the measurement would fail on noise. A genuine regression --
-# holding every observed snapshot, say -- clears this easily.
-RSS_LIMIT_KB ?= 8192
+# Measured at 5400 KB when this was written. The headroom is deliberate:
+# resident size varies with allocator behaviour and page reclaim in a way
+# binary size does not, so a limit set at the measurement would fail on noise.
+# A genuine regression -- holding every observed snapshot, say -- clears this
+# easily.
+#
+# Raised from 8192 when the station list went in, because the headroom the
+# paragraph above asks for had quietly been spent. Five runs of the *same*
+# binary spanned 7464..7736 KB before that change and 7588..8168 after: a
+# ~600 KB noise band on an identical binary, with peaks landing 24 KB under
+# the old limit. That is a gate about to fail on noise rather than on a
+# regression, which is worse than no gate -- a red build nobody can act on
+# teaches people to re-run it.
+#
+# So this is set from the observed peak plus a full noise band, and the
+# measurement is written down so the next person can tell drift from spread.
+# The feature itself accounts for about 250 KB of the mean; the rest is that
+# nothing has re-measured this since it read 5400.
+RSS_LIMIT_KB ?= 9216
 
 rss:
 	@$(CARGO) build --quiet
@@ -447,6 +461,7 @@ live:
 	fi
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/stations.sh"
 	@# Deliberately not under NCFG_LIVE: unlike wpa_supplicant, which decision
 	@# 0014 makes the floor for wireless, hostapd is an optional package that a
 	@# machine never running an access point has no reason to install (0026).

@@ -34,6 +34,7 @@ use std::sync::{Arc, Mutex};
 enum Pane {
 	Devices,
 	Wifi,
+	Clients,
 	Plan,
 	Events,
 }
@@ -43,6 +44,7 @@ impl Pane {
 		match self {
 			Self::Devices => "devices",
 			Self::Wifi => "wifi",
+			Self::Clients => "clients",
 			Self::Plan => "plan",
 			Self::Events => "events",
 		}
@@ -63,6 +65,7 @@ struct App {
 	status: Option<serde_json::Value>,
 	plan: Option<serde_json::Value>,
 	scan: Option<serde_json::Value>,
+	stations: Option<serde_json::Value>,
 	events: Arc<Mutex<Vec<String>>>,
 	socket: std::path::PathBuf,
 }
@@ -94,6 +97,7 @@ pub(crate) fn run(options: &Options) -> Result<ExitCode, String> {
 		message: String::from("? for keys"),
 		status: None,
 		plan: None,
+		stations: None,
 		scan: None,
 		events: Arc::new(Mutex::new(Vec::new())),
 		socket: socket.clone(),
@@ -239,16 +243,22 @@ impl Layout {
 
 /// The tab bar.
 fn tabs(app: &App, width: usize) -> String {
-	let tabs: Vec<String> = [Pane::Devices, Pane::Wifi, Pane::Plan, Pane::Events]
-		.iter()
-		.map(|pane| {
-			if *pane == app.pane {
-				format!("[{}]", pane.title())
-			} else {
-				format!(" {} ", pane.title())
-			}
-		})
-		.collect();
+	let tabs: Vec<String> = [
+		Pane::Devices,
+		Pane::Wifi,
+		Pane::Clients,
+		Pane::Plan,
+		Pane::Events,
+	]
+	.iter()
+	.map(|pane| {
+		if *pane == app.pane {
+			format!("[{}]", pane.title())
+		} else {
+			format!(" {} ", pane.title())
+		}
+	})
+	.collect();
 	fit(&format!("ncfg  {}", tabs.join("")), width)
 }
 
@@ -257,6 +267,7 @@ fn body(app: &App, width: usize) -> Vec<String> {
 	match app.pane {
 		Pane::Devices => devices(app, width),
 		Pane::Wifi => wifi(app, width),
+		Pane::Clients => clients(app, width),
 		Pane::Plan => plan(app, width),
 		Pane::Events => events(app, width),
 	}
@@ -298,6 +309,16 @@ impl App {
 				self.status = self.fetch(&Request::Status);
 				if let Some(interface) = self.radio() {
 					self.scan = self.fetch(&Request::WifiScan { interface });
+				} else {
+					"no wireless device in the configuration".clone_into(&mut self.message);
+				}
+			}
+			Pane::Clients => {
+				// The same shape as the scan: the operator should not have to
+				// name a radio they can already see on the devices pane.
+				self.status = self.fetch(&Request::Status);
+				if let Some(interface) = self.radio() {
+					self.stations = self.fetch(&Request::ApStations { interface });
 				} else {
 					"no wireless device in the configuration".clone_into(&mut self.message);
 				}
@@ -355,6 +376,10 @@ impl App {
 			(_, b'q' | 0x03) => return false,
 			(_, b'd') => self.go(Pane::Devices),
 			(_, b'w') => self.go(Pane::Wifi),
+			// `s` for stations rather than `c`, which is already `connect` on
+			// the wifi pane. A pane key that works everywhere except one pane
+			// is worse than a letter that does not match the tab name.
+			(_, b's') => self.go(Pane::Clients),
 			(_, b'p') => self.go(Pane::Plan),
 			(_, b'e') => self.go(Pane::Events),
 			(_, b'r') => {
@@ -454,15 +479,25 @@ impl App {
 			status: self.status.clone(),
 			plan: self.plan.clone(),
 			scan: self.scan.clone(),
+			stations: self.stations.clone(),
 			events: Arc::clone(&self.events),
 			socket: self.socket.clone(),
 		}
 	}
 
+	fn station_entries(&self) -> Vec<serde_json::Value> {
+		self.stations
+			.as_ref()
+			.and_then(|value| value.get("stations"))
+			.and_then(serde_json::Value::as_array)
+			.cloned()
+			.unwrap_or_default()
+	}
+
 	fn scan_entries(&self) -> Vec<serde_json::Value> {
 		self.scan
 			.as_ref()
-			.and_then(|value| value.get("entries"))
+			.and_then(|value| value.get("access_points"))
 			.and_then(serde_json::Value::as_array)
 			.cloned()
 			.unwrap_or_default()
@@ -478,8 +513,9 @@ const KEYS: &str =
 ///
 /// Not a repeat of `KEYS`. A help key that prints what is already on the
 /// screen teaches the operator that help is useless.
-const HELP: &str = "a applies with a 60s window: y keeps it, n undoes it now, \
-	 nothing reverts it. `c` marks networks the config can join.";
+const HELP: &str = "d w s p e switch panes (s is clients). a applies with a 60s window: \
+	 y keeps it, n undoes it now, nothing reverts it. `c` marks networks the config can \
+	 join; `!` marks a station the access point should not be talking to.";
 
 fn devices(app: &App, width: usize) -> Vec<String> {
 	let Some(links) = app
@@ -562,6 +598,54 @@ fn wifi(app: &App, width: usize) -> Vec<String> {
 					signal,
 					if secured { "secured" } else { "open" }
 				),
+				width,
+			)
+		})
+		.collect()
+}
+
+/// Who is on the access point.
+///
+/// The marker column is the point of showing this next to a station list at
+/// all: `!` means the document's `access_control` block and what hostapd is
+/// enforcing disagree, which happens because hostapd reads the list once at
+/// startup (decision 0039).
+fn clients(app: &App, width: usize) -> Vec<String> {
+	let entries = app.station_entries();
+	if entries.is_empty() {
+		return vec!["(nobody associated; press r to refresh)".to_owned()];
+	}
+	let policy = app
+		.stations
+		.as_ref()
+		.and_then(|value| value.get("access_control"))
+		.and_then(serde_json::Value::as_str);
+
+	entries
+		.iter()
+		.map(|entry| {
+			let address = entry
+				.get("address")
+				.and_then(serde_json::Value::as_str)
+				.unwrap_or("<no address>");
+			let signal = entry
+				.get("signal")
+				.and_then(serde_json::Value::as_i64)
+				.map_or_else(|| "  -- ".to_owned(), |dbm| format!("{dbm:>4} "));
+			let connected = entry
+				.get("connected_seconds")
+				.and_then(serde_json::Value::as_u64)
+				.map_or_else(|| "--".to_owned(), |seconds| format!("{}m", seconds / 60));
+			let listed = entry.get("listed").and_then(serde_json::Value::as_bool) == Some(true);
+			let authorized =
+				entry.get("authorized").and_then(serde_json::Value::as_bool) == Some(true);
+			let marker = match (policy, listed) {
+				(Some("deny"), true) | (Some("allow"), false) => "!",
+				_ if !authorized => "?",
+				_ => " ",
+			};
+			fit(
+				&format!("{marker} {address:<19} {signal}dBm  {connected:>6}"),
 				width,
 			)
 		})
@@ -689,6 +773,7 @@ mod tests {
 			status: serde_json::from_str(status).ok(),
 			plan: serde_json::from_str(plan).ok(),
 			scan: None,
+			stations: None,
 			events: Arc::new(Mutex::new(Vec::new())),
 			socket: std::path::PathBuf::from("/nonexistent"),
 		}
@@ -776,5 +861,84 @@ mod tests {
 		assert_eq!(fit("ab", 5), "ab   ");
 		assert_eq!(fit("abcdefg", 3), "abc");
 		assert_eq!(fit("", 2), "  ");
+	}
+
+	/// A station list with one of each case that renders differently.
+	const STATIONS: &str = r#"{
+		"interface": "ap0", "access_point": "guest", "access_control": "deny",
+		"stations": [
+			{"address": "00:11:22:33:44:55", "authorized": true, "listed": true,
+			 "signal": -52, "connected_seconds": 3600},
+			{"address": "aa:bb:cc:dd:ee:ff", "authorized": true, "listed": false},
+			{"address": "66:77:88:99:aa:bb", "authorized": false, "listed": false,
+			 "signal": -70, "connected_seconds": 120}
+		]
+	}"#;
+
+	fn clients_app() -> App {
+		let mut app = app(Pane::Clients, STATUS, PLAN);
+		app.stations = serde_json::from_str(STATIONS).ok();
+		app
+	}
+
+	#[test]
+	fn the_clients_pane_marks_a_station_the_acl_should_have_stopped() {
+		let lines = body(&clients_app(), 60);
+		assert_eq!(lines.len(), 3, "{lines:?}");
+		// On the deny list and connected anyway: hostapd was never told the
+		// list changed. That is the marker worth having on screen.
+		assert!(
+			lines[0].starts_with("! 00:11:22:33:44:55"),
+			"{:?}",
+			lines[0]
+		);
+		// Not listed, authorized, ordinary.
+		assert!(
+			lines[1].starts_with("  aa:bb:cc:dd:ee:ff"),
+			"{:?}",
+			lines[1]
+		);
+		// Associated but not authorized.
+		assert!(
+			lines[2].starts_with("? 66:77:88:99:aa:bb"),
+			"{:?}",
+			lines[2]
+		);
+	}
+
+	#[test]
+	fn a_station_with_no_statistics_still_gets_a_line() {
+		let lines = body(&clients_app(), 60);
+		assert!(lines[1].contains("--"), "{:?}", lines[1]);
+		// And one that has them shows them rather than dashes.
+		assert!(lines[0].contains("-52"), "{:?}", lines[0]);
+	}
+
+	#[test]
+	fn an_empty_station_list_says_so_rather_than_drawing_nothing() {
+		let mut app = app(Pane::Clients, STATUS, PLAN);
+		app.stations = serde_json::from_str(r#"{"stations": []}"#).ok();
+		let lines = body(&app, 60);
+		assert!(lines[0].contains("nobody associated"), "{lines:?}");
+	}
+
+	/// The wifi pane read a field the daemon has never sent.
+	///
+	/// `ScanReport`'s list is `access_points`; the pane asked for `entries`,
+	/// so every scan rendered as "(no scan)" from the day the TUI was written.
+	/// Nothing caught it because `tests/live/tui.py` never opens this pane.
+	#[test]
+	fn the_wifi_pane_reads_the_field_the_daemon_sends() {
+		let mut app = app(Pane::Wifi, STATUS, PLAN);
+		app.scan = serde_json::from_str(
+			r#"{"interface": "wl0", "access_points": [
+				{"bssid": "00:11:22:33:44:55", "frequency": 2412, "signal": -53,
+				 "secured": true, "ssid": "486f6d65", "name": "Home"}
+			]}"#,
+		)
+		.ok();
+		let lines = body(&app, 60);
+		assert!(lines[0].contains("Home"), "{lines:?}");
+		assert!(lines[0].contains("-53"), "{lines:?}");
 	}
 }

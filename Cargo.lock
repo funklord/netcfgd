@@ -75,6 +75,7 @@ dependencies = [
  "netcfgd-apply",
  "netcfgd-compile",
  "netcfgd-host",
+ "netcfgd-hostapd",
  "netcfgd-model",
  "netcfgd-observe",
  "netcfgd-plan",

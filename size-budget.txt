@@ -175,4 +175,13 @@ netcfgd
 # +4 KB for `on_unmanage = "clear"`: the policy enum and its serde, the
 # compiler key, the clearing set, and the document filter that lets four
 # teardown passes implement it without knowing it exists.
-total 1858072
+# +48 KB for showing who is connected: the STA-FIRST/STA-NEXT walk and its
+# parser, two protocol types with their serde, the daemon handler, an `ncfg
+# wifi clients` renderer and a fifth TUI pane. The daemon also links
+# netcfgd-hostapd for the first time -- netcfgd-apply already did, so the code
+# was in the binary, but the dependency edge is new.
+#
+# Most of this is serde's generated code for StationReport and StationEntry
+# again, which is the same finding as every previous entry in this file: the
+# types cost more than the logic.
+total 1907224
