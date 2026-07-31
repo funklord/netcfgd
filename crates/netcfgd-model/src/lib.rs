@@ -71,10 +71,20 @@ pub(crate) fn default_true() -> bool {
 
 /// The schema version this build produces and accepts.
 ///
-/// Bumping `minor` means fields were added. Bumping `major` means a consumer
-/// of the old version must refuse the document outright, which is what
-/// [`Document::from_json`] does.
-pub const SCHEMA_VERSION: Version = Version { major: 1, minor: 2 };
+/// **Pinned at 1.0 until netcfgd ships, deliberately** (decision 0038).
+/// Versioning is a promise to consumers, and before a release there are none:
+/// counting minor bumps across a schema still being designed produces a number
+/// that measures how much work happened rather than what anybody can rely on.
+///
+/// This is not a licence to change the schema quietly. The two witnesses under
+/// `docs/schema/` still move on every change and still have to be blessed
+/// deliberately (decision 0020), which is the mechanism that was ever doing
+/// the work -- the version was a weaker second signal alongside it.
+///
+/// Bumping `major` means a consumer of the old version must refuse the
+/// document outright, which is what [`Document::from_json`] does. `minor`
+/// starts counting at the first release.
+pub const SCHEMA_VERSION: Version = Version { major: 1, minor: 0 };
 
 /// A `{major, minor}` schema version.
 ///

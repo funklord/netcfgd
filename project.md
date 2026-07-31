@@ -59,7 +59,9 @@ This is the load-bearing artifact. Everything hangs off it: the compiler emits i
 
 **Determinism.** The same config must produce a byte-identical document. All lists sort by their declared key; field order is fixed by the schema; integers canonical; no floats anywhere; no map types with unordered iteration. This is what makes plan diffs and caching trustworthy.
 
-**Versioning.** `schema_version` is `{major, minor}`. A consumer **rejects** a document whose major differs from its own, and **rejects any document containing a field it does not recognise** — silent field-dropping is forbidden. Adding a field bumps minor. A remote producer must negotiate the consumer's version and emit at or below it.
+**Versioning.** `schema_version` is `{major, minor}`. A consumer **rejects** a document whose major differs from its own, and **rejects any document containing a field it does not recognise** — silent field-dropping is forbidden. A remote producer must negotiate the consumer's version and emit at or below it.
+
+**Not yet, though.** The version is pinned at **1.0 until netcfgd ships** ([0038](docs/decisions/0038-versioning-starts-at-the-first-release.md)): a version is a promise to consumers and there are none before a release, so counting minor bumps through a schema still being designed measures effort rather than compatibility. Adding a field bumps minor *from the first release onwards*. What keeps a schema change visible meanwhile is the pair of witnesses under `docs/schema/`, which move on every change and have to be blessed deliberately ([0020](docs/decisions/0020-the-freeze-is-two-witnesses.md)) — the mechanism that was doing the work all along.
 
 ### 2.1 Types
 
