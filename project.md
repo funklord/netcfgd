@@ -477,8 +477,8 @@ The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are
 
 | Gate | What it checks |
 |---|---|
-| Size budget | stripped static binary: embedded ≤ 1 MB ([0021](docs/decisions/0021-no-nano-tier.md) dropped the 400 KB nano tier) |
-| RSS budget | steady-state < 4 MB |
+| Size budget | `make size`. **Total installed size, not per binary** — merging two binaries that each link most of the workspace makes the one binary bigger and the install a megabyte smaller, so a per-binary gate points the wrong way. It **ratchets**: the limit is the last measured size, and `size-budget.txt` carries a line per feature saying what it bought. The 3% tolerance is for compiler-version noise; spend it on a feature and the next feature fails the gate for the wrong reason. Design §10.2's 1 MB embedded target was measured as unreachable ([0021](docs/decisions/0021-no-nano-tier.md), [0024](docs/decisions/0024-one-binary-and-what-a-megabyte-would-actually-cost.md)) |
+| RSS budget | `make rss`, `VmHWM` of the debug daemon. Design §10.4 wants < 4 MB; what is measured is the full tier, so this ratchets too. **It is noisy in a way the size gate is not** — five runs of an *identical* binary spanned ~600 KB — so the limit carries a full noise band above the observed peak, and the measurements are written down in the Makefile so the next person can tell drift from spread. A limit set at the measurement goes red on noise, and a red build nobody can act on teaches people to re-run it |
 | Filesystem footprint | `find /etc/netcfgd` on a fixture install with no optional features used must match a build compiled without those features |
 | Unsafe policy | `forbid(unsafe_code)` holds everywhere except `netcfgd-sys` |
 | Supply chain | `cargo-deny`, `cargo-audit`, pinned lockfile, stated MSRV |
@@ -565,15 +565,72 @@ Source, comments and commit messages are **ASCII**; write `--` where prose would
 
 Changing any of the above is a convention change: raise it rather than adjusting the default in passing.
 
+### Verifying — the method, which has earned its keep
+
+`make check` is the desk gate and `make live` is the one that finds things. The live suite runs each script in its own network namespace (`unshare -rn`), against a real kernel, with `NCFG_LIVE=1` turning skips into failures — without that variable a missing tool looks exactly like a passing suite.
+
+**Prove every new gate can fail.** Break the thing it guards, watch the named check go red, restore. This has caught a long run of checks that passed for the wrong reason: a `make packaging` check that matched nothing, an unsafe-policy gate that globbed half the tree, a `rows <= 24` assertion that could not fail, a "foreign NAT rule survived" check that passed because the *kernel* refused the delete rather than the planner, and a `tui.py` assertion that pressing `w` shows "no scan" — which passed for as long as the pane existed, because the pane read a field name the daemon has never sent. A gate nobody has seen fail is not evidence.
+
+Two corollaries worth stating, because both cost real time here:
+
+- **A check expecting "nothing there" is satisfied by the feature being broken.** Whenever a check asserts an empty or negative state, ask what makes the populated case appear at all, and assert that instead.
+- **Watch for a check that passes because of a different protection than the one under test.** Breaking the `InQueue` arm of the NM shim's bus-name claim changed nothing, because `DoNotQueue` makes the refusal arrive as an `Err`.
+
+**Prefer a real kernel and a reference tool over fixtures.** Every netlink bug here was found by writing to a kernel and reading it back, never by reading the encoder more carefully. Cross-check against `tc`, `ip rule`, `ip token`, `nft`, `nmcli`, `hostapd` — a round trip through netcfgd alone proves nothing when the same mistake is made in both directions.
+
+Three techniques make that reachable without root or a clean machine:
+
+- An uninstalled reference tool: `apt-get download <pkg>` then `dpkg-deb -x`. That is how the hostapd renderer is checked against a real hostapd 2.10 on a machine with no radio and no hostapd package — it validates its configuration *and* its ACL file before touching a driver, and names the line it dislikes.
+- A tool that cannot be *run* at all still answers through `apt-get source <pkg>`. Reading hostapd's `src/ap/ctrl_iface_ap.c` changed the station parser twice over what `strings` implied. Guessing a wire format from `strings` is a step above guessing; reading the implementation is a step above that.
+- A D-Bus client redirects to a private bus: `dbus-daemon --session --print-address --fork`, exported as **`DBUS_SYSTEM_BUS_ADDRESS`**, which GDBus honours in place of the system bus. That is how `tests/live/nm.sh` drives a real `nmcli` against the shim without touching the NetworkManager running the laptop.
+
+**Fake only what cannot exist, which is a radio — never the protocol.** `fake_supplicant.py` and `fake_hostapd.py` speak the real `wpa_ctrl` wire format with replies copied from upstream source; the real daemons are driven elsewhere, which is what would catch a parser changing its mind. Anything needing a real association needs `mac80211_hwsim` and therefore real root: `sudo sh tests/live/hwsim.sh`, which is the one part of the suite that cannot run unprivileged.
+
+**If a regression would make a test hang rather than fail, wrap it in `timeout`.** A stuck suite reports nothing, which is worse than a red one.
+
 ### Known incompatibilities to carry forward
 
 - **A netifrc `preup` that checks link state deadlocks under netcfgd's ordering.** Rule 6 runs `pre_up` before `link.up`, and the kernel returns `EINVAL` for `carrier` on a down interface, so `mii-tool`/`ethtool` checks cannot work there — and net.example's canonical `preup` aborts on "no link", which then prevents the bring-up that would have produced the carrier. The ordering stays. The warning was to have lived in `ncfg convert`, which [0019](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md) dropped, so the incompatibility is documented and nothing converts. [0011](docs/decisions/0011-preup-runs-before-the-link-is-up.md).
 - **A supplicant must hold no state of its own.** wpa_supplicant runs with no persistent configuration and `update_config=0` set explicitly, and every network arrives over the control socket ([0015](docs/decisions/0015-the-supplicant-holds-no-state.md)). iwd cannot be driven this way — it writes its own network database during connections and has no stateless mode — which is what blocks it, rather than the D-Bus cost ([0014](docs/decisions/0014-wpa-supplicant-is-the-floor-not-the-fallback.md)).
 - **netcfgd will never implement key management or EAP.** Permanently delegated, affirming design §1.5. Scan and BSS selection *could* become netcfgd's, and [0016](docs/decisions/0016-which-half-of-a-supplicant-could-ever-be-ours.md) records the shape and the cost — pinning a BSSID defeats 802.11r fast transition, so it buys explainability and spends roaming quality.
 - **netcfgd does not gate addressing on carrier.** A link is brought up and addressed whether or not a cable is present. The `carrier` hook reports; nothing defers. Noted as a gap in 0011, not scheduled.
+- **hostapd reads its configuration once, at startup.** There is no reload that keeps clients associated, and that shapes more than it looks like: changing an `access_point` block — an SSID, a channel, a station list — means restarting hostapd, which deauthenticates everyone on the radio. For an ACL that is the wrong answer outright, since the feature exists to make a handoff smooth. The control socket takes `DENY_ACL`/`ACCEPT_ACL` with `ADD_MAC`/`DEL_MAC`/`SHOW`/`CLEAR` and `DEAUTHENTICATE <addr>`, all verified present in 2.10, which is enough to converge the live list instead. Not implemented; [0039](docs/decisions/0039-a-station-list-is-one-list.md).
+- **Nothing notices that an access point's configuration changed.** `ObservedBackend` records only whether a backend is *running*, so the planner does not see an edited `access_point` block at all. Older and wider than the ACL, and the reason the point above has no cheap fix.
+- **`ieee80211r` is absent from Debian's hostapd.** Checked directly: not in the binary, and its parser rejects the option. OpenWrt's build generally includes it. So 802.11r fast transition is a per-distribution packaging question before it is a netcfgd feature, and any support has to detect it rather than assume — as [0026](docs/decisions/0026-an-access-point-is-a-file-hostapd-reads.md) handles hostapd's other optional pieces.
+- **There is no client hostname to show.** hostapd knows hardware addresses; a friendly name would have to come from DHCP leases, and netcfgd runs no DHCP server. `ncfg wifi clients` shows a MAC rather than inventing a label.
+- **A MAC-based allow list is policy, not security.** An address is asserted by the station and changed with one command. It keeps honest devices off a network and stops nobody who does not want to be stopped; anything that must be secure belongs in `wifi { .. }` where the key material is.
 
 ---
 
-## 10. Reference
+## 10. Where this is now, and what to pick up next
+
+Kept current deliberately: this is the section to read after a break, and the one to rewrite rather than append to.
+
+### State
+
+M1–M6 are done. M7's NetworkManager shim has tiers 1 and 2 complete and tier 3 bounded rather than built — and **tier 3 bounds the shim, not netcfgd** ([0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md)), which is the single easiest thing in this repository to misread. VPN, modems and complete wifi are wanted in netcfgd and will simply not be projected through NM's interfaces.
+
+The M4 freeze's four inert features are all closed. Access points now go further than the freeze described: a station list ([0039](docs/decisions/0039-a-station-list-is-one-list.md)) and the live client list that makes it usable ([0040](docs/decisions/0040-a-station-list-needs-a-station-list.md)).
+
+The schema version is pinned at 1.0 until the first release ([0038](docs/decisions/0038-versioning-starts-at-the-first-release.md)). That is not a licence to change it quietly — the two witnesses under `docs/schema/` still move on every change and still need a deliberate `make schema-bless`, which was always the mechanism doing the work.
+
+### Next, roughly in order
+
+1. **Converge an access point's ACL over the control socket** instead of restarting hostapd. The commands are verified to exist; what is missing is observation over a control socket, which nothing does today. It is first because the feature it completes is already shipped and visibly incomplete — `ncfg wifi clients` marks a station that is on the deny list and connected anyway, which is honest and not a fix. See the two carried-forward notes about hostapd in §9.
+2. **Refuse a plan that would strand credentials.** [0037](docs/decisions/0037-clear-then-unmanage.md) left this open: `on_unmanage = "clear"` exists, but nothing *warns* somebody unmanaging a device that holds a WireGuard key, a supplicant's passphrases or a running hostapd's generated config. The shape that fits is `--allow-disruption`'s — notice, refuse, make the operator say which they meant. A prompt belongs to whichever client is in front of a person; the core has no UI and must not grow one to be safe.
+3. **Decide the modem backend.** ModemManager (D-Bus, therefore an optional package by constraint 3) or QMI/MBIM directly (large, keeps the dependency posture). Deserves its own record before any code.
+4. **WireGuard as a first-class NM device**, if the shim is worth more attention than the core.
+
+Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN (openvpn, then the harder ipsec) end-stage, complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one.
+
+### Things that are true and non-obvious
+
+- **`make live` is where defects are found**, not `make check`. Nearly every real bug in the last several milestones came from a real kernel or a real reference tool, and several came from a test that had been passing for the wrong reason.
+- **`switch.sh` failed once, unreproduced.** The socket appearing does not mean the first apply has finished — the daemon binds before it converges — so the veth peers are not guaranteed to exist when a script that waited on the socket uses them. The window is real, smaller than a `fork`+`exec`, and has never been caught open. The wait added there is not claimed as the diagnosis; what it does is report the failure with the daemon log instead of a message about permissions.
+- **Size and RSS both ratchet, and RSS is noisy.** See §6. Raising either is a deliberate, reviewable edit with a line saying what it bought.
+
+---
+
+## 11. Reference
 
 Full rationale, principles, comparisons, security model, migration paths and the northbound-adapter discipline are in **`netcfgd-design.md`** (v0.6). Read §2 (principles), §4 (architecture and the compiler/reconciler seam), §9.2 (the one-way rule) and §10 (embedded tiers) before making structural decisions.
