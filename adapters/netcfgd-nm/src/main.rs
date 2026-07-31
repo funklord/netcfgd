@@ -24,10 +24,12 @@ mod accesspoint;
 mod active;
 mod client;
 mod device;
+mod emit;
 mod enums;
 mod manager;
 mod settings;
 mod state;
+mod store;
 
 use state::State;
 use std::sync::Arc;
@@ -219,6 +221,17 @@ fn serve(session: bool) -> Result<(), String> {
 				publish_active(&connection, &state)?;
 				republish_wireless(&connection, &state)?;
 			}
+			// A file changed under /etc because a client asked for it. Reload,
+			// and reconcile the objects that describe the configuration --
+			// which is work a method handler cannot do for itself, because
+			// unregistering an object it was called on would wait for itself.
+			state::Job::Reload => match state.reload() {
+				Ok(profiles) => {
+					publish_profiles(&connection, &state, &profiles)?;
+					publish_active(&connection, &state)?;
+				}
+				Err(error) => eprintln!("netcfgd-nm: cannot re-read the configuration: {error}"),
+			},
 			state::Job::Scan(interface) => match state.rescan(&interface) {
 				Ok(changes) => {
 					publish_access_points(&connection, &state, &changes)?;
