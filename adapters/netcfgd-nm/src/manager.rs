@@ -379,7 +379,8 @@ impl Compat {
 			("wifi_scan".to_owned(), true),
 			("connections".to_owned(), true),
 			("activation".to_owned(), true),
-			("profile_writes".to_owned(), false),
+			("profile_writes".to_owned(), true),
+			("profile_writes_wifi_only".to_owned(), true),
 			("secret_agents".to_owned(), false),
 		]
 		.into_iter()

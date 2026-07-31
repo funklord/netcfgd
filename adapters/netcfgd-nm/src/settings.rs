@@ -318,41 +318,93 @@ impl Settings {
 
 	/// Create a profile.
 	///
+	/// Design section 9.4: this writes a netcfgd `network` block into the
+	/// operator's configuration and reloads. There is no profile store to add
+	/// to -- the file *is* the profile, and it stays valid with this program
+	/// uninstalled.
+	///
 	/// # Errors
 	///
-	/// Always, for now. Design section 9.4 has GUI-created profiles written as
-	/// native config under `/etc/netcfgd/conf.d/nm/` -- a real feature with a
-	/// real design, and one that has to get atomic writes, reload and the
-	/// secret provider right. Refusing by name beats accepting and losing it.
-	fn add_connection(&self, settings: Dict) -> zbus::fdo::Result<OwnedObjectPath> {
-		drop(settings);
-		Err(zbus::fdo::Error::AuthFailed(
-			"this build of netcfgd-nm cannot create profiles. netcfgd's configuration \
-			 files are the only authority, and writing them from a GUI needs the \
-			 conf.d/nm directory that design section 9.4 describes and this build does \
-			 not have yet. Write the `network` block and run `ncfg apply`"
-				.to_owned(),
-		))
+	/// Returns a refusal naming what could not be written: a caller who may not
+	/// change the configuration, a connection type netcfgd has no block for, or
+	/// a configuration that no longer compiles with the new file in it.
+	async fn add_connection(
+		&self,
+		settings: Dict,
+		#[zbus(header)] header: zbus::message::Header<'_>,
+		#[zbus(connection)] connection: &zbus::Connection,
+	) -> zbus::fdo::Result<OwnedObjectPath> {
+		let caller = caller_uid(&header, connection).await?;
+		self.authorize(caller)?;
+
+		let emitted = crate::emit::network_block(&settings)
+			.map_err(|error| zbus::fdo::Error::InvalidArgs(error.to_string()))?;
+		let identity = format!("network:{}", emitted.id);
+
+		crate::store::write(&emitted).map_err(zbus::fdo::Error::Failed)?;
+
+		// Reload before answering, so a client that reads the returned path
+		// immediately finds an object there. It also means a block that does
+		// not compile is reported *here*, as a failed AddConnection, rather
+		// than as a machine that quietly stopped reconciling.
+		if let Err(error) = self.state.reload() {
+			// The file is what broke the configuration, so it goes. Leaving it
+			// would leave the machine with a config that does not compile
+			// because of something a GUI did and nobody can see.
+			let _ = crate::store::remove(&emitted.id);
+			let _ = self.state.reload();
+			return Err(zbus::fdo::Error::Failed(format!(
+				"netcfgd would not accept the new network: {error}. The file has been \
+				 removed again"
+			)));
+		}
+
+		let path = self
+			.state
+			.profiles()
+			.into_iter()
+			.find(|(profile, _)| profile.identity() == identity)
+			.map(|(_, number)| path_for(number))
+			.ok_or_else(|| {
+				zbus::fdo::Error::Failed(format!(
+					"wrote `{}` but netcfgd does not report it; the file may have been \
+					 overridden by another block with the same name",
+					emitted.id
+				))
+			})?;
+
+		// Serve it before answering. The main loop publishes profiles too, when
+		// netcfgd's reload event arrives -- but a client calls `GetSettings` on
+		// the path this returns immediately, and "operation succeeded but the
+		// object does not exist" is what it says when the two race. Registering
+		// here is idempotent with the main loop's pass.
+		self.republish(connection.object_server()).await?;
+		Ok(path)
 	}
 
 	/// The newer spelling, which `nmcli connection add` prefers.
 	///
-	/// Present for the reason the refusals below all exist: a client that finds
-	/// the method missing reports "Unknown method 'AddConnection2'", which
-	/// tells the operator nothing about netcfgd. One that finds it and is
-	/// refused shows the sentence explaining where profiles come from here.
+	/// It has to exist rather than being left to the older one: a client that
+	/// finds the method missing reports "Unknown method 'AddConnection2'",
+	/// which tells the operator nothing about netcfgd whether the answer is
+	/// yes or no.
 	///
 	/// # Errors
 	///
-	/// Always, as [`Self::add_connection`].
-	fn add_connection2(
+	/// As [`Self::add_connection`]. The flags and extra arguments are NM's
+	/// (block-autoconnect, and a request for the settings back); neither
+	/// changes what is written, so both are dropped rather than half-honoured.
+	async fn add_connection2(
 		&self,
 		settings: Dict,
 		flags: u32,
 		args: HashMap<String, OwnedValue>,
+		#[zbus(header)] header: zbus::message::Header<'_>,
+		#[zbus(connection)] connection: &zbus::Connection,
 	) -> zbus::fdo::Result<(OwnedObjectPath, HashMap<String, OwnedValue>)> {
-		drop((settings, flags, args));
-		self.add_connection(Dict::new())
+		drop((flags, args));
+		self.add_connection(settings, header, connection)
+			.await
 			.map(|path| (path, HashMap::new()))
 	}
 
@@ -365,7 +417,12 @@ impl Settings {
 	/// exactly the hidden state constraint 1 forbids.
 	fn add_connection_unsaved(&self, settings: Dict) -> zbus::fdo::Result<OwnedObjectPath> {
 		drop(settings);
-		self.add_connection(Dict::new())
+		Err(zbus::fdo::Error::AuthFailed(
+			"netcfgd has nowhere to put an unsaved profile. Its authority is its files, \
+			 and a profile held only in this process would be exactly the hidden state \
+			 constraint 1 exists to prevent"
+				.to_owned(),
+		))
 	}
 
 	/// Re-read the configuration.
@@ -376,7 +433,7 @@ impl Settings {
 	fn reload_connections(&self) -> zbus::fdo::Result<bool> {
 		self.state
 			.reload()
-			.map(|()| true)
+			.map(|_| true)
 			.map_err(zbus::fdo::Error::Failed)
 	}
 
@@ -399,12 +456,56 @@ impl Settings {
 
 	#[zbus(property)]
 	fn can_modify(&self) -> bool {
-		// False, and clients render it: a GUI that reads this greys out its
-		// "add" button rather than offering one that fails. That is a better
-		// experience than the error above, which exists for clients that ask
-		// anyway.
-		false
+		// True now that profiles can be created. Clients render this: a GUI
+		// that reads false greys out its "add" button, which would hide a
+		// feature that works.
+		true
 	}
+}
+
+impl Settings {
+	/// Make sure every profile netcfgd reports has an object.
+	///
+	/// Idempotent: `at` answers false for a path already served, so this can
+	/// run from a method handler and from the main loop without the two
+	/// treading on each other.
+	async fn republish(&self, server: &zbus::ObjectServer) -> zbus::fdo::Result<()> {
+		for (profile, number) in self.state.profiles() {
+			server
+				.at(
+					path_for(number),
+					Connection::new(Arc::clone(&self.state), profile.identity()),
+				)
+				.await?;
+		}
+		Ok(())
+	}
+
+	/// Whether a caller may change the configuration.
+	fn authorize(&self, caller: u32) -> zbus::fdo::Result<()> {
+		crate::store::may_write(caller, &self.state.admin_principal())
+			.map_err(zbus::fdo::Error::AuthFailed)
+	}
+}
+
+/// Who is calling.
+///
+/// From the bus rather than from the message: a sender name can be anything the
+/// client puts there, and `GetConnectionUnixUser` is the bus telling us what it
+/// knows about the connection. That distinction is the whole security of this.
+pub(crate) async fn caller_uid(
+	header: &zbus::message::Header<'_>,
+	connection: &zbus::Connection,
+) -> zbus::fdo::Result<u32> {
+	let Some(sender) = header.sender() else {
+		return Err(zbus::fdo::Error::AuthFailed(
+			"the bus did not say who is calling, so this cannot decide whether they may \
+			 change the configuration"
+				.to_owned(),
+		));
+	};
+	let bus = zbus::fdo::DBusProxy::new(connection).await?;
+	bus.get_connection_unix_user(sender.clone().into()).await
 }
 
 /// One connection profile.
@@ -475,12 +576,52 @@ impl Connection {
 	/// this reason: a stray click in a settings panel must not rewrite a tuned
 	/// `interface eth0`, and the error a GUI already renders is the right way
 	/// to say so.
-	fn update(&self, settings: Dict) -> zbus::fdo::Result<()> {
-		drop(settings);
+	async fn update(
+		&self,
+		settings: Dict,
+		#[zbus(header)] header: zbus::message::Header<'_>,
+		#[zbus(connection)] connection: &zbus::Connection,
+	) -> zbus::fdo::Result<()> {
+		let caller = caller_uid(&header, connection).await?;
+		let id = self
+			.identity
+			.strip_prefix("network:")
+			.unwrap_or(&self.identity);
+		self.writable(id)?;
+		crate::store::may_write(caller, &self.state.admin_principal())
+			.map_err(zbus::fdo::Error::AuthFailed)?;
+
+		// A client updating a profile sends back what `GetSettings` gave it,
+		// which never includes the passphrase -- so an update that changed the
+		// hidden flag would arrive with no `psk` and be refused for missing
+		// one. The credential is not being changed, so the stored one stands.
+		let emitted =
+			crate::emit::network_block_keeping_secret(&settings, crate::store::has_secret(id))
+				.map_err(|error| zbus::fdo::Error::InvalidArgs(error.to_string()))?;
+		// Renaming is a delete and an add, because the block label is the
+		// identity and the filename is derived from it. Doing it silently would
+		// leave the old file behind as a second network nobody asked for.
+		if emitted.id != id {
+			crate::store::remove(id).map_err(zbus::fdo::Error::Failed)?;
+		}
+		crate::store::write(&emitted).map_err(zbus::fdo::Error::Failed)?;
+		// Posted rather than done here: see `Job::Reload`.
+		self.state
+			.request_reload()
+			.map_err(zbus::fdo::Error::Failed)
+	}
+
+	/// Whether this profile is one the shim wrote and may therefore change.
+	fn writable(&self, id: &str) -> zbus::fdo::Result<()> {
+		if crate::store::is_machine_generated(id) {
+			return Ok(());
+		}
 		Err(zbus::fdo::Error::AuthFailed(format!(
-			"`{}` is a hand-written netcfgd block and is read-only here. Edit it in \
-			 /etc/netcfgd and run `ncfg apply`; the file is the authority, and a GUI \
-			 that could rewrite it would make that untrue",
+			"`{}` is a hand-written netcfgd block and is read-only here (design section \
+			 9.4). Edit it in /etc/netcfgd and run `ncfg apply` -- a GUI that could \
+			 rewrite a tuned interface with a stray click is the thing that rule exists \
+			 to prevent. Networks this shim created are editable, because it knows it \
+			 wrote them",
 			self.identity
 		)))
 	}
@@ -490,12 +631,26 @@ impl Connection {
 	/// # Errors
 	///
 	/// Always, for the reason [`Self::update`] gives.
-	fn delete(&self) -> zbus::fdo::Result<()> {
-		Err(zbus::fdo::Error::AuthFailed(format!(
-			"`{}` is a hand-written netcfgd block and is read-only here. Remove it \
-			 from /etc/netcfgd and run `ncfg apply`",
-			self.identity
-		)))
+	async fn delete(
+		&self,
+		#[zbus(header)] header: zbus::message::Header<'_>,
+		#[zbus(connection)] connection: &zbus::Connection,
+	) -> zbus::fdo::Result<()> {
+		let caller = caller_uid(&header, connection).await?;
+		let id = self
+			.identity
+			.strip_prefix("network:")
+			.unwrap_or(&self.identity);
+		self.writable(id)?;
+		crate::store::may_write(caller, &self.state.admin_principal())
+			.map_err(zbus::fdo::Error::AuthFailed)?;
+		crate::store::remove(id).map_err(zbus::fdo::Error::Failed)?;
+		// Posted rather than done here. Removing the file is the deletion; the
+		// object that stands for it is unregistered by the main loop, which
+		// cannot happen until this method has returned. See `Job::Reload`.
+		self.state
+			.request_reload()
+			.map_err(zbus::fdo::Error::Failed)
 	}
 
 	/// The newer spelling of [`Self::update`], which `nmcli connection modify`
@@ -505,14 +660,18 @@ impl Connection {
 	///
 	/// Always, and with netcfgd's own explanation rather than the bus's
 	/// "Unknown method" -- which is what a client showed before this existed.
-	fn update2(
+	async fn update2(
 		&self,
 		settings: Dict,
 		flags: u32,
 		args: HashMap<String, OwnedValue>,
+		#[zbus(header)] header: zbus::message::Header<'_>,
+		#[zbus(connection)] connection: &zbus::Connection,
 	) -> zbus::fdo::Result<HashMap<String, OwnedValue>> {
-		drop((settings, flags, args));
-		self.update(Dict::new()).map(|()| HashMap::new())
+		drop((flags, args));
+		self.update(settings, header, connection)
+			.await
+			.map(|()| HashMap::new())
 	}
 
 	/// Change the profile without writing it.
@@ -522,7 +681,9 @@ impl Connection {
 	/// Always, as [`Self::update`].
 	fn update_unsaved(&self, settings: Dict) -> zbus::fdo::Result<()> {
 		drop(settings);
-		self.update(Dict::new())
+		Err(zbus::fdo::Error::AuthFailed(
+			"netcfgd has nowhere to put an unsaved change: the file is the profile".to_owned(),
+		))
 	}
 
 	/// Write an unsaved profile.
@@ -530,8 +691,11 @@ impl Connection {
 	/// # Errors
 	///
 	/// Always. Nothing here is ever unsaved, so there is nothing to save.
-	fn save(&self) -> zbus::fdo::Result<()> {
-		self.update(Dict::new())
+	fn save(&self) {
+		// Nothing here is ever unsaved: a profile is a file, and it was written
+		// before this method could have been called. So this succeeds by doing
+		// nothing, which is the honest answer rather than a refusal -- the
+		// state being asked for is the state that holds.
 	}
 
 	/// Forget the stored credential.
@@ -542,7 +706,12 @@ impl Connection {
 	/// wherever the provider keeps it; clearing it means editing those, which
 	/// is the same boundary every other write here runs into.
 	fn clear_secrets(&self) -> zbus::fdo::Result<()> {
-		self.update(Dict::new())
+		Err(zbus::fdo::Error::AuthFailed(
+			"the credential is a `@secret:` reference in the configuration and a file \
+			 wherever the provider keeps it. Clearing it means editing those, or deleting \
+			 the network, which takes its secret with it"
+				.to_owned(),
+		))
 	}
 
 	#[zbus(property)]

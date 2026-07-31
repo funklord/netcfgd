@@ -399,9 +399,13 @@ else
 	# Writes are refused, with netcfgd's explanation rather than the bus's
 	# "Unknown method". nmcli calls the newer spellings, so those exist purely
 	# to be able to say no in netcfgd's words.
-	check "creating a profile is refused, and says where profiles come from" \
-		"$(nmcli connection add type ethernet ifname probe0 con-name x 2>&1 |
-			grep -c 'ncfg apply' || true)" "1"
+	# Creating a wifi network works and is checked below; creating anything
+	# else is refused by name. An interface is configured by an `interface`
+	# block, which is a file to edit rather than a profile to create -- and a
+	# client that got a generic failure here would have no way to learn that.
+	check "creating a wired profile is refused, and says why" \
+		"$(timeout 15 nmcli connection add type ethernet ifname probe0 con-name x 2>&1 |
+			grep -c 'wifi networks and nothing else' || true)" "1"
 	check "modifying one is refused" \
 		"$(nmcli connection modify HomeFiber connection.id x 2>&1 |
 			grep -c 'read-only here' || true)" "1"
@@ -429,6 +433,72 @@ else
 				"$conn_path" org.freedesktop.NetworkManager.Settings.Connection \
 				GetSettings 2>&1 | grep -c 'hunter2hunter2' || true)" "0"
 	fi
+
+	# ------------------------------------------------------- the write path
+
+	# Design section 9.4: a GUI is just another editor of config files. What
+	# comes out the other end of `nmcli connection add` has to be a netcfgd
+	# block an operator could have typed.
+	nmcli connection add type wifi ifname '*' con-name Roaming ssid Roaming \
+		wifi-sec.key-mgmt wpa-psk wifi-sec.psk correcthorsebattery \
+		> "$work/add.log" 2>&1 || true
+	created="$work/etc/conf.d/nm-Roaming.conf"
+
+	check "creating a network writes a netcfgd block" \
+		"$([ -f "$created" ] && echo yes || echo no)" "yes"
+	check "and netcfgd reads it" \
+		"$("$repo/target/debug/ncfg" show 2>/dev/null |
+			grep -c '"id": "Roaming"' || true)" "1"
+	check "the block is what a person would have written" \
+		"$(grep -c 'network "Roaming" {' "$created" || true)" "1"
+
+	# The credential goes to the provider, and the block gets a reference. This
+	# is constraint 5 applied to a file a GUI created.
+	check "the passphrase is a reference, not a value" \
+		"$(grep -c '@secret:Roaming' "$created" || true)" "1"
+	check "and the value is nowhere in the block" \
+		"$(grep -c 'correcthorsebattery' "$created" || true)" "0"
+	check "the value is in the secrets directory" \
+		"$(cat "$work/etc/secrets/Roaming" 2>/dev/null)" "correcthorsebattery"
+	check "readable by nobody else" \
+		"$(stat -c '%a' "$work/etc/secrets/Roaming" 2>/dev/null)" "600"
+
+	# A lossy translation that says nothing is how somebody finds out months
+	# later that a setting never took effect.
+	check "what could not be translated is written into the file" \
+		"$(grep -c '^#   ' "$created" || true)" "1"
+
+	# An update from a client carries back what GetSettings gave it, which
+	# never includes the passphrase. Requiring one would refuse every edit that
+	# is not a password change.
+	timeout 15 nmcli connection modify Roaming 802-11-wireless.hidden yes \
+		> "$work/modify.log" 2>&1 || true
+	check "editing a generated profile does not need the passphrase again" \
+		"$(grep -c 'hidden = true' "$created" || true)" "1"
+	check "and the secret it never sent is still there" \
+		"$(cat "$work/etc/secrets/Roaming" 2>/dev/null)" "correcthorsebattery"
+
+	# A hand-written block is not ours to edit, whatever a client asks. This is
+	# the rule that stops a stray click rewriting a tuned interface.
+	check "a hand-written block is still read-only" \
+		"$(timeout 15 nmcli connection modify HomeFiber 802-11-wireless.hidden yes 2>&1 |
+			grep -c 'read-only here' || true)" "1"
+	check "and it is still in the configuration afterwards" \
+		"$(grep -c 'HomeFiber' "$work/etc/netcfgd.conf" || true)" "1"
+
+	timeout 15 nmcli connection delete Roaming > "$work/delete.log" 2>&1 || true
+	waited=0
+	while [ -f "$created" ] && [ "$waited" -lt 50 ]; do
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	check "deleting takes the file with it" \
+		"$([ -f "$created" ] && echo yes || echo no)" "no"
+	check "and the credential too, rather than leaving it for nothing" \
+		"$([ -f "$work/etc/secrets/Roaming" ] && echo yes || echo no)" "no"
+	check "and netcfgd no longer has the network" \
+		"$("$repo/target/debug/ncfg" show 2>/dev/null |
+			grep -c '"id": "Roaming"' || true)" "0"
 fi
 
 echo

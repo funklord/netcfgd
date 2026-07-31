@@ -46,6 +46,16 @@ pub(crate) enum Job {
 	Refresh,
 	/// Scan on one radio.
 	Scan(String),
+	/// Re-read the configuration and republish what it describes.
+	///
+	/// Posted by a method that changed a file rather than done inside it. A
+	/// D-Bus method runs while zbus holds a lock on the interface it was
+	/// called on, and unregistering that interface is exactly what removing a
+	/// deleted profile does -- so doing the reload inline had the main loop
+	/// waiting for a method that was waiting for the main loop. `Delete`
+	/// returned after ten seconds of nothing, which is what a client shows as
+	/// "Timeout expired".
+	Reload,
 }
 
 /// Everything the shim knows.
@@ -201,6 +211,8 @@ impl State {
 				// has found will not find it here.
 				next: 1,
 				next_ap: 1,
+				next_profile: 1,
+				next_active: 1,
 				..Inner::default()
 			}),
 			jobs: Mutex::new(None),
@@ -244,6 +256,24 @@ impl State {
 		};
 		sender
 			.send(Job::Scan(interface.to_owned()))
+			.map_err(|_| "the shim is shutting down".to_owned())
+	}
+
+	/// Ask the main loop to re-read the configuration.
+	///
+	/// # Errors
+	///
+	/// Returns a message if the main loop is gone.
+	pub(crate) fn request_reload(&self) -> Result<(), String> {
+		let jobs = self
+			.jobs
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let Some(sender) = jobs.as_ref() else {
+			return Err("the shim is still starting up".to_owned());
+		};
+		sender
+			.send(Job::Reload)
 			.map_err(|_| "the shim is shutting down".to_owned())
 	}
 
@@ -297,6 +327,24 @@ impl State {
 			.collect()
 	}
 
+	/// Who the configuration lets change it.
+	///
+	/// Root when nothing is loaded, which is the safe direction: a shim that
+	/// could not read the document must not decide that anybody may write it.
+	#[must_use]
+	pub(crate) fn admin_principal(&self) -> netcfgd_model::Principal {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner
+			.document
+			.as_ref()
+			.map_or(netcfgd_model::Principal::Root, |document| {
+				document.globals.control.admin.clone()
+			})
+	}
+
 	/// One profile, by identity.
 	#[must_use]
 	pub(crate) fn profile(&self, identity: &str) -> Option<crate::settings::Profile> {
@@ -314,11 +362,10 @@ impl State {
 	/// # Errors
 	///
 	/// Returns netcfgd's own message.
-	pub(crate) fn reload(&self) -> Result<(), String> {
+	pub(crate) fn reload(&self) -> Result<ProfileChanges, String> {
 		crate::client::reload(&self.socket)?;
 		let document = crate::client::document(&self.socket)?;
-		self.adopt_document(Some(document));
-		Ok(())
+		Ok(self.adopt_document(Some(document)))
 	}
 
 	/// Which profiles are active, and on which interface.
