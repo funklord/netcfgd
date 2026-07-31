@@ -44,6 +44,7 @@ fn access_point(id: &str, security: Security) -> AccessPoint {
 		band: None,
 		hidden: false,
 		regdom: None,
+		access_control: None,
 	}
 }
 

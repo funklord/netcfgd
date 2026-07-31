@@ -114,6 +114,13 @@ pub fn write_config(
 	)
 	.map_err(|error| format!("`{}`: {error}", access_point.id))?;
 
+	// Before the configuration that names it: hostapd refuses to start when
+	// `deny_mac_file` points at nothing, so a run where this failed silently
+	// would take the access point down rather than leave the list unenforced.
+	// Written even when the list is empty, for the same reason -- an empty file
+	// is the statement "nobody is denied", and a missing one is a failure.
+	write_acl(run_dir, access_point)?;
+
 	let path = config_path(run_dir, &access_point.device);
 	// Truncate through `OpenOptions` rather than `fs::write` plus a chmod: the
 	// window between the two is a window in which the passphrase is readable by
@@ -129,6 +136,49 @@ pub fn write_config(
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
 
 	Ok(path)
+}
+
+/// Where the station list for one device is written.
+#[must_use]
+pub fn acl_path(run_dir: &Path, device: &str) -> PathBuf {
+	ctrl_dir(run_dir).join(format!("{device}.acl"))
+}
+
+/// Write the station list, or remove it when the document asks for none.
+///
+/// Mode 0644 rather than the configuration's 0600: this holds no secret, and a
+/// list of MAC addresses that only root can read is a list nobody debugging an
+/// access point can read either.
+///
+/// # Errors
+///
+/// Returns a message naming the file that could not be written.
+pub fn write_acl(run_dir: &Path, access_point: &AccessPoint) -> Result<(), String> {
+	use std::io::Write;
+	use std::os::unix::fs::OpenOptionsExt;
+
+	let path = acl_path(run_dir, &access_point.device);
+	let Some(acl) = &access_point.access_control else {
+		// A block that was there and is not any more. Leaving the file would
+		// leave a list that nothing reads, which is worse than no file: the
+		// next person to look would find an ACL and believe it.
+		match std::fs::remove_file(&path) {
+			Ok(()) => return Ok(()),
+			Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+			Err(error) => return Err(format!("cannot remove {}: {error}", path.display())),
+		}
+	};
+	// Mode at open rather than left to the umask, so that the comment above is
+	// a fact about the file and not about whoever started the daemon.
+	let mut file = std::fs::OpenOptions::new()
+		.write(true)
+		.create(true)
+		.truncate(true)
+		.mode(0o644)
+		.open(&path)
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	file.write_all(render::acl_contents(&acl.stations).as_bytes())
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
 /// Start an access point.

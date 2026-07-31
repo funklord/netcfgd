@@ -164,6 +164,95 @@ check "a failed start is still asked for on the next plan" \
 check "and nothing is asked to stop" \
 	"$(grep -c 'backend\.stop' "$work/plan2.log" || true)" "0"
 
+# --------------------------------------------- the station list (decision 0036)
+#
+# The single-host half of Ubiquiti-style roaming: a station is forced onto one
+# access point by every other access point refusing it. What is checked here is
+# the part a fixture cannot check -- that hostapd accepts the two keys together
+# and reads the file netcfgd pointed it at.
+
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface ap0 {
+	kind   = "dummy"
+	config = "192.168.9.1/24"
+}
+
+access_point "guest" {
+	device  = "ap0"
+	channel = 11
+	wifi    { psk = "@secret:guest"; proto = "wpa2" }
+	access_control { deny = ["AA-BB-CC-DD-EE-FF", "00:11:22:33:44:55"] }
+}
+CONF
+
+"$ncfg" apply --oneshot > "$work/acl.log" 2>&1 || true
+acl="$work/run/hostapd/ap0.acl"
+
+check "a deny list selects hostapd's deny file" \
+	"$(sed -n 's/^macaddr_acl=//p' "$conf")" "0"
+check "and points it at the list netcfgd wrote" \
+	"$(sed -n 's/^deny_mac_file=//p' "$conf")" "$acl"
+check "the list exists" "$([ -f "$acl" ] && echo yes || echo no)" "yes"
+# Not 0600: this holds no secret, and a list only root can read is a list
+# nobody debugging an access point can read either.
+check "at mode 0644" "$(stat -c '%a' "$acl" 2>/dev/null)" "644"
+# Normalised on the way in: written in two spellings and two cases, stored in
+# the one form hostapd prints, sorted so the document is canonical.
+check "the stations are normalised and sorted" \
+	"$(tr '\n' ' ' < "$acl")" "00:11:22:33:44:55 aa:bb:cc:dd:ee:ff "
+
+# The reference tool again, and the reason this check is worth its cost:
+# hostapd validates `deny_mac_file` by reading it at parse time, so a path that
+# is wrong or a file that is malformed is an error here rather than a silently
+# unenforced ACL.
+"$hostapd" "$conf" > "$work/parse2.log" 2>&1 || true
+check "hostapd accepts the acl configuration" \
+	"$(grep -c 'errors found in configuration file' "$work/parse2.log" || true)" "0"
+check "and read the list rather than ignoring it" \
+	"$(grep -c 'Line [0-9]*: .*macaddr_acl\|Line [0-9]*: .*deny_mac' "$work/parse2.log" || true)" "0"
+
+# An access point whose block goes away must not leave a list behind. The next
+# person to look would find an ACL and believe it.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface ap0 {
+	kind   = "dummy"
+	config = "192.168.9.1/24"
+}
+
+access_point "guest" {
+	device  = "ap0"
+	channel = 11
+	wifi    { psk = "@secret:guest"; proto = "wpa2" }
+}
+CONF
+
+"$ncfg" apply --oneshot > "$work/noacl.log" 2>&1 || true
+check "removing the block removes the list" \
+	"$([ -f "$acl" ] && echo yes || echo no)" "no"
+check "and stops naming it in the configuration" \
+	"$(grep -c '^macaddr_acl=\|^deny_mac_file=' "$conf" || true)" "0"
+
+# Locking everyone out is legitimate and easy to arrive at by deleting the last
+# station, so the plan says which one this is rather than leaving an operator to
+# find out from the far side of a radio.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface ap0 {
+	kind   = "dummy"
+	config = "192.168.9.1/24"
+}
+
+access_point "guest" {
+	device  = "ap0"
+	channel = 11
+	wifi    { psk = "@secret:guest"; proto = "wpa2" }
+	access_control { allow = [] }
+}
+CONF
+
+"$ncfg" plan > "$work/empty.log" 2>&1 || true
+check "an empty allow list is warned about, not refused" \
+	"$(grep -c 'no station can associate' "$work/empty.log" || true)" "1"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "ap.sh: all checks passed"

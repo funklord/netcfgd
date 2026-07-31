@@ -5904,7 +5904,13 @@
       "channel": 6,
       "band": "2.4",
       "hidden": true,
-      "regdom": "SE"
+      "regdom": "SE",
+      "access_control": {
+        "policy": "deny",
+        "stations": [
+          "aa:bb:cc:dd:ee:ff"
+        ]
+      }
     }
   ]
 }

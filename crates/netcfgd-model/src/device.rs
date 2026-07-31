@@ -200,10 +200,11 @@ pub enum OnUnmanage {
 /// not: a station profile describes a network that may be in range of any
 /// radio, while an access point is a thing one specific radio is doing.
 ///
-/// Nothing implements this yet. It is in the schema because the model freezes
-/// at M4 and adding it afterwards is a major version bump -- the same reason
-/// `BackendKind::Builtin` is there (project.md section 8, row 4). A config
-/// asking for one is refused by name, with the milestone.
+/// Rendered to a `hostapd` configuration by `netcfgd-hostapd` (decision
+/// 0026). It was in the schema for a milestone before anything implemented it,
+/// because the model freezes at M4 and adding it afterwards is a major version
+/// bump -- the same reason `BackendKind::Builtin` is there (project.md section
+/// 8, row 4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccessPoint {
@@ -238,4 +239,166 @@ pub struct AccessPoint {
 	/// Country code the access point advertises.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub regdom: Option<String>,
+	/// Which stations this access point will talk to at all.
+	///
+	/// Absent means everyone, which is what an access point without an
+	/// `access_control` block does.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub access_control: Option<AccessControl>,
+}
+
+/// A station list, and which way to read it.
+///
+/// This is the single-host half of Ubiquiti-style roaming (decision 0036).
+/// Forcing a client onto one access point is done by making every *other*
+/// access point refuse it, so the operation that matters is per-station and
+/// per-AP, and the decision about which AP owns a station is coordination
+/// between machines -- section 11's territory, not this.
+///
+/// One list rather than two, because hostapd has one: `macaddr_acl` selects
+/// *either* `accept_mac_file` or `deny_mac_file`, and a configuration naming
+/// both would have half of it silently ignored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccessControl {
+	/// Whether the stations are the only ones allowed, or the only ones
+	/// refused.
+	pub policy: AclPolicy,
+	/// The stations, lowercase `aa:bb:cc:dd:ee:ff`, sorted and deduplicated.
+	///
+	/// Normalised at compile time so that two documents meaning the same thing
+	/// hash the same, and so that comparing against what hostapd reports over
+	/// its control socket is a string comparison rather than a parse.
+	pub stations: Vec<String>,
+}
+
+/// Which way an [`AccessControl`] list reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AclPolicy {
+	/// Everyone except the listed stations. `macaddr_acl=0`.
+	///
+	/// The one Zero Handoff uses: a station is denied everywhere except the
+	/// access point meant to serve it.
+	Deny,
+	/// Only the listed stations. `macaddr_acl=1`.
+	///
+	/// Note what this is not. A MAC address is asserted by the station and
+	/// changed with one command, so this keeps honest devices off a network
+	/// and stops nobody who does not want to be stopped. It is a policy
+	/// mechanism, not a security one, and anything that must be secure belongs
+	/// in `wifi { .. }` where the key material is.
+	Allow,
+}
+
+impl AclPolicy {
+	/// The value hostapd's `macaddr_acl` takes for this policy.
+	#[must_use]
+	pub fn macaddr_acl(self) -> &'static str {
+		match self {
+			Self::Deny => "0",
+			Self::Allow => "1",
+		}
+	}
+
+	/// The control-socket command prefix that edits this list at runtime.
+	#[must_use]
+	pub fn ctrl_command(self) -> &'static str {
+		match self {
+			Self::Deny => "DENY_ACL",
+			Self::Allow => "ACCEPT_ACL",
+		}
+	}
+}
+
+/// Parse and normalise one station address.
+///
+/// Accepts the two spellings people actually write -- `aa:bb:cc:dd:ee:ff` and
+/// `aa-bb-cc-dd-ee-ff`, in either case -- and produces the lowercase colon
+/// form, which is what hostapd prints and therefore what a comparison against
+/// its live list has to be in. Bare `aabbccddeeff` is refused: it is one
+/// transposition away from being unreadable, and an ACL is the wrong place to
+/// guess.
+///
+/// # Errors
+///
+/// Returns the reason the text is not a station address, phrased for an
+/// operator reading a diagnostic.
+pub fn normalize_station(text: &str) -> Result<String, String> {
+	let separator = if text.contains('-') { '-' } else { ':' };
+	let parts: Vec<&str> = text.split(separator).collect();
+	if parts.len() != 6 {
+		return Err(format!(
+			"a station address is six colon-separated octets, such as \
+			 `aa:bb:cc:dd:ee:ff`; `{text}` has {}",
+			parts.len()
+		));
+	}
+	let mut out = String::with_capacity(17);
+	for (index, part) in parts.iter().enumerate() {
+		if part.len() != 2 || !part.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+			return Err(format!(
+				"`{part}` is not a two-digit hex octet, in the station address `{text}`"
+			));
+		}
+		if index > 0 {
+			out.push(':');
+		}
+		out.push_str(&part.to_ascii_lowercase());
+	}
+	Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn a_station_address_normalises_to_lowercase_colons() {
+		// Both spellings and both cases reach the one form hostapd prints, so
+		// that comparing the document against a live list is string equality.
+		for text in [
+			"aa:bb:cc:dd:ee:ff",
+			"AA:BB:CC:DD:EE:FF",
+			"aa-bb-cc-dd-ee-ff",
+			"AA-BB-CC-DD-EE-FF",
+		] {
+			assert_eq!(
+				normalize_station(text).as_deref(),
+				Ok("aa:bb:cc:dd:ee:ff"),
+				"{text}"
+			);
+		}
+		assert_eq!(
+			normalize_station("00:11:22:33:44:55").as_deref(),
+			Ok("00:11:22:33:44:55")
+		);
+	}
+
+	#[test]
+	fn what_is_not_a_station_address_is_refused_rather_than_repaired() {
+		// The bare form is refused on purpose: `aabbccddeeff` with one digit
+		// dropped is still eleven plausible characters, and an ACL is the wrong
+		// place to accept something that might be a typo.
+		for text in [
+			"aabbccddeeff",
+			"aa:bb:cc:dd:ee",
+			"aa:bb:cc:dd:ee:ff:00",
+			"aa:bb:cc:dd:ee:gg",
+			"aa:bb:cc:dd:ee:f",
+			"aa:bb:cc:dd:ee:fff",
+			"",
+			"ff:ff:ff:ff:ff:ff ",
+		] {
+			assert!(normalize_station(text).is_err(), "{text} should be refused");
+		}
+	}
+
+	#[test]
+	fn the_two_policies_carry_hostapds_own_spellings() {
+		assert_eq!(AclPolicy::Deny.macaddr_acl(), "0");
+		assert_eq!(AclPolicy::Allow.macaddr_acl(), "1");
+		assert_eq!(AclPolicy::Deny.ctrl_command(), "DENY_ACL");
+		assert_eq!(AclPolicy::Allow.ctrl_command(), "ACCEPT_ACL");
+	}
 }
