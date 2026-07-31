@@ -21,10 +21,12 @@
 //! own a well-known bus name, so if NM is running this exits saying so.
 
 mod accesspoint;
+mod active;
 mod client;
 mod device;
 mod enums;
 mod manager;
+mod settings;
 mod state;
 
 use state::State;
@@ -35,6 +37,8 @@ use zbus::blocking::connection;
 const BUS_NAME: &str = "org.freedesktop.NetworkManager";
 /// The root object.
 const MANAGER_PATH: &str = "/org/freedesktop/NetworkManager";
+/// The connection profile store.
+const SETTINGS_PATH: &str = "/org/freedesktop/NetworkManager/Settings";
 
 fn main() -> std::process::ExitCode {
 	match run() {
@@ -105,10 +109,13 @@ fn serve(session: bool) -> Result<(), String> {
 	// uses. Not fatal if it fails -- a machine whose config does not compile
 	// still has interfaces worth showing, and the shim degrades to sysfs for
 	// the first question and to a guess for the second.
-	match client::document(&socket) {
+	let profiles = match client::document(&socket) {
 		Ok(document) => state.adopt_document(Some(document)),
-		Err(error) => eprintln!("netcfgd-nm: cannot read the configuration: {error}"),
-	}
+		Err(error) => {
+			eprintln!("netcfgd-nm: cannot read the configuration: {error}");
+			state::ProfileChanges::default()
+		}
+	};
 
 	let builder = if session {
 		connection::Builder::session()
@@ -125,6 +132,8 @@ fn serve(session: bool) -> Result<(), String> {
 		.map_err(|error| format!("cannot serve the manager object: {error}"))?
 		.serve_at(MANAGER_PATH, manager::Compat)
 		.map_err(|error| format!("cannot serve the compat object: {error}"))?
+		.serve_at(SETTINGS_PATH, settings::Settings::new(Arc::clone(&state)))
+		.map_err(|error| format!("cannot serve the settings object: {error}"))?
 		.build()
 		.map_err(|error| format!("cannot reach the message bus: {error}"))?;
 
@@ -141,6 +150,8 @@ fn serve(session: bool) -> Result<(), String> {
 
 	publish(&connection, &state, &changes)?;
 	state.refresh_associations();
+	publish_profiles(&connection, &state, &profiles)?;
+	publish_active(&connection, &state)?;
 	claim_name(&connection)?;
 
 	// One job queue, and every change to the object tree goes through it. That
@@ -201,15 +212,21 @@ fn serve(session: bool) -> Result<(), String> {
 				// The configuration may have changed with it -- a reload is one
 				// of the events netcfgd streams.
 				if let Ok(document) = client::document(&socket) {
-					state.adopt_document(Some(document));
+					let profiles = state.adopt_document(Some(document));
+					publish_profiles(&connection, &state, &profiles)?;
 				}
 				state.refresh_associations();
+				publish_active(&connection, &state)?;
 				republish_wireless(&connection, &state)?;
 			}
 			state::Job::Scan(interface) => match state.rescan(&interface) {
 				Ok(changes) => {
 					publish_access_points(&connection, &state, &changes)?;
 					republish_wireless(&connection, &state)?;
+					// A scan is what turns an association from a BSSID into a
+					// named network, so what is active can only be settled
+					// after one.
+					publish_active(&connection, &state)?;
 				}
 				// By now the caller is gone -- `RequestScan` returned when the
 				// job was posted, which is what NM's semantics ask for. So this
@@ -448,5 +465,109 @@ fn republish_wireless(
 			changed.map_err(|error| format!("cannot announce {path}: {error}"))?;
 		}
 	}
+	Ok(())
+}
+
+/// Make the connection profile objects match the configuration.
+///
+/// A profile appears when the config gains a `network` or `interface` block and
+/// goes when it loses one, which is what a reload does. libnm learns about both
+/// through `InterfacesAdded` and `InterfacesRemoved` from the object server.
+fn publish_profiles(
+	connection: &zbus::blocking::Connection,
+	state: &Arc<State>,
+	changes: &state::ProfileChanges,
+) -> Result<(), String> {
+	let server = connection.object_server();
+
+	for (identity, number) in &changes.removed {
+		let path = settings::path_for(*number);
+		server
+			.remove::<settings::Connection, _>(&path)
+			.map_err(|error| format!("cannot stop serving `{identity}` at {path}: {error}"))?;
+	}
+
+	for (identity, number) in &changes.added {
+		let path = settings::path_for(*number);
+		server
+			.at(
+				&path,
+				settings::Connection::new(Arc::clone(state), identity.clone()),
+			)
+			.map_err(|error| format!("cannot serve `{identity}` at {path}: {error}"))?;
+	}
+
+	if changes != &state::ProfileChanges::default() {
+		// The list moved, and `Connections` is computed rather than stored, so
+		// zbus has no way to know. Same reason as the wireless properties.
+		if let Ok(settings) = server.interface::<_, settings::Settings>(SETTINGS_PATH) {
+			let emitter = settings.signal_emitter();
+			async_io::block_on(settings.get().connections_changed(emitter))
+				.map_err(|error| format!("cannot announce the profile list: {error}"))?;
+		}
+	}
+
+	Ok(())
+}
+
+/// Make the active connection objects match what netcfgd is actually doing.
+///
+/// Unlike every other object here, an activation has no identifier of its own
+/// in netcfgd -- it is a pairing of a profile and an interface, derived from
+/// the observation. So the set is recomputed and reconciled rather than
+/// diffed from a change list: there is nothing to diff against.
+fn publish_active(
+	connection: &zbus::blocking::Connection,
+	state: &Arc<State>,
+) -> Result<(), String> {
+	let server = connection.object_server();
+	let wanted: Vec<(state::Activation, u32)> = state
+		.active()
+		.into_iter()
+		.map(|activation| {
+			let number = state.active_number(&activation);
+			(activation, number)
+		})
+		.collect();
+
+	// Anything served that is no longer active. Tracked in the state rather
+	// than by asking the object server what it holds, because zbus has no
+	// "list what is at this prefix" and inventing one by string-matching paths
+	// would be a second source of truth for the object tree.
+	for number in state.forget_inactive(&wanted) {
+		let path = active::path_for(number);
+		let _ = server.remove::<active::Active, _>(&path);
+	}
+
+	for (activation, number) in wanted {
+		let path = active::path_for(number);
+		server
+			.at(&path, active::Active::new(Arc::clone(state), activation))
+			.map_err(|error| format!("cannot serve {path}: {error}"))?;
+	}
+
+	// `ActiveConnections` and `PrimaryConnection` are computed, so say they
+	// moved. An applet draws its icon from the second one.
+	if let Ok(manager) = server.interface::<_, manager::Manager>(MANAGER_PATH) {
+		let emitter = manager.signal_emitter();
+		let interface = manager.get();
+		for changed in [
+			async_io::block_on(interface.active_connections_changed(emitter)),
+			async_io::block_on(interface.primary_connection_changed(emitter)),
+		] {
+			changed.map_err(|error| format!("cannot announce the active list: {error}"))?;
+		}
+	}
+
+	// And each device's own view of it, which is the CONNECTION column.
+	for (name, number) in state.devices() {
+		let path = device::path_for(number);
+		if let Ok(interface) = server.interface::<_, device::Device>(&path) {
+			let emitter = interface.signal_emitter();
+			async_io::block_on(interface.get().active_connection_changed(emitter))
+				.map_err(|error| format!("cannot announce {name}'s connection: {error}"))?;
+		}
+	}
+
 	Ok(())
 }

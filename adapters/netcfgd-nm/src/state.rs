@@ -91,6 +91,21 @@ struct Inner {
 	last_scan: BTreeMap<String, i32>,
 	/// The BSSID each radio is associated with, where it is.
 	associated: BTreeMap<String, String>,
+	/// Profile identity to the number in its `Settings` path.
+	///
+	/// Numbered like devices and access points, and never reused for the same
+	/// reason: a client stores the path of the profile it last activated.
+	profile_numbers: BTreeMap<String, u32>,
+	/// The next profile number to hand out.
+	next_profile: u32,
+	/// `(profile identity, interface)` to the number of its active connection.
+	///
+	/// An activation is a pairing rather than a thing: the same `network` block
+	/// active on two radios is two active connections, and NM's model says so
+	/// too.
+	active_numbers: BTreeMap<(String, String), u32>,
+	/// The next active connection number to hand out.
+	next_active: u32,
 }
 
 /// What changed about the device list across a refresh.
@@ -104,6 +119,65 @@ pub(crate) struct Changes {
 	pub(crate) added: Vec<(String, u32)>,
 	/// Interfaces that went away, with the number each had.
 	pub(crate) removed: Vec<(String, u32)>,
+}
+
+/// One profile active on one interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Activation {
+	/// Which profile.
+	pub(crate) identity: String,
+	/// Where.
+	pub(crate) interface: String,
+}
+
+/// What changed about the connection profiles across a reload.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct ProfileChanges {
+	/// `(identity, number)` for each profile that appeared.
+	pub(crate) added: Vec<(String, u32)>,
+	/// The same for each that left the configuration.
+	pub(crate) removed: Vec<(String, u32)>,
+}
+
+/// Every profile a document describes.
+///
+/// Free rather than a method, so it can be called while the state's lock is
+/// held without the lock having to be reentrant.
+#[must_use]
+fn profiles_of(document: &Document) -> Vec<crate::settings::Profile> {
+	document
+		.networks
+		.iter()
+		.map(|network| crate::settings::Profile::Network(Box::new(network.clone())))
+		.chain(
+			document
+				.interfaces
+				.iter()
+				// A radio's `interface` block is not a profile of its own. Its
+				// profiles are the `network` blocks: what you activate on a
+				// radio is a network, and offering an `802-3-ethernet` profile
+				// named `wlan0` alongside them would put a thing in every
+				// client's connection list that cannot be activated and is not
+				// an ethernet.
+				.filter(|interface| !is_radio_in(document, &interface.name))
+				.map(|interface| crate::settings::Profile::Interface(Box::new(interface.clone()))),
+		)
+		.collect()
+}
+
+/// Whether a document makes an interface a radio.
+///
+/// The same question [`State::is_radio`] answers, asked where the lock is
+/// already held. Kept beside it rather than duplicated inside it: two
+/// definitions of "radio" is exactly the disagreement this whole arrangement
+/// exists to avoid.
+#[must_use]
+fn is_radio_in(document: &Document, interface: &str) -> bool {
+	document
+		.devices
+		.iter()
+		.any(|device| device.name == interface && device.managed && device.wifi.is_some())
+		|| crate::device::has_sysfs_wireless(interface)
 }
 
 /// What changed about one radio's access points across a scan.
@@ -198,6 +272,235 @@ impl State {
 		}
 	}
 
+	/// Every connection profile the configuration describes, with its number.
+	///
+	/// `network` blocks first and then `interface` blocks, each in document
+	/// order, so the numbering is a function of the configuration rather than
+	/// of the order things were first noticed.
+	#[must_use]
+	pub(crate) fn profiles(&self) -> Vec<(crate::settings::Profile, u32)> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let Some(document) = inner.document.as_ref() else {
+			return Vec::new();
+		};
+		profiles_of(document)
+			.into_iter()
+			.filter_map(|profile| {
+				inner
+					.profile_numbers
+					.get(&profile.identity())
+					.map(|number| (profile, *number))
+			})
+			.collect()
+	}
+
+	/// One profile, by identity.
+	#[must_use]
+	pub(crate) fn profile(&self, identity: &str) -> Option<crate::settings::Profile> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		profiles_of(inner.document.as_ref()?)
+			.into_iter()
+			.find(|profile| profile.identity() == identity)
+	}
+
+	/// Ask netcfgd to re-read its configuration, then take the result.
+	///
+	/// # Errors
+	///
+	/// Returns netcfgd's own message.
+	pub(crate) fn reload(&self) -> Result<(), String> {
+		crate::client::reload(&self.socket)?;
+		let document = crate::client::document(&self.socket)?;
+		self.adopt_document(Some(document));
+		Ok(())
+	}
+
+	/// Which profiles are active, and on which interface.
+	///
+	/// Derived rather than recorded, which is the same discipline as
+	/// everywhere else here: a radio's association names a network, and an
+	/// interface that is up with an address is its own profile activated. If
+	/// netcfgd says neither, nothing is active, and there is no third place
+	/// holding a different opinion.
+	#[must_use]
+	pub(crate) fn active(&self) -> Vec<Activation> {
+		let mut active = Vec::new();
+		for (profile, _) in self.profiles() {
+			match &profile {
+				crate::settings::Profile::Network(network) => {
+					for radio in self.radios() {
+						if self.associated_id(&radio).as_deref() == Some(network.id.as_str()) {
+							active.push(Activation {
+								identity: profile.identity(),
+								interface: radio,
+							});
+						}
+					}
+				}
+				crate::settings::Profile::Interface(interface) => {
+					// A radio's interface block is not separately active: the
+					// network it joined is the activation, and reporting both
+					// would put two connections on one device.
+					if self.is_radio(&interface.name) {
+						continue;
+					}
+					if self
+						.link(&interface.name)
+						.is_some_and(|link| link.up && link.carrier)
+						&& self.has_address(&interface.name)
+					{
+						active.push(Activation {
+							identity: profile.identity(),
+							interface: interface.name.clone(),
+						});
+					}
+				}
+			}
+		}
+		active
+	}
+
+	/// The number for one activation, assigning it if this is the first time.
+	#[must_use]
+	pub(crate) fn active_number(&self, activation: &Activation) -> u32 {
+		let mut inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let key = (activation.identity.clone(), activation.interface.clone());
+		if let Some(number) = inner.active_numbers.get(&key) {
+			return *number;
+		}
+		let number = inner.next_active;
+		inner.next_active += 1;
+		inner.active_numbers.insert(key, number);
+		number
+	}
+
+	/// Drop the numbers of activations that are no longer live, and say which
+	/// they were.
+	///
+	/// The state is what remembers which activations have objects, because zbus
+	/// has no way to enumerate what is served under a path prefix and
+	/// reconstructing that by matching path strings would be a second opinion
+	/// about the object tree.
+	pub(crate) fn forget_inactive(&self, live: &[(Activation, u32)]) -> Vec<u32> {
+		let mut inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let keep: Vec<(String, String)> = live
+			.iter()
+			.map(|(activation, _)| (activation.identity.clone(), activation.interface.clone()))
+			.collect();
+		let mut dropped = Vec::new();
+		inner.active_numbers.retain(|key, number| {
+			if keep.contains(key) {
+				true
+			} else {
+				dropped.push(*number);
+				false
+			}
+		});
+		dropped
+	}
+
+	/// The id of the `network` block a radio is currently on.
+	#[must_use]
+	pub(crate) fn associated_id(&self, interface: &str) -> Option<String> {
+		let bssid = {
+			let inner = self
+				.inner
+				.lock()
+				.unwrap_or_else(std::sync::PoisonError::into_inner);
+			inner.associated.get(interface).cloned()?
+		};
+		self.scan_entry(interface, &bssid)?.configured
+	}
+
+	/// Whether an interface carries a default route netcfgd can see.
+	///
+	/// What NM's `Default` and `Default6` mean, and what an applet uses to
+	/// decide which of two connections is "the" one. Read from the observation
+	/// rather than from the configuration, because on a laptop that switches
+	/// uplinks the answer changes without the config doing so.
+	#[must_use]
+	pub(crate) fn has_default_route(&self, interface: &str, v6: bool) -> bool {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner.observed.routes.iter().any(|route| {
+			route.interface == interface
+				&& (route.destination == "default" || route.destination == "::/0")
+				&& route.destination.contains(':') == v6
+		})
+	}
+
+	/// Ask netcfgd to join a network, by profile identity.
+	///
+	/// # Errors
+	///
+	/// Returns netcfgd's own message, including its refusal when the profile is
+	/// not something that can be activated this way.
+	pub(crate) fn activate(&self, identity: &str, interface: &str) -> Result<(), String> {
+		match self.profile(identity) {
+			Some(crate::settings::Profile::Network(network)) => {
+				crate::client::connect(&self.socket, interface, &network.id)
+			}
+			// An interface profile is not activated: netcfgd brings an
+			// interface up because the configuration says to, and an already-up
+			// interface is the state being asked for. Saying so beats either
+			// failing at something that is already true or pretending to have
+			// done something.
+			Some(crate::settings::Profile::Interface(interface_block)) => {
+				if self.link(&interface_block.name).is_some_and(|link| link.up) {
+					Ok(())
+				} else {
+					Err(format!(
+						"netcfgd brings `{}` up from the configuration, not on request. It \
+						 is currently down, which means the configuration says so or the \
+						 last apply failed -- `ncfg plan` will say which",
+						interface_block.name
+					))
+				}
+			}
+			None => Err(format!(
+				"netcfgd's configuration has no profile `{identity}`"
+			)),
+		}
+	}
+
+	/// Ask netcfgd to leave a network.
+	///
+	/// # Errors
+	///
+	/// Returns netcfgd's own message, or a refusal for a profile that cannot be
+	/// deactivated without editing the configuration.
+	pub(crate) fn deactivate(&self, activation: &Activation) -> Result<(), String> {
+		match self.profile(&activation.identity) {
+			Some(crate::settings::Profile::Network(_)) => {
+				crate::client::disconnect(&self.socket, &activation.interface)
+			}
+			Some(crate::settings::Profile::Interface(_)) => Err(format!(
+				"`{}` is up because /etc/netcfgd says it should be. Taking it down means \
+				 changing that -- `enabled = false` on the interface, then `ncfg apply` -- \
+				 rather than a request that the next reconcile would undo",
+				activation.interface
+			)),
+			None => Err(format!(
+				"netcfgd's configuration has no profile `{}`",
+				activation.identity
+			)),
+		}
+	}
+
 	/// Every radio netcfgd knows about.
 	#[must_use]
 	pub(crate) fn radios(&self) -> Vec<String> {
@@ -208,13 +511,47 @@ impl State {
 			.collect()
 	}
 
-	/// Take the compiled document as the current one.
-	pub(crate) fn adopt_document(&self, document: Option<Document>) {
+	/// Take the compiled document as the current one, numbering any profile
+	/// that is new and saying which profiles moved.
+	pub(crate) fn adopt_document(&self, document: Option<Document>) -> ProfileChanges {
 		let mut inner = self
 			.inner
 			.lock()
 			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		let mut changes = ProfileChanges::default();
+
+		let present: Vec<String> = document
+			.as_ref()
+			.map(|document| {
+				profiles_of(document)
+					.into_iter()
+					.map(|profile| profile.identity())
+					.collect()
+			})
+			.unwrap_or_default();
+
+		let mut next = inner.next_profile;
+		for identity in &present {
+			if let std::collections::btree_map::Entry::Vacant(slot) =
+				inner.profile_numbers.entry(identity.clone())
+			{
+				slot.insert(next);
+				changes.added.push((identity.clone(), next));
+				next += 1;
+			}
+		}
+		inner.next_profile = next;
+		inner.profile_numbers.retain(|identity, number| {
+			if present.contains(identity) {
+				true
+			} else {
+				changes.removed.push((identity.clone(), *number));
+				false
+			}
+		});
+
 		inner.document = document;
+		changes
 	}
 
 	/// Whether netcfgd treats this interface as a radio.
@@ -230,12 +567,10 @@ impl State {
 			.inner
 			.lock()
 			.unwrap_or_else(std::sync::PoisonError::into_inner);
-		let declared = inner.document.as_ref().is_some_and(|document| {
-			document
-				.devices
-				.iter()
-				.any(|device| device.name == interface && device.managed && device.wifi.is_some())
-		});
+		let declared = inner
+			.document
+			.as_ref()
+			.is_some_and(|document| is_radio_in(document, interface));
 		drop(inner);
 		declared || crate::device::has_sysfs_wireless(interface)
 	}
