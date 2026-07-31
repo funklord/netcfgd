@@ -9,10 +9,15 @@ double quotes inside a shell function inside a `$(...)` produced a program that
 ran, printed nothing, and made five checks agree with an empty string.
 
 Fields:
-    method    the addressing method
-    address   every static address, as CIDR
-    gateway   the default route's next hop
-    routes    every route in the table, as CIDR
+    method      the addressing method
+    address     every static address, as CIDR
+    gateway     the default route's next hop
+    routes      every route in the table, as CIDR
+    dns         the nameservers, as text
+    dns-search  the search domains
+    priority    the connection's autoconnect priority
+    metered     NM's metered tri-state
+    autoconnect whether it joins by itself
 """
 
 import json
@@ -39,10 +44,21 @@ def main():
         prefix = entry["prefix"]["data"]
         return str(address) + "/" + str(prefix)
 
-    if field == "method":
-        print(scalar("method"))
-    elif field == "gateway":
-        print(scalar("gateway"))
+    if field in ("method", "gateway", "priority", "metered", "autoconnect"):
+        key = {
+            "priority": "autoconnect-priority",
+        }.get(field, field)
+        print(scalar(key))
+    elif field == "dns":
+        # `dns-data` rather than `dns`: the first is the text form a current
+        # client sends and reads, the second the packed integers an older one
+        # uses. Reading the wrong one returns a number where a test expected an
+        # address, which is how this was noticed.
+        print(" ".join(str(item) for item in entries("dns-data")))
+    elif field == "dns-packed":
+        print(" ".join(str(item) for item in entries("dns")))
+    elif field == "dns-search":
+        print(" ".join(str(item) for item in entries("dns-search")))
     elif field == "address":
         print(" ".join(cidr(e, "address") for e in entries("address-data")))
     elif field == "routes":
