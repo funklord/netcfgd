@@ -64,6 +64,11 @@ pub(crate) enum Unsupported {
 		/// What was asked for.
 		given: String,
 	},
+	/// A negative autoconnect priority, which the DSL cannot write.
+	NegativePriority {
+		/// What was asked for.
+		given: i32,
+	},
 }
 
 impl std::fmt::Display for Unsupported {
@@ -103,6 +108,11 @@ impl std::fmt::Display for Unsupported {
 				formatter,
 				"`{given}` is not an IP address, and writing it into the configuration \
 				 would make netcfgd refuse to compile a network you were told was created"
+			),
+			Self::NegativePriority { given } => write!(
+				formatter,
+				"a netcfgd `priority` counts up from zero, so {given} cannot be written \
+				 down. Give the networks you prefer a higher number instead"
 			),
 		}
 	}
@@ -153,6 +163,8 @@ const UNINTERESTING: &[(&str, &str)] = &[
 	("connection", "timestamp"),
 	("connection", "permissions"),
 	("connection", "autoconnect"),
+	("connection", "autoconnect-priority"),
+	("connection", "metered"),
 	("connection", "interface-name"),
 	("802-11-wireless", "ssid"),
 	("802-11-wireless", "mode"),
@@ -171,12 +183,18 @@ const UNINTERESTING: &[(&str, &str)] = &[
 	("ipv4", "route-data"),
 	("ipv4", "addresses"),
 	("ipv4", "routes"),
+	("ipv4", "dns"),
+	("ipv4", "dns-data"),
+	("ipv4", "dns-search"),
 	("ipv6", "method"),
 	("ipv6", "address-data"),
 	("ipv6", "gateway"),
 	("ipv6", "route-data"),
 	("ipv6", "addresses"),
 	("ipv6", "routes"),
+	("ipv6", "dns"),
+	("ipv6", "dns-data"),
+	("ipv6", "dns-search"),
 	("ipv6", "addr-gen-mode"),
 	("proxy", ""),
 ];
@@ -333,6 +351,116 @@ fn routes(settings: &Dict) -> Result<Vec<String>, Unsupported> {
 	Ok(routes)
 }
 
+/// The keys that go inside a `wifi` block: what a station uses to choose
+/// between networks.
+///
+/// # Errors
+///
+/// Returns [`Unsupported::NegativePriority`] for a priority the DSL cannot
+/// write.
+fn station_options(settings: &Dict) -> Result<Vec<String>, Unsupported> {
+	let mut options = Vec::new();
+	if let Some(priority) = signed(settings, "connection", "autoconnect-priority") {
+		if priority < 0 {
+			// netcfgd's `priority` is written as an unsigned number in the
+			// DSL, so a negative one cannot be expressed. Refusing by name
+			// beats writing a file that will not compile, or clamping to zero,
+			// which would turn a network the operator deliberately
+			// deprioritised into an ordinary one.
+			return Err(Unsupported::NegativePriority { given: priority });
+		}
+		if priority != 0 {
+			options.push(format!("priority = {priority}"));
+		}
+	}
+	Ok(options)
+}
+
+/// The `dns` block a profile's nameservers and search domains become.
+///
+/// Both families at once: netcfgd's policy is one scope per network rather
+/// than one per address family, which is decision 0007's shape rather than
+/// NM's.
+///
+/// # Errors
+///
+/// Returns [`Unsupported::MalformedAddress`] for a nameserver that is not one.
+fn dns_block(settings: &Dict) -> Result<Option<String>, Unsupported> {
+	let mut servers = nameservers(settings, "ipv4")?;
+	servers.extend(nameservers(settings, "ipv6")?);
+	let mut search = strings(settings, "ipv4", "dns-search").unwrap_or_default();
+	search.extend(strings(settings, "ipv6", "dns-search").unwrap_or_default());
+	search.retain(|domain| !domain.is_empty());
+
+	if servers.is_empty() && search.is_empty() {
+		return Ok(None);
+	}
+
+	let mut parts = Vec::new();
+	if !servers.is_empty() {
+		let rendered: Vec<String> = servers.iter().map(|s| format!("\"{s}\"")).collect();
+		parts.push(format!("servers = [{}]", rendered.join(", ")));
+	}
+	if !search.is_empty() {
+		let rendered: Vec<String> = search.iter().map(|s| format!("\"{s}\"")).collect();
+		parts.push(format!("search = [{}]", rendered.join(", ")));
+	}
+	Ok(Some(format!("dns {{ {} }}", parts.join("; "))))
+}
+
+/// Read a signed number out of a settings group.
+fn signed(settings: &Dict, group: &str, key: &str) -> Option<i32> {
+	let value = settings.get(group)?.get(key)?;
+	i32::try_from(value.try_clone().ok()?).ok()
+}
+
+/// Read a list of strings out of a settings group.
+fn strings(settings: &Dict, group: &str, key: &str) -> Option<Vec<String>> {
+	let value = settings.get(group)?.get(key)?;
+	Vec::<String>::try_from(value.try_clone().ok()?).ok()
+}
+
+/// The nameservers a client asked for, in whichever spelling it used.
+///
+/// `dns-data` is what a current client sends -- nmcli 1.52 does -- and `dns`
+/// is the packed form older ones use. Reading only the one this machine's
+/// client happens to send is how a shim works until somebody runs a different
+/// desktop.
+fn nameservers(settings: &Dict, group: &str) -> Result<Vec<String>, Unsupported> {
+	if let Some(listed) = strings(settings, group, "dns-data") {
+		for address in &listed {
+			if address.parse::<std::net::IpAddr>().is_err() {
+				return Err(Unsupported::MalformedAddress {
+					given: address.clone(),
+				});
+			}
+		}
+		return Ok(listed);
+	}
+
+	// The packed form. IPv4 only: NM's IPv6 `dns` is an array of byte arrays,
+	// and a client old enough to send that is older than this shim intends to
+	// serve -- so it is reported as dropped rather than half-read.
+	let Some(value) = settings.get(group).and_then(|fields| fields.get("dns")) else {
+		return Ok(Vec::new());
+	};
+	let Ok(words) =
+		Vec::<u32>::try_from(
+			value
+				.try_clone()
+				.map_err(|_| Unsupported::MalformedAddress {
+					given: "dns".to_owned(),
+				})?,
+		)
+	else {
+		return Ok(Vec::new());
+	};
+	Ok(words
+		.into_iter()
+		.map(|word| std::net::Ipv4Addr::from(word.to_ne_bytes()).to_string())
+		.collect())
+}
+
 /// Read an `aa{sv}` out of a settings group.
 fn dictionaries(
 	settings: &Dict,
@@ -394,6 +522,10 @@ pub(crate) fn network_block_keeping_secret(
 
 	let key_mgmt = string(settings, "802-11-wireless-security", "key-mgmt");
 	let mut secret = None;
+	// Keys that belong inside the `wifi` block rather than beside it, which is
+	// where netcfgd's DSL puts the ones a station uses to choose between
+	// networks.
+	let mut extra: Vec<String> = Vec::new();
 	let security = match key_mgmt.as_deref() {
 		None => "open = true".to_owned(),
 		Some("owe") => "owe = true".to_owned(),
@@ -432,6 +564,11 @@ pub(crate) fn network_block_keeping_secret(
 		}
 	};
 
+	// The per-connection options. Parsed before anything is written, so a
+	// refusal happens before a file exists rather than after.
+	extra.extend(station_options(settings)?);
+	let metered = signed(settings, "connection", "metered") == Some(1);
+
 	let mut text = String::new();
 	text.push_str(
 		"# Written by netcfgd-nm from a NetworkManager client. This file is\n\
@@ -451,6 +588,9 @@ pub(crate) fn network_block_keeping_secret(
 	}
 
 	let _ = writeln!(text, "\nnetwork \"{id}\" {{");
+	if metered {
+		text.push_str("\tmetered = true\n");
+	}
 	// The SSID as hex whenever it is not exactly the label. An SSID is octets
 	// and the label is text, so a network whose name has a space, or is not
 	// UTF-8 at all, needs both -- and writing the hex form unconditionally
@@ -458,7 +598,9 @@ pub(crate) fn network_block_keeping_secret(
 	if ssid.as_bytes() != id.as_bytes() {
 		let _ = writeln!(text, "\tssid = \"{}\"", ssid.to_hex());
 	}
-	let _ = writeln!(text, "\twifi {{ {security} }}");
+	let mut wifi = vec![security];
+	wifi.extend(extra);
+	let _ = writeln!(text, "\twifi {{ {} }}", wifi.join("; "));
 	if flag(settings, "802-11-wireless", "hidden") == Some(true) {
 		text.push_str("\thidden = true\n");
 	}
@@ -475,6 +617,11 @@ pub(crate) fn network_block_keeping_secret(
 		let rendered: Vec<String> = routes.iter().map(|r| format!("\"{r}\"")).collect();
 		let _ = writeln!(text, "\troutes = [{}]", rendered.join(", "));
 	}
+
+	if let Some(block) = dns_block(settings)? {
+		let _ = writeln!(text, "\t{block}");
+	}
+
 	text.push_str("}\n");
 
 	Ok(Emitted { id, text, secret })
@@ -719,6 +866,105 @@ mod tests {
 		);
 	}
 
+	/// The options a settings panel offers beside the address.
+	#[test]
+	fn per_connection_options_become_the_keys_that_carry_them() {
+		let mut settings = wifi_settings("Office", None, None);
+		settings
+			.get_mut("connection")
+			.expect("the group")
+			.insert("metered".to_owned(), value(Value::from(1_i32)));
+		settings.get_mut("connection").expect("the group").insert(
+			"autoconnect-priority".to_owned(),
+			value(Value::from(42_i32)),
+		);
+		let mut ipv4 = HashMap::new();
+		ipv4.insert("method".to_owned(), value(Value::from("auto")));
+		ipv4.insert(
+			"dns-data".to_owned(),
+			OwnedValue::try_from(Value::from(vec!["1.1.1.1".to_owned()])).expect("an array"),
+		);
+		ipv4.insert(
+			"dns-search".to_owned(),
+			OwnedValue::try_from(Value::from(vec!["example.com".to_owned()])).expect("an array"),
+		);
+		settings.insert("ipv4".to_owned(), ipv4);
+
+		let emitted = network_block(&settings).expect("it renders");
+		assert!(emitted.text.contains("metered = true"), "{}", emitted.text);
+		// Priority lives inside the `wifi` block, which is where netcfgd puts
+		// the keys a station uses to choose between networks.
+		assert!(
+			emitted.text.contains("wifi { open = true; priority = 42 }"),
+			"{}",
+			emitted.text
+		);
+		assert!(
+			emitted
+				.text
+				.contains(r#"dns { servers = ["1.1.1.1"]; search = ["example.com"] }"#),
+			"{}",
+			emitted.text
+		);
+	}
+
+	/// A priority netcfgd cannot write down. Clamping to zero would turn a
+	/// network the operator deliberately deprioritised into an ordinary one,
+	/// which is a silent change of meaning.
+	#[test]
+	fn a_negative_priority_is_refused_rather_than_clamped() {
+		let mut settings = wifi_settings("Office", None, None);
+		settings.get_mut("connection").expect("the group").insert(
+			"autoconnect-priority".to_owned(),
+			value(Value::from(-5_i32)),
+		);
+		assert_eq!(
+			network_block(&settings),
+			Err(Unsupported::NegativePriority { given: -5 })
+		);
+	}
+
+	/// `metered` is a tri-state in NM and a boolean in netcfgd, so only "yes"
+	/// writes anything: "no" and "unknown" are both the absence of the key.
+	#[test]
+	fn only_an_explicit_yes_makes_a_network_metered() {
+		for (given, expected) in [(1_i32, true), (2, false), (0, false)] {
+			let mut settings = wifi_settings("Office", None, None);
+			settings
+				.get_mut("connection")
+				.expect("the group")
+				.insert("metered".to_owned(), value(Value::from(given)));
+			let emitted = network_block(&settings).expect("it renders");
+			assert_eq!(
+				emitted.text.contains("metered = true"),
+				expected,
+				"for {given}"
+			);
+		}
+	}
+
+	/// The packed nameserver form, for a client too old to send `dns-data`.
+	#[test]
+	fn the_older_packed_nameserver_form_is_read_too() {
+		let mut settings = wifi_settings("Office", None, None);
+		let mut ipv4 = HashMap::new();
+		ipv4.insert("method".to_owned(), value(Value::from("auto")));
+		// 1.1.1.1 packed the way NM does it, which is the octets read back as
+		// a native-endian word.
+		ipv4.insert(
+			"dns".to_owned(),
+			OwnedValue::try_from(Value::from(vec![u32::from_ne_bytes([1, 1, 1, 1])]))
+				.expect("an array"),
+		);
+		settings.insert("ipv4".to_owned(), ipv4);
+		let emitted = network_block(&settings).expect("it renders");
+		assert!(
+			emitted.text.contains(r#"servers = ["1.1.1.1"]"#),
+			"{}",
+			emitted.text
+		);
+	}
+
 	#[test]
 	fn a_wired_profile_is_refused_by_name() {
 		let mut settings = wifi_settings("eth0", None, None);
@@ -741,16 +987,19 @@ mod tests {
 	fn settings_that_were_dropped_are_named_in_the_file() {
 		let mut settings = wifi_settings("HomeFiber", None, None);
 		settings
-			.get_mut("connection")
-			.expect("the group")
-			.insert("metered".to_owned(), value(Value::from(1_u32)));
-		settings
 			.get_mut("802-11-wireless")
 			.expect("the group")
 			.insert("powersave".to_owned(), value(Value::from(2_u32)));
+		// netcfgd has no per-network MTU: an interface has one and an SSID does
+		// not. A client asking for one is told so in the file it gets back,
+		// rather than having it quietly ignored.
+		settings
+			.get_mut("802-11-wireless")
+			.expect("the group")
+			.insert("mtu".to_owned(), value(Value::from(1400_u32)));
 		let emitted = network_block(&settings).expect("it renders");
 		assert!(
-			emitted.text.contains("#   connection.metered"),
+			emitted.text.contains("#   802-11-wireless.mtu"),
 			"{}",
 			emitted.text
 		);

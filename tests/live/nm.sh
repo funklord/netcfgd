@@ -121,7 +121,10 @@ interface radio0 {
 # whether it is consulted or not -- which is what happened, and was found by
 # removing the lookup and watching the test still pass.
 network "HomeFiber" {
-	wifi { psk = "@secret:home"; proto = "wpa3" }
+	metered = true
+	config  = "dhcp"
+	wifi { psk = "@secret:home"; proto = "wpa3"; priority = 30 }
+	dns { servers = ["9.9.9.9"]; search = ["quad9.example"] }
 }
 
 # A network whose credential is referenced and does not exist. Before the
@@ -563,6 +566,72 @@ else
 		"$("$repo/target/debug/ncfg" show 2>/dev/null | grep -c '"id": "Office"' || true)" "1"
 
 	timeout 15 nmcli connection delete Office > /dev/null 2>&1 || true
+
+	# --------------------------------------------- per-connection options
+
+	# What a settings panel offers beside the address. Round-tripped: the
+	# fixture's HomeFiber carries them, and a client writes them back.
+	if command -v busctl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+		home_profile=$(busctl --user --address="$address" call \
+			org.freedesktop.NetworkManager /org/freedesktop/NetworkManager/Settings \
+			org.freedesktop.NetworkManager.Settings GetConnectionByUuid \
+			s 7b9da559-bfbe-5bf1-82b1-bc18e6e2e81a 2>/dev/null | awk '{print $2}' | tr -d '"')
+		option() {
+			busctl --user --address="$address" --json=short call \
+				org.freedesktop.NetworkManager "$home_profile" \
+				org.freedesktop.NetworkManager.Settings.Connection GetSettings 2>/dev/null |
+				python3 "$repo/tests/live/nm_setting.py" connection "$1"
+		}
+		check "a network reports the priority it was given" "$(option priority)" "30"
+		# 1 is NM_METERED_YES. netcfgd's flag is a boolean, so `false` becomes
+		# an explicit "no" rather than "unknown" -- an operator who wrote it
+		# said something, and reporting unknown would have a desktop guess.
+		check "and whether it is metered, as a statement rather than a guess" \
+			"$(option metered)" "1"
+		check "and whether it joins by itself" "$(option autoconnect)" "True"
+
+		dns_of() {
+			busctl --user --address="$address" --json=short call \
+				org.freedesktop.NetworkManager "$home_profile" \
+				org.freedesktop.NetworkManager.Settings.Connection GetSettings 2>/dev/null |
+				python3 "$repo/tests/live/nm_setting.py" ipv4 "$1"
+		}
+		check "a network's own nameservers reach a panel" "$(dns_of dns)" "9.9.9.9"
+		# And in the packed form an older client reads, which has to be the
+		# same address: 9.9.9.9 is 0x09090909, which is 151587081 either way
+		# round -- so the fixture uses it deliberately as the one address that
+		# cannot tell a byte-order mistake apart, and the unit tests cover the
+		# asymmetric case.
+		check "and in the packed form beside it" "$(dns_of dns-packed)" "151587081"
+		check "and its search domains" "$(dns_of dns-search)" "quad9.example"
+	fi
+
+	# And back: a client setting them has to produce the keys netcfgd reads.
+	nmcli connection add type wifi ifname '*' con-name Opts ssid Opts \
+		connection.metered yes connection.autoconnect-priority 42 \
+		ipv4.dns 1.1.1.1 ipv4.dns-search example.com \
+		> "$work/opts.log" 2>&1 || true
+	opts="$work/etc/conf.d/nm-Opts.conf"
+
+	check "metered comes back as a network key" \
+		"$(grep -c 'metered = true' "$opts" 2>/dev/null || true)" "1"
+	# Priority goes inside the wifi block, which is where netcfgd keeps the
+	# keys a station uses to choose between networks.
+	check "priority goes inside the wifi block" \
+		"$(grep -c 'wifi { open = true; priority = 42 }' "$opts" 2>/dev/null || true)" "1"
+	check "and the nameservers become a dns block" \
+		"$(grep -c 'dns { servers = \["1.1.1.1"\]; search = \["example.com"\] }' "$opts" 2>/dev/null || true)" "1"
+	check "which netcfgd accepts" \
+		"$("$repo/target/debug/ncfg" show 2>/dev/null | grep -c '"id": "Opts"' || true)" "1"
+
+	# An MTU is the one option that has nowhere to go: an interface has one and
+	# an SSID does not. It is named in the file rather than silently ignored.
+	timeout 15 nmcli connection delete Opts > /dev/null 2>&1 || true
+	nmcli connection add type wifi ifname '*' con-name Mtu ssid Mtu \
+		802-11-wireless.mtu 1400 > "$work/mtu.log" 2>&1 || true
+	check "an option netcfgd cannot express is named in the file" \
+		"$(grep -c '802-11-wireless.mtu' "$work/etc/conf.d/nm-Mtu.conf" 2>/dev/null || true)" "1"
+	timeout 15 nmcli connection delete Mtu > /dev/null 2>&1 || true
 
 	# ------------------------------------------------------- the write path
 
