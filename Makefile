@@ -6,7 +6,12 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-systemd install-openrc install-procd fuzz deny clean
+.PHONY: all check build test fmt fmt-fix clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment
+
+# Where each adapter lives. Each is its own cargo workspace with its own
+# lockfile, so that its dependencies cannot reach the core's -- see
+# `nm-containment` below, and design section 9.2.
+ADAPTERS = adapters/netcfgd-nm
 
 all: build
 
@@ -24,7 +29,72 @@ ncfg-link:
 	fi
 
 # Ordered cheapest first, so a formatting slip does not wait on a full test run.
-check: fmt ascii clippy unsafe-policy executor-policy packaging test size footprint rss
+# `nm-containment` is early and costs nothing: it reads two text files, and it
+# is the one gate that fails if an adapter's dependencies have leaked into the
+# core -- which is the kind of thing that is trivial to prevent and miserable to
+# unpick later.
+check: fmt ascii clippy unsafe-policy executor-policy nm-containment packaging test size footprint rss adapters
+
+# Each adapter, built and checked with the same bar as the core.
+#
+# Separately, because they are separate workspaces. That is the price of
+# dependency containment and it is a small one: a `cd` per adapter, against
+# never having to ask which binary a `cargo deny` result was about.
+adapters:
+	@for adapter in $(ADAPTERS); do \
+		echo "adapters: $$adapter"; \
+		( cd $$adapter && \
+			$(CARGO) fmt --check && \
+			$(CARGO) clippy --all-targets -- -D warnings && \
+			$(CARGO) test && \
+			$(CARGO) build ) || exit 1; \
+	done
+
+# Design section 9.2 asks for this in as many words: "a mechanically checkable
+# CI assertion" that the core's dependency manifest has not gained an entry.
+#
+# It is not a grep for `zbus`. Naming the thing to keep out only keeps *that*
+# thing out, and the next adapter brings something else. Instead the core's
+# lockfile is checked against `deny.toml`'s allow list, which is the written
+# form of constraint 3 -- so any new core dependency fails this, whether an
+# adapter brought it or not.
+#
+# The second half is the gate checking itself. If the adapter's lockfile has no
+# heavy dependency in it, then "the core does not have the adapter's
+# dependencies" is true for the boring reason and proves nothing. So it also
+# asserts that the adapter really does carry what it is supposed to be
+# containing -- a gate that passes on an empty input set is the failure mode
+# this project keeps finding.
+nm-containment:
+	@allowed=$$(sed -n 's/.*{ crate = "\([^"]*\)".*/\1/p' deny.toml | sort -u); \
+	present=$$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.lock | grep -v '^netcfgd' | sort -u); \
+	leaked=""; \
+	for crate in $$present; do \
+		echo "$$allowed" | grep -qx "$$crate" || leaked="$$leaked $$crate"; \
+	done; \
+	if [ -n "$$leaked" ]; then \
+		echo "nm-containment: the core workspace has dependencies deny.toml does not allow:"; \
+		echo "nm-containment:  $$leaked"; \
+		echo "nm-containment: constraint 3 and design section 9.2 -- an adapter's"; \
+		echo "nm-containment: dependencies belong to its own workspace, and a new core"; \
+		echo "nm-containment: dependency is a decision, not a lockfile update"; \
+		exit 1; \
+	fi; \
+	for adapter in $(ADAPTERS); do \
+		if [ ! -f $$adapter/Cargo.lock ]; then \
+			echo "nm-containment: $$adapter has no lockfile, so this proved nothing"; \
+			echo "nm-containment: run 'make adapters' first"; \
+			exit 1; \
+		fi; \
+		count=$$(sed -n 's/^name = "\(.*\)"/\1/p' $$adapter/Cargo.lock | wc -l); \
+		if [ "$$count" -lt 20 ]; then \
+			echo "nm-containment: $$adapter has $$count dependencies, which is too few"; \
+			echo "nm-containment: for this check to mean anything -- it is supposed to be"; \
+			echo "nm-containment: containing a D-Bus stack"; \
+			exit 1; \
+		fi; \
+	done; \
+	echo "nm-containment: ok, $$(echo "$$present" | wc -w) core dependencies, all allowed"
 
 fmt:
 	$(CARGO) fmt --check
@@ -381,6 +451,10 @@ live:
 	@# machine never running an access point has no reason to install (0026).
 	@# A missing one is a skip rather than a failed suite.
 	@unshare -rn sh -c "sh tests/live/ap.sh"
+	@# The NetworkManager shim, against a real nmcli on a private bus. Not under
+	@# NCFG_LIVE: nmcli comes from the network-manager package, which is exactly
+	@# what a netcfgd machine is expected not to have installed.
+	@unshare -rn sh -c "sh tests/live/nm.sh"
 	@# Association, which needs real root and a loadable mac80211_hwsim. Not
 	@# under NCFG_LIVE and not under unshare: it does its own namespace, and a
 	@# machine that cannot run it should get a skip rather than a failure.
@@ -403,6 +477,18 @@ deny:
 		echo "deny: cargo-deny not installed, skipping"
 	@command -v cargo-audit >/dev/null 2>&1 && $(CARGO) audit || \
 		echo "deny: cargo-audit not installed, skipping"
+	@# Each adapter separately, against its own deny.toml. A separate workspace
+	@# is invisible to a `cargo deny` run in the root -- which is the point, and
+	@# also the way an adapter's supply chain would go unchecked forever if this
+	@# loop were not here.
+	@for adapter in $(ADAPTERS); do \
+		echo "deny: $$adapter"; \
+		( cd $$adapter && \
+			{ command -v cargo-deny >/dev/null 2>&1 && $(CARGO) deny check || \
+				echo "deny: cargo-deny not installed, skipping"; } && \
+			{ command -v cargo-audit >/dev/null 2>&1 && $(CARGO) audit || \
+				echo "deny: cargo-audit not installed, skipping"; } ) || exit 1; \
+	done
 
 clean:
 	$(CARGO) clean
