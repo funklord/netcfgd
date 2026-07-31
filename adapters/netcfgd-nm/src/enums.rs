@@ -205,6 +205,38 @@ pub(crate) mod activation_flag {
 	pub(crate) const IP6_READY: u32 = 0x10;
 }
 
+/// `NMDeviceWifiCapabilities`: what a radio can negotiate.
+///
+/// Checked against a running `NetworkManager` 1.52, whose card reports 12287 --
+/// `0x2fff`, every bit below `MESH` -- so the low bits are confirmed as a
+/// block rather than one at a time.
+pub(crate) mod wifi_capability {
+	/// Nothing known.
+	pub(crate) const NONE: u32 = 0x0;
+	/// 40-bit WEP.
+	pub(crate) const CIPHER_WEP40: u32 = 0x1;
+	/// 104-bit WEP.
+	pub(crate) const CIPHER_WEP104: u32 = 0x2;
+	/// TKIP.
+	pub(crate) const CIPHER_TKIP: u32 = 0x4;
+	/// CCMP.
+	pub(crate) const CIPHER_CCMP: u32 = 0x8;
+	/// WPA.
+	pub(crate) const WPA: u32 = 0x10;
+	/// WPA2 and later, which NM still calls RSN.
+	pub(crate) const RSN: u32 = 0x20;
+	/// Can run as an access point.
+	pub(crate) const AP: u32 = 0x40;
+	/// Can join an ad-hoc cell.
+	pub(crate) const ADHOC: u32 = 0x80;
+	/// The frequency bits below mean something.
+	pub(crate) const FREQ_VALID: u32 = 0x100;
+	/// 2.4 GHz.
+	pub(crate) const FREQ_2GHZ: u32 = 0x200;
+	/// 5 GHz.
+	pub(crate) const FREQ_5GHZ: u32 = 0x400;
+}
+
 /// `NMDeviceCapabilities`.
 pub(crate) mod capability {
 	/// The device is supported by this daemon.

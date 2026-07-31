@@ -192,6 +192,15 @@ fn secret_path(name: &str) -> PathBuf {
 	config_dir().join("secrets").join(name)
 }
 
+/// Store a credential an agent supplied.
+///
+/// # Errors
+///
+/// Returns a message naming the file.
+pub(crate) fn save_secret(name: &str, value: &str) -> Result<(), String> {
+	write_secret(name, value)
+}
+
 fn write_secret(name: &str, value: &str) -> Result<(), String> {
 	let path = secret_path(name);
 	create_dir(path.parent().unwrap_or_else(|| Path::new(".")))?;
