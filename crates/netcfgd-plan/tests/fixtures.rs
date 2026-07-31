@@ -1441,6 +1441,91 @@ fn an_unmanaged_device_is_not_torn_down_either() {
 	assert!(plan.is_empty(), "{:?}", names(&plan));
 }
 
+/// `on_unmanage = "clear"` empties the device first, then leaves it alone.
+///
+/// The point of the policy: walking away from a device strands whatever
+/// netcfgd put on it, including credentials. Clearing is defined by ownership
+/// rather than by content, so one rule covers every device -- it removes what
+/// carries netcfgd's tag and nothing else.
+#[test]
+fn a_cleared_device_is_emptied_and_then_left_alone() {
+	let desired = document(
+		r#"
+device probe0 { managed = false; on_unmanage = "clear" }
+
+interface probe0 {
+	kind   = "dummy"
+	config = "10.5.5.1/24"
+}
+"#,
+	);
+	let mut observed = observed_with(&["probe0"]);
+	observed.links[0].up = true;
+	observed.links[0].kind = "dummy".to_owned();
+	observed.links[0].ownership = Ownership::Ours;
+	observed.addresses.push(ObservedAddress {
+		interface: "probe0".to_owned(),
+		address: "10.5.5.1/24".to_owned(),
+		proto: None,
+		ownership: Ownership::Ours,
+		origin: Some(Origin::Static),
+	});
+
+	let first = plan(&desired, &observed, &PlanOptions::default());
+	assert!(names(&first).contains(&"addr.del"), "{:?}", names(&first));
+	// And nothing is added back: planning an address and removing it in the
+	// same plan is a loop rather than a convergence, which is why the forward
+	// passes stay switched off for a device being cleared.
+	assert!(!names(&first).contains(&"addr.add"), "{:?}", names(&first));
+
+	// Once emptied, there is nothing left to do -- the policy is a state, so
+	// it stops on its own rather than needing an edge to be detected.
+	let emptied = plan(&desired, &observed_with(&[]), &PlanOptions::default());
+	assert!(emptied.is_empty(), "{:?}", names(&emptied));
+}
+
+/// Clearing removes what netcfgd owns and nothing else. Whoever takes the
+/// device over keeps their own configuration -- which is the property that
+/// makes one rule safe on every device.
+#[test]
+fn clearing_leaves_what_netcfgd_did_not_put_there() {
+	let desired = document(r#"device probe0 { managed = false; on_unmanage = "clear" }"#);
+	let mut observed = observed_with(&["probe0"]);
+	observed.links[0].up = true;
+	observed.addresses.push(ObservedAddress {
+		interface: "probe0".to_owned(),
+		address: "192.0.2.9/24".to_owned(),
+		proto: None,
+		ownership: Ownership::Foreign,
+		origin: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan.is_empty(), "{:?}", names(&plan));
+}
+
+/// The default is still to walk away. A device that says nothing about
+/// `on_unmanage` keeps the behaviour decision 0035 settled on, because you set
+/// `managed = false` when something else is taking over and having netcfgd
+/// pull the addresses out on its way past is the failure the flag prevents.
+#[test]
+fn leaving_is_still_what_happens_by_default() {
+	let desired = document(r"device probe0 { managed = false }");
+	let mut observed = observed_with(&["probe0"]);
+	observed.links[0].up = true;
+	observed.links[0].ownership = Ownership::Ours;
+	observed.addresses.push(ObservedAddress {
+		interface: "probe0".to_owned(),
+		address: "10.5.5.1/24".to_owned(),
+		proto: None,
+		ownership: Ownership::Ours,
+		origin: Some(Origin::Static),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan.is_empty(), "{:?}", names(&plan));
+}
+
 /// An unmanaged interface's DNS scope is not applied either. `dns.apply` is
 /// host-wide and names no interface, so it is the one action the check in
 /// `push` cannot see.

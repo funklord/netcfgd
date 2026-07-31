@@ -43,7 +43,7 @@ pub use address::{
 	Static,
 };
 pub use control::{Control, Principal, Tier};
-pub use device::{AccessPoint, Device, DeviceMatch, MacPolicy, WifiDevicePolicy};
+pub use device::{AccessPoint, Device, DeviceMatch, MacPolicy, OnUnmanage, WifiDevicePolicy};
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};
 pub use interface::{
@@ -74,7 +74,7 @@ pub(crate) fn default_true() -> bool {
 /// Bumping `minor` means fields were added. Bumping `major` means a consumer
 /// of the old version must refuse the document outright, which is what
 /// [`Document::from_json`] does.
-pub const SCHEMA_VERSION: Version = Version { major: 1, minor: 1 };
+pub const SCHEMA_VERSION: Version = Version { major: 1, minor: 2 };
 
 /// A `{major, minor}` schema version.
 ///

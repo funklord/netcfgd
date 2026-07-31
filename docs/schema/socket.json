@@ -14,7 +14,7 @@
 {"request":"wifi_status","interface":"wlan0"}
 {"request":"wifi_connect","interface":"wlan0","network":"home"}
 {"request":"wifi_disconnect","interface":"wlan0"}
-{"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":1}}
+{"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":2}}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"ssid":"686f6d65","name":"home","configured":"home"}]}
 {"response":"wifi_status","interface":"wlan0","state":"COMPLETED","ssid":"686f6d65","name":"home","bssid":"00:11:22:33:44:55","network":"home"}
