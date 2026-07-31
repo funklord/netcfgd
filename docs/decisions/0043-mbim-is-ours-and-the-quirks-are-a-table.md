@@ -1,8 +1,14 @@
 # 0043: MBIM is ours, and the quirks are a table
 
-Status: accepted
+Status: superseded by [0044](0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)
 Date: 2026-07-31
 Milestone: settles the fork 0036 named
+
+> **Superseded.** The gate this record names in "The gate before any code" was
+> checked and it fails: `wwan_hwsim` creates an AT port and nothing else, so an
+> MBIM backend cannot be tested. 0044 follows the branch this record itself
+> named for that case. What survives is the measurement, the reason
+> ModemManager's only door is the bus, and the quirks-as-a-table shape.
 
 ## Context
 
