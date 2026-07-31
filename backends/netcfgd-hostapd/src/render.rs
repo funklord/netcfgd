@@ -150,19 +150,68 @@ pub fn acl_file(ctrl_dir: &str, device: &str) -> String {
 	format!("{ctrl_dir}/{device}.acl")
 }
 
-/// The station list, one address per line, as hostapd reads it.
+/// The prefix of the line that records which policy hostapd was started with.
 ///
-/// hostapd accepts an optional VLAN id after the address, which nothing here
-/// writes: putting a station on a VLAN is an `interface` question and the
-/// document says it there.
+/// A comment, because `hostapd_config_read_maclist` skips any line whose *first
+/// byte* is `#` -- at column zero, with no leading whitespace allowed, which is
+/// why this is not indented. Short for a second reason from the same function:
+/// it reads with `fgets` into a 128-byte buffer, so a longer line would arrive
+/// split, and the tail of a comment is not a comment. It would be parsed as an
+/// address, fail, and take the access point down at startup.
+const POLICY_MARKER: &str = "# netcfgd policy: ";
+
+/// The station list as hostapd reads it, with the policy recorded above it.
+///
+/// One address per line. hostapd accepts an optional VLAN id after the address,
+/// which nothing here writes: putting a station on a VLAN is an `interface`
+/// question and the document says it there.
+///
+/// The first line is the record decision 0041 needs. `macaddr_acl` is not
+/// readable over the control socket -- `GET_CONFIG` reports the SSID, the BSSID
+/// and the ciphers and says nothing about it -- so without a record netcfgd
+/// could converge the lists of a running access point without knowing which one
+/// it reads, and an operator who flipped `deny` to `allow` would get an open
+/// network reported as converged. This file is written only by [`crate::start`],
+/// so while hostapd is running it says what hostapd was started with.
+///
+/// It goes here rather than in the generated `.conf`, which also carries the
+/// value: this file is mode 0644 and holds no secret, and reading the other one
+/// back would mean opening a file with a passphrase in it to learn one integer.
 #[must_use]
-pub fn acl_contents(stations: &[String]) -> String {
-	let mut out = String::new();
-	for station in stations {
+pub fn acl_contents(access_control: &netcfgd_model::AccessControl) -> String {
+	let mut out = format!("{POLICY_MARKER}{}\n", policy_name(access_control.policy));
+	for station in &access_control.stations {
 		out.push_str(station);
 		out.push('\n');
 	}
 	out
+}
+
+/// How a policy is spelled in the record, which is how the document spells it.
+fn policy_name(policy: AclPolicy) -> &'static str {
+	match policy {
+		AclPolicy::Deny => "deny",
+		AclPolicy::Allow => "allow",
+	}
+}
+
+/// Which policy a written station list records, if it records one.
+///
+/// `None` for a file written before this record existed, and for one written by
+/// something that is not netcfgd. Both mean "netcfgd does not know which list
+/// this hostapd reads", which is a state the planner has to be able to say out
+/// loud rather than guess at.
+#[must_use]
+pub fn policy_in(contents: &str) -> Option<AclPolicy> {
+	let recorded = contents
+		.lines()
+		.find_map(|line| line.strip_prefix(POLICY_MARKER))?
+		.trim();
+	match recorded {
+		"deny" => Some(AclPolicy::Deny),
+		"allow" => Some(AclPolicy::Allow),
+		_ => None,
+	}
 }
 
 /// The 2.4 GHz band, as hostapd spells the mode and the document spells the
@@ -704,14 +753,66 @@ mod tests {
 	}
 
 	#[test]
-	fn the_station_file_is_one_address_per_line() {
-		assert_eq!(acl_contents(&[]), "");
+	fn the_station_file_is_one_address_per_line_under_the_recorded_policy() {
+		let list = |policy, stations: &[&str]| netcfgd_model::AccessControl {
+			policy,
+			stations: stations.iter().map(|s| (*s).to_owned()).collect(),
+		};
+		// An empty list is still a file, and still records its policy: hostapd
+		// refuses to start when `deny_mac_file` points at nothing, so "nobody is
+		// denied" has to be spelled rather than left out (decision 0039).
 		assert_eq!(
-			acl_contents(&[
-				"aa:bb:cc:dd:ee:ff".to_owned(),
-				"00:11:22:33:44:55".to_owned()
-			]),
-			"aa:bb:cc:dd:ee:ff\n00:11:22:33:44:55\n"
+			acl_contents(&list(AclPolicy::Deny, &[])),
+			"# netcfgd policy: deny\n"
 		);
+		assert_eq!(
+			acl_contents(&list(
+				AclPolicy::Allow,
+				&["aa:bb:cc:dd:ee:ff", "00:11:22:33:44:55"]
+			)),
+			"# netcfgd policy: allow\naa:bb:cc:dd:ee:ff\n00:11:22:33:44:55\n"
+		);
+	}
+
+	#[test]
+	fn the_policy_is_read_back_out_of_the_file_that_records_it() {
+		for policy in [AclPolicy::Deny, AclPolicy::Allow] {
+			let contents = acl_contents(&netcfgd_model::AccessControl {
+				policy,
+				stations: vec!["aa:bb:cc:dd:ee:ff".to_owned()],
+			});
+			assert_eq!(policy_in(&contents), Some(policy));
+		}
+	}
+
+	#[test]
+	fn a_file_with_no_record_claims_no_policy() {
+		// A list written by an older netcfgd, or by something that is not
+		// netcfgd. Guessing here would be guessing which list a running hostapd
+		// reads, and getting that wrong opens a network.
+		assert_eq!(policy_in("aa:bb:cc:dd:ee:ff\n"), None);
+		assert_eq!(policy_in(""), None);
+		assert_eq!(policy_in("# netcfgd policy: whatever\n"), None);
+		// Indented, so hostapd would not treat it as a comment either -- it
+		// checks byte zero. A file like this is not one netcfgd wrote.
+		assert_eq!(policy_in(" # netcfgd policy: deny\n"), None);
+	}
+
+	#[test]
+	fn the_record_is_short_enough_that_hostapd_reads_it_as_one_line() {
+		// `hostapd_config_read_maclist` reads with `fgets` into a 128-byte
+		// buffer and treats a line as a comment only when its first byte is
+		// `#`. A longer record would arrive split, and the tail would be parsed
+		// as an address, fail, and take the access point down at startup.
+		let first = acl_contents(&netcfgd_model::AccessControl {
+			policy: AclPolicy::Allow,
+			stations: Vec::new(),
+		});
+		assert!(
+			first.len() < 127,
+			"the policy record is {} bytes",
+			first.len()
+		);
+		assert!(first.starts_with('#'));
 	}
 }

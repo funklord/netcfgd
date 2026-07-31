@@ -184,4 +184,15 @@ netcfgd
 # Most of this is serde's generated code for StationReport and StationEntry
 # again, which is the same finding as every previous entry in this file: the
 # types cost more than the logic.
-total 1907224
+# +12 KB for converging an access point's ACL over the control socket: the
+# DENY_ACL/ACCEPT_ACL client and its SHOW parser, two observed types with their
+# serde, a planner pass with its restart path, two ops and two executor arms.
+# `netcfgd-observe` links netcfgd-hostapd for the first time, which is a new
+# dependency edge and no new code in the binary -- netcfgd-apply already linked
+# it, and `ncfg` links both.
+#
+# Cheaper than the station list at +48 KB despite doing more, and for the
+# reason this file keeps finding: that one added two protocol types that cross
+# the wire, and this one adds no wire types at all. The lists are read and
+# converged where they are used.
+total 1919512

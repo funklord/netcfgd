@@ -21,13 +21,15 @@
 //! `wpa_ctrl` protocol as `wpa_supplicant`, so the client from that crate
 //! reaches it unchanged.
 
+pub mod acl;
 pub mod render;
 pub mod station;
 
+pub use acl::Live;
 pub use render::{config, to_file, to_redacted, Line, Unsupported};
 pub use station::{stations, Station};
 
-use netcfgd_model::AccessPoint;
+use netcfgd_model::{AccessPoint, ObservedPolicy};
 use netcfgd_secret::Resolver;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -179,9 +181,77 @@ pub fn write_acl(run_dir: &Path, access_point: &AccessPoint) -> Result<(), Strin
 		.mode(0o644)
 		.open(&path)
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-	file.write_all(render::acl_contents(&acl.stations).as_bytes())
+	file.write_all(render::acl_contents(acl).as_bytes())
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
+
+/// Which policy the access point on this device was started with.
+///
+/// Read out of the station list netcfgd generated, where [`render::acl_contents`]
+/// records it as a comment hostapd ignores. Three answers, because the two ways
+/// of finding no policy mean opposite things:
+///
+/// - **No file.** [`write_acl`] removes it when the document carries no
+///   `access_control` block, so its absence says hostapd was started without
+///   one and has no `macaddr_acl` at all -- [`ObservedPolicy::Unset`].
+/// - **A file with no record**, written by a netcfgd from before this existed:
+///   [`ObservedPolicy::Unknown`], and nothing may be converged from there.
+/// - **A file with a record**: that policy.
+///
+/// This is only the truth about a *running* hostapd. The file is written by
+/// [`start`] and by nothing else, so while the process is alive it says what
+/// the process read; once it has exited the file is a leftover and the caller
+/// must not treat it as an observation. That is why the observer asks only
+/// about backends it believes are running.
+#[must_use]
+pub fn recorded_policy(run_dir: &Path, device: &str) -> ObservedPolicy {
+	match std::fs::read_to_string(acl_path(run_dir, device)) {
+		Ok(contents) => render::policy_in(&contents).map_or(ObservedPolicy::Unknown, |policy| {
+			ObservedPolicy::Set(policy)
+		}),
+		Err(error) if error.kind() == std::io::ErrorKind::NotFound => ObservedPolicy::Unset,
+		// Present and unreadable is not the same as absent. A file netcfgd
+		// cannot open says nothing about what hostapd read out of it, and
+		// reporting `Unset` would have the planner restart an access point over
+		// a permissions problem.
+		Err(_) => ObservedPolicy::Unknown,
+	}
+}
+
+/// Open the control socket of the access point on one device.
+///
+/// The phrasing is the point of having this in one place. "Connection refused
+/// on a unix socket" sends an operator to look at permissions; what is almost
+/// always true is that no access point is running, which is the ordinary state
+/// for a radio whose block was never applied.
+///
+/// The deadline is a parameter because one caller runs in the reconcile loop
+/// and the rest do not -- see [`acl::read`], which is the one that cannot
+/// afford to wait.
+///
+/// # Errors
+///
+/// Returns that message, naming the device.
+pub fn connect(
+	run_dir: &Path,
+	device: &str,
+	timeout: std::time::Duration,
+) -> Result<netcfgd_supplicant::Client, String> {
+	netcfgd_supplicant::Client::connect_within(&ctrl_dir(run_dir), device, timeout).map_err(
+		|error| {
+			format!(
+				"no access point is running on {device}, or its control socket is \
+				 unreachable: {error}"
+			)
+		},
+	)
+}
+
+/// How long an ordinary command may take.
+///
+/// The client's own default, named here so the callers that want it read the
+/// same as the one that does not.
+pub const PATIENT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Start an access point.
 ///
