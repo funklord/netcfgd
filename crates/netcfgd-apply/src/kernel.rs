@@ -663,6 +663,16 @@ impl Executor for KernelExecutor {
 					)
 					.map_err(|error| format!("cannot remove vlan {vid} from {iface}: {error}"))
 			}
+			Op::AccessControlAdd {
+				iface,
+				list,
+				station,
+			} => netcfgd_hostapd::acl::add(&self.run_dir, iface, *list, station),
+			Op::AccessControlDel {
+				iface,
+				list,
+				station,
+			} => netcfgd_hostapd::acl::remove(&self.run_dir, iface, *list, station),
 			Op::BackendStop { kind, iface } => {
 				if *kind == netcfgd_model::BackendKind::AccessPoint {
 					// Where `/run` is, which `stop_backend` has no access to --

@@ -242,6 +242,7 @@ impl OwnedState {
 					kind: *kind,
 					interface: interface.clone(),
 					running: true,
+					access_control: None,
 				});
 			}
 		}

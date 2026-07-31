@@ -17,7 +17,14 @@ plausible fake would get wrong:
   - the walk ends with an *empty* reply, because the MIB printer returns zero
     bytes for a null station
 
-    fake_hostapd.py <ctrl-dir> <interface>
+The access control lists are real state here rather than a command that answers
+OK, for the same reason. `hostapd_ctrl_iface_acl_show_mac` prints
+`MACSTR " VLAN_ID=%d\n"` per entry and *nothing at all* for an empty list, and
+`ADD_MAC`/`DEL_MAC` are idempotent -- adding an address already present and
+deleting one that is absent both answer OK. A fake that answered OK to
+everything would let a converger pass while sending the same command forever.
+
+    fake_hostapd.py <ctrl-dir> <interface> [--deny addr,addr] [--accept addr,...]
 """
 
 import os
@@ -34,6 +41,13 @@ STATIONS = [
     ("aa:bb:cc:dd:ee:ff", True, False),
     ("66:77:88:99:aa:bb", False, True),
 ]
+
+# hostapd's two in-memory lists, seeded from the command line. Both exist
+# whatever `macaddr_acl` says -- `hostapd_check_acl` consults the accept list
+# first and the deny list second, and `macaddr_acl` decides only what happens to
+# an address in neither -- so a fake with one list would hide the case where a
+# stale accept entry overrides the deny list that is meant to be refusing it.
+ACL = {"deny": [], "accept": []}
 
 
 def mib(index):
@@ -93,20 +107,71 @@ def answer(command):
     if command.startswith("STA "):
         index = index_of(command[len("STA "):])
         return mib(index) if index is not None else "FAIL\n"
-    # The ACL and deauthentication commands, so a test can assert that netcfgd
-    # sent them rather than only that it returned without an error.
-    if command.startswith(("DENY_ACL ", "ACCEPT_ACL ", "DEAUTHENTICATE ")):
+    for prefix, name in (("DENY_ACL ", "deny"), ("ACCEPT_ACL ", "accept")):
+        if command.startswith(prefix):
+            return acl(name, command[len(prefix):])
+    if command.startswith("DEAUTHENTICATE "):
         return "OK\n"
     # Everything else. FAIL is a real hostapd answer; inventing a success would
     # make a test pass for a command that did nothing.
     return "FAIL\n"
 
 
+def acl(name, rest):
+    """One of hostapd's two lists, changed the way ctrl_iface.c changes it."""
+    held = ACL[name]
+    if rest == "SHOW":
+        # `hostapd_ctrl_iface_acl_show_mac` writes nothing for an empty list, so
+        # this returns zero bytes rather than an empty line -- which is what the
+        # reader has to cope with, and what a plausible fake gets wrong.
+        return "".join(f"{addr} VLAN_ID=0\n" for addr in held)
+    if rest == "CLEAR":
+        held.clear()
+        return "OK\n"
+    if rest.startswith("ADD_MAC "):
+        address = rest[len("ADD_MAC "):].strip().lower()
+        if not valid(address):
+            # `hwaddr_aton` failing is the one way these answer FAIL.
+            return "FAIL\n"
+        if address not in held:
+            held.append(address)
+            # hostapd qsorts the list on every add.
+            held.sort()
+        return "OK\n"
+    if rest.startswith("DEL_MAC "):
+        address = rest[len("DEL_MAC "):].strip().lower()
+        if not valid(address):
+            return "FAIL\n"
+        # Deleting an address that is not there is not an error, and neither is
+        # deleting from an empty list -- `hostapd_ctrl_iface_acl_del_mac`
+        # returns 0 for both.
+        if address in held:
+            held.remove(address)
+        return "OK\n"
+    return "FAIL\n"
+
+
+def valid(address):
+    parts = address.split(":")
+    return len(parts) == 6 and all(
+        len(part) == 2 and all(c in "0123456789abcdef" for c in part)
+        for part in parts
+    )
+
+
 def main():
-    if len(sys.argv) != 3:
-        print("fake_hostapd.py <ctrl-dir> <interface>", file=sys.stderr)
+    if len(sys.argv) < 3:
+        print("fake_hostapd.py <ctrl-dir> <interface> [--deny a,b] [--accept a,b]",
+              file=sys.stderr)
         return 2
     ctrl_dir, interface = sys.argv[1], sys.argv[2]
+    # What hostapd read out of its configuration file at startup, which is the
+    # state a converger has to reconcile against.
+    rest = sys.argv[3:]
+    for flag, name in (("--deny", "deny"), ("--accept", "accept")):
+        if flag in rest:
+            value = rest[rest.index(flag) + 1]
+            ACL[name] = sorted(a for a in value.split(",") if a)
     os.makedirs(ctrl_dir, exist_ok=True)
     path = os.path.join(ctrl_dir, interface)
     if os.path.exists(path):

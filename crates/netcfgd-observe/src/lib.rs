@@ -308,13 +308,17 @@ fn address_ownership(proto: Option<u8>, proto_supported: bool, recorded: bool) -
 
 /// Take a live observation.
 ///
+/// `run_dir` is netcfgd's own `/run` directory, which the impure half needs:
+/// an access point's control socket and the record of the policy it was started
+/// with both live under it.
+///
 /// # Errors
 ///
 /// Returns the underlying `io::Error` from the netlink socket.
-pub fn current(prior: &PriorState) -> io::Result<Observed> {
+pub fn current(prior: &PriorState, run_dir: &std::path::Path) -> io::Result<Observed> {
 	let snapshot = netcfgd_sys::snapshot()?;
 	let mut observed = build(&snapshot, prior);
-	host::augment(&mut observed);
+	host::augment(&mut observed, run_dir);
 	Ok(observed)
 }
 

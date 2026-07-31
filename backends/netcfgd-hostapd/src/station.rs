@@ -79,11 +79,7 @@ pub struct Station {
 /// Returns a message naming the device when hostapd cannot be reached, which
 /// is the ordinary case for an access point that is not running.
 pub fn stations(run_dir: &std::path::Path, device: &str) -> Result<Vec<Station>, String> {
-	let dir = crate::ctrl_dir(run_dir);
-	let client =
-		netcfgd_supplicant::Client::connect(&dir, device).map_err(|error| {
-			format!("no access point is running on {device}, or its control socket is unreachable: {error}")
-		})?;
+	let client = crate::connect(run_dir, device, crate::PATIENT)?;
 
 	let mut stations = Vec::new();
 	let mut reply = client

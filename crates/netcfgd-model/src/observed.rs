@@ -312,6 +312,76 @@ pub struct ObservedBackend {
 	pub interface: String,
 	/// Whether it is running.
 	pub running: bool,
+	/// What a running access point's access control lists actually hold.
+	///
+	/// Only ever present for [`BackendKind::AccessPoint`], and only while it is
+	/// running -- a list read out of a process that has exited is not an
+	/// observation of anything. Absent everywhere else, which is why this is an
+	/// `Option` rather than an empty [`ObservedAccessControl`]: "netcfgd could
+	/// not ask" and "hostapd denies nobody" are different answers, and only the
+	/// second one may be reconciled against.
+	///
+	/// Unlike the rest of this struct it is read live rather than recorded.
+	/// Absent when it serialises, so the `/run` record of what netcfgd started
+	/// is byte-for-byte what it was before this field existed, and a file
+	/// written by an older netcfgd still parses.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub access_control: Option<ObservedAccessControl>,
+}
+
+/// hostapd's in-memory station lists, and the policy it is running under.
+///
+/// Both lists, because hostapd holds both regardless of which one `macaddr_acl`
+/// selects. The document names only one (decision 0039), so the other has to be
+/// observed to notice that it is not empty -- which is the only way to see, from
+/// outside, that an operator flipped the policy under a running access point.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedAccessControl {
+	/// Which policy the running hostapd was started with.
+	pub policy: ObservedPolicy,
+	/// Addresses in hostapd's `deny_mac` list, normalised and sorted.
+	pub denied: Vec<String>,
+	/// Addresses in hostapd's `accept_mac` list, normalised and sorted.
+	pub accepted: Vec<String>,
+}
+
+impl ObservedAccessControl {
+	/// The list one policy reads.
+	#[must_use]
+	pub fn list(&self, policy: crate::AclPolicy) -> &[String] {
+		match policy {
+			crate::AclPolicy::Deny => &self.denied,
+			crate::AclPolicy::Allow => &self.accepted,
+		}
+	}
+}
+
+/// Which policy a running access point is enforcing.
+///
+/// Three answers rather than an `Option`, because the two ways of having no
+/// policy lead to opposite actions. `macaddr_acl` is not readable over the
+/// control socket -- `GET_CONFIG` reports the SSID, the BSSID and the ciphers
+/// and says nothing about it -- so this comes from netcfgd's own record of what
+/// it started hostapd with, and the record's *absence* is itself informative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservedPolicy {
+	/// Started with no `access_control` block, so `macaddr_acl` was never set.
+	///
+	/// Both of hostapd's lists exist and neither is consulted for admission the
+	/// way a configured one is -- which is exactly why anything in them is worth
+	/// reporting rather than converging away as though it were inert.
+	Unset,
+	/// Started with this policy, and still enforcing it.
+	Set(crate::AclPolicy),
+	/// netcfgd has no record and cannot tell.
+	///
+	/// An access point started by a netcfgd too old to write one, or a `/run`
+	/// cleared underneath a running one. Nothing may be converged from here:
+	/// emptying a list without knowing which one hostapd reads either opens a
+	/// network or closes it, and there is no way to know which.
+	Unknown,
 }
 
 /// A DNS scope netcfgd last delivered, and what it delivered.
