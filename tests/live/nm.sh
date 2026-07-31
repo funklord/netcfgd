@@ -187,6 +187,9 @@ until nmcli general status >/dev/null 2>&1; do
 done
 
 devices() { nmcli --terse --fields DEVICE,TYPE,STATE device status 2>/dev/null; }
+devices_full() {
+	nmcli --terse --fields DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null
+}
 field() { devices | awk -F: -v want="$1" '$1 == want { print $2 ":" $3 }'; }
 
 # Every link, not a subset. This is the assertion that would have caught the
@@ -334,6 +337,98 @@ else
 	# that would never produce anything.
 	check "asking a non-radio to scan is refused" \
 		"$(nmcli device wifi rescan ifname probe0 2>&1 | grep -ci "error\|not a wi" || true)" "1"
+
+	# ------------------------------------------- connections and activation
+
+	connections() { nmcli --terse --fields NAME,TYPE,DEVICE connection show 2>/dev/null; }
+
+	# One profile per block, and specifically none for the radio's `interface`
+	# block: what you activate on a radio is a network, and an 802-3-ethernet
+	# profile named `radio0` would be a thing in every client's list that
+	# cannot be activated and is not an ethernet.
+	check "every interface block is a profile" \
+		"$(connections | awk -F: '{print $1}' | sort | tr '\n' ' ')" \
+		"HomeFiber probe0 quiet0 "
+	check "and a radio's interface block is not one" \
+		"$(connections | grep -c '^radio0:' || true)" "0"
+	check "the wifi profile is wireless" \
+		"$(connections | awk -F: '$1 == "HomeFiber" { print $2 }')" "802-11-wireless"
+	check "the interface profile is wired" \
+		"$(connections | awk -F: '$1 == "probe0" { print $2 }')" "802-3-ethernet"
+
+	# Derived, not stored: the same configuration produces this on any machine,
+	# and the value is cross-checked against a second implementation in the
+	# unit tests.
+	check "the uuid is derived from the configuration" \
+		"$(nmcli --terse --fields NAME,UUID connection show 2>/dev/null |
+			awk -F: '$1 == "HomeFiber" { print $2 }')" \
+		"7b9da559-bfbe-5bf1-82b1-bc18e6e2e81a"
+
+	# The activation, end to end: a D-Bus call has to come out of the other
+	# side as a supplicant command. Asserting only that the call returned would
+	# pass for a shim that did nothing.
+	# Measured as a delta, because the daemon already populated the supplicant
+	# at apply time -- counting ADD_NETWORK over the whole log would count that
+	# too and pass for a shim that did nothing here.
+	before=$(wc -l < "$work/fake.log")
+	nmcli connection up HomeFiber ifname radio0 > "$work/up.log" 2>&1 || true
+	since_up=$(tail -n +$((before + 1)) "$work/fake.log")
+	check "activating a profile reaches the supplicant" \
+		"$(printf '%s' "$since_up" | grep -c 'SELECT_NETWORK' || true)" "1"
+	# Through netcfgd's own join rather than a path of the shim's own: the
+	# network is added the way `ncfg wifi connect` adds it, which is what keeps
+	# decision 0013's boundary in one place.
+	check "and it went through netcfgd's join" \
+		"$(printf '%s' "$since_up" | grep -c 'ADD_NETWORK' || true)" "1"
+
+	before=$(wc -l < "$work/fake.log")
+	nmcli connection down HomeFiber > "$work/down.log" 2>&1 || true
+	check "deactivating reaches it too" \
+		"$(tail -n +$((before + 1)) "$work/fake.log" | grep -c '^DISCONNECT' || true)" "1"
+
+	# The device's own view. This is nmcli's CONNECTION column and an applet's
+	# "you are connected to" line, and it was empty until active connections
+	# existed.
+	check "the device names what is active on it" \
+		"$(devices_full | awk -F: '$1 == "radio0" { print $4 }')" "HomeFiber"
+	check "and a radio with an activation is connected, not disconnected" \
+		"$(devices_full | awk -F: '$1 == "radio0" { print $3 }')" "connected"
+	check "the wired device names its own profile" \
+		"$(devices_full | awk -F: '$1 == "probe0" { print $4 }')" "probe0"
+
+	# Writes are refused, with netcfgd's explanation rather than the bus's
+	# "Unknown method". nmcli calls the newer spellings, so those exist purely
+	# to be able to say no in netcfgd's words.
+	check "creating a profile is refused, and says where profiles come from" \
+		"$(nmcli connection add type ethernet ifname probe0 con-name x 2>&1 |
+			grep -c 'ncfg apply' || true)" "1"
+	check "modifying one is refused" \
+		"$(nmcli connection modify HomeFiber connection.id x 2>&1 |
+			grep -c 'read-only here' || true)" "1"
+	check "deleting one is refused" \
+		"$(nmcli connection delete HomeFiber 2>&1 |
+			grep -c 'read-only here' || true)" "1"
+
+	# And the secret never leaves. This is the one refusal that is a security
+	# property rather than a missing feature.
+	if command -v busctl >/dev/null 2>&1; then
+		conn_path=$(busctl --user --address="$address" call \
+			org.freedesktop.NetworkManager /org/freedesktop/NetworkManager/Settings \
+			org.freedesktop.NetworkManager.Settings GetConnectionByUuid \
+			s 7b9da559-bfbe-5bf1-82b1-bc18e6e2e81a 2>/dev/null |
+			awk '{print $2}' | tr -d '"')
+		check "a profile can be found by its uuid" \
+			"$([ -n "$conn_path" ] && echo found || echo missing)" "found"
+		check "and asking it for the passphrase is refused" \
+			"$(busctl --user --address="$address" call org.freedesktop.NetworkManager \
+				"$conn_path" org.freedesktop.NetworkManager.Settings.Connection \
+				GetSecrets s 802-11-wireless-security 2>&1 |
+				grep -c 'does not hand out secrets' || true)" "1"
+		check "and the passphrase is nowhere in what it does hand out" \
+			"$(busctl --user --address="$address" call org.freedesktop.NetworkManager \
+				"$conn_path" org.freedesktop.NetworkManager.Settings.Connection \
+				GetSettings 2>&1 | grep -c 'hunter2hunter2' || true)" "0"
+	fi
 fi
 
 echo

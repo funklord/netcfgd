@@ -76,7 +76,20 @@ def answer(command):
     if command == "STATUS":
         return status()
     if command == "LIST_NETWORKS":
+        # Empty, so netcfgd adds the network rather than selecting one it
+        # thinks is already there. Exercising the add is the point.
         return "network id / ssid / bssid / flags\n"
+    # The association commands, answered the way a supplicant would. This is
+    # what lets a test assert that a D-Bus `ActivateConnection` became a
+    # `SELECT_NETWORK` on a control socket, rather than only that it returned
+    # without an error.
+    if command == "ADD_NETWORK":
+        return "0\n"
+    if command.startswith(("SET_NETWORK ", "ENABLE_NETWORK ", "SELECT_NETWORK ",
+                           "DISABLE_NETWORK ", "REMOVE_NETWORK ", "SET ")):
+        return "OK\n"
+    if command == "DISCONNECT":
+        return "OK\n"
     # Everything netcfgd might send that this does not model. FAIL is a real
     # supplicant answer and netcfgd handles it; inventing a success would make
     # a test pass for a command that did nothing.
@@ -103,6 +116,12 @@ def main():
         while True:
             data, sender = server.recvfrom(4096)
             command = data.decode(errors="replace").strip()
+            # Logged so a test can assert which commands a D-Bus call produced.
+            # Secrets are redacted: `SET_NETWORK 0 psk "..."` carries the
+            # passphrase, and a test fixture writing one to a log is the habit
+            # this project refuses to get into.
+            first = command.split(" psk ")[0].split(" sae_password ")[0]
+            print(first, flush=True)
             if sender:
                 server.sendto(answer(command).encode(), sender)
     except (KeyboardInterrupt, OSError):

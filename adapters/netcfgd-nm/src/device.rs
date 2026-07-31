@@ -227,6 +227,19 @@ impl Device {
 		let Some(link) = self.link() else {
 			return (device_state::UNAVAILABLE, state_reason::UNKNOWN);
 		};
+		// An activation on this device settles it, whatever the addressing
+		// says. A radio associated with a known network is connected even
+		// before a lease arrives, and reporting `disconnected` while also
+		// reporting an active connection on the same object is a contradiction
+		// a client resolves by believing whichever it read second.
+		if self
+			.state
+			.active()
+			.iter()
+			.any(|activation| activation.interface == self.interface)
+		{
+			return (device_state::ACTIVATED, state_reason::NONE);
+		}
 		state_of(&link, self.state.has_address(&self.interface))
 	}
 
@@ -342,14 +355,40 @@ impl Device {
 		no_object()
 	}
 
+	/// The activation on this device.
+	///
+	/// What fills `nmcli device status`'s CONNECTION column, and what a
+	/// settings panel looks for to decide whether to offer "disconnect".
 	#[zbus(property)]
 	fn active_connection(&self) -> OwnedObjectPath {
-		no_object()
+		self.state
+			.active()
+			.iter()
+			.find(|activation| activation.interface == self.interface)
+			.map_or_else(no_object, |activation| {
+				crate::active::path_for(self.state.active_number(activation))
+			})
 	}
 
+	/// Profiles that could be activated here.
+	///
+	/// Every `network` block for a radio, because an SSID may be in range of
+	/// any of them; for anything else, the profile that names this interface.
+	/// A client uses this to populate the menu of what you could connect to.
 	#[zbus(property)]
 	fn available_connections(&self) -> Vec<OwnedObjectPath> {
-		Vec::new()
+		let radio = self.state.is_radio(&self.interface);
+		self.state
+			.profiles()
+			.into_iter()
+			.filter(|(profile, _)| match profile {
+				crate::settings::Profile::Network(_) => radio,
+				crate::settings::Profile::Interface(interface) => {
+					!radio && interface.name == self.interface
+				}
+			})
+			.map(|(_, number)| crate::settings::path_for(number))
+			.collect()
 	}
 
 	#[zbus(property)]
