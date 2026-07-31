@@ -33,6 +33,7 @@ fn every_request() -> Vec<Request> {
 		Request::Apply {
 			confirm: Some(90),
 			allow_disruption: vec!["eth0".to_owned()],
+			strand_credentials: vec!["wg0".to_owned()],
 		},
 		Request::Confirm,
 		Request::Revert,

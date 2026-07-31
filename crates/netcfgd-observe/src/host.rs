@@ -34,6 +34,38 @@ pub fn augment(observed: &mut Observed, run_dir: &Path) {
 	read_netfilter(observed);
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
+	read_wireguard_keys(observed);
+}
+
+/// Which `WireGuard` devices have a private key loaded.
+///
+/// Asked as "does the kernel report a public key", which it derives from the
+/// private one and reports for no other reason. Nothing here asks for the
+/// private key, and `netcfgd_sys::wg::DeviceState` has no field that could
+/// return one -- that is deliberate there and this must not be the reason it
+/// changes.
+///
+/// Only for links the kernel calls `wireguard`, so a host with none of them
+/// makes no generic-netlink request at all. A kernel with no `wireguard`
+/// module has no such links either, so the same check covers it.
+fn read_wireguard_keys(observed: &mut Observed) {
+	if !observed.links.iter().any(|link| link.kind == "wireguard") {
+		return;
+	}
+	let Ok(mut genl) = netcfgd_sys::genl::Genl::open() else {
+		return;
+	};
+	for link in &mut observed.links {
+		if link.kind != "wireguard" {
+			continue;
+		}
+		// A device that cannot be read is reported as carrying nothing rather
+		// than as carrying something. This feeds a refusal, and a refusal that
+		// fires because a read failed is one people learn to override by
+		// reflex -- which would leave them overriding the real ones too.
+		link.private_key_loaded = netcfgd_sys::wg::get_device(&mut genl, &link.name)
+			.is_ok_and(|state| state.public_key.is_some());
+	}
 }
 
 /// What a running access point holds in its access control lists.

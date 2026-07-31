@@ -386,6 +386,7 @@ fn apply_request(
 	state: &mut State,
 	window: Option<u32>,
 	allow_disruption: &[String],
+	strand_credentials: &[String],
 	subscribers: &mut Vec<SyncSender<Event>>,
 	timers: Option<&Sender<Command>>,
 ) -> Response {
@@ -405,6 +406,7 @@ fn apply_request(
 		confirm_window: window,
 		revert_to: last_good.as_ref().map(netcfgd_host::document_hash),
 		allow_disruption: allow_disruption.to_vec(),
+		strand_credentials: strand_credentials.to_vec(),
 	};
 	let mut executor = match state.executor() {
 		Ok(executor) => executor,
@@ -464,7 +466,15 @@ fn answer(
 		Request::Apply {
 			confirm: window,
 			allow_disruption,
-		} => apply_request(state, *window, allow_disruption, subscribers, timers),
+			strand_credentials,
+		} => apply_request(
+			state,
+			*window,
+			allow_disruption,
+			strand_credentials,
+			subscribers,
+			timers,
+		),
 		Request::Reload => {
 			let event = state.reload();
 			server::broadcast(subscribers, &event);

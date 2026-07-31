@@ -140,6 +140,18 @@ pub struct ObservedLink {
 	/// which means a link nobody has a record of is never deleted.
 	#[serde(default)]
 	pub ownership: Ownership,
+	/// Whether a `WireGuard` private key is loaded in the kernel for this link.
+	///
+	/// Read as the *presence of the derived public key*, never by asking for
+	/// the private one -- `netcfgd_sys::wg::DeviceState` deliberately does not
+	/// carry a field for that, and this must not become the reason it grows
+	/// one. A keyless device reports no public key and a keyed one reports the
+	/// key derived from it, checked against a real kernel rather than assumed.
+	///
+	/// `false` for every link that is not `WireGuard`, and for a `WireGuard`
+	/// device that has been created and not yet configured.
+	#[serde(default)]
+	pub private_key_loaded: bool,
 }
 
 /// An address as the kernel reports it.

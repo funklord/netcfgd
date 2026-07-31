@@ -421,6 +421,10 @@ impl App {
 		let request = Request::Apply {
 			confirm: Some(60),
 			allow_disruption: Vec::new(),
+			// Neither consent is offered from the TUI, for the reason the
+			// comment above gives about guards: a keystroke is the wrong place
+			// to agree to leave a key on hardware that is walking away.
+			strand_credentials: Vec::new(),
 		};
 		match client::ask(&self.socket, &request) {
 			Ok(client::Answer::Error { message }) => self.message = message,

@@ -45,6 +45,14 @@ pub struct PlanOptions {
 	/// the flag people alias and stop reading, and it consents to disrupting
 	/// the interfaces they had not thought about as well.
 	pub allow_disruption: Vec<String>,
+	/// Devices the operator has explicitly consented to walk away from, keys
+	/// and all.
+	///
+	/// Named per device for the same reason `allow_disruption` is, and kept
+	/// separate from it rather than folded in: the two consent to different
+	/// things, and an operator who accepted a brief outage on one interface has
+	/// not thereby agreed to leave a private key on another.
+	pub strand_credentials: Vec<String>,
 }
 
 /// Something the operator should know that is not an action.
@@ -79,6 +87,38 @@ pub struct Refusal {
 	pub override_with: String,
 }
 
+/// Secret material a plan walks away from and cannot take back.
+///
+/// Not a [`Refusal`], which is an *action* a guard dropped and can name.
+/// Nothing is dropped here: `managed = false` already means netcfgd plans
+/// nothing for the device (decision 0035), and the hazard is that absence
+/// continuing rather than anything being done. So this says what is being left
+/// and offers the two ways of meaning it, and the exit code says a decision is
+/// outstanding.
+///
+/// **Only for credentials that cannot be revoked from this host** -- see
+/// `docs/decisions/0042` for the test and why the other secrets an unmanaged
+/// device holds do not meet it. A notice that fires for everything is one
+/// people learn to pass over, which would cost the one case that matters.
+///
+/// The credential is prose rather than an enum because there is exactly one
+/// kind today. A second would make the enum worth its weight; one would make it
+/// a decision dressed as a type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Stranded {
+	/// Which device is being walked away from.
+	pub interface: String,
+	/// What stays behind, and where.
+	pub credential: String,
+	/// Why it cannot simply be withdrawn later.
+	pub irrevocable: String,
+	/// The configuration change that removes it instead.
+	pub remove_with: String,
+	/// The exact invocation that consents to leaving it, for this run.
+	pub consent_with: String,
+}
+
 /// An ordered DAG of actions, plus what could not be planned.
 ///
 /// The action list is already in a valid execution order, so an executor that
@@ -96,6 +136,9 @@ pub struct Plan {
 	/// Actions a guard prevented, and how to consent to them.
 	#[serde(default)]
 	pub refusals: Vec<Refusal>,
+	/// Credentials this plan walks away from that cannot be revoked.
+	#[serde(default)]
+	pub stranded: Vec<Stranded>,
 }
 
 impl Plan {
@@ -114,6 +157,17 @@ impl Plan {
 	#[must_use]
 	pub fn was_refused(&self) -> bool {
 		!self.refusals.is_empty()
+	}
+
+	/// Whether this plan leaves behind a credential nobody can withdraw.
+	///
+	/// Separate from [`Plan::was_refused`] because the remedies are different,
+	/// and a script that handled one as the other would do the wrong thing:
+	/// a refusal is re-run with `--allow-disruption`, and this is answered by
+	/// deciding what should happen to a key.
+	#[must_use]
+	pub fn strands_credentials(&self) -> bool {
+		!self.stranded.is_empty()
 	}
 }
 
@@ -418,6 +472,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	builder.plan_forwarding(desired, observed);
 	builder.plan_nat(desired, observed);
 	builder.plan_access_control(desired, observed);
+	builder.plan_stranded_credentials(observed, &options.strand_credentials);
 
 	// Teardown comes last, so a change to an address is make-before-break: the
 	// new address is in place before the old one goes. On a machine being
@@ -433,6 +488,8 @@ struct Builder {
 	actions: Vec<Action>,
 	warnings: Vec<Warning>,
 	refusals: Vec<Refusal>,
+	/// Credentials this plan walks away from and cannot take back.
+	stranded: Vec<Stranded>,
 	/// `(interface, reason)` for every guarded interface.
 	guards: Vec<(String, String)>,
 	/// Interfaces the operator consented to disrupt.
@@ -2090,6 +2147,89 @@ impl Builder {
 		self.radios.iter().any(|name| name == iface) && self.has_networks
 	}
 
+	/// Notice a plan that walks away from a key nobody can withdraw.
+	///
+	/// Decision 0042, closing what 0037 left open. The test is deliberately
+	/// narrow, and narrower than 0037 guessed: a credential qualifies only when
+	/// **it cannot be revoked from this host** *and* **netcfgd holds the only
+	/// copy anything will remove**. Exactly one thing passes both.
+	///
+	/// A `WireGuard` private key is loaded into the kernel by netcfgd, is
+	/// readable back verbatim by root, and its authority lives as a public key
+	/// in the configuration of every peer -- machines the operator may not own
+	/// and cannot reach. Revoking it is an act by each of them. Walking away
+	/// leaves whoever ends up with the hardware able to be this host on that
+	/// network, indefinitely.
+	///
+	/// The other secrets 0037 named do not pass, and saying why is the point of
+	/// the rule rather than an aside:
+	///
+	/// - **A supplicant's passphrases** and **a running hostapd's generated
+	///   configuration** are copies of material sitting in the secrets
+	///   directory on the same disk, which neither `leave` nor `clear` touches.
+	///   The choice cannot change that exposure, so refusing over it would be
+	///   refusing over something the operator cannot fix by deciding.
+	/// - **A WPA passphrase** is shared, and revoking it is one change at the
+	///   access point -- which for a network netcfgd itself runs is one line of
+	///   this document.
+	/// - **An EAP client key** is asymmetric and genuinely hard to revoke, but
+	///   netcfgd never holds it: the model carries a `SecretRef` and a path,
+	///   and the file stays on disk whichever policy is chosen.
+	///
+	/// Nothing is dropped from the plan here. `managed = false` already means
+	/// no actions for the device, so there is nothing to withhold -- what this
+	/// produces is a decision the operator has not made, and an exit code that
+	/// says so.
+	fn plan_stranded_credentials(&mut self, observed: &Observed, consented: &[String]) {
+		// Driven by the observation rather than the document, on purpose and
+		// twice over. The kernel is what decides whether a key is really there
+		// -- a document declaring one for an interface that was never applied
+		// strands nothing, and a notice about that would be a notice about a
+		// file. And a `WireGuard` interface whose block has been *deleted* while
+		// its `device` block still says `managed = false` still has the key
+		// loaded, which the document no longer mentions at all.
+		//
+		// It also means the rule has no second opinion about which links are
+		// `WireGuard`. `private_key_loaded` is set in one place, for links the
+		// kernel calls `wireguard` and no others; a `kind` check here would be
+		// a branch no test could ever make fail, which this project does not
+		// keep.
+		for link in &observed.links {
+			let name = &link.name;
+			if !link.private_key_loaded {
+				continue;
+			}
+			// Only a device the document is walking away from. `clear` removes
+			// the link and the key with it, which is the answer this exists to
+			// point at -- reporting it as well would be reporting a hazard the
+			// operator has already dealt with.
+			if !self.unmanaged.iter().any(|device| device == name)
+				|| self.clearing.iter().any(|device| device == name)
+			{
+				continue;
+			}
+			if consented.iter().any(|device| device == name) {
+				continue;
+			}
+
+			self.stranded.push(Stranded {
+				interface: name.clone(),
+				credential: format!(
+					"a WireGuard private key, loaded in the kernel on `{name}` and readable \
+					 there by root"
+				),
+				irrevocable: "its authority is the matching public key in every peer's \
+					configuration, so withdrawing it means changing each of them -- netcfgd \
+					cannot, and the machines may not be yours"
+					.to_owned(),
+				remove_with: format!(
+					"device {name} {{ managed = false; on_unmanage = \"clear\" }}"
+				),
+				consent_with: format!("ncfg apply --strand-credentials {name}"),
+			});
+		}
+	}
+
 	/// Converge a running access point's station lists against the document.
 	///
 	/// Decision 0041. hostapd reads `deny_mac_file` once, at startup, so up to
@@ -2334,6 +2474,7 @@ impl Builder {
 			actions: self.actions,
 			warnings: self.warnings,
 			refusals: self.refusals,
+			stranded: self.stranded,
 		}
 	}
 }

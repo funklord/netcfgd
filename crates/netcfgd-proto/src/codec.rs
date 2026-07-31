@@ -132,6 +132,7 @@ mod tests {
 			Request::Apply {
 				confirm: Some(120),
 				allow_disruption: vec!["eth0".to_owned()],
+				strand_credentials: vec!["wg0".to_owned()],
 			},
 			Request::Confirm,
 			Request::Reload,

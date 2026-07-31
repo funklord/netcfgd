@@ -195,4 +195,13 @@ netcfgd
 # reason this file keeps finding: that one added two protocol types that cross
 # the wire, and this one adds no wire types at all. The lists are read and
 # converged where they are used.
-total 1919512
+# +12 KB for refusing to strand a key nobody can revoke: the WireGuard key
+# read in the observation, an observed bool, the `Stranded` type with its serde,
+# a planner pass, a CLI flag with its own exit code, and the proto field that
+# carries the consent to the daemon.
+#
+# The same shape as every entry above it -- the rule itself is thirty lines and
+# most of this is the type crossing two boundaries. What it is not is a second
+# netlink protocol: `wg::get_device` was written for M4 and had never been
+# called outside a test, so reading a key back cost nothing new.
+total 1931800

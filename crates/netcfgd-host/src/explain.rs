@@ -492,6 +492,7 @@ mod tests {
 				ingress_redirect: None,
 				forwarding: None,
 				ownership: Ownership::Unknown,
+				private_key_loaded: false,
 			}],
 			addresses: vec![address],
 			address_proto_supported: proto_supported,

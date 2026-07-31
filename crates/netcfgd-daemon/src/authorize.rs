@@ -161,7 +161,8 @@ mod tests {
 			&user,
 			&Request::Apply {
 				confirm: None,
-				allow_disruption: Vec::new()
+				allow_disruption: Vec::new(),
+				strand_credentials: Vec::new()
 			}
 		)
 		.is_err());
@@ -174,7 +175,8 @@ mod tests {
 		assert_eq!(
 			tier_of(&Request::Apply {
 				confirm: None,
-				allow_disruption: Vec::new()
+				allow_disruption: Vec::new(),
+				strand_credentials: Vec::new()
 			}),
 			Tier::Admin
 		);
@@ -215,7 +217,8 @@ mod tests {
 			&user,
 			&Request::Apply {
 				confirm: None,
-				allow_disruption: Vec::new()
+				allow_disruption: Vec::new(),
+				strand_credentials: Vec::new()
 			}
 		)
 		.is_err());

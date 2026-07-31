@@ -50,6 +50,13 @@ pub enum Request {
 		/// Guarded interfaces the operator consents to disrupt.
 		#[serde(default)]
 		allow_disruption: Vec<String>,
+		/// Devices the operator consents to walk away from, keys and all.
+		///
+		/// Separate from `allow_disruption` because they consent to different
+		/// things: an operator who accepted a brief outage on one interface has
+		/// not agreed to leave a private key loaded on another.
+		#[serde(default)]
+		strand_credentials: Vec<String>,
 	},
 	/// Keep the change made under a confirm window.
 	Confirm,

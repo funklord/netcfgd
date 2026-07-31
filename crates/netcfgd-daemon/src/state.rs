@@ -222,6 +222,20 @@ impl State {
 			});
 		}
 
+		// And a credential nobody can revoke, for a stronger version of the
+		// same reason: nothing is waiting on this one, which is exactly why it
+		// would otherwise go unsaid until the hardware was gone.
+		for stranded in &plan.stranded {
+			events.push(Event::Drift {
+				interface: stranded.interface.clone(),
+				summary: format!("unmanaging it leaves {}", stranded.credential),
+				action: format!(
+					"undecided; {} or {}",
+					stranded.remove_with, stranded.consent_with
+				),
+			});
+		}
+
 		events
 	}
 
@@ -286,6 +300,11 @@ pub(crate) fn restrict(plan: &Plan, interfaces: &[String]) -> (Plan, Vec<String>
 	let mut kept = Plan {
 		warnings: plan.warnings.clone(),
 		refusals: plan.refusals.clone(),
+		// Kept for the same reason the refusals are: restricting a plan to a
+		// set of interfaces changes what will be *done*, not what is true about
+		// the configuration. A key left on a device the operator did not ask
+		// about is still a key left.
+		stranded: plan.stranded.clone(),
 		..Plan::default()
 	};
 	let mut dropped = Vec::new();
