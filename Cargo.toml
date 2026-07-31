@@ -2,7 +2,15 @@
 resolver = "2"
 # fuzz/ is built by cargo-fuzz with nightly and a sanitizer, never by
 # `cargo build`. Excluding it keeps the workspace buildable on stable.
-exclude = ["fuzz"]
+#
+# adapters/ is excluded for a different reason and a more important one:
+# design section 9.2 says an adapter's dependencies are its own package's
+# only, and that the core's dependency manifest never gains an entry. A shared
+# workspace means a shared lockfile and a shared `cargo-deny` graph, which
+# would put the NM shim's D-Bus stack inside the gate that keeps this tree at
+# libc and serde. Each adapter is its own workspace with its own lockfile;
+# `make nm-containment` is the mechanically checkable assertion 9.2 asks for.
+exclude = ["fuzz", "adapters/netcfgd-nm"]
 members = [
 	"crates/netcfgd-model",
 	"crates/netcfgd-compile",

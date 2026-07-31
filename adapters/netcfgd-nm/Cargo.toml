@@ -1,0 +1,68 @@
+# A workspace of its own, deliberately.
+#
+# Design section 9.2 requires the adapter's dependencies to be dependencies of
+# that package only, and the core's manifest never to gain an entry. A cargo
+# workspace shares one lockfile and one `cargo-deny` graph, so a member here
+# would put zbus and its eighty-odd transitive crates in front of the gate that
+# exists to keep the core at libc, serde and nothing else -- and the honest
+# answer to "may netcfgd depend on this?" would have to become "it depends
+# which binary you mean".
+#
+# Two workspaces gives one answer per question. The root workspace excludes
+# this directory (the same mechanism `fuzz/` uses), so `cargo build` in the
+# repo root does not build it and the core lockfile does not know it exists.
+# `make adapters` builds and checks it; `make nm-containment` proves the core
+# links none of it.
+[workspace]
+# Resolver 3, where the core workspace is on 2. It is MSRV-aware: it will not
+# select a dependency version whose own `rust-version` exceeds the one below,
+# which matters far more here than in the core. The core's dependencies are
+# twelve crates that move slowly; this one's are eighty that do not, and
+# without this a routine `cargo update` silently raises the compiler netcfgd
+# needs -- discovered immediately, because zbus 5.18 wants rustc 1.87 and the
+# stated MSRV is 1.85.
+resolver = "3"
+members = ["."]
+
+[package]
+name        = "netcfgd-nm"
+description = "NetworkManager's D-Bus interface, served from netcfgd."
+version      = "0.0.0"
+edition      = "2021"
+rust-version = "1.85"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/netcfgd/netcfgd"
+
+[dependencies]
+# The socket contract, from the crate that defines it. A second definition of
+# the request and response types is how an adapter and a daemon come to
+# disagree about the protocol they share.
+netcfgd-proto = { path = "../../crates/netcfgd-proto" }
+netcfgd-model = { path = "../../crates/netcfgd-model" }
+serde_json    = "1"
+# D-Bus is infrastructure, not this project's protocol: the marshalling, the
+# authentication handshake and the bus routing are all solved, and a hand-rolled
+# one would be a second implementation of somebody else's wire format with no
+# users to find its bugs. What netcfgd owns is the NetworkManager *interface*
+# on top of it, which is the part nobody else has written.
+#
+# The blocking API, and no async runtime beyond the one zbus needs for its own
+# I/O. Everything else in this tree is threads and blocking sockets, and an
+# adapter that introduced an executor would be the only place in netcfgd where
+# a contributor has to know what a runtime is.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+
+[lints.rust]
+unsafe_code     = "forbid"
+missing_docs    = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+all      = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# A D-Bus property getter takes `&self` because the interface macro requires
+# one, not because it needs the receiver -- and roughly half of NM's properties
+# are constants for a daemon that does not implement WWAN or checkpoints. The
+# lint is right about the function and wrong about the situation; the
+# alternative is fifty individual allows on the fifty places it fires.
+unused_self = "allow"
