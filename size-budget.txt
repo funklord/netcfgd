@@ -172,4 +172,7 @@ netcfgd
 # choke point, the DNS scope exception beside it, and the warning that names
 # the credentials walking away leaves behind. Small because the enforcement is
 # one place rather than eleven -- which was the point of putting it there.
-total 1853976
+# +4 KB for `on_unmanage = "clear"`: the policy enum and its serde, the
+# compiler key, the clearing set, and the document filter that lets four
+# teardown passes implement it without knowing it exists.
+total 1858072

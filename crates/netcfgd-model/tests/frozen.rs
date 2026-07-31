@@ -465,6 +465,10 @@ fn witness() -> Document {
 				name_glob: Some("wl*".to_owned()),
 			}),
 			managed: true,
+			// The witness carries the non-default so a spelling change moves
+			// the bytes: a field that is always at its default serialises to
+			// nothing and is pinned by nothing.
+			on_unmanage: netcfgd_model::OnUnmanage::Clear,
 			wifi: Some(WifiDevicePolicy {
 				backend: WifiBackend::WpaSupplicant,
 				autoconnect: true,

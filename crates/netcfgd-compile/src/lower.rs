@@ -494,6 +494,7 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 		name,
 		r#match: None,
 		managed: true,
+		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
 	};
 
@@ -502,6 +503,26 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 			Item::Assignment(assignment) if assignment.key == "managed" => {
 				if let Some(flag) = as_bool(&assignment.value, diags) {
 					device.managed = flag;
+				}
+			}
+			Item::Assignment(assignment) if assignment.key == "on_unmanage" => {
+				if let Some(name) = as_string(&assignment.value, diags) {
+					match name.as_str() {
+						"leave" => device.on_unmanage = netcfgd_model::OnUnmanage::Leave,
+						"clear" => device.on_unmanage = netcfgd_model::OnUnmanage::Clear,
+						other => diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{other}` is not an `on_unmanage` policy"),
+							)
+							.with_help(
+								"`leave` walks away and changes nothing, which is what you \
+								 want when handing an interface to another daemon. `clear` \
+								 removes everything netcfgd owns first, which is what you \
+								 want when the hardware is leaving your hands",
+							),
+						),
+					}
 				}
 			}
 			Item::Assignment(assignment) => diags.push(Diagnostic::new(

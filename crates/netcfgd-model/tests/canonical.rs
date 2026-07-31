@@ -109,6 +109,7 @@ fn insertion_order_does_not_survive_canonicalisation() {
 		name: "eth0".to_owned(),
 		r#match: None,
 		managed: true,
+		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
 	});
 
@@ -122,6 +123,7 @@ fn insertion_order_does_not_survive_canonicalisation() {
 		name: "eth0".to_owned(),
 		r#match: None,
 		managed: true,
+		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
 	});
 

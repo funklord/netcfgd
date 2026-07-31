@@ -104,8 +104,15 @@ pub struct Device {
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub r#match: Option<DeviceMatch>,
 	/// When false, netcfgd never touches this device at all.
+	///
+	/// Enforced at the planner's action choke point (decision 0035). Before
+	/// that it was honoured only by the filter deciding which devices are
+	/// radios, so the flag read as documentation rather than as a control.
 	#[serde(default = "crate::default_true")]
 	pub managed: bool,
+	/// What to do on the way out of being managed.
+	#[serde(default)]
+	pub on_unmanage: OnUnmanage,
 	/// Radio policy, for wifi devices.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub wifi: Option<WifiDevicePolicy>,
@@ -153,6 +160,38 @@ impl MacPolicy {
 			Self::PerConnection => "per_connection",
 		}
 	}
+}
+
+/// What netcfgd does with a device it is about to stop managing.
+///
+/// A policy rather than an action, so it can sit in the configuration while the
+/// device is still managed and mean "if you ever stop, do this". That also
+/// keeps it a *state*: `Clear` says the desired state of the device is that
+/// netcfgd owns nothing on it, which the planner reaches and then stops,
+/// without any edge-triggered machinery to get wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnUnmanage {
+	/// Walk away and change nothing.
+	///
+	/// The right answer when handing an interface to another daemon: you set
+	/// `managed = false` because something else is taking over, and having
+	/// netcfgd pull the addresses out on its way past is the failure the flag
+	/// exists to prevent.
+	#[default]
+	Leave,
+	/// Remove everything netcfgd owns first, then walk away.
+	///
+	/// The right answer when the hardware is leaving your hands, because
+	/// walking away otherwise strands credentials: a `WireGuard` key stays
+	/// loaded in the kernel, a supplicant keeps its passphrases, and a running
+	/// hostapd keeps its generated configuration.
+	///
+	/// Defined by ownership rather than by content, which is what lets one
+	/// rule apply to every device: it removes objects carrying netcfgd's tag
+	/// and stops backends netcfgd started, and touches nothing else. Whoever
+	/// takes the device over keeps their own configuration.
+	Clear,
 }
 
 /// An access point netcfgd runs, rather than joins.
