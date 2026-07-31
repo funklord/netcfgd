@@ -429,6 +429,7 @@ dependencies = [
 name = "netcfgd-nm"
 version = "0.0.0"
 dependencies = [
+ "async-io",
  "netcfgd-model",
  "netcfgd-proto",
  "serde_json",

@@ -20,6 +20,7 @@
 //! Mutual exclusion with a real `NetworkManager` is free: only one process can
 //! own a well-known bus name, so if NM is running this exits saying so.
 
+mod accesspoint;
 mod client;
 mod device;
 mod enums;
@@ -95,9 +96,19 @@ fn serve(session: bool) -> Result<(), String> {
 	// org.freedesktop.NetworkManager while unable to answer anything is worse
 	// than one that is not running: clients would find a daemon and get
 	// errors, rather than finding none and saying so.
-	let mut changes = state
+	let changes = state
 		.refresh()
 		.map_err(|error| format!("{error}\nrefusing to claim {BUS_NAME} without it"))?;
+
+	// The document, for the two questions an observation cannot answer: which
+	// devices netcfgd treats as radios, and what security a configured network
+	// uses. Not fatal if it fails -- a machine whose config does not compile
+	// still has interfaces worth showing, and the shim degrades to sysfs for
+	// the first question and to a guess for the second.
+	match client::document(&socket) {
+		Ok(document) => state.adopt_document(Some(document)),
+		Err(error) => eprintln!("netcfgd-nm: cannot read the configuration: {error}"),
+	}
 
 	let builder = if session {
 		connection::Builder::session()
@@ -129,35 +140,96 @@ fn serve(session: bool) -> Result<(), String> {
 		.map_err(|error| format!("cannot serve the object manager: {error}"))?;
 
 	publish(&connection, &state, &changes)?;
+	state.refresh_associations();
 	claim_name(&connection)?;
 
-	// Everything below is the refresh loop. netcfgd streams events for exactly
-	// this reason, so the shim subscribes rather than polling -- and a daemon
-	// that goes away is a reconnect rather than an exit, because an applet
-	// should not have to be restarted when netcfgd is.
-	loop {
-		match client::Monitor::open(&socket) {
-			Ok(mut monitor) => {
-				while monitor.next_change().is_some() {
-					match state.refresh() {
-						Ok(fresh) => changes = fresh,
-						Err(error) => {
-							eprintln!("netcfgd-nm: cannot refresh: {error}");
-							break;
+	// One job queue, and every change to the object tree goes through it. That
+	// is not tidiness: registering an object and emitting a signal are the two
+	// things a D-Bus method handler cannot do from zbus's blocking API, so a
+	// `RequestScan` arriving on zbus's own thread posts a job here instead of
+	// doing the work where it was asked.
+	let (sender, jobs) = std::sync::mpsc::channel::<state::Job>();
+	state.set_jobs(sender.clone());
+
+	// netcfgd streams events, so the shim subscribes rather than polling. In
+	// its own thread, because the main loop now has two things to wait for and
+	// a blocking read of the monitor socket can only be one of them. A daemon
+	// that goes away is a reconnect rather than an exit: an applet should not
+	// have to be restarted when netcfgd is.
+	{
+		let socket = socket.clone();
+		std::thread::Builder::new()
+			.name("monitor".to_owned())
+			.spawn(move || loop {
+				match client::Monitor::open(&socket) {
+					Ok(mut monitor) => {
+						while monitor.next_change().is_some() {
+							if sender.send(state::Job::Refresh).is_err() {
+								return;
+							}
 						}
 					}
-					publish(&connection, &state, &changes)?;
+					Err(error) => eprintln!("netcfgd-nm: {error}; retrying"),
 				}
-			}
-			Err(error) => {
-				eprintln!("netcfgd-nm: {error}; retrying");
-			}
-		}
-		// netcfgd is not there. Wait rather than spin: the daemon may be
-		// restarting, and a client that reconnects in a tight loop is one that
-		// makes the restart slower.
-		std::thread::sleep(std::time::Duration::from_secs(2));
+				if sender.send(state::Job::Refresh).is_err() {
+					return;
+				}
+				// Wait rather than spin: netcfgd may be restarting, and a
+				// client that reconnects in a tight loop makes that slower.
+				std::thread::sleep(std::time::Duration::from_secs(2));
+			})
+			.map_err(|error| format!("cannot start the monitor thread: {error}"))?;
 	}
+
+	// A first scan on every radio, so a client that connects and immediately
+	// reads AccessPoints has something rather than an empty list it would show
+	// as "no networks found".
+	for radio in state.radios() {
+		let _ = sender_of(&state, &radio);
+	}
+
+	for job in jobs {
+		match job {
+			state::Job::Refresh => {
+				match state.refresh() {
+					Ok(changes) => publish(&connection, &state, &changes)?,
+					Err(error) => {
+						eprintln!("netcfgd-nm: cannot refresh: {error}");
+						continue;
+					}
+				}
+				// The configuration may have changed with it -- a reload is one
+				// of the events netcfgd streams.
+				if let Ok(document) = client::document(&socket) {
+					state.adopt_document(Some(document));
+				}
+				state.refresh_associations();
+				republish_wireless(&connection, &state)?;
+			}
+			state::Job::Scan(interface) => match state.rescan(&interface) {
+				Ok(changes) => {
+					publish_access_points(&connection, &state, &changes)?;
+					republish_wireless(&connection, &state)?;
+				}
+				// By now the caller is gone -- `RequestScan` returned when the
+				// job was posted, which is what NM's semantics ask for. So this
+				// is logged rather than returned, and the client sees it as no
+				// new access points.
+				Err(error) => eprintln!("netcfgd-nm: scan on {interface} failed: {error}"),
+			},
+		}
+	}
+
+	Ok(())
+}
+
+/// Ask for the first scan on a radio, ignoring a refusal.
+///
+/// Split out only so the startup path reads as one line. A radio that refuses
+/// here is one with no supplicant yet, which is ordinary at startup and
+/// resolves itself when the next client asks.
+fn sender_of(state: &Arc<State>, radio: &str) -> Result<(), String> {
+	state.request_scan(radio)
 }
 
 /// Take `org.freedesktop.NetworkManager`, or say why not and stop.
@@ -251,7 +323,7 @@ fn publish(
 		let Some(link) = state.link(&name) else {
 			continue;
 		};
-		let kind_interface = match device::flavour_of(&link) {
+		let kind_interface = match device::flavour_of(&link, state.is_radio(&name)) {
 			device::Flavour::Loopback => server.at(&path, device::Loopback),
 			device::Flavour::Wireless => server.at(
 				&path,
@@ -268,5 +340,113 @@ fn publish(
 			.map_err(|error| format!("cannot serve the kind interface of {path}: {error}"))?;
 	}
 
+	Ok(())
+}
+
+/// Make the access point objects match the last scan.
+///
+/// Registering the object emits `InterfacesAdded`, but a libnm client does not
+/// learn about an access point that way -- it listens for
+/// `AccessPointAdded` on the radio. Both are emitted, because both are part of
+/// the contract and a client is entitled to use either.
+fn publish_access_points(
+	connection: &zbus::blocking::Connection,
+	state: &Arc<State>,
+	changes: &state::ApChanges,
+) -> Result<(), String> {
+	let server = connection.object_server();
+
+	for (interface, bssid, number) in &changes.added {
+		let path = accesspoint::path_for(*number);
+		server
+			.at(
+				&path,
+				accesspoint::AccessPoint::new(Arc::clone(state), interface.clone(), bssid.clone()),
+			)
+			.map_err(|error| format!("cannot serve {path}: {error}"))?;
+		signal_access_point(connection, state, interface, *number, true)?;
+	}
+
+	for (interface, _, number) in &changes.removed {
+		// Signalled before the object goes, so a client that reacts by reading
+		// the path finds it rather than an error. NM does the same.
+		signal_access_point(connection, state, interface, *number, false)?;
+		let path = accesspoint::path_for(*number);
+		server
+			.remove::<accesspoint::AccessPoint, _>(&path)
+			.map_err(|error| format!("cannot stop serving {path}: {error}"))?;
+	}
+
+	Ok(())
+}
+
+/// Tell a radio's clients that its access point list moved.
+fn signal_access_point(
+	connection: &zbus::blocking::Connection,
+	state: &Arc<State>,
+	interface: &str,
+	number: u32,
+	added: bool,
+) -> Result<(), String> {
+	let Some(device_number) = state
+		.devices()
+		.into_iter()
+		.find(|(name, _)| name == interface)
+		.map(|(_, number)| number)
+	else {
+		return Ok(());
+	};
+	let device_path = device::path_for(device_number);
+	let Ok(wireless) = connection
+		.object_server()
+		.interface::<_, device::Wireless>(&device_path)
+	else {
+		// The radio has no wireless interface on its object, which means it is
+		// not being served as a radio. Nothing to tell anybody.
+		return Ok(());
+	};
+	let emitter = wireless.signal_emitter();
+	let path = accesspoint::path_for(number);
+	let result = if added {
+		async_io::block_on(device::Wireless::access_point_added(emitter, path.as_ref()))
+	} else {
+		async_io::block_on(device::Wireless::access_point_removed(
+			emitter,
+			path.as_ref(),
+		))
+	};
+	result.map_err(|error| format!("cannot announce {path}: {error}"))
+}
+
+/// Tell clients that a radio's own properties moved.
+///
+/// `AccessPoints`, `ActiveAccessPoint` and `LastScan` are computed from the
+/// state rather than stored in the interface, so zbus has no way to know when
+/// they change and emits nothing by itself. Saying so explicitly is what keeps
+/// a libnm cache -- and therefore an open applet menu -- from showing the
+/// results of the scan before last.
+fn republish_wireless(
+	connection: &zbus::blocking::Connection,
+	state: &Arc<State>,
+) -> Result<(), String> {
+	let server = connection.object_server();
+	for (name, number) in state.devices() {
+		if !state.is_radio(&name) {
+			continue;
+		}
+		let path = device::path_for(number);
+		let Ok(wireless) = server.interface::<_, device::Wireless>(&path) else {
+			continue;
+		};
+		let emitter = wireless.signal_emitter();
+		let interface = wireless.get();
+		for changed in [
+			async_io::block_on(interface.access_points_changed(emitter)),
+			async_io::block_on(interface.active_access_point_changed(emitter)),
+			async_io::block_on(interface.last_scan_changed(emitter)),
+		] {
+			changed.map_err(|error| format!("cannot announce {path}: {error}"))?;
+		}
+	}
 	Ok(())
 }
