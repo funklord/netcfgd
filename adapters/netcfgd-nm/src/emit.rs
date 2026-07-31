@@ -59,6 +59,11 @@ pub(crate) enum Unsupported {
 		/// What was asked for.
 		given: String,
 	},
+	/// Something that should have been an address and is not.
+	MalformedAddress {
+		/// What was asked for.
+		given: String,
+	},
 }
 
 impl std::fmt::Display for Unsupported {
@@ -93,6 +98,11 @@ impl std::fmt::Display for Unsupported {
 				formatter,
 				"`{given}` cannot be a block label: netcfgd names a network with printable \
 				 text and no quotes or newlines"
+			),
+			Self::MalformedAddress { given } => write!(
+				formatter,
+				"`{given}` is not an IP address, and writing it into the configuration \
+				 would make netcfgd refuse to compile a network you were told was created"
 			),
 		}
 	}
@@ -156,7 +166,17 @@ const UNINTERESTING: &[(&str, &str)] = &[
 	("802-11-wireless-security", "wep-key-flags"),
 	("802-11-wireless-security", "leap-password-flags"),
 	("ipv4", "method"),
+	("ipv4", "address-data"),
+	("ipv4", "gateway"),
+	("ipv4", "route-data"),
+	("ipv4", "addresses"),
+	("ipv4", "routes"),
 	("ipv6", "method"),
+	("ipv6", "address-data"),
+	("ipv6", "gateway"),
+	("ipv6", "route-data"),
+	("ipv6", "addresses"),
+	("ipv6", "routes"),
 	("ipv6", "addr-gen-mode"),
 	("proxy", ""),
 ];
@@ -200,17 +220,130 @@ fn is_empty(value: &zbus::zvariant::OwnedValue) -> bool {
 }
 
 /// How netcfgd spells the addressing NM asked for.
-fn addressing(settings: &Dict) -> Vec<&'static str> {
+///
+/// Both families, in one list, because netcfgd's `config` is one list --
+/// decision 0006's composition rather than NM's two independent settings.
+fn addressing(settings: &Dict) -> Result<Vec<String>, Unsupported> {
 	let mut sources = Vec::new();
-	if string(settings, "ipv4", "method").as_deref() == Some("auto") {
-		sources.push("dhcp");
-	}
-	match string(settings, "ipv6", "method").as_deref() {
-		Some("auto") => sources.push("slaac"),
-		Some("dhcp") => sources.push("dhcp6"),
+	match string(settings, "ipv4", "method").as_deref() {
+		Some("auto") => sources.push("dhcp".to_owned()),
+		Some("manual") => sources.extend(static_addresses(settings, "ipv4")?),
+		// `disabled` and `link-local` have no netcfgd spelling that says
+		// anything: an interface netcfgd is not given addressing for gets
+		// none, which is what both of those mean.
 		_ => {}
 	}
-	sources
+	match string(settings, "ipv6", "method").as_deref() {
+		Some("auto") => sources.push("slaac".to_owned()),
+		Some("dhcp") => sources.push("dhcp6".to_owned()),
+		Some("manual") => sources.extend(static_addresses(settings, "ipv6")?),
+		Some("link-local") => sources.push("link_local".to_owned()),
+		_ => {}
+	}
+	Ok(sources)
+}
+
+/// The static addresses in one family's `address-data`.
+///
+/// NM keeps the address and the prefix apart; netcfgd writes CIDR, which is
+/// what an operator types and what `ip addr` prints. Rejoining them here means
+/// the file reads like one somebody wrote.
+fn static_addresses(settings: &Dict, group: &str) -> Result<Vec<String>, Unsupported> {
+	let Some(entries) = dictionaries(settings, group, "address-data") else {
+		return Err(Unsupported::Missing {
+			field: "ipv4.address-data",
+		});
+	};
+	let mut addresses = Vec::new();
+	for entry in entries {
+		let address = entry
+			.get("address")
+			.and_then(|value| String::try_from(value.try_clone().ok()?).ok())
+			.ok_or(Unsupported::Missing {
+				field: "address-data.address",
+			})?;
+		let prefix = entry
+			.get("prefix")
+			.and_then(|value| u32::try_from(value.try_clone().ok()?).ok())
+			.ok_or(Unsupported::Missing {
+				field: "address-data.prefix",
+			})?;
+		// Checked rather than trusted: this goes into a configuration file, and
+		// a value that is not an address would make the file refuse to compile
+		// -- which the caller would see as netcfgd rejecting a network the
+		// client thought was fine.
+		if address.parse::<std::net::IpAddr>().is_err() {
+			return Err(Unsupported::MalformedAddress { given: address });
+		}
+		addresses.push(format!("{address}/{prefix}"));
+	}
+	Ok(addresses)
+}
+
+/// The routes a client asked for, as netcfgd writes them.
+///
+/// The gateway comes back together with them: NM keeps the default route's
+/// next hop in `gateway` and everything else in `route-data`, and netcfgd has
+/// one list of routes with `default` in it like any other destination.
+fn routes(settings: &Dict) -> Result<Vec<String>, Unsupported> {
+	let mut routes = Vec::new();
+	for group in ["ipv4", "ipv6"] {
+		if let Some(gateway) = string(settings, group, "gateway") {
+			if gateway.parse::<std::net::IpAddr>().is_err() {
+				return Err(Unsupported::MalformedAddress { given: gateway });
+			}
+			routes.push(format!("default via {gateway}"));
+		}
+		let Some(entries) = dictionaries(settings, group, "route-data") else {
+			continue;
+		};
+		for entry in entries {
+			let Some(destination) = entry
+				.get("dest")
+				.and_then(|value| String::try_from(value.try_clone().ok()?).ok())
+			else {
+				continue;
+			};
+			if destination.parse::<std::net::IpAddr>().is_err() {
+				return Err(Unsupported::MalformedAddress { given: destination });
+			}
+			let prefix = entry
+				.get("prefix")
+				.and_then(|value| u32::try_from(value.try_clone().ok()?).ok())
+				.unwrap_or(0);
+			let mut route = format!("{destination}/{prefix}");
+			if let Some(next) = entry
+				.get("next-hop")
+				.and_then(|value| String::try_from(value.try_clone().ok()?).ok())
+			{
+				if next.parse::<std::net::IpAddr>().is_err() {
+					return Err(Unsupported::MalformedAddress { given: next });
+				}
+				route.push_str(&format!(" via {next}"));
+			}
+			if let Some(metric) = entry
+				.get("metric")
+				.and_then(|value| u32::try_from(value.try_clone().ok()?).ok())
+			{
+				route.push_str(&format!(" metric {metric}"));
+			}
+			routes.push(route);
+		}
+	}
+	Ok(routes)
+}
+
+/// Read an `aa{sv}` out of a settings group.
+fn dictionaries(
+	settings: &Dict,
+	group: &str,
+	key: &str,
+) -> Option<Vec<std::collections::HashMap<String, zbus::zvariant::OwnedValue>>> {
+	let value = settings.get(group)?.get(key)?;
+	Vec::<std::collections::HashMap<String, zbus::zvariant::OwnedValue>>::try_from(
+		value.try_clone().ok()?,
+	)
+	.ok()
 }
 
 /// Turn a settings dictionary into a `network` block.
@@ -332,10 +465,15 @@ pub(crate) fn network_block_keeping_secret(
 	if flag(settings, "connection", "autoconnect") == Some(false) {
 		text.push_str("\tautoconnect = false\n");
 	}
-	let sources = addressing(settings);
+	let sources = addressing(settings)?;
 	if !sources.is_empty() {
 		let rendered: Vec<String> = sources.iter().map(|s| format!("\"{s}\"")).collect();
 		let _ = writeln!(text, "\tconfig = [{}]", rendered.join(", "));
+	}
+	let routes = routes(settings)?;
+	if !routes.is_empty() {
+		let rendered: Vec<String> = routes.iter().map(|r| format!("\"{r}\"")).collect();
+		let _ = writeln!(text, "\troutes = [{}]", rendered.join(", "));
 	}
 	text.push_str("}\n");
 
@@ -483,6 +621,100 @@ mod tests {
 			network_block(&wifi_settings("X", Some("wpa-psk"), None)),
 			Err(Unsupported::Missing {
 				field: "802-11-wireless-security.psk"
+			})
+		);
+	}
+
+	fn entry(pairs: &[(&str, Value<'_>)]) -> HashMap<String, OwnedValue> {
+		pairs
+			.iter()
+			.map(|(key, item)| {
+				(
+					(*key).to_owned(),
+					OwnedValue::try_from(item.try_clone().expect("cloneable")).expect("a value"),
+				)
+			})
+			.collect()
+	}
+
+	fn with_static(id: &str) -> Dict {
+		let mut settings = wifi_settings(id, None, None);
+		let mut ipv4 = HashMap::new();
+		ipv4.insert("method".to_owned(), value(Value::from("manual")));
+		ipv4.insert(
+			"address-data".to_owned(),
+			OwnedValue::try_from(Value::from(vec![entry(&[
+				("address", Value::from("192.0.2.5")),
+				("prefix", Value::from(24_u32)),
+			])]))
+			.expect("an array"),
+		);
+		ipv4.insert("gateway".to_owned(), value(Value::from("192.0.2.1")));
+		ipv4.insert(
+			"route-data".to_owned(),
+			OwnedValue::try_from(Value::from(vec![entry(&[
+				("dest", Value::from("10.0.0.0")),
+				("prefix", Value::from(8_u32)),
+				("next-hop", Value::from("192.0.2.9")),
+				("metric", Value::from(600_u32)),
+			])]))
+			.expect("an array"),
+		);
+		settings.insert("ipv4".to_owned(), ipv4);
+		settings
+	}
+
+	/// A settings panel's static address becomes the line an operator would
+	/// have typed: address and prefix rejoined into CIDR, and the gateway back
+	/// among the routes where netcfgd keeps it.
+	#[test]
+	fn a_static_address_becomes_a_config_line() {
+		let emitted = network_block(&with_static("Office")).expect("it renders");
+		assert!(
+			emitted.text.contains(r#"config = ["192.0.2.5/24"]"#),
+			"{}",
+			emitted.text
+		);
+		assert!(
+			emitted.text.contains(
+				r#"routes = ["default via 192.0.2.1", "10.0.0.0/8 via 192.0.2.9 metric 600"]"#
+			),
+			"{}",
+			emitted.text
+		);
+	}
+
+	/// Anything that is not an address is refused rather than written. A file
+	/// that does not compile would be reported to the client as netcfgd
+	/// rejecting a network the client was told had been created.
+	#[test]
+	fn something_that_is_not_an_address_is_refused() {
+		let mut settings = with_static("Office");
+		settings
+			.get_mut("ipv4")
+			.expect("the group")
+			.insert("gateway".to_owned(), value(Value::from("not-an-address")));
+		assert_eq!(
+			network_block(&settings),
+			Err(Unsupported::MalformedAddress {
+				given: "not-an-address".to_owned()
+			})
+		);
+	}
+
+	/// `manual` with nothing to be manual about is a mistake worth naming: a
+	/// panel that sent it would otherwise produce a network with no addressing
+	/// and no explanation.
+	#[test]
+	fn manual_with_no_addresses_is_refused() {
+		let mut settings = wifi_settings("Office", None, None);
+		let mut ipv4 = HashMap::new();
+		ipv4.insert("method".to_owned(), value(Value::from("manual")));
+		settings.insert("ipv4".to_owned(), ipv4);
+		assert_eq!(
+			network_block(&settings),
+			Err(Unsupported::Missing {
+				field: "ipv4.address-data"
 			})
 		);
 	}

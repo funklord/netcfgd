@@ -80,6 +80,24 @@ impl Profile {
 		}
 	}
 
+	/// The addressing the profile asks for.
+	#[must_use]
+	pub(crate) fn addressing(&self) -> &[AddressSource] {
+		match self {
+			Self::Network(network) => &network.addressing,
+			Self::Interface(interface) => &interface.addressing,
+		}
+	}
+
+	/// The routes it asks for.
+	#[must_use]
+	pub(crate) fn routes(&self) -> &[netcfgd_model::Route] {
+		match self {
+			Self::Network(network) => &network.routes,
+			Self::Interface(interface) => &interface.routes,
+		}
+	}
+
 	/// Which interface this profile is bound to, where it is bound to one.
 	///
 	/// A wifi profile is not: design section 9.3 keeps a `network` block
@@ -257,25 +275,95 @@ pub(crate) fn settings_of(profile: &Profile) -> Dict {
 				dict.insert("802-11-wireless-security".to_owned(), security);
 			}
 
-			insert_ip(&mut dict, &network.addressing);
+			insert_ip(&mut dict, profile);
 		}
-		Profile::Interface(interface) => {
+		Profile::Interface(_) => {
 			dict.insert("802-3-ethernet".to_owned(), Group::new());
-			insert_ip(&mut dict, &interface.addressing);
+			insert_ip(&mut dict, profile);
 		}
 	}
 
 	dict
 }
 
-fn insert_ip(dict: &mut Dict, addressing: &[AddressSource]) {
-	let mut ipv4 = Group::new();
-	ipv4.insert("method".to_owned(), text(ipv4_method(addressing)));
-	dict.insert("ipv4".to_owned(), ipv4);
+/// The two IP groups, with whatever the profile actually says.
+///
+/// The method alone was enough while nothing read the rest. A settings panel
+/// reads all of it: a profile reporting `manual` and no addresses is one the
+/// panel draws as an empty table, and an operator who then presses save has
+/// just deleted their static address.
+fn insert_ip(dict: &mut Dict, profile: &Profile) {
+	for v6 in [false, true] {
+		let mut group = Group::new();
+		group.insert(
+			"method".to_owned(),
+			text(if v6 {
+				ipv6_method(profile.addressing())
+			} else {
+				ipv4_method(profile.addressing())
+			}),
+		);
 
-	let mut ipv6 = Group::new();
-	ipv6.insert("method".to_owned(), text(ipv6_method(addressing)));
-	dict.insert("ipv6".to_owned(), ipv6);
+		let addresses: Vec<HashMap<String, OwnedValue>> = profile
+			.addressing()
+			.iter()
+			.filter_map(|source| match source {
+				AddressSource::Static(fixed) => crate::ipconfig::parse_cidr(&fixed.address),
+				_ => None,
+			})
+			.filter(|address| address.address.is_ipv6() == v6)
+			.map(|address| crate::ipconfig::address_entry(&address))
+			.collect();
+		if !addresses.is_empty() {
+			group.insert("address-data".to_owned(), array_of(addresses));
+		}
+
+		// NM splits what netcfgd keeps together: the default route's next hop
+		// is `gateway`, and everything else is `route-data`. Reporting the
+		// default route in both would have a panel show a route table with a
+		// duplicate of the gateway in it.
+		if let Some(gateway) = gateway_of(profile.routes(), v6) {
+			group.insert("gateway".to_owned(), text(gateway.to_string()));
+		}
+		let routes: Vec<HashMap<String, OwnedValue>> = profile
+			.routes()
+			.iter()
+			.filter(|route| !is_default(&route.destination))
+			.filter(|route| route.destination.contains(':') == v6)
+			.map(|route| {
+				let (destination, prefix) = crate::ipconfig::destination_of(&route.destination, v6);
+				crate::ipconfig::route_entry(&destination, prefix, route.via, route.metric)
+			})
+			.collect();
+		if !routes.is_empty() {
+			group.insert("route-data".to_owned(), array_of(routes));
+		}
+
+		dict.insert(if v6 { "ipv6" } else { "ipv4" }.to_owned(), group);
+	}
+}
+
+/// Whether a destination is the default route, in either spelling.
+#[must_use]
+pub(crate) fn is_default(destination: &str) -> bool {
+	destination == "default" || destination == "0.0.0.0/0" || destination == "::/0"
+}
+
+/// The next hop of a profile's default route, in one family.
+#[must_use]
+fn gateway_of(routes: &[netcfgd_model::Route], v6: bool) -> Option<std::net::IpAddr> {
+	routes
+		.iter()
+		.find(|route| {
+			is_default(&route.destination) && route.via.is_some_and(|via| via.is_ipv6() == v6)
+		})
+		.and_then(|route| route.via)
+}
+
+/// An array of settings entries, which is what `address-data` and `route-data`
+/// are: `aa{sv}`, a list of little dictionaries.
+fn array_of(entries: Vec<HashMap<String, OwnedValue>>) -> OwnedValue {
+	OwnedValue::try_from(Value::from(entries)).expect("an array of dictionaries owns itself")
 }
 
 /// The `Settings` object.
