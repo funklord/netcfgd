@@ -99,8 +99,30 @@ while [ ! -e "$work/run/netcfgd.sock" ]; do
 	sleep 0.1
 done
 
-# Both far ends up, so both uplinks have carrier.
-ip link set eth-peer up 2>/dev/null || skip "cannot bring the veth peers up"
+# The socket is bound before the first apply runs (netcfgd-daemon serves, then
+# converges), so the peers are not guaranteed to exist the moment it appears.
+# The window is far smaller than the fork+exec of ip(8) below and has never been
+# caught open here -- this loop has measured zero iterations every time it was
+# asked. It stays because the ordering is real and costs nothing when it holds,
+# and because a full-suite run once failed on the line below with "cannot bring
+# the veth peers up", which was reported as a permissions problem and is not
+# one. That failure was not reproduced; if it returns, this reports it with the
+# daemon log instead of guessing.
+waited=0
+while ! ip link show eth-peer >/dev/null 2>&1 || ! ip link show wl-peer >/dev/null 2>&1; do
+	waited=$((waited + 1))
+	if [ "$waited" -gt 100 ]; then
+		cat "$work/daemon.log" >&2
+		echo "switch.sh: the daemon started but never created the veth pairs" >&2
+		exit 1
+	fi
+	sleep 0.1
+done
+
+# Both far ends up, so both uplinks have carrier. Not a skip: the peers exist by
+# here and the daemon started, so a failure is a real one and its error is worth
+# reading rather than discarding down /dev/null.
+ip link set eth-peer up
 ip link set wl-peer up
 
 settle_to eth-lan || true
