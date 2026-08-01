@@ -1087,7 +1087,7 @@ impl Builder {
 			));
 		}
 
-		for route in &interface.routes {
+		for route in &routes_for(interface, observed) {
 			self.plan_route(interface, route, observed, &base);
 		}
 
@@ -2044,7 +2044,16 @@ impl Builder {
 					{
 						return false;
 					}
-					interface.routes.iter().any(|desired| {
+					// The report's routes count as wanted alongside the
+					// document's, for the reason the addressing teardown gives:
+					// the document names a source and the value comes from the
+					// report, so a check that read only `interface.routes`
+					// would delete the default route the same plan just added.
+					//
+					// And when the bearer drops, the report stops naming the
+					// gateway, this stops being true, and the route goes -- the
+					// same withdrawal the address gets, for the same reason.
+					routes_for(interface, observed).iter().any(|desired| {
 						route_matches(&with_metric(desired, interface.preference), route)
 					})
 				});
@@ -2614,6 +2623,83 @@ fn render_route(route: &Route) -> String {
 		out.push_str(&format!(" metric {metric}"));
 	}
 	out
+}
+
+/// Every route this interface should have: the document's, plus the ones a
+/// modem helper's report implies.
+///
+/// One function so the forward pass and the teardown cannot disagree about what
+/// the list is. They already could not disagree about the document's routes,
+/// because both read the same field; adding a second source made that a thing
+/// worth guaranteeing rather than observing, and the failure it prevents is the
+/// loud one -- a plan that installs a route and deletes it on the next
+/// reconcile, forever.
+fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
+	interface
+		.routes
+		.iter()
+		.cloned()
+		.chain(modem_routes(interface, observed))
+		.collect()
+}
+
+/// The routes a modem helper's report implies for one interface.
+///
+/// A default route per reported gateway, and nothing else -- a cellular bearer
+/// gives you a way off the link, not a topology. Two of them on a dual-stack
+/// bearer, which is why the report's `gateway` key repeats.
+///
+/// **Synthesised into [`Route`] rather than planned separately**, so they go
+/// through the same path every other route does: the carrier check that stops a
+/// dead link stealing the default route, the metric derived from the
+/// interface's preference, ordering rule 4 putting `addr.add` first when the
+/// next hop lies in a reported address's subnet, and the teardown that removes
+/// what the document no longer asks for. A second route planner would be a
+/// second set of those rules to keep in step.
+///
+/// Empty unless the interface actually asks for `modem` addressing. A report
+/// for an interface whose document says nothing about a modem is an observation
+/// netcfgd has no instruction about, and installing a default route off the
+/// strength of a file somebody dropped in `/run` is not one it should invent.
+fn modem_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
+	if !interface
+		.addressing
+		.iter()
+		.any(|source| matches!(source, AddressSource::Modem(_)))
+	{
+		return Vec::new();
+	}
+	observed
+		.modems
+		.iter()
+		.filter(|modem| modem.interface == interface.name)
+		.flat_map(|modem| modem.gateways.iter())
+		.filter_map(|gateway| {
+			let via: std::net::IpAddr = gateway.parse().ok()?;
+			Some(Route {
+				// `default` for v4 and `::/0` for v6, spelled the way the rest
+				// of the model spells them so the comparison against an
+				// observed route is the same string comparison it is for a
+				// route out of the document.
+				destination: if via.is_ipv6() {
+					"::/0".to_owned()
+				} else {
+					"default".to_owned()
+				},
+				via: Some(via),
+				metric: None,
+				table: None,
+				src: None,
+				scope: None,
+				// The bearer's gateway is very often outside every address the
+				// bearer was given -- a /32 with a next hop elsewhere is the
+				// ordinary shape of a cellular link, and the kernel refuses
+				// such a route without this.
+				onlink: true,
+				proto: None,
+			})
+		})
+		.collect()
 }
 
 /// A route with the interface's preference filled in as its metric.

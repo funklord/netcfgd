@@ -90,10 +90,18 @@ netcfgd's, and withdrawn again when the report stops naming them -- so
 truncating the file when the bearer drops really does take the address off the
 interface.
 
-**`gateway=` and `dns=` are read and shown and not yet applied.** `ncfg status`
-marks them as reported, and nothing installs a route or a resolver from them
-yet. A helper should report them anyway: they are the contract, and the day
-netcfgd consumes them no helper has to change.
+**`gateway=`** becomes a default route on the interface, one per reported
+gateway, so a dual-stack bearer gets one each way. The route is installed
+`onlink`, because a cellular next hop is routinely outside every address the
+bearer was given -- a /30 or a /32 with the gateway elsewhere is the ordinary
+shape, and the kernel refuses such a route otherwise. It is withdrawn with the
+address when the report empties: a default route down a modem that is gone
+black-holes traffic another interface would have carried.
+
+**`dns=` is read and shown and not yet applied.** `ncfg status` marks it as
+reported and nothing delivers a resolver from it. A helper should report it
+anyway: it is the contract, and the day netcfgd consumes it no helper has to
+change.
 
 netcfgd will not configure the interface at all until a document asks it to --
 an `interface` with no `modem` source gets nothing, however complete the report.

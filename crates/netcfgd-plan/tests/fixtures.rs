@@ -1279,15 +1279,103 @@ fn modem_document() -> Document {
 
 /// `wwan0` present, with a helper reporting these addresses.
 fn modem_observed(addresses: &[&str]) -> Observed {
+	modem_reporting(addresses, &[])
+}
+
+/// The same, with gateways too.
+fn modem_reporting(addresses: &[&str], gateways: &[&str]) -> Observed {
+	let owned = |list: &[&str]| list.iter().map(|value| (*value).to_owned()).collect();
 	let mut observed = observed_with(&["wwan0"]);
 	observed.links[0].up = true;
 	observed.modems.push(netcfgd_model::ObservedModem {
 		interface: "wwan0".to_owned(),
-		addresses: addresses.iter().map(|a| (*a).to_owned()).collect(),
-		gateways: Vec::new(),
+		addresses: owned(addresses),
+		gateways: owned(gateways),
 		nameservers: Vec::new(),
 	});
 	observed
+}
+
+/// A bearer gives you a way off the link, and without it an address is a
+/// address on an island. The route comes from the report, not the document.
+#[test]
+fn a_reported_gateway_becomes_a_default_route() {
+	let desired = modem_document();
+	let mut observed = modem_reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(names(&plan), ["addr.add", "route.add"]);
+	let route = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "route.add")
+		.expect("a route.add");
+	let Op::RouteAdd { route, iface } = &route.op else {
+		panic!("got {:?}", route.op);
+	};
+	assert_eq!(iface, "wwan0");
+	assert_eq!(route.destination, "default");
+	assert_eq!(
+		route.via.map(|via| via.to_string()).as_deref(),
+		Some("10.64.1.24")
+	);
+	// A cellular gateway is routinely outside every address the bearer was
+	// given -- a /32 with a next hop elsewhere is the ordinary shape -- and the
+	// kernel refuses such a route unless it is onlink.
+	assert!(
+		route.onlink,
+		"a bearer's gateway is not covered by its address"
+	);
+}
+
+/// Both families, which is why the report's `gateway` key repeats.
+#[test]
+fn a_dual_stack_bearer_gets_a_default_route_each_way() {
+	let desired = modem_document();
+	let mut observed = modem_reporting(
+		&["10.64.1.23/30", "2001:db8::2/64"],
+		&["10.64.1.24", "2001:db8::1"],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	let destinations: Vec<&str> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::RouteAdd { route, .. } => Some(route.destination.as_str()),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(destinations, ["default", "::/0"]);
+}
+
+/// The bearer drops, the report stops naming the gateway, and the route goes --
+/// the same withdrawal the address gets. A default route pointing down a dead
+/// modem is worse than no route: it black-holes traffic that another interface
+/// would have carried.
+#[test]
+fn the_default_route_goes_when_the_bearer_does() {
+	let desired = modem_document();
+	let mut observed = modem_reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
+	settle(&desired, &mut observed);
+
+	observed.modems[0].addresses.clear();
+	observed.modems[0].gateways.clear();
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let mut removed = names(&plan);
+	removed.sort_unstable();
+	assert_eq!(removed, ["addr.del", "route.del"]);
+}
+
+/// A report for an interface the document says nothing about is an observation
+/// netcfgd has no instruction for. Installing a default route on the strength
+/// of a file somebody dropped in `/run` is not something to invent.
+#[test]
+fn a_report_without_a_modem_source_installs_no_route() {
+	let desired = document(r#"interface wwan0 { kind = "dummy"; config = "null" }"#);
+	let mut observed = modem_reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
+	let plan = settle(&desired, &mut observed);
+	assert!(names(&plan).is_empty(), "got {:?}", names(&plan));
 }
 
 /// The point of the source. A helper reported an address; netcfgd installs it,

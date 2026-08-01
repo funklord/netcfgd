@@ -214,4 +214,9 @@ netcfgd
 # makes withdrawal work. Four kilobytes because the address path was already
 # there -- this source adds a place the value comes from, not a way to install
 # one.
-total 1944088
+# +4 KB for the default route a modem report implies: the route synthesis, the
+# shared list the forward pass and the teardown both read, and the tests. Small
+# because the routes are *synthesised into the existing type* and go through
+# the ordinary route path -- carrier check, metric, ordering rule 4, teardown --
+# rather than getting a planner of their own to keep in step.
+total 1948184
