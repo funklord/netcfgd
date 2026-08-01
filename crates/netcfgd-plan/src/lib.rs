@@ -26,8 +26,8 @@ pub use action::{Action, Op, Reason};
 
 use netcfgd_model::{AclPolicy, RoutingRule};
 use netcfgd_model::{
-	AddressSource, BackendKind, DnsPolicy, Document, HookPhase, Interface, InterfaceKind, Observed,
-	Origin, Route,
+	AddressSource, BackendKind, Document, HookPhase, Interface, InterfaceKind, Observed, Origin,
+	Route,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1945,25 +1945,17 @@ impl Builder {
 	}
 
 	fn plan_dns(&mut self, desired: &Document, observed: &Observed) {
-		let mut scopes: Vec<(String, &DnsPolicy)> = Vec::new();
-		if desired.globals.dns.mode != netcfgd_model::dns::DnsMode::None {
-			scopes.push(("globals".to_owned(), &desired.globals.dns));
-		}
-		for interface in &desired.interfaces {
-			// An unmanaged interface contributes no scope. `DnsApply` is
-			// host-wide, so it names no interface and the check in `push` does
-			// not see it -- this is the one place that has to ask directly.
-			if self.unmanaged.iter().any(|name| name == &interface.name) {
-				continue;
-			}
-			if let Some(policy) = &interface.dns {
-				scopes.push((interface.name.clone(), policy));
-			}
-		}
+		// The scope list is `netcfgd_model::dns::scopes`, not a second copy of
+		// the rule. The executor delivers every scope on any `dns.apply` --
+		// a flat resolver cannot express scopes, so the file is written whole
+		// -- which means the two have to agree about what the list is, and when
+		// they did not the plan said `dns.apply` and the delivery wrote a
+		// `resolv.conf` with nothing in it.
+		let scopes = netcfgd_model::dns::scopes(desired, observed);
 
 		for (scope, policy) in scopes {
 			let previous = observed.dns_for(&scope);
-			if previous == Some(policy) {
+			if previous == Some(&policy) {
 				continue;
 			}
 			let inverse = previous.map(|policy| Op::DnsApply {

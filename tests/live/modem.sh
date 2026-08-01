@@ -40,6 +40,9 @@ mkdir -p "$work/etc" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
+# Somewhere other than the real one, so a suite run on a workstation does
+# not rewrite the resolver of the machine running it.
+export NCFG_RESOLV_CONF="$work/resolv.conf"
 ncfg="$repo/target/debug/ncfg"
 
 failures=0
@@ -61,6 +64,7 @@ ip link add wwan0 type dummy
 ip link set wwan0 up
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
+${2:-}
 interface wwan0 {
 	kind   = "dummy"
 	config = "$1"
@@ -151,10 +155,14 @@ check "and a removed report is nobody watching" "$(seen)" "no report"
 # come from. The helper still does not install anything -- netcfgd does, from
 # what the helper reported, with its own tag. That is the whole point of the
 # split: one writer.
-write_config modem
+# A host that manages its resolver, so the reported nameservers have somewhere
+# to go. Without this netcfgd manages no DNS and a modem appearing is not a
+# reason for it to start.
+write_config modem 'global { dns { dns_mode = "write_resolv_conf" } }'
 report <<'EOF'
 address=10.64.1.23/30
 gateway=10.64.1.24
+dns=8.8.8.8
 EOF
 "$ncfg" apply > "$work/apply.txt" 2>&1 || true
 check "netcfgd installs the address the helper reported" \
@@ -176,11 +184,19 @@ print([a["ownership"] for a in o["addresses"]
 check "and installs the default route the helper reported" \
 	"$(ip -4 route show default | grep -c 'via 10.64.1.24 dev wwan0' || true)" "1"
 
+# And the resolver. Decision 0006 rule 4 says a source contributes nameservers
+# and they merge; until the modem there was no source that contributed any, so
+# this is the first thing to exercise it. The mode is not chosen -- every scope
+# in one delivery has to agree about it, so the only value that is not an error
+# is the one the host already uses.
+check "and delivers the nameserver the helper reported" \
+	"$(grep -c '^nameserver 8.8.8.8' "$work/resolv.conf" 2>/dev/null || true)" "1"
+
 # Converged: a second apply does nothing, which is the check that the source
 # is not adding an address the teardown then removes on every reconcile.
 "$ncfg" plan > "$work/replan.txt" 2>&1 || true
 check "and the next plan has nothing to do" \
-	"$(grep -cE 'addr\.|route\.' "$work/replan.txt" || true)" "0"
+	"$(grep -cE 'addr\.|route\.|dns\.' "$work/replan.txt" || true)" "0"
 
 # The bearer drops. The helper truncates its report, as the contract asks, and
 # the address goes -- rule 7 for this source. Unlike a lease there is no client
@@ -193,6 +209,29 @@ check "and withdraws it when the bearer goes down" \
 # modem that is gone black-holes traffic another interface would have carried.
 check "and takes the default route with it" \
 	"$(ip -4 route show default | grep -c 'dev wwan0' || true)" "0"
+
+# ----------------------------------- the neighbouring case this refactor fixed
+
+# Not about modems, and here because this is where a redirected resolv.conf is
+# already set up. `dns = "9.9.9.9"` on an interface compiles to a policy whose
+# mode is `none` -- the line says nothing about delivery -- and the executor
+# used to drop such a scope while the plan happily reported applying it. An
+# operator wrote a nameserver down and netcfgd silently ignored it.
+#
+# Only a delivery can catch this. A check on the plan sees the server either
+# way, because the plan carried it all along.
+report < /dev/null
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+global { dns { dns_mode = "write_resolv_conf" } }
+interface wwan0 {
+	kind   = "dummy"
+	config = "10.9.9.1/24"
+	dns    = "9.9.9.9"
+}
+CONF
+"$ncfg" apply > "$work/plaindns.txt" 2>&1 || true
+check "a nameserver written on an interface reaches the resolver" \
+	"$(grep -c '^nameserver 9.9.9.9' "$work/resolv.conf" 2>/dev/null || true)" "1"
 
 echo
 if [ "$failures" -eq 0 ]; then

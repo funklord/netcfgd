@@ -156,7 +156,7 @@ impl State {
 		let executor = netcfgd_apply::KernelExecutor::new()
 			.map_err(|error| format!("cannot open a netlink socket: {error}"))?;
 		Ok(match &self.desired {
-			Some(document) => executor.with_context(&self.paths.run, document),
+			Some(document) => executor.with_context(&self.paths.run, document, &self.observed),
 			None => executor,
 		})
 	}
