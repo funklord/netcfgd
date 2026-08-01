@@ -219,4 +219,13 @@ netcfgd
 # because the routes are *synthesised into the existing type* and go through
 # the ordinary route path -- carrier check, metric, ordering rule 4, teardown --
 # rather than getting a planner of their own to keep in step.
-total 1948184
+# +8 KB for the nameservers a modem report contributes: the shared scope
+# function both the planner and the executor now call, the merge with what the
+# document wrote, and the mode inheritance that closes an older defect.
+#
+# Bigger than the route for a reason worth recording: the scopes are *owned*
+# rather than borrowed, because one of them is synthesised from an observation
+# and there is nothing to borrow it from. Cloning a DnsPolicy per interface per
+# plan is what that costs, and it is what having one implementation instead of
+# two is worth.
+total 1952280

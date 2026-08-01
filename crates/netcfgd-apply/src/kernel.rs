@@ -149,14 +149,18 @@ impl KernelExecutor {
 		mut self,
 		run_dir: impl Into<std::path::PathBuf>,
 		document: &netcfgd_model::Document,
+		observed: &netcfgd_model::Observed,
 	) -> Self {
 		self.run_dir = run_dir.into();
-		self.dns_scopes = netcfgd_dns::scopes_of(document)
+		// The same function the planner calls, and deliberately not a second
+		// reading of the document. A scope can come from an observation rather
+		// than from the document -- a modem helper's reported nameservers are
+		// one -- and an executor that rebuilt the list from the document alone
+		// delivered a `resolv.conf` with nothing in it while the plan said it
+		// had applied one.
+		self.dns_scopes = netcfgd_model::dns::scopes(document, observed)
 			.into_iter()
-			.map(|scope| netcfgd_model::AppliedDns {
-				scope: scope.name.to_owned(),
-				policy: scope.policy.clone(),
-			})
+			.map(|(scope, policy)| netcfgd_model::AppliedDns { scope, policy })
 			.collect();
 		self.hook_hashes = document
 			.interfaces
