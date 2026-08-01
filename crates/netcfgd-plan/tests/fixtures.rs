@@ -1296,6 +1296,186 @@ fn modem_reporting(addresses: &[&str], gateways: &[&str]) -> Observed {
 	observed
 }
 
+/// `wwan0` reporting nameservers, with the document's globals set to a mode.
+fn modem_with_nameservers(config: &str, servers: &[&str]) -> (Document, Observed) {
+	let desired = document(config);
+	let mut observed = modem_reporting(&["10.64.1.23/30"], &[]);
+	observed.modems[0].nameservers = servers.iter().map(|s| (*s).to_owned()).collect();
+	(desired, observed)
+}
+
+/// The servers a plan would deliver for one scope.
+fn delivered(plan: &Plan, scope: &str) -> Vec<String> {
+	plan.actions
+		.iter()
+		.find_map(|action| match &action.op {
+			Op::DnsApply {
+				scope: name,
+				policy,
+			} if name == scope => Some(
+				policy
+					.servers
+					.iter()
+					.map(|server| server.addr.to_string())
+					.collect(),
+			),
+			_ => None,
+		})
+		.unwrap_or_default()
+}
+
+/// Decision 0006 rule 4 says DNS merges in list order, and until now nothing
+/// had ever exercised it: no addressing source contributed a nameserver. A
+/// modem does, and the interface gets a scope for it.
+#[test]
+fn a_reported_nameserver_is_delivered() {
+	let (desired, mut observed) = modem_with_nameservers(
+		r#"
+global { dns { dns_mode = "write_resolv_conf" } }
+interface wwan0 { kind = "dummy"; config = "modem" }
+"#,
+		&["8.8.8.8"],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(delivered(&plan, "wwan0"), ["8.8.8.8"]);
+}
+
+/// The mode is not a choice. `netcfgd_dns::deliver` refuses a delivery whose
+/// scopes disagree about it, so the only value that is not an error is the one
+/// the rest of the host uses.
+#[test]
+fn a_synthesised_scope_takes_the_mode_the_host_already_uses() {
+	let (desired, mut observed) = modem_with_nameservers(
+		r#"
+global { dns { dns_mode = "resolvconf" } }
+interface wwan0 { kind = "dummy"; config = "modem" }
+"#,
+		&["8.8.8.8"],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	let mode = plan.actions.iter().find_map(|action| match &action.op {
+		Op::DnsApply { scope, policy } if scope == "wwan0" => Some(policy.mode.name().to_owned()),
+		_ => None,
+	});
+	assert_eq!(mode.as_deref(), Some("resolvconf"));
+}
+
+/// A host that manages no DNS does not start managing it because a modem
+/// appeared. Globals at `none` means nothing is delivered.
+#[test]
+fn a_host_that_manages_no_dns_still_manages_none() {
+	let (desired, mut observed) = modem_with_nameservers(
+		r#"interface wwan0 { kind = "dummy"; config = "modem" }"#,
+		&["8.8.8.8"],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		!names(&plan).iter().any(|name| *name == "dns.apply"),
+		"got {:?}",
+		names(&plan)
+	);
+}
+
+/// Rule 4's "first occurrence winning", with the document first: a server an
+/// operator wrote down beats one the network handed out.
+#[test]
+fn a_written_nameserver_comes_before_a_reported_one() {
+	let (desired, mut observed) = modem_with_nameservers(
+		r#"
+global { dns { dns_mode = "write_resolv_conf" } }
+interface wwan0 {
+	kind   = "dummy"
+	config = "modem"
+	dns    = "9.9.9.9"
+}
+"#,
+		&["8.8.8.8"],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(delivered(&plan, "wwan0"), ["9.9.9.9", "8.8.8.8"]);
+}
+
+/// A defect older than the modem work, found by merging two implementations of
+/// the scope list into one.
+///
+/// `dns = "9.9.9.9"` on an interface compiles to a policy whose mode is `none`,
+/// because the line says nothing about delivery. The executor built its scope
+/// list separately and dropped any scope with that mode -- so an operator wrote
+/// a nameserver down, nothing failed, nothing warned, and the server never
+/// reached `resolv.conf`.
+///
+/// The mode was never a per-interface choice: `netcfgd-dns` refuses a delivery
+/// whose scopes disagree about it, so `none` on a scope that has something to
+/// deliver can only mean "not stated".
+#[test]
+fn a_nameserver_written_on_an_interface_reaches_the_resolver() {
+	let desired = document(
+		r#"
+global { dns { dns_mode = "write_resolv_conf" } }
+interface eth0 {
+	kind   = "dummy"
+	config = "10.0.0.1/24"
+	dns    = "9.9.9.9"
+}
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(
+		delivered(&plan, "eth0"),
+		["9.9.9.9"],
+		"an interface's dns line has to reach the resolver"
+	);
+	// And the mode, which is the half that decides whether it is delivered at
+	// all. Asserting only the servers checks that the *plan* carries them --
+	// which it did all along, while the scope was dropped at delivery for
+	// having no mode. The bug was invisible to a check on the plan alone.
+	let mode = plan.actions.iter().find_map(|action| match &action.op {
+		Op::DnsApply { scope, policy } if scope == "eth0" => Some(policy.mode.name().to_owned()),
+		_ => None,
+	});
+	assert_eq!(
+		mode.as_deref(),
+		Some("write_resolv_conf"),
+		"a scope with no mode of its own is dropped at delivery"
+	);
+}
+
+/// And a block that asks for nothing produces no action, so the fix above does
+/// not turn every `dns { }` into a delivery nobody wanted.
+#[test]
+fn a_dns_block_that_asks_for_nothing_plans_nothing() {
+	let desired = document(
+		r#"
+global { dns { dns_mode = "write_resolv_conf" } }
+interface eth0 { kind = "dummy"; config = "10.0.0.1/24"; dns { } }
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	let plan = settle(&desired, &mut observed);
+	assert!(delivered(&plan, "eth0").is_empty());
+}
+
+/// A report for an interface the document says nothing about contributes no
+/// resolver, the same as it installs no route.
+#[test]
+fn a_report_without_a_modem_source_contributes_no_nameserver() {
+	let (desired, mut observed) = modem_with_nameservers(
+		r#"
+global { dns { dns_mode = "write_resolv_conf" } }
+interface wwan0 { kind = "dummy"; config = "null" }
+"#,
+		&["8.8.8.8"],
+	);
+
+	let plan = settle(&desired, &mut observed);
+	assert!(delivered(&plan, "wwan0").is_empty());
+}
+
 /// A bearer gives you a way off the link, and without it an address is a
 /// address on an island. The route comes from the report, not the document.
 #[test]

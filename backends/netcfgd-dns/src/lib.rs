@@ -388,29 +388,6 @@ fn record(delivered: &[AppliedDns], run_dir: &Path) -> Result<(), String> {
 	Ok(())
 }
 
-/// Collect the scopes a document asks for, in a deterministic order.
-#[must_use]
-pub fn scopes_of(document: &netcfgd_model::Document) -> Vec<Scope<'_>> {
-	let mut scopes = Vec::new();
-	if document.globals.dns.mode != DnsMode::None {
-		scopes.push(Scope {
-			name: "globals",
-			policy: &document.globals.dns,
-		});
-	}
-	for interface in &document.interfaces {
-		if let Some(policy) = &interface.dns {
-			if policy.mode != DnsMode::None {
-				scopes.push(Scope {
-					name: &interface.name,
-					policy,
-				});
-			}
-		}
-	}
-	scopes
-}
-
 /// One scope, for the executor's per-scope `dns.apply` action.
 #[must_use]
 pub fn single<'a>(name: &'a str, policy: &'a DnsPolicy) -> Vec<Scope<'a>> {

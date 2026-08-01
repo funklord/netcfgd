@@ -347,7 +347,7 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 
 	let mut executor = KernelExecutor::new()
 		.map_err(|error| format!("could not open a netlink socket: {error}"))?
-		.with_context(&run_dir, &document);
+		.with_context(&run_dir, &document, &observed);
 	let journal = apply(&plan, &mut executor);
 
 	// Record what happened before reporting it. A journal that exists only in

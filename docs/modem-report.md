@@ -98,10 +98,15 @@ shape, and the kernel refuses such a route otherwise. It is withdrawn with the
 address when the report empties: a default route down a modem that is gone
 black-holes traffic another interface would have carried.
 
-**`dns=` is read and shown and not yet applied.** `ncfg status` marks it as
-reported and nothing delivers a resolver from it. A helper should report it
-anyway: it is the contract, and the day netcfgd consumes it no helper has to
-change.
+**`dns=`** is delivered, when the host manages DNS at all. The reported servers
+join the interface's DNS scope, after any the document wrote for it -- so a
+server an operator chose is consulted before one the network handed out. The
+delivery mode is not a choice: every scope in one delivery has to agree about
+it, so the reported servers go out however the rest of the host's DNS does.
+
+A host whose `global { dns { } }` sets no mode manages no resolver, and a modem
+appearing is not a reason for it to start. The servers are read and shown and
+nothing is delivered.
 
 netcfgd will not configure the interface at all until a document asks it to --
 an `interface` with no `modem` source gets nothing, however complete the report.
