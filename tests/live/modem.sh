@@ -154,6 +154,7 @@ check "and a removed report is nobody watching" "$(seen)" "no report"
 write_config modem
 report <<'EOF'
 address=10.64.1.23/30
+gateway=10.64.1.24
 EOF
 "$ncfg" apply > "$work/apply.txt" 2>&1 || true
 check "netcfgd installs the address the helper reported" \
@@ -167,11 +168,19 @@ o = json.load(sys.stdin)
 print([a["ownership"] for a in o["addresses"]
        if a["interface"] == "wwan0" and a["address"] == "10.64.1.23/30"][0])')" "ours"
 
+# The gateway, which is the half that makes the address useful. A cellular
+# next hop is routinely outside every address the bearer was given -- a /30 or
+# a /32 with the gateway elsewhere is the ordinary shape -- so this only works
+# because the route is onlink, and a real kernel is the only thing that can say
+# so. Without it the kernel answers ENETUNREACH and the apply fails.
+check "and installs the default route the helper reported" \
+	"$(ip -4 route show default | grep -c 'via 10.64.1.24 dev wwan0' || true)" "1"
+
 # Converged: a second apply does nothing, which is the check that the source
 # is not adding an address the teardown then removes on every reconcile.
 "$ncfg" plan > "$work/replan.txt" 2>&1 || true
 check "and the next plan has nothing to do" \
-	"$(grep -c 'addr\.' "$work/replan.txt" || true)" "0"
+	"$(grep -cE 'addr\.|route\.' "$work/replan.txt" || true)" "0"
 
 # The bearer drops. The helper truncates its report, as the contract asks, and
 # the address goes -- rule 7 for this source. Unlike a lease there is no client
@@ -180,6 +189,10 @@ report < /dev/null
 "$ncfg" apply > "$work/down.txt" 2>&1 || true
 check "and withdraws it when the bearer goes down" \
 	"$(ip -4 addr show wwan0 | grep -c '10.64.1.23/30' || true)" "0"
+# The route too, and this is the one that matters more: a default route down a
+# modem that is gone black-holes traffic another interface would have carried.
+check "and takes the default route with it" \
+	"$(ip -4 route show default | grep -c 'dev wwan0' || true)" "0"
 
 echo
 if [ "$failures" -eq 0 ]; then
