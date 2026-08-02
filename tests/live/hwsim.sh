@@ -93,8 +93,18 @@ ip=$(find_in_sbin ip) || die "no ip(8), which is not something this can work aro
 # The line is drawn where the answer stops being about this machine: no kmod and
 # no module in this kernel are both "not here", while a module that exists and
 # will not load is worth going red over, and the `die` below still does that.
-command -v modprobe >/dev/null 2>&1 || skip "no modprobe (apt install kmod)"
-modinfo mac80211_hwsim >/dev/null 2>&1 ||
+#
+# Found through `find_in_sbin` like everything else, and that is not a detail.
+# The first version asked `command -v`, which is a question about `$PATH` rather
+# than about the machine: this repository's own desktop has no `/usr/sbin` in a
+# user's `$PATH` and has the module, so `modinfo` reported "not here" about a
+# kernel that has it. A preflight that can only produce a false negative turns a
+# test that would have run into a skip that reads as a pass -- the mistake the
+# `AP-ENABLED` grep above already made once, in this file.
+modprobe=$(find_in_sbin modprobe) || skip "no modprobe (apt install kmod)"
+modinfo=$(find_in_sbin modinfo) || skip "no modinfo (apt install kmod)"
+rmmod=$(find_in_sbin rmmod) || skip "no rmmod (apt install kmod)"
+"$modinfo" mac80211_hwsim >/dev/null 2>&1 ||
 	skip "this kernel has no mac80211_hwsim module"
 
 if grep -q '^mac80211_hwsim ' /proc/modules; then
@@ -117,7 +127,7 @@ cleanup() {
 		# The module can take a moment to become removable after its
 		# interfaces go away.
 		for _ in 1 2 3 4 5; do
-			rmmod mac80211_hwsim 2>/dev/null && break
+			"$rmmod" mac80211_hwsim 2>/dev/null && break
 			sleep 0.4
 		done
 		if grep -q '^mac80211_hwsim ' /proc/modules; then
@@ -132,7 +142,7 @@ trap cleanup EXIT INT TERM
 # -------------------------------------------------------------- the radios
 
 before=$(ls /sys/class/ieee80211 2>/dev/null | sort)
-modprobe mac80211_hwsim radios=2 || die "could not load mac80211_hwsim"
+"$modprobe" mac80211_hwsim radios=2 || die "could not load mac80211_hwsim"
 loaded_here=yes
 # udev renames interfaces asynchronously; give it a moment before reading them.
 sleep 1

@@ -828,13 +828,25 @@ was reachable by reading seven records end to end.
 
 ### Next, roughly in order
 
-1. **Run the root-only three on the machine that can.** They pass — checked as
-   root in a privileged container after the 0047–0053 session, `delegation.sh`
-   and `pppoe-session.sh` both green end to end, `hwsim.sh` skipping because no
-   kernel here carries `mac80211_hwsim`. That last one is the gap worth closing
-   next: association is the only part of wifi nothing has exercised since the
-   session, and it needs a kernel with the module rather than a privileged
-   container alone.
+1. **Run `hwsim.sh`, which this machine can.** `delegation.sh` and
+   `pppoe-session.sh` are green end to end, checked as root in a privileged
+   container after the 0047–0053 session. `hwsim.sh` is the one left, and
+   association is the only part of wifi nothing has exercised since that
+   session. Everything it needs is here: the module is at
+   `/lib/modules/$(uname -r)/kernel/drivers/net/wireless/virtual/`, nothing has
+   it loaded, and the preflight passes in full — checked by running the script
+   with the `modprobe` line replaced by an echo, in a container with
+   `--net=host` and `/lib/modules` mounted read-only. What stopped it earlier
+   was neither of those: a plain container's `/lib/modules` is not this
+   kernel's, and the first version of the preflight asked `$PATH` rather than
+   the machine. `sudo sh tests/live/hwsim.sh` is the whole of it.
+
+   Worth knowing before running it: this laptop has a **real** wifi card, phy0
+   on `iwlmvm`, and `mac80211`/`cfg80211` are already loaded for it — which is
+   the condition the script's header calls safe, since nothing that card
+   depends on gets reloaded. The two virtual radios exist in the initial
+   namespace for about a second before the script moves them out of reach of
+   anything that would adopt them.
 2. **Run the modem path against a real modem.** Everything is written and
    nothing has met hardware: `helpers/netcfgd-modem-mbim` drives `mbimcli`
    against a fake whose output is copied from libmbim's own `g_print` calls.
