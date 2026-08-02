@@ -638,6 +638,8 @@ Three techniques make that reachable without root or a clean machine:
 - **`accept_ra=1` means "accept unless this interface forwards".** A host in an environment that starts with forwarding on ignores every router advertisement, and `ip addr` shows nothing that explains it. `accept_ra=2` is the other way to say it.
 - **A host fills in the bottom 64 bits of an advertised prefix itself**, so the address is `2001:db8:1234:0:...` and a grep for `2001:db8:1234::` matches nothing. `proto kernel_ra` is the kernel saying where an address came from, and is the thing worth asserting.
 - **A backend's *device* may not exist while the backend is running.** openvpn creates its `tun` seconds after starting, and a tunnel still negotiating has none at all — so anything planned from an interface's contents is skipped for exactly the tunnels that need it. The stale-configuration check for a `.ovpn` is a top-level pass for that reason, and the live test is what said so while every unit test passed.
+- **An op can be declared, frozen and pinned without anything emitting it.** `wg.set_device` and `wg.set_peers` were in the action taxonomy, in the `Op` enum and in `docs/schema/plan.json` from M4, and the executor answered both with "not implemented in this build" — because no planner path had ever produced one. A witness proves an op's *shape*; nothing in the repository was asking whether an op is reachable. Worth suspecting wherever a taxonomy was written before the code that fills it.
+- **The kernel's `SET_DEVICE` is a partial update and netcfgd used to send the whole device.** An attribute that is absent is left alone and the peer list is replaced only under `WGDEVICE_F_REPLACE_PEERS`, which is how `wg set wg0 listen-port` changes a port without touching a peer. A comment in `netcfgd-sys` said WireGuard "has no partial update that netcfgd wants", true while the only caller was link creation and false the moment there was a second.
 - **A MAC-based allow list is policy, not security.** An address is asserted by the station and changed with one command. It keeps honest devices off a network and stops nobody who does not want to be stopped; anything that must be secure belongs in `wifi { .. }` where the key material is.
 
 ---
@@ -650,7 +652,8 @@ Kept current deliberately: this is the section to read after a break, and the on
 
 **Read this first after a break, and rewrite it rather than appending to it.**
 Last touched by the session that read 0047–0053 as a whole rather than adding to
-them, and before that by the one that closed the M4 freeze's last inert feature;
+them, and then found what that reading pointed at: a WireGuard device netcfgd
+could not see (0054);
 what follows is organised by subject, not by the order it was built in.
 
 **Milestones.** M1–M6 are done. M7's NetworkManager shim has tiers 1 and 2
@@ -774,6 +777,23 @@ touch — a secret, and a file 0046 says netcfgd does not read — so both are m
 in the **observer**, where both halves are already in hand, and what travels is
 a boolean. `None` is not `false`: "could not check" never restarts anything.
 
+**And for a kernel object too, which is where 0053 guessed wrong.** It said the
+next thing of this shape would be a backend netcfgd does not start; it was a
+**WireGuard device**, which netcfgd creates itself
+([0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md)). Its
+configuration went over generic netlink inside `link.create` and never again, so
+an edited listen port did nothing and **a peer deleted from the config kept its
+access** while `ncfg apply` said there was nothing to do. That is the same drift
+as an edited SSID with a much worse face on it: a wrong answer shaped like a
+completed revocation. The observation now carries what the kernel holds — port,
+mark, public key, peers — and the planner emits `wg.set_device` and
+`wg.set_peers`, two ops that had been declared in the taxonomy and pinned by the
+plan witness since M4 without anything ever emitting one. What is not compared:
+a peer's **endpoint**, because a peer roams and the kernel rewrites it; a port
+the document does not state, because that one is the kernel's to choose; and a
+**rotated private key**, because deciding that means deriving a public key from
+a private one, which is curve25519 and is not arithmetic this project carries.
+
 #### Explaining it
 
 `ncfg explain` follows the indirections. An address the document named by
@@ -837,7 +857,18 @@ was reachable by reading seven records end to end.
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
 2. **WireGuard as a first-class NM device**, if the shim is worth more
-   attention than the core.
+   attention than the core. The core half of it is done and was the reason to
+   look: the shim reports every WireGuard interface as `GENERIC`, and the
+   `Device.WireGuard` interface NM defines wants a public key, a listen port
+   and a firewall mark — none of which netcfgd could observe until
+   [0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md), and
+   all of which it now carries. What is left is the shim's own: the device type
+   constant, which `enums.rs` already holds and `flavour_of` never returns, and
+   the three properties.
+3. **A rotated WireGuard private key is still not noticed** (0054). The kernel
+   reports the public key it derived; matching that against the secret store
+   means deriving one, which is curve25519. Worth doing only with a plan for
+   where that arithmetic lives.
 
 **The whole suite has now been run as root**, which is what the previous entry
 here asked for. All three root-only scripts pass: `delegation.sh` through
