@@ -118,8 +118,37 @@ fi
 cleanup() {
 	status=$?
 	set +e
-	[ -n "$created_ns" ] && "$ip" netns pids "$ns" 2>/dev/null | xargs -r kill 2>/dev/null
-	[ -n "$created_ns" ] && "$ip" netns delete "$ns" 2>/dev/null
+	# Two ways of naming what to kill, because one of them was not enough.
+	#
+	# `ip netns pids` finds what is *in* the namespace -- netcfgd and both
+	# supplicants. What it cannot see is the subshell the background job
+	# forked, which stays in the initial namespace and holds this script's
+	# stdout; a run that leaves it behind leaves a reader of that pipe waiting
+	# for an end-of-file that never comes, which is a suite that hangs rather
+	# than fails. One run here did exactly that: the script itself had exited,
+	# the namespace and the work directory were gone, and netcfgd, two
+	# supplicants and that subshell were still up ten minutes later. The
+	# enumeration is right when it works and is not something to rely on alone.
+	#
+	# And then wait, because a SIGTERM is not an exit. netcfgd writes its run
+	# directory on the way out, so the `rm -rf` below was racing a daemon still
+	# shutting down -- it emptied the directory, the daemon put something back,
+	# and the rmdir failed with "Directory not empty".
+	[ -n "${daemon_job:-}" ] && kill "$daemon_job" 2>/dev/null
+	if [ -n "$created_ns" ]; then
+		"$ip" netns pids "$ns" 2>/dev/null | xargs -r kill 2>/dev/null
+		for _ in 1 2 3 4 5 6 7 8 9 10; do
+			[ -z "$("$ip" netns pids "$ns" 2>/dev/null)" ] && break
+			sleep 0.2
+		done
+		# Whatever is left has had two seconds to take a hint. A supplicant
+		# whose radio is about to be removed from under it is the plausible
+		# candidate, and there is nothing to be gained by waiting longer.
+		"$ip" netns pids "$ns" 2>/dev/null | xargs -r kill -9 2>/dev/null
+		"$ip" netns delete "$ns" 2>/dev/null
+	fi
+	# Reap the background job, so nothing of this script's outlives it.
+	[ -n "${daemon_job:-}" ] && { kill -9 "$daemon_job" 2>/dev/null; wait "$daemon_job" 2>/dev/null; }
 	# The phys go back to the initial namespace when the namespace is deleted,
 	# and then away entirely with the module. Unloading is what keeps this from
 	# leaving two wireless devices for the desktop to find.
@@ -134,7 +163,21 @@ cleanup() {
 			echo "hwsim.sh: could not unload mac80211_hwsim; \`rmmod mac80211_hwsim\`" >&2
 		fi
 	fi
-	[ -n "${work:-}" ] && rm -rf "$work"
+	# Retried, because the wait above is a claim about processes and this is a
+	# claim about a directory. `rm -rf` walks, unlinks and then rmdirs, so
+	# anything writing between the walk and the rmdir defeats it once; a
+	# second attempt after the writer is certainly gone does not need to know
+	# which writer it was. Seen twice, unreproduced afterwards -- the run that
+	# left `/tmp/ncfg-hwsim.XXXXXX` behind still exited 0, so it was litter on
+	# whichever machine has root rather than a failing test.
+	if [ -n "${work:-}" ]; then
+		for _ in 1 2 3; do
+			rm -rf "$work" 2>/dev/null
+			[ -d "$work" ] || break
+			sleep 0.5
+		done
+		[ -d "$work" ] && echo "hwsim.sh: left $work behind" >&2
+	fi
 	exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -286,6 +329,11 @@ innc() {
 }
 
 innc "$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+# Kept so cleanup can kill this by name rather than only by namespace. `$!` is
+# the *subshell* the background function call forked, not netcfgd, and that is
+# the point: it is the process holding this script's stdout open, and it sits
+# in the initial namespace where `ip netns pids` never looks.
+daemon_job=$!
 waited=0
 while [ ! -e "$work/run/netcfgd.sock" ]; do
 	waited=$((waited + 1))
