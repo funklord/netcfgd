@@ -14,10 +14,17 @@
 {"request":"wifi_status","interface":"wlan0"}
 {"request":"wifi_connect","interface":"wlan0","network":"home"}
 {"request":"wifi_disconnect","interface":"wlan0"}
+{"request":"ap_stations","interface":"wlan0"}
 {"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":0}}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"ssid":"686f6d65","name":"home","configured":"home"}]}
 {"response":"wifi_status","interface":"wlan0","state":"COMPLETED","ssid":"686f6d65","name":"home","bssid":"00:11:22:33:44:55","network":"home"}
+{"response":"status","links":[],"addresses":[],"routes":[],"backends":[],"dns":[],"rules":[],"bridge_vlans":[],"delegations":[],"reports":[],"qdisc_applied":[],"ingress_applied":[],"forwarding_applied":[],"nat":[],"nat_conflicts":[],"address_proto_supported":false}
+{"response":"plan","actions":[],"warnings":[],"refusals":[],"stranded":[]}
+{"response":"document","schema_version":{"major":1,"minor":0},"globals":{"dns":{"mode":"none","servers":[],"search":[],"domains":[],"options":[]},"on_drift_default":"report","confirm_default":null,"hostname_policy":"none","control":{"observe":"root","wifi":"root","admin":"root"}},"devices":[],"interfaces":[],"networks":[],"rules":[],"access_points":[]}
+{"response":"journal","records":[{"id":1,"op":"addr.add","interface":"eth0","reason":{"interface":"eth0","field":"addressing[0]","desired":"192.0.2.1/24","observed":"<absent>"},"outcome":"done"}]}
+{"response":"event","event":"confirm_armed","seconds":90}
+{"response":"ap_stations","interface":"wlan0","access_point":"home","access_control":"deny","stations":[{"address":"00:11:22:33:44:55","authorized":true,"listed":true,"signal":-52,"connected_seconds":184,"inactive_msec":120,"rx_bytes":4096,"tx_bytes":8192}]}
 {"response":"ok"}
 {"response":"error","message":"not permitted"}
 {"event":"observed","summary":"eth0 gained an address"}
