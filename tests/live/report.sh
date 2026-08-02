@@ -240,6 +240,57 @@ check "and the second plan has nothing to do, in both families" \
 report < /dev/null
 "$ncfg" apply > /dev/null 2>&1 || true
 
+# ------------------------------------------------------- routes, not just one
+
+# What a VPN server pushes and a bearer normally does not: a handful of routes
+# rather than a way off the link. Decision 0047 makes these netcfgd's to
+# install, so that they carry a metric that composes with `preference` instead
+# of whatever the far end chose.
+#
+# `preference` is set here because it is the whole reason netcfgd took the
+# routes rather than leaving them with the daemon, and a metric the kernel did
+# not accept would make the taking pointless.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface wwan0 {
+	kind       = "dummy"
+	config     = "reported"
+	preference = 700
+}
+CONF
+report <<'EOF'
+address=10.8.0.2/24
+route=10.0.0.0/8 via 10.8.0.1
+route=192.168.44.0/24
+route=default via 10.8.0.1
+EOF
+"$ncfg" apply > "$work/routes.txt" 2>&1 || true
+check "a reported route with a next hop is installed" \
+	"$(ip -4 route show 10.0.0.0/8 | grep -c 'via 10.8.0.1 dev wwan0' || true)" "1"
+# No `via`, so no `onlink` either -- it means nothing without a gateway, and
+# the kernel is what says whether netcfgd got that right.
+check "and one without a next hop is a device route" \
+	"$(ip -4 route show 192.168.44.0/24 | grep -c 'dev wwan0' || true)" "1"
+check "with the interface's preference as its metric, not the far end's" \
+	"$(ip -4 route show 10.0.0.0/8 | grep -c 'metric 700' || true)" "1"
+# `default via` in a route line means what `gateway=` means, and both have to
+# survive the kernel's one-word spelling of a default route.
+check "and a reported default route is one the kernel took" \
+	"$(ip -4 route show default | grep -c 'via 10.8.0.1 dev wwan0' || true)" "1"
+"$ncfg" plan > "$work/routes-replan.txt" 2>&1 || true
+check "and the next plan has nothing to do" \
+	"$(grep -cE 'route\.' "$work/routes-replan.txt" || true)" "0"
+
+# The tunnel drops. Rule 7 for routes: what netcfgd installed on the strength
+# of a report goes when the report stops saying it.
+report <<'EOF'
+address=10.8.0.2/24
+EOF
+"$ncfg" apply > "$work/routes-down.txt" 2>&1 || true
+check "and they go when the report stops naming them" \
+	"$(ip -4 route show | grep -cE '10\.0\.0\.0/8|192\.168\.44\.0/24' || true)" "0"
+report < /dev/null
+"$ncfg" apply > /dev/null 2>&1 || true
+
 # ----------------------------------- the neighbouring case this refactor fixed
 
 # Not about modems, and here because this is where a redirected resolv.conf is

@@ -1381,8 +1381,36 @@ fn reporting(addresses: &[&str], gateways: &[&str]) -> Observed {
 		addresses: owned(addresses),
 		gateways: owned(gateways),
 		nameservers: Vec::new(),
+		routes: Vec::new(),
 	});
 	observed
+}
+
+/// The same, with routes the report names outright.
+fn reporting_routes(routes: &[(&str, Option<&str>)]) -> Observed {
+	let mut observed = reporting(&["10.8.0.2/24"], &[]);
+	observed.reports[0].routes = routes
+		.iter()
+		.map(|(destination, via)| netcfgd_model::ReportedRoute {
+			destination: (*destination).to_owned(),
+			via: via.map(ToOwned::to_owned),
+		})
+		.collect();
+	observed
+}
+
+/// The destination and next hop of every route a plan installs.
+fn added_routes(plan: &Plan) -> Vec<(String, String)> {
+	plan.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::RouteAdd { route, .. } => Some((
+				route.destination.clone(),
+				route.via.map(|via| via.to_string()).unwrap_or_default(),
+			)),
+			_ => None,
+		})
+		.collect()
 }
 
 /// `wwan0` reporting nameservers, with the document's globals set to a mode.
@@ -1651,6 +1679,102 @@ fn the_default_route_goes_when_the_bearer_does() {
 	let mut removed = names(&plan);
 	removed.sort_unstable();
 	assert_eq!(removed, ["addr.del", "route.del"]);
+}
+
+/// A route the report names outright, which is what a VPN server pushes and a
+/// bearer normally does not. Decision 0047: the routes are the contested half,
+/// so they are netcfgd's to install rather than the daemon's.
+#[test]
+fn a_reported_route_is_installed_with_its_next_hop() {
+	let desired = reported_document();
+	let mut observed = reporting_routes(&[
+		("10.0.0.0/8", Some("10.8.0.1")),
+		("192.168.44.0/24", Some("10.8.0.1")),
+	]);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(
+		added_routes(&plan),
+		[
+			("10.0.0.0/8".to_owned(), "10.8.0.1".to_owned()),
+			("192.168.44.0/24".to_owned(), "10.8.0.1".to_owned())
+		]
+	);
+}
+
+/// A route with no next hop, which is what a point-to-point link gives: the
+/// interface is the whole answer and there is nothing to be onlink about.
+#[test]
+fn a_reported_route_may_have_no_next_hop() {
+	let desired = reported_document();
+	let mut observed = reporting_routes(&[("172.16.0.0/12", None)]);
+
+	let plan = settle(&desired, &mut observed);
+	let route = plan
+		.actions
+		.iter()
+		.find_map(|action| match &action.op {
+			Op::RouteAdd { route, .. } => Some(route),
+			_ => None,
+		})
+		.expect("a route.add");
+	assert_eq!(route.destination, "172.16.0.0/12");
+	assert_eq!(route.via, None);
+	assert!(!route.onlink, "onlink means nothing without a gateway");
+}
+
+/// One spelling for the default route, whichever one the writer used. `openvpn`
+/// says `0.0.0.0/0`, a person says `default`, and the kernel reports neither --
+/// it reports no destination at all. A desired route spelled any other way
+/// matches nothing observed and is added and deleted forever.
+#[test]
+fn every_spelling_of_the_default_route_becomes_one() {
+	let desired = reported_document();
+	let mut observed = reporting_routes(&[
+		("0.0.0.0/0", Some("10.8.0.1")),
+		("::/0", Some("fd00::1")),
+		("default", Some("10.8.0.2")),
+	]);
+
+	let plan = settle(&desired, &mut observed);
+	let destinations: Vec<String> = added_routes(&plan)
+		.into_iter()
+		.map(|(destination, _)| destination)
+		.collect();
+	assert_eq!(destinations, ["default", "default", "default"]);
+}
+
+/// The contract's rule for every other value, applied to this one: one bad line
+/// does not discard the good ones. A destination that is not a prefix would
+/// otherwise travel all the way to a netlink refusal, where nothing says which
+/// file it came from.
+#[test]
+fn a_route_that_is_not_a_route_is_skipped_not_fatal() {
+	let desired = reported_document();
+	let mut observed = reporting_routes(&[
+		("not-a-prefix", Some("10.8.0.1")),
+		("10.0.0.0/8", Some("not-an-address")),
+		("10.1.0.0/16", Some("10.8.0.1")),
+	]);
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(
+		added_routes(&plan),
+		[("10.1.0.0/16".to_owned(), "10.8.0.1".to_owned())]
+	);
+}
+
+/// Rule 7 again, for the routes. The tunnel goes down, the report empties, and
+/// what netcfgd installed on the strength of it goes with it.
+#[test]
+fn reported_routes_go_when_the_report_empties() {
+	let desired = reported_document();
+	let mut observed = reporting_routes(&[("10.0.0.0/8", Some("10.8.0.1"))]);
+	settle(&desired, &mut observed);
+
+	observed.reports[0].routes.clear();
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(names(&plan), ["route.del"]);
 }
 
 /// A report for an interface the document says nothing about is an observation

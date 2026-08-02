@@ -344,6 +344,32 @@ pub struct ObservedReport {
 	pub gateways: Vec<String>,
 	/// Nameservers, in the order reported.
 	pub nameservers: Vec<String>,
+	/// Routes beyond the default one, in the order reported.
+	///
+	/// A cellular bearer usually names none -- it gives a way off the link, not
+	/// a topology -- but a VPN server routinely pushes a handful, and those are
+	/// the routes decision 0047 says are netcfgd's to install rather than the
+	/// daemon's. Absent by default so a report written before this existed still
+	/// parses.
+	#[serde(default)]
+	pub routes: Vec<ReportedRoute>,
+}
+
+/// One route a report names.
+///
+/// Both parts stay text, as every other address in a report does: parsing them
+/// in the reader would put the refusal where the operator cannot see which line
+/// of whose file was wrong. What the reader *does* own is the line's syntax,
+/// because the file format is its business.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReportedRoute {
+	/// Where it goes: CIDR, or `default`.
+	pub destination: String,
+	/// The next hop, where the report names one. A point-to-point link has
+	/// none, and a route down one needs none.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub via: Option<String>,
 }
 
 /// A backend process as netcfgd currently believes it to be.
