@@ -76,11 +76,15 @@ fn key(seed: u8) -> Key {
 /// it -- the same shape as every other gate this project has caught passing on
 /// an incomplete input set.
 ///
-/// So there are now two checks below, and between them a new variant cannot
-/// reach the schema unnoticed: the exhaustive match stops this file compiling,
-/// and the assertion catches the case the compiler cannot see -- an arm written
-/// with no sample added. Either way the witness moves and `make schema-bless`
-/// has to be run deliberately.
+/// So there are now two checks below, and it is worth being exact about which
+/// one does what -- this comment used to claim more for the second than it
+/// delivers. **The exhaustive match is what catches an addition**: it stops this
+/// file compiling, in a file whose only purpose is samples. The assertion
+/// catches a sample that went away or a name that moved. It does *not* catch an
+/// arm written with no sample beside it, because neither list would mention the
+/// new name and they would agree; nothing in Rust can enumerate a variant
+/// without a value of it. `crates/netcfgd-plan/tests/frozen.rs` says the same
+/// thing at greater length.
 fn every_address_source() -> Vec<AddressSource> {
 	let sources = every_address_source_sample();
 
