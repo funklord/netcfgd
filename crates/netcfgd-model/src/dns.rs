@@ -285,17 +285,32 @@ fn inheriting(policy: &DnsPolicy, global_mode: &DnsMode) -> DnsPolicy {
 
 /// The nameservers an interface's sources contribute, from what was observed.
 ///
-/// Only a `reported` source contributes any today -- a DHCP lease's servers belong
-/// to the client that took the lease, which writes them itself. Gated on the
-/// document actually asking for the source, because a report netcfgd has no
-/// instruction about is an observation, and a resolver is not something to
-/// configure off a file somebody dropped in `/run`.
+/// Only a report contributes any -- a DHCP lease's servers belong to the client
+/// that took the lease, which writes them itself.
+///
+/// **Gated more narrowly than a reported route is**, and the difference is
+/// decision 0049. A route down a tunnel netcfgd started is netcfgd's to install
+/// on the strength of netcfgd having started it; a *resolver* is not, because
+/// what a nameserver changes is where every query on the machine goes. So the
+/// document has to have said something:
+///
+/// - **The addressing comes from the report.** A modem is the whole uplink and
+///   its servers are the ones to use; this is the case that has always worked.
+/// - **Or the interface has a `dns` block.** The operator has given this link a
+///   scope -- most usefully `domains = [..]`, which says *which names* travel
+///   this way -- and the reported servers fill it in.
+///
+/// A tunnel with neither is read, shown by `ncfg status` as reported and not
+/// applied, and delivered nowhere. That is the failure decision 0007 opens on:
+/// bring up a VPN and every query on the machine silently goes to the corporate
+/// resolver. netcfgd will not do that because a remote server asked it to.
 fn reported_servers(interface: &crate::Interface, observed: &crate::Observed) -> Vec<DnsServer> {
-	if !interface
+	let claimed = interface
 		.addressing
 		.iter()
 		.any(|source| matches!(source, crate::AddressSource::Reported(_)))
-	{
+		|| interface.dns.is_some();
+	if !claimed {
 		return Vec::new();
 	}
 	observed

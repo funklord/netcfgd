@@ -1593,6 +1593,111 @@ interface wwan0 { kind = "dummy"; config = "null" }
 	assert!(delivered(&plan, "wwan0").is_empty());
 }
 
+/// A tunnel's servers are not delivered because a tunnel reported them.
+///
+/// Decision 0049, and the difference from a route: netcfgd installs a route
+/// down a tunnel it started on the strength of having started it, because a
+/// route down a tunnel goes down that tunnel. A nameserver decides where every
+/// query on the machine goes, so the document has to have asked. This is
+/// decision 0007's opening failure -- bring up a VPN and every query silently
+/// goes to the corporate resolver -- and it does not happen here.
+#[test]
+fn a_tunnels_nameservers_wait_for_the_document_to_ask() {
+	let desired = document(
+		r#"
+global { dns { dns_mode = "write_resolv_conf" } }
+interface vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }
+"#,
+	);
+	let mut observed = observed_with(&["vpn0"]);
+	observed.links[0].up = true;
+	observed.reports.push(netcfgd_model::ObservedReport {
+		interface: "vpn0".to_owned(),
+		addresses: Vec::new(),
+		gateways: Vec::new(),
+		nameservers: vec!["10.0.0.53".to_owned()],
+		routes: vec![netcfgd_model::ReportedRoute {
+			destination: "10.0.0.0/8".to_owned(),
+			via: Some("10.8.0.1".to_owned()),
+		}],
+	});
+
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		delivered(&plan, "vpn0").is_empty(),
+		"got {:?}",
+		delivered(&plan, "vpn0")
+	);
+	// The route, on the same report, in the same plan. The two gates differ on
+	// purpose and this is the assertion that says so -- without it, a change
+	// that stopped believing the report at all would still pass the check
+	// above.
+	assert!(
+		names(&plan).iter().any(|name| *name == "route.add"),
+		"got {:?}",
+		names(&plan)
+	);
+}
+
+/// And they are delivered the moment it does. A `dns` block on the tunnel is
+/// the operator saying which names travel this way; the servers that answer
+/// them come from the report.
+#[test]
+fn a_dns_block_on_the_tunnel_is_what_asks() {
+	let desired = document(
+		r#"
+global { dns { dns_mode = "dnsmasq" } }
+interface vpn0 {
+	openvpn { config = "/etc/netcfgd/work.ovpn" }
+	dns { domains = ["corp.example"] }
+}
+"#,
+	);
+	let mut observed = observed_with(&["vpn0"]);
+	observed.links[0].up = true;
+	observed.reports.push(netcfgd_model::ObservedReport {
+		interface: "vpn0".to_owned(),
+		addresses: Vec::new(),
+		gateways: Vec::new(),
+		nameservers: vec!["10.0.0.53".to_owned()],
+		routes: Vec::new(),
+	});
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(delivered(&plan, "vpn0"), ["10.0.0.53"]);
+}
+
+/// The gate is the block, not what is in it.
+///
+/// `dns { }` on an interface asks for nothing of its own -- and that is exactly
+/// what makes it the minimal way to say "this link's resolvers count". A host
+/// with a flat resolver can take a tunnel's servers this way without a
+/// scope-capable mode, which splitting would need.
+#[test]
+fn an_empty_dns_block_is_enough_to_claim_them() {
+	let desired = document(
+		r#"
+global { dns { dns_mode = "write_resolv_conf" } }
+interface vpn0 {
+	openvpn { config = "/etc/netcfgd/work.ovpn" }
+	dns { }
+}
+"#,
+	);
+	let mut observed = observed_with(&["vpn0"]);
+	observed.links[0].up = true;
+	observed.reports.push(netcfgd_model::ObservedReport {
+		interface: "vpn0".to_owned(),
+		addresses: Vec::new(),
+		gateways: Vec::new(),
+		nameservers: vec!["10.0.0.53".to_owned()],
+		routes: Vec::new(),
+	});
+
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(delivered(&plan, "vpn0"), ["10.0.0.53"]);
+}
+
 /// A bearer gives you a way off the link, and without it an address is a
 /// address on an island. The route comes from the report, not the document.
 #[test]
