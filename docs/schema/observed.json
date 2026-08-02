@@ -292,7 +292,8 @@
         "ssid": "686f6d65",
         "band": "2.4",
         "channel": 6
-      }
+      },
+      "secret_matches": true
     }
   ],
   "dns": [

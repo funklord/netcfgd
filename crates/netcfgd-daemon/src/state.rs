@@ -121,7 +121,13 @@ impl State {
 	/// Re-read the kernel.
 	pub(crate) fn reobserve(&mut self) {
 		let prior = run_state::prior_state(&self.paths.run);
-		if let Ok(observed) = netcfgd_observe::current(&prior, &self.paths.run) {
+		// The document goes in so the observation can answer one question it
+		// otherwise could not: whether a running access point still holds the
+		// passphrase the secret store has (decision 0052). Only a boolean comes
+		// back out.
+		if let Ok(observed) =
+			netcfgd_observe::current(&prior, &self.paths.run, self.desired.as_ref())
+		{
 			self.observed = observed;
 			let _ = run_state::write_observed(&self.paths.run, &self.observed);
 		}

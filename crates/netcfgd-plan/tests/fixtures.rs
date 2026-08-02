@@ -299,6 +299,38 @@ fn simulate_access_control(op: &Op, observed: &mut Observed) {
 	held.sort();
 }
 
+/// What a backend looks like once netcfgd has started it.
+///
+/// A restarted access point re-reads the file netcfgd wrote from the document,
+/// so what it holds afterwards is what the document says -- policy record,
+/// identity and secret included. Simulating any of those as "netcfgd could not
+/// ask" would make the planner skip its comparison, and the idempotence gate
+/// would then pass because the feature was invisible rather than because it
+/// converged.
+fn started_backend(
+	kind: netcfgd_model::BackendKind,
+	iface: &str,
+	desired: &Document,
+) -> ObservedBackend {
+	let access_point = desired
+		.access_points
+		.iter()
+		.find(|point| point.device == iface);
+	ObservedBackend {
+		kind,
+		interface: iface.to_owned(),
+		running: true,
+		access_control: started_access_control(kind, iface, desired),
+		started_with: access_point.map(|point| netcfgd_model::ObservedAccessPoint {
+			ssid: point.ssid.clone(),
+			band: point.band.clone(),
+			channel: point.channel,
+		}),
+		secret_matches: access_point.map(|_| true),
+		advertised: Vec::new(),
+	}
+}
+
 fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 	for action in &plan.actions {
 		match &action.op {
@@ -346,20 +378,11 @@ fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 			Op::RouteDel { iface, route } => observed.routes.retain(|r| {
 				!(&r.interface == iface && r.destination == route.destination && r.via == route.via)
 			}),
-			Op::BackendStart { kind, iface } => observed.backends.push(ObservedBackend {
-				kind: *kind,
-				interface: iface.clone(),
-				running: true,
-				// A restarted access point re-reads the file netcfgd wrote from
-				// the document, so what it holds afterwards is what the document
-				// says -- policy record included. Simulating this as "netcfgd
-				// could not ask" would make the planner skip it, and the
-				// idempotence gate would then pass because the feature was
-				// invisible rather than because it converged.
-				access_control: started_access_control(*kind, iface, desired),
-				started_with: None,
-				advertised: Vec::new(),
-			}),
+			Op::BackendStart { kind, iface } => {
+				observed
+					.backends
+					.push(started_backend(*kind, iface, desired));
+			}
 			Op::BackendStop { kind, iface } => observed
 				.backends
 				.retain(|b| !(b.kind == *kind && &b.interface == iface)),
@@ -760,6 +783,7 @@ fn a_lease_address_is_left_to_its_backend() {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 	// The lease produced this, and it is tagged as ours.
@@ -790,6 +814,7 @@ fn removing_dhcp_stops_the_backend() {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1153,6 +1178,7 @@ fn removing_dot1x_stops_the_supplicant() {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1338,6 +1364,7 @@ fn a_running_tunnel_is_left_alone() {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut observed);
@@ -1362,6 +1389,7 @@ fn a_tunnel_stops_when_its_block_goes() {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -1785,6 +1813,7 @@ access_point "after" {
 			band: None,
 			channel: None,
 		}),
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1799,6 +1828,82 @@ access_point "after" {
 		"got {:?}",
 		plan.warnings
 	);
+}
+
+/// An edited passphrase restarts it too, without the value going anywhere.
+///
+/// The one thing 0052 left open until the observer could answer it: the secret
+/// is in neither the document nor the observation, so what travels is a
+/// boolean, computed where both halves were already in hand. The reason names
+/// the field and says which way it went and cannot print a passphrase, because
+/// it never has one.
+#[test]
+fn an_edited_passphrase_restarts_the_access_point() {
+	let desired = document(
+		r#"
+device wlan0 { }
+access_point "home" {
+	device = "wlan0"
+	wifi   { psk = "@secret:ap"; proto = "wpa2" }
+}
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: true,
+		access_control: None,
+		// The identity is unchanged; only the secret moved.
+		started_with: Some(netcfgd_model::ObservedAccessPoint {
+			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
+			band: None,
+			channel: None,
+		}),
+		secret_matches: Some(false),
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(names(&plan), ["backend.stop", "backend.start"]);
+	assert_eq!(plan.actions[0].reason.field, "access_point.wifi.psk");
+}
+
+/// "netcfgd could not check" is not a reason to deauthenticate a LAN.
+///
+/// `None` is the answer whenever anything is missing -- no document, no secret
+/// in the store, an unreadable file -- and a restart on that would be a radio
+/// dropped for a question nobody answered.
+#[test]
+fn a_secret_that_could_not_be_checked_restarts_nothing() {
+	let desired = document(
+		r#"
+device wlan0 { }
+access_point "home" {
+	device = "wlan0"
+	wifi   { psk = "@secret:ap"; proto = "wpa2" }
+}
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: true,
+		access_control: None,
+		started_with: Some(netcfgd_model::ObservedAccessPoint {
+			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
+			band: None,
+			channel: None,
+		}),
+		secret_matches: None,
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan.actions.is_empty(), "got {:?}", names(&plan));
 }
 
 /// An access point running what the document asks for is left alone, which is
@@ -1830,6 +1935,7 @@ access_point "home" {
 			band: Some("2.4".to_owned()),
 			channel: Some(6),
 		}),
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1869,6 +1975,7 @@ interface lan0 {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	// And the address it derived from the new one, so the only thing left to
@@ -1913,6 +2020,7 @@ interface lan0 {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	observed.addresses.push(netcfgd_model::ObservedAddress {
@@ -2365,6 +2473,7 @@ interface wg0 {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -2428,6 +2537,7 @@ fn running_access_point(
 			accepted: owned(accepted),
 		}),
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 }
@@ -2636,6 +2746,7 @@ fn an_unreachable_access_point_is_not_converged_against() {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut unreachable);
@@ -2669,6 +2780,7 @@ fn an_access_point_stops_when_its_block_goes() {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -2761,6 +2873,7 @@ interface wlan0 { config = "null" }
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -3292,6 +3405,7 @@ interface ppp0 {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: Vec::new(),
 	});
 
