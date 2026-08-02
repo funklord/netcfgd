@@ -26,8 +26,8 @@ pub use action::{Action, Op, Reason};
 
 use netcfgd_model::{AclPolicy, RoutingRule};
 use netcfgd_model::{
-	AddressSource, BackendKind, Document, HookPhase, Interface, InterfaceKind, Observed, Origin,
-	Route,
+	AddressSource, BackendKind, Document, HookPhase, Interface, InterfaceKind, Observed,
+	ObservedWgPeer, Origin, Route,
 };
 use serde::{Deserialize, Serialize};
 
@@ -458,6 +458,11 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	}
 	for interface in &desired.interfaces {
 		builder.plan_link_attributes(interface, observed);
+		// In the attributes pass rather than the contents one: a WireGuard
+		// device's port and peers are properties of the link, and the pass that
+		// runs later is the one a tunnel's dial lives in -- which is where
+		// planning the same work twice cost a session once already.
+		builder.plan_wireguard(interface, observed);
 	}
 	for interface in &desired.interfaces {
 		builder.plan_interface_contents(interface, observed);
@@ -984,6 +989,115 @@ impl Builder {
 			}),
 		);
 		self.gates.push((interface.name.clone(), id));
+	}
+
+	/// Reconfigure a `WireGuard` device the document has moved under.
+	///
+	/// A device is configured when its link is created, and until decision 0054
+	/// that was the only time: an edited listen port did nothing, and a peer
+	/// deleted from the config kept the access the operator believed they had
+	/// just revoked. `ncfg apply` said "nothing to do" and meant it.
+	///
+	/// Only for a device that already exists. One being created is configured
+	/// whole by `link.create`, and planning a second configuration for it would
+	/// be an action that describes work already done.
+	///
+	/// **The endpoint is deliberately not compared.** A peer roams: the kernel
+	/// updates the endpoint from the packets it receives, which is what the
+	/// protocol is for, and the document's endpoint is where to look first
+	/// rather than where a peer must stay. It is also a name at least as often
+	/// as an address, resolved at apply time -- so comparing it would reconcile
+	/// a device forever on a value the document never claimed to fix.
+	///
+	/// **A rotated private key is not compared either**, and that is a limit
+	/// rather than a decision: the kernel reports the public key derived from
+	/// it, and deciding whether it matches the secret store would mean deriving
+	/// a public key here, which is curve25519 and is not arithmetic this
+	/// project carries.
+	fn plan_wireguard(&mut self, interface: &Interface, observed: &Observed) {
+		let InterfaceKind::WireGuard(config) = &interface.kind else {
+			return;
+		};
+		let name = &interface.name;
+		let Some(running) = observed.link(name).and_then(|link| link.wireguard.as_ref()) else {
+			return;
+		};
+		let gate = self.gate(name);
+
+		// A port or a mark the document does not state is the kernel's to
+		// choose, and a `None` against whatever it chose is agreement. The
+		// same trap 0052's `band` fell into, which restarted an access point on
+		// every reconcile until the document's silence was read as silence.
+		let device_differs = |desired: Option<String>, seen: Option<String>| -> bool {
+			desired.is_some() && desired != seen
+		};
+		let rendered = |value: Option<String>| value.unwrap_or_else(|| "<absent>".to_owned());
+		let desired_port = config.listen_port.map(|port| port.to_string());
+		let seen_port = running.listen_port.map(|port| port.to_string());
+		let desired_mark = config.fwmark.map(|mark| mark.to_string());
+		let seen_mark = running.fwmark.map(|mark| mark.to_string());
+		let field = if device_differs(desired_port.clone(), seen_port.clone()) {
+			Some((
+				"wireguard.listen_port",
+				rendered(desired_port),
+				rendered(seen_port),
+			))
+		} else if device_differs(desired_mark.clone(), seen_mark.clone()) {
+			Some((
+				"wireguard.fwmark",
+				rendered(desired_mark),
+				rendered(seen_mark),
+			))
+		} else {
+			None
+		};
+
+		if let Some((field, desired, seen)) = field {
+			self.push(
+				Op::WgSetDevice {
+					iface: name.clone(),
+					// A reference, never a value: section 2's rule holds in a
+					// plan as much as in the document, and this one goes to
+					// `/run/netcfgd/plan.last.json`.
+					private_key_ref: config.private_key.name.clone(),
+					listen_port: config.listen_port,
+					fwmark: config.fwmark,
+				},
+				Reason::differs(name, field, desired, seen),
+				gate.clone(),
+				// Reversible, and worth saying so: commit-confirm can put the
+				// port and the mark back, because what they were is exactly
+				// what the observation was just read from. The peer list below
+				// gets no such offer -- an observed peer has no name and no
+				// `SecretRef` for a preshared key, so there is nothing to build
+				// a `WgSetPeers` out of, and claiming otherwise would revert a
+				// revocation into something that is not what was there.
+				Some(Op::WgSetDevice {
+					iface: name.clone(),
+					private_key_ref: config.private_key.name.clone(),
+					listen_port: running.listen_port,
+					fwmark: running.fwmark,
+				}),
+			);
+		}
+
+		let desired_peers = wanted_peers(config);
+		if desired_peers != running.peers {
+			self.push(
+				Op::WgSetPeers {
+					iface: name.clone(),
+					peers: config.peers.clone(),
+				},
+				Reason::differs(
+					name,
+					"wireguard.peers",
+					render_peers(&desired_peers),
+					render_peers(&running.peers),
+				),
+				gate,
+				None,
+			);
+		}
 	}
 
 	/// MTU, MAC and enslavement, all of which must precede rule 2's consumers.
@@ -3120,6 +3234,61 @@ fn advertised_prefixes(policy: &netcfgd_model::RaPolicy, observed: &Observed) ->
 }
 
 /// A number, or the word for not having one, for a plan's reason line.
+/// The document's peers in the shape the kernel reports them.
+///
+/// Built so the two sides can be compared as values rather than field by field,
+/// and sorted by public key for the reason `ObservedWireGuard::peers` is: the
+/// document sorts by the operator's label, which the kernel has never heard of.
+///
+/// A prefix that does not parse is dropped, which is what the executor does
+/// with it -- `configure_wireguard` filters the same way. That is not a good
+/// answer, but it is *the same* answer: a desired list that kept a prefix the
+/// apply throws away would differ from the kernel forever, and the plan would
+/// say so on every reconcile without ever being able to fix it.
+fn wanted_peers(config: &netcfgd_model::interface::WireGuardConfig) -> Vec<ObservedWgPeer> {
+	let mut peers: Vec<ObservedWgPeer> = config
+		.peers
+		.iter()
+		.map(|peer| ObservedWgPeer {
+			public_key: peer.public_key,
+			preshared_key: peer.preshared_key.is_some(),
+			// Not compared: see `plan_wireguard`. Carried as `None` on both
+			// sides of the comparison rather than omitted from the type, so
+			// that the observation keeps reporting what the kernel says.
+			endpoint: None,
+			allowed_ips: {
+				let mut prefixes: Vec<String> = peer
+					.allowed_ips
+					.iter()
+					.filter_map(|prefix| net::parse_cidr(prefix))
+					.map(|(address, length)| format!("{address}/{length}"))
+					.collect();
+				prefixes.sort();
+				prefixes
+			},
+			keepalive: peer.keepalive,
+		})
+		.collect();
+	peers.sort();
+	peers
+}
+
+/// A peer list as a plan's reason renders it.
+///
+/// Public keys and nothing else. They are what identifies a peer, they are not
+/// secret -- a public key is the thing handed to the other end -- and an
+/// operator reading "the peer list changed" wants to see *which*.
+fn render_peers(peers: &[ObservedWgPeer]) -> String {
+	if peers.is_empty() {
+		return "<none>".to_owned();
+	}
+	peers
+		.iter()
+		.map(|peer| peer.public_key.render())
+		.collect::<Vec<_>>()
+		.join(" ")
+}
+
 fn render_option(value: Option<u16>) -> String {
 	value.map_or_else(|| "<absent>".to_owned(), |value| value.to_string())
 }
