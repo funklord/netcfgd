@@ -1324,7 +1324,8 @@ fn write_ppp_options(
 	let dir = run_dir_path().join("ppp");
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
 	let path = dir.join(iface);
-	let text = ppp_options(iface, config, password);
+	let (up, down) = write_ppp_scripts(iface)?;
+	let text = ppp_options(iface, config, password, &up, &down);
 
 	let mut file = std::fs::File::create(&path)
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
@@ -1337,6 +1338,98 @@ fn write_ppp_options(
 	Ok(path)
 }
 
+/// Write the two scripts pppd runs when a session comes up and goes down.
+///
+/// Two, not one, and that is the whole of what reading `ipcp.c` was worth here.
+/// pppd hands both calls the same argv and **does not unset `IPLOCAL`, `DNS1`
+/// or `DNS2` on the way down** -- it unsets `OLDIPLOCAL` and `CONNECT_TIME` and
+/// leaves the rest standing. A single script testing the environment for "is
+/// this a teardown" would therefore rewrite the same nameservers as the session
+/// went away, and netcfgd would hold an ISP's resolvers for a line that is
+/// down. There is no `script_type` here as there is for `OpenVPN`; the only
+/// thing that differs between the two calls is which option named the script,
+/// so which script it is has to be the answer.
+///
+/// # Errors
+///
+/// Returns a message naming the file that could not be written.
+fn write_ppp_scripts(iface: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+	use std::io::Write;
+	use std::os::unix::fs::PermissionsExt;
+
+	let run_dir = run_dir_path();
+	let dir = run_dir.join("ppp");
+	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+	let report = report_path(&run_dir, iface);
+
+	let mut written = Vec::new();
+	for going_up in [true, false] {
+		let suffix = if going_up { "up" } else { "down" };
+		let path = dir.join(format!("{iface}.{suffix}"));
+		let mut file = std::fs::File::create(&path)
+			.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+		file.write_all(ppp_script(iface, &report, going_up).as_bytes())
+			.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+		std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+			.map_err(|error| format!("cannot make {} executable: {error}", path.display()))?;
+		written.push(path);
+	}
+	let down = written.pop().expect("two scripts");
+	let up = written.pop().expect("two scripts");
+	Ok((up, down))
+}
+
+/// One of those scripts: what pppd learned, in the reporting contract's format.
+///
+/// Pure, so what a session reports can be read without dialling one.
+///
+/// Generated into `/run` rather than installed, for the reason the `OpenVPN`
+/// one is: nothing packages it, and it carries the interface name and the
+/// report path. `docs/interface-report.md` is the format.
+///
+/// **Only nameservers.** A PPP link's address is IPCP's result and stays with
+/// `pppd` (decision 0047: `noip` disables IP entirely, so there is no
+/// "negotiate and let somebody else apply it"), and its only route is the
+/// default one, which `nodefaultroute` stops and the document spells
+/// `routes = "default"`. What is left is `DNS1` and `DNS2`, which nothing but
+/// `pppd` ever learns -- and which decision 0049 delivers only where the
+/// document gave this interface a `dns` block.
+#[must_use]
+pub fn ppp_script(iface: &str, report: &std::path::Path, going_up: bool) -> String {
+	let report = report.display();
+	let when = if going_up { "ip-up" } else { "ip-down" };
+	// Emptied on the way down rather than removed, which the contract makes
+	// mean "nothing, deliberately" -- pppd running this is somebody watching.
+	let body = if going_up {
+		"\t[ -n \"${DNS1:-}\" ] && printf 'dns=%s\\n' \"$DNS1\"\n\
+		 \t[ -n \"${DNS2:-}\" ] && printf 'dns=%s\\n' \"$DNS2\"\n"
+	} else {
+		"\t# Nothing. The session is gone, and pppd leaves DNS1 and DNS2 set\n\
+		 \t# in the environment of this very call -- which is why this is a\n\
+		 \t# separate script rather than a branch.\n"
+	};
+	format!(
+		"#!/bin/sh\n\
+		 # Written by netcfgd for {iface}. Do not edit; it is rewritten on apply,\n\
+		 # and pppd is the only thing that runs it.\n\
+		 #\n\
+		 # pppd's {when}-script. docs/interface-report.md is the format; only the\n\
+		 # nameservers are reported, because the address is IPCP's and the routes\n\
+		 # are the document's.\n\
+		 set -u\n\
+		 \n\
+		 target='{report}'\n\
+		 tmp=\"$target.tmp\"\n\
+		 mkdir -p \"$(dirname \"$target\")\" || exit 1\n\
+		 \n\
+		 {{\n\
+		 \tprintf '# %s, written by netcfgd from pppd {when}\\n' '{iface}'\n\
+		 {body}\
+		 }} > \"$tmp\" || exit 1\n\
+		 mv \"$tmp\" \"$target\"\n"
+	)
+}
+
 /// The options file's text.
 ///
 /// Pure, so what pppd is told can be checked without a filesystem -- and the
@@ -1347,6 +1440,8 @@ pub fn ppp_options(
 	iface: &str,
 	config: &netcfgd_model::interface::PppoeConfig,
 	password: &str,
+	up: &std::path::Path,
+	down: &std::path::Path,
 ) -> String {
 	// The unit number comes from the interface name, so `interface ppp0` is
 	// ppp0 and not whichever unit happened to be free. Without it the document
@@ -1365,12 +1460,24 @@ pub fn ppp_options(
 		 noauth\n\
 		 persist\n\
 		 maxfail 0\n\
-		 # netcfgd owns routes and resolvers. `defaultroute` here would install\n\
-		 # a route nobody wrote down, and `usepeerdns` would rewrite resolv.conf\n\
-		 # underneath the dns backend. A ppp link needs no gateway, so the\n\
-		 # config says `routes = \"default\"` and netcfgd installs it.\n\
+		 # netcfgd owns routes. `defaultroute` here would install one nobody\n\
+		 # wrote down; a ppp link needs no gateway, so the config says\n\
+		 # `routes = \"default\"` and netcfgd installs it.\n\
 		 nodefaultroute\n\
-		 noipdefault\n",
+		 noipdefault\n\
+		 # And the ISP's resolvers, which are the one thing only pppd learns.\n\
+		 # `usepeerdns` sets DNS1 and DNS2 for the scripts below; it also writes\n\
+		 # /etc/ppp/resolv.conf, which is pppd's own file and not the system\n\
+		 # one -- checked in ipcp.c rather than assumed, because this option was\n\
+		 # left out for years on the belief that it rewrote /etc/resolv.conf.\n\
+		 usepeerdns\n\
+		 # Two scripts rather than one told apart by its environment: pppd\n\
+		 # leaves DNS1 and DNS2 set for the ip-down call as well, so a single\n\
+		 # script would report the same servers as the session went away.\n\
+		 ip-up-script {up}\n\
+		 ip-down-script {down}\n",
+		up = up.display(),
+		down = down.display(),
 		parent = config.parent,
 		user = quote_ppp(&config.username),
 		password = quote_ppp(password),

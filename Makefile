@@ -509,6 +509,10 @@ live:
 	@# not under NCFG_LIVE, for the reason ap.sh is not: openvpn is a package a
 	@# machine with no VPN has no reason to have.
 	@unshare -rn sh -c "sh tests/live/tunnel.sh"
+	@# What netcfgd hands pppd, against a real pppd. Same reasoning: ppp is a
+	@# package a machine with no DSL line has no reason to have, and a session
+	@# cannot be dialled without real root either way.
+	@unshare -rn sh -c "sh tests/live/ppp.sh"
 	@# Deliberately not under NCFG_LIVE: it needs the `wireguard` module, which
 	@# a kernel may simply not have -- and nothing else in netcfgd does.
 	@unshare -rn sh -c "sh tests/live/strand.sh"

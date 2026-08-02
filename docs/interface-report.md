@@ -209,10 +209,20 @@ of them is privileged by netcfgd:
 
 netcfgd does not start, supervise or speak to any of them. It reads a file.
 
-A tunnel is the other half, and there netcfgd *does* start the daemon -- but the
-report reaches it by the same road, written by a script `openvpn` or `pppd`
-calls. netcfgd knowing how a process was started tells it nothing about what the
-far end handed over.
+A tunnel and a DSL line are the other half, and there netcfgd *does* start the
+daemon -- but the report reaches it by the same road, written by a script
+`openvpn` or `pppd` calls. netcfgd knowing how a process was started tells it
+nothing about what the far end handed over.
+
+What each of those two reports is worth knowing:
+
+- **`openvpn`** reports the routes the server pushed, and the resolvers it
+  named. Its address is its own (decision 0047) and so is anything it says
+  about *which* names should use those resolvers (0049).
+- **`pppd`** reports the resolvers and nothing else. A PPP link's address is
+  IPCP's result and cannot be separated from it, and the only route such a link
+  has is the default one -- which `nodefaultroute` stops and the document
+  spells `routes = "default"`.
 
 ## Where the APN lives
 
