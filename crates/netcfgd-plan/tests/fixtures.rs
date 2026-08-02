@@ -357,6 +357,7 @@ fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 				// idempotence gate would then pass because the feature was
 				// invisible rather than because it converged.
 				access_control: started_access_control(*kind, iface, desired),
+				advertised: Vec::new(),
 			}),
 			Op::BackendStop { kind, iface } => observed
 				.backends
@@ -757,6 +758,7 @@ fn a_lease_address_is_left_to_its_backend() {
 		interface: "eth0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 	// The lease produced this, and it is tagged as ours.
 	observed.addresses.push(ObservedAddress {
@@ -785,6 +787,7 @@ fn removing_dhcp_stops_the_backend() {
 		interface: "eth0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 
 	let plan = settle(&desired, &mut observed);
@@ -1146,6 +1149,7 @@ fn removing_dot1x_stops_the_supplicant() {
 		interface: "eth0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 
 	let document = document(r#"interface eth0 { config = "null" }"#);
@@ -1329,6 +1333,7 @@ fn a_running_tunnel_is_left_alone() {
 		interface: "vpn0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut observed);
 	assert!(
@@ -1351,6 +1356,7 @@ fn a_tunnel_stops_when_its_block_goes() {
 		interface: "vpn0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 	let stop = plan
@@ -1743,6 +1749,94 @@ interface vpn0 {
 
 	let plan = settle(&desired, &mut observed);
 	assert_eq!(delivered(&plan, "vpn0"), ["10.0.0.53"]);
+}
+
+/// A renumbered delegation reloads what is being advertised.
+///
+/// The prefix is the one value in the document that arrives after the document
+/// does, so an ISP that hands out a different block leaves a running daemon
+/// announcing one the upstream has taken back -- every host on the LAN then
+/// holds an address that does not route, and nothing in the config changed to
+/// say so. radvd re-reads on `SIGHUP`, so this is a reload rather than a
+/// restart and costs nothing on the wire.
+#[test]
+fn a_renumbered_delegation_reloads_the_advertisement() {
+	let desired = document(
+		r#"
+interface lan0 {
+	kind   = "dummy"
+	config = "@pd:wan0=::1/64"
+	advertise { prefixes = ["@pd:wan0"] }
+}
+"#,
+	);
+	let mut observed = observed_with(&["lan0"]);
+	observed.links[0].up = true;
+	observed.delegations.push(netcfgd_model::Delegation {
+		interface: "wan0".to_owned(),
+		prefixes: vec!["2001:db8:5678::/56".to_owned()],
+	});
+	// Running, and started with the block the ISP has since taken back.
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::RouterAdvert,
+		interface: "lan0".to_owned(),
+		running: true,
+		access_control: None,
+		advertised: vec!["2001:db8:1234::/64".to_owned()],
+	});
+	// And the address it derived from the new one, so the only thing left to
+	// do is the advertisement.
+	observed.addresses.push(netcfgd_model::ObservedAddress {
+		interface: "lan0".to_owned(),
+		address: "2001:db8:5678::1/64".to_owned(),
+		proto: Some(110),
+		ownership: netcfgd_model::Ownership::Ours,
+		origin: Some(netcfgd_model::Origin::Delegated),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(names(&plan), ["backend.reload"], "got {:?}", names(&plan));
+	let reason = &plan.actions[0].reason;
+	assert_eq!(reason.desired, "2001:db8:5678::/64");
+	assert_eq!(reason.observed, "2001:db8:1234::/64");
+}
+
+/// And an advertisement that already matches is left alone, which is what
+/// stops the reload happening on every reconcile.
+#[test]
+fn an_advertisement_that_matches_is_not_reloaded() {
+	let desired = document(
+		r#"
+interface lan0 {
+	kind   = "dummy"
+	config = "@pd:wan0=::1/64"
+	advertise { prefixes = ["@pd:wan0"] }
+}
+"#,
+	);
+	let mut observed = observed_with(&["lan0"]);
+	observed.links[0].up = true;
+	observed.delegations.push(netcfgd_model::Delegation {
+		interface: "wan0".to_owned(),
+		prefixes: vec!["2001:db8:1234::/56".to_owned()],
+	});
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::RouterAdvert,
+		interface: "lan0".to_owned(),
+		running: true,
+		access_control: None,
+		advertised: vec!["2001:db8:1234::/64".to_owned()],
+	});
+	observed.addresses.push(netcfgd_model::ObservedAddress {
+		interface: "lan0".to_owned(),
+		address: "2001:db8:1234::1/64".to_owned(),
+		proto: Some(110),
+		ownership: netcfgd_model::Ownership::Ours,
+		origin: Some(netcfgd_model::Origin::Delegated),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan.actions.is_empty(), "got {:?}", names(&plan));
 }
 
 /// A bearer gives you a way off the link, and without it an address is a
@@ -2182,6 +2276,7 @@ interface wg0 {
 		interface: "wlan0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -2243,6 +2338,7 @@ fn running_access_point(
 			denied: owned(denied),
 			accepted: owned(accepted),
 		}),
+		advertised: Vec::new(),
 	});
 }
 
@@ -2449,6 +2545,7 @@ fn an_unreachable_access_point_is_not_converged_against() {
 		interface: "wlan0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut unreachable);
 	assert!(names(&plan).is_empty(), "got {:?}", names(&plan));
@@ -2480,6 +2577,7 @@ fn an_access_point_stops_when_its_block_goes() {
 		interface: "wlan0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 
@@ -2570,6 +2668,7 @@ interface wlan0 { config = "null" }
 		interface: "wlan0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 
@@ -3099,6 +3198,7 @@ interface ppp0 {
 		interface: "ppp0".to_owned(),
 		running: true,
 		access_control: None,
+		advertised: Vec::new(),
 	});
 
 	let plan = plan(&document, &observed, &PlanOptions::default());

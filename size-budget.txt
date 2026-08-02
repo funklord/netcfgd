@@ -270,4 +270,9 @@ netcfgd
 # The renderer is a small part of it. What costs is that `advertise` is the
 # fourth thing in the document with a backend behind it, and each of those
 # brings its own start, stop, ownership check and error vocabulary.
-total 2026008
+# +8 KB for noticing that a delegation was renumbered: the observed field that
+# says what a running radvd was last given, the planner comparison against what
+# the delegation now implies, and the reload that rewrites and signals. Small
+# because the expensive half -- a backend with a lifecycle -- was already paid
+# for by the advertisement itself.
+total 2034200

@@ -252,6 +252,45 @@ radvd --config "$work/run/radvd/lan0.conf" --configtest > "$work/configtest.txt"
 	&& parsed=yes || parsed=no
 check "and radvd's own parser accepts what netcfgd wrote" "$parsed" "yes"
 
+# ------------------------------------------------------------- renumbering
+
+# What a real line does at three in the morning: the ISP hands out a different
+# block. Everything derived from the old one has to move -- the LAN's address
+# and what is being advertised on it -- and nothing but a real renewal exercises
+# that, because the prefix is the one value in this whole path that no config
+# file contains.
+#
+# kea is restarted with a different pool and an empty lease database, and
+# odhcp6c is told to rebind: SIGUSR2 is its "ask anybody", which is what a
+# client does when the server it knew is gone.
+pkill -f 'kea-dhcp6 -c' 2>/dev/null || true
+sed -i 's/2001:db8:1234::/2001:db8:5678::/' "$work/kea.json"
+kea-dhcp6 -c "$work/kea.json" > "$work/kea2.log" 2>&1 &
+sleep 2
+pkill -USR2 -f odhcp6c 2>/dev/null || true
+
+waited=0
+while ! grep -q '^2001:db8:5678:' "$prefixes" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 300 ] && break
+	sleep 0.1
+done
+check "the ISP renumbered and the client reported the new prefix" \
+	"$(grep -c '^2001:db8:5678::/56$' "$prefixes" 2>/dev/null || true)" "1"
+
+"$ncfg" apply > "$work/renumber.txt" 2>&1 || true
+check "netcfgd moved the LAN onto the new prefix" \
+	"$(ip -6 addr show lan0 | grep -c '2001:db8:5678::1/64' || true)" "1"
+check "and took the old address away rather than keeping both" \
+	"$(ip -6 addr show lan0 | grep -c '2001:db8:1234::1/64' || true)" "0"
+# The advertisement has to move with it. A router still announcing a prefix the
+# ISP has taken back is telling every host on the LAN to use an address the
+# upstream will not route.
+check "and the advertisement followed the address" \
+	"$(grep -c 'prefix 2001:db8:5678::/64' "$work/run/radvd/lan0.conf" || true)" "1"
+check "rather than still announcing the prefix that was taken back" \
+	"$(grep -c 'prefix 2001:db8:1234::/64' "$work/run/radvd/lan0.conf" || true)" "0"
+
 # The lease going away takes the address with it. odhcp6c is stopped rather
 # than the lease being expired, which is the same thing from netcfgd's side: the
 # hook empties the file and the reference has nothing behind it again.

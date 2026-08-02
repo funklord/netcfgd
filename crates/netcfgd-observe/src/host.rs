@@ -34,6 +34,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path) {
 	read_netfilter(observed);
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
+	read_advertised(observed, run_dir);
 	read_wireguard_keys(observed);
 }
 
@@ -98,6 +99,41 @@ fn read_access_control(observed: &mut Observed, run_dir: &Path) {
 			denied: live.denied,
 			accepted: live.accepted,
 		});
+	}
+}
+
+/// What a running router advertisement daemon was last given.
+///
+/// Read from the configuration netcfgd generated, which is netcfgd's own record
+/// of what it started the daemon with -- the same shape as the ACL policy above
+/// and for the same reason: radvd has no way to be asked, and the file netcfgd
+/// wrote is the only account of what is being announced.
+///
+/// The one value in it that matters is the prefix, because that is the one that
+/// arrives after the document does. An ISP renumbers, the LAN's address moves,
+/// and a daemon still announcing the old block tells every host on the wire to
+/// use an address the upstream will not route. The planner compares this
+/// against what the document and the current delegation imply, and reloads when
+/// they differ.
+fn read_advertised(observed: &mut Observed, run_dir: &Path) {
+	for backend in &mut observed.backends {
+		if backend.kind != netcfgd_model::BackendKind::RouterAdvert || !backend.running {
+			continue;
+		}
+		let path = netcfgd_ra::config_path(run_dir, &backend.interface);
+		let Ok(text) = fs::read_to_string(&path) else {
+			// The file is gone from under a daemon netcfgd's record says is
+			// running. Saying nothing is the honest answer, and it is also the
+			// safe one: an empty list would read as "advertising nothing" and
+			// make the planner reload on every reconcile.
+			continue;
+		};
+		backend.advertised = text
+			.lines()
+			.map(str::trim)
+			.filter_map(|line| line.strip_prefix("prefix "))
+			.map(|prefix| prefix.trim().to_owned())
+			.collect();
 	}
 }
 

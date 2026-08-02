@@ -1199,6 +1199,44 @@ impl Builder {
 			observed,
 			&deps,
 		);
+
+		// A running daemon is not necessarily a correct one. The prefix is the
+		// one value here that arrives after the document does, so an ISP that
+		// renumbers leaves a daemon announcing a block the upstream has taken
+		// back -- every host on the LAN then holds an address that does not
+		// route, and nothing in the document changed to say so.
+		//
+		// radvd re-reads its configuration on `SIGHUP`, so this is a reload and
+		// not a restart: unlike an access point (0026), nothing on the wire is
+		// disturbed by it.
+		let desired = advertised_prefixes(policy, observed);
+		let Some(running) = observed
+			.backends
+			.iter()
+			.find(|backend| {
+				backend.kind == BackendKind::RouterAdvert
+					&& backend.interface == interface.name
+					&& backend.running
+			})
+			.filter(|backend| !backend.advertised.is_empty())
+		else {
+			return;
+		};
+		if running.advertised != desired {
+			self.push_root(
+				Op::BackendReload {
+					kind: BackendKind::RouterAdvert,
+					iface: interface.name.clone(),
+				},
+				Reason {
+					interface: Some(interface.name.clone()),
+					field: "advertise.prefixes".to_owned(),
+					desired: desired.join(" "),
+					observed: running.advertised.join(" "),
+				},
+				None,
+			);
+		}
 	}
 
 	fn plan_source(
@@ -2868,6 +2906,24 @@ fn reported_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
 			})
 		})
 		.chain(named)
+		.collect()
+}
+
+/// The prefixes an `advertise` block resolves to, right now.
+///
+/// The same arithmetic the LAN's own address used, with `::/64` as the suffix
+/// because what is advertised is the block rather than an address in it. A
+/// reference that resolves to nothing contributes nothing, which is how a
+/// delegation that has not arrived leaves the list empty rather than wrong.
+fn advertised_prefixes(policy: &netcfgd_model::RaPolicy, observed: &Observed) -> Vec<String> {
+	policy
+		.prefixes
+		.iter()
+		.filter_map(|reference| {
+			let delegation = observed.delegation(&reference.source)?;
+			let prefix = delegation.prefixes.get(reference.index as usize)?;
+			netcfgd_model::derive_from_delegation(prefix, reference, "::/64").ok()
+		})
 		.collect()
 }
 

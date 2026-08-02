@@ -49,6 +49,36 @@ pub fn terminate(pid: i32) -> io::Result<()> {
 	Err(error)
 }
 
+/// Ask a process to re-read its configuration.
+///
+/// `SIGHUP` is the convention and radvd honours it -- `radvd.c` handles it by
+/// calling `reload_config`, which re-reads the file it was started with. That
+/// is what makes a changed prefix free: the daemon keeps running and nothing on
+/// the wire is disturbed.
+///
+/// # Errors
+///
+/// Returns the errno. Unlike [`terminate`], `ESRCH` is *not* success: a reload
+/// asked of a process that is gone did not happen, and the caller has a
+/// document that no longer matches anything.
+pub fn hangup(pid: i32) -> io::Result<()> {
+	if pid <= 0 {
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidInput,
+			"a pid must be positive: 0 and -1 mean process groups",
+		));
+	}
+	// SAFETY: `kill` takes a pid and a signal number and touches no memory this
+	// crate owns. The pid is positive, checked above, so this cannot address a
+	// process group.
+	let result = unsafe { libc::kill(pid, libc::SIGHUP) };
+	if result == 0 {
+		Ok(())
+	} else {
+		Err(io::Error::last_os_error())
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

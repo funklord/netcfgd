@@ -342,29 +342,45 @@ impl KernelExecutor {
 			return Err(format!("no advertise block for {iface}"));
 		};
 
-		let delegations = netcfgd_host_prefixes(&self.run_dir);
-		let mut prefixes = Vec::new();
-		for reference in &policy.prefixes {
-			let Some(available) = delegations
-				.iter()
-				.find(|(source, _)| source == &reference.source)
-			else {
-				continue;
-			};
-			let Some(prefix) = available.1.get(reference.index as usize) else {
-				continue;
-			};
-			// The sub-prefix an interface advertises is the one it addressed
-			// itself out of, so this is the same arithmetic the address used --
-			// `::/64` as the suffix, because what is advertised is the block
-			// rather than an address in it.
-			match netcfgd_model::derive_from_delegation(prefix, reference, "::/64") {
-				Ok(derived) => prefixes.push(derived),
-				Err(message) => return Err(format!("{iface}: {message}")),
-			}
-		}
-
+		let prefixes = self.resolve_advertised(policy);
 		netcfgd_ra::start(&self.run_dir, iface, policy, &prefixes, servers)
+	}
+
+	/// The prefixes an `advertise` block names, as they are *now*.
+	///
+	/// The sub-prefix an interface advertises is the one it addressed itself out
+	/// of, so this is the same arithmetic the address used -- `::/64` as the
+	/// suffix, because what is advertised is the block rather than an address in
+	/// it. A reference that resolves to nothing contributes nothing; the
+	/// planner has already warned, and `netcfgd_ra` refuses to advertise a
+	/// router with no prefix at all.
+	fn resolve_advertised(&self, policy: &netcfgd_model::interface::RaPolicy) -> Vec<String> {
+		let delegations = netcfgd_host_prefixes(&self.run_dir);
+		policy
+			.prefixes
+			.iter()
+			.filter_map(|reference| {
+				let (_, available) = delegations
+					.iter()
+					.find(|(source, _)| source == &reference.source)?;
+				let prefix = available.get(reference.index as usize)?;
+				netcfgd_model::derive_from_delegation(prefix, reference, "::/64").ok()
+			})
+			.collect()
+	}
+
+	/// Rewrite what an interface advertises and tell radvd to re-read it.
+	///
+	/// The prefixes are resolved here for the same reason `start_advertising`
+	/// resolves them here: the delegation arrives after the document, and a
+	/// reload exists precisely because it can arrive *again* as something else.
+	fn reload_advertising(&self, iface: &str) -> Result<(), String> {
+		let Some((_, policy, servers)) = self.advertising.iter().find(|(name, _, _)| name == iface)
+		else {
+			return Err(format!("no advertise block for {iface}"));
+		};
+		let prefixes = self.resolve_advertised(policy);
+		netcfgd_ra::reload(&self.run_dir, iface, policy, &prefixes, servers)
 	}
 
 	/// Hang up the `PPPoE` session netcfgd dialled.
@@ -915,6 +931,27 @@ impl Executor for KernelExecutor {
 				list,
 				station,
 			} => netcfgd_hostapd::acl::remove(&self.run_dir, iface, *list, station),
+			Op::BackendReload { kind, iface } => {
+				// radvd re-reads its configuration on SIGHUP, so a changed
+				// prefix costs nothing on the wire -- unlike an access point,
+				// where the same question means a restart and a deauthenticated
+				// LAN (decision 0026). Rewriting first and signalling second is
+				// the order that matters: the daemon reads the file when it is
+				// told to, not when it is signalled.
+				if *kind == netcfgd_model::BackendKind::RouterAdvert {
+					self.reload_advertising(iface)?;
+					return Ok(());
+				}
+				// Every other backend falls to the catch-all below, which says
+				// so by name. Nothing else here has a reload: hostapd's would
+				// be a restart (0026), a DHCP client's is the client's own
+				// business, and inventing one that stopped and started would
+				// hide that difference behind a word.
+				Err(format!(
+					"reloading the {kind:?} backend on {iface} is not implemented in \
+					 this build"
+				))
+			}
 			Op::BackendStop { kind, iface } => {
 				if *kind == netcfgd_model::BackendKind::RouterAdvert {
 					netcfgd_ra::stop(&self.run_dir, iface)?;

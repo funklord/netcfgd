@@ -397,6 +397,20 @@ pub struct ObservedBackend {
 	/// written by an older netcfgd still parses.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub access_control: Option<ObservedAccessControl>,
+	/// The prefixes a running router advertisement daemon was last given.
+	///
+	/// Only ever present for [`BackendKind::RouterAdvert`], and read from the
+	/// configuration netcfgd generated -- which is netcfgd's own record of what
+	/// it started the daemon with, exactly as [`ObservedPolicy`] is for an
+	/// access point's ACL policy.
+	///
+	/// It exists because a prefix is the one value in the document that arrives
+	/// after the document does: an ISP renumbers, the LAN's address moves, and a
+	/// daemon still announcing the old block is telling every host on the wire
+	/// to use an address the upstream will not route. Without this the planner
+	/// sees a backend that is running and has nothing to compare.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub advertised: Vec<String>,
 }
 
 /// hostapd's in-memory station lists, and the policy it is running under.
