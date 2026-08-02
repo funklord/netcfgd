@@ -27,6 +27,7 @@ pub mod inotify;
 pub mod nft;
 pub mod ops;
 pub mod peer;
+pub mod process;
 pub mod qdisc;
 pub mod rule;
 pub mod signals;
