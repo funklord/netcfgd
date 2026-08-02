@@ -1928,7 +1928,14 @@ fn parse_prefix(text: &str) -> Option<(std::net::IpAddr, u8)> {
 ///
 /// Derived from the config directory rather than passed in, because the
 /// executor is handed a run directory and a document, and a secret is neither.
-fn secrets_dir() -> std::path::PathBuf {
+/// Where the secrets live.
+///
+/// Public because the observer needs the same answer: it resolves an access
+/// point's passphrase to say whether the running daemon still holds it
+/// (decision 0052), and two crates deciding separately where this directory is
+/// would work until one of them moved.
+#[must_use]
+pub fn secrets_dir() -> std::path::PathBuf {
 	std::env::var_os("NCFG_CONFIG_DIR").map_or_else(
 		|| std::path::PathBuf::from(netcfgd_secret::DEFAULT_SECRETS_DIR),
 		|dir| std::path::PathBuf::from(dir).join("secrets"),
