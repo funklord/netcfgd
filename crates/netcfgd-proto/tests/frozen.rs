@@ -9,9 +9,22 @@
 //! event serialised into `docs/schema/socket.json`, and any change to the wire
 //! form moves those bytes.
 //!
-//! Only the envelope is pinned here. A `Status` response carries an `Observed`
-//! and a `Plan`, and repeating them would mean two witnesses to update for one
-//! change, with the second eventually being the one nobody did.
+//! Only the envelope is pinned here, for the payloads that are pinned
+//! elsewhere. A `Status` response carries an `Observed` and a `Plan`, and
+//! repeating them would mean two witnesses to update for one change, with the
+//! second eventually being the one nobody did -- so those variants appear with
+//! an empty payload, which pins the tag and the framing and leaves the contents
+//! to `docs/schema/observed.json`, `plan.json` and `document.json`. A payload
+//! *nothing else* pins carries a real sample: a journal record and a station
+//! report are only ever described here.
+//!
+//! An empty payload is not a payload-free one -- an `Observed::default()` still
+//! spells every field name, so adding a field to `Observed` moves this witness
+//! as well as its own. That is the price of pinning the tag at all, there being
+//! no way to serialise a `Status` response without an `Observed` inside it, and
+//! `make schema-bless` moves all four together. Leaving the variant out instead
+//! would leave the tag and the framing pinned by nothing, which is the failure
+//! this file has now had twice.
 //!
 //! That sentence used to end "those are pinned by their own crates", which was
 //! not true of either of them. `netcfgd-model` pinned a `Document` and nothing
@@ -20,9 +33,22 @@
 //! `ObservedReport::routes` arrived. Both are pinned now, at
 //! `docs/schema/observed.json` and `docs/schema/plan.json`, and the sentence is
 //! true because those files exist rather than because it says so.
+//!
+//! **And the same disease had a second host, in this file.** The header above
+//! said "every request, response and event", and the lists below were plain
+//! `vec![]`s that nobody had to add to: `Request::ApStations`,
+//! `Response::ApStations` and `Response::Journal` were never in them, so
+//! `StationReport`, `StationEntry` and the journal's `Record` -- three types the
+//! socket sends and no other witness mentions -- were pinned by nothing at all.
+//! The three lists now go through the exhaustive match the model's witness
+//! arrived at, which stops this file compiling when a variant appears. A sample
+//! is a sample; only the compiler can count variants.
 
+use netcfgd_apply::{Journal, Outcome, Record};
+use netcfgd_plan::Reason;
 use netcfgd_proto::{
-	Event, Explanation, Fact, Request, Response, ScanEntry, ScanReport, Subject, WifiState,
+	Event, Explanation, Fact, Request, Response, ScanEntry, ScanReport, StationEntry,
+	StationReport, Subject, WifiState,
 };
 use std::path::PathBuf;
 
@@ -32,7 +58,63 @@ fn witness_path() -> PathBuf {
 		.join("docs/schema/socket.json")
 }
 
+/// Every request, so none can be added or renamed unnoticed.
+///
+/// Two checks, and they catch different things. The match is a *compile* error
+/// when a variant appears, which is the half that catches an addition -- never a
+/// `_` arm, because the wildcard is what would take that half away. The
+/// assertion catches a sample that went away or a name that moved, and does not
+/// catch an arm written with no sample beside it: neither list would mention the
+/// new name and the two would agree. `crates/netcfgd-plan/tests/frozen.rs` is
+/// exact about the same division.
 fn every_request() -> Vec<Request> {
+	let all = every_request_sample();
+	let name = |request: &Request| match request {
+		Request::Hello => "hello",
+		Request::Status => "status",
+		Request::Plan => "plan",
+		Request::Apply { .. } => "apply",
+		Request::Confirm => "confirm",
+		Request::Revert => "revert",
+		Request::Reload => "reload",
+		Request::Show => "show",
+		Request::Explain { .. } => "explain",
+		Request::Monitor => "monitor",
+		Request::WifiScan { .. } => "wifi_scan",
+		Request::WifiStatus { .. } => "wifi_status",
+		Request::WifiConnect { .. } => "wifi_connect",
+		Request::WifiDisconnect { .. } => "wifi_disconnect",
+		Request::ApStations { .. } => "ap_stations",
+	};
+	let mut present: Vec<&str> = all.iter().map(name).collect();
+	present.sort_unstable();
+	present.dedup();
+	assert_eq!(
+		present,
+		[
+			"ap_stations",
+			"apply",
+			"confirm",
+			"explain",
+			"hello",
+			"monitor",
+			"plan",
+			"reload",
+			"revert",
+			"show",
+			"status",
+			"wifi_connect",
+			"wifi_disconnect",
+			"wifi_scan",
+			"wifi_status",
+		],
+		"the witness is missing a sample for a request, so the frozen surface \
+		 would not move when that request changed"
+	);
+	all
+}
+
+fn every_request_sample() -> Vec<Request> {
 	vec![
 		Request::Hello,
 		Request::Status,
@@ -77,10 +159,55 @@ fn every_request() -> Vec<Request> {
 		Request::WifiDisconnect {
 			interface: "wlan0".to_owned(),
 		},
+		Request::ApStations {
+			interface: "wlan0".to_owned(),
+		},
 	]
 }
 
+/// Every response, on the same terms.
 fn every_response() -> Vec<Response> {
+	let all = every_response_sample();
+	let name = |response: &Response| match response {
+		Response::Hello { .. } => "hello",
+		Response::Status(_) => "status",
+		Response::Plan(_) => "plan",
+		Response::Document(_) => "document",
+		Response::Journal(_) => "journal",
+		Response::Explanation(_) => "explanation",
+		Response::Event(_) => "event",
+		Response::WifiScan(_) => "wifi_scan",
+		Response::WifiStatus(_) => "wifi_status",
+		Response::ApStations(_) => "ap_stations",
+		Response::Ok => "ok",
+		Response::Error { .. } => "error",
+	};
+	let mut present: Vec<&str> = all.iter().map(name).collect();
+	present.sort_unstable();
+	present.dedup();
+	assert_eq!(
+		present,
+		[
+			"ap_stations",
+			"document",
+			"error",
+			"event",
+			"explanation",
+			"hello",
+			"journal",
+			"ok",
+			"plan",
+			"status",
+			"wifi_scan",
+			"wifi_status",
+		],
+		"the witness is missing a sample for a response, so the frozen surface \
+		 would not move when that response changed"
+	);
+	all
+}
+
+fn every_response_sample() -> Vec<Response> {
 	vec![
 		Response::Hello {
 			protocol: netcfgd_proto::PROTOCOL_VERSION,
@@ -114,6 +241,41 @@ fn every_response() -> Vec<Response> {
 			bssid: Some("00:11:22:33:44:55".to_owned()),
 			network: Some("home".to_owned()),
 		})),
+		// Empty payloads, deliberately: the tag and the framing are this
+		// witness's business and the contents belong to `observed.json`,
+		// `plan.json` and `document.json`. An empty one still moves these bytes
+		// if the envelope is renamed or the box goes away.
+		Response::Status(Box::<netcfgd_model::Observed>::default()),
+		Response::Plan(Box::<netcfgd_plan::Plan>::default()),
+		Response::Document(Box::<netcfgd_model::Document>::default()),
+		// And a full one here, because nothing else in the repository pins a
+		// journal record or a station: this is the only description of either.
+		Response::Journal(Box::new(Journal {
+			records: vec![Record {
+				id: 1,
+				op: "addr.add".to_owned(),
+				interface: Some("eth0".to_owned()),
+				reason: Reason::differs("eth0", "addressing[0]", "192.0.2.1/24", "<absent>"),
+				outcome: Outcome::Done,
+				error: None,
+			}],
+		})),
+		Response::Event(Box::new(Event::ConfirmArmed { seconds: 90 })),
+		Response::ApStations(Box::new(StationReport {
+			interface: "wlan0".to_owned(),
+			access_point: "home".to_owned(),
+			access_control: Some(netcfgd_model::AclPolicy::Deny),
+			stations: vec![StationEntry {
+				address: "00:11:22:33:44:55".to_owned(),
+				authorized: true,
+				listed: true,
+				signal: Some(-52),
+				connected_seconds: Some(184),
+				inactive_msec: Some(120),
+				rx_bytes: Some(4096),
+				tx_bytes: Some(8192),
+			}],
+		})),
 		Response::Ok,
 		Response::Error {
 			message: "not permitted".to_owned(),
@@ -121,7 +283,35 @@ fn every_response() -> Vec<Response> {
 	]
 }
 
+/// Every event, on the same terms.
 fn every_event() -> Vec<Event> {
+	let all = every_event_sample();
+	let name = |event: &Event| match event {
+		Event::Observed { .. } => "observed",
+		Event::Reloaded { .. } => "reloaded",
+		Event::Drift { .. } => "drift",
+		Event::ConfirmArmed { .. } => "confirm_armed",
+		Event::ConfirmResolved { .. } => "confirm_resolved",
+	};
+	let mut present: Vec<&str> = all.iter().map(name).collect();
+	present.sort_unstable();
+	present.dedup();
+	assert_eq!(
+		present,
+		[
+			"confirm_armed",
+			"confirm_resolved",
+			"drift",
+			"observed",
+			"reloaded",
+		],
+		"the witness is missing a sample for an event, so the frozen surface \
+		 would not move when that event changed"
+	);
+	all
+}
+
+fn every_event_sample() -> Vec<Event> {
 	vec![
 		Event::Observed {
 			summary: "eth0 gained an address".to_owned(),
