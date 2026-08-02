@@ -78,6 +78,8 @@ pub struct KernelExecutor {
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
 	/// What each interface's `dhcp6` source asks for by way of a prefix.
 	delegating: Vec<(String, netcfgd_model::PdRequest)>,
+	/// What each interface advertises, and the nameservers its own scope holds.
+	advertising: Vec<(String, netcfgd_model::interface::RaPolicy, Vec<String>)>,
 	/// The `OpenVPN` tunnel on each interface that is one.
 	///
 	/// Carried for the reason the `PPPoE` session above is: the op says which
@@ -143,6 +145,7 @@ impl KernelExecutor {
 			mac_policy: Vec::new(),
 			pppoe: Vec::new(),
 			delegating: Vec::new(),
+			advertising: Vec::new(),
 			openvpn: Vec::new(),
 			preferences: Vec::new(),
 			networks: Vec::new(),
@@ -224,6 +227,30 @@ impl KernelExecutor {
 				})
 			})
 			.collect();
+		// What an interface advertises, and the servers to advertise with it.
+		// The prefix *references* are carried rather than resolved here: a
+		// delegation arrives after the document does, so resolving at this
+		// point would freeze whatever was known when the executor was built.
+		self.advertising = document
+			.interfaces
+			.iter()
+			.filter_map(|interface| {
+				interface.advertise.as_ref().map(|policy| {
+					let servers = interface
+						.dns
+						.as_ref()
+						.map(|dns| {
+							dns.servers
+								.iter()
+								.filter(|server| server.addr.is_ipv6())
+								.map(|server| server.addr.to_string())
+								.collect()
+						})
+						.unwrap_or_default();
+					(interface.name.clone(), policy.clone(), servers)
+				})
+			})
+			.collect();
 		self.pppoe = document
 			.interfaces
 			.iter()
@@ -296,6 +323,48 @@ impl KernelExecutor {
 			));
 		}
 		Ok(())
+	}
+
+	/// Start advertising what this interface's document says to advertise.
+	///
+	/// The prefix references are resolved *here*, at the last moment, and that
+	/// is the point: `@pd:wan0` names a delegation that arrives after the
+	/// document did, so a router advertising it is advertising something no
+	/// config file could have contained (decision 0009). Resolving at apply
+	/// time is what makes the reference worth having.
+	///
+	/// A reference that resolves to nothing is not an error here -- the plan
+	/// warned, and `netcfgd_ra::start` refuses rather than advertising a router
+	/// with no prefix.
+	fn start_advertising(&self, iface: &str) -> Result<(), String> {
+		let Some((_, policy, servers)) = self.advertising.iter().find(|(name, _, _)| name == iface)
+		else {
+			return Err(format!("no advertise block for {iface}"));
+		};
+
+		let delegations = netcfgd_host_prefixes(&self.run_dir);
+		let mut prefixes = Vec::new();
+		for reference in &policy.prefixes {
+			let Some(available) = delegations
+				.iter()
+				.find(|(source, _)| source == &reference.source)
+			else {
+				continue;
+			};
+			let Some(prefix) = available.1.get(reference.index as usize) else {
+				continue;
+			};
+			// The sub-prefix an interface advertises is the one it addressed
+			// itself out of, so this is the same arithmetic the address used --
+			// `::/64` as the suffix, because what is advertised is the block
+			// rather than an address in it.
+			match netcfgd_model::derive_from_delegation(prefix, reference, "::/64") {
+				Ok(derived) => prefixes.push(derived),
+				Err(message) => return Err(format!("{iface}: {message}")),
+			}
+		}
+
+		netcfgd_ra::start(&self.run_dir, iface, policy, &prefixes, servers)
 	}
 
 	/// Hang up the `PPPoE` session netcfgd dialled.
@@ -750,6 +819,11 @@ impl Executor for KernelExecutor {
 					self.effects.started_backends.push((*kind, iface.clone()));
 					return Ok(());
 				}
+				if *kind == netcfgd_model::BackendKind::RouterAdvert {
+					self.start_advertising(iface)?;
+					self.effects.started_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
 				if *kind == netcfgd_model::BackendKind::Dhcp6 {
 					let request = self
 						.delegating
@@ -842,6 +916,11 @@ impl Executor for KernelExecutor {
 				station,
 			} => netcfgd_hostapd::acl::remove(&self.run_dir, iface, *list, station),
 			Op::BackendStop { kind, iface } => {
+				if *kind == netcfgd_model::BackendKind::RouterAdvert {
+					netcfgd_ra::stop(&self.run_dir, iface)?;
+					self.effects.stopped_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
 				if *kind == netcfgd_model::BackendKind::Pppoe {
 					self.stop_pppoe(iface)?;
 					self.effects.stopped_backends.push((*kind, iface.clone()));
@@ -1723,6 +1802,33 @@ pub fn pd_hook_script(iface: &str, target: &std::path::Path) -> String {
 		 mv \"$out.tmp\" \"$out\"\n",
 		target.display()
 	)
+}
+
+/// The delegations a `DHCPv6` client has reported, read from `/run`.
+///
+/// The same files `netcfgd-host` reads and a separate reader, because that
+/// crate is *above* this one in the graph -- it depends on this. The format is
+/// one prefix per line and the hook that writes it lives here, which is what
+/// keeps the two in step: `pd_hook_script` and this function are the two ends
+/// of one file, twenty lines apart.
+fn netcfgd_host_prefixes(run_dir: &std::path::Path) -> Vec<(String, Vec<String>)> {
+	let Ok(entries) = std::fs::read_dir(run_dir.join("prefixes")) else {
+		return Vec::new();
+	};
+	entries
+		.flatten()
+		.filter_map(|entry| {
+			let interface = entry.file_name().to_str()?.to_owned();
+			let body = std::fs::read_to_string(entry.path()).ok()?;
+			let prefixes: Vec<String> = body
+				.lines()
+				.map(str::trim)
+				.filter(|line| !line.is_empty() && !line.starts_with('#'))
+				.map(ToOwned::to_owned)
+				.collect();
+			Some((interface, prefixes))
+		})
+		.collect()
 }
 
 /// Where something that is not netcfgd writes what an interface was given.
