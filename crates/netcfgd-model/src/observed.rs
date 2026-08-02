@@ -397,6 +397,23 @@ pub struct ObservedBackend {
 	/// written by an older netcfgd still parses.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub access_control: Option<ObservedAccessControl>,
+	/// What a running access point was started with, as netcfgd names it.
+	///
+	/// The second half of the question [`ObservedAccessControl`] answers. That
+	/// one says what hostapd's station lists hold *now*, read over the control
+	/// socket; this says what its SSID, band and channel were when netcfgd
+	/// started it, read back from the configuration netcfgd generated. hostapd
+	/// reads that file once, at startup (decision 0026), so nothing else can
+	/// say whether it is still what the document asks for.
+	///
+	/// **The passphrase is deliberately not here.** A secret does not belong in
+	/// an observation that goes over the socket and into `/run` (constraint 5),
+	/// and the planner could not compare one anyway: it is pure, and what the
+	/// document holds is a `SecretRef`. So an edited passphrase is not noticed
+	/// by this comparison, which is stated in `docs/decisions/0052` rather than
+	/// left for somebody to discover.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub started_with: Option<ObservedAccessPoint>,
 	/// The prefixes a running router advertisement daemon was last given.
 	///
 	/// Only ever present for [`BackendKind::RouterAdvert`], and read from the
@@ -411,6 +428,24 @@ pub struct ObservedBackend {
 	/// sees a backend that is running and has nothing to compare.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub advertised: Vec<String>,
+}
+
+/// The identity a running access point was started with.
+///
+/// In netcfgd's own vocabulary rather than hostapd's: the observer maps
+/// `hw_mode` back to the band the document spells, so the planner compares
+/// model values against model values and can name the field that differs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedAccessPoint {
+	/// The SSID it is announcing.
+	pub ssid: crate::Ssid,
+	/// The band, as the document spells it.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub band: Option<String>,
+	/// The channel, or `None` where hostapd was told to choose one.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub channel: Option<u16>,
 }
 
 /// hostapd's in-memory station lists, and the policy it is running under.
