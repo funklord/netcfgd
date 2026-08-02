@@ -157,6 +157,62 @@ rm -f "$work/run/openvpn/vpn0.sock"
 check "stopping one that is already stopped is not an error" \
 	"$(grep -c 'could not stop' "$work/stop2.txt" || true)" "0"
 
+# --------------------------------------------------------------- credentials
+
+# A server that wants a username and password. OpenVPN has no indirection for
+# them -- `--auth-user-pass` reads a file with the username on the first line
+# and the password on the second -- so netcfgd resolves the SecretRef into one,
+# which is the same trade the hostapd passphrase already makes.
+mkdir -p "$work/etc/secrets"
+printf '%s' 'correct-horse-battery' > "$work/etc/secrets/vpn"
+chmod 600 "$work/etc/secrets/vpn"
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface vpn0 {
+	openvpn {
+		config   = "$work/etc/work.ovpn"
+		username = "vpn-user"
+		password = "@secret:vpn"
+	}
+}
+CONF
+"$ncfg" apply > "$work/auth.txt" 2>&1 || true
+
+auth="$work/run/openvpn/vpn0.auth"
+check "netcfgd wrote the credentials file openvpn reads" \
+	"$([ -f "$auth" ] && echo yes || echo no)" "yes"
+# 0600 before anything is written to it, never a chmod afterwards: the window
+# between the two is a window in which the password is world-readable.
+check "at mode 0600" "$(stat -c '%a' "$auth" 2>/dev/null)" "600"
+check "with the username on the first line" "$(sed -n 1p "$auth")" "vpn-user"
+check "and the password on the second" "$(sed -n 2p "$auth")" "correct-horse-battery"
+check "and pointed openvpn at the file" \
+	"$(grep -c -- "--auth-user-pass $auth" "$FAKE_OPENVPN_LOG" || true)" "1"
+# Never on the command line, where every process on the machine can read it
+# out of /proc.
+check "never putting the password on a command line" \
+	"$(grep -c 'correct-horse-battery' "$FAKE_OPENVPN_LOG" || true)" "0"
+check "nor in what the apply printed" \
+	"$(grep -c 'correct-horse-battery' "$work/auth.txt" || true)" "0"
+# And nowhere under /run except that one file, which is the check that catches
+# a password copied into the plan, the observation or the journal.
+check "and nowhere under /run except the file that needs it" \
+	"$(grep -rl 'correct-horse-battery' "$work/run" 2>/dev/null | grep -cv 'vpn0.auth' || true)" "0"
+
+# The credentials go when the tunnel does. /run is tmpfs so they would go at a
+# reboot anyway, but a password beside a tunnel that is not running is one
+# nobody is watching.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface vpn0 { kind = "dummy"; config = "null" }
+CONF
+"$ncfg" apply > /dev/null 2>&1 || true
+check "and are removed when the tunnel is stopped" \
+	"$([ -f "$auth" ] && echo yes || echo no)" "no"
+
+check "a username without a password is refused, not left to prompt" \
+	"$(printf 'interface vpn0 { openvpn { config = "/x.ovpn"; username = "u" } }\n' \
+	     > "$work/etc/netcfgd.conf"; \
+	   "$ncfg" plan 2>&1 | grep -c 'both `username` and `password`' || true)" "1"
+
 # ------------------------------------------------------------------ refusals
 
 # A path with no file behind it. Refused by netcfgd with the path in the

@@ -2310,7 +2310,12 @@
       "name": "k-openvpn",
       "kind": {
         "kind": "open_vpn",
-        "config": "/etc/openvpn/work.ovpn"
+        "config": "/etc/openvpn/work.ovpn",
+        "username": "vpn-user",
+        "password": {
+          "provider": "file",
+          "name": "vpn"
+        }
       },
       "enabled": true,
       "mtu": 1400,

@@ -291,7 +291,29 @@ impl KernelExecutor {
 		let Some((_, config)) = self.openvpn.iter().find(|(name, _)| name == iface) else {
 			return Err(format!("no openvpn configuration for {iface}"));
 		};
-		openvpn::start(&self.run_dir, iface, &config.config)
+		// Resolved here and nowhere earlier: the document carries a `SecretRef`
+		// and the plan carries an interface name, so this is the first point at
+		// which a password exists at all -- and it exists only long enough to
+		// reach a 0600 file. The compiler has already refused a username
+		// without a password, so one being present implies the other.
+		let resolved = match (&config.username, &config.password) {
+			(Some(username), Some(reference)) => {
+				let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+				let password = resolver
+					.resolve(reference)
+					.map_err(|error| format!("{iface}: {error}"))?;
+				Some((username.clone(), password))
+			}
+			_ => None,
+		};
+		openvpn::start(
+			&self.run_dir,
+			iface,
+			&config.config,
+			resolved
+				.as_ref()
+				.map(|(user, password)| (user.as_str(), password.expose())),
+		)
 	}
 
 	/// Run the access point the document puts on this radio.

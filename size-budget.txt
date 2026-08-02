@@ -237,4 +237,9 @@ netcfgd
 # integration: netcfgd does not generate OpenVPN's configuration (decision
 # 0046), so there is no renderer here at all. What it buys is a lifecycle --
 # start, stop through the daemon's own socket, and quote what it said.
-total 1972760
+# +4 KB for the tunnel's credentials: two optional model fields with their
+# serde, the compiler keys and the refusal that pairs them, and the 0600
+# two-line file `--auth-user-pass` reads. Small because the secret machinery
+# was already there -- the resolver, the provider and the `SecretRef` type all
+# predate this, and what was added is one more place that calls them.
+total 1976856

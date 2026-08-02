@@ -54,6 +54,52 @@ pub fn log_path(run: &Path, iface: &str) -> PathBuf {
 	run_dir(run).join(format!("{iface}.log"))
 }
 
+/// Where the credentials for one tunnel go, when the server wants any.
+///
+/// Mode 0600 and under `/run`, which is the same trade the generated hostapd
+/// configuration and the `pppd` options file already make and comes with the
+/// same mitigations: `/run` is tmpfs so it does not survive a reboot, and the
+/// document itself still carries only a `SecretRef` (constraint 5). `OpenVPN` has
+/// no indirection for a password either -- `--auth-user-pass` takes a file with
+/// the username on the first line and the password on the second, and there is
+/// no other way in.
+#[must_use]
+pub fn auth_path(run: &Path, iface: &str) -> PathBuf {
+	run_dir(run).join(format!("{iface}.auth"))
+}
+
+/// Write the credentials file, or remove it when the document carries none.
+///
+/// # Errors
+///
+/// Returns a message naming the file that could not be written.
+fn write_auth(run: &Path, iface: &str, username: &str, password: &str) -> Result<PathBuf, String> {
+	use std::os::unix::fs::OpenOptionsExt;
+
+	let path = auth_path(run, iface);
+	// The mode is set at open rather than afterwards. A chmod after the write
+	// leaves a window in which the password is world-readable, and a mode that
+	// was wrong once is a mode that was wrong.
+	let mut file = std::fs::OpenOptions::new()
+		.write(true)
+		.create(true)
+		.truncate(true)
+		.mode(0o600)
+		.open(&path)
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	// Exactly two lines, which is what `--auth-user-pass` reads. A username
+	// containing a newline would become a password line; nothing in the model
+	// stops one, so it is stopped here.
+	if username.contains('\n') || password.contains('\n') {
+		return Err(format!(
+			"the openvpn credentials for {iface} contain a newline, which would be read 			 as a different field"
+		));
+	}
+	file.write_all(format!("{username}\n{password}\n").as_bytes())
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	Ok(path)
+}
+
 /// Find `openvpn`.
 ///
 /// The same search as hostapd's and for the same reason: it lives in
@@ -81,7 +127,12 @@ pub fn binary() -> Option<PathBuf> {
 /// Returns a message naming what failed: no openvpn installed, a configuration
 /// file that is not there, or the daemon refusing to start -- quoting what it
 /// said rather than its exit status.
-pub fn start(run: &Path, iface: &str, config: &str) -> Result<(), String> {
+pub fn start(
+	run: &Path,
+	iface: &str,
+	config: &str,
+	credentials: Option<(&str, &str)>,
+) -> Result<(), String> {
 	let dir = run_dir(run);
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
 
@@ -112,7 +163,20 @@ pub fn start(run: &Path, iface: &str, config: &str) -> Result<(), String> {
 		.try_clone()
 		.map_err(|error| format!("cannot write {}: {error}", log.display()))?;
 
-	let status = Command::new(&program)
+	let auth = match credentials {
+		Some((username, password)) => Some(write_auth(run, iface, username, password)?),
+		// No credentials in the document. Left to the `.ovpn`, which for a file
+		// with inline certificates authenticates without any -- and removed if
+		// an earlier configuration had some, so a password does not outlive the
+		// document that asked for it.
+		None => {
+			let _ = std::fs::remove_file(auth_path(run, iface));
+			None
+		}
+	};
+
+	let mut command = Command::new(&program);
+	command
 		.arg("--config")
 		.arg(config)
 		// The interface name is netcfgd's to choose, not the file's: the
@@ -131,7 +195,13 @@ pub fn start(run: &Path, iface: &str, config: &str) -> Result<(), String> {
 		.arg("--log")
 		.arg(&log)
 		.stdout(capture)
-		.stderr(errors)
+		.stderr(errors);
+	if let Some(auth) = &auth {
+		// The path, never the values. A password on a command line is readable
+		// by every process on the machine through /proc.
+		command.arg("--auth-user-pass").arg(auth);
+	}
+	let status = command
 		.status()
 		.map_err(|error| format!("could not run {}: {error}", program.display()))?;
 
@@ -163,6 +233,10 @@ pub fn stop(run: &Path, iface: &str) -> Result<(), String> {
 	// enough to install the handler. Left behind, it would take the bind on the
 	// next start.
 	let _ = std::fs::remove_file(&socket);
+	// And the credentials, which have nothing left to authenticate. `/run` is
+	// tmpfs so they would go at the next reboot regardless, but a password
+	// sitting beside a tunnel that is not running is one nobody is watching.
+	let _ = std::fs::remove_file(auth_path(run, iface));
 	Ok(())
 }
 

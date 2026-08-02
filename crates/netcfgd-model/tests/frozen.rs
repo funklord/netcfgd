@@ -413,6 +413,8 @@ fn credentialled_kinds() -> Vec<(&'static str, InterfaceKind)> {
 			"openvpn",
 			InterfaceKind::OpenVpn(netcfgd_model::OpenVpnConfig {
 				config: "/etc/openvpn/work.ovpn".to_owned(),
+				username: Some("vpn-user".to_owned()),
+				password: Some(secret("vpn", SecretProvider::File)),
 			}),
 		),
 	]

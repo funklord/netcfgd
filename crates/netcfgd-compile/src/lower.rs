@@ -2122,6 +2122,8 @@ fn lower_vxlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> 
 /// is how the two come to disagree.
 fn lower_openvpn(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 	let mut config = None;
+	let mut username = None;
+	let mut password = None;
 
 	for item in &block.items {
 		let Item::Assignment(assignment) = item else {
@@ -2129,6 +2131,8 @@ fn lower_openvpn(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind
 		};
 		match assignment.key.as_str() {
 			"config" | "file" => config = as_string(&assignment.value, diags),
+			"username" | "user" => username = as_string(&assignment.value, diags),
+			"password" => password = as_secret(&assignment.value, diags),
 			other => diags.push(
 				Diagnostic::new(assignment.span, format!("unknown openvpn key `{other}`"))
 					.with_help(
@@ -2158,8 +2162,26 @@ fn lower_openvpn(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind
 		);
 		return None;
 	}
+	// One without the other is a configuration that cannot work: OpenVPN
+	// prompts on the console for whatever is missing, and there is no console
+	// behind a daemon netcfgd started. Refused here rather than left to hang.
+	if username.is_some() != password.is_some() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				"an openvpn tunnel needs both `username` and `password`, or neither",
+			)
+			.with_help(
+				"openvpn prompts on the console for whichever is missing, and a daemon \
+				 netcfgd started has no console to prompt on",
+			),
+		);
+		return None;
+	}
 	Some(InterfaceKind::OpenVpn(netcfgd_model::OpenVpnConfig {
 		config,
+		username,
+		password,
 	}))
 }
 
