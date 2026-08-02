@@ -284,4 +284,8 @@ netcfgd
 # a running backend that the file netcfgd wrote is the only account of. The
 # command whose whole job is "why is it like this" was the last thing that could
 # not say why an access point restarted.
-total 2050584
+# +4 KB for the TUI catching up with the same two things: what was reported and
+# not applied, and a backend that is about to be restarted. It is the pane an
+# operator watches while a modem is not working, and it was the one view where
+# "the bearer is up" and "netcfgd acted on it" looked the same.
+total 2054680

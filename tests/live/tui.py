@@ -75,7 +75,17 @@ class Session:
         os.makedirs(f"{self.work}/etc")
         os.makedirs(f"{self.work}/run")
         with open(f"{self.work}/etc/netcfgd.conf", "w") as handle:
-            handle.write('interface probe0 {\n\tkind = "dummy"\n\tconfig = "10.11.0.1/24"\n}\n')
+            handle.write(
+                'interface probe0 {\n\tkind = "dummy"\n\tconfig = "10.11.0.1/24"\n}\n'
+                'interface probe1 {\n\tkind = "dummy"\n\tconfig = "reported"\n}\n'
+            )
+        # Something outside netcfgd, reporting an interface netcfgd has not
+        # configured. `ncfg status` has marked these since the modem work and
+        # the device pane did not, which made the TUI the one view where "the
+        # bearer is up" and "netcfgd acted on it" looked the same.
+        os.makedirs(f"{self.work}/run/reported")
+        with open(f"{self.work}/run/reported/probe1", "w") as handle:
+            handle.write("address=10.64.1.23/30\ngateway=10.64.1.24\n")
         self.env = dict(
             os.environ,
             NCFG_CONFIG_DIR=f"{self.work}/etc",
@@ -147,6 +157,10 @@ def panes(session):
     pump(master, 1.2, seen)
     check("the device pane draws the interface", "probe0" in "".join(seen), True)
     check("and its address", "10.11.0.1/24" in "".join(seen), True)
+    # Reported and not applied, marked as such. Without the marker this pane
+    # says an address is on an interface that does not have one.
+    check("and marks what was reported rather than applied",
+          "10.64.1.23/30 [reported]" in visible("".join(seen)), True)
 
     # Asserted on each pane's own content, not on the tab bar. ncurses emits
     # the minimal diff, so switching from [plan] to [events] sends only the
