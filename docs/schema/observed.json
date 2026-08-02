@@ -1,0 +1,375 @@
+{
+  "links": [
+    {
+      "name": "eth0",
+      "index": 7,
+      "kind": "veth",
+      "up": true,
+      "carrier": true,
+      "mtu": 1500,
+      "mac": "02:00:00:00:00:01",
+      "master": "br0",
+      "offloads": [
+        "rx-checksum",
+        "tx-checksum-ip-generic"
+      ],
+      "ipv6_token": "::5",
+      "qdisc": "cake",
+      "qdisc_bandwidth_bits": 20000000,
+      "qdisc_ingress": true,
+      "ingress_redirect": "ifb-eth0",
+      "forwarding": true,
+      "ownership": "ours",
+      "private_key_loaded": true
+    },
+    {
+      "name": "eth1",
+      "index": 7,
+      "kind": "veth",
+      "up": true,
+      "carrier": true,
+      "mtu": 1500,
+      "mac": "02:00:00:00:00:01",
+      "master": "br0",
+      "offloads": [
+        "rx-checksum",
+        "tx-checksum-ip-generic"
+      ],
+      "ipv6_token": "::5",
+      "qdisc": "cake",
+      "qdisc_bandwidth_bits": 20000000,
+      "qdisc_ingress": true,
+      "ingress_redirect": "ifb-eth0",
+      "forwarding": true,
+      "ownership": "foreign",
+      "private_key_loaded": true
+    },
+    {
+      "name": "eth2",
+      "index": 7,
+      "kind": "veth",
+      "up": true,
+      "carrier": true,
+      "mtu": 1500,
+      "mac": "02:00:00:00:00:01",
+      "master": "br0",
+      "offloads": [
+        "rx-checksum",
+        "tx-checksum-ip-generic"
+      ],
+      "ipv6_token": "::5",
+      "qdisc": "cake",
+      "qdisc_bandwidth_bits": 20000000,
+      "qdisc_ingress": true,
+      "ingress_redirect": "ifb-eth0",
+      "forwarding": true,
+      "ownership": "unknown",
+      "private_key_loaded": true
+    }
+  ],
+  "addresses": [
+    {
+      "interface": "eth0",
+      "address": "192.168.0.1/24",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "static"
+    },
+    {
+      "interface": "eth0",
+      "address": "192.168.1.1/24",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "dhcp4"
+    },
+    {
+      "interface": "eth0",
+      "address": "192.168.2.1/24",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "dhcp6"
+    },
+    {
+      "interface": "eth0",
+      "address": "192.168.3.1/24",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "slaac"
+    },
+    {
+      "interface": "eth0",
+      "address": "192.168.4.1/24",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "link_local"
+    },
+    {
+      "interface": "eth0",
+      "address": "192.168.5.1/24",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "delegated"
+    },
+    {
+      "interface": "eth1",
+      "address": "172.16.0.1/24",
+      "ownership": "ours"
+    },
+    {
+      "interface": "eth1",
+      "address": "172.16.1.1/24",
+      "ownership": "foreign"
+    },
+    {
+      "interface": "eth1",
+      "address": "172.16.2.1/24",
+      "ownership": "unknown"
+    }
+  ],
+  "routes": [
+    {
+      "interface": "eth1",
+      "destination": "10.0.0.0/16",
+      "via": "10.0.0.1",
+      "metric": 700,
+      "table": 254,
+      "src": "10.0.0.9",
+      "scope": "global",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "static"
+    },
+    {
+      "interface": "eth1",
+      "destination": "10.1.0.0/16",
+      "via": "10.0.0.1",
+      "metric": 700,
+      "table": 254,
+      "src": "10.0.0.9",
+      "scope": "global",
+      "proto": 110,
+      "ownership": "foreign",
+      "origin": "static"
+    },
+    {
+      "interface": "eth1",
+      "destination": "10.2.0.0/16",
+      "via": "10.0.0.1",
+      "metric": 700,
+      "table": 254,
+      "src": "10.0.0.9",
+      "scope": "global",
+      "proto": 110,
+      "ownership": "unknown",
+      "origin": "static"
+    },
+    {
+      "interface": "eth0",
+      "destination": "default",
+      "via": "192.168.0.254",
+      "ownership": "foreign"
+    }
+  ],
+  "backends": [
+    {
+      "kind": "dhcp4",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "dhcp6",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "supplicant",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "access_point",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "wire_guard",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "pppoe",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "open_vpn",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "dns",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "router_advert",
+      "interface": "eth0",
+      "running": true
+    },
+    {
+      "kind": "access_point",
+      "interface": "wlan0",
+      "running": true,
+      "access_control": {
+        "policy": "unset",
+        "denied": [
+          "02:00:00:00:00:aa"
+        ],
+        "accepted": [
+          "02:00:00:00:00:bb"
+        ]
+      }
+    },
+    {
+      "kind": "access_point",
+      "interface": "wlan1",
+      "running": true,
+      "access_control": {
+        "policy": {
+          "set": "deny"
+        },
+        "denied": [
+          "02:00:00:00:00:aa"
+        ],
+        "accepted": [
+          "02:00:00:00:00:bb"
+        ]
+      }
+    },
+    {
+      "kind": "access_point",
+      "interface": "wlan2",
+      "running": true,
+      "access_control": {
+        "policy": {
+          "set": "allow"
+        },
+        "denied": [
+          "02:00:00:00:00:aa"
+        ],
+        "accepted": [
+          "02:00:00:00:00:bb"
+        ]
+      }
+    },
+    {
+      "kind": "access_point",
+      "interface": "wlan3",
+      "running": true,
+      "access_control": {
+        "policy": "unknown",
+        "denied": [
+          "02:00:00:00:00:aa"
+        ],
+        "accepted": [
+          "02:00:00:00:00:bb"
+        ]
+      }
+    }
+  ],
+  "dns": [
+    {
+      "scope": "globals",
+      "policy": {
+        "mode": "write_resolv_conf",
+        "servers": [
+          {
+            "addr": "9.9.9.9",
+            "port": 853,
+            "sni": "dns.quad9.net"
+          }
+        ],
+        "search": [
+          "example.com"
+        ],
+        "domains": [],
+        "options": [
+          "edns0"
+        ]
+      }
+    }
+  ],
+  "rules": [
+    {
+      "priority": 100,
+      "family": "inet",
+      "from": "192.168.0.0/24",
+      "to": "10.0.0.0/8",
+      "iif": "eth0",
+      "oif": "eth1",
+      "fwmark": 3,
+      "fwmask": 65535,
+      "table": 200,
+      "action": "lookup",
+      "suppress_prefixlength": 0,
+      "l3mdev": true,
+      "invert": true,
+      "ownership": "ours"
+    }
+  ],
+  "bridge_vlans": [
+    {
+      "index": 7,
+      "vid": 10,
+      "pvid": true,
+      "untagged": true
+    }
+  ],
+  "delegations": [
+    {
+      "interface": "wan0",
+      "prefixes": [
+        "2001:db8:1234::/56"
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "interface": "vpn0",
+      "addresses": [
+        "10.8.0.2/24"
+      ],
+      "gateways": [
+        "10.8.0.1"
+      ],
+      "nameservers": [
+        "10.0.0.53"
+      ],
+      "routes": [
+        {
+          "destination": "10.0.0.0/8",
+          "via": "10.8.0.1"
+        },
+        {
+          "destination": "192.168.44.0/24"
+        }
+      ]
+    }
+  ],
+  "qdisc_applied": [
+    "eth0"
+  ],
+  "ingress_applied": [
+    "eth0"
+  ],
+  "forwarding_applied": [
+    "eth0"
+  ],
+  "nat": [
+    "eth0"
+  ],
+  "nat_conflicts": [
+    "somebody-elses-table"
+  ],
+  "address_proto_supported": true
+}
