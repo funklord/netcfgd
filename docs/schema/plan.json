@@ -1,0 +1,1073 @@
+{
+  "actions": [
+    {
+      "id": 0,
+      "op": {
+        "op": "link_create",
+        "name": "br0",
+        "kind": {
+          "kind": "dummy"
+        }
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_create",
+        "name": "br0",
+        "kind": {
+          "kind": "dummy"
+        }
+      }
+    },
+    {
+      "id": 1,
+      "op": {
+        "op": "link_delete",
+        "name": "br0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_delete",
+        "name": "br0"
+      }
+    },
+    {
+      "id": 2,
+      "op": {
+        "op": "link_set_mtu",
+        "name": "eth0",
+        "mtu": 9000
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_set_mtu",
+        "name": "eth0",
+        "mtu": 9000
+      }
+    },
+    {
+      "id": 3,
+      "op": {
+        "op": "link_set_mac",
+        "name": "eth0",
+        "mac": "02:00:00:00:00:01"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_set_mac",
+        "name": "eth0",
+        "mac": "02:00:00:00:00:01"
+      }
+    },
+    {
+      "id": 4,
+      "op": {
+        "op": "link_set_master",
+        "name": "eth0",
+        "master": "br0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_set_master",
+        "name": "eth0",
+        "master": "br0"
+      }
+    },
+    {
+      "id": 5,
+      "op": {
+        "op": "link_unset_master",
+        "name": "eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_unset_master",
+        "name": "eth0"
+      }
+    },
+    {
+      "id": 6,
+      "op": {
+        "op": "link_up",
+        "name": "eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_up",
+        "name": "eth0"
+      }
+    },
+    {
+      "id": 7,
+      "op": {
+        "op": "link_down",
+        "name": "eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_down",
+        "name": "eth0"
+      }
+    },
+    {
+      "id": 8,
+      "op": {
+        "op": "addr_add",
+        "iface": "eth0",
+        "addr": "192.168.1.10/24",
+        "preferred_lifetime": 3600,
+        "valid_lifetime": 7200
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "addr_add",
+        "iface": "eth0",
+        "addr": "192.168.1.10/24",
+        "preferred_lifetime": 3600,
+        "valid_lifetime": 7200
+      }
+    },
+    {
+      "id": 9,
+      "op": {
+        "op": "addr_del",
+        "iface": "eth0",
+        "addr": "192.168.1.10/24"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "addr_del",
+        "iface": "eth0",
+        "addr": "192.168.1.10/24"
+      }
+    },
+    {
+      "id": 10,
+      "op": {
+        "op": "route_add",
+        "iface": "eth0",
+        "route": {
+          "destination": "10.0.0.0/8",
+          "via": "192.168.1.1",
+          "metric": 700,
+          "table": 254,
+          "src": "192.168.1.10",
+          "scope": "global",
+          "onlink": true,
+          "proto": 110
+        }
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "route_add",
+        "iface": "eth0",
+        "route": {
+          "destination": "10.0.0.0/8",
+          "via": "192.168.1.1",
+          "metric": 700,
+          "table": 254,
+          "src": "192.168.1.10",
+          "scope": "global",
+          "onlink": true,
+          "proto": 110
+        }
+      }
+    },
+    {
+      "id": 11,
+      "op": {
+        "op": "route_del",
+        "iface": "eth0",
+        "route": {
+          "destination": "10.0.0.0/8",
+          "via": "192.168.1.1",
+          "metric": 700,
+          "table": 254,
+          "src": "192.168.1.10",
+          "scope": "global",
+          "onlink": true,
+          "proto": 110
+        }
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "route_del",
+        "iface": "eth0",
+        "route": {
+          "destination": "10.0.0.0/8",
+          "via": "192.168.1.1",
+          "metric": 700,
+          "table": 254,
+          "src": "192.168.1.10",
+          "scope": "global",
+          "onlink": true,
+          "proto": 110
+        }
+      }
+    },
+    {
+      "id": 12,
+      "op": {
+        "op": "backend_start",
+        "kind": "dhcp4",
+        "iface": "eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "backend_start",
+        "kind": "dhcp4",
+        "iface": "eth0"
+      }
+    },
+    {
+      "id": 13,
+      "op": {
+        "op": "backend_stop",
+        "kind": "open_vpn",
+        "iface": "vpn0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "backend_stop",
+        "kind": "open_vpn",
+        "iface": "vpn0"
+      }
+    },
+    {
+      "id": 14,
+      "op": {
+        "op": "backend_reload",
+        "kind": "supplicant",
+        "iface": "wlan0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "backend_reload",
+        "kind": "supplicant",
+        "iface": "wlan0"
+      }
+    },
+    {
+      "id": 15,
+      "op": {
+        "op": "bridge_vlan_add",
+        "iface": "eth0",
+        "vid": 10,
+        "pvid": true,
+        "untagged": true,
+        "on_self": false
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "bridge_vlan_add",
+        "iface": "eth0",
+        "vid": 10,
+        "pvid": true,
+        "untagged": true,
+        "on_self": false
+      }
+    },
+    {
+      "id": 16,
+      "op": {
+        "op": "bridge_vlan_del",
+        "iface": "eth0",
+        "vid": 10,
+        "on_self": true
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "bridge_vlan_del",
+        "iface": "eth0",
+        "vid": 10,
+        "on_self": true
+      }
+    },
+    {
+      "id": 17,
+      "op": {
+        "op": "wifi_set_profiles",
+        "device": "wlan0",
+        "profiles": [
+          "home"
+        ]
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "wifi_set_profiles",
+        "device": "wlan0",
+        "profiles": [
+          "home"
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "op": {
+        "op": "wifi_associate",
+        "device": "wlan0",
+        "network_id": "home"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "wifi_associate",
+        "device": "wlan0",
+        "network_id": "home"
+      }
+    },
+    {
+      "id": 19,
+      "op": {
+        "op": "wifi_disassociate",
+        "device": "wlan0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "wifi_disassociate",
+        "device": "wlan0"
+      }
+    },
+    {
+      "id": 20,
+      "op": {
+        "op": "wifi_set_regdom",
+        "device": "wlan0",
+        "country": "SE"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "wifi_set_regdom",
+        "device": "wlan0",
+        "country": "SE"
+      }
+    },
+    {
+      "id": 21,
+      "op": {
+        "op": "access_control_add",
+        "iface": "wlan0",
+        "list": "deny",
+        "station": "02:00:00:00:00:aa"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "access_control_add",
+        "iface": "wlan0",
+        "list": "deny",
+        "station": "02:00:00:00:00:aa"
+      }
+    },
+    {
+      "id": 22,
+      "op": {
+        "op": "access_control_del",
+        "iface": "wlan0",
+        "list": "allow",
+        "station": "02:00:00:00:00:bb"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "access_control_del",
+        "iface": "wlan0",
+        "list": "allow",
+        "station": "02:00:00:00:00:bb"
+      }
+    },
+    {
+      "id": 23,
+      "op": {
+        "op": "wg_set_device",
+        "iface": "wg0",
+        "private_key_ref": "@secret:wg0",
+        "listen_port": 51820,
+        "fwmark": 1
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "wg_set_device",
+        "iface": "wg0",
+        "private_key_ref": "@secret:wg0",
+        "listen_port": 51820,
+        "fwmark": 1
+      }
+    },
+    {
+      "id": 24,
+      "op": {
+        "op": "wg_set_peers",
+        "iface": "wg0",
+        "peers": [
+          {
+            "name": "office",
+            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+            "endpoint": "vpn.example:51820",
+            "allowed_ips": [
+              "10.0.0.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "wg_set_peers",
+        "iface": "wg0",
+        "peers": [
+          {
+            "name": "office",
+            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+            "endpoint": "vpn.example:51820",
+            "allowed_ips": [
+              "10.0.0.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
+      }
+    },
+    {
+      "id": 25,
+      "op": {
+        "op": "dns_apply",
+        "scope": "globals",
+        "policy": {
+          "mode": "write_resolv_conf",
+          "servers": [
+            {
+              "addr": "9.9.9.9"
+            }
+          ],
+          "search": [
+            "example.com"
+          ],
+          "domains": [],
+          "options": []
+        }
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "dns_apply",
+        "scope": "globals",
+        "policy": {
+          "mode": "write_resolv_conf",
+          "servers": [
+            {
+              "addr": "9.9.9.9"
+            }
+          ],
+          "search": [
+            "example.com"
+          ],
+          "domains": [],
+          "options": []
+        }
+      }
+    },
+    {
+      "id": 26,
+      "op": {
+        "op": "link_set_offloads",
+        "name": "eth0",
+        "features": [
+          [
+            "rx-checksum",
+            true
+          ]
+        ]
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_set_offloads",
+        "name": "eth0",
+        "features": [
+          [
+            "rx-checksum",
+            true
+          ]
+        ]
+      }
+    },
+    {
+      "id": 27,
+      "op": {
+        "op": "link_set_ipv6_token",
+        "name": "eth0",
+        "token": "::5"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link_set_ipv6_token",
+        "name": "eth0",
+        "token": "::5"
+      }
+    },
+    {
+      "id": 28,
+      "op": {
+        "op": "rule_add",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "rule_add",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
+      }
+    },
+    {
+      "id": 29,
+      "op": {
+        "op": "rule_del",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "rule_del",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
+      }
+    },
+    {
+      "id": 30,
+      "op": {
+        "op": "qdisc_set",
+        "iface": "eth0",
+        "kind": "cake",
+        "bandwidth_bits": 20000000,
+        "ingress": true
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "qdisc_set",
+        "iface": "eth0",
+        "kind": "cake",
+        "bandwidth_bits": 20000000,
+        "ingress": true
+      }
+    },
+    {
+      "id": 31,
+      "op": {
+        "op": "qdisc_reset",
+        "iface": "eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "qdisc_reset",
+        "iface": "eth0"
+      }
+    },
+    {
+      "id": 32,
+      "op": {
+        "op": "ingress_redirect",
+        "iface": "eth0",
+        "target": "ifb-eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "ingress_redirect",
+        "iface": "eth0",
+        "target": "ifb-eth0"
+      }
+    },
+    {
+      "id": 33,
+      "op": {
+        "op": "ingress_redirect_clear",
+        "iface": "eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "ingress_redirect_clear",
+        "iface": "eth0"
+      }
+    },
+    {
+      "id": 34,
+      "op": {
+        "op": "sysctl_set_forwarding",
+        "iface": "eth0",
+        "enabled": true
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "sysctl_set_forwarding",
+        "iface": "eth0",
+        "enabled": true
+      }
+    },
+    {
+      "id": 35,
+      "op": {
+        "op": "nat_replace",
+        "uplinks": [
+          "eth0"
+        ]
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "nat_replace",
+        "uplinks": [
+          "eth0"
+        ]
+      }
+    },
+    {
+      "id": 36,
+      "op": {
+        "op": "hook_run",
+        "iface": "eth0",
+        "phase": "post_up",
+        "path": "/run/netcfgd/hooks/eth0-post_up"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "hook_run",
+        "iface": "eth0",
+        "phase": "post_up",
+        "path": "/run/netcfgd/hooks/eth0-post_up"
+      }
+    },
+    {
+      "id": 37,
+      "op": {
+        "op": "commit_arm",
+        "window_seconds": 90
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "commit_arm",
+        "window_seconds": 90
+      }
+    },
+    {
+      "id": 38,
+      "op": {
+        "op": "commit_confirm"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "commit_confirm"
+      }
+    },
+    {
+      "id": 39,
+      "op": {
+        "op": "commit_revert",
+        "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "commit_revert",
+        "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "message": "slaac is accepted but not yet applied by this build",
+      "interface": "eth0"
+    }
+  ],
+  "refusals": [
+    {
+      "interface": "eth0",
+      "op": "link.down",
+      "guard": "the office runs on this",
+      "reason": {
+        "interface": "eth0",
+        "field": "enabled",
+        "desired": "false",
+        "observed": "true"
+      },
+      "override_with": "ncfg apply --allow-disruption eth0"
+    }
+  ],
+  "stranded": [
+    {
+      "interface": "wg0",
+      "credential": "the WireGuard private key",
+      "irrevocable": "only every peer's administrator can revoke it",
+      "remove_with": "on_unmanage = \"clear\"",
+      "consent_with": "ncfg apply --strand-credentials wg0"
+    }
+  ]
+}

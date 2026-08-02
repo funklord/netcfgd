@@ -17,9 +17,9 @@
 //! not true of either of them. `netcfgd-model` pinned a `Document` and nothing
 //! pinned an `Observed`, so a field could be added to the thing this socket
 //! actually sends and no gate anywhere moved -- which is how
-//! `ObservedReport::routes` arrived. `Observed` now has its own witness at
-//! `docs/schema/observed.json`. A `Plan` still has none, and that is a hole
-//! rather than a decision.
+//! `ObservedReport::routes` arrived. Both are pinned now, at
+//! `docs/schema/observed.json` and `docs/schema/plan.json`, and the sentence is
+//! true because those files exist rather than because it says so.
 
 use netcfgd_proto::{
 	Event, Explanation, Fact, Request, Response, ScanEntry, ScanReport, Subject, WifiState,

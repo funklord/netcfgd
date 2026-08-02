@@ -36,10 +36,12 @@ fn witness_path() -> PathBuf {
 
 /// Every ownership, so none can be renamed unnoticed.
 ///
-/// The two-check pattern the document witness arrived at, and for the reason it
-/// arrived at it: the match is a *compile* error when a variant appears, which
-/// is what makes somebody write the arm, and the assertion catches the case the
-/// compiler cannot see -- an arm written with no sample added. Never a `_` arm.
+/// The two-check pattern the document witness arrived at. The match is a
+/// *compile* error when a variant appears, which is the half that catches an
+/// addition; the assertion catches a sample that went away or a name that moved.
+/// Never a `_` arm -- the wildcard is what would take the first half away.
+/// `crates/netcfgd-plan/tests/frozen.rs` is exact about what neither half
+/// catches.
 fn every_ownership() -> Vec<Ownership> {
 	let all = vec![Ownership::Ours, Ownership::Foreign, Ownership::Unknown];
 	let name = |ownership: &Ownership| match ownership {

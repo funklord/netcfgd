@@ -16,3 +16,7 @@ serde.workspace = true
 
 [dev-dependencies]
 netcfgd-compile = { path = "../netcfgd-compile" }
+# The frozen-surface witness renders a plan as JSON, which is the form it takes
+# on the socket and in /run. A dev dependency only: the crate itself is pure
+# and serialises through whatever its caller chose.
+serde_json.workspace = true
