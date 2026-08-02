@@ -443,6 +443,23 @@ pub struct OpenVpnConfig {
 	/// Never read by netcfgd. It is passed through and the daemon's complaints
 	/// about it are passed back.
 	pub config: String,
+	/// Username for `--auth-user-pass`, where the server wants one.
+	///
+	/// Optional, unlike a `PPPoE` session's, because a `.ovpn` with inline
+	/// certificates authenticates without one and that is the ordinary case for
+	/// a provider-supplied file.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub username: Option<String>,
+	/// The matching password, by reference.
+	///
+	/// Never the value: the desired-state document is written to `/run` and read
+	/// by adapters, so the *type* is incapable of carrying a password
+	/// (constraint 5). netcfgd resolves it at apply time into a two-line file
+	/// under `/run` at 0600, which is the same trade the hostapd passphrase and
+	/// the `pppd` options file already make -- `OpenVPN` has no indirection for
+	/// it either.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub password: Option<crate::SecretRef>,
 }
 
 /// A `PPPoE` session.
