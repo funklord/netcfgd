@@ -19,5 +19,6 @@ netcfgd-secret  = { path = "../netcfgd-secret" }
 netcfgd-supplicant = { path = "../../backends/netcfgd-supplicant" }
 netcfgd-hostapd    = { path = "../../backends/netcfgd-hostapd" }
 netcfgd-openvpn    = { path = "../../backends/netcfgd-openvpn" }
+netcfgd-ra         = { path = "../../backends/netcfgd-ra" }
 serde.workspace      = true
 serde_json.workspace = true

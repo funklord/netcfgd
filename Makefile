@@ -544,9 +544,10 @@ live:
 	@# plugin opens it as it loads, so an unprivileged machine cannot dial. It
 	@# makes its own namespaces too, and skips rather than fails without root.
 	@sh tests/live/pppoe-session.sh
-	@# A real delegated prefix, from a real kea to a real odhcp6c. Root because
-	@# both ends bind a privileged port, and odhcp6c is not packaged for Debian
-	@# -- the script's header says how to build it, and skips without it.
+	@# A real delegated prefix, from a real kea to a real odhcp6c, advertised
+	@# by a real radvd to a host that configures itself. Root because both ends
+	@# bind a privileged port, and odhcp6c is not packaged for Debian -- the
+	@# script's header says how to build it, and skips without it.
 	@sh tests/live/delegation.sh
 
 fuzz:

@@ -262,4 +262,12 @@ netcfgd
 # compiler with their diagnostics, the per-interface lookup that carries the
 # request to odhcp6c, and the refusal of the modifiers the keyword sources used
 # to drop silently. The DSL half is most of it, which is where it should be.
-total 2001432
+# +24 KB for router advertisement, which is the largest step since the OpenVPN
+# tunnel and for the same reason: a new backend crate, a new config block in
+# the compiler with its diagnostics, a planner arm with its own waiting rule,
+# and the executor path that resolves a prefix reference at the last moment.
+#
+# The renderer is a small part of it. What costs is that `advertise` is the
+# fourth thing in the document with a backend behind it, and each of those
+# brings its own start, stop, ownership check and error vocabulary.
+total 2026008

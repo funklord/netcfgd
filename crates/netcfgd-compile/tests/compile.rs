@@ -1814,3 +1814,73 @@ fn a_modifier_a_keyword_source_does_not_take_is_refused() {
 			.contains("is not something `dhcp6` takes")
 	);
 }
+
+/// The router half of decision 0009: what a LAN tells the hosts behind it.
+///
+/// The prefix is a reference for the same reason the address was -- no config
+/// file can contain a block an ISP has not handed out yet.
+#[test]
+fn an_interface_can_advertise_a_delegated_prefix() {
+	let document = build_ok(
+		r#"
+		interface lan0 {
+			config = "@pd:wan0=::1/64"
+			advertise { prefixes = ["@pd:wan0"] }
+		}
+		"#,
+	);
+	let policy = document.interfaces[0]
+		.advertise
+		.as_ref()
+		.expect("an advertise block");
+	assert_eq!(policy.prefixes.len(), 1);
+	assert_eq!(policy.prefixes[0].source, "wan0");
+	// The defaults are the ones a LAN wants: no DHCPv6 server to send hosts to,
+	// and the nameservers this interface's scope carries go out with the RA.
+	assert!(!policy.managed);
+	assert!(!policy.other_config);
+	assert!(policy.dns);
+}
+
+/// A sub-prefix, for a router with more than one LAN behind one delegation.
+#[test]
+fn an_advertised_prefix_can_name_a_subnet() {
+	let document = build_ok(
+		r#"
+		interface lan1 {
+			config = "@pd:wan0/2=::1/64"
+			advertise { prefixes = ["@pd:wan0/2"]; managed = true; lifetime = 0 }
+		}
+		"#,
+	);
+	let policy = document.interfaces[0].advertise.as_ref().expect("a policy");
+	assert_eq!(policy.prefixes[0].subnet, 2);
+	assert!(policy.managed);
+	// Zero is a lifetime and means "not a default router", so it survives as a
+	// value rather than being read as "unset".
+	assert_eq!(policy.lifetime, Some(0));
+}
+
+/// A prefix that is not a reference is refused where the line is.
+///
+/// A literal would be a prefix somebody typed, which is the thing an ISP hands
+/// out and a config file cannot know.
+#[test]
+fn an_advertised_prefix_must_be_a_reference() {
+	let message = errors(r#"interface lan0 { advertise { prefixes = ["2001:db8::/64"] } }"#);
+	assert!(
+		message.contains("is not a prefix reference"),
+		"got {message}"
+	);
+}
+
+/// And a block with nothing to advertise is refused rather than starting a
+/// daemon that advertises a router and no prefix.
+#[test]
+fn an_advertise_block_needs_something_to_advertise() {
+	let message = errors("interface lan0 { advertise { managed = true } }");
+	assert!(
+		message.contains("needs a prefix to advertise"),
+		"got {message}"
+	);
+}

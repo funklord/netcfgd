@@ -5,8 +5,9 @@
 #
 # This is decision 0009's whole loop, which nothing had ever run end to end: the
 # document asks for a prefix, `odhcp6c` solicits one, the ISP delegates one, the
-# hook netcfgd generated reports it, and netcfgd derives an address on the LAN
-# from the `@pd:` reference. Every one of those steps was tested separately and
+# hook netcfgd generated reports it, netcfgd derives an address on the LAN from
+# the `@pd:` reference, and `radvd` advertises that prefix to a host which
+# configures itself from it without being asked. Every one of those steps was tested separately and
 # the joins between them were not -- which is how three separate defects in the
 # dhcpcd half survived for as long as they did (decision 0050).
 #
@@ -44,7 +45,7 @@ if [ -z "${NCFG_PD_NS:-}" ]; then
 	exec unshare -mn sh "$0" "$@"
 fi
 
-for tool in odhcp6c kea-dhcp6 ip; do
+for tool in odhcp6c kea-dhcp6 radvd ip; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		echo "delegation.sh: skipping: no $tool (see the header for odhcp6c)"
 		exit 0
@@ -82,10 +83,25 @@ check() {
 
 ip link set lo up
 ip link add isp0 type veth peer name wan0
-ip link add lan0 type dummy
+# The LAN is a veth pair too, so there is something on it to be advertised
+# *at*: `host0` is an ordinary host with no netcfgd on it, which is the only
+# way to check that what radvd sends is something a kernel acts on.
+ip link add lan0 type veth peer name host0
 ip link set isp0 up
 ip link set wan0 up
 ip link set lan0 up
+ip link set host0 up
+# Before anything advertises. A host that has accept_ra switched on *after* the
+# first advertisement waits for the next unsolicited one, which radvd sends
+# sixteen seconds later -- long enough to look like a failure and short enough
+# to pass on a good day, which is the worst combination a test can have.
+sysctl -qw net.ipv6.conf.host0.accept_ra=1 >/dev/null 2>&1 || true
+# And it has to be a host. `accept_ra=1` means "accept unless this interface
+# forwards", so an environment that starts with forwarding on -- a container
+# usually does -- makes the kernel ignore every advertisement while `ip addr`
+# shows nothing to explain it. That cost an hour; `accept_ra=2` is the other
+# way to say it and says less about what this end is.
+sysctl -qw net.ipv6.conf.host0.forwarding=0 >/dev/null 2>&1 || true
 
 # Duplicate address detection has to finish before anything binds a link-local
 # address, or the bind fails with "Cannot assign requested address" on an
@@ -126,16 +142,26 @@ interface wan0 {
 }
 
 interface lan0 {
-	kind   = "dummy"
-	config = "@pd:wan0=::1/64"
+	config     = "@pd:wan0=::1/64"
+	forwarding = true
+	advertise { prefixes = ["@pd:wan0"] }
 }
 CONF
 
 "$ncfg" plan > "$work/plan.txt" 2>&1 || true
-# Before the lease: the address cannot be derived and the plan says what it is
-# waiting for rather than failing or inventing one.
-check "a reference with nothing behind it waits rather than failing" \
-	"$(grep -c 'delegat' "$work/plan.txt" || true)" "1"
+# Before the lease, *two* things are waiting on it and both say so rather than
+# failing or inventing a prefix: the address that would be derived from it, and
+# the advertisement that would carry it. The second one matters more than it
+# looks -- planning it early puts an action that must fail ahead of the DHCPv6
+# client whose lease it is waiting for, which stops the apply and means the
+# router never comes up at all. A tunnel taught that once already.
+check "the address waits for the delegation rather than failing" \
+	"$(grep -c 'waiting on a delegated prefix from wan0; nothing planned' "$work/plan.txt" \
+		|| true)" "1"
+check "and so does the advertisement, rather than being planned to fail" \
+	"$(grep -c 'before advertising' "$work/plan.txt" || true)" "1"
+check "so nothing is planned for the LAN at all yet" \
+	"$(grep -c 'backend.start lan0' "$work/plan.txt" || true)" "0"
 
 "$ncfg" apply > "$work/apply.txt" 2>&1 || true
 
@@ -174,6 +200,57 @@ check "and tagged it as its own, so it can be withdrawn again" \
 "$ncfg" plan > "$work/replan.txt" 2>&1 || true
 check "and the next plan has nothing to do" \
 	"$(grep -cE 'addr\.|route\.' "$work/replan.txt" || true)" "0"
+
+# ------------------------------------------------------------ advertising
+
+# The host end of the LAN, which is not netcfgd's and never hears from it. What
+# reaches it is a router advertisement, and what it does with one is the
+# kernel's business -- so this is the check that netcfgd asked radvd for
+# something a host acts on, rather than that a file has the right words in it.
+# A router solicitation, so the answer does not wait on radvd's own schedule:
+# the kernel sends one when an interface with accept_ra comes up, and radvd
+# answers a solicitation at once. Without this the test waits up to sixteen
+# seconds for the second unsolicited advertisement.
+ip link set host0 down
+ip link set host0 up
+waited=0
+while [ "$(ip -6 addr show host0 | grep -c '2001:db8:1234:' || true)" = "0" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 200 ] && break
+	sleep 0.1
+done
+check "a host on the LAN configured itself from the delegated prefix" \
+	"$(ip -6 addr show host0 | grep -c '2001:db8:1234:' || true)" "1"
+# SLAAC, which is what `AdvAutonomous on` buys: `proto kernel_ra` is the kernel
+# saying an advertisement is where this came from. Without `AdvAutonomous` the
+# host would treat the prefix as on-link and never take an address from it.
+#
+# The address is `2001:db8:1234:0:...` rather than `2001:db8:1234::...` -- the
+# host fills the bottom 64 bits in itself, which is the whole idea, and a grep
+# for the prefix with `::` in it matches nothing. That cost a wrong assertion
+# on a working feature.
+check "by autoconfiguration, which is what the prefix flags are for" \
+	"$(ip -6 addr show host0 | grep -c 'proto kernel_ra' || true)" "1"
+# And the router is its default gateway, which is the other half of an RA.
+check "and took netcfgd's router as its default route" \
+	"$(ip -6 route show default | grep -c 'dev host0' || true)" "1"
+
+if [ "$(ip -6 addr show host0 | grep -c '2001:db8:1234:' || true)" = "0" ]; then
+	echo "--- radvd said:"; cat "$work/run/radvd/lan0.log" 2>/dev/null || true
+	echo "--- netcfgd said:"; tail -10 "$work/apply2.txt" || true
+	echo "--- host0:"; ip -6 addr show host0
+	echo "--- lan0:"; ip -6 addr show lan0
+	echo "--- sysctl:"; sysctl net.ipv6.conf.host0.accept_ra net.ipv6.conf.host0.forwarding net.ipv6.conf.all.forwarding 2>&1
+	echo "--- config:"; cat "$work/run/radvd/lan0.conf" 2>/dev/null
+	echo "--- radvd running:"; ps ax | grep '[r]advd' | head -3
+fi
+
+# What netcfgd wrote, checked by the tool that reads it. `--configtest` is
+# radvd's own parser and needs no privileges, which is the same lever `ap.sh`
+# uses on hostapd.
+radvd --config "$work/run/radvd/lan0.conf" --configtest > "$work/configtest.txt" 2>&1 \
+	&& parsed=yes || parsed=no
+check "and radvd's own parser accepts what netcfgd wrote" "$parsed" "yes"
 
 # The lease going away takes the address with it. odhcp6c is stopped rather
 # than the lease being expired, which is the same thing from netcfgd's side: the

@@ -16,8 +16,9 @@ use netcfgd_model::device::{
 use netcfgd_model::dns::{DnsMode, RoutingDomain};
 use netcfgd_model::interface::{
 	BondConfig, BondMode, BridgeConfig, BridgeVlan, LinkSettings, MacvlanConfig, MacvlanMode,
-	PppoeConfig, QdiscKind, QdiscPolicy, Toggle, TunConfig, TunMode, TunnelConfig, TunnelKind,
-	VethConfig, VlanConfig, VlanProtocol, VrfConfig, VxlanConfig, WgPeer, WireGuardConfig,
+	PppoeConfig, QdiscKind, QdiscPolicy, RaBackend, RaPolicy, Toggle, TunConfig, TunMode,
+	TunnelConfig, TunnelKind, VethConfig, VlanConfig, VlanProtocol, VrfConfig, VxlanConfig, WgPeer,
+	WireGuardConfig,
 };
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
@@ -1774,6 +1775,7 @@ fn lower_interface(
 						interface.kind = kind;
 					}
 				}
+				"advertise" => interface.advertise = lower_advertise(inner, diags),
 				other => diags.push(Diagnostic::new(
 					inner.span,
 					format!("`{other}` is not valid inside `interface`"),
@@ -2120,6 +2122,120 @@ fn lower_vxlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> 
 /// netcfgd does not express what is in it, so every option somebody might want
 /// here already has a home in that file. A second place to say the same thing
 /// is how the two come to disagree.
+/// `advertise { }`: what this interface tells the hosts behind it.
+///
+/// The router half of decision 0009. A LAN addressed out of a delegated prefix
+/// has to advertise that prefix or nothing on it configures itself, and the
+/// prefix is a *reference* for the same reason the address was: no config file
+/// could contain a block an ISP has not handed out yet.
+///
+/// `prefixes` takes the `@pd:` spelling an address entry uses, minus the suffix
+/// -- `@pd:wan0` is the whole delegation, `@pd:wan0/2` its third sub-prefix.
+/// netcfgd does not send the advertisement; decision 0009 hands that to radvd
+/// or odhcpd, and `netcfgd-ra` renders what they read.
+fn lower_advertise(block: &Block, diags: &mut Diagnostics) -> Option<RaPolicy> {
+	let mut policy = RaPolicy {
+		backend: RaBackend::Auto,
+		prefixes: Vec::new(),
+		managed: false,
+		other_config: false,
+		dns: true,
+		lifetime: None,
+	};
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"backend" => match as_string(&assignment.value, diags).as_deref() {
+				Some("auto") => policy.backend = RaBackend::Auto,
+				Some("radvd") => policy.backend = RaBackend::Radvd,
+				Some("odhcpd") => policy.backend = RaBackend::Odhcpd,
+				Some(other) => {
+					diags.push(
+						Diagnostic::new(
+							assignment.span,
+							format!("`{other}` is not a router advertisement backend"),
+						)
+						.with_help("backends: auto, radvd, odhcpd"),
+					);
+					return None;
+				}
+				None => return None,
+			},
+			"prefixes" | "prefix" => {
+				let entries = split_value(&assignment.value, diags, |text, span| {
+					text.split_whitespace()
+						.map(|word| Spanned::new(word.to_owned(), span))
+						.collect()
+				});
+				for entry in entries {
+					let value = entry.node.as_str();
+					let Some(rest) = value.strip_prefix("@pd:") else {
+						diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{value}` is not a prefix reference"),
+							)
+							.with_help(
+								"a prefix to advertise is `@pd:wan0`, naming the interface \
+								 whose delegation it comes from -- never a prefix itself, \
+								 which no config file can know",
+							),
+						);
+						return None;
+					};
+					let (source, subnet) = match rest.split_once('/') {
+						Some((name, index)) => {
+							let Ok(subnet) = index.parse::<u16>() else {
+								diags.push(Diagnostic::new(
+									assignment.span,
+									format!("`{index}` is not a subnet number"),
+								));
+								return None;
+							};
+							(name, subnet)
+						}
+						None => (rest, 0),
+					};
+					policy.prefixes.push(PrefixRef {
+						source: source.to_owned(),
+						index: 0,
+						subnet,
+					});
+				}
+			}
+			// The two flags that send a host to a DHCPv6 server for the rest.
+			"managed" => policy.managed = as_bool(&assignment.value, diags).unwrap_or(false),
+			"other_config" | "other" => {
+				policy.other_config = as_bool(&assignment.value, diags).unwrap_or(false);
+			}
+			"dns" => policy.dns = as_bool(&assignment.value, diags).unwrap_or(true),
+			"lifetime" => policy.lifetime = as_u32(&assignment.value, diags),
+			other => diags.push(
+				Diagnostic::new(assignment.span, format!("unknown advertise key `{other}`"))
+					.with_help(
+						"an advertise block takes backend, prefixes, managed, \
+						 other_config, dns and lifetime",
+					),
+			),
+		}
+	}
+
+	if policy.prefixes.is_empty() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				"an `advertise` block needs a prefix to advertise",
+			)
+			.with_help("`prefixes = [\"@pd:wan0\"]` advertises what the ISP delegated to wan0"),
+		);
+		return None;
+	}
+	Some(policy)
+}
+
 fn lower_openvpn(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 	let mut config = None;
 	let mut username = None;
