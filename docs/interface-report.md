@@ -52,11 +52,40 @@ dns=8.8.8.8
 dns=2001:4860:4860::8888
 ```
 
+```
+# vpn0, connected 2026-08-02T09:14:55Z to vpn.example.com
+route=10.0.0.0/8 via 10.8.0.1
+route=192.168.44.0/24 via 10.8.0.1
+dns=10.0.0.53
+```
+
 | key | repeats | meaning |
 |---|---|---|
 | `address` | yes | An address the network assigned, in CIDR form. IPv4 or IPv6. |
 | `gateway` | yes | A next hop for a default route. IPv4 or IPv6; give both on a dual-stack link. |
 | `dns` | yes | A nameserver. IPv4 or IPv6. |
+| `route` | yes | A route the far end handed over: `<destination>`, optionally followed by `via <gateway>`. |
+
+A `route` line is spelled the way a `routes` line in a netcfgd config is, so
+that somebody reading a report and somebody reading a config are reading the
+same thing:
+
+```
+route=10.0.0.0/8 via 10.8.0.1     # through a next hop
+route=192.168.5.0/24              # out of this interface, no next hop
+route=default via 10.8.0.1        # the same thing `gateway=` says
+```
+
+Nothing else is accepted on the line. **A metric is netcfgd's**, not the
+reporter's: it comes from the interface's `preference` so that a tunnel and a
+wired link and a bearer can be ranked against each other by one number an
+operator wrote down. A `metric` in a `route` line does not override that and
+does not silently pass -- the whole line is skipped, because a route with a
+metric the writer thought it had chosen is worse than no route.
+
+`default`, `0.0.0.0/0` and `::/0` all mean the same route and all three are
+accepted. netcfgd stores one spelling for it, which is the one the kernel gives
+back.
 
 Rules, all of which a writer can follow without thinking hard:
 
@@ -104,6 +133,13 @@ interface was given -- a /30 or a /32 with the gateway elsewhere is the ordinary
 shape of a cellular link, and the kernel refuses such a route otherwise. It is
 withdrawn with the address when the report empties: a default route down a link
 that is gone black-holes traffic another interface would have carried.
+
+**`route=`** is installed the same way, with the same metric and the same
+withdrawal. It is `onlink` when the line names a next hop and an ordinary device
+route when it does not. Nothing about it is a special case: a reported route
+goes through the same planner path a route out of the config file does, so the
+carrier check that stops a dead link keeping a route, the ordering that puts
+`addr.add` first, and the teardown all apply to it unchanged.
 
 **`dns=`** is delivered, when the host manages DNS at all. The reported servers
 join the interface's DNS scope, after any the document wrote for it -- so a

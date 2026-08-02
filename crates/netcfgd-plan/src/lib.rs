@@ -2671,7 +2671,10 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 /// The routes a report implies for one interface.
 ///
 /// A default route per reported gateway -- two of them on a dual-stack bearer,
-/// which is why the report's `gateway` key repeats.
+/// which is why the report's `gateway` key repeats -- plus whatever the report
+/// names outright. A cellular bearer usually names none, because it gives a way
+/// off the link rather than a topology; a VPN server routinely pushes a handful,
+/// and decision 0047 makes those netcfgd's to install rather than the daemon's.
 ///
 /// **Synthesised into [`Route`] rather than planned separately**, so they go
 /// through the same path every other route does: the carrier check that stops a
@@ -2693,10 +2696,40 @@ fn reported_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
 	{
 		return Vec::new();
 	}
-	observed
-		.reports
-		.iter()
-		.filter(|report| report.interface == interface.name)
+	let reports = || {
+		observed
+			.reports
+			.iter()
+			.filter(|report| report.interface == interface.name)
+	};
+	let named = reports()
+		.flat_map(|report| report.routes.iter())
+		.filter_map(|route| -> Option<Route> {
+			// A destination that is not a destination is skipped rather than
+			// refused, which is the contract's rule for every other malformed
+			// value: one bad line does not discard a report that also carried
+			// six good ones.
+			let destination = normalize_destination(&route.destination)?;
+			let via = match &route.via {
+				Some(text) => Some(text.parse::<std::net::IpAddr>().ok()?),
+				None => None,
+			};
+			Some(Route {
+				destination,
+				via,
+				metric: None,
+				table: None,
+				src: None,
+				scope: None,
+				// Only where there is a next hop to reach. `onlink` on a route
+				// with no gateway means nothing, and the reason for it here is
+				// the same as below: what a tunnel or a bearer hands over is
+				// routinely outside every address it also handed over.
+				onlink: via.is_some(),
+				proto: None,
+			})
+		});
+	reports()
 		.flat_map(|report| report.gateways.iter())
 		.filter_map(|gateway| {
 			let via: std::net::IpAddr = gateway.parse().ok()?;
@@ -2734,7 +2767,34 @@ fn reported_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
 				proto: None,
 			})
 		})
+		.chain(named)
 		.collect()
+}
+
+/// A reported destination in the one spelling netcfgd uses for it.
+///
+/// `default`, `0.0.0.0/0` and `::/0` all mean the same route and a writer may
+/// send any of them -- `openvpn` says `0.0.0.0/0`, a person says `default`. The
+/// kernel reports every one of them as no destination at all, so they have to
+/// arrive here as one word or the comparison against the observation fails and
+/// the route is added and deleted on every reconcile. The commit before this one
+/// paid for that lesson with the v6 half of a reported gateway.
+///
+/// Anything else is passed through as text and validated where it is used, which
+/// is the rule the rest of a report follows.
+fn normalize_destination(destination: &str) -> Option<String> {
+	let text = destination.trim();
+	if text.is_empty() {
+		return None;
+	}
+	if matches!(text, "default" | "0.0.0.0/0" | "::/0") {
+		return Some("default".to_owned());
+	}
+	// A route destination that is not a prefix is a line netcfgd cannot install
+	// and would otherwise carry all the way to a netlink refusal, where the
+	// operator cannot see which file it came from.
+	net::parse_cidr(text)?;
+	Some(text.to_owned())
 }
 
 /// A route with the interface's preference filled in as its metric.
