@@ -381,6 +381,10 @@ fn publish(
 			device::Flavour::Wired => {
 				server.at(&path, device::Wired::new(Arc::clone(state), name.clone()))
 			}
+			device::Flavour::WireGuard => server.at(
+				&path,
+				device::WireGuard::new(Arc::clone(state), name.clone()),
+			),
 			device::Flavour::Generic => {
 				server.at(&path, device::Generic::new(Arc::clone(state), name.clone()))
 			}

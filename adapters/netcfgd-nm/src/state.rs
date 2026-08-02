@@ -172,6 +172,16 @@ fn profiles_of(document: &Document) -> Vec<crate::settings::Profile> {
 				// client's connection list that cannot be activated and is not
 				// an ethernet.
 				.filter(|interface| !is_radio_in(document, &interface.name))
+				// And a tunnel is not one either, by the same sentence read
+				// twice. NM's own profile for a WireGuard device carries the
+				// peers and the private key, which is a shape this shim will
+				// not project (0029 keeps secrets from travelling, 0036 keeps
+				// VPN out of NM's interfaces) -- so the honest offer is none.
+				// The *device* is projected in full and says what it is; what
+				// is missing is a profile pretending to configure it.
+				.filter(|interface| {
+					!matches!(interface.kind, netcfgd_model::InterfaceKind::WireGuard(_))
+				})
 				.map(|interface| crate::settings::Profile::Interface(Box::new(interface.clone()))),
 		)
 		.collect()
