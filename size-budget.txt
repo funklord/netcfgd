@@ -254,4 +254,8 @@ netcfgd
 # the options-file lines that point pppd at them. Small because everything else
 # it needed already existed -- the reporting contract, its reader, and the rule
 # that decides whether a reported nameserver is delivered.
-total 1993240
+# +4 KB for the DHCPv6 client decision: the refusal message that names why
+# dhcpcd cannot report a delegated prefix, and the per-interface lookup that
+# decides whether a prefix was asked for at all. Mostly the message, which is
+# the point of it -- a lease that goes nowhere is the failure it prevents.
+total 1997336
