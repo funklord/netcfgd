@@ -327,6 +327,7 @@ fn started_backend(
 			channel: point.channel,
 		}),
 		secret_matches: access_point.map(|_| true),
+		config_matches: None,
 		advertised: Vec::new(),
 	}
 }
@@ -784,6 +785,7 @@ fn a_lease_address_is_left_to_its_backend() {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 	// The lease produced this, and it is tagged as ours.
@@ -815,6 +817,7 @@ fn removing_dhcp_stops_the_backend() {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1179,6 +1182,7 @@ fn removing_dot1x_stops_the_supplicant() {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1365,6 +1369,7 @@ fn a_running_tunnel_is_left_alone() {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut observed);
@@ -1390,6 +1395,7 @@ fn a_tunnel_stops_when_its_block_goes() {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -1814,6 +1820,7 @@ access_point "after" {
 			channel: None,
 		}),
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1828,6 +1835,63 @@ access_point "after" {
 		"got {:?}",
 		plan.warnings
 	);
+}
+
+/// An edited `.ovpn` restarts the tunnel, and netcfgd never read the file.
+///
+/// The last of the stale-configuration questions (decision 0053). What the
+/// planner sees is a boolean the observer computed from two hashes; the file
+/// stays the operator's, which is what 0046 protects.
+#[test]
+fn an_edited_ovpn_restarts_the_tunnel() {
+	let desired = document(r#"interface vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }"#);
+	let mut observed = observed_with(&["vpn0"]);
+	observed.links[0].up = true;
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::OpenVpn,
+		interface: "vpn0".to_owned(),
+		running: true,
+		access_control: None,
+		started_with: None,
+		secret_matches: None,
+		config_matches: Some(false),
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(names(&plan), ["backend.stop", "backend.start"]);
+	assert_eq!(plan.actions[0].reason.field, "openvpn.config");
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("drops it")),
+		"got {:?}",
+		plan.warnings
+	);
+}
+
+/// And a tunnel running the file the document names is left alone -- including
+/// when netcfgd could not check, which is not the same as a difference.
+#[test]
+fn a_tunnel_whose_file_is_unchanged_or_unreadable_is_left_alone() {
+	let desired = document(r#"interface vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }"#);
+	for answer in [Some(true), None] {
+		let mut observed = observed_with(&["vpn0"]);
+		observed.links[0].up = true;
+		observed.backends.push(netcfgd_model::ObservedBackend {
+			kind: netcfgd_model::BackendKind::OpenVpn,
+			interface: "vpn0".to_owned(),
+			running: true,
+			access_control: None,
+			started_with: None,
+			secret_matches: None,
+			config_matches: answer,
+			advertised: Vec::new(),
+		});
+
+		let plan = plan(&desired, &observed, &PlanOptions::default());
+		assert!(plan.actions.is_empty(), "{answer:?} got {:?}", names(&plan));
+	}
 }
 
 /// An edited passphrase restarts it too, without the value going anywhere.
@@ -1862,6 +1926,7 @@ access_point "home" {
 			channel: None,
 		}),
 		secret_matches: Some(false),
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1899,6 +1964,7 @@ access_point "home" {
 			channel: None,
 		}),
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1936,6 +2002,7 @@ access_point "home" {
 			channel: Some(6),
 		}),
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -1976,6 +2043,7 @@ interface lan0 {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	// And the address it derived from the new one, so the only thing left to
@@ -2021,6 +2089,7 @@ interface lan0 {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	observed.addresses.push(netcfgd_model::ObservedAddress {
@@ -2474,6 +2543,7 @@ interface wg0 {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 
@@ -2538,6 +2608,7 @@ fn running_access_point(
 		}),
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 }
@@ -2747,6 +2818,7 @@ fn an_unreachable_access_point_is_not_converged_against() {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut unreachable);
@@ -2781,6 +2853,7 @@ fn an_access_point_stops_when_its_block_goes() {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -2874,6 +2947,7 @@ interface wlan0 { config = "null" }
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -3406,6 +3480,7 @@ interface ppp0 {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 

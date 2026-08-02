@@ -370,6 +370,7 @@ impl OwnedState {
 					access_control: None,
 					started_with: None,
 					secret_matches: None,
+					config_matches: None,
 					advertised: Vec::new(),
 				});
 			}

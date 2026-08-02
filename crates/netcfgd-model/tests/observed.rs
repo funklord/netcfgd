@@ -313,6 +313,7 @@ fn backends(observed: &mut Observed) {
 			access_control: None,
 			started_with: None,
 			secret_matches: None,
+			config_matches: None,
 			advertised: Vec::new(),
 		});
 	}
@@ -328,6 +329,7 @@ fn backends(observed: &mut Observed) {
 			}),
 			started_with: None,
 			secret_matches: None,
+			config_matches: None,
 			advertised: Vec::new(),
 		});
 	}
@@ -340,12 +342,25 @@ fn backends(observed: &mut Observed) {
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
+		config_matches: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	// And the identity an access point was started with, which is the other
 	// half of the same question (decision 0052). Sampled on its own backend
 	// rather than beside the ACL, because the two are read from different
 	// places -- one from a control socket, one from the file netcfgd wrote.
+	// A tunnel, carrying the other boolean: whether the `.ovpn` it was started
+	// from is still that file (decision 0053).
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::OpenVpn,
+		interface: "vpn0".to_owned(),
+		running: true,
+		access_control: None,
+		started_with: None,
+		secret_matches: None,
+		config_matches: Some(false),
+		advertised: Vec::new(),
+	});
 	observed.backends.push(ObservedBackend {
 		kind: BackendKind::AccessPoint,
 		interface: "wlan9".to_owned(),
@@ -359,6 +374,7 @@ fn backends(observed: &mut Observed) {
 		// The answer to a question about a secret, which is the only form a
 		// secret takes in an observation (decision 0052).
 		secret_matches: Some(true),
+		config_matches: None,
 		advertised: Vec::new(),
 	});
 }

@@ -36,6 +36,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	read_access_control(observed, run_dir);
 	read_advertised(observed, run_dir);
 	read_secret_currency(observed, run_dir, desired);
+	read_tunnel_currency(observed, run_dir, desired);
 	read_wireguard_keys(observed);
 }
 
@@ -158,6 +159,47 @@ fn read_secret_currency(
 			.map(str::trim)
 			.find_map(|line| line.strip_prefix("wpa_passphrase="));
 		backend.secret_matches = started.map(|started| started == wanted.expose());
+	}
+}
+
+/// Whether a running tunnel's `.ovpn` is still the one it was started from.
+///
+/// netcfgd does not read that file for meaning -- decision 0046 is emphatic and
+/// this does not weaken it -- but it hashes it, which is exactly what a hook's
+/// `sha256` does for a script netcfgd equally does not interpret (section 2.2).
+/// The comparison is here rather than in the planner for the reason the
+/// passphrase's is: a pure planner may not read files, and only the answer
+/// needs to travel.
+fn read_tunnel_currency(
+	observed: &mut Observed,
+	run_dir: &Path,
+	desired: Option<&netcfgd_model::Document>,
+) {
+	let Some(document) = desired else {
+		return;
+	};
+	for backend in &mut observed.backends {
+		if backend.kind != netcfgd_model::BackendKind::OpenVpn || !backend.running {
+			continue;
+		}
+		let Some(config) = document.interfaces.iter().find_map(|interface| {
+			match (&interface.kind, interface.name == backend.interface) {
+				(netcfgd_model::InterfaceKind::OpenVpn(tunnel), true) => Some(&tunnel.config),
+				_ => None,
+			}
+		}) else {
+			continue;
+		};
+		let Ok(recorded) = fs::read_to_string(netcfgd_openvpn::config_hash_path(
+			run_dir,
+			&backend.interface,
+		)) else {
+			// Started by a netcfgd too old to write the record, or a `/run`
+			// cleared underneath a running tunnel. Nothing may be concluded.
+			continue;
+		};
+		backend.config_matches =
+			netcfgd_openvpn::hash_of(config).map(|current| current == recorded.trim());
 	}
 }
 
