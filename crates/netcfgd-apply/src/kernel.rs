@@ -279,6 +279,82 @@ impl KernelExecutor {
 		Ok(())
 	}
 
+	/// Hang up the `PPPoE` session netcfgd dialled.
+	///
+	/// Until this existed, netcfgd could dial and not hang up: `stop_backend`
+	/// answered "not implemented in this build", so deleting the block from the
+	/// config failed the apply and left `pppd` holding the line -- with
+	/// `persist` and `maxfail 0` in its options file, forever. Found by dialling
+	/// a real session against a real access concentrator, which is the first
+	/// thing here that ever could have found it.
+	///
+	/// **`pppd` has no control socket**, which is what every other daemon here
+	/// is stopped through (decision 0014). What it has is a pid file it writes
+	/// itself, named for the interface. That is a record of this session rather
+	/// than a search for something that looks like one -- but a pid file
+	/// outlives the process it names and pids are recycled, so the pid is
+	/// checked against `/proc/<pid>/cmdline` before anything is signalled: it
+	/// has to be a `pppd` running *the options file netcfgd wrote for this
+	/// interface*. An operator's own `pppd` cannot match that, which is a
+	/// stronger claim than "not by name" rather than an approximation of it.
+	fn stop_pppoe(&self, iface: &str) -> Result<(), String> {
+		// The report first, and whether or not anything is listening: it is a
+		// claim about resolvers that a session is providing, and the session is
+		// going either way. pppd's own ip-down script may write an empty one
+		// afterwards, which means the same thing.
+		let _ = std::fs::remove_file(report_path(&self.run_dir, iface));
+
+		let Some((pid, path)) = Self::pppd_pid(iface) else {
+			// Nothing netcfgd can identify as its own is running, which is the
+			// state this was asked to produce. Deliberately not an error: an
+			// apply that has already been run once, or a session that died on
+			// its own, both land here.
+			return Ok(());
+		};
+		netcfgd_sys::process::terminate(pid).map_err(|error| {
+			format!("could not stop the pppoe session on {iface} (pid {pid} from {path}): {error}")
+		})
+	}
+
+	/// The pid of the `pppd` netcfgd started for this interface, if it is
+	/// running.
+	///
+	/// The directory is not fixed. Debian's `pppd` 2.5.2 writes `/run/ppp0.pid`
+	/// and upstream's default is `${runstatedir}/pppd/`, so both are looked in
+	/// rather than one being hardcoded -- a wrong guess here would silently stop
+	/// nothing.
+	fn pppd_pid(iface: &str) -> Option<(i32, String)> {
+		let options = run_dir_path().join("ppp").join(iface);
+		let options = options.to_string_lossy().into_owned();
+		for dir in ["/run", "/run/pppd", "/var/run", "/var/run/pppd"] {
+			let path = std::path::Path::new(dir).join(format!("{iface}.pid"));
+			let Ok(text) = std::fs::read_to_string(&path) else {
+				continue;
+			};
+			let Ok(pid) = text
+				.trim()
+				.lines()
+				.next()
+				.unwrap_or_default()
+				.parse::<i32>()
+			else {
+				continue;
+			};
+			// The ownership check. `cmdline` is NUL-separated, so the options
+			// path is a whole argument in it and cannot match by accident.
+			let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+				continue;
+			};
+			if cmdline
+				.split(|byte| *byte == 0)
+				.any(|argument| argument == options.as_bytes())
+			{
+				return Some((pid, path.display().to_string()));
+			}
+		}
+		None
+	}
+
 	/// Start the `OpenVPN` tunnel the document puts on this interface.
 	///
 	/// netcfgd hands over the operator's `.ovpn` and reads none of it (decision
@@ -737,6 +813,11 @@ impl Executor for KernelExecutor {
 				station,
 			} => netcfgd_hostapd::acl::remove(&self.run_dir, iface, *list, station),
 			Op::BackendStop { kind, iface } => {
+				if *kind == netcfgd_model::BackendKind::Pppoe {
+					self.stop_pppoe(iface)?;
+					self.effects.stopped_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
 				if *kind == netcfgd_model::BackendKind::OpenVpn {
 					// Through its own management socket, never by signalling a
 					// process found by name: an operator's own OpenVPN tunnels
