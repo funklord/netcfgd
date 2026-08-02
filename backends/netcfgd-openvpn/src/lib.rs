@@ -54,6 +54,29 @@ pub fn log_path(run: &Path, iface: &str) -> PathBuf {
 	run_dir(run).join(format!("{iface}.log"))
 }
 
+/// Where netcfgd records the `.ovpn` it started this tunnel from.
+///
+/// A hash, not a copy. The file is the operator's and netcfgd does not read it
+/// for meaning (decision 0046) -- but it can notice that it changed, which is
+/// the same thing a hook's `sha256` does for a script netcfgd equally does not
+/// interpret (section 2.2). Decision 0053 has the argument.
+#[must_use]
+pub fn config_hash_path(run: &Path, iface: &str) -> PathBuf {
+	run_dir(run).join(format!("{iface}.ovpn.sha256"))
+}
+
+/// The hash of a `.ovpn`, as netcfgd records and compares it.
+///
+/// `None` where the file cannot be read at all, which is the honest answer:
+/// "the operator's file is not there" is a different statement from "it
+/// changed", and only one of them is a reason to restart a working tunnel.
+#[must_use]
+pub fn hash_of(config: &str) -> Option<String> {
+	std::fs::read(config)
+		.ok()
+		.map(|bytes| netcfgd_model::hash::sha256_hex(&bytes))
+}
+
 /// The script `OpenVPN` calls to say what it negotiated.
 ///
 /// Generated rather than installed, for the same reason a hook is materialised
@@ -441,6 +464,15 @@ pub fn start(
 		.status()
 		.map_err(|error| format!("could not run {}: {error}", program.display()))?;
 
+	// What the tunnel was started from, so that an edited `.ovpn` is something
+	// the next reconcile can notice. Written after the daemon took it, because
+	// a hash of a file openvpn refused is a record of nothing.
+	if status.success() {
+		if let Some(hash) = hash_of(config) {
+			let _ = std::fs::write(config_hash_path(run, iface), hash);
+		}
+	}
+
 	if !status.success() {
 		return Err(format!(
 			"openvpn would not start on {iface}: {}. Its output is in {}",
@@ -469,6 +501,9 @@ pub fn stop(run: &Path, iface: &str, report: &Path) -> Result<(), String> {
 	// race with no wrong outcome: gone and empty both mean no routes, and the
 	// contract gives them both that meaning deliberately.
 	let _ = std::fs::remove_file(report);
+	// And the record of which `.ovpn` this was started from, which describes a
+	// tunnel that is no longer running.
+	let _ = std::fs::remove_file(config_hash_path(run, iface));
 	// The script itself stays. It is regenerated on every start, it does
 	// nothing unless openvpn runs it, and removing it here would pull it out
 	// from under the `--down` call that has not happened yet -- which openvpn

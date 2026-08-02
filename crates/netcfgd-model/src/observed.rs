@@ -431,6 +431,22 @@ pub struct ObservedBackend {
 	/// check" is not a reason to.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub secret_matches: Option<bool>,
+	/// Whether a running tunnel's configuration file is still the one it was
+	/// started from.
+	///
+	/// The same shape as [`ObservedBackend::secret_matches`] and for the same
+	/// reason: the comparison needs a file the planner may not read, so it is
+	/// made where the file is and only the answer travels. netcfgd hashes the
+	/// `.ovpn` it started a tunnel from and hashes it again on the next
+	/// observation -- it never reads the file for meaning, which is what
+	/// decision 0046 protects, and a hook's `sha256` is the same trick on a
+	/// script netcfgd equally does not interpret.
+	///
+	/// `None` means netcfgd could not tell: no record, or a file it could not
+	/// read. Restarting a working tunnel on that would be a VPN dropped for a
+	/// question nobody answered.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub config_matches: Option<bool>,
 	/// The prefixes a running router advertisement daemon was last given.
 	///
 	/// Only ever present for [`BackendKind::RouterAdvert`], and read from the

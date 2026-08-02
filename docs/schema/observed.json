@@ -285,6 +285,12 @@
       ]
     },
     {
+      "kind": "open_vpn",
+      "interface": "vpn0",
+      "running": true,
+      "config_matches": false
+    },
+    {
       "kind": "access_point",
       "interface": "wlan9",
       "running": true,
