@@ -540,6 +540,10 @@ live:
 	@# under NCFG_LIVE and not under unshare: it does its own namespace, and a
 	@# machine that cannot run it should get a skip rather than a failure.
 	@sh tests/live/hwsim.sh
+	@# A real PPPoE session, same bucket: /dev/ppp is root-only and the rp-pppoe
+	@# plugin opens it as it loads, so an unprivileged machine cannot dial. It
+	@# makes its own namespaces too, and skips rather than fails without root.
+	@sh tests/live/pppoe-session.sh
 
 fuzz:
 	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \
