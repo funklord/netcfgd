@@ -516,6 +516,10 @@ live:
 	@# Deliberately not under NCFG_LIVE: it needs the `wireguard` module, which
 	@# a kernel may simply not have -- and nothing else in netcfgd does.
 	@unshare -rn sh -c "sh tests/live/strand.sh"
+	@# The same module, plus `wg` itself as the reference tool -- reading the
+	@# state back through netcfgd would only prove netcfgd agrees with itself.
+	@# The script's header says how to get `wg` without installing it.
+	@unshare -rn sh -c "sh tests/live/wireguard.sh"
 	@# The only python test. A TUI needs a pty to say anything about, and
 	@# script(1) cannot drive input reliably; see the file's own header.
 	@if command -v python3 >/dev/null 2>&1; then \
