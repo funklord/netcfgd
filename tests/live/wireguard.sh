@@ -167,6 +167,41 @@ check "and the one it no longer names is gone" \
 check "and the next plan has nothing to do" \
 	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
 
+# ------------------------------------------------------- rotate the key
+#
+# The other half of a revocation. An operator who replaces the private key has
+# rekeyed the tunnel in their own mind; the kernel goes on using the key it was
+# handed, and every peer goes on accepting it. netcfgd cannot derive a public
+# key from a private one -- that is curve25519 -- so it compares a digest of
+# what it loaded against a digest of what the store holds, which is decision
+# 0053's answer to the same question about a file.
+
+before_key=$(wg show wg0 public-key)
+head -c 32 /dev/urandom | base64 > "$work/etc/secrets/wg0"
+plan=$("$ncfg" plan 2>&1 || true)
+contains "a rotated private key is planned" "$plan" "wireguard.private_key"
+# And says which way it went without printing either key, which is the whole
+# reason the comparison happens in the observer.
+check "and names no key while doing it" \
+	"$(printf '%s' "$plan" | grep -c "$(cat "$work/etc/secrets/wg0")" || true)" "0"
+
+"$ncfg" apply > "$work/apply4.txt" 2>&1 || { cat "$work/apply4.txt" >&2; exit 1; }
+after_key=$(wg show wg0 public-key)
+check "the kernel derived a different public key afterwards" \
+	"$([ "$before_key" != "$after_key" ] && echo changed || echo same)" "changed"
+check "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+# The record is netcfgd's own, and it is a digest rather than a key. A test
+# that only checked the behaviour would not notice the day somebody makes this
+# file the key itself.
+check "what netcfgd wrote down is a digest, not the secret" \
+	"$(grep -c "$(cat "$work/etc/secrets/wg0")" "$work/run/wireguard/wg0.key.sha256" || true)" "0"
+check "and it is 64 hex characters" \
+	"$(tr -d '\n' < "$work/run/wireguard/wg0.key.sha256" | grep -c '^[0-9a-f]\{64\}$' || true)" "1"
+check "readable by nobody else" \
+	"$(stat -c '%a' "$work/run/wireguard/wg0.key.sha256")" "600"
+
 # ------------------------------------------------- an unchanged device is quiet
 #
 # The check that would have caught a comparison that always differs -- which is
