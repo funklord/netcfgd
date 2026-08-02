@@ -279,4 +279,9 @@ netcfgd
 # read back from the file netcfgd wrote, the comparison in the planner, and the
 # restart with the warning about what it costs. The same shape as the
 # advertisement one commit earlier, which is why it is half the price.
-total 2042392
+# +8 KB for `ncfg explain` catching up with what the reconciler learned this
+# session: the indirection behind a delegated address, and the three facts about
+# a running backend that the file netcfgd wrote is the only account of. The
+# command whose whole job is "why is it like this" was the last thing that could
+# not say why an access point restarted.
+total 2050584
