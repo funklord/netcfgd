@@ -571,9 +571,10 @@ Changing any of the above is a convention change: raise it rather than adjusting
 
 **Prove every new gate can fail.** Break the thing it guards, watch the named check go red, restore. This has caught a long run of checks that passed for the wrong reason: a `make packaging` check that matched nothing, an unsafe-policy gate that globbed half the tree, a `rows <= 24` assertion that could not fail, a "foreign NAT rule survived" check that passed because the *kernel* refused the delete rather than the planner, and a `tui.py` assertion that pressing `w` shows "no scan" — which passed for as long as the pane existed, because the pane read a field name the daemon has never sent. A gate nobody has seen fail is not evidence.
 
-Six corollaries, every one of them paid for. The first two were here before this
-session; the rest are the same disease in disguises that took a while to
-recognise, which is why they are written out separately rather than merged:
+Five corollaries, every one of them paid for, and every one the same disease in
+a disguise that took a while to recognise -- which is why they are written out
+separately rather than merged. A sixth is in section 10, because it is about
+what a witness catches rather than about what a test does.
 
 - **A check expecting "nothing there" is satisfied by the feature being broken.** Whenever a check asserts an empty or negative state, ask what makes the populated case appear at all, and assert that instead.
 - **Watch for a check that passes because of a different protection than the one under test.** Breaking the `InQueue` arm of the NM shim's bus-name claim changed nothing, because `DoNotQueue` makes the refusal arrive as an `Err`.
@@ -644,60 +645,179 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
+Last rewritten after the session that closed the M4 freeze's last inert feature;
+what follows is organised by subject, not by the order it was built in.
 
-M1–M6 are done. M7's NetworkManager shim has tiers 1 and 2 complete and tier 3 bounded rather than built — and **tier 3 bounds the shim, not netcfgd** ([0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md)), which is the single easiest thing in this repository to misread. VPN, modems and complete wifi are wanted in netcfgd and will simply not be projected through NM's interfaces.
+**Milestones.** M1–M6 are done. M7's NetworkManager shim has tiers 1 and 2
+complete and tier 3 bounded rather than built — and **tier 3 bounds the shim,
+not netcfgd** ([0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md)),
+which is the single easiest thing in this repository to misread. VPN, modems and
+complete wifi are wanted in netcfgd and will simply not be projected through
+NM's interfaces.
 
-The M4 freeze's four inert features are all closed. Access points now go further than the freeze described: a station list ([0039](docs/decisions/0039-a-station-list-is-one-list.md)), the live client list that makes it usable ([0040](docs/decisions/0040-a-station-list-needs-a-station-list.md)), and the convergence that makes an edit to that list reach a running hostapd without deauthenticating everybody ([0041](docs/decisions/0041-a-station-list-converges-over-the-control-socket.md)). That last one is the first observation netcfgd takes by *asking another process* rather than reading the kernel or its own `/run`, which is a seam worth knowing about before the next backend wants one.
+**The M4 freeze's inert features are all closed**, router advertisement last.
+Everything the model carried and nothing implemented now has an implementation
+and a test that ran against the real daemon.
 
-Walking away from a device is now decided rather than defaulted: `managed = false` on a device holding a **WireGuard private key** stops an apply with its own exit code until the operator says which they meant ([0042](docs/decisions/0042-only-a-key-nobody-can-revoke-stops-a-plan.md)). That closes 0037's open question, and narrows it — 0037 named three credentials and only one passes the test, which is *irrevocable from this host* **and** *the operator's choice can change the outcome*. A supplicant's passphrases fail the second half: the same secret is in the secrets directory whichever policy is picked.
+#### The reporting contract
 
-**Cellular works end to end, and nothing in it is netcfgd's protocol.** A helper connects the bearer and writes what the network gave it to `/run/netcfgd/reported/<interface>`; netcfgd installs the addresses, the default route and the nameservers, and withdraws them when the report empties. `docs/interface-report.md` is the contract and is written for somebody who has never read this source, because [0045](docs/decisions/0045-the-contract-is-the-decision-and-the-helper-is-plural.md) makes the helper deliberately plural — `helpers/netcfgd-modem-mbim` is a reference, not a blessed one, and `umbim` on OpenWrt or ModemManager over D-Bus are equally valid writers. netcfgd never speaks MBIM, QMI or D-Bus itself ([0044](docs/decisions/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)).
+`/run/netcfgd/reported/<interface>`, `key=value` lines, documented for somebody
+who has never read this source in
+[docs/interface-report.md](docs/interface-report.md). Something that is not
+netcfgd brings an interface up and writes down what the far end gave it;
+netcfgd reads that file and treats it as it treats a lease. It is not a modem's,
+though a modem helper wrote the first one — the name came off the path, the
+document, the model variant and the config word together, because doing half of
+it leaves two names for one idea
+([0047](docs/decisions/0047-a-tunnels-address-stays-with-its-daemon.md)).
 
-**OpenVPN tunnels run, netcfgd never reads the `.ovpn`, and the routes are netcfgd's.** `openvpn --help` lists 253 top-level options against hostapd's couple of dozen, so the file stays the operator's and netcfgd owns the lifecycle instead — start, stop through the daemon's own management socket, credentials from the secret store, and the daemon's own words quoted when it will not start ([0046](docs/decisions/0046-the-ovpn-file-is-the-operators.md)). The tunnel's *address* stays with the daemon as a DHCP lease's already does; its *routes* are the contested half and are now taken ([0047](docs/decisions/0047-a-tunnels-address-stays-with-its-daemon.md), [0048](docs/decisions/0048-a-tunnels-routes-arrive-through-the-report.md)): `--route-noexec` plus a generated `--route-up` script that writes the report, and a metric from `preference` so a tunnel can be ranked against a wired link.
+Four keys: `address`, `gateway`, `route`, `dns`. There will not be one for a
+routing domain
+([0049](docs/decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)):
+a resolver is information netcfgd could not have had, and *which names use it*
+is a decision about where every query on the machine goes, which a remote server
+does not get to make by connecting.
 
-**The reporting contract is no longer a modem's**, in every place at once — path, document, model variant and config word. A tunnel reports through it, which is what 0047 said would make the old name start actively misleading somebody. A report is believed when the document asks for `reported` addressing *or* when netcfgd started the writer, and a tunnel is the second: netcfgd generated the script and launched the process that runs it.
+**Two gates, and they differ on purpose.** A route is installed when the
+document asks for `reported` addressing *or* when netcfgd started the writer —
+a tunnel reports through a script netcfgd generated, run by a process netcfgd
+started. A **nameserver** needs more: the addressing must come from the report,
+or the interface must have a `dns` block. A route down a tunnel goes down that
+tunnel; a nameserver changes where names resolve for the whole machine. Anyone
+finding the two disagreeing should read 0049 before making them agree.
 
-**What openvpn will not tell you is written down rather than worked around.** `redirect-gateway` for IPv4 leaves no trace in a `--route-up` script's environment, and the IPv6 half does — measured both ways against a real openvpn 2.6.14 in a namespace. The local answer is `routes = "default"` in the document, and `tests/live/tunnel.sh` checks that recommendation rather than leaving it as advice.
+#### What netcfgd runs, and what it leaves alone
 
-**Everything netcfgd starts is now compared to what the document says**, the operator's `.ovpn` included ([0053](docs/decisions/0053-a-file-netcfgd-does-not-read-can-still-be-hashed.md)). netcfgd still never reads that file — it hashes it, which is precisely what a hook's `sha256` does to a script netcfgd equally does not interpret, and an edited one restarts the tunnel with a warning that it drops. Reading bytes to hash them is not reading a configuration, and [0046](docs/decisions/0046-the-ovpn-file-is-the-operators.md) is untouched.
+**Cellular** works end to end and nothing in it is netcfgd's protocol: a helper
+connects the bearer and writes a report, netcfgd installs what it says and
+withdraws it when the report empties. The helper is deliberately plural
+([0045](docs/decisions/0045-the-contract-is-the-decision-and-the-helper-is-plural.md))
+— `helpers/netcfgd-modem-mbim` is a reference, and `umbim` or ModemManager are
+equally valid writers. netcfgd never speaks MBIM, QMI or D-Bus
+([0044](docs/decisions/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)).
+Nothing here has met hardware.
 
-**An edited passphrase is noticed too, and no secret travels to notice it.** The comparison happens in the observer, where the resolved value and the file netcfgd generated are both already in hand; what reaches the model is `secret_matches`, a boolean of the shape `private_key_loaded` already has. `None` is not `false` — no document, no secret, an unreadable file all mean "could not check", and nothing deauthenticates a LAN on that.
+**An OpenVPN tunnel**: netcfgd owns the lifecycle and never reads the `.ovpn`
+([0046](docs/decisions/0046-the-ovpn-file-is-the-operators.md)) — 253 top-level
+options against hostapd's couple of dozen, and a file an operator is *given*
+rather than a rendering of an intent netcfgd holds. The address stays with the
+daemon as a DHCP lease's does; the **routes** are netcfgd's, through
+`--route-noexec` and a generated `--route-up` script, with a metric from
+`preference` so a tunnel can be ranked against a wired link
+([0048](docs/decisions/0048-a-tunnels-routes-arrive-through-the-report.md)). The
+one thing openvpn will not report is IPv4 `redirect-gateway`; the local answer
+is `routes = "default"` in the document, and `tests/live/tunnel.sh` checks that
+recommendation rather than leaving it as advice.
 
-**Both daemons that read a file once are now compared to what they were started with** ([0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md)). The observation records it, the planner compares against what the document implies now, and the act differs by daemon: radvd reloads and costs nothing, hostapd restarts and says what that costs. A `backend.reload` that quietly stopped and started would hide that difference behind one verb, so every other backend refuses the op by name.
+**A PPPoE session** dials and now hangs up — it could not until something
+dialled one. pppd has no control socket, so netcfgd reads the pid file pppd
+wrote for the interface and checks `/proc/<pid>/cmdline` names the options file
+netcfgd generated before signalling anything, which is a stronger claim than
+"not by name" rather than an approximation of it. `usepeerdns` is on, because
+the belief that kept it out — that it rewrites `/etc/resolv.conf` — was wrong;
+it writes pppd's own file, and what it is for is `DNS1`/`DNS2` in a script's
+environment. Two generated scripts, not one: pppd hands the `ip-down` call the
+same environment as the `ip-up` call.
 
-**And when the ISP renumbers, the advertisement follows.** A prefix is the one value in the document that arrives after the document does, so it can arrive *again* as something else — and a daemon still announcing the block that was taken back tells every host on the LAN to use an address the upstream will not route. `ObservedBackend.advertised` records what a running radvd was last given, the planner compares it against what the delegation implies now, and `backend.reload` rewrites and signals. It is a **reload**: radvd re-reads on `SIGHUP` (checked in its own `radvd.c`, which the manual page does not mention), so nothing on the wire is disturbed — the opposite of an access point, where the same question means a restart and a deauthenticated LAN ([0026](docs/decisions/0026-an-access-point-is-a-file-hostapd-reads.md)).
+**An access point** is a file hostapd reads
+([0026](docs/decisions/0026-an-access-point-is-a-file-hostapd-reads.md)), with a
+station list that converges over the control socket without deauthenticating
+anybody ([0041](docs/decisions/0041-a-station-list-converges-over-the-control-socket.md))
+and a live client list that makes it usable
+([0040](docs/decisions/0040-a-station-list-needs-a-station-list.md)).
 
-**And it advertises what it was given, which is the last of M4's frozen-and-unwired features.** `advertise { prefixes = ["@pd:wan0"] }` on the LAN; netcfgd renders radvd's configuration and starts it, the same split [0026](docs/decisions/0026-an-access-point-is-a-file-hostapd-reads.md) made for hostapd and for the same reason — an RA is a packet a host acts on without asking. odhcpd is refused by name rather than handed radvd's file. The advertisement is not planned until a prefix reference resolves, because planning it early puts an action that must fail ahead of the DHCPv6 client whose lease it is waiting for, and the apply stops there.
+**A router advertisement** is the same bargain: netcfgd renders radvd's
+configuration and radvd sends the packets. `advertise { prefixes = ["@pd:wan0"] }`
+on the LAN. odhcpd is refused by name rather than handed radvd's file.
 
-**A router can ask its ISP for a prefix, and the whole of decision 0009 now runs end to end.** `config = "dhcp6 pd_length 56"` on the WAN and `@pd:wan0=::1/64` on the LAN, with `tests/live/delegation.sh` driving a real `odhcp6c` against a real `kea-dhcp6` over a veth pair: the ISP delegates, the hook reports, netcfgd derives the address ([0051](docs/decisions/0051-the-request-half-of-a-delegated-prefix.md)). It is the third root-only test and it needs an odhcp6c built from source on Debian, which its header explains — on OpenWrt, the device the feature is for, it is already installed.
+#### The router story, end to end
 
-**Prefix delegation is odhcp6c's, and the request half of it did not exist until 0051.** A real `kea-dhcp6` over a veth pair found three things at once, none of which any test here could have seen: dhcpcd was never told about netcfgd's hook, dhcpcd never solicited a prefix at all (that needs an `ia_pd` line in a config file netcfgd does not write), and dhcpcd's `$new_delegated_dhcp6_prefix` carries the addresses it *derived* rather than the prefix — which netcfgd forbids it from deriving. A document asking dhcpcd for a prefix is now refused by name ([0050](docs/decisions/0050-a-delegated-prefix-is-odhcp6cs-to-report.md)). The fourth thing found while writing that: **nothing can ask for a prefix anyway**, because `PdRequest` is in the frozen model and the DSL has no spelling that sets it. `-P 0` used to go to odhcp6c unconditionally, so every `config = "dhcp6"` solicited a delegation nobody had written down.
+`config = "dhcp6 pd_length 56"` on the WAN and `@pd:wan0=::1/64` on the LAN: the
+ISP delegates, odhcp6c reports through the hook netcfgd generated, netcfgd
+derives the address, radvd advertises the prefix, and a host on the LAN
+configures itself
+([0051](docs/decisions/0051-the-request-half-of-a-delegated-prefix.md)).
+`tests/live/delegation.sh` runs all of it against a real kea, a real odhcp6c and
+a real radvd.
 
-**A PPPoE session now hangs up, and did not until something dialled one.** `stop_backend` answered "not implemented in this build" for `Pppoe`, so deleting the block from a config failed the apply and left `pppd` holding the line — with the `persist` and `maxfail 0` netcfgd itself wrote into the options file. `tests/live/pppoe-session.sh` is what found it: a real `pppd` against a real `pppoe-server` over a veth pair, which is a real discovery and a real IPCP negotiation with no DSL line anywhere. It needs real root, so it sits in `hwsim.sh`'s bucket — and it has been run. pppd has no control socket, so netcfgd finds the pid file pppd wrote for the interface and checks `/proc/<pid>/cmdline` names the options file netcfgd generated before signalling anything, which is a stronger claim than "not by name" rather than an approximation of it.
+**Prefix delegation is odhcp6c's.** dhcpcd cannot report a prefix to a script at
+all — its `$new_delegated_dhcp6_prefix` carries the addresses it *derived*, which
+is the deriving decision 0009 makes netcfgd's — so a document asking dhcpcd for
+one is refused by name
+([0050](docs/decisions/0050-a-delegated-prefix-is-odhcp6cs-to-report.md)).
+odhcp6c is not packaged for Debian and builds from source in two minutes;
+`delegation.sh`'s header says how.
 
-**A DSL line's resolvers are taken too, and the option was left out for a reason that was wrong.** `usepeerdns` does not rewrite `/etc/resolv.conf` — `create_resolv` in pppd's `ipcp.c` writes `/etc/ppp/resolv.conf`, pppd's own file, which nothing reads unless somebody points it there. What the option is for is `DNS1` and `DNS2` in a script's environment, and on a DSL line those are the one thing nothing but pppd learns. netcfgd now asks for them and reports them through the same contract, with **two** generated scripts rather than one: pppd leaves `DNS1` and `DNS2` set for the `ip-down` call as well, so a single script branching on its environment would report an ISP's servers as the line went away.
+**And when the ISP renumbers, everything derived from the prefix moves** — the
+LAN's address and what is being advertised. That is a reload for radvd, which
+re-reads on `SIGHUP`, so nothing on the wire is disturbed.
 
-**A tunnel's nameservers are taken and its opinion about routing is not** ([0049](docs/decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)). A server pushes `dhcp-option DNS` and `dhcp-option DOMAIN` in the same breath; the first is information netcfgd could not have had, the second is a decision about where every query on the machine goes, made by a remote party. So the report has a `dns=` key and will never have one for a routing domain, and what the server suggested is kept as a comment in the file rather than hidden. The gate is narrower than for a route, deliberately: a route down a tunnel goes down that tunnel, so netcfgd having started the tunnel is enough; a nameserver waits for `config = "reported"` or a `dns` block on the interface, and an empty `dns { }` is the minimal way to say it.
+#### Is what is running still what the document says?
 
-The schema version is pinned at 1.0 until the first release ([0038](docs/decisions/0038-versioning-starts-at-the-first-release.md)). That is not a licence to change it quietly — the four witnesses under `docs/schema/` still move on every change and still need a deliberate `make schema-bless`, which was always the mechanism doing the work. Two of them are new. `observed.json` and `plan.json` are the other things a `Status` response carries, and nothing had ever pinned either: an `Observed` field or an `Op` name could move and no gate anywhere noticed, while the socket witness said in a comment that both were "pinned by their own crates".
+Yes, for everything netcfgd starts
+([0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md),
+[0053](docs/decisions/0053-a-file-netcfgd-does-not-read-can-still-be-hashed.md)).
+The observation records what each daemon was started with — read back from the
+file netcfgd itself wrote, in netcfgd's own vocabulary — and the planner compares
+it against what the document implies now. An edited SSID, channel, band,
+passphrase, advertised prefix or `.ovpn` is noticed.
+
+The act differs by daemon and that difference is not cosmetic: radvd reloads and
+costs nothing, hostapd restarts and every station is deauthenticated, which the
+plan says in those words. Two comparisons need something a pure planner may not
+touch — a secret, and a file 0046 says netcfgd does not read — so both are made
+in the **observer**, where both halves are already in hand, and what travels is
+a boolean. `None` is not `false`: "could not check" never restarts anything.
+
+#### Explaining it
+
+`ncfg explain` follows the indirections. An address the document named by
+reference — a report, a delegated prefix — says which file the value came from,
+so the next question has somewhere to go. An interface says which backends are
+running, what they were started with, and whether anything behind them has
+moved. `ncfg status` and the TUI's device pane both mark what was *reported* and
+not applied, which is the difference between "the network gave us nothing" and
+"netcfgd has not acted on it".
+
+#### Credentials and the schema
+
+Walking away from a device is decided rather than defaulted: `managed = false`
+on a device holding a **WireGuard private key** stops an apply with its own exit
+code until the operator says which they meant
+([0042](docs/decisions/0042-only-a-key-nobody-can-revoke-stops-a-plan.md)) — the
+one credential that is both irrevocable from this host and something the
+operator's choice can change.
+
+The schema version is pinned at 1.0 until the first release
+([0038](docs/decisions/0038-versioning-starts-at-the-first-release.md)). What
+does the work is the **four** witnesses under `docs/schema/`, which move on every
+change and need a deliberate `make schema-bless`. Two of them are new:
+`observed.json` and `plan.json` are the other things a `Status` response carries,
+and nothing had ever pinned either while the socket witness claimed in a comment
+that something did.
 
 ### Next, roughly in order
 
-1. **Run the modem path against a real modem.** Everything is written and nothing has met hardware: `helpers/netcfgd-modem-mbim` drives `mbimcli` against a fake whose output is copied from libmbim's own `g_print` calls, and netcfgd consumes the report it writes. What no test can reach is a modem that does not behave — the 43 vendor plugins ModemManager carries are the measure of how common that is ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **A second reading of the whole session, before anything else is added.** Thirty-eight commits, six decision records and four new live tests landed here in one run, and every one of them was verified in isolation. What has *not* been done is a pass over the result as a whole: whether the vocabulary still holds together, whether any two of the new gates overlap, and whether the next person can find the thread. That is worth a session of its own and is not a feature.
-3. **WireGuard as a first-class NM device**, if the shim is worth more attention than the core.
+1. **Read the last session before adding to it.** Thirty-nine commits, six
+   decision records and four live tests landed in one run, each verified in
+   isolation and none of them read as a whole afterwards. Does the vocabulary
+   still cohere across 0047–0053? Do any two of the new gates overlap? Can
+   somebody arriving cold find the thread? That is a session's work and it is
+   not a feature.
+2. **Run the modem path against a real modem.** Everything is written and
+   nothing has met hardware: `helpers/netcfgd-modem-mbim` drives `mbimcli`
+   against a fake whose output is copied from libmbim's own `g_print` calls.
+   What no test can reach is a modem that does not behave — the 43 vendor
+   plugins ModemManager carries are the measure of how common that is
+   ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
+3. **WireGuard as a first-class NM device**, if the shim is worth more
+   attention than the core.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one.
 
-**And so does the TUI's device pane**, which listed the observation and nothing else — the one view where "the bearer is up" and "netcfgd acted on it" looked the same, which is the whole question when a modem is not working. It now marks what was reported and not applied, and names a backend that is about to be restarted.
-
-**`ncfg explain` knows what this session taught the reconciler.** An interface carries what netcfgd started on it — which backend is running, what it was started with, and whether the secret or the file behind it has moved since — and only the answers that mean something is wrong, because a line every reader skips is how the one that matters gets skipped with it. The plan says the same thing while a restart is pending; this is what an operator gets afterwards, when hostapd cannot be asked and netcfgd's own record is the whole of the answer.
-
-**`ncfg explain` follows the indirection now.** A document that names a *source* rather than a value — a report, a delegated prefix — used to explain as "the configuration does not ask for this address" about an address netcfgd had installed itself and would withdraw itself. Both the address and the route paths now name the file the value came from, gated by the planner's own `takes_reports` rather than a second copy of the question — and a *delegated* address names the delegation it was built from and the file that came from, which is where the next question goes.
-
 ### Things that are true and non-obvious
 
-- **This session's method lesson is one lesson, and it is in §9.** Six corollaries now hang off "prove every new gate can fail", and every one was paid for by a gate that was green while the thing it guarded was broken. If something here is going to be re-learned, it is that. The newest instance is the worst-shaped one: a gate that did not exist, with a comment saying it did.
+- **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected all three comments. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **`make live` is where defects are found**, not `make check`. Nearly every real bug in the last several milestones came from a real kernel or a real reference tool, and several came from a test that had been passing for the wrong reason.
