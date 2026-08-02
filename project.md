@@ -590,7 +590,9 @@ Three techniques make that reachable without root or a clean machine:
 - A tool that cannot be *run* at all still answers through `apt-get source <pkg>`. Reading hostapd's `src/ap/ctrl_iface_ap.c` changed the station parser twice over what `strings` implied. Guessing a wire format from `strings` is a step above guessing; reading the implementation is a step above that.
 - A D-Bus client redirects to a private bus: `dbus-daemon --session --print-address --fork`, exported as **`DBUS_SYSTEM_BUS_ADDRESS`**, which GDBus honours in place of the system bus. That is how `tests/live/nm.sh` drives a real `nmcli` against the shim without touching the NetworkManager running the laptop.
 
-**Fake only what cannot exist, which is a radio — never the protocol.** `fake_supplicant.py` and `fake_hostapd.py` speak the real `wpa_ctrl` wire format with replies copied from upstream source; the real daemons are driven elsewhere, which is what would catch a parser changing its mind. Anything needing a real association needs `mac80211_hwsim` and therefore real root: `sudo sh tests/live/hwsim.sh`, which is the one part of the suite that cannot run unprivileged.
+**Fake only what cannot exist, which is a radio — never the protocol.** `fake_supplicant.py` and `fake_hostapd.py` speak the real `wpa_ctrl` wire format with replies copied from upstream source; the real daemons are driven elsewhere, which is what would catch a parser changing its mind. Anything needing a real association needs `mac80211_hwsim` and therefore real root: `sudo sh tests/live/hwsim.sh`.
+
+**Know what an ordinary `make live` skipped.** Three scripts need real root — `hwsim.sh` loads a module and moves a phy between namespaces, `pppoe-session.sh` opens `/dev/ppp`, `delegation.sh` binds ports 546 and 547 — and `make live` invokes each of them either way, so an unprivileged run prints three skips and a green suite. Two more skip on a package a netcfgd machine has no reason to have: `tunnel.sh` wants `openvpn`, `ap.sh` wants `hostapd`. That is five scripts saying nothing, and the skip lines are the only place it is written down. **A privileged container closes all five** and does not touch the machine's own network — `docker run --rm --privileged -v $PWD:/repo -w /repo debian:trixie`, plus the packages each header names. Doing that after the 0047–0053 session found two things an unprivileged run could not: `delegation.sh`'s own build recipe stopped at `None of the required 'json-c' found` on a clean trixie, and `hwsim.sh` **failed** rather than skipped where the kernel has no `mac80211_hwsim`, which aborts the suite at the one moment somebody is running it properly.
 
 **If a regression would make a test hang rather than fail, wrap it in `timeout`.** A stuck suite reports nothing, which is worse than a red one.
 
@@ -602,7 +604,7 @@ Three techniques make that reachable without root or a clean machine:
 - **netcfgd does not gate addressing on carrier.** A link is brought up and addressed whether or not a cable is present. The `carrier` hook reports; nothing defers. Noted as a gap in 0011, not scheduled.
 - **hostapd reads its configuration once, at startup.** There is no reload that keeps clients associated, so changing an `access_point` block — an SSID, a channel — means restarting hostapd, which deauthenticates everyone on the radio. The **station list is the exception**: it converges over the control socket with `DENY_ACL`/`ACCEPT_ACL` `ADD_MAC`/`DEL_MAC`, no restart and no `DEAUTHENTICATE` ([0041](docs/decisions/0041-a-station-list-converges-over-the-control-socket.md)). Three things in hostapd 2.10's source decided that shape, and each would have been a defect taken from the documentation: `DENY_ACL ADD_MAC` **disconnects the station itself** (`hostapd_disassoc_deny_mac`); `SET deny_mac_file` **appends rather than replaces**, so re-pointing hostapd at the regenerated file would leave every past entry denied forever; and `hostapd_check_acl` **consults the accept list first and the deny list second whatever `macaddr_acl` says**, so the list the policy does not name is not inert and is converged to empty too.
 - **`macaddr_acl` is the one field that cannot converge in place.** It is settable over the socket, but nothing disassociates on the change and nothing reports it back, so netcfgd would be converging a value it could never confirm — and converging the *lists* without it would apply a `deny` → `allow` edit as an open network. So netcfgd records the policy it started hostapd with, as a `# netcfgd policy: deny` line in the generated station list that `hostapd_config_read_maclist` skips, and a changed policy restarts the access point with a warning saying what that costs. The record has to sit at column zero and fit hostapd's 128-byte `fgets` buffer; a longer line is split, parsed as an address, and takes the access point down at startup. Checked against a real hostapd in both directions.
-- **~~Nothing notices that an access point's *other* configuration changed.~~ Closed** ([0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md)), passphrase included. The observation reads back what hostapd was started with, and an edited SSID, channel or stated band restarts it with the deauthentication warning. The secret is compared **in the observer**, which is the one place both halves are in hand, and what travels is a boolean -- the value is in neither the document nor the observation, and must not be in either. `ObservedBackend` carries whether a backend is running and, now, a running access point's two station lists — but an edited SSID, channel or band is still invisible to the planner. Older and wider than the ACL, and untouched by 0041.
+- **~~Nothing notices that an access point's *other* configuration changed.~~ Closed** ([0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md)), passphrase included. The observation reads back what hostapd was started with, and an edited SSID, channel or stated band restarts it with the deauthentication warning. The secret is compared **in the observer**, which is the one place both halves are in hand, and what travels is a boolean -- the value is in neither the document nor the observation, and must not be in either. Two limits are left and both are deliberate: a **band the document does not state** is not compared, because an absent `band` means "work it out from the channel" and comparing what hostapd worked out would restart the radio on every reconcile; and a daemon **netcfgd did not start** has no record to compare against at all, which 0053 names as the next thing of this shape.
 - **`ieee80211r` is absent from Debian's hostapd.** Checked directly: not in the binary, and its parser rejects the option. OpenWrt's build generally includes it. So 802.11r fast transition is a per-distribution packaging question before it is a netcfgd feature, and any support has to detect it rather than assume — as [0026](docs/decisions/0026-an-access-point-is-a-file-hostapd-reads.md) handles hostapd's other optional pieces.
 - **There is no client hostname to show.** hostapd knows hardware addresses; a friendly name would have to come from DHCP leases, and netcfgd runs no DHCP server. `ncfg wifi clients` shows a MAC rather than inventing a label.
 - **`wwan_hwsim` cannot test a modem protocol, which is what decided the modem design.** Read out of the running kernel's source: one `wwan_create_port` call, `WWAN_PORT_AT`, and its emulator does not parse commands — it looks for `A`, then `T`, echoes the line and appends `OK`. The core knows `MBIM`, `QMI`, `QCDM`, `FIREHOSE`, `XMMRPC` and `FASTBOOT` and the simulator creates none of them. So an MBIM backend would have been the first thing here with no live test, and [0044](docs/decisions/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md) supersedes [0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md) on that basis.
@@ -645,7 +647,8 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after the session that closed the M4 freeze's last inert feature;
+Last touched by the session that read 0047–0053 as a whole rather than adding to
+them, and before that by the one that closed the M4 freeze's last inert feature;
 what follows is organised by subject, not by the order it was built in.
 
 **Milestones.** M1–M6 are done. M7's NetworkManager shim has tiers 1 and 2
@@ -796,14 +799,42 @@ change and need a deliberate `make schema-bless`. Two of them are new:
 and nothing had ever pinned either while the socket witness claimed in a comment
 that something did.
 
+**And the socket witness had the same hole the comment was about.** Its header
+said "every request, response and event"; the lists were plain `vec![]`s nobody
+had to add to, so `Request::ApStations`, `Response::ApStations` and
+`Response::Journal` were never in them — and `StationReport`, `StationEntry` and
+the journal's `Record` were pinned by nothing anywhere. All three lists now go
+through the exhaustive match the model's witness arrived at, both halves of it
+watched failing. The payload-heavy variants carry an *empty* payload: enough to
+pin the tag and the framing, with the contents left to the witness that owns
+them.
+
+#### Reading the last session as a whole
+
+The thing §10 asked for, and what it turned up. Vocabulary: the `modem` →
+`reported` rename is complete everywhere the name could be read, and the four
+"is this daemon still current" fields divide cleanly — two carry what a daemon
+was started with, two carry an answer computed where a secret or an unread file
+was already in hand. Gates: no two of the new ones overlap, and each new script
+says in its header what its neighbour covers instead.
+
+What was wrong was **comments a later commit in the same session falsified and
+nobody re-read**: three places said an edited passphrase was not noticed, beside
+code that notices it; one said the ACL policy was the only thing anything noticed
+changing, sixty lines below the function that notices the rest. Records 0047 and
+0048 deferred work that the same session then did, with no forward pointer of the
+kind 0050 already carried. None of it was reachable by any gate, and all of it
+was reachable by reading seven records end to end.
+
 ### Next, roughly in order
 
-1. **Read the last session before adding to it.** Thirty-nine commits, six
-   decision records and four live tests landed in one run, each verified in
-   isolation and none of them read as a whole afterwards. Does the vocabulary
-   still cohere across 0047–0053? Do any two of the new gates overlap? Can
-   somebody arriving cold find the thread? That is a session's work and it is
-   not a feature.
+1. **Run the root-only three on the machine that can.** They pass — checked as
+   root in a privileged container after the 0047–0053 session, `delegation.sh`
+   and `pppoe-session.sh` both green end to end, `hwsim.sh` skipping because no
+   kernel here carries `mac80211_hwsim`. That last one is the gap worth closing
+   next: association is the only part of wifi nothing has exercised since the
+   session, and it needs a kernel with the module rather than a privileged
+   container alone.
 2. **Run the modem path against a real modem.** Everything is written and
    nothing has met hardware: `helpers/netcfgd-modem-mbim` drives `mbimcli`
    against a fake whose output is copied from libmbim's own `g_print` calls.
@@ -818,7 +849,9 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 ### Things that are true and non-obvious
 
 - **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
-- **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected all three comments. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running.
+- **A comment is falsified by the commit after it, and nothing goes red.** Four places in one session said an access point's passphrase, SSID or channel was not compared — written true, left standing when the next commit compared them, and sitting directly above the code that does. Every gate stayed green because no gate reads prose. The habit that catches it is the one §10 already asks for: when a session closes a gap it earlier wrote down, grep for the sentence that wrote it down, not only for the code.
+- **A record that defers something needs a forward pointer when the deferral is lifted.** 0050 has one to 0051 and it works; 0047 and 0048 deferred work the same session then did and had none, so a reader landing on 0047 from `docs/interface-report.md` — which links there — was told the rename had not happened. The body stays as written, because a decision is changed by superseding it; the `Status` line is where the pointer goes.
+- **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **`make live` is where defects are found**, not `make check`. Nearly every real bug in the last several milestones came from a real kernel or a real reference tool, and several came from a test that had been passing for the wrong reason.
 - **`acl.sh` failed once, unreproduced, and the cause is a real property.** Two policy-change checks went red in one `make live` and have passed on every run since, including under deliberate load. They need netcfgd to have read a running access point's ACL, and that read has a one-second deadline *on purpose* -- a wedged hostapd must not stall the reconcile loop. A Python fake's first reply on a loaded machine can cost more than that, at which point netcfgd correctly converges nothing. The fix is a warm-up round trip before anything is measured, never a longer deadline: the deadline is the behaviour, and the same script measures it two checks later.
