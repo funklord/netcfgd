@@ -2701,15 +2701,26 @@ fn reported_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
 		.filter_map(|gateway| {
 			let via: std::net::IpAddr = gateway.parse().ok()?;
 			Some(Route {
-				// `default` for v4 and `::/0` for v6, spelled the way the rest
-				// of the model spells them so the comparison against an
-				// observed route is the same string comparison it is for a
-				// route out of the document.
-				destination: if via.is_ipv6() {
-					"::/0".to_owned()
-				} else {
-					"default".to_owned()
-				},
+				// `default` for both families, because that is the one word the
+				// kernel gives back: a dump carries no destination for either a
+				// v4 or a v6 default route, and `RouteRecord::destination_text`
+				// renders both as `default`. Spelling the v6 one `::/0` here
+				// made every comparison against the observation fail, so a
+				// dual-stack report produced a plan that added `::/0` and
+				// deleted `default` on every single reconcile -- forever, and
+				// silently, because each half succeeded.
+				//
+				// The fixture harness could not see it: its executor copies the
+				// desired destination into the observation instead of
+				// normalising it the way the kernel does, so both sides said
+				// `::/0` and matched. `tests/live/report.sh` now applies a
+				// dual-stack report against a real kernel and asserts the second
+				// plan is empty, which is the check that would have caught it.
+				//
+				// The family is not lost by this: it comes from the next hop,
+				// and `Socket::route_request` reads it from there when there is
+				// no destination. A reported default route always has one.
+				destination: "default".to_owned(),
 				via: Some(via),
 				metric: None,
 				table: None,

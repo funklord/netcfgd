@@ -1598,6 +1598,14 @@ fn a_reported_gateway_becomes_a_default_route() {
 }
 
 /// Both families, which is why the report's `gateway` key repeats.
+///
+/// **Both are spelled `default`**, because that is the one word the kernel gives
+/// back for either family -- a dump carries no destination for a default route
+/// of either kind. The v6 one used to be spelled `::/0` here, which no
+/// observation could ever match, so a dual-stack report added `::/0` and deleted
+/// `default` on every reconcile. This assertion cannot catch that on its own,
+/// since the harness's executor copies the destination it was given straight
+/// into the observation; `tests/live/report.sh` does it against a real kernel.
 #[test]
 fn a_dual_stack_bearer_gets_a_default_route_each_way() {
 	let desired = reported_document();
@@ -1607,15 +1615,24 @@ fn a_dual_stack_bearer_gets_a_default_route_each_way() {
 	);
 
 	let plan = settle(&desired, &mut observed);
-	let destinations: Vec<&str> = plan
+	let routes: Vec<(&str, String)> = plan
 		.actions
 		.iter()
 		.filter_map(|action| match &action.op {
-			Op::RouteAdd { route, .. } => Some(route.destination.as_str()),
+			Op::RouteAdd { route, .. } => Some((
+				route.destination.as_str(),
+				route.via.map(|via| via.to_string()).unwrap_or_default(),
+			)),
 			_ => None,
 		})
 		.collect();
-	assert_eq!(destinations, ["default", "::/0"]);
+	assert_eq!(
+		routes,
+		[
+			("default", "10.64.1.24".to_owned()),
+			("default", "2001:db8::1".to_owned())
+		]
+	);
 }
 
 /// The bearer drops, the report stops naming the gateway, and the route goes --

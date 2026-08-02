@@ -211,6 +211,35 @@ check "and withdraws it when the bearer goes down" \
 check "and takes the default route with it" \
 	"$(ip -4 route show default | grep -c 'dev wwan0' || true)" "0"
 
+# ------------------------------------------------------------ both families
+
+# A dual-stack bearer, and the check is the *second* plan rather than the first.
+#
+# The kernel reports a default route of either family with no destination at
+# all, and netcfgd renders that as the word `default`. A v6 default spelled
+# `::/0` on the desired side therefore matches nothing observed, so every
+# reconcile added `::/0` and deleted `default`, forever, with both halves
+# succeeding and nothing to see unless somebody ran `ncfg plan` twice.
+#
+# The fixture harness cannot catch this: its executor copies the destination it
+# was handed into the observation, so both sides say `::/0` and agree. Only a
+# real kernel normalises, which is why this check lives here.
+write_config reported
+report <<'EOF'
+address=10.64.1.23/30
+address=fd00:1::2/64
+gateway=10.64.1.24
+gateway=fd00:1::1
+EOF
+"$ncfg" apply > "$work/dual.txt" 2>&1 || true
+check "a reported v6 gateway becomes a default route the kernel took" \
+	"$(ip -6 route show default | grep -c 'via fd00:1::1 dev wwan0' || true)" "1"
+"$ncfg" plan > "$work/dual-replan.txt" 2>&1 || true
+check "and the second plan has nothing to do, in both families" \
+	"$(grep -cE 'route\.' "$work/dual-replan.txt" || true)" "0"
+report < /dev/null
+"$ncfg" apply > /dev/null 2>&1 || true
+
 # ----------------------------------- the neighbouring case this refactor fixed
 
 # Not about modems, and here because this is where a redirected resolv.conf is
