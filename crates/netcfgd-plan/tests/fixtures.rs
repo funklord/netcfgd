@@ -43,6 +43,7 @@ fn link(name: &str) -> ObservedLink {
 		forwarding: None,
 		ownership: Ownership::Unknown,
 		private_key_loaded: false,
+		wireguard: None,
 	}
 }
 
@@ -2407,6 +2408,130 @@ fn wireguard_observed(keyed: bool) -> Observed {
 	observed.links[0].up = true;
 	observed.links[0].private_key_loaded = keyed;
 	observed
+}
+
+/// The kernel state of `wg0` as decision 0054's comparison reads it.
+///
+/// `hub` is the peer `wireguard_document` declares, with the same allowed
+/// prefix, so the default is a device that matches its document.
+fn wireguard_running(port: Option<u16>, peers: &[&str]) -> netcfgd_model::ObservedWireGuard {
+	netcfgd_model::ObservedWireGuard {
+		public_key: Some(netcfgd_model::Key::from_bytes([0x11; 32])),
+		listen_port: port,
+		fwmark: None,
+		peers: {
+			let mut peers: Vec<netcfgd_model::ObservedWgPeer> = peers
+				.iter()
+				.map(|key| netcfgd_model::ObservedWgPeer {
+					public_key: netcfgd_model::Key::parse(key).expect("a test key parses"),
+					preshared_key: false,
+					endpoint: None,
+					allowed_ips: vec!["10.0.0.0/24".to_owned()],
+					keepalive: None,
+				})
+				.collect();
+			peers.sort();
+			peers
+		},
+	}
+}
+
+/// The peer `wireguard_document` names.
+const HUB: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+/// A peer it does not.
+const STRANGER: &str = "ZGVhZGJlZWZkZWFkYmVlZmRlYWRiZWVmZGVhZGJlZWY=";
+
+/// A device that matches its document plans nothing.
+///
+/// The check that has to come first. A comparison of two lists sorted
+/// differently, or of a port the kernel chose against a port the document never
+/// stated, differs on every reconcile -- and the plan that results is one an
+/// operator watches reconfigure a working tunnel forever.
+#[test]
+fn a_wireguard_device_matching_its_document_plans_nothing() {
+	let desired = wireguard_document("");
+	let mut observed = wireguard_observed(true);
+	observed.links[0].wireguard = Some(wireguard_running(None, &[HUB]));
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::WgSetDevice { .. } | Op::WgSetPeers { .. })),
+		"a device that matches its document was reconfigured: {:?}",
+		plan.actions.iter().map(|a| a.op.name()).collect::<Vec<_>>()
+	);
+}
+
+/// A peer the document no longer names is removed from the kernel.
+///
+/// Decision 0054, and the reason it is not a tidiness fix: an operator who
+/// deletes a peer has revoked its access in their own mind. Before this, the
+/// plan was empty and the peer kept the tunnel.
+#[test]
+fn a_peer_the_document_dropped_is_planned_away() {
+	let desired = wireguard_document("");
+	let mut observed = wireguard_observed(true);
+	observed.links[0].wireguard = Some(wireguard_running(None, &[HUB, STRANGER]));
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::WgSetPeers { .. }))
+		.expect("the peer list differs, so it is replaced");
+	assert_eq!(action.reason.field, "wireguard.peers");
+	// The reason names which peers, because "the peer list changed" is not an
+	// answer to "what did I just revoke". Public keys are not secret; they are
+	// what one hands the other end.
+	assert!(
+		action.reason.observed.contains(STRANGER),
+		"the reason does not name the peer being removed: {:?}",
+		action.reason
+	);
+}
+
+/// A listen port the document does not state is the kernel's to choose.
+///
+/// The trap decision 0052 fell into with an access point's band, arriving here
+/// by a different road: a document that says nothing about a port is not a
+/// document asking for the ephemeral one to change.
+#[test]
+fn a_port_the_document_never_stated_is_not_reconciled() {
+	let desired = wireguard_document("");
+	let mut observed = wireguard_observed(true);
+	observed.links[0].wireguard = Some(wireguard_running(Some(38_211), &[HUB]));
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::WgSetDevice { .. })),
+		"an ephemeral port the document never asked about was reconfigured"
+	);
+}
+
+/// A device that does not exist yet is configured by its creation, once.
+///
+/// `link.create` carries the whole configuration, so a second action saying the
+/// peers differ would describe work the first action already did -- the shape
+/// that had `PPPoE` dialling twice for a session that had not come up.
+#[test]
+fn a_device_being_created_is_not_also_reconfigured() {
+	let desired = wireguard_document("");
+	let observed = Observed::default();
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(
+		plan.actions
+			.iter()
+			.filter(|action| matches!(action.op, Op::WgSetDevice { .. } | Op::WgSetPeers { .. }))
+			.count(),
+		0,
+		"a device being created was configured twice"
+	);
 }
 
 /// Decision 0042. Walking away from a `WireGuard` key leaves whoever ends up

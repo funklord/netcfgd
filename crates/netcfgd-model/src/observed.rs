@@ -152,6 +152,84 @@ pub struct ObservedLink {
 	/// device that has been created and not yet configured.
 	#[serde(default)]
 	pub private_key_loaded: bool,
+	/// What a `WireGuard` device actually holds, where this link is one.
+	///
+	/// The kernel reports all of this for free on the request that answers
+	/// [`ObservedLink::private_key_loaded`], and netcfgd threw it away for as
+	/// long as `WireGuard` has existed here -- which is why an edited listen port
+	/// or a **deleted peer** planned nothing at all. Decision 0054.
+	///
+	/// Nothing secret is in it. The device's own public key is derived by the
+	/// kernel and is the thing a peer is given; a preshared key is a boolean,
+	/// exactly as `netcfgd_sys::wg::PeerState` reports one; and the private key
+	/// has no field here for the same reason it has none there.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub wireguard: Option<ObservedWireGuard>,
+}
+
+/// What a `WireGuard` device holds, as the kernel reports it.
+///
+/// The counterpart of [`crate::interface::WireGuardConfig`], and deliberately
+/// not a copy of it: what the document holds is a `SecretRef` and a list sorted
+/// by the operator's name for each peer, while this is what came back over
+/// generic netlink. The comparison between them is decision 0054's, and it is
+/// made on the fields below rather than on the structs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedWireGuard {
+	/// The public key the kernel derived from the private one.
+	///
+	/// Present exactly when a private key is loaded, which is what
+	/// [`ObservedLink::private_key_loaded`] says in a boolean. It is here as
+	/// well because it is the value an operator hands a peer, and `ncfg
+	/// explain` having to say "yes, a key" rather than *which* key was a gap
+	/// somebody had to run `wg` to fill.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub public_key: Option<crate::Key>,
+	/// The port it listens on.
+	///
+	/// `None` where the kernel reports none. A document that names no port
+	/// leaves the kernel to choose one, so a `None` here against a `None` in
+	/// the document is agreement rather than a difference -- getting that
+	/// backwards would reconfigure the device on every reconcile.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub listen_port: Option<u16>,
+	/// The firewall mark on outgoing packets, where one is set.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub fwmark: Option<u32>,
+	/// Every peer, **sorted by public key**.
+	///
+	/// The kernel's own order is the order it happens to hold them in, which is
+	/// not stable and is not the document's order either -- the document sorts
+	/// by the operator's label, which the kernel has never heard of. Sorting by
+	/// the one field both sides have is what makes the comparison a comparison
+	/// rather than a diff of two arbitrary orders.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub peers: Vec<ObservedWgPeer>,
+}
+
+/// One peer of a `WireGuard` device, as the kernel reports it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedWgPeer {
+	/// The peer's identity, which is also the sorting key.
+	pub public_key: crate::Key,
+	/// Whether a preshared key is set.
+	///
+	/// A boolean because the kernel reports one: `WGPEER_A_PRESHARED_KEY` comes
+	/// back zeroed for a peer that has one, which is the kernel refusing to
+	/// hand back a secret and not an accident to work around.
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub preshared_key: bool,
+	/// Where it is, as `host:port`, where it has an endpoint.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub endpoint: Option<String>,
+	/// What is routed to it, sorted.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub allowed_ips: Vec<String>,
+	/// Persistent keepalive in seconds, where one is set.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub keepalive: Option<u16>,
 }
 
 /// An address as the kernel reports it.

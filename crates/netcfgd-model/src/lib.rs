@@ -58,7 +58,8 @@ pub use key::Key;
 pub use observed::{
 	AppliedDns, BackendKind, Delegation, Observed, ObservedAccessControl, ObservedAccessPoint,
 	ObservedAddress, ObservedBackend, ObservedBridgeVlan, ObservedLink, ObservedPolicy,
-	ObservedReport, ObservedRoute, ObservedRule, Origin, Ownership, ReportedRoute,
+	ObservedReport, ObservedRoute, ObservedRule, ObservedWgPeer, ObservedWireGuard, Origin,
+	Ownership, ReportedRoute,
 };
 pub use route::{Route, RouteScope};
 pub use rule::{RoutingRule, RuleAction, RuleFamily};
