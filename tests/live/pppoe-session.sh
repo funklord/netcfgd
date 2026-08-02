@@ -15,8 +15,10 @@
 # negotiation. The nameservers netcfgd ends up delivering are the ones the
 # server pushed, over the wire, in the protocol's own option.
 #
-# **Needs real root**, which is why `make live` does not run it -- the same
-# bucket as `hwsim.sh` and for the same reason. It confines itself to a private
+# **Needs real root** -- the same bucket as `hwsim.sh` and for the same reason.
+# `make live` invokes it either way and an unprivileged run skips, which means
+# an unprivileged suite is not evidence about any of this: run the suite as
+# root, or run this script with `sudo`. It confines itself to a private
 # network *and* mount namespace, so the veths, the ppp interface and pppd's own
 # `/etc/ppp/resolv.conf` all disappear with it and the host's network is never
 # touched.
