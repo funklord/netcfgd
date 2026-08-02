@@ -100,6 +100,23 @@ check "with a management socket to stop it through" \
 	"$(grep -c -- "--management $work/run/openvpn/vpn0.sock unix" "$FAKE_OPENVPN_LOG" || true)" "1"
 check "and --daemon, so the apply does not block on a tunnel negotiating" \
 	"$(grep -c -- '--daemon' "$FAKE_OPENVPN_LOG" || true)" "1"
+# The routes are netcfgd's (decisions 0047, 0048), which takes three arguments
+# and not one. --script-security is the one worth a check of its own: without
+# it openvpn runs no script at all, says so once at verb 1, and the routes are
+# simply never reported -- nothing fails, which is the whole problem.
+check "and --route-noexec, because the routes are netcfgd's" \
+	"$(grep -c -- '--route-noexec' "$FAKE_OPENVPN_LOG" || true)" "1"
+check "with the script security that lets the reporting script run at all" \
+	"$(grep -c -- '--script-security 2' "$FAKE_OPENVPN_LOG" || true)" "1"
+check "and one script for both --route-up and --down" \
+	"$(grep -c -- "--route-up $work/run/openvpn/vpn0.report --down $work/run/openvpn/vpn0.report" \
+		"$FAKE_OPENVPN_LOG" || true)" "1"
+# Generated rather than installed: nothing packages it, and it carries the
+# interface name and the report path, so it is rewritten on every start.
+check "the script netcfgd generated is there and executable" \
+	"$([ -x "$work/run/openvpn/vpn0.report" ] && echo yes || echo no)" "yes"
+check "and it parses as a shell script" \
+	"$(sh -n "$work/run/openvpn/vpn0.report" 2>&1 && echo ok)" "ok"
 
 waited=0
 while [ ! -S "$work/run/openvpn/vpn0.sock" ]; do

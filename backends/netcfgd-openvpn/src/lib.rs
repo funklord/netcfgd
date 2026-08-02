@@ -54,6 +54,147 @@ pub fn log_path(run: &Path, iface: &str) -> PathBuf {
 	run_dir(run).join(format!("{iface}.log"))
 }
 
+/// The script `OpenVPN` calls to say what it negotiated.
+///
+/// Generated rather than installed, for the same reason a hook is materialised
+/// into `/run`: a path under `/usr` would have to be packaged, would not exist
+/// on a read-only root that netcfgd was unpacked onto, and would be one more
+/// thing that can be out of step with the binary that wrote it.
+#[must_use]
+pub fn script_path(run: &Path, iface: &str) -> PathBuf {
+	run_dir(run).join(format!("{iface}.report"))
+}
+
+/// The script's text, which is the whole of netcfgd's side of `--route-up`.
+///
+/// Pure, so that what a tunnel is told to do can be read without running one.
+///
+/// `report` is the file to write and is passed in rather than derived: the
+/// layout of `/run` belongs to the caller, and a second crate spelling
+/// `reported` for itself is how two spellings start.
+///
+/// ## Why a script at all
+///
+/// `openvpn --help` lists 253 options and decision 0046 keeps the `.ovpn` the
+/// operator's, so netcfgd cannot read what the server pushed. It can be *told*:
+/// `--route-noexec` stops the daemon installing routes, and `--route-up` runs
+/// this with every route in the environment. What comes back goes through
+/// `docs/interface-report.md`, the same contract a modem helper writes -- which
+/// is why decision 0047 took the modem's name off it.
+///
+/// ## What the environment holds, measured rather than assumed
+///
+/// Against a real `openvpn` 2.6.14 in a network namespace, with a real `tun`:
+///
+/// - `route_network_N`, `route_netmask_N`, `route_gateway_N` for IPv4, with the
+///   netmask dotted rather than a prefix length. `route_gateway_N` is filled in
+///   even for a route the config gave no gateway -- it becomes the tunnel's own
+///   endpoint.
+/// - `route_ipv6_network_N` already in CIDR, with `route_ipv6_gateway_N`.
+/// - Both **survive `--route-noexec`**, because the environment is filled in
+///   when the route list is built and the flag only skips installing it.
+/// - `N` is not guaranteed contiguous: `setenv_route` skips a route that is not
+///   fully defined and the counter moves on regardless, so this scans a range
+///   rather than stopping at the first gap.
+///
+/// ## The one thing that does not survive
+///
+/// **`redirect-gateway` for IPv4 leaves no trace in the environment.** The
+/// 0.0.0.0/1 and 128.0.0.0/1 pair it installs is added inside `add_routes`,
+/// which `--route-noexec` skips entirely, and the `redirect_gateway` variable
+/// is set in the same skipped branch. The IPv6 half *does* survive, because
+/// those four prefixes are appended to the option list before the route list is
+/// built. Measured both ways; `docs/decisions/0048` says what to do about it.
+#[must_use]
+pub fn report_script(iface: &str, report: &Path) -> String {
+	let report = report.display();
+	format!(
+		"#!/bin/sh\n\
+		 # Written by netcfgd for {iface}. Do not edit; it is rewritten on every\n\
+		 # start, and openvpn is the only thing that runs it.\n\
+		 #\n\
+		 # Called twice over a tunnel's life: as --route-up once the routes\n\
+		 # openvpn was told not to install are known, and as --down when the\n\
+		 # tunnel goes. docs/interface-report.md is the format.\n\
+		 set -u\n\
+		 \n\
+		 target='{report}'\n\
+		 tmp=\"$target.tmp\"\n\
+		 dir=$(dirname \"$target\")\n\
+		 mkdir -p \"$dir\" || exit 1\n\
+		 \n\
+		 # The tunnel is gone, so the routes are. Emptied rather than removed:\n\
+		 # the contract makes an empty report mean \"nothing, deliberately\" and\n\
+		 # a missing one mean \"nobody is watching\", and openvpn running its\n\
+		 # down script is somebody watching.\n\
+		 if [ \"${{script_type:-}}\" = down ]; then\n\
+		 \t: > \"$tmp\" && mv \"$tmp\" \"$target\"\n\
+		 \texit 0\n\
+		 fi\n\
+		 \n\
+		 # 255.255.255.0 -> 24. Fails on a mask with a hole in it, which the\n\
+		 # kernel would refuse anyway and which is better skipped here, where\n\
+		 # the line it came from is still visible.\n\
+		 prefix_of() {{\n\
+		 \ttotal=0\n\
+		 \tended=\n\
+		 \tfor octet in $(printf '%s' \"$1\" | tr '.' ' '); do\n\
+		 \t\tcase \"$octet\" in\n\
+		 \t\t255) bits=8 ;;\n\
+		 \t\t254) bits=7 ;;\n\
+		 \t\t252) bits=6 ;;\n\
+		 \t\t248) bits=5 ;;\n\
+		 \t\t240) bits=4 ;;\n\
+		 \t\t224) bits=3 ;;\n\
+		 \t\t192) bits=2 ;;\n\
+		 \t\t128) bits=1 ;;\n\
+		 \t\t0) bits=0 ;;\n\
+		 \t\t*) return 1 ;;\n\
+		 \t\tesac\n\
+		 \t\t[ -n \"$ended\" ] && [ \"$bits\" != 0 ] && return 1\n\
+		 \t\t[ \"$bits\" = 8 ] || ended=yes\n\
+		 \t\ttotal=$((total + bits))\n\
+		 \tdone\n\
+		 \tprintf '%s' \"$total\"\n\
+		 }}\n\
+		 \n\
+		 {{\n\
+		 \tprintf '# %s, written by netcfgd from openvpn --route-up\\n' '{iface}'\n\
+		 \t# A fixed range rather than a break on the first gap: openvpn skips\n\
+		 \t# a route it did not fully define and the number moves on anyway.\n\
+		 \ti=1\n\
+		 \twhile [ \"$i\" -le 256 ]; do\n\
+		 \t\teval \"network=\\${{route_network_$i:-}}\"\n\
+		 \t\teval \"netmask=\\${{route_netmask_$i:-}}\"\n\
+		 \t\teval \"gateway=\\${{route_gateway_$i:-}}\"\n\
+		 \t\ti=$((i + 1))\n\
+		 \t\t[ -n \"$network\" ] || continue\n\
+		 \t\tprefix=$(prefix_of \"$netmask\") || continue\n\
+		 \t\tif [ -n \"$gateway\" ]; then\n\
+		 \t\t\tprintf 'route=%s/%s via %s\\n' \"$network\" \"$prefix\" \"$gateway\"\n\
+		 \t\telse\n\
+		 \t\t\tprintf 'route=%s/%s\\n' \"$network\" \"$prefix\"\n\
+		 \t\tfi\n\
+		 \tdone\n\
+		 \t# Already CIDR on this side, which is openvpn's asymmetry and not\n\
+		 \t# netcfgd's.\n\
+		 \ti=1\n\
+		 \twhile [ \"$i\" -le 256 ]; do\n\
+		 \t\teval \"network=\\${{route_ipv6_network_$i:-}}\"\n\
+		 \t\teval \"gateway=\\${{route_ipv6_gateway_$i:-}}\"\n\
+		 \t\ti=$((i + 1))\n\
+		 \t\t[ -n \"$network\" ] || continue\n\
+		 \t\tif [ -n \"$gateway\" ]; then\n\
+		 \t\t\tprintf 'route=%s via %s\\n' \"$network\" \"$gateway\"\n\
+		 \t\telse\n\
+		 \t\t\tprintf 'route=%s\\n' \"$network\"\n\
+		 \t\tfi\n\
+		 \tdone\n\
+		 }} > \"$tmp\" || exit 1\n\
+		 mv \"$tmp\" \"$target\"\n"
+	)
+}
+
 /// Where the credentials for one tunnel go, when the server wants any.
 ///
 /// Mode 0600 and under `/run`, which is the same trade the generated hostapd
@@ -100,6 +241,25 @@ fn write_auth(run: &Path, iface: &str, username: &str, password: &str) -> Result
 	Ok(path)
 }
 
+/// Write the reporting script, executable, next to the tunnel's other state.
+///
+/// # Errors
+///
+/// Returns a message naming the file that could not be written.
+fn write_script(run: &Path, iface: &str, report: &Path) -> Result<PathBuf, String> {
+	use std::os::unix::fs::PermissionsExt;
+
+	let path = script_path(run, iface);
+	std::fs::write(&path, report_script(iface, report))
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	// Rewritten on every start rather than written once: it carries the
+	// interface name and the report path, and a tunnel renamed in the document
+	// would otherwise keep reporting under the old name.
+	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+		.map_err(|error| format!("cannot make {} executable: {error}", path.display()))?;
+	Ok(path)
+}
+
 /// Find `openvpn`.
 ///
 /// The same search as hostapd's and for the same reason: it lives in
@@ -132,6 +292,7 @@ pub fn start(
 	iface: &str,
 	config: &str,
 	credentials: Option<(&str, &str)>,
+	report: &Path,
 ) -> Result<(), String> {
 	let dir = run_dir(run);
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -162,6 +323,13 @@ pub fn start(
 	let errors = capture
 		.try_clone()
 		.map_err(|error| format!("cannot write {}: {error}", log.display()))?;
+
+	// Whatever the last tunnel negotiated is not what this one will. Removed
+	// before the daemon starts rather than after it connects, because between
+	// those two moments netcfgd would otherwise be installing the previous
+	// tunnel's routes down the new one.
+	let _ = std::fs::remove_file(report);
+	let script = write_script(run, iface, report)?;
 
 	let auth = match credentials {
 		Some((username, password)) => Some(write_auth(run, iface, username, password)?),
@@ -194,6 +362,24 @@ pub fn start(
 		.arg(format!("netcfgd-{iface}"))
 		.arg("--log")
 		.arg(&log)
+		// The routes are netcfgd's, which is the half of a tunnel decision 0047
+		// says is worth taking: a daemon installing its own default route walks
+		// into the middle of netcfgd's uplink arbitration with a metric netcfgd
+		// did not choose, and neither side knows the other is there.
+		.arg("--route-noexec")
+		// Without this openvpn runs no script at all and says so once, at
+		// verb 1, in a log nobody reads -- the routes would simply never be
+		// reported and nothing would fail. It is the default in 2.6, checked in
+		// `run_command.c`: `script_security_level` starts at `SSEC_BUILT_IN`.
+		.arg("--script-security")
+		.arg("2")
+		.arg("--route-up")
+		.arg(&script)
+		// The same script, told apart by `script_type`. `--down` rather than
+		// `--route-pre-down`, which openvpn only runs when a route list exists
+		// -- a tunnel that pushed nothing would then leave its report behind.
+		.arg("--down")
+		.arg(&script)
 		.stdout(capture)
 		.stderr(errors);
 	if let Some(auth) = &auth {
@@ -221,7 +407,23 @@ pub fn start(
 ///
 /// Returns a message if the daemon is listening and will not stop. Nothing
 /// listening is the state this was asked to produce, so that is success.
-pub fn stop(run: &Path, iface: &str) -> Result<(), String> {
+pub fn stop(run: &Path, iface: &str, report: &Path) -> Result<(), String> {
+	// Before the signal, and outside the "is anything listening" question. A
+	// report is a claim that routes exist, and the tunnel they belong to is
+	// going either way -- a daemon that already died is exactly the case where
+	// nobody comes back to tidy up, which is the lesson a stopped access
+	// point's passphrase paid for.
+	//
+	// The daemon's own `--down` script may still write an empty report after
+	// this, because openvpn runs it when it gets round to exiting. That is a
+	// race with no wrong outcome: gone and empty both mean no routes, and the
+	// contract gives them both that meaning deliberately.
+	let _ = std::fs::remove_file(report);
+	// The script itself stays. It is regenerated on every start, it does
+	// nothing unless openvpn runs it, and removing it here would pull it out
+	// from under the `--down` call that has not happened yet -- which openvpn
+	// would report as a failed script in a log an operator then has to explain.
+
 	let socket = socket_path(run, iface);
 	let Ok(mut client) = Management::connect(&socket) else {
 		return Ok(());
@@ -344,4 +546,114 @@ fn complaints(path: &Path, count: usize) -> Option<String> {
 		telling
 	};
 	Some(chosen.join("; ").trim_end_matches('.').to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// The generated script has to be a shell script.
+	///
+	/// It is written into `/run` and run by openvpn rather than by anything in
+	/// this repository, so `make shell` cannot see it: that gate reads
+	/// `helpers/` and `tests/live/`, and a syntax error here would first be
+	/// noticed as a tunnel that reports nothing. `sh -n` costs a fork.
+	#[test]
+	fn the_script_parses() {
+		let script = report_script("vpn0", Path::new("/run/netcfgd/reported/vpn0"));
+		let dir = std::env::temp_dir().join(format!("ncfg-script-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).expect("a temporary directory");
+		let path = dir.join("report.sh");
+		std::fs::write(&path, &script).expect("write");
+
+		let status = Command::new("sh")
+			.arg("-n")
+			.arg(&path)
+			.status()
+			.expect("run sh -n");
+		let _ = std::fs::remove_dir_all(&dir);
+		assert!(
+			status.success(),
+			"the generated script does not parse:\n{script}"
+		);
+	}
+
+	/// It converts what openvpn actually hands it.
+	///
+	/// The environment here is copied from a real `openvpn` 2.6.14 run under
+	/// `--route-noexec`: a dotted netmask, a gateway openvpn filled in for a
+	/// route that named none, an explicit gateway on the second, and an IPv6
+	/// route already in CIDR. Running the script is the only way to check the
+	/// mask conversion without a tunnel.
+	#[test]
+	fn it_writes_what_openvpn_put_in_its_environment() {
+		let dir = std::env::temp_dir().join(format!("ncfg-report-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).expect("a temporary directory");
+		let report = dir.join("vpn0");
+		let path = dir.join("report.sh");
+		std::fs::write(&path, report_script("vpn0", &report)).expect("write");
+
+		let status = Command::new("sh")
+			.arg(&path)
+			.env("script_type", "route-up")
+			.env("route_network_1", "10.9.0.0")
+			.env("route_netmask_1", "255.255.255.0")
+			.env("route_gateway_1", "10.8.0.2")
+			.env("route_network_2", "10.10.0.0")
+			.env("route_netmask_2", "255.255.0.0")
+			.env("route_gateway_2", "192.168.99.1")
+			// A mask with a hole in it, which the kernel would refuse and which
+			// is better dropped here where the rest of the report survives.
+			.env("route_network_3", "10.11.0.0")
+			.env("route_netmask_3", "255.0.255.0")
+			.env("route_gateway_3", "10.8.0.2")
+			.env("route_ipv6_network_1", "fd77::/32")
+			.env("route_ipv6_gateway_1", "fd00::2")
+			.status()
+			.expect("run the script");
+		assert!(status.success());
+
+		let written = std::fs::read_to_string(&report).expect("a report");
+		let _ = std::fs::remove_dir_all(&dir);
+		let routes: Vec<&str> = written
+			.lines()
+			.filter(|line| line.starts_with("route="))
+			.collect();
+		assert_eq!(
+			routes,
+			[
+				"route=10.9.0.0/24 via 10.8.0.2",
+				"route=10.10.0.0/16 via 192.168.99.1",
+				"route=fd77::/32 via fd00::2"
+			],
+			"got:\n{written}"
+		);
+	}
+
+	/// The tunnel going down empties the report rather than removing it, which
+	/// is the difference the contract draws between "nothing, deliberately" and
+	/// "nobody is watching".
+	#[test]
+	fn the_down_call_empties_it() {
+		let dir = std::env::temp_dir().join(format!("ncfg-down-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).expect("a temporary directory");
+		let report = dir.join("vpn0");
+		std::fs::write(&report, "route=10.0.0.0/8 via 10.8.0.1\n").expect("a stale report");
+		let path = dir.join("report.sh");
+		std::fs::write(&path, report_script("vpn0", &report)).expect("write");
+
+		let status = Command::new("sh")
+			.arg(&path)
+			.env("script_type", "down")
+			.status()
+			.expect("run the script");
+		assert!(status.success());
+
+		let written = std::fs::read_to_string(&report).expect("a report");
+		let _ = std::fs::remove_dir_all(&dir);
+		assert_eq!(
+			written, "",
+			"a down call leaves an empty report, not a gone one"
+		);
+	}
 }
