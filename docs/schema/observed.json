@@ -25,6 +25,7 @@
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
         "listen_port": 51820,
         "fwmark": 110,
+        "key_matches": true,
         "peers": [
           {
             "public_key": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
@@ -64,6 +65,7 @@
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
         "listen_port": 51820,
         "fwmark": 110,
+        "key_matches": true,
         "peers": [
           {
             "public_key": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
@@ -103,6 +105,7 @@
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
         "listen_port": 51820,
         "fwmark": 110,
+        "key_matches": true,
         "peers": [
           {
             "public_key": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
