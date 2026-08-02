@@ -84,6 +84,19 @@ ip=$(find_in_sbin ip) || die "no ip(8), which is not something this can work aro
 # diagnostic there says so, having read what wpa_supplicant actually printed
 # rather than guessing from the binary.
 
+# A radio that cannot exist here is a missing tool, and the Makefile says so in
+# as many words: a machine that cannot run this should get a skip rather than a
+# failure. It did not get one. `make live` as root inside a container aborted
+# the whole suite at `modprobe: not found` -- which is the one way this suite is
+# meant to be run in full, since three of its scripts need real root.
+#
+# The line is drawn where the answer stops being about this machine: no kmod and
+# no module in this kernel are both "not here", while a module that exists and
+# will not load is worth going red over, and the `die` below still does that.
+command -v modprobe >/dev/null 2>&1 || skip "no modprobe (apt install kmod)"
+modinfo mac80211_hwsim >/dev/null 2>&1 ||
+	skip "this kernel has no mac80211_hwsim module"
+
 if grep -q '^mac80211_hwsim ' /proc/modules; then
 	die "mac80211_hwsim is already loaded, so something else is using it.
        This will not unload a module it did not load. Run
