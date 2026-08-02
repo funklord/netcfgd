@@ -82,6 +82,10 @@ check() {
 mkdir -p "$work/etc/secrets" "$work/ctrl"
 printf 'hunter2hunter2' > "$work/etc/secrets/home"
 chmod 600 "$work/etc/secrets/home"
+# Generated, never committed: a private key in a repository is a private key in
+# a repository, however worthless the network it opens.
+head -c 32 /dev/urandom | base64 > "$work/etc/secrets/wg0"
+chmod 600 "$work/etc/secrets/wg0"
 export NCFG_WPA_CTRL_DIR="$work/ctrl"
 
 # `radio0` is a dummy the configuration declares as a radio. netcfgd's planner
@@ -105,6 +109,20 @@ interface probe0 {
 
 interface quiet0 {
 	kind = "dummy"
+}
+
+# A tunnel, for the one link kind that is not `Generic` to the shim. The
+# private key is written beside this file at run time; nothing here is a key.
+interface wg0 {
+	wireguard {
+		private_key = "@secret:wg0"
+		listen_port = 51822
+		peer hub {
+			public_key  = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+			allowed_ips = "10.8.0.0/24"
+		}
+	}
+	config = "10.8.0.2/32"
 }
 
 device radio0 {
@@ -285,6 +303,58 @@ done
 check "a link that goes away leaves the device list" "$(field quiet0)" ""
 check "and the others are still there" "$(field probe0)" "dummy:connected"
 
+# ---------------------------------------------------------------- wireguard
+#
+# The one link kind the shim reports as itself rather than as `Generic`, and it
+# earns that by answering NM's three questions about a tunnel -- which netcfgd
+# could not observe at all until decision 0054. A device that claims a type and
+# cannot answer for it is the failure the `Flavour` comment warns about.
+#
+# Skipped rather than failed where the kernel has no module: nothing else in
+# this script needs one, and `strand.sh` makes the same call the same way.
+
+if ! ip link show wg0 >/dev/null 2>&1; then
+	echo "nm.sh: skipping the wireguard checks: no wg0 (this kernel has no wireguard?)"
+elif ! command -v busctl >/dev/null 2>&1; then
+	echo "nm.sh: skipping the wireguard checks: no busctl to read the properties"
+else
+	# **Not** `nmcli device status`, and that is the whole lesson of this block.
+	# The obvious check -- that the TYPE column says `wireguard` -- passes with
+	# the device-type mapping deliberately broken, because nmcli prints a
+	# *generic* device's `TypeDescription`, and netcfgd's type description for
+	# this link is the kernel's link kind, which is the word `wireguard`. Two
+	# entirely different devices render identically in that column. Watched
+	# passing with `flavour_of` returning `Generic`, which is why it is gone.
+	#
+	# What only a real WireGuard device can answer is the interface NM defines
+	# for one. A listen port the document chose is the strongest of the three:
+	# it cannot arrive by accident, it is not in any other property, and it
+	# comes from the observation decision 0054 added.
+	wg_path=$(busctl --user --address="$address" call \
+		org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+		org.freedesktop.NetworkManager GetDeviceByIpIface s wg0 2>/dev/null |
+		awk '{print $2}' | tr -d '"')
+	wgprop() {
+		busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$wg_path" \
+			org.freedesktop.NetworkManager.Device.WireGuard "$1" 2>/dev/null
+	}
+	check "the tunnel is served as a wireguard device" \
+		"$(printf '%s' "$wg_path" | grep -c '^/org/freedesktop/NetworkManager/Devices/' || true)" "1"
+	check "and answers for the listen port the document chose" \
+		"$(wgprop ListenPort)" "q 51822"
+	check "and carries the public key the kernel derived" \
+		"$(wgprop PublicKey | awk '{print $1, $2}')" "ay 32"
+	check "and a firewall mark of none, rather than nothing at all" \
+		"$(wgprop FwMark)" "u 0"
+	# And the type number, read from the property rather than from a column
+	# that renders two things the same way. 29 is NM's WireGuard.
+	check "and says it is one in the property clients switch on" \
+		"$(busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$wg_path" \
+			org.freedesktop.NetworkManager.Device DeviceType 2>/dev/null)" "u 29"
+fi
+
 # ----------------------------------------------------------------- wireless
 
 if [ -z "$fake" ]; then
@@ -373,6 +443,10 @@ else
 	check "every interface block is a profile" \
 		"$(connections | awk -F: '{print $1}' | LC_ALL=C sort | tr '\n' ' ')" \
 		"HomeFiber Prompted probe0 quiet0 "
+	# Nor a tunnel's, for the same reason and one more: NM's WireGuard profile
+	# carries the peers and the private key, and this shim projects neither.
+	check "a wireguard interface block is not a profile either" \
+		"$(connections | awk -F: '$1 == "wg0" { print $1 }')" ""
 	check "and a radio's interface block is not one" \
 		"$(connections | grep -c '^radio0:' || true)" "0"
 	check "the wifi profile is wireless" \
