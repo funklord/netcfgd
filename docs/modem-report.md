@@ -140,11 +140,28 @@ what keeps the contract one-way and lets a helper be replaced without touching
 a netcfgd config. The reference helper takes them on its command line:
 
 ```
+netcfgd-modem-mbim monitor -d /dev/cdc-wdm0 -i wwan0 -a internet
 netcfgd-modem-mbim connect -d /dev/cdc-wdm0 -i wwan0 -a internet
 netcfgd-modem-mbim disconnect -d /dev/cdc-wdm0 -i wwan0
 netcfgd-modem-mbim stop -i wwan0
 ```
 
-It does not stay running, so nothing truncates the report if the bearer drops
-on its own. Supervising it -- a service unit, an init script, a loop -- is the
-operator's, and is deliberately not netcfgd's.
+**`monitor` is the one to run from a service manager.** It connects, then stays
+up watching the bearer and empties the report the moment the network drops it,
+exiting non-zero so the service manager restarts it. `connect` is the same
+thing without the watching, which leaves a report nothing maintains.
+
+That difference matters more than it sounds. netcfgd withdraws an address and a
+default route when a report empties -- and only then. A stale report is netcfgd
+holding a default route down a modem that is gone, black-holing traffic another
+interface would have carried. Whatever writes reports has to keep them true.
+
+Restarting, reconnecting and backing off are the service manager's, and
+deliberately not this script's:
+
+```
+[Service]
+ExecStart=/usr/bin/netcfgd-modem-mbim monitor -d /dev/cdc-wdm0 -i wwan0 -a internet
+Restart=always
+RestartSec=10
+```

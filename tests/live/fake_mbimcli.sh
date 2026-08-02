@@ -40,6 +40,19 @@ for argument in "$@"; do
 		echo "[/dev/cdc-wdm0] Successfully disconnected"
 		exit 0
 		;;
+	--query-connection-state*)
+		# Read from a file so a test can drop the bearer underneath a running
+		# monitor, which is the only way to exercise the thing the monitor
+		# exists for. Tab-indented, as libmbim's g_print writes it.
+		state=activated
+		[ -n "${FAKE_MBIMCLI_STATE_FILE:-}" ] && [ -f "$FAKE_MBIMCLI_STATE_FILE" ] \
+			&& state=$(cat "$FAKE_MBIMCLI_STATE_FILE")
+		printf '[/dev/cdc-wdm0] Connection status:\n'
+		printf '\t      Session ID: %s\n' "'0'"
+		printf '\tActivation state: %s\n' "'$state'"
+		printf '\tVoice call state: %s\n' "'none'"
+		exit 0
+		;;
 	--query-ip-configuration*)
 		if [ -n "${FAKE_MBIMCLI_NO_ADDRESS:-}" ]; then
 			# A bearer that came up and got nothing. Real, and the reason the
