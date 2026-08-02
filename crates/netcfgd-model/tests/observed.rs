@@ -311,6 +311,7 @@ fn backends(observed: &mut Observed) {
 			interface: "eth0".to_owned(),
 			running: true,
 			access_control: None,
+			advertised: Vec::new(),
 		});
 	}
 	for (index, policy) in every_observed_policy().into_iter().enumerate() {
@@ -323,8 +324,18 @@ fn backends(observed: &mut Observed) {
 				denied: vec!["02:00:00:00:00:aa".to_owned()],
 				accepted: vec!["02:00:00:00:00:bb".to_owned()],
 			}),
+			advertised: Vec::new(),
 		});
 	}
+	// The one backend that carries what it was last given, which is how a
+	// renumbered delegation is noticed at all.
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::RouterAdvert,
+		interface: "lan0".to_owned(),
+		running: true,
+		access_control: None,
+		advertised: vec!["2001:db8:1234::/64".to_owned()],
+	});
 }
 
 /// The whole observed surface, in one value.
