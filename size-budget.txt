@@ -258,4 +258,8 @@ netcfgd
 # dhcpcd cannot report a delegated prefix, and the per-interface lookup that
 # decides whether a prefix was asked for at all. Mostly the message, which is
 # the point of it -- a lease that goes nowhere is the failure it prevents.
-total 1997336
+# +4 KB for the request half of prefix delegation: three modifier words in the
+# compiler with their diagnostics, the per-interface lookup that carries the
+# request to odhcp6c, and the refusal of the modifiers the keyword sources used
+# to drop silently. The DSL half is most of it, which is where it should be.
+total 2001432
