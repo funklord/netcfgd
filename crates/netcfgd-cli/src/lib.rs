@@ -234,8 +234,21 @@ fn compile_with_provenance(
 }
 
 fn observe(run_dir: &std::path::Path) -> Result<Observed, String> {
+	observe_against(run_dir, None)
+}
+
+/// The same, with the document to compare a running daemon's secret against.
+///
+/// Split rather than made optional at the call sites, because most callers have
+/// no document and the one question this answers -- has the passphrase behind a
+/// `@secret:` reference been edited (decision 0052) -- is only meaningful when
+/// there is one.
+fn observe_against(
+	run_dir: &std::path::Path,
+	desired: Option<&netcfgd_model::Document>,
+) -> Result<Observed, String> {
 	let prior = state::prior_state(run_dir);
-	netcfgd_observe::current(&prior, run_dir)
+	netcfgd_observe::current(&prior, run_dir, desired)
 		.map_err(|error| format!("could not read the kernel: {error}"))
 }
 
@@ -243,7 +256,11 @@ fn build_plan(
 	options: &Options,
 ) -> Result<(Plan, netcfgd_model::Document, Observed, std::path::PathBuf), String> {
 	let (document, run_dir) = compile(options)?;
-	let observed = observe(&run_dir)?;
+	// With the document, because one thing the observation answers needs it:
+	// whether a running access point still holds the passphrase the store has
+	// (decision 0052). Every other caller of `observe` has no document and asks
+	// a smaller question.
+	let observed = observe_against(&run_dir, Some(&document))?;
 	let plan_options = PlanOptions {
 		confirm_window: options.confirm,
 		revert_to: None,
@@ -923,9 +940,21 @@ fn command_reset(options: &Options) -> Result<ExitCode, String> {
 	Ok(ExitCode::SUCCESS)
 }
 
+/// Observe, with the document where the config compiles.
+///
+/// The observation answers one question that needs it: whether a running access
+/// point still holds the passphrase the store has (decision 0052). A config
+/// that does not compile is not a reason to refuse to look at the kernel, so a
+/// failure here leaves that one field unanswered -- which is exactly what
+/// `None` says -- rather than failing the command.
+fn observe_with_document(options: &Options, run_dir: &std::path::Path) -> Result<Observed, String> {
+	let compiled = compile(options).ok();
+	observe_against(run_dir, compiled.as_ref().map(|(document, _)| document))
+}
+
 fn command_status(options: &Options) -> Result<ExitCode, String> {
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
-	let observed = observe(&run_dir)?;
+	let observed = observe_with_document(options, &run_dir)?;
 	let _ = state::write_observed(&run_dir, &observed);
 
 	if options.json {

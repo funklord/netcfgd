@@ -16,5 +16,7 @@ netcfgd-sys = { path = "../netcfgd-sys" }
 # For the one observation that is a question to another process rather than a
 # read of the kernel: what a running hostapd currently holds in its access
 # control lists. `netcfgd-apply` already links this to start and stop one.
+netcfgd-secret  = { path = "../netcfgd-secret" }
+netcfgd-apply   = { path = "../netcfgd-apply" }
 netcfgd-ra      = { path = "../../backends/netcfgd-ra" }
 netcfgd-hostapd = { path = "../../backends/netcfgd-hostapd" }

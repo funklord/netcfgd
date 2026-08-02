@@ -51,30 +51,32 @@ is a restart and every station is deauthenticated -- which the plan warns about
 in those words. A `backend.reload` that quietly stopped and started would hide
 that difference behind one verb, so every other backend refuses the op by name.
 
-## What is deliberately not compared
+## What is deliberately not carried
 
-**The passphrase.** It is not in the observation and must not be: an
+**The passphrase's value.** It is not in the observation and must not be: an
 `ObservedBackend` goes over the control socket, into `/run` and out of
 `ncfg status --json`, and constraint 5 keeps secret material out of all three.
 It is not in the document either -- what the document holds is a `SecretRef` --
 so a *pure* planner has nothing to compare even in principle.
 
-The consequence is worth stating plainly rather than discovering: **editing the
-secret behind `@secret:guest` changes nothing until the access point is
-restarted for some other reason.** Two ways out, neither taken here:
+So the comparison happens **in the observer**, which is the one place both
+halves are already in hand: the value hostapd was started with is in the file
+netcfgd generated, and the value the store holds is a resolve away. What leaves
+that function is `ObservedBackend::secret_matches`, a boolean -- the same shape
+`private_key_loaded` already has, reporting the presence of a key without
+carrying one. The planner stays pure and compares a boolean; nothing that
+travels holds a secret.
 
-- The observer could resolve the reference and compare a hash of what hostapd
-  was started with against a hash of what the store holds now, publishing the
-  answer as a boolean the way `private_key_loaded` already is. That keeps the
-  planner pure and the secret out of the observation, and it is the shape to
-  reach for when somebody wants this.
-- `ncfg` could grow an explicit "restart this access point" request. That is
-  smaller, and it is also an admission that the reconciler cannot see something
-  it ought to.
+This was written a few hours after the paragraph above said it would be, and
+the paragraph is left standing because the reasoning is the record: the
+alternative -- an explicit `ncfg restart` -- was smaller and was an admission
+that the reconciler cannot see something it ought to.
 
-The first is better and neither is urgent, because rotating a passphrase is a
-deliberate act with a person present -- unlike an ISP renumbering at three in
-the morning, which is what this record is really about.
+**`None` is not `false`.** No document, no secret in the store, an unreadable
+file and an open network all produce `None`, and nothing restarts on it: a
+restart deauthenticates every station, and "I could not check" is not a reason
+to. That distinction has its own test, because the version that treated the two
+alike would have passed every other one.
 
 ## Consequences
 

@@ -2484,6 +2484,20 @@ impl Builder {
 	fn plan_access_control(&mut self, desired: &Document, observed: &Observed) {
 		for access_point in &desired.access_points {
 			let device = &access_point.device;
+			// One radio is one BSS in this build, and the one that runs is the
+			// first by id -- the same answer the executor gives and the warning
+			// above already names. Without this the *second* access point on a
+			// radio compares its own identity against what the first started
+			// with, finds a difference that is not one, and restarts forever.
+			// Caught by the idempotence gate, which is what it is for.
+			if desired
+				.access_points
+				.iter()
+				.find(|other| &other.device == device)
+				.is_some_and(|first| first.id != access_point.id)
+			{
+				continue;
+			}
 			let Some(running) = observed.backends.iter().find(|backend| {
 				backend.kind == BackendKind::AccessPoint
 					&& &backend.interface == device
@@ -2646,6 +2660,16 @@ impl Builder {
 				"access_point.band",
 				access_point.band.clone().unwrap_or_default(),
 				started.band.clone().unwrap_or_default(),
+			)
+		} else if running.secret_matches == Some(false) {
+			// The value is not here and must not be: what the observation
+			// carries is the answer, computed where both halves were already in
+			// hand (decision 0052). So the reason names the field and says which
+			// way it went, and nothing in this plan can print a passphrase.
+			(
+				"access_point.wifi.psk",
+				"the secret store's".to_owned(),
+				"what the access point was started with".to_owned(),
 			)
 		} else {
 			return false;

@@ -414,6 +414,23 @@ pub struct ObservedBackend {
 	/// left for somebody to discover.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub started_with: Option<ObservedAccessPoint>,
+	/// Whether the secret a running daemon holds is still the one the secret
+	/// store has.
+	///
+	/// A boolean rather than a value, and that is the whole design (decision
+	/// 0052). The passphrase is in the file netcfgd generated because hostapd
+	/// has no indirection for one, and an observation goes over the control
+	/// socket, into `/run` and out of `ncfg status --json` -- so what travels is
+	/// the *answer*, computed where both halves are already in hand, and never
+	/// the secret. The same shape as [`ObservedLink::private_key_loaded`], which
+	/// reports the presence of a key without carrying one.
+	///
+	/// `None` means netcfgd could not tell: no document to compare against, no
+	/// secret in the store, or a file it could not read. Nothing is restarted on
+	/// that, because a restart deauthenticates every station and "I could not
+	/// check" is not a reason to.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub secret_matches: Option<bool>,
 	/// The prefixes a running router advertisement daemon was last given.
 	///
 	/// Only ever present for [`BackendKind::RouterAdvert`], and read from the

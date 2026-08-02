@@ -312,6 +312,7 @@ fn backends(observed: &mut Observed) {
 			running: true,
 			access_control: None,
 			started_with: None,
+			secret_matches: None,
 			advertised: Vec::new(),
 		});
 	}
@@ -326,6 +327,7 @@ fn backends(observed: &mut Observed) {
 				accepted: vec!["02:00:00:00:00:bb".to_owned()],
 			}),
 			started_with: None,
+			secret_matches: None,
 			advertised: Vec::new(),
 		});
 	}
@@ -337,6 +339,7 @@ fn backends(observed: &mut Observed) {
 		running: true,
 		access_control: None,
 		started_with: None,
+		secret_matches: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	// And the identity an access point was started with, which is the other
@@ -353,6 +356,9 @@ fn backends(observed: &mut Observed) {
 			band: Some("2.4".to_owned()),
 			channel: Some(6),
 		}),
+		// The answer to a question about a secret, which is the only form a
+		// secret takes in an observation (decision 0052).
+		secret_matches: Some(true),
 		advertised: Vec::new(),
 	});
 }

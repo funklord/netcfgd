@@ -130,9 +130,11 @@ dependencies = [
 name = "netcfgd-observe"
 version = "0.0.0"
 dependencies = [
+ "netcfgd-apply",
  "netcfgd-hostapd",
  "netcfgd-model",
  "netcfgd-ra",
+ "netcfgd-secret",
  "netcfgd-sys",
 ]
 

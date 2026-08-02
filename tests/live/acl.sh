@@ -61,7 +61,8 @@ check() {
 	fi
 }
 
-printf '%s' correct-horse-battery > "$work/etc/secrets/guest"
+passphrase=correct-horse-battery
+printf '%s' "$passphrase" > "$work/etc/secrets/guest"
 chmod 600 "$work/etc/secrets/guest"
 
 export NCFG_CONFIG_DIR="$work/etc"
@@ -333,9 +334,34 @@ check "and saying what the restart costs" \
 check "rather than converging a list on a daemon that is about to go" \
 	"$(grep -cE 'access_control\.(add|del)' "$work/identity.txt" || true)" "0"
 
+# And an edited passphrase, which is the half the identity comparison cannot
+# make: the secret is in neither the document nor the observation, so what the
+# observer publishes is a boolean it computed where both halves were already in
+# hand (decision 0052).
+sed -i 's/^ssid2=6f6c64$/ssid2=6775657374/' "$work/run/hostapd/ap0.conf"
+printf 'wpa_passphrase=%s\n' 'what-it-was-started-with' >> "$work/run/hostapd/ap0.conf"
+"$ncfg" plan > "$work/secret.txt" 2>&1 || true
+check "an edited passphrase restarts the access point" \
+	"$(grep -c 'access_point.wifi.psk' "$work/secret.txt" || true)" "3"
+# Neither value may appear in a plan an operator pastes into a bug report. The
+# document's is the one in the secrets directory; the daemon's is the line just
+# written above.
+check "without printing what the store holds" \
+	"$(grep -c "$passphrase" "$work/secret.txt" || true)" "0"
+check "or what the access point was started with" \
+	"$(grep -c 'what-it-was-started-with' "$work/secret.txt" || true)" "0"
+# And nowhere in the observation either, which goes over the socket and into
+# /run -- constraint 5 is about all three.
+"$ncfg" status --json > "$work/status.json" 2>&1 || true
+check "nor anywhere in the observation" \
+	"$(grep -c "$passphrase\|what-it-was-started-with" "$work/status.json" || true)" "0"
+check "which says the answer instead" \
+	"$(grep -c 'secret_matches' "$work/status.json" || true)" "1"
+
 # And the same file, matching the document, plans nothing. Without this the
 # check above passes for a netcfgd that restarts on every reconcile.
-sed -i 's/^ssid2=6f6c64$/ssid2=6775657374/' "$work/run/hostapd/ap0.conf"
+sed -i '/^wpa_passphrase=/d' "$work/run/hostapd/ap0.conf"
+printf 'wpa_passphrase=%s\n' "$passphrase" >> "$work/run/hostapd/ap0.conf"
 "$ncfg" plan > "$work/identity2.txt" 2>&1 || true
 check "an access point already running what the document says is left alone" \
 	"$(grep -cE 'backend\.(stop|start)' "$work/identity2.txt" || true)" "0"

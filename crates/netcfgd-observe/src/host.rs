@@ -26,7 +26,7 @@ fn proc_root() -> PathBuf {
 }
 
 /// Fill in everything the netlink snapshot could not supply.
-pub fn augment(observed: &mut Observed, run_dir: &Path) {
+pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd_model::Document>) {
 	let root = proc_root();
 	for link in &mut observed.links {
 		link.forwarding = forwarding(&root, &link.name);
@@ -35,6 +35,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path) {
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
 	read_advertised(observed, run_dir);
+	read_secret_currency(observed, run_dir, desired);
 	read_wireguard_keys(observed);
 }
 
@@ -101,6 +102,72 @@ fn read_access_control(observed: &mut Observed, run_dir: &Path) {
 		});
 		backend.started_with = started_with(run_dir, &backend.interface);
 	}
+}
+
+/// Whether a running access point still holds the passphrase the store has.
+///
+/// The one thing decision 0052 left open, and the reason it was left: the
+/// secret is not in the observation, because constraint 5 keeps it out of
+/// `/run` and the socket, and not in the document either -- what the document
+/// holds is a `SecretRef`. A pure planner therefore has nothing to compare.
+///
+/// So the comparison happens here, where both halves are already in hand: the
+/// value hostapd was started with is in the file netcfgd generated, and the
+/// value the store holds now is a resolve away. What leaves this function is a
+/// boolean. Neither value is copied anywhere, put in a message, or returned.
+///
+/// `None` is the answer whenever anything is missing -- no document, no
+/// secret, an unreadable file, an access point with no passphrase at all --
+/// because a restart deauthenticates every station and "I could not check" is
+/// not a reason to.
+fn read_secret_currency(
+	observed: &mut Observed,
+	run_dir: &Path,
+	desired: Option<&netcfgd_model::Document>,
+) {
+	let Some(document) = desired else {
+		return;
+	};
+	let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+	for backend in &mut observed.backends {
+		if backend.kind != netcfgd_model::BackendKind::AccessPoint || !backend.running {
+			continue;
+		}
+		let Some(access_point) = document
+			.access_points
+			.iter()
+			.find(|point| point.device == backend.interface)
+		else {
+			continue;
+		};
+		let netcfgd_model::Security::Psk(psk) = &access_point.security else {
+			// An open network, or one this build does not render. Nothing to
+			// compare rather than something that differs.
+			continue;
+		};
+		let Ok(wanted) = resolver.resolve(&psk.passphrase) else {
+			continue;
+		};
+		let Ok(text) =
+			fs::read_to_string(netcfgd_hostapd::config_path(run_dir, &backend.interface))
+		else {
+			continue;
+		};
+		let started = text
+			.lines()
+			.map(str::trim)
+			.find_map(|line| line.strip_prefix("wpa_passphrase="));
+		backend.secret_matches = started.map(|started| started == wanted.expose());
+	}
+}
+
+/// Where the secrets live, which is `netcfgd-apply`'s definition.
+///
+/// One spelling, for the reason `report_dir` has one: two crates deciding
+/// separately where `/etc/netcfgd/secrets` is would work until one of them
+/// moved.
+fn secrets_dir() -> PathBuf {
+	netcfgd_apply::kernel::secrets_dir()
 }
 
 /// What a running access point was started with, from the file netcfgd wrote.
