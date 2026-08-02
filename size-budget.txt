@@ -288,4 +288,12 @@ netcfgd
 # not applied, and a backend that is about to be restarted. It is the pane an
 # operator watches while a modem is not working, and it was the one view where
 # "the bearer is up" and "netcfgd acted on it" looked the same.
-total 2054680
+# +16 KB for a WireGuard device netcfgd can see and correct: the observation
+# carries what the kernel holds -- listen port, firewall mark, public key and
+# the peer list -- and the planner compares it against the document. What it
+# bought is a revocation that happens: deleting a peer from the config used to
+# plan nothing at all, so the peer kept its tunnel while `ncfg apply` said
+# there was nothing to do. Half of the cost is the observed model growing two
+# structs; the rest is the comparison and the two ops that were declared in the
+# taxonomy and had never been emitted.
+total 2071064
