@@ -803,6 +803,9 @@ impl Builder {
 		if matches!(interface.kind, InterfaceKind::Pppoe(_)) {
 			return self.plan_backend(interface, BackendKind::Pppoe, "pppoe", observed, base);
 		}
+		if matches!(interface.kind, InterfaceKind::OpenVpn(_)) {
+			return self.plan_backend(interface, BackendKind::OpenVpn, "openvpn", observed, base);
+		}
 		// Before the supplicant, because a radio that runs an access point does
 		// not also join networks with the same interface. The warning that says
 		// so is emitted once, up front, rather than here -- this runs per
@@ -838,13 +841,25 @@ impl Builder {
 	/// new link; `ncfg apply --oneshot` needs a second run, and the warning
 	/// says so rather than leaving a DSL user wondering why their route is
 	/// missing.
+	///
+	/// Nothing else may be planned here, and that is the point rather than an
+	/// optimisation. A `link.up` on an interface that does not exist is an
+	/// action that must fail, and it fails *first* -- so the apply stops
+	/// before the `backend.start` that would have created the device, and the
+	/// tunnel never comes up at all. Found exactly that way.
 	fn plan_ppp_session(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let base = self.gate(name);
-		self.plan_backend(interface, BackendKind::Pppoe, "pppoe", observed, &base);
+		// An OpenVPN handshake negotiates asynchronously the same way PPP
+		// does, so a tunnel with no device yet takes this path too.
+		let (kind, field) = match interface.kind {
+			InterfaceKind::OpenVpn(_) => (BackendKind::OpenVpn, "openvpn"),
+			_ => (BackendKind::Pppoe, "pppoe"),
+		};
+		self.plan_backend(interface, kind, field, observed, &base);
 		self.warn(
 			name,
-			"the ppp session is not up yet; addressing and routes are planned once it is",
+			"the tunnel is not up yet; addressing and routes are planned once it is",
 		);
 	}
 
@@ -853,11 +868,14 @@ impl Builder {
 		if observed.link(&interface.name).is_some() {
 			return;
 		}
-		if matches!(interface.kind, InterfaceKind::Pppoe(_)) {
+		if matches!(
+			interface.kind,
+			InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
+		) {
 			// A PPP interface is created by `pppd` when the session comes up,
-			// not by netlink. Planning a `link.create` for it would emit an
-			// action that must fail; the `backend.start` below is what brings
-			// it into existence.
+			// and a tunnel by `openvpn`, not by netlink. Planning a
+			// `link.create` for either would emit an action that must fail;
+			// the `backend.start` below is what brings it into existence.
 			return;
 		}
 		if matches!(interface.kind, InterfaceKind::Physical) {
@@ -889,8 +907,17 @@ impl Builder {
 	fn plan_link_attributes(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let link = observed.link(name);
-		if link.is_none() && matches!(interface.kind, InterfaceKind::Pppoe(_)) {
-			self.plan_ppp_session(interface, observed);
+		// A tunnel whose device does not exist yet has no attributes to set.
+		// It returns *without planning the dial*, which `plan_interface_contents`
+		// does one pass later -- both passes used to call `plan_ppp_session`,
+		// and the result was two `backend.start` actions for one session, so
+		// every apply ran `pppd` twice. Nothing caught it because the fixture
+		// asserted the action was present rather than how many there were.
+		if link.is_none()
+			&& matches!(
+				interface.kind,
+				InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
+			) {
 			return;
 		}
 		if link.is_none()
@@ -990,7 +1017,11 @@ impl Builder {
 	fn plan_interface_contents(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let link = observed.link(name);
-		if link.is_none() && matches!(interface.kind, InterfaceKind::Pppoe(_)) {
+		if link.is_none()
+			&& matches!(
+				interface.kind,
+				InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
+			) {
 			self.plan_ppp_session(interface, observed);
 			return;
 		}
@@ -2216,6 +2247,11 @@ impl Builder {
 				on_interface(&|interface| matches!(interface.kind, InterfaceKind::Pppoe(_))),
 				"pppoe",
 			),
+			// And a tunnel is an interface for the same reason (decision 0046).
+			BackendKind::OpenVpn => (
+				on_interface(&|interface| matches!(interface.kind, InterfaceKind::OpenVpn(_))),
+				"openvpn",
+			),
 			// Not started by the planner, so not stopped by it either. A
 			// WireGuard device is configured at creation and a DNS delivery is
 			// an action rather than a process; router advertisement is not
@@ -2805,6 +2841,7 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Vxlan(_) => "vxlan",
 		InterfaceKind::WireGuard(_) => "wireguard",
 		InterfaceKind::Pppoe(_) => "pppoe",
+		InterfaceKind::OpenVpn(_) => "openvpn",
 		InterfaceKind::Dummy => "dummy",
 		InterfaceKind::Veth(_) => "veth",
 		InterfaceKind::Vrf(_) => "vrf",

@@ -421,6 +421,30 @@ pub struct WireGuardConfig {
 	pub peers: Vec<WgPeer>,
 }
 
+/// An `OpenVPN` tunnel.
+///
+/// The configuration is a **path to the operator's `.ovpn`**, not a rendering
+/// of one. Decision 0046 has the number behind that: `openvpn --help` lists 253
+/// top-level options against hostapd's couple of dozen, so netcfgd expressing
+/// the surface would be a second `OpenVPN` configuration language permanently
+/// behind the first. A `.ovpn` is also something an operator is *given* rather
+/// than something netcfgd renders, which is the treatment `EapConfig` already
+/// gives X.509 material in `ca_cert` and `client_cert`.
+///
+/// What netcfgd owns is the lifecycle: it starts the daemon as the interface's
+/// prerequisite, stops it through its own management socket, and reports what
+/// it said when it will not start. What is inside the file is the operator's,
+/// and `ncfg explain` stops at its edge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenVpnConfig {
+	/// Absolute path to the `.ovpn` netcfgd hands to `openvpn --config`.
+	///
+	/// Never read by netcfgd. It is passed through and the daemon's complaints
+	/// about it are passed back.
+	pub config: String,
+}
+
 /// A `PPPoE` session.
 ///
 /// Implemented by pppd. Present because a large share of DSL and fibre
@@ -469,6 +493,8 @@ pub enum InterfaceKind {
 	WireGuard(WireGuardConfig),
 	/// A `PPPoE` session.
 	Pppoe(PppoeConfig),
+	/// An `OpenVPN` tunnel.
+	OpenVpn(OpenVpnConfig),
 	/// A dummy interface.
 	Dummy,
 	/// One end of a veth pair.

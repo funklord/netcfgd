@@ -269,6 +269,8 @@ pub enum BackendKind {
 	WireGuard,
 	/// A `PPPoE` session.
 	Pppoe,
+	/// An `OpenVPN` tunnel.
+	OpenVpn,
 	/// A DNS delivery backend.
 	Dns,
 	/// A router advertisement daemon.

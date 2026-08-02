@@ -1769,6 +1769,11 @@ fn lower_interface(
 						interface.kind = kind;
 					}
 				}
+				"openvpn" => {
+					if let Some(kind) = lower_openvpn(inner, diags) {
+						interface.kind = kind;
+					}
+				}
 				other => diags.push(Diagnostic::new(
 					inner.span,
 					format!("`{other}` is not valid inside `interface`"),
@@ -2107,6 +2112,55 @@ fn lower_vxlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> 
 	}
 
 	Some(InterfaceKind::Vxlan(config))
+}
+
+/// An `openvpn { }` block, which is a path and nothing else.
+///
+/// Deliberately one key. Decision 0046: the `.ovpn` is the operator's and
+/// netcfgd does not express what is in it, so every option somebody might want
+/// here already has a home in that file. A second place to say the same thing
+/// is how the two come to disagree.
+fn lower_openvpn(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	let mut config = None;
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"config" | "file" => config = as_string(&assignment.value, diags),
+			other => diags.push(
+				Diagnostic::new(assignment.span, format!("unknown openvpn key `{other}`"))
+					.with_help(
+						"an openvpn tunnel takes only `config`, the path to the .ovpn file; 						 everything else belongs in that file (docs/decisions/0046)",
+					),
+			),
+		}
+	}
+
+	let Some(config) = config else {
+		diags.push(
+			Diagnostic::new(block.span, "an openvpn tunnel needs a `config`").with_help(
+				"the path to the .ovpn file, such as `/etc/openvpn/work.ovpn`; netcfgd 				 hands it to openvpn and does not read it",
+			),
+		);
+		return None;
+	};
+	// Absolute, because netcfgd's working directory is not the operator's and a
+	// relative path here would resolve somewhere nobody chose. Refused at
+	// compile time, where the span points at the line, rather than by openvpn
+	// against a file it cannot find.
+	if !config.starts_with('/') {
+		diags.push(
+			Diagnostic::new(block.span, format!("`{config}` is not an absolute path")).with_help(
+				"netcfgd runs from no particular directory, so the .ovpn needs a full path",
+			),
+		);
+		return None;
+	}
+	Some(InterfaceKind::OpenVpn(netcfgd_model::OpenVpnConfig {
+		config,
+	}))
 }
 
 fn lower_pppoe(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {

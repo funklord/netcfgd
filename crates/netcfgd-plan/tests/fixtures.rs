@@ -1272,6 +1272,95 @@ interface wlan0 { config = "192.168.9.1/24" }
 	);
 }
 
+/// One dial, not two. Both the link-attributes pass and the contents pass used
+/// to plan it, so every apply of a session that had not come up yet ran the
+/// daemon twice -- and the fixture that covered this asserted the action was
+/// *present* rather than how many there were, which is why it went unnoticed
+/// from the day `PPPoE` was written.
+#[test]
+fn a_tunnel_that_is_not_up_is_dialled_exactly_once() {
+	for config in [
+		r#"interface t0 { pppoe { parent = "eth0"; username = "u"; password = "@secret:p" } }"#,
+		r#"interface t0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#,
+	] {
+		let desired = document(config);
+		let plan = plan(&desired, &Observed::default(), &PlanOptions::default());
+		let starts = names(&plan)
+			.iter()
+			.filter(|name| **name == "backend.start")
+			.count();
+		assert_eq!(starts, 1, "for {config}, got {:?}", names(&plan));
+	}
+}
+
+/// A tunnel is an interface, exactly as a `PPPoE` session is: the daemon creates
+/// the device, so nothing plans a `link.create`, and the backend is the
+/// prerequisite that brings it into existence.
+#[test]
+fn an_openvpn_tunnel_is_started_rather_than_created() {
+	let desired = document(r#"interface vpn0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#);
+	// The device does not exist yet, which is the ordinary state before the
+	// daemon has connected.
+	let observed = Observed::default();
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).iter().any(|name| *name == "link.create"),
+		"openvpn makes the tun device; a link.create would be an action that must fail: {:?}",
+		names(&plan)
+	);
+	assert!(
+		plan.actions.iter().any(|action| matches!(&action.op,
+			Op::BackendStart { kind, iface }
+				if *kind == BackendKind::OpenVpn && iface == "vpn0")),
+		"got {:?}",
+		names(&plan)
+	);
+}
+
+/// And once it is up, nothing starts it again.
+#[test]
+fn a_running_tunnel_is_left_alone() {
+	let desired = document(r#"interface vpn0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#);
+	let mut observed = observed_with(&["vpn0"]);
+	observed.links[0].up = true;
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::OpenVpn,
+		interface: "vpn0".to_owned(),
+		running: true,
+		access_control: None,
+	});
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		!names(&plan).iter().any(|name| name.starts_with("backend.")),
+		"got {:?}",
+		names(&plan)
+	);
+}
+
+/// Deleting the block stops the daemon. The same question `backend_wanted`
+/// answers for every other backend, and getting it wrong is an oscillation
+/// rather than a missing feature -- start on one reconcile, stop on the next.
+#[test]
+fn a_tunnel_stops_when_its_block_goes() {
+	let desired = document(r#"interface vpn0 { kind = "dummy"; config = "null" }"#);
+	let mut observed = observed_with(&["vpn0"]);
+	observed.links[0].up = true;
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::OpenVpn,
+		interface: "vpn0".to_owned(),
+		running: true,
+		access_control: None,
+	});
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let stop = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "backend.stop")
+		.expect("a stop");
+	assert_eq!(stop.reason.field, "openvpn");
+}
+
 /// An interface whose addresses come from a modem helper's report.
 fn modem_document() -> Document {
 	document(r#"interface wwan0 { kind = "dummy"; config = "modem" }"#)
@@ -2693,7 +2782,7 @@ interface ppp0 {
 	assert!(
 		plan.warnings
 			.iter()
-			.any(|warning| warning.message.contains("ppp session is not up yet")),
+			.any(|warning| warning.message.contains("tunnel is not up yet")),
 		"got {:?}",
 		plan.warnings
 	);

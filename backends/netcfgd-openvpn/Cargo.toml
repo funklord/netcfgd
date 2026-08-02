@@ -1,0 +1,13 @@
+[package]
+name        = "netcfgd-openvpn"
+description = "Running an OpenVPN tunnel, whose configuration is the operator's."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lints]
+workspace = true
+
+[dependencies]
