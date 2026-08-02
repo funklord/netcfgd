@@ -395,6 +395,7 @@ dependencies = [
  "netcfgd-model",
  "netcfgd-openvpn",
  "netcfgd-plan",
+ "netcfgd-ra",
  "netcfgd-secret",
  "netcfgd-supplicant",
  "netcfgd-sys",
@@ -459,6 +460,14 @@ dependencies = [
  "netcfgd-plan",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "netcfgd-ra"
+version = "0.0.0"
+dependencies = [
+ "netcfgd-model",
+ "netcfgd-sys",
 ]
 
 [[package]]
