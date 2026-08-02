@@ -409,9 +409,11 @@ pub struct ObservedBackend {
 	/// **The passphrase is deliberately not here.** A secret does not belong in
 	/// an observation that goes over the socket and into `/run` (constraint 5),
 	/// and the planner could not compare one anyway: it is pure, and what the
-	/// document holds is a `SecretRef`. So an edited passphrase is not noticed
-	/// by this comparison, which is stated in `docs/decisions/0052` rather than
-	/// left for somebody to discover.
+	/// document holds is a `SecretRef`. An edited passphrase is still noticed --
+	/// by [`ObservedBackend::secret_matches`], which carries the *answer* and
+	/// never the value, computed where both halves are already in hand. This
+	/// field and that one are the two halves of decision 0052, and neither of
+	/// them is a place a secret may appear.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub started_with: Option<ObservedAccessPoint>,
 	/// Whether the secret a running daemon holds is still the one the secret

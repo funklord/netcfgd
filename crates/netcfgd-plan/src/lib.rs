@@ -2704,10 +2704,12 @@ impl Builder {
 	/// difference -- and the only thing that differs here is the act, because
 	/// hostapd cannot be reloaded and radvd can.
 	///
-	/// **A changed passphrase is not noticed**, and that is a limit rather than
-	/// an oversight: the secret is not in the observation (constraint 5 keeps it
-	/// out of `/run` and the socket) and not in the document either, so a pure
-	/// planner has nothing to compare. Decision 0052 says what to do about it.
+	/// **A changed passphrase restarts it too**, through the last arm below. The
+	/// secret is in neither the observation nor the document -- constraint 5
+	/// keeps it out of `/run` and the socket, and what the document holds is a
+	/// `SecretRef` -- so a pure planner has no values to compare. What it
+	/// compares instead is `secret_matches`, a boolean the *observer* computed
+	/// where both halves were already in hand (decision 0052).
 	///
 	/// Returns whether a restart was planned, so the caller can leave the
 	/// station lists alone -- an access point that is coming back rebuilds them
@@ -2776,10 +2778,12 @@ impl Builder {
 	/// be converging a value it could never confirm -- and the failure mode is
 	/// an open network reported as a closed one.
 	///
-	/// Restarting is honest about its cost instead. It is also the only part of
-	/// an access point's configuration anything notices changing today: an
-	/// edited SSID or channel is still invisible to the planner, which is older
-	/// and wider than this.
+	/// Restarting is honest about its cost instead. It was for a while the only
+	/// part of an access point's configuration anything noticed changing;
+	/// [`Builder::restart_if_identity_changed`] is the rest of it, and the two
+	/// divide by *why* a restart is unavoidable. There it is that hostapd reads
+	/// its file once; here it is that `macaddr_acl` could be set over the socket
+	/// and still could not be confirmed.
 	fn restart_access_point(
 		&mut self,
 		device: &str,
