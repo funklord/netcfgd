@@ -258,6 +258,7 @@ install-procd:
 # Anything else is major, and every consumer refuses the document.
 schema-bless:
 	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-model --test frozen >/dev/null
+	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-model --test observed >/dev/null
 	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-proto --test frozen >/dev/null
 	@echo "schema-bless: witnesses rewritten; `git diff --stat docs/schema | tail -1`"
 	@echo "schema-bless: say in the commit whether this is a minor or a major bump"

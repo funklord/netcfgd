@@ -10,9 +10,16 @@
 //! form moves those bytes.
 //!
 //! Only the envelope is pinned here. A `Status` response carries an `Observed`
-//! and a `Plan`, and those are pinned by their own crates -- repeating them
-//! would mean two witnesses to update for one change, and the second would
-//! eventually be the one nobody did.
+//! and a `Plan`, and repeating them would mean two witnesses to update for one
+//! change, with the second eventually being the one nobody did.
+//!
+//! That sentence used to end "those are pinned by their own crates", which was
+//! not true of either of them. `netcfgd-model` pinned a `Document` and nothing
+//! pinned an `Observed`, so a field could be added to the thing this socket
+//! actually sends and no gate anywhere moved -- which is how
+//! `ObservedReport::routes` arrived. `Observed` now has its own witness at
+//! `docs/schema/observed.json`. A `Plan` still has none, and that is a hole
+//! rather than a decision.
 
 use netcfgd_proto::{
 	Event, Explanation, Fact, Request, Response, ScanEntry, ScanReport, Subject, WifiState,
