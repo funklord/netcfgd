@@ -1,9 +1,18 @@
 #!/bin/sh
 # A modem helper for netcfgd, over MBIM, with no bus and no ModemManager.
 #
+#     netcfgd-modem-mbim monitor    -d /dev/cdc-wdm0 -i wwan0 -a internet
 #     netcfgd-modem-mbim connect    -d /dev/cdc-wdm0 -i wwan0 -a internet
 #     netcfgd-modem-mbim disconnect -d /dev/cdc-wdm0 -i wwan0
 #     netcfgd-modem-mbim stop       -i wwan0
+#
+# `monitor` is the one to run from a service manager: it connects, then stays
+# up watching the bearer, and empties the report the moment the network drops
+# it. `connect` is the same thing without the watching, which leaves a report
+# nothing maintains -- fine for a script that is about to do its own polling,
+# and a trap for anything else. A stale report means netcfgd keeps an address
+# and a default route on a modem that is gone, and a default route down a dead
+# modem black-holes traffic another interface would have carried.
 #
 # netcfgd does not start this, supervise it or speak to it. It connects a
 # cellular bearer and writes what the network gave it to
@@ -29,7 +38,7 @@
 set -eu
 
 usage() {
-	sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
 	exit "${1:-2}"
 }
 
@@ -42,6 +51,7 @@ interface=
 apn=
 user=
 password=
+interval=30
 
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -50,6 +60,7 @@ while [ $# -gt 0 ]; do
 		-a|--apn)       apn=${2:?--apn needs a name}; shift 2 ;;
 		-u|--user)      user=${2:?--user needs a name}; shift 2 ;;
 		-p|--password)  password=${2:?--password needs a value}; shift 2 ;;
+		-n|--interval)  interval=${2:?--interval needs seconds}; shift 2 ;;
 		-h|--help)      usage 0 ;;
 		*) echo "netcfgd-modem-mbim: unknown option $1" >&2; exit 2 ;;
 	esac
@@ -106,8 +117,8 @@ to_report() {
 	"
 }
 
-case $command in
-connect)
+# Connect the bearer and write what the network gave us.
+connect_bearer() {
 	[ -n "$device" ] || { echo "netcfgd-modem-mbim: --device is required" >&2; exit 2; }
 	[ -n "$apn" ] || { echo "netcfgd-modem-mbim: --apn is required" >&2; exit 2; }
 
@@ -138,6 +149,52 @@ connect)
 
 	printf '# %s via %s, %s\n%s\n' "$interface" "$apn" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
 		"$body" | write_report
+}
+
+# Whether the bearer is still up, from `mbimcli --query-connection-state`:
+#
+#     [/dev/cdc-wdm0] Connection status:
+#              Session ID: '0'
+#        Activation state: 'activated'
+#
+# Tab-indented in libmbim's `g_print`, matched as whitespace here because a
+# literal tab in a shell script is a thing somebody's editor eventually eats.
+still_connected() {
+	mbim --query-connection-state 2>/dev/null \
+		| sed -n "s/^[[:space:]]*Activation state: '\(.*\)'\$/\1/p" \
+		| grep -qx activated
+}
+
+case $command in
+connect)
+	connect_bearer
+	;;
+
+monitor)
+	# The mode to run under a service manager. Cleaning up on the way out is
+	# the whole reason it exists, so the trap is set before anything can fail.
+	trap 'mbim --disconnect > /dev/null 2>&1 || true; rm -f "$report"; exit 0' INT TERM
+
+	connect_bearer
+
+	while :; do
+		sleep "$interval"
+		if still_connected; then
+			continue
+		fi
+		# Emptied, not removed. This helper is still around and still watching,
+		# and the contract says an empty report means "connected to nothing"
+		# while a missing one means "nobody is watching this modem". netcfgd
+		# withdraws the address and the default route either way; the
+		# difference is what an operator reading /run sees.
+		: | write_report
+		echo "netcfgd-modem-mbim: the bearer on $interface went down" >&2
+		# Non-zero so a service manager restarts this rather than treating a
+		# dropped connection as a job well done. Reconnecting in a loop here
+		# would be a supervisor written badly inside a script that does not
+		# need to be one.
+		exit 1
+	done
 	;;
 
 disconnect)
