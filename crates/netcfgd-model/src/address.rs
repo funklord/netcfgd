@@ -170,25 +170,26 @@ pub struct Slaac {
 	pub privacy: SlaacPrivacy,
 }
 
-/// Addresses a modem helper reported for this interface.
+/// Addressing something outside netcfgd reported for this interface.
 ///
-/// The bearer's configuration is decided by the cellular network and told to
-/// netcfgd through a file -- `docs/modem-report.md` is the contract, and
-/// decisions 0044 and 0045 say why netcfgd neither connects the bearer nor
-/// speaks a modem protocol to do it.
+/// The value is decided by whatever negotiated it -- a cellular network, a VPN
+/// server -- and told to netcfgd through a file. `docs/interface-report.md` is
+/// the contract; decisions 0044 and 0045 say why netcfgd neither connects a
+/// bearer nor speaks a modem protocol, and 0047 says why the contract is not a
+/// modem's even though a modem helper wrote the first one.
 ///
-/// Unlike [`Dhcp4`], there is no backend to start: the helper is already
-/// running and netcfgd does not supervise it. Unlike [`Delegated`], the value
-/// is not derived from anything -- it is used as reported. What netcfgd does is
+/// Unlike [`Dhcp4`], there is no backend to start *for the addressing*: whatever
+/// writes the report is already running, whether netcfgd started it (an
+/// `OpenVPN` tunnel) or not (a modem helper). Unlike [`Delegated`], the value is
+/// not derived from anything -- it is used as reported. What netcfgd does is
 /// install what the report says, with its own tag, and withdraw it when the
 /// report stops saying it.
 ///
 /// A struct with no fields yet rather than a unit variant, so that the first
-/// thing worth configuring here -- a metric, an APN the helper should be told
-/// about -- is a field rather than a second variant.
+/// thing worth configuring here is a field rather than a second variant.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
-pub struct Modem {}
+pub struct Reported {}
 
 /// One way an interface acquires addresses.
 ///
@@ -213,8 +214,8 @@ pub enum AddressSource {
 	/// than being a fallback; a timeout-triggered fallback would be state
 	/// hidden in the reconciler that no config file explains.
 	LinkLocal,
-	/// Whatever a modem helper reported for this interface.
-	Modem(Modem),
+	/// Whatever something outside netcfgd reported for this interface.
+	Reported(Reported),
 }
 
 impl AddressSource {
@@ -228,7 +229,7 @@ impl AddressSource {
 			Self::Dhcp6(_) => "dhcp6",
 			Self::Slaac(_) => "slaac",
 			Self::LinkLocal => "link_local",
-			Self::Modem(_) => "modem",
+			Self::Reported(_) => "reported",
 		}
 	}
 
@@ -241,7 +242,7 @@ impl AddressSource {
 	pub fn is_singleton(&self) -> bool {
 		matches!(
 			self,
-			Self::Dhcp4(_) | Self::Dhcp6(_) | Self::Slaac(_) | Self::LinkLocal | Self::Modem(_)
+			Self::Dhcp4(_) | Self::Dhcp6(_) | Self::Slaac(_) | Self::LinkLocal | Self::Reported(_)
 		)
 	}
 }

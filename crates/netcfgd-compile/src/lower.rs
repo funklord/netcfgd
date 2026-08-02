@@ -2828,8 +2828,8 @@ fn starts_entry(word: &str) -> bool {
 			| "dhcp6" | "slaac"
 			| "link-local"
 			| "link_local"
-			| "modem" | "null"
-			| "noop"
+			| "reported"
+			| "null" | "noop"
 	) || word.starts_with("@pd:")
 		|| word
 			.split('/')
@@ -2934,10 +2934,16 @@ fn address_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Opt
 		"dhcp6" | "dhcpv6" => return Some(AddressSource::Dhcp6(Dhcp6::default())),
 		"slaac" => return Some(AddressSource::Slaac(Slaac::default())),
 		"link-local" | "link_local" => return Some(AddressSource::LinkLocal),
-		// Whatever a modem helper reported for this interface. There is no
+		// Whatever something outside netcfgd reported for this interface -- a
+		// modem helper, or the tunnel daemon netcfgd itself started. There is no
 		// backend to name and no value to carry: the report is the value, and
-		// `docs/modem-report.md` is where it comes from.
-		"modem" => return Some(AddressSource::Modem(netcfgd_model::Modem::default())),
+		// `docs/interface-report.md` is where it comes from.
+		//
+		// Spelled `reported` rather than `modem` because the writer is not a
+		// modem's (decision 0047), and there is deliberately no second spelling:
+		// two words for one source is how a config language stops being
+		// greppable.
+		"reported" => return Some(AddressSource::Reported(netcfgd_model::Reported::default())),
 		// netifrc's "no address at all", used on bridge members. An empty
 		// addressing list is already legal (decision 0006 rule 6), so this
 		// contributes nothing rather than being an error.

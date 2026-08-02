@@ -1207,25 +1207,26 @@ impl Builder {
 			AddressSource::Delegated(delegated) => {
 				self.plan_delegated(interface, delegated, &field, observed, base)
 			}
-			AddressSource::Modem(_) => self.plan_modem(interface, &field, observed, base),
+			AddressSource::Reported(_) => self.plan_reported(interface, &field, observed, base),
 		}
 	}
 
-	/// The addresses a modem helper reported for this interface.
+	/// The addresses something outside netcfgd reported for this interface.
 	///
 	/// The third source whose value comes from outside the document, and the
 	/// only one netcfgd installs itself. A `Dhcp4` source starts a client and
-	/// the client installs the address; a modem helper deliberately does not
-	/// (`docs/modem-report.md` forbids it, because two writers on one interface
-	/// is the failure this project is arranged around). So the report is read
-	/// and the addresses are netcfgd's to add, tagged as netcfgd's.
+	/// the client installs the address; whatever writes a report deliberately
+	/// does not (`docs/interface-report.md` forbids it, because two writers on
+	/// one interface is the failure this project is arranged around). So the
+	/// report is read and the addresses are netcfgd's to add, tagged as
+	/// netcfgd's.
 	///
-	/// **No report is not an error.** A helper that has not connected yet, or
-	/// is not running, leaves nothing to install -- exactly like a delegation
-	/// that has not arrived. The warning says which, because "no addresses on
-	/// the modem" has two very different causes and an operator needs to know
-	/// whether to look at netcfgd or at the helper.
-	fn plan_modem(
+	/// **No report is not an error.** A helper that has not connected yet, or a
+	/// tunnel still negotiating, leaves nothing to install -- exactly like a
+	/// delegation that has not arrived. The warning says which, because "no
+	/// addresses here" has two very different causes and an operator needs to
+	/// know whether to look at netcfgd or at the thing that reports.
+	fn plan_reported(
 		&mut self,
 		interface: &Interface,
 		field: &str,
@@ -1234,29 +1235,29 @@ impl Builder {
 	) -> Vec<u32> {
 		let name = &interface.name;
 		let Some(report) = observed
-			.modems
+			.reports
 			.iter()
-			.find(|modem| &modem.interface == name)
+			.find(|report| &report.interface == name)
 		else {
 			self.warn(
 				name,
 				format!(
-					"`{name}` takes its addresses from a modem, and no helper has reported \
-					 one -- nothing is written at /run/netcfgd/modem/{name}. Addresses are \
-					 planned when a helper reports them; see docs/modem-report.md"
+					"`{name}` takes its addresses from whatever reports them, and nothing \
+					 has -- there is no file at /run/netcfgd/reported/{name}. Addresses are \
+					 planned when a report arrives; see docs/interface-report.md"
 				),
 			);
 			return Vec::new();
 		};
 
 		if report.addresses.is_empty() {
-			// A report with no addresses is a bearer that is down, and the
-			// helper said so deliberately. Distinct from the case above, and
-			// worth distinguishing: this one means the modem stack is working
+			// A report with no addresses is a link that is down, and whoever
+			// wrote it said so deliberately. Distinct from the case above, and
+			// worth distinguishing: this one means the reporting side is working
 			// and the network has not given us anything.
 			self.warn(
 				name,
-				format!("the modem helper on `{name}` reports no addresses, so the bearer is down"),
+				format!("`{name}` is reported with no addresses, so the link is down"),
 			);
 			return Vec::new();
 		}
@@ -1278,11 +1279,7 @@ impl Builder {
 					preferred_lifetime: None,
 					valid_lifetime: None,
 				},
-				Reason::absent(
-					name,
-					field,
-					format!("{address} (reported by a modem helper)"),
-				),
+				Reason::absent(name, field, format!("{address} (reported)")),
 				base.to_vec(),
 				Some(Op::AddrDel {
 					iface: name.clone(),
@@ -2155,11 +2152,11 @@ impl Builder {
 						// wanted here, and the teardown removes it -- which is
 						// right, because unlike a lease there is no client
 						// holding it and no backend to restart.
-						AddressSource::Modem(_) => observed
-							.modems
+						AddressSource::Reported(_) => observed
+							.reports
 							.iter()
-							.find(|modem| modem.interface == address.interface)
-							.is_some_and(|modem| modem.addresses.contains(&address.address)),
+							.find(|report| report.interface == address.interface)
+							.is_some_and(|report| report.addresses.contains(&address.address)),
 						_ => false,
 					})
 				});
@@ -2654,7 +2651,7 @@ fn render_route(route: &Route) -> String {
 }
 
 /// Every route this interface should have: the document's, plus the ones a
-/// modem helper's report implies.
+/// report implies.
 ///
 /// One function so the forward pass and the teardown cannot disagree about what
 /// the list is. They already could not disagree about the document's routes,
@@ -2667,15 +2664,14 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 		.routes
 		.iter()
 		.cloned()
-		.chain(modem_routes(interface, observed))
+		.chain(reported_routes(interface, observed))
 		.collect()
 }
 
-/// The routes a modem helper's report implies for one interface.
+/// The routes a report implies for one interface.
 ///
-/// A default route per reported gateway, and nothing else -- a cellular bearer
-/// gives you a way off the link, not a topology. Two of them on a dual-stack
-/// bearer, which is why the report's `gateway` key repeats.
+/// A default route per reported gateway -- two of them on a dual-stack bearer,
+/// which is why the report's `gateway` key repeats.
 ///
 /// **Synthesised into [`Route`] rather than planned separately**, so they go
 /// through the same path every other route does: the carrier check that stops a
@@ -2685,23 +2681,23 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 /// what the document no longer asks for. A second route planner would be a
 /// second set of those rules to keep in step.
 ///
-/// Empty unless the interface actually asks for `modem` addressing. A report
-/// for an interface whose document says nothing about a modem is an observation
+/// Empty unless the interface actually asks for `reported` addressing. A report
+/// for an interface whose document does not ask for one is an observation
 /// netcfgd has no instruction about, and installing a default route off the
 /// strength of a file somebody dropped in `/run` is not one it should invent.
-fn modem_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
+fn reported_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
 	if !interface
 		.addressing
 		.iter()
-		.any(|source| matches!(source, AddressSource::Modem(_)))
+		.any(|source| matches!(source, AddressSource::Reported(_)))
 	{
 		return Vec::new();
 	}
 	observed
-		.modems
+		.reports
 		.iter()
-		.filter(|modem| modem.interface == interface.name)
-		.flat_map(|modem| modem.gateways.iter())
+		.filter(|report| report.interface == interface.name)
+		.flat_map(|report| report.gateways.iter())
 		.filter_map(|gateway| {
 			let via: std::net::IpAddr = gateway.parse().ok()?;
 			Some(Route {
@@ -2719,8 +2715,8 @@ fn modem_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
 				table: None,
 				src: None,
 				scope: None,
-				// The bearer's gateway is very often outside every address the
-				// bearer was given -- a /32 with a next hop elsewhere is the
+				// A reported gateway is very often outside every address the
+				// interface was given -- a /32 with a next hop elsewhere is the
 				// ordinary shape of a cellular link, and the kernel refuses
 				// such a route without this.
 				onlink: true,
