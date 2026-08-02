@@ -1,16 +1,17 @@
 #!/bin/sh
-# The modem reporting contract, from the side a helper writes.
+# The interface reporting contract, from the side a writer writes.
 #
-#     unshare -rn sh tests/live/modem.sh
+#     unshare -rn sh tests/live/report.sh
 #
 # Decisions 0044 and 0045 put modem support in a helper that netcfgd does not
-# start, supervise or speak to: it writes a file, netcfgd reads it. The whole
-# interface is `docs/modem-report.md`.
+# start, supervise or speak to: it writes a file, netcfgd reads it. Decision
+# 0047 takes the modem's name off that contract, because a tunnel daemon
+# reports through it too. The whole interface is `docs/interface-report.md`.
 #
-# So this test *is* a helper, in the sense that matters. It writes the file the
+# So this test *is* a writer, in the sense that matters. It writes the file the
 # way the document tells somebody to write it -- a shell script wrapped around
-# what the modem said, which is exactly what a `umbim` or `mbimcli` helper is --
-# and then asks netcfgd what it saw. If this script has to do anything the
+# what the far end said, which is exactly what a `umbim` or `mbimcli` helper is
+# -- and then asks netcfgd what it saw. If this script has to do anything the
 # document does not describe, the document is wrong.
 #
 # There is no modem here and there does not need to be one. netcfgd's half of
@@ -22,10 +23,10 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
-		echo "modem.sh: NCFG_LIVE is set but this cannot run: $1" >&2
+		echo "report.sh: NCFG_LIVE is set but this cannot run: $1" >&2
 		exit 1
 	fi
-	echo "modem.sh: skipping: $1"
+	echo "report.sh: skipping: $1"
 	exit 0
 }
 
@@ -33,7 +34,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
-work=$(mktemp -d /tmp/ncfg-modem.XXXXXX)
+work=$(mktemp -d /tmp/ncfg-report.XXXXXX)
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
@@ -73,22 +74,22 @@ CONF
 }
 write_config null
 
-# The directory the contract names. A helper creates it; netcfgd does not,
+# The directory the contract names. A writer creates it; netcfgd does not,
 # because netcfgd is not the one reporting.
-mkdir -p "$work/run/modem"
+mkdir -p "$work/run/reported"
 
 report() {
-	# Atomically, as the document tells a helper to: netcfgd may read at any
+	# Atomically, as the document tells a writer to: netcfgd may read at any
 	# moment and a half-written file is a file it will believe.
-	cat > "$work/run/modem/.wwan0.tmp"
-	mv "$work/run/modem/.wwan0.tmp" "$work/run/modem/wwan0"
+	cat > "$work/run/reported/.wwan0.tmp"
+	mv "$work/run/reported/.wwan0.tmp" "$work/run/reported/wwan0"
 }
 
 seen() {
 	"$ncfg" status --json 2>/dev/null | python3 -c '
 import json,sys
 observed = json.load(sys.stdin)
-found = [m for m in observed.get("modems", []) if m["interface"] == "wwan0"]
+found = [m for m in observed.get("reports", []) if m["interface"] == "wwan0"]
 if not found:
     print("no report")
 else:
@@ -97,13 +98,13 @@ else:
 '
 }
 
-# ------------------------------------------------ nothing reported, no modem
+# ----------------------------------------------------- nothing reported yet
 
-check "a machine with no helper running reports no modem" "$(seen)" "no report"
+check "a machine with nothing reporting shows no report" "$(seen)" "no report"
 
 # ------------------------------------------------- the documented example
 
-# Verbatim from docs/modem-report.md. If this stops matching the document, one
+# Verbatim from docs/interface-report.md. If this stops matching the document, one
 # of the two is wrong and it is not the document.
 report <<'EOF'
 # wwan0, connected 2026-07-31T14:02:11Z via three.co.uk
@@ -120,7 +121,7 @@ check "the documented example is read as the document describes" "$(seen)" \
 # those apart would have no way to know which half was broken.
 "$ncfg" status > "$work/status.txt" 2>&1 || true
 check "and the text output does not claim it was applied" \
-	"$(grep -c 'reported by a modem helper, not applied' "$work/status.txt" || true)" "3"
+	"$(grep -c 'reported, not applied' "$work/status.txt" || true)" "3"
 # Really not applied: the interface has no address on it.
 check "the interface really does not carry the address" \
 	"$(ip -4 addr show wwan0 | grep -c '10.64.1.23' || true)" "0"
@@ -146,19 +147,19 @@ check "a helper may report more than netcfgd understands" "$(seen)" "10.64.1.23/
 report < /dev/null
 check "an empty report is a bearer that is down, and says so" "$(seen)" "empty"
 
-rm -f "$work/run/modem/wwan0"
+rm -f "$work/run/reported/wwan0"
 check "and a removed report is nobody watching" "$(seen)" "no report"
 
 # ------------------------------------ and now the source that consumes it
 
-# `config = "modem"` is the document saying where this interface's addresses
+# `config = "reported"` is the document saying where this interface's addresses
 # come from. The helper still does not install anything -- netcfgd does, from
 # what the helper reported, with its own tag. That is the whole point of the
 # split: one writer.
 # A host that manages its resolver, so the reported nameservers have somewhere
 # to go. Without this netcfgd manages no DNS and a modem appearing is not a
 # reason for it to start.
-write_config modem 'global { dns { dns_mode = "write_resolv_conf" } }'
+write_config reported 'global { dns { dns_mode = "write_resolv_conf" } }'
 report <<'EOF'
 address=10.64.1.23/30
 gateway=10.64.1.24
@@ -235,8 +236,8 @@ check "a nameserver written on an interface reaches the resolver" \
 
 echo
 if [ "$failures" -eq 0 ]; then
-	echo "modem.sh: all checks passed"
+	echo "report.sh: all checks passed"
 else
-	echo "modem.sh: $failures check(s) failed"
+	echo "report.sh: $failures check(s) failed"
 	exit 1
 fi

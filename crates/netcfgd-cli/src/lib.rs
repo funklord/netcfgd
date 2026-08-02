@@ -980,27 +980,27 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 		if link.forwarding == Some(true) {
 			println!("    forwarding");
 		}
-		// What a modem helper reported, shown as reported rather than as
-		// applied -- because it is not applied. netcfgd reads this file and
+		// What something outside netcfgd reported, shown as reported rather than
+		// as applied -- because it is not applied. netcfgd reads this file and
 		// does nothing with it until an `addressing` source asks (0044, 0045,
-		// `docs/modem-report.md`), and an operator who cannot see the
+		// `docs/interface-report.md`), and an operator who cannot see the
 		// difference between "the bearer is up" and "netcfgd configured the
 		// interface" would have no way to tell which half was broken.
-		if let Some(modem) = observed
-			.modems
+		if let Some(report) = observed
+			.reports
 			.iter()
-			.find(|modem| modem.interface == link.name)
+			.find(|report| report.interface == link.name)
 		{
-			for address in &modem.addresses {
-				println!("    {address} [reported by a modem helper, not applied]");
+			for address in &report.addresses {
+				println!("    {address} [reported, not applied]");
 			}
-			for gateway in &modem.gateways {
-				println!("    via {gateway} [reported by a modem helper, not applied]");
+			for gateway in &report.gateways {
+				println!("    via {gateway} [reported, not applied]");
 			}
-			if !modem.nameservers.is_empty() {
+			if !report.nameservers.is_empty() {
 				println!(
-					"    nameservers {} [reported by a modem helper, not applied]",
-					modem.nameservers.join(" ")
+					"    nameservers {} [reported, not applied]",
+					report.nameservers.join(" ")
 				);
 			}
 		}

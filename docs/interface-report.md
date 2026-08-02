@@ -1,41 +1,48 @@
-# The modem report
+# The interface report
 
 **Status: stable. This is a contract, not an implementation detail.**
 
-A modem helper connects a cellular bearer and writes down what the network gave
-it. netcfgd reads that file and treats it the way it treats a lease. The two
-halves do not otherwise know about each other -- no library, no socket, no bus.
+Something that is not netcfgd brings an interface up -- a modem helper connects a
+cellular bearer, `openvpn` negotiates a tunnel -- and writes down what the far
+end gave it. netcfgd reads that file and treats it the way it treats a lease. The
+two halves do not otherwise know about each other -- no library, no socket, no
+bus.
 
-This document is the whole interface. If you are writing a helper you should not
-need to read netcfgd's source, and if you find you did, that is a bug in this
-page.
+This document is the whole interface. If you are writing something that reports,
+you should not need to read netcfgd's source, and if you find you did, that is a
+bug in this page.
 
 Decisions [0044](decisions/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)
 and [0045](decisions/0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
-say why it is shaped this way.
+say why it is shaped this way, and
+[0047](decisions/0047-a-tunnels-address-stays-with-its-daemon.md) says why it is
+not called the modem report even though a modem helper wrote the first one:
+nothing in it is a modem's, and a name that says otherwise sends the next writer
+looking for a document that does not exist.
 
 ## Where
 
 ```
-/run/netcfgd/modem/<interface>
+/run/netcfgd/reported/<interface>
 ```
 
-One file per interface, named for the network interface the bearer runs on --
-`wwan0`, `wwx00…`, whatever the kernel called it. That is the same shape as
+One file per interface, named for the network interface reported on -- `wwan0`,
+`vpn0`, `ppp0`, whatever the kernel called it. That is the same shape as
 `/run/netcfgd/prefixes/<interface>`, which a `DHCPv6` client's hook already
 writes.
 
-`/run/netcfgd` is netcfgd's run directory and moves with `$NCFG_RUN_DIR`, which
-a helper should honour so it can be tested somewhere other than `/run`.
+`/run/netcfgd` is netcfgd's run directory and moves with `$NCFG_RUN_DIR`, which a
+writer should honour so it can be tested somewhere other than `/run`.
 
 ## What
 
 Lines of `key=value`. Not JSON.
 
 That is deliberate and is the same call the prefix file makes: the thing writing
-this is very often a shell script wrapped around `umbim` or `mbimcli`, and a
-shell script that has to emit valid JSON is a shell script that will one day
-emit invalid JSON. This is a format a helper cannot get wrong.
+this is very often a shell script -- wrapped around `umbim` or `mbimcli`, or
+handed its values in the environment by `openvpn` or `pppd` -- and a shell script
+that has to emit valid JSON is a shell script that will one day emit invalid
+JSON. This is a format a writer cannot get wrong.
 
 ```
 # wwan0, connected 2026-07-31T14:02:11Z via three.co.uk
@@ -48,19 +55,19 @@ dns=2001:4860:4860::8888
 | key | repeats | meaning |
 |---|---|---|
 | `address` | yes | An address the network assigned, in CIDR form. IPv4 or IPv6. |
-| `gateway` | yes | A next hop. IPv4 or IPv6; give both on a dual-stack bearer. |
+| `gateway` | yes | A next hop for a default route. IPv4 or IPv6; give both on a dual-stack link. |
 | `dns` | yes | A nameserver. IPv4 or IPv6. |
 
-Rules, all of which a helper can follow without thinking hard:
+Rules, all of which a writer can follow without thinking hard:
 
 - **Blank lines and lines beginning `#` are ignored.** Put whatever you like in
   a comment; netcfgd will not read it and neither will it complain.
 - **Whitespace around the key and the value is trimmed.** `address = 10.0.0.1/32`
   is the same as `address=10.0.0.1/32`.
-- **Unknown keys are ignored, and this is a promise.** A helper may report
+- **Unknown keys are ignored, and this is a promise.** A writer may report
   `mtu=`, `apn=`, `operator=` or anything else it knows; a netcfgd that does not
   understand a key skips it rather than rejecting the file. That is what lets
-  helpers run ahead of netcfgd instead of waiting for it.
+  writers run ahead of netcfgd instead of waiting for it.
 - **A malformed value is skipped, not fatal.** One unparseable address does not
   discard the rest of the file. A bearer that came up with a usable v4 address
   and a mangled v6 one should still get the v4.
@@ -69,34 +76,34 @@ Rules, all of which a helper can follow without thinking hard:
 
 ## When
 
-**Write the file after the bearer is up and you know its configuration.**
+**Write the file once the link is up and you know its configuration.**
 Write it atomically -- write a temporary file in the same directory and
 `rename(2)` it over the target -- because netcfgd may read at any moment and a
 half-written file is a file it will believe.
 
-**Truncate it to empty when the bearer goes down.** An empty file and a missing
+**Truncate it to empty when the link goes down.** An empty file and a missing
 file both mean "no addresses", and they differ only in that the empty one says
-so deliberately. Prefer the empty file while the helper is running: it
-distinguishes "connected to nothing" from "nobody is watching this modem".
+so deliberately. Prefer the empty file while the writer is running: it
+distinguishes "connected to nothing" from "nobody is watching this interface".
 
-**Remove it when the helper stops.** A file left behind is a report nothing is
+**Remove it when the writer stops.** A file left behind is a report nothing is
 maintaining, and the next person to read it will believe it.
 
 ## What netcfgd does with it
 
 **`address=`** is applied, when the document asks for it. An `interface` block
-saying `config = "modem"` gets the reported addresses installed, tagged as
+saying `config = "reported"` gets the reported addresses installed, tagged as
 netcfgd's, and withdrawn again when the report stops naming them -- so
-truncating the file when the bearer drops really does take the address off the
+truncating the file when the link drops really does take the address off the
 interface.
 
 **`gateway=`** becomes a default route on the interface, one per reported
-gateway, so a dual-stack bearer gets one each way. The route is installed
-`onlink`, because a cellular next hop is routinely outside every address the
-bearer was given -- a /30 or a /32 with the gateway elsewhere is the ordinary
-shape, and the kernel refuses such a route otherwise. It is withdrawn with the
-address when the report empties: a default route down a modem that is gone
-black-holes traffic another interface would have carried.
+gateway, so a dual-stack link gets one each way. The route is installed
+`onlink`, because a reported next hop is routinely outside every address the
+interface was given -- a /30 or a /32 with the gateway elsewhere is the ordinary
+shape of a cellular link, and the kernel refuses such a route otherwise. It is
+withdrawn with the address when the report empties: a default route down a link
+that is gone black-holes traffic another interface would have carried.
 
 **`dns=`** is delivered, when the host manages DNS at all. The reported servers
 join the interface's DNS scope, after any the document wrote for it -- so a
@@ -104,20 +111,20 @@ server an operator chose is consulted before one the network handed out. The
 delivery mode is not a choice: every scope in one delivery has to agree about
 it, so the reported servers go out however the rest of the host's DNS does.
 
-A host whose `global { dns { } }` sets no mode manages no resolver, and a modem
-appearing is not a reason for it to start. The servers are read and shown and
+A host whose `global { dns { } }` sets no mode manages no resolver, and a report
+arriving is not a reason for it to start. The servers are read and shown and
 nothing is delivered.
 
 netcfgd will not configure the interface at all until a document asks it to --
-an `interface` with no `modem` source gets nothing, however complete the report.
-A helper must not assume its report has been applied, and must never apply the
-addresses itself: two writers on one interface is the failure this whole project
-is arranged to avoid.
+an `interface` with no `reported` source gets nothing, however complete the
+report. A writer must not assume its report has been applied, and must never
+apply the addresses itself: two writers on one interface is the failure this
+whole project is arranged to avoid.
 
-## What a helper is
+## What writes one
 
-Anything that writes the file. Three are known to be possible and none of them
-is privileged by netcfgd:
+Anything at all. For a cellular bearer, three are known to be possible and none
+of them is privileged by netcfgd:
 
 - **`mbimcli`** from `libmbim-utils`. **There is one in this repository**:
   `helpers/netcfgd-modem-mbim`, a shell script, installed by
@@ -129,6 +136,11 @@ is privileged by netcfgd:
   where the vendor quirk handling for non-conforming modems lives.
 
 netcfgd does not start, supervise or speak to any of them. It reads a file.
+
+A tunnel is the other half, and there netcfgd *does* start the daemon -- but the
+report reaches it by the same road, written by a script `openvpn` or `pppd`
+calls. netcfgd knowing how a process was started tells it nothing about what the
+far end handed over.
 
 ## Where the APN lives
 

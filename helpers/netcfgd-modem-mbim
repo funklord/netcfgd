@@ -16,15 +16,15 @@
 #
 # netcfgd does not start this, supervise it or speak to it. It connects a
 # cellular bearer and writes what the network gave it to
-# `/run/netcfgd/modem/<interface>`; netcfgd reads that file and configures the
-# interface from it. `docs/modem-report.md` is the whole contract between the
+# `/run/netcfgd/reported/<interface>`; netcfgd reads that file and configures the
+# interface from it. `docs/interface-report.md` is the whole contract between the
 # two, and this script is one implementation of the writing half -- decision
 # 0045 is explicit that it is not a privileged one. `umbim` on OpenWrt is the
 # other obvious way, on hardware where libmbim does not fit.
 #
 # It does NOT configure the interface. That is netcfgd's job, and two writers
 # on one interface is the failure the whole arrangement exists to avoid. Set
-# `config = "modem"` on the interface and netcfgd installs the address, the
+# `config = "reported"` on the interface and netcfgd installs the address, the
 # default route and the nameservers from the report.
 #
 # What it needs: `mbimcli` from libmbim-utils, and read/write on the modem's
@@ -71,7 +71,7 @@ done
 # The same directory netcfgd reads, and the same environment variable it
 # honours, so a helper can be exercised somewhere other than /run.
 run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
-report="$run_dir/modem/$interface"
+report="$run_dir/reported/$interface"
 
 mbimcli=${MBIMCLI:-mbimcli}
 
@@ -86,7 +86,7 @@ mbim() {
 # Atomically, as the contract asks: netcfgd may read at any moment and a
 # half-written file is a file it will believe.
 write_report() {
-	mkdir -p "$run_dir/modem"
+	mkdir -p "$run_dir/reported"
 	cat > "$report.tmp"
 	mv "$report.tmp" "$report"
 }

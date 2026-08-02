@@ -100,39 +100,43 @@ pub fn read_delegations(run_dir: &Path) -> Vec<netcfgd_model::Delegation> {
 	out
 }
 
-/// Where a modem helper records what the bearer was given.
+/// Where something that is not netcfgd records what an interface was given.
 ///
 /// One file per interface, `key=value` lines, blank lines and `#` comments
 /// ignored. Not JSON, for the reason [`prefixes_dir`] gives: the thing writing
-/// it is very often a shell script wrapped around `umbim` or `mbimcli`.
+/// it is very often a shell script -- wrapped around `umbim` or `mbimcli` for a
+/// modem, or handed its values in the environment by `openvpn` or `pppd`.
 ///
 /// **The format is a documented contract**, not an internal detail --
-/// `docs/modem-report.md` is the whole of it, and decision 0045 says why the
-/// helper is deliberately plural. Changing what is parsed here changes what
+/// `docs/interface-report.md` is the whole of it, and decision 0045 says why the
+/// writer is deliberately plural. Changing what is parsed here changes what
 /// somebody else's script has to write.
+///
+/// Named `reported` rather than `modem` because a modem helper was merely the
+/// first writer; decision 0047 has the argument for taking the name off it.
 #[must_use]
-pub fn modem_dir(run_dir: &Path) -> PathBuf {
-	run_dir.join("modem")
+pub fn report_dir(run_dir: &Path) -> PathBuf {
+	run_dir.join("reported")
 }
 
-/// Read every modem report a helper has written.
+/// Read every report that has been written.
 ///
-/// A missing directory means no helper is running, which is the state of every
-/// machine without a modem. Unreadable and malformed files are skipped rather
-/// than failing the observation, for the reason the rest of this module gives:
-/// `/run` is derived and disposable, and refusing to observe a machine because
-/// one file is bad is worse than observing the rest of it.
+/// A missing directory means nothing is reporting, which is the state of every
+/// machine with no modem and no tunnel. Unreadable and malformed files are
+/// skipped rather than failing the observation, for the reason the rest of this
+/// module gives: `/run` is derived and disposable, and refusing to observe a
+/// machine because one file is bad is worse than observing the rest of it.
 #[must_use]
-pub fn read_modems(run_dir: &Path) -> Vec<netcfgd_model::ObservedModem> {
-	let Ok(entries) = fs::read_dir(modem_dir(run_dir)) else {
+pub fn read_reports(run_dir: &Path) -> Vec<netcfgd_model::ObservedReport> {
+	let Ok(entries) = fs::read_dir(report_dir(run_dir)) else {
 		return Vec::new();
 	};
-	let mut out: Vec<netcfgd_model::ObservedModem> = entries
+	let mut out: Vec<netcfgd_model::ObservedReport> = entries
 		.flatten()
 		.filter_map(|entry| {
 			let interface = entry.file_name().to_str()?.to_owned();
 			let body = fs::read_to_string(entry.path()).ok()?;
-			Some(parse_modem_report(&interface, &body))
+			Some(parse_report(&interface, &body))
 		})
 		.collect();
 	out.sort_by(|a, b| a.interface.cmp(&b.interface));
@@ -141,7 +145,7 @@ pub fn read_modems(run_dir: &Path) -> Vec<netcfgd_model::ObservedModem> {
 
 /// One report, parsed.
 ///
-/// Split out from [`read_modems`] so the format -- which is somebody else's to
+/// Split out from [`read_reports`] so the format -- which is somebody else's to
 /// write -- is testable without a filesystem.
 ///
 /// **Unknown keys are ignored, and that is a promise the contract makes.** It
@@ -150,8 +154,8 @@ pub fn read_modems(run_dir: &Path) -> Vec<netcfgd_model::ObservedModem> {
 /// malformed value is skipped for the neighbouring reason: a bearer that came
 /// up with a usable v4 address and a mangled v6 one should still get the v4.
 #[must_use]
-pub fn parse_modem_report(interface: &str, body: &str) -> netcfgd_model::ObservedModem {
-	let mut report = netcfgd_model::ObservedModem {
+pub fn parse_report(interface: &str, body: &str) -> netcfgd_model::ObservedReport {
+	let mut report = netcfgd_model::ObservedReport {
 		interface: interface.to_owned(),
 		addresses: Vec::new(),
 		gateways: Vec::new(),
@@ -195,7 +199,7 @@ pub fn parse_modem_report(interface: &str, body: &str) -> netcfgd_model::Observe
 pub fn prior_state(run_dir: &Path) -> PriorState {
 	let mut prior = read_owned(run_dir).to_prior();
 	prior.delegations = read_delegations(run_dir);
-	prior.modems = read_modems(run_dir);
+	prior.reports = read_reports(run_dir);
 	prior
 }
 
@@ -236,7 +240,7 @@ impl OwnedState {
 			// it is something a client was told, so it is recorded separately
 			// and folded in by [`prior_state`].
 			delegations: Vec::new(),
-			modems: Vec::new(),
+			reports: Vec::new(),
 		}
 	}
 
@@ -512,7 +516,7 @@ pub fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 mod tests {
 	use super::*;
 
-	/// The example from `docs/modem-report.md`, verbatim. If this test and that
+	/// The example from `docs/interface-report.md`, verbatim. If this test and that
 	/// document ever disagree, the document is right: it is what somebody else
 	/// wrote their helper against.
 	const REPORT: &str = "# wwan0, connected 2026-07-31T14:02:11Z via three.co.uk\n\
@@ -523,7 +527,7 @@ mod tests {
 
 	#[test]
 	fn the_documented_example_parses_to_what_it_says() {
-		let report = parse_modem_report("wwan0", REPORT);
+		let report = parse_report("wwan0", REPORT);
 		assert_eq!(report.interface, "wwan0");
 		assert_eq!(report.addresses, ["10.64.1.23/30"]);
 		assert_eq!(report.gateways, ["10.64.1.24"]);
@@ -536,7 +540,7 @@ mod tests {
 		// understand yet, so that helpers do not have to wait for netcfgd. A
 		// reader that refused here would break every helper the day it learned
 		// a new field.
-		let report = parse_modem_report(
+		let report = parse_report(
 			"wwan0",
 			"mtu=1428\noperator=three.co.uk\naddress=10.0.0.1/32\nsignal=-71\n",
 		);
@@ -549,7 +553,7 @@ mod tests {
 		// A bearer that came up with a usable v4 address and a mangled v6 one
 		// should still get the v4. Losing the file over one line is the failure
 		// mode that leaves somebody with no connectivity and no explanation.
-		let report = parse_modem_report(
+		let report = parse_report(
 			"wwan0",
 			"address=10.0.0.1/32\nthis is not a key=value line at all\n\
 			 gateway=\naddress=\n\ndns=1.1.1.1\n",
@@ -561,7 +565,7 @@ mod tests {
 
 	#[test]
 	fn comments_and_whitespace_are_what_the_document_says_they_are() {
-		let report = parse_modem_report(
+		let report = parse_report(
 			"wwan0",
 			"  # a comment, indented\n\t address = 10.0.0.1/32 \t\n\n#dns=8.8.8.8\n",
 		);
@@ -577,7 +581,7 @@ mod tests {
 		// Distinct from no file at all only in that somebody said so, which is
 		// exactly the distinction the contract asks helpers to make while they
 		// are running.
-		let report = parse_modem_report("wwan0", "");
+		let report = parse_report("wwan0", "");
 		assert_eq!(report.interface, "wwan0");
 		assert!(report.addresses.is_empty());
 	}
@@ -587,13 +591,13 @@ mod tests {
 		// The contract says so, and a nameserver list that reorders itself
 		// between reads would make a plan differ from the last one for no
 		// reason anybody could see.
-		let report = parse_modem_report("wwan0", "dns=9.9.9.9\ndns=1.1.1.1\ndns=8.8.8.8\n");
+		let report = parse_report("wwan0", "dns=9.9.9.9\ndns=1.1.1.1\ndns=8.8.8.8\n");
 		assert_eq!(report.nameservers, ["9.9.9.9", "1.1.1.1", "8.8.8.8"]);
 	}
 
 	#[test]
-	fn a_missing_directory_is_a_machine_without_a_modem() {
+	fn a_missing_directory_is_a_machine_with_nothing_reporting() {
 		let empty = Path::new("/nonexistent/netcfgd-test-run-dir");
-		assert!(read_modems(empty).is_empty());
+		assert!(read_reports(empty).is_empty());
 	}
 }

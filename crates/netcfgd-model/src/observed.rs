@@ -316,25 +316,31 @@ pub struct Delegation {
 	pub prefixes: Vec<String>,
 }
 
-/// What a modem helper reported about one interface's bearer.
+/// What something that is not netcfgd reported about one interface.
 ///
-/// Not kernel state, and not netcfgd's own record either: a cellular bearer's
-/// configuration is known to whatever connected it, and netcfgd is told through
-/// a file (`docs/modem-report.md`). The same shape and the same reason as
-/// [`Delegation`] -- decision 0004 delegates the client and design section 9.2
-/// keeps the arrow pointing inward.
+/// Not kernel state, and not netcfgd's own record either: the configuration a
+/// cellular bearer or a tunnel comes up with is known to whatever negotiated it,
+/// and netcfgd is told through a file (`docs/interface-report.md`). The same
+/// shape and the same reason as [`Delegation`] -- decision 0004 delegates the
+/// client and design section 9.2 keeps the arrow pointing inward.
+///
+/// Named for what it is rather than for the first thing that wrote one. A modem
+/// helper was, and decision 0047 says why that name had to stop being the
+/// contract's: the writer is anything that knows an interface's addressing and
+/// is not netcfgd.
 ///
 /// Every field is what the *network* assigned, not what the document asked for.
-/// An empty report is a bearer that is down, which is different from no report
-/// at all only in that somebody said so.
+/// An empty report is a link that is down, which is different from no report at
+/// all only in that somebody said so.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ObservedModem {
-	/// The interface the bearer runs on, which is the report's filename.
+pub struct ObservedReport {
+	/// The interface reported on, which is the report's filename.
 	pub interface: String,
 	/// Addresses the network assigned, in CIDR form, in the order reported.
 	pub addresses: Vec<String>,
-	/// Next hops, in the order reported. Both families on a dual-stack bearer.
+	/// Next hops for a default route, in the order reported. Both families on a
+	/// dual-stack bearer.
 	pub gateways: Vec<String>,
 	/// Nameservers, in the order reported.
 	pub nameservers: Vec<String>,
@@ -459,9 +465,9 @@ pub struct Observed {
 	/// Prefixes delegated to this host, sorted by interface.
 	#[serde(default)]
 	pub delegations: Vec<Delegation>,
-	/// What modem helpers reported, sorted by interface.
+	/// What helpers and daemons reported about interfaces, sorted by interface.
 	#[serde(default)]
-	pub modems: Vec<ObservedModem>,
+	pub reports: Vec<ObservedReport>,
 	/// Interfaces netcfgd set the root qdisc on, sorted.
 	///
 	/// Recorded for the same reason as [`Observed::forwarding_applied`]: a

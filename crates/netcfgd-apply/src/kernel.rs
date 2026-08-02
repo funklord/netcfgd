@@ -162,8 +162,8 @@ impl KernelExecutor {
 		self.run_dir = run_dir.into();
 		// The same function the planner calls, and deliberately not a second
 		// reading of the document. A scope can come from an observation rather
-		// than from the document -- a modem helper's reported nameservers are
-		// one -- and an executor that rebuilt the list from the document alone
+		// than from the document -- a report's nameservers are one -- and an
+		// executor that rebuilt the list from the document alone
 		// delivered a `resolv.conf` with nothing in it while the plan said it
 		// had applied one.
 		self.dns_scopes = netcfgd_model::dns::scopes(document, observed)

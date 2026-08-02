@@ -56,13 +56,13 @@ pub struct PriorState {
 	/// until an address is derived from it. The client is the only source, and
 	/// netcfgd does not implement the client (decision 0004).
 	pub delegations: Vec<netcfgd_model::Delegation>,
-	/// What modem helpers reported, read from `/run`.
+	/// What helpers and daemons reported about interfaces, read from `/run`.
 	///
-	/// Prior state for the same reason a delegation is: a cellular bearer's
-	/// configuration is known to whatever connected it, and netcfgd does not
-	/// connect it (decisions 0044 and 0045). The contract is
-	/// `docs/modem-report.md`.
-	pub modems: Vec<netcfgd_model::ObservedModem>,
+	/// Prior state for the same reason a delegation is: the configuration a
+	/// cellular bearer or a tunnel comes up with is known to whatever negotiated
+	/// it, and netcfgd negotiates neither (decisions 0044, 0045 and 0047). The
+	/// contract is `docs/interface-report.md`.
+	pub reports: Vec<netcfgd_model::ObservedReport>,
 }
 
 impl PriorState {
@@ -284,7 +284,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 			})
 			.collect(),
 		delegations: prior.delegations.clone(),
-		modems: prior.modems.clone(),
+		reports: prior.reports.clone(),
 		address_proto_supported: snapshot.address_proto_supported,
 	};
 	observed.canonicalize();
