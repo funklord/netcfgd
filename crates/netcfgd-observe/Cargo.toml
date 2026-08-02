@@ -18,5 +18,6 @@ netcfgd-sys = { path = "../netcfgd-sys" }
 # control lists. `netcfgd-apply` already links this to start and stop one.
 netcfgd-secret  = { path = "../netcfgd-secret" }
 netcfgd-apply   = { path = "../netcfgd-apply" }
+netcfgd-openvpn = { path = "../../backends/netcfgd-openvpn" }
 netcfgd-ra      = { path = "../../backends/netcfgd-ra" }
 netcfgd-hostapd = { path = "../../backends/netcfgd-hostapd" }
