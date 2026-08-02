@@ -38,6 +38,67 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	read_secret_currency(observed, run_dir, desired);
 	read_tunnel_currency(observed, run_dir, desired);
 	read_wireguard_keys(observed);
+	read_wireguard_currency(observed, run_dir, desired);
+}
+
+/// Whether each `WireGuard` device still holds the key the store has.
+///
+/// The third comparison of this shape, after an access point's passphrase
+/// (0052) and a tunnel's configuration file (0053), and it is here rather than
+/// in the planner for the reason both of those are: one half is a secret, and a
+/// pure planner may not hold one. What leaves this function is a boolean.
+///
+/// The record is a digest of the key netcfgd loaded, written when the kernel
+/// accepted it. Comparing digests rather than deriving a public key is what
+/// makes this possible at all without curve25519 -- which project.md carried as
+/// the reason a rotated key could not be noticed.
+fn read_wireguard_currency(
+	observed: &mut Observed,
+	run_dir: &Path,
+	desired: Option<&netcfgd_model::Document>,
+) {
+	let Some(document) = desired else {
+		return;
+	};
+	let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+	for link in &mut observed.links {
+		let Some(state) = link.wireguard.as_mut() else {
+			continue;
+		};
+		let Some(config) = document.interfaces.iter().find_map(|interface| {
+			match (&interface.kind, interface.name == link.name) {
+				(netcfgd_model::InterfaceKind::WireGuard(wireguard), true) => Some(wireguard),
+				_ => None,
+			}
+		}) else {
+			continue;
+		};
+		let Ok(recorded) =
+			fs::read_to_string(netcfgd_apply::kernel::key_record_path(run_dir, &link.name))
+		else {
+			// A device netcfgd did not configure, or a `/run` cleared under a
+			// running one. Neither is a statement about the key.
+			continue;
+		};
+		let Ok(secret) = resolver.resolve(&config.private_key) else {
+			continue;
+		};
+		state.key_matches =
+			Some(netcfgd_model::hash::sha256_hex(&decoded_key(secret.expose())) == recorded.trim());
+	}
+}
+
+/// The 32 octets a base64 key spells, or the raw bytes if it is not base64.
+///
+/// The executor hashes what it loaded, which is the decoded key -- so this has
+/// to decode the same way or every device would report a rotated key forever.
+/// Falling back to the raw bytes keeps that true for a store holding something
+/// this cannot parse: both sides then hash the same unparseable thing.
+fn decoded_key(secret: &str) -> Vec<u8> {
+	netcfgd_model::Key::parse(secret.trim()).map_or_else(
+		|_| secret.trim().as_bytes().to_vec(),
+		|key| key.as_bytes().to_vec(),
+	)
 }
 
 /// Which `WireGuard` devices have a private key loaded.
@@ -111,6 +172,9 @@ fn carried(state: &netcfgd_sys::wg::DeviceState) -> netcfgd_model::ObservedWireG
 	netcfgd_model::ObservedWireGuard {
 		public_key: state.public_key.map(netcfgd_model::Key::from_bytes),
 		listen_port: state.listen_port,
+		// Filled in by `read_wireguard_currency`, which needs the document and
+		// the secret store and so cannot run from a netlink reply alone.
+		key_matches: None,
 		// Zero is how the kernel spells "no mark", the same way it spells "no
 		// keepalive" -- and a `Some(0)` here would be a value in `/run` and on
 		// the socket that says a mark is set when none is.

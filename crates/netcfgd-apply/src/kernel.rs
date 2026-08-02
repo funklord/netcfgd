@@ -601,6 +601,7 @@ impl KernelExecutor {
 	/// the kernel takes them separately and a plan that says `wg.set_device`
 	/// should not quietly replace peers.
 	fn configure_wireguard(
+		&self,
 		name: &str,
 		config: &netcfgd_model::interface::WireGuardConfig,
 		parts: WgParts,
@@ -684,7 +685,16 @@ impl KernelExecutor {
 			} else {
 				format!("cannot configure {name}: {error}")
 			}
-		})
+		})?;
+
+		// What key the kernel was given, so that a *rotated* one is something
+		// the next reconcile can notice. Written after the kernel took it, for
+		// the reason a `.ovpn` hash is written after openvpn accepted the file:
+		// a record of a configuration that was refused is a record of nothing.
+		if let Some(private) = private {
+			record_key(&self.run_dir, name, &private);
+		}
+		Ok(())
 	}
 
 	/// The index of an interface, refreshing once if it is not known.
@@ -762,7 +772,7 @@ impl Executor for KernelExecutor {
 				// nothing -- so this is part of creating it rather than a
 				// separate action.
 				if let InterfaceKind::WireGuard(config) = &**kind {
-					Self::configure_wireguard(name, config, WgParts::Whole)?;
+					self.configure_wireguard(name, config, WgParts::Whole)?;
 				}
 				if let InterfaceKind::Bridge(bridge) = &**kind {
 					let index = self.index_of(name)?;
@@ -1283,11 +1293,11 @@ impl Executor for KernelExecutor {
 			// prefix into `/run/netcfgd/plan.last.json` for no gain.
 			Op::WgSetDevice { iface, .. } => {
 				let config = self.wireguard_config(iface)?;
-				Self::configure_wireguard(iface, &config, WgParts::DeviceOnly)
+				self.configure_wireguard(iface, &config, WgParts::DeviceOnly)
 			}
 			Op::WgSetPeers { iface, .. } => {
 				let config = self.wireguard_config(iface)?;
-				Self::configure_wireguard(iface, &config, WgParts::Peers)
+				self.configure_wireguard(iface, &config, WgParts::Peers)
 			}
 			// The commit family is a marker in the plan rather than something
 			// the kernel does. The window lives in the daemon, which opens it
@@ -1297,6 +1307,44 @@ impl Executor for KernelExecutor {
 			Op::CommitArm { .. } | Op::CommitConfirm | Op::CommitRevert { .. } => Ok(()),
 			other => Err(format!("{} is not implemented in this build", other.name())),
 		}
+	}
+}
+
+/// Where netcfgd records which key it loaded into a `WireGuard` device.
+///
+/// Under `/run`, like every other record netcfgd keeps of its own past.
+#[must_use]
+pub fn key_record_path(run: &std::path::Path, iface: &str) -> std::path::PathBuf {
+	run.join("wireguard").join(format!("{iface}.key.sha256"))
+}
+
+/// Record which key a device was given, as a digest and never as a value.
+///
+/// The question this answers is one nothing else could: an operator rotates the
+/// secret, and the kernel goes on using the key it was handed. The kernel
+/// reports the *public* key it derived, and matching that against the store
+/// would mean deriving one -- which is curve25519, and was written down here as
+/// the reason this could not be done.
+///
+/// It is not the reason. Decision 0053 hashes a file netcfgd will not read to
+/// find out whether it changed; this hashes a secret netcfgd must not carry, to
+/// answer exactly the same question. No arithmetic beyond the SHA-256 the model
+/// already has for hooks.
+///
+/// **A digest of a `WireGuard` private key is not a way back to one.** It is 32
+/// octets of kernel randomness, so there is no dictionary and no structure to
+/// attack -- unlike a passphrase, which is why this technique would be a poor
+/// answer for one. The file is 0600 under `/run`, nothing reads it but the
+/// observer, and what leaves the observer is a boolean.
+fn record_key(run: &std::path::Path, iface: &str, private: &[u8; 32]) {
+	let path = key_record_path(run, iface);
+	if let Some(parent) = path.parent() {
+		let _ = std::fs::create_dir_all(parent);
+	}
+	let digest = netcfgd_model::hash::sha256_hex(private);
+	if std::fs::write(&path, &digest).is_ok() {
+		let _ =
+			std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
 	}
 }
 

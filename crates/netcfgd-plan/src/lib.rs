@@ -1009,11 +1009,15 @@ impl Builder {
 	/// as an address, resolved at apply time -- so comparing it would reconcile
 	/// a device forever on a value the document never claimed to fix.
 	///
-	/// **A rotated private key is not compared either**, and that is a limit
-	/// rather than a decision: the kernel reports the public key derived from
-	/// it, and deciding whether it matches the secret store would mean deriving
-	/// a public key here, which is curve25519 and is not arithmetic this
-	/// project carries.
+	/// **A rotated private key is compared**, through `key_matches`, and the
+	/// route to it is worth stating because the obvious one is a dead end. The
+	/// kernel reports the public key it derived, and matching that against a
+	/// `SecretRef` would mean deriving a public key -- curve25519, which this
+	/// project does not carry, and which 0054 first wrote down as the reason
+	/// this could not be done. It is not the reason: netcfgd records a digest
+	/// of the key it loaded and the observer compares it against a digest of
+	/// what the store holds now, which is decision 0053's trick played on a
+	/// secret instead of on a file.
 	fn plan_wireguard(&mut self, interface: &Interface, observed: &Observed) {
 		let InterfaceKind::WireGuard(config) = &interface.kind else {
 			return;
@@ -1047,6 +1051,22 @@ impl Builder {
 				"wireguard.fwmark",
 				rendered(desired_mark),
 				rendered(seen_mark),
+			))
+		} else if running.key_matches == Some(false) {
+			// A rotated private key. The value is in neither the document nor
+			// the observation and must be in neither: what arrives here is the
+			// answer, computed in the observer where both halves were already
+			// in hand, exactly as an access point's passphrase is (0052). So
+			// the reason names the field and says which way it went, and
+			// nothing in this plan can print a key.
+			//
+			// `None` is not `false`: a device netcfgd did not configure and a
+			// secret that will not resolve both leave it unanswered, and an
+			// unanswered question is not a reason to rekey a working tunnel.
+			Some((
+				"wireguard.private_key",
+				"the secret store's".to_owned(),
+				"the one the device was given".to_owned(),
 			))
 		} else {
 			None

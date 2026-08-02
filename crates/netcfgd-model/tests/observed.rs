@@ -196,6 +196,7 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		wireguard: Some(netcfgd_model::ObservedWireGuard {
 			public_key: Some(key(0x11)),
 			listen_port: Some(51820),
+			key_matches: Some(true),
 			fwmark: Some(0x6e),
 			peers: vec![netcfgd_model::ObservedWgPeer {
 				public_key: key(0x22),
