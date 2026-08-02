@@ -76,8 +76,8 @@ pub struct KernelExecutor {
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
-	/// Interfaces whose `dhcp6` source asks for a delegated prefix.
-	delegating: Vec<String>,
+	/// What each interface's `dhcp6` source asks for by way of a prefix.
+	delegating: Vec<(String, netcfgd_model::PdRequest)>,
 	/// The `OpenVPN` tunnel on each interface that is one.
 	///
 	/// Carried for the reason the `PPPoE` session above is: the op says which
@@ -214,13 +214,15 @@ impl KernelExecutor {
 		self.delegating = document
 			.interfaces
 			.iter()
-			.filter(|interface| {
-				interface.addressing.iter().any(|source| {
-					matches!(source, netcfgd_model::AddressSource::Dhcp6(dhcp6)
-						if dhcp6.prefix_delegation.is_some())
+			.filter_map(|interface| {
+				interface.addressing.iter().find_map(|source| match source {
+					netcfgd_model::AddressSource::Dhcp6(dhcp6) => dhcp6
+						.prefix_delegation
+						.as_ref()
+						.map(|request| (interface.name.clone(), request.clone())),
+					_ => None,
 				})
 			})
-			.map(|interface| interface.name.clone())
 			.collect();
 		self.pppoe = document
 			.interfaces
@@ -749,7 +751,12 @@ impl Executor for KernelExecutor {
 					return Ok(());
 				}
 				if *kind == netcfgd_model::BackendKind::Dhcp6 {
-					start_dhcp6(iface, self.delegating.iter().any(|name| name == iface))?;
+					let request = self
+						.delegating
+						.iter()
+						.find(|(name, _)| name == iface)
+						.map(|(_, request)| request);
+					start_dhcp6(iface, request)?;
 					self.effects.started_backends.push((*kind, iface.clone()));
 					return Ok(());
 				}
@@ -1365,17 +1372,17 @@ fn dhcp6_client(delegating: bool, has_odhcp6c: bool, iface: &str) -> Result<&'st
 /// is passed **only when the document asked for one**. It used to be
 /// unconditional, so every `config = "dhcp6"` solicited a delegation nobody had
 /// written down and an ISP handed one out that nothing would ever use.
-fn start_dhcp6(iface: &str, delegating: bool) -> Result<(), String> {
+fn start_dhcp6(iface: &str, delegating: Option<&netcfgd_model::PdRequest>) -> Result<(), String> {
 	let hook = write_pd_hook(iface)?;
 	let has_odhcp6c = which("odhcp6c");
 
 	let mut arguments: Vec<String> = Vec::new();
-	match dhcp6_client(delegating, has_odhcp6c, iface)? {
+	match dhcp6_client(delegating.is_some(), has_odhcp6c, iface)? {
 		"odhcp6c" => {
 			arguments.push("-d".to_owned());
-			if delegating {
+			if let Some(request) = delegating {
 				arguments.push("-P".to_owned());
-				arguments.push("0".to_owned());
+				arguments.push(prefix_request(request));
 			}
 			// The script as an argument, which is the shape this wants: no
 			// global hook directory to share with other clients.
@@ -1391,6 +1398,24 @@ fn start_dhcp6(iface: &str, delegating: bool) -> Result<(), String> {
 			&["-b".to_owned(), "-6".to_owned(), iface.to_owned()],
 			iface,
 		),
+	}
+}
+
+/// What the document asks the ISP for, in odhcp6c's spelling.
+///
+/// `-P <[pfx/]len>`, where `0` means "whatever you are giving out". Both parts
+/// are a *request*: a server may hand back a different size or a different
+/// block, which is why `PdRequest` carries a hint rather than a value and why
+/// what arrives is read back from the report rather than assumed.
+///
+/// Checked against odhcp6c's own `config.c`, which splits on the `/` and parses
+/// the left half with `inet_pton` -- so the hint is an address without a length
+/// and the length follows the slash.
+fn prefix_request(request: &netcfgd_model::PdRequest) -> String {
+	let length = request.length.unwrap_or(0);
+	match &request.hint {
+		Some(hint) => format!("{hint}/{length}"),
+		None => length.to_string(),
 	}
 }
 
@@ -1907,6 +1932,39 @@ mod tests {
 		let error = dhcp6_client(true, false, "wan0").expect_err("dhcpcd cannot report a prefix");
 		assert!(error.contains("odhcp6c"), "got {error}");
 		assert!(error.contains("0050"), "got {error}");
+	}
+
+	/// The request, in odhcp6c's spelling. `0` is "whatever you are giving
+	/// out", and a hint takes the length after a slash -- which is how
+	/// odhcp6c's own `config.c` splits it.
+	#[test]
+	fn a_prefix_request_is_rendered_the_way_odhcp6c_reads_it() {
+		use netcfgd_model::PdRequest;
+
+		assert_eq!(super::prefix_request(&PdRequest::default()), "0");
+		assert_eq!(
+			super::prefix_request(&PdRequest {
+				length: Some(56),
+				hint: None
+			}),
+			"56"
+		);
+		assert_eq!(
+			super::prefix_request(&PdRequest {
+				length: Some(56),
+				hint: Some("2001:db8::".to_owned())
+			}),
+			"2001:db8::/56"
+		);
+		// A hint with no length asks for that block at whatever size, which is
+		// the same "0" the length alone means.
+		assert_eq!(
+			super::prefix_request(&PdRequest {
+				length: None,
+				hint: Some("2001:db8::".to_owned())
+			}),
+			"2001:db8::/0"
+		);
 	}
 
 	/// And every other combination is served rather than refused. An ordinary
