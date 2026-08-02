@@ -499,6 +499,9 @@ live:
 	@# The reference helper, against a fake mbimcli. Under NCFG_LIVE: it
 	@# needs no modem and no mbimcli, only the shell.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/helper.sh"
+	@# An OpenVPN tunnel, against a fake daemon that speaks the real
+	@# management protocol. Under NCFG_LIVE: it needs no openvpn package.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/openvpn.sh"
 	@# Deliberately not under NCFG_LIVE: it needs the `wireguard` module, which
 	@# a kernel may simply not have -- and nothing else in netcfgd does.
 	@unshare -rn sh -c "sh tests/live/strand.sh"

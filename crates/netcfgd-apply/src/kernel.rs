@@ -3,6 +3,7 @@
 use crate::Executor;
 use netcfgd_model::route::NETCFGD_PROTO;
 use netcfgd_model::{InterfaceKind, Origin};
+use netcfgd_openvpn as openvpn;
 use netcfgd_plan::{net, Op};
 use netcfgd_sys::ops::RT_TABLE_MAIN;
 use netcfgd_sys::{parse_mac, Netlink, NewLink, RouteSpec};
@@ -75,6 +76,12 @@ pub struct KernelExecutor {
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
+	/// The `OpenVPN` tunnel on each interface that is one.
+	///
+	/// Carried for the reason the `PPPoE` session above is: the op says which
+	/// interface, and the configuration it needs lives in a part of the
+	/// document the op does not carry.
+	openvpn: Vec<(String, netcfgd_model::OpenVpnConfig)>,
 	/// The route preference of each interface that declares one.
 	preferences: Vec<(String, u32)>,
 	/// Every wifi profile the document describes.
@@ -133,6 +140,7 @@ impl KernelExecutor {
 			dot1x: Vec::new(),
 			mac_policy: Vec::new(),
 			pppoe: Vec::new(),
+			openvpn: Vec::new(),
 			preferences: Vec::new(),
 			networks: Vec::new(),
 			access_points: Vec::new(),
@@ -187,6 +195,14 @@ impl KernelExecutor {
 				interface
 					.preference
 					.map(|preference| (interface.name.clone(), preference))
+			})
+			.collect();
+		self.openvpn = document
+			.interfaces
+			.iter()
+			.filter_map(|interface| match &interface.kind {
+				InterfaceKind::OpenVpn(config) => Some((interface.name.clone(), config.clone())),
+				_ => None,
 			})
 			.collect();
 		self.pppoe = document
@@ -261,6 +277,21 @@ impl KernelExecutor {
 			));
 		}
 		Ok(())
+	}
+
+	/// Start the `OpenVPN` tunnel the document puts on this interface.
+	///
+	/// netcfgd hands over the operator's `.ovpn` and reads none of it (decision
+	/// 0046). What it adds is the three things that make the daemon netcfgd's
+	/// to manage rather than one that merely happens to be running: a
+	/// management socket to stop it through, `--daemon` so the apply does not
+	/// block on a tunnel that may take seconds to come up, and a log to quote
+	/// when it will not start.
+	fn start_openvpn(&self, iface: &str) -> Result<(), String> {
+		let Some((_, config)) = self.openvpn.iter().find(|(name, _)| name == iface) else {
+			return Err(format!("no openvpn configuration for {iface}"));
+		};
+		openvpn::start(&self.run_dir, iface, &config.config)
 	}
 
 	/// Run the access point the document puts on this radio.
@@ -601,6 +632,11 @@ impl Executor for KernelExecutor {
 					self.effects.started_backends.push((*kind, iface.clone()));
 					return Ok(());
 				}
+				if *kind == netcfgd_model::BackendKind::OpenVpn {
+					self.start_openvpn(iface)?;
+					self.effects.started_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
 				start_backend(*kind, iface, self.preference_of(iface))?;
 				self.effects.started_backends.push((*kind, iface.clone()));
 				if *kind == netcfgd_model::BackendKind::Supplicant {
@@ -678,6 +714,15 @@ impl Executor for KernelExecutor {
 				station,
 			} => netcfgd_hostapd::acl::remove(&self.run_dir, iface, *list, station),
 			Op::BackendStop { kind, iface } => {
+				if *kind == netcfgd_model::BackendKind::OpenVpn {
+					// Through its own management socket, never by signalling a
+					// process found by name: an operator's own OpenVPN tunnels
+					// are common, and decision 0014's sentence about the
+					// supplicant applies here without changing a word.
+					openvpn::stop(&self.run_dir, iface)?;
+					self.effects.stopped_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
 				if *kind == netcfgd_model::BackendKind::AccessPoint {
 					// Where `/run` is, which `stop_backend` has no access to --
 					// it is a free function, and the control socket for an
@@ -1085,6 +1130,7 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Vxlan(_) => "vxlan",
 		InterfaceKind::WireGuard(_) => "wireguard",
 		InterfaceKind::Pppoe(_) => "pppoe",
+		InterfaceKind::OpenVpn(_) => "openvpn",
 		InterfaceKind::Dummy => "dummy",
 		InterfaceKind::Veth(_) => "veth",
 		InterfaceKind::Vrf(_) => "vrf",

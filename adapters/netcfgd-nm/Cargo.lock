@@ -393,6 +393,7 @@ dependencies = [
  "netcfgd-dns",
  "netcfgd-hostapd",
  "netcfgd-model",
+ "netcfgd-openvpn",
  "netcfgd-plan",
  "netcfgd-secret",
  "netcfgd-supplicant",
@@ -436,6 +437,10 @@ dependencies = [
  "uuid",
  "zbus",
 ]
+
+[[package]]
+name = "netcfgd-openvpn"
+version = "0.0.0"
 
 [[package]]
 name = "netcfgd-plan"

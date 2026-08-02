@@ -228,4 +228,13 @@ netcfgd
 # and there is nothing to borrow it from. Cloning a DnsPolicy per interface per
 # plan is what that costs, and it is what having one implementation instead of
 # two is worth.
-total 1952280
+# +20 KB for the OpenVPN tunnel: the interface kind and backend kind with their
+# serde, the compiler block, the planner arms, and a backend crate carrying a
+# unix *stream* management client -- which is new code rather than a reuse,
+# because wpa_ctrl is a datagram protocol and this one is not.
+#
+# The largest single step since the station list, and almost none of it is the
+# integration: netcfgd does not generate OpenVPN's configuration (decision
+# 0046), so there is no renderer here at all. What it buys is a lifecycle --
+# start, stop through the daemon's own socket, and quote what it said.
+total 1972760
