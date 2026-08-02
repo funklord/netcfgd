@@ -409,14 +409,79 @@ fn credentialled_kinds() -> Vec<(&'static str, InterfaceKind)> {
 		// that shapes arriving traffic -- but it is in the document, and the
 		// witness covers the document rather than the config.
 		("ifb", InterfaceKind::Ifb),
+		(
+			"openvpn",
+			InterfaceKind::OpenVpn(netcfgd_model::OpenVpnConfig {
+				config: "/etc/openvpn/work.ovpn".to_owned(),
+			}),
+		),
 	]
 }
 
 /// Every interface kind, one interface each.
+///
+/// **Guarded the same way `every_address_source` is, and for the same reason it
+/// needed guarding twice.** That fix was made for `AddressSource` alone and this
+/// list kept the hole: `InterfaceKind::OpenVpn` was added, the frozen surface
+/// did not move, and the gate stayed green. A witness is a sample document and
+/// a sample cannot notice a variant nobody put in it, so *every* list of
+/// variants in this file needs the check, not only the one caught first.
 fn every_kind() -> Vec<Interface> {
-	plain_kinds()
+	// Exhaustive, never a wildcard: adding a variant stops this file compiling
+	// until somebody writes an arm, and writing the arm is what reminds them to
+	// add the sample. The assertion underneath catches what the compiler cannot
+	// see -- an arm written with no sample added to either list.
+	fn name(kind: &InterfaceKind) -> &'static str {
+		match kind {
+			InterfaceKind::Physical => "physical",
+			InterfaceKind::Bridge(_) => "bridge",
+			InterfaceKind::Bond(_) => "bond",
+			InterfaceKind::Vlan(_) => "vlan",
+			InterfaceKind::Vxlan(_) => "vxlan",
+			InterfaceKind::WireGuard(_) => "wireguard",
+			InterfaceKind::Pppoe(_) => "pppoe",
+			InterfaceKind::OpenVpn(_) => "openvpn",
+			InterfaceKind::Dummy => "dummy",
+			InterfaceKind::Veth(_) => "veth",
+			InterfaceKind::Vrf(_) => "vrf",
+			InterfaceKind::Macvlan(_) => "macvlan",
+			InterfaceKind::Tunnel(_) => "tunnel",
+			InterfaceKind::Tun(_) => "tun",
+			InterfaceKind::Ifb => "ifb",
+		}
+	}
+
+	let all: Vec<(&'static str, InterfaceKind)> = plain_kinds()
 		.into_iter()
 		.chain(credentialled_kinds())
+		.collect();
+	let mut present: Vec<&str> = all.iter().map(|(_, kind)| name(kind)).collect();
+	present.sort_unstable();
+	present.dedup();
+	assert_eq!(
+		present,
+		[
+			"bond",
+			"bridge",
+			"dummy",
+			"ifb",
+			"macvlan",
+			"openvpn",
+			"physical",
+			"pppoe",
+			"tun",
+			"tunnel",
+			"veth",
+			"vlan",
+			"vrf",
+			"vxlan",
+			"wireguard"
+		],
+		"the witness is missing a sample for an interface kind, so the frozen \
+		 surface would not move when that kind changed"
+	);
+
+	all.into_iter()
 		.map(|(name, kind)| maximal_interface(&format!("k-{name}"), kind))
 		.collect()
 }
