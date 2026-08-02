@@ -2419,6 +2419,7 @@ fn wireguard_running(port: Option<u16>, peers: &[&str]) -> netcfgd_model::Observ
 		public_key: Some(netcfgd_model::Key::from_bytes([0x11; 32])),
 		listen_port: port,
 		fwmark: None,
+		key_matches: Some(true),
 		peers: {
 			let mut peers: Vec<netcfgd_model::ObservedWgPeer> = peers
 				.iter()
@@ -2489,6 +2490,61 @@ fn a_peer_the_document_dropped_is_planned_away() {
 		action.reason.observed.contains(STRANGER),
 		"the reason does not name the peer being removed: {:?}",
 		action.reason
+	);
+}
+
+/// A rotated private key is planned, and names no key.
+///
+/// The comparison is the observer's -- a digest of what netcfgd loaded against
+/// a digest of what the store holds -- so what reaches the planner is a
+/// boolean, and a plan that could print a key would be a plan that writes one
+/// into `/run/netcfgd/plan.last.json`.
+#[test]
+fn a_rotated_private_key_is_planned_without_naming_one() {
+	let desired = wireguard_document("");
+	let mut observed = wireguard_observed(true);
+	let mut running = wireguard_running(None, &[HUB]);
+	running.key_matches = Some(false);
+	observed.links[0].wireguard = Some(running);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::WgSetDevice { .. }))
+		.expect("a rotated key is reconfigured");
+	assert_eq!(action.reason.field, "wireguard.private_key");
+	// The op carries a reference, which is the name of a secret rather than
+	// one. Nothing else in the action may look like key material.
+	let Op::WgSetDevice {
+		private_key_ref, ..
+	} = &action.op
+	else {
+		unreachable!("just matched")
+	};
+	assert_eq!(private_key_ref, "wg0");
+}
+
+/// "Could not check" is not "the key changed".
+///
+/// `None` is what a device netcfgd did not configure reports, and what a secret
+/// that will not resolve reports. Rekeying a working tunnel over an unanswered
+/// question is the failure `None is not false` names in decision 0052.
+#[test]
+fn a_key_that_could_not_be_checked_changes_nothing() {
+	let desired = wireguard_document("");
+	let mut observed = wireguard_observed(true);
+	let mut running = wireguard_running(None, &[HUB]);
+	running.key_matches = None;
+	observed.links[0].wireguard = Some(running);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::WgSetDevice { .. })),
+		"an unanswered question rekeyed a tunnel"
 	);
 }
 
