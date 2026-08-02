@@ -511,6 +511,14 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 
 **Access points carry a station list**, which is the single-host half of the Ubiquiti-style roaming [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) wrote down: forcing a client onto one access point means every other access point refusing it. `access_control { deny = [..] }` or `allow`, never both, because hostapd reads one file or the other ([0039](docs/decisions/0039-a-station-list-is-one-list.md)). Changing the list still needs a restart, which for this feature is the wrong answer — converging it over hostapd's control socket instead is the next piece, and the record says why.
 
+**A WireGuard tunnel is a WireGuard device in the shim**, the first link kind
+to stop being `GENERIC` — and it stopped only once 0054 gave it the three values
+NM asks a tunnel for. Its `interface` block is deliberately *not* a connection
+profile, which is the radio rule read twice: an `802-3-ethernet` profile named
+`wg0` is a thing in every client's list that is not an ethernet, and NM's own
+WireGuard profile carries the peers and the private key, which this shim will
+not project.
+
 **And netcfgd shows who is connected.** `ncfg wifi clients` and a fifth TUI pane list the stations associated with an access point, read back over hostapd's control socket ([0040](docs/decisions/0040-a-station-list-needs-a-station-list.md)). It is a live query rather than part of the observation, because there is no desired station list to reconcile against. The two halves are shown as one thing: a station that is on the deny list *and* connected is marked, which is 0039's restart gap made visible rather than silent. There is no hostname — hostapd knows addresses, and netcfgd runs no DHCP server to learn names from.
 
 **Consequence of M9 being last, stated plainly:** multi-host management arrives at the very end, because conforming to RESTCONF *is* the multi-host answer (design doc §11.1). That is a deliberate choice — this is a single-host tool first, and nothing before M9 should be shaped by fleet considerations.
@@ -856,19 +864,16 @@ was reachable by reading seven records end to end.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **WireGuard as a first-class NM device**, if the shim is worth more
-   attention than the core. The core half of it is done and was the reason to
-   look: the shim reports every WireGuard interface as `GENERIC`, and the
-   `Device.WireGuard` interface NM defines wants a public key, a listen port
-   and a firewall mark — none of which netcfgd could observe until
-   [0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md), and
-   all of which it now carries. What is left is the shim's own: the device type
-   constant, which `enums.rs` already holds and `flavour_of` never returns, and
-   the three properties.
-3. **A rotated WireGuard private key is still not noticed** (0054). The kernel
+2. **A rotated WireGuard private key is still not noticed** (0054). The kernel
    reports the public key it derived; matching that against the secret store
    means deriving one, which is curve25519. Worth doing only with a plan for
    where that arithmetic lives.
+3. **The other link kinds are still `Generic` to the shim**, and that is
+   correct until each has properties to answer with. `enums.rs` holds constants
+   for bridge, bond, VLAN, VXLAN, tunnel and veth that `flavour_of` never
+   returns; WireGuard is the one that left, because 0054 gave it the three
+   values NM asks a tunnel for. A bridge would need `.Device.Bridge`, and
+   claiming the type without it is the failure that shim comment warns about.
 
 **The whole suite has now been run as root**, which is what the previous entry
 here asked for. All three root-only scripts pass: `delegation.sh` through
@@ -882,6 +887,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 ### Things that are true and non-obvious
 
 - **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
+- **A column that renders two things the same way cannot tell them apart, and neither can a check reading it.** `nmcli`'s TYPE column prints a *generic* device's `TypeDescription`, and netcfgd's type description is the kernel's link kind — so "the tunnel shows as `wireguard`" passed with the device-type mapping deliberately broken, because a generic device whose description is the word `wireguard` renders identically to a real one. The repair is to assert a value only the real thing can produce: a listen port the document chose, and the type as a *number* rather than as a rendered column.
 - **A test that cleans up by category misses what is not in the category.** `hwsim.sh` killed everything in its network namespace, which is netcfgd and both supplicants and is not everything it started: the subshell a background job forks stays in the initial namespace, holds the script's stdout, and keeps a reader of that pipe waiting after the script has exited. The test passed and left a root netcfgd running. Kill what you started by the handle you were given, and treat an enumeration as the second answer rather than the only one.
 - **A comment is falsified by the commit after it, and nothing goes red.** Four places in one session said an access point's passphrase, SSID or channel was not compared — written true, left standing when the next commit compared them, and sitting directly above the code that does. Every gate stayed green because no gate reads prose. The habit that catches it is the one §10 already asks for: when a session closes a gap it earlier wrote down, grep for the sentence that wrote it down, not only for the code.
 - **A record that defers something needs a forward pointer when the deferral is lifted.** 0050 has one to 0051 and it works; 0047 and 0048 deferred work the same session then did and had none, so a reader landing on 0047 from `docs/interface-report.md` — which links there — was told the rename had not happened. The body stays as written, because a decision is changed by superseding it; the `Status` line is where the pointer goes.
