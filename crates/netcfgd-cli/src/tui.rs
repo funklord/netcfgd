@@ -564,9 +564,105 @@ fn devices(app: &App, width: usize) -> Vec<String> {
 				));
 			}
 		}
+		out.extend(reported_on(app, &name, width));
+		out.extend(backends_on(app, &name, width));
 	}
 	if out.is_empty() {
 		out.push("(no interfaces)".to_owned());
+	}
+	out
+}
+
+/// What something outside netcfgd reported for this interface, and did not
+/// apply.
+///
+/// `ncfg status` has marked these since the modem work and this pane did not,
+/// which made the TUI the one view where a bearer that is up and an interface
+/// that is configured look the same. The difference is the whole question when
+/// a modem is not working: "the network gave us nothing" and "netcfgd has not
+/// acted on it" send somebody to different places.
+fn reported_on(app: &App, interface: &str, width: usize) -> Vec<String> {
+	let Some(report) = app
+		.status
+		.as_ref()
+		.and_then(|value| value.get("reports"))
+		.and_then(serde_json::Value::as_array)
+		.and_then(|reports| {
+			reports
+				.iter()
+				.find(|report| string(report, "interface") == interface)
+		})
+	else {
+		return Vec::new();
+	};
+	let list = |key: &str| -> Vec<String> {
+		report
+			.get(key)
+			.and_then(serde_json::Value::as_array)
+			.map(|values| {
+				values
+					.iter()
+					.filter_map(|value| value.as_str().map(ToOwned::to_owned))
+					.collect()
+			})
+			.unwrap_or_default()
+	};
+
+	let mut out = Vec::new();
+	for address in list("addresses") {
+		out.push(fit(&format!("    {address} [reported]"), width));
+	}
+	for gateway in list("gateways") {
+		out.push(fit(&format!("    via {gateway} [reported]"), width));
+	}
+	let servers = list("nameservers");
+	if !servers.is_empty() {
+		out.push(fit(
+			&format!("    dns {} [reported]", servers.join(" ")),
+			width,
+		));
+	}
+	out
+}
+
+/// What netcfgd started here, and whether it is still what the document says.
+///
+/// The plan pane shows the restart while it is pending; this shows the reason
+/// it is pending, on the interface, where somebody looking at a radio is
+/// already looking. Only the answers that mean something is wrong -- decisions
+/// 0052 and 0053 -- because a line every reader skips is how the one that
+/// matters gets skipped with it.
+fn backends_on(app: &App, interface: &str, width: usize) -> Vec<String> {
+	let Some(backends) = app
+		.status
+		.as_ref()
+		.and_then(|value| value.get("backends"))
+		.and_then(serde_json::Value::as_array)
+	else {
+		return Vec::new();
+	};
+	let mut out = Vec::new();
+	for backend in backends
+		.iter()
+		.filter(|backend| string(backend, "interface") == interface)
+		.filter(|backend| backend.get("running").and_then(serde_json::Value::as_bool) == Some(true))
+	{
+		let stale = [
+			("secret_matches", "the passphrase has changed"),
+			("config_matches", "its configuration file has changed"),
+		]
+		.iter()
+		.find_map(|(key, said)| {
+			(backend.get(*key).and_then(serde_json::Value::as_bool) == Some(false)).then_some(*said)
+		});
+		let kind = string(backend, "kind");
+		match stale {
+			Some(said) => out.push(fit(
+				&format!("    {kind}: running, {said}; it will be restarted"),
+				width,
+			)),
+			None => out.push(fit(&format!("    {kind}: running"), width)),
+		}
 	}
 	out
 }
