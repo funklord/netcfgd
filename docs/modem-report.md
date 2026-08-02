@@ -119,11 +119,32 @@ is arranged to avoid.
 Anything that writes the file. Three are known to be possible and none of them
 is privileged by netcfgd:
 
+- **`mbimcli`** from `libmbim-utils`. **There is one in this repository**:
+  `helpers/netcfgd-modem-mbim`, a shell script, installed by
+  `make install-modem-mbim`. It is a reference rather than a blessed
+  implementation -- netcfgd does not know it exists.
 - **`umbim`** on OpenWrt -- `+libubox +kmod-usb-net-cdc-mbim +wwan`, no glib and
   no D-Bus, on hardware where nothing heavier fits.
-- **`mbimcli`** from `libmbim-utils` -- `--connect="access-string=APN,..."` then
-  `--query-ip-configuration`. Links no `libdbus` and no `libsystemd`.
 - **ModemManager**, over D-Bus, on a machine already running it -- which is
   where the vendor quirk handling for non-conforming modems lives.
 
 netcfgd does not start, supervise or speak to any of them. It reads a file.
+
+## Where the APN lives
+
+In the helper, not in netcfgd's document.
+
+Connecting the bearer is the helper's job, so its parameters are the helper's
+too. netcfgd is told the *result* and never asked for the inputs -- which is
+what keeps the contract one-way and lets a helper be replaced without touching
+a netcfgd config. The reference helper takes them on its command line:
+
+```
+netcfgd-modem-mbim connect -d /dev/cdc-wdm0 -i wwan0 -a internet
+netcfgd-modem-mbim disconnect -d /dev/cdc-wdm0 -i wwan0
+netcfgd-modem-mbim stop -i wwan0
+```
+
+It does not stay running, so nothing truncates the report if the bearer drops
+on its own. Supervising it -- a service unit, an init script, a loop -- is the
+operator's, and is deliberately not netcfgd's.

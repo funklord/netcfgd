@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment
+.PHONY: all check build test fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -33,7 +33,7 @@ ncfg-link:
 # is the one gate that fails if an adapter's dependencies have leaked into the
 # core -- which is the kind of thing that is trivial to prevent and miserable to
 # unpick later.
-check: fmt ascii clippy unsafe-policy executor-policy nm-containment packaging test size footprint rss adapters
+check: fmt ascii shell clippy unsafe-policy executor-policy nm-containment packaging test size footprint rss adapters
 
 # Each adapter, built and checked with the same bar as the core.
 #
@@ -95,6 +95,25 @@ nm-containment:
 		fi; \
 	done; \
 	echo "nm-containment: ok, $$(echo "$$present" | wc -w) core dependencies, all allowed"
+
+# The shell netcfgd ships. A helper is a program somebody installs and runs as
+# root against their modem, so a syntax error in one is not a smaller problem
+# than one in the daemon -- and `sh -n` costs nothing.
+#
+# Counted, because a glob that matches nothing passes: this project has caught
+# that exact failure in a `make packaging` check before.
+shell:
+	@count=0; \
+	for script in helpers/* tests/live/*.sh; do \
+		[ -f "$$script" ] || continue; \
+		sh -n "$$script" || exit 1; \
+		count=$$((count + 1)); \
+	done; \
+	if [ "$$count" -lt 10 ]; then \
+		echo "shell: only $$count scripts checked, which is too few to mean anything"; \
+		exit 1; \
+	fi; \
+	echo "shell: ok, $$count scripts parse"
 
 fmt:
 	$(CARGO) fmt --check
@@ -202,6 +221,16 @@ install:
 	@# Constraint 2: the filesystem reflects use. conf.d/, secrets/ and hooks/
 	@# appear when something needs them, so they are not created here.
 
+# The reference modem helper. Optional and separate on purpose: decision 0045
+# says the helper is plural, and installing one by default would make it the
+# blessed one. It also needs `mbimcli`, which most machines have no use for.
+install-modem-mbim:
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 0755 helpers/netcfgd-modem-mbim $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
+	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
+	@echo "install-modem-mbim:   docs/modem-report.md is the contract -- write"
+	@echo "install-modem-mbim:   your own helper if this one does not fit"
+
 install-systemd:
 	install -d $(DESTDIR)/usr/lib/systemd/system
 	install -m 0644 packaging/systemd/netcfgd.service \
@@ -293,8 +322,20 @@ packaging:
 # `backends/` had gone unchecked since M2 -- it happened to be clean, which is
 # luck rather than evidence. Shell scripts count as source; markdown does not,
 # and project.md section 9 says so.
-ASCII_PATHS  = crates backends tests Cargo.toml Makefile
-ASCII_KINDS  = --include='*.rs' --include='*.toml' --include='*.sh'
+# Every directory that holds source, not just the ones that existed when this
+# was written. `adapters` and `helpers` were both outside it -- the same shape
+# as the unsafe-policy gate globbing only `crates/*` and missing a whole backend
+# for a milestone.
+ASCII_PATHS  = crates backends adapters helpers tests Cargo.toml Makefile
+# `netcfgd-*` catches an installed helper, which is a script with no extension
+# because it ends up on a PATH. Filtering by extension alone would have skipped
+# the entire helpers directory while appearing to cover it.
+#
+# `--exclude-dir=target` because that pattern also matches a *compiled* binary,
+# and an adapter builds one into its own tree. Widening the gate found it
+# immediately, which is the gate working -- on the wrong file.
+ASCII_KINDS  = --include='*.rs' --include='*.toml' --include='*.sh' \
+	--include='netcfgd-*' --exclude-dir=target
 
 ascii:
 	@if grep -rlP '[^\x00-\x7F]' $(ASCII_KINDS) \
@@ -455,6 +496,9 @@ live:
 	@# The modem reporting contract, checked from the side a helper writes.
 	@# Under NCFG_LIVE: it needs no modem and no module, only a file.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/modem.sh"
+	@# The reference helper, against a fake mbimcli. Under NCFG_LIVE: it
+	@# needs no modem and no mbimcli, only the shell.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/helper.sh"
 	@# Deliberately not under NCFG_LIVE: it needs the `wireguard` module, which
 	@# a kernel may simply not have -- and nothing else in netcfgd does.
 	@unshare -rn sh -c "sh tests/live/strand.sh"
