@@ -646,6 +646,7 @@ Three techniques make that reachable without root or a clean machine:
 - **`accept_ra=1` means "accept unless this interface forwards".** A host in an environment that starts with forwarding on ignores every router advertisement, and `ip addr` shows nothing that explains it. `accept_ra=2` is the other way to say it.
 - **A host fills in the bottom 64 bits of an advertised prefix itself**, so the address is `2001:db8:1234:0:...` and a grep for `2001:db8:1234::` matches nothing. `proto kernel_ra` is the kernel saying where an address came from, and is the thing worth asserting.
 - **A backend's *device* may not exist while the backend is running.** openvpn creates its `tun` seconds after starting, and a tunnel still negotiating has none at all — so anything planned from an interface's contents is skipped for exactly the tunnels that need it. The stale-configuration check for a `.ovpn` is a top-level pass for that reason, and the live test is what said so while every unit test passed.
+- **A limit can be an artefact of the question rather than of the world.** 0054 wrote down that a rotated WireGuard key could not be noticed without curve25519, and project.md carried it as work needing "a plan for where that arithmetic lives". Both were true about *deriving a public key* and neither was true about the question anyone actually had, which is whether the secret moved. The rewrite cost a digest and no dependency. Worth asking of any limit stated in terms of a technique rather than in terms of an answer.
 - **An op can be declared, frozen and pinned without anything emitting it.** `wg.set_device` and `wg.set_peers` were in the action taxonomy, in the `Op` enum and in `docs/schema/plan.json` from M4, and the executor answered both with "not implemented in this build" — because no planner path had ever produced one. A witness proves an op's *shape*; nothing in the repository was asking whether an op is reachable. Worth suspecting wherever a taxonomy was written before the code that fills it.
 - **The kernel's `SET_DEVICE` is a partial update and netcfgd used to send the whole device.** An attribute that is absent is left alone and the peer list is replaced only under `WGDEVICE_F_REPLACE_PEERS`, which is how `wg set wg0 listen-port` changes a port without touching a peer. A comment in `netcfgd-sys` said WireGuard "has no partial update that netcfgd wants", true while the only caller was link creation and false the moment there was a second.
 - **A MAC-based allow list is policy, not security.** An address is asserted by the station and changed with one command. It keeps honest devices off a network and stops nobody who does not want to be stopped; anything that must be secure belongs in `wifi { .. }` where the key material is.
@@ -796,11 +797,21 @@ as an edited SSID with a much worse face on it: a wrong answer shaped like a
 completed revocation. The observation now carries what the kernel holds — port,
 mark, public key, peers — and the planner emits `wg.set_device` and
 `wg.set_peers`, two ops that had been declared in the taxonomy and pinned by the
-plan witness since M4 without anything ever emitting one. What is not compared:
-a peer's **endpoint**, because a peer roams and the kernel rewrites it; a port
-the document does not state, because that one is the kernel's to choose; and a
-**rotated private key**, because deciding that means deriving a public key from
-a private one, which is curve25519 and is not arithmetic this project carries.
+plan witness since M4 without anything ever emitting one. What is not compared: a
+peer's **endpoint**, because a peer roams and the kernel rewrites it, and a port
+the document does not state, because that one is the kernel's to choose.
+
+**A rotated private key is compared too**, which 0054 said needed curve25519 and
+[0055](docs/decisions/0055-a-secret-can-be-hashed-too.md) found it did not. The
+question is not what public key a private one derives — it is whether the secret
+has moved since netcfgd loaded it, and that is answered by a **digest**: netcfgd
+records `sha256` of the key it handed the kernel, at 0600 under `/run`, and the
+observer compares it against the store. 0053's trick played on a secret rather
+than on a file — it hashed bytes it was forbidden to *interpret*, this hashes
+bytes it is forbidden to *keep*. Safe because a WireGuard key is 32 octets of
+kernel randomness with no dictionary behind it, and **not** a technique to reach
+for with a passphrase, which is why an access point's is still compared in
+memory and written down nowhere.
 
 #### Explaining it
 
@@ -864,10 +875,10 @@ was reachable by reading seven records end to end.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **A rotated WireGuard private key is still not noticed** (0054). The kernel
-   reports the public key it derived; matching that against the secret store
-   means deriving one, which is curve25519. Worth doing only with a plan for
-   where that arithmetic lives.
+2. **A peer's preshared key is the same shape and is not compared** (0055). It
+   is a `SecretRef` in the document and a boolean in the kernel's reply, so the
+   digest technique fits it exactly — what it needs is a per-peer record rather
+   than a per-device one, and a reason to want it beyond symmetry.
 3. **The other link kinds are still `Generic` to the shim**, and that is
    correct until each has properties to answer with. `enums.rs` holds constants
    for bridge, bond, VLAN, VXLAN, tunnel and veth that `flavour_of` never
