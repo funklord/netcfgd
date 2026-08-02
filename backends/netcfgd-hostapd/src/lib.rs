@@ -322,12 +322,29 @@ pub fn start(
 /// listening is the state this was asked to produce, so that is success.
 pub fn stop(run_dir: &Path, device: &str) -> Result<(), String> {
 	let dir = ctrl_dir(run_dir);
-	match netcfgd_supplicant::Client::connect(&dir, device) {
+	let outcome = match netcfgd_supplicant::Client::connect(&dir, device) {
 		Ok(client) => client
 			.command("TERMINATE")
 			.map_err(|error| format!("could not stop the access point on {device}: {error}")),
 		Err(_) => Ok(()),
-	}
+	};
+
+	// The generated configuration holds the passphrase in the clear, because
+	// hostapd has no indirection for one -- and an access point that is not
+	// running has nothing to authenticate. `/run` is tmpfs so it would go at
+	// the next reboot regardless, but a passphrase sitting beside a stopped
+	// access point is one nobody is watching.
+	//
+	// Removed whether or not the daemon answered, and that is the case that
+	// matters most: a hostapd that died leaves the file behind and is exactly
+	// the situation where nobody is going to come back and tidy it.
+	//
+	// Nothing reads it after startup. `write_config` is its only writer and
+	// `start` its only caller, so a start after this regenerates it -- and the
+	// policy record the observer reads lives in the `.acl` beside it, which
+	// holds no secret and keeps the lifecycle decision 0039 gave it.
+	let _ = std::fs::remove_file(config_path(run_dir, device));
+	outcome
 }
 
 /// The lines of a log that say what went wrong, for an error message.

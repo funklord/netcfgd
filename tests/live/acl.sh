@@ -250,6 +250,39 @@ check "a hostapd that never answers does not stall the reconcile loop" \
 check "and nothing is converged against a list that could not be read" \
 	"$(grep -cE 'access_control\.(add|del)' "$work/wedgedplan.txt" || true)" "0"
 
+# ------------------------------------ a stopped access point keeps no secret
+
+# The generated configuration holds the passphrase in the clear, because hostapd
+# has no indirection for one. An access point that is stopped has nothing left
+# to authenticate, so it must not stay in /run -- tmpfs would clear it at the
+# next reboot, but a passphrase beside a stopped daemon is one nobody is
+# watching.
+#
+# Checked here rather than in ap.sh because ap.sh's hostapd never starts -- a
+# dummy has no radio -- so nothing is ever stopped there and the check could not
+# fire. This suite has a fake that answers TERMINATE, which is what a stop
+# needs.
+start_fake --deny aa:bb:cc:dd:ee:ff
+seed_run_state deny
+printf '# a previous start left this\nwpa_passphrase=correct-horse-battery\n' \
+	> "$work/run/hostapd/ap0.conf"
+chmod 600 "$work/run/hostapd/ap0.conf"
+write_config ""
+# The document no longer names an access point on ap0, so the plan stops it.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface ap0 {
+	kind   = "dummy"
+	config = "192.168.9.1/24"
+}
+CONF
+"$ncfg" apply > "$work/stopped.txt" 2>&1 || true
+
+check "stopping the access point asked hostapd to terminate" \
+	"$(grep -c 'cmd: TERMINATE' "$work/fake.log" || true)" "1"
+# By content, not by path: what matters is the secret rather than the filename.
+check "and left no passphrase anywhere under /run" \
+	"$(grep -rl 'correct-horse-battery' "$work/run" 2>/dev/null | wc -l)" "0"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "acl.sh: all checks passed"
