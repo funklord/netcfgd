@@ -2676,22 +2676,31 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 /// report is claimed: netcfgd did not start that helper and has no idea it
 /// exists, so the operator has to say that the file in `/run` is meant.
 ///
-/// **Or netcfgd started the writer itself.** A tunnel daemon reports through a
-/// script netcfgd generated, launched by a process netcfgd started, on an
-/// interface the document named -- there is nothing left to opt into. Requiring
-/// `config = "reported"` as well would mean a tunnel that silently kept none of
-/// its routes until somebody added a word whose absence explained nothing.
+/// **Or netcfgd started the writer itself.** A tunnel daemon or a `PPPoE`
+/// session reports through a script netcfgd generated, launched by a process
+/// netcfgd started, on an interface the document named -- there is nothing left
+/// to opt into. Requiring `config = "reported"` as well would mean a tunnel that
+/// silently kept none of its routes until somebody added a word whose absence
+/// explained nothing.
 ///
 /// What this is *not* is "there is a file". A report for an interface the
 /// document says nothing about is an observation netcfgd has no instruction
 /// for, and installing a default route off the strength of a file somebody
 /// dropped in `/run` is not something to invent.
+///
+/// And it is not the gate for a *nameserver*, which is narrower still and lives
+/// in `netcfgd_model::dns`: netcfgd having started the writer is enough to
+/// install a route down that link and deliberately not enough to change where
+/// every query on the machine goes (decision 0049).
 fn takes_reports(interface: &Interface) -> bool {
 	interface
 		.addressing
 		.iter()
 		.any(|source| matches!(source, AddressSource::Reported(_)))
-		|| matches!(interface.kind, InterfaceKind::OpenVpn(_))
+		|| matches!(
+			interface.kind,
+			InterfaceKind::OpenVpn(_) | InterfaceKind::Pppoe(_)
+		)
 }
 
 /// The routes a report implies for one interface.

@@ -250,4 +250,8 @@ netcfgd
 #
 # It also carries the rename of the reporting contract, which cost nothing: the
 # same code under a different word.
-total 1989144
+# +4 KB for a DSL line's resolvers: two generated scripts instead of none, and
+# the options-file lines that point pppd at them. Small because everything else
+# it needed already existed -- the reporting contract, its reader, and the rule
+# that decides whether a reported nameserver is delivered.
+total 1993240

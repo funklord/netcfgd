@@ -1667,6 +1667,53 @@ interface vpn0 {
 	assert_eq!(delivered(&plan, "vpn0"), ["10.0.0.53"]);
 }
 
+/// A DSL line's resolvers, which are the one thing only pppd learns.
+///
+/// The same rule as a tunnel's and the same reason: `usepeerdns` gives netcfgd
+/// the servers, and a `dns` block on the interface is the operator saying this
+/// link answers for something. Without the block the report is read and
+/// nothing is delivered.
+#[test]
+fn a_ppp_sessions_resolvers_follow_the_same_rule() {
+	let config = |dns: &str| {
+		format!(
+			r#"
+global {{ dns {{ dns_mode = "write_resolv_conf" }} }}
+interface ppp0 {{
+	pppoe {{ parent = "eth0"; username = "alice"; password = "@secret:dsl" }}
+	{dns}
+}}
+"#
+		)
+	};
+	let observe = || {
+		let mut observed = observed_with(&["ppp0"]);
+		observed.links[0].up = true;
+		observed.reports.push(netcfgd_model::ObservedReport {
+			interface: "ppp0".to_owned(),
+			addresses: Vec::new(),
+			gateways: Vec::new(),
+			nameservers: vec!["195.190.228.10".to_owned()],
+			routes: Vec::new(),
+		});
+		observed
+	};
+
+	let desired = document(&config(""));
+	let mut observed = observe();
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		delivered(&plan, "ppp0").is_empty(),
+		"got {:?}",
+		delivered(&plan, "ppp0")
+	);
+
+	let desired = document(&config("dns { }"));
+	let mut observed = observe();
+	let plan = settle(&desired, &mut observed);
+	assert_eq!(delivered(&plan, "ppp0"), ["195.190.228.10"]);
+}
+
 /// The gate is the block, not what is in it.
 ///
 /// `dns { }` on an interface asks for nothing of its own -- and that is exactly
