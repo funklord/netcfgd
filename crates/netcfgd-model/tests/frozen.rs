@@ -70,7 +70,7 @@ fn key(seed: u8) -> Key {
 /// Every addressing source, so none can be renamed unnoticed.
 ///
 /// **And so none can be *added* unnoticed**, which this list did not manage on
-/// its own: `AddressSource::Modem` was added and the witness did not move,
+/// its own: `AddressSource::Reported` was added and the witness did not move,
 /// because a witness is a sample document and a sample cannot notice a variant
 /// nobody put in it. The gate said "every variant present" and nothing checked
 /// it -- the same shape as every other gate this project has caught passing on
@@ -96,7 +96,7 @@ fn every_address_source() -> Vec<AddressSource> {
 		AddressSource::Slaac(_) => "slaac",
 		AddressSource::Delegated(_) => "delegated",
 		AddressSource::LinkLocal => "link_local",
-		AddressSource::Modem(_) => "modem",
+		AddressSource::Reported(_) => "reported",
 	};
 
 	// And this one does fail at runtime, for the case the compiler cannot see:
@@ -112,7 +112,7 @@ fn every_address_source() -> Vec<AddressSource> {
 			"dhcp4",
 			"dhcp6",
 			"link_local",
-			"modem",
+			"reported",
 			"slaac",
 			"static"
 		],
@@ -157,7 +157,7 @@ fn every_address_source_sample() -> Vec<AddressSource> {
 			suffix: "::1/64".to_owned(),
 		}),
 		AddressSource::LinkLocal,
-		AddressSource::Modem(netcfgd_model::Modem::default()),
+		AddressSource::Reported(netcfgd_model::Reported::default()),
 	]
 }
 

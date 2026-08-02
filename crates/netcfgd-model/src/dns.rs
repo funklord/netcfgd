@@ -181,8 +181,8 @@ impl DnsPolicy {
 /// Every DNS scope a document asks for, given what has been observed.
 ///
 /// **One function, called by both the planner and the executor**, because they
-/// have to agree and once did not. The planner learned that a modem helper's
-/// report contributes nameservers (decision 0006 rule 4) and the executor kept
+/// have to agree and once did not. The planner learned that a report
+/// contributes nameservers (decision 0006 rule 4) and the executor kept
 /// building its scope list from the document alone, so the plan said
 /// `dns.apply` and the delivery wrote a `resolv.conf` with nothing in it. That
 /// is the same failure `make executor-policy` exists to prevent one crate over,
@@ -252,7 +252,7 @@ pub fn scopes(document: &crate::Document, observed: &crate::Observed) -> Vec<(St
 			// scope that delivers nothing is still an action in the plan, and an
 			// action that does nothing is one somebody reads and dismisses on
 			// every run. A host that does not manage DNS should not start
-			// because a modem appeared.
+			// because a report arrived.
 			(None, _) => {}
 		}
 	}
@@ -267,7 +267,7 @@ pub fn scopes(document: &crate::Document, observed: &crate::Observed) -> Vec<(St
 /// deliver can only mean "not stated", and the only value that is not an error
 /// is the one the rest of the host uses.
 ///
-/// This closes a defect older than the modem work that surfaced while merging
+/// This closes a defect older than the reporting work that surfaced while merging
 /// two implementations of the scope list into one: `dns = "9.9.9.9"` on an
 /// interface compiles to a policy with mode `none`, and the executor dropped
 /// the scope -- so an operator wrote a nameserver down and netcfgd silently
@@ -285,7 +285,7 @@ fn inheriting(policy: &DnsPolicy, global_mode: &DnsMode) -> DnsPolicy {
 
 /// The nameservers an interface's sources contribute, from what was observed.
 ///
-/// Only a `modem` source contributes any today -- a DHCP lease's servers belong
+/// Only a `reported` source contributes any today -- a DHCP lease's servers belong
 /// to the client that took the lease, which writes them itself. Gated on the
 /// document actually asking for the source, because a report netcfgd has no
 /// instruction about is an observation, and a resolver is not something to
@@ -294,15 +294,15 @@ fn reported_servers(interface: &crate::Interface, observed: &crate::Observed) ->
 	if !interface
 		.addressing
 		.iter()
-		.any(|source| matches!(source, crate::AddressSource::Modem(_)))
+		.any(|source| matches!(source, crate::AddressSource::Reported(_)))
 	{
 		return Vec::new();
 	}
 	observed
-		.modems
+		.reports
 		.iter()
-		.filter(|modem| modem.interface == interface.name)
-		.flat_map(|modem| modem.nameservers.iter())
+		.filter(|report| report.interface == interface.name)
+		.flat_map(|report| report.nameservers.iter())
 		.filter_map(|server| {
 			// Kept as text by the reader on purpose, so one bad line does not
 			// discard a report. This is where it has to become an address.

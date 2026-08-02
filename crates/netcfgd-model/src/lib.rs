@@ -39,7 +39,7 @@ pub mod security;
 pub mod wifi;
 
 pub use address::{
-	derive_from_delegation, AddressSource, Delegated, Dhcp4, Dhcp6, Modem, PdRequest, PrefixRef,
+	derive_from_delegation, AddressSource, Delegated, Dhcp4, Dhcp6, PdRequest, PrefixRef, Reported,
 	Slaac, Static,
 };
 pub use control::{Control, Principal, Tier};
@@ -57,7 +57,7 @@ pub use interface::{
 pub use key::Key;
 pub use observed::{
 	AppliedDns, BackendKind, Delegation, Observed, ObservedAccessControl, ObservedAddress,
-	ObservedBackend, ObservedBridgeVlan, ObservedLink, ObservedModem, ObservedPolicy,
+	ObservedBackend, ObservedBridgeVlan, ObservedLink, ObservedPolicy, ObservedReport,
 	ObservedRoute, ObservedRule, Origin, Ownership,
 };
 pub use route::{Route, RouteScope};

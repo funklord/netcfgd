@@ -228,7 +228,7 @@ install-modem-mbim:
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 0755 helpers/netcfgd-modem-mbim $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
-	@echo "install-modem-mbim:   docs/modem-report.md is the contract -- write"
+	@echo "install-modem-mbim:   docs/interface-report.md is the contract -- write"
 	@echo "install-modem-mbim:   your own helper if this one does not fit"
 
 install-systemd:
@@ -493,9 +493,9 @@ live:
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ingress.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/readonly.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/unmanage.sh"
-	@# The modem reporting contract, checked from the side a helper writes.
+	@# The interface reporting contract, checked from the side a writer writes.
 	@# Under NCFG_LIVE: it needs no modem and no module, only a file.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/modem.sh"
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/report.sh"
 	@# The reference helper, against a fake mbimcli. Under NCFG_LIVE: it
 	@# needs no modem and no mbimcli, only the shell.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/helper.sh"

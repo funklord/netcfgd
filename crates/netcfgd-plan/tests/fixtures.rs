@@ -1361,22 +1361,22 @@ fn a_tunnel_stops_when_its_block_goes() {
 	assert_eq!(stop.reason.field, "openvpn");
 }
 
-/// An interface whose addresses come from a modem helper's report.
-fn modem_document() -> Document {
-	document(r#"interface wwan0 { kind = "dummy"; config = "modem" }"#)
+/// An interface whose addresses come from a report.
+fn reported_document() -> Document {
+	document(r#"interface wwan0 { kind = "dummy"; config = "reported" }"#)
 }
 
-/// `wwan0` present, with a helper reporting these addresses.
-fn modem_observed(addresses: &[&str]) -> Observed {
-	modem_reporting(addresses, &[])
+/// `wwan0` present, with these addresses reported for it.
+fn reported_observed(addresses: &[&str]) -> Observed {
+	reporting(addresses, &[])
 }
 
 /// The same, with gateways too.
-fn modem_reporting(addresses: &[&str], gateways: &[&str]) -> Observed {
+fn reporting(addresses: &[&str], gateways: &[&str]) -> Observed {
 	let owned = |list: &[&str]| list.iter().map(|value| (*value).to_owned()).collect();
 	let mut observed = observed_with(&["wwan0"]);
 	observed.links[0].up = true;
-	observed.modems.push(netcfgd_model::ObservedModem {
+	observed.reports.push(netcfgd_model::ObservedReport {
 		interface: "wwan0".to_owned(),
 		addresses: owned(addresses),
 		gateways: owned(gateways),
@@ -1386,10 +1386,10 @@ fn modem_reporting(addresses: &[&str], gateways: &[&str]) -> Observed {
 }
 
 /// `wwan0` reporting nameservers, with the document's globals set to a mode.
-fn modem_with_nameservers(config: &str, servers: &[&str]) -> (Document, Observed) {
+fn reporting_nameservers(config: &str, servers: &[&str]) -> (Document, Observed) {
 	let desired = document(config);
-	let mut observed = modem_reporting(&["10.64.1.23/30"], &[]);
-	observed.modems[0].nameservers = servers.iter().map(|s| (*s).to_owned()).collect();
+	let mut observed = reporting(&["10.64.1.23/30"], &[]);
+	observed.reports[0].nameservers = servers.iter().map(|s| (*s).to_owned()).collect();
 	(desired, observed)
 }
 
@@ -1418,10 +1418,10 @@ fn delivered(plan: &Plan, scope: &str) -> Vec<String> {
 /// modem does, and the interface gets a scope for it.
 #[test]
 fn a_reported_nameserver_is_delivered() {
-	let (desired, mut observed) = modem_with_nameservers(
+	let (desired, mut observed) = reporting_nameservers(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
-interface wwan0 { kind = "dummy"; config = "modem" }
+interface wwan0 { kind = "dummy"; config = "reported" }
 "#,
 		&["8.8.8.8"],
 	);
@@ -1435,10 +1435,10 @@ interface wwan0 { kind = "dummy"; config = "modem" }
 /// the rest of the host uses.
 #[test]
 fn a_synthesised_scope_takes_the_mode_the_host_already_uses() {
-	let (desired, mut observed) = modem_with_nameservers(
+	let (desired, mut observed) = reporting_nameservers(
 		r#"
 global { dns { dns_mode = "resolvconf" } }
-interface wwan0 { kind = "dummy"; config = "modem" }
+interface wwan0 { kind = "dummy"; config = "reported" }
 "#,
 		&["8.8.8.8"],
 	);
@@ -1455,8 +1455,8 @@ interface wwan0 { kind = "dummy"; config = "modem" }
 /// appeared. Globals at `none` means nothing is delivered.
 #[test]
 fn a_host_that_manages_no_dns_still_manages_none() {
-	let (desired, mut observed) = modem_with_nameservers(
-		r#"interface wwan0 { kind = "dummy"; config = "modem" }"#,
+	let (desired, mut observed) = reporting_nameservers(
+		r#"interface wwan0 { kind = "dummy"; config = "reported" }"#,
 		&["8.8.8.8"],
 	);
 
@@ -1472,12 +1472,12 @@ fn a_host_that_manages_no_dns_still_manages_none() {
 /// operator wrote down beats one the network handed out.
 #[test]
 fn a_written_nameserver_comes_before_a_reported_one() {
-	let (desired, mut observed) = modem_with_nameservers(
+	let (desired, mut observed) = reporting_nameservers(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
 interface wwan0 {
 	kind   = "dummy"
-	config = "modem"
+	config = "reported"
 	dns    = "9.9.9.9"
 }
 "#,
@@ -1552,8 +1552,8 @@ interface eth0 { kind = "dummy"; config = "10.0.0.1/24"; dns { } }
 /// A report for an interface the document says nothing about contributes no
 /// resolver, the same as it installs no route.
 #[test]
-fn a_report_without_a_modem_source_contributes_no_nameserver() {
-	let (desired, mut observed) = modem_with_nameservers(
+fn a_report_without_the_source_contributes_no_nameserver() {
+	let (desired, mut observed) = reporting_nameservers(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
 interface wwan0 { kind = "dummy"; config = "null" }
@@ -1569,8 +1569,8 @@ interface wwan0 { kind = "dummy"; config = "null" }
 /// address on an island. The route comes from the report, not the document.
 #[test]
 fn a_reported_gateway_becomes_a_default_route() {
-	let desired = modem_document();
-	let mut observed = modem_reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
+	let desired = reported_document();
+	let mut observed = reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
 
 	let plan = settle(&desired, &mut observed);
 	assert_eq!(names(&plan), ["addr.add", "route.add"]);
@@ -1600,8 +1600,8 @@ fn a_reported_gateway_becomes_a_default_route() {
 /// Both families, which is why the report's `gateway` key repeats.
 #[test]
 fn a_dual_stack_bearer_gets_a_default_route_each_way() {
-	let desired = modem_document();
-	let mut observed = modem_reporting(
+	let desired = reported_document();
+	let mut observed = reporting(
 		&["10.64.1.23/30", "2001:db8::2/64"],
 		&["10.64.1.24", "2001:db8::1"],
 	);
@@ -1624,12 +1624,12 @@ fn a_dual_stack_bearer_gets_a_default_route_each_way() {
 /// would have carried.
 #[test]
 fn the_default_route_goes_when_the_bearer_does() {
-	let desired = modem_document();
-	let mut observed = modem_reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
+	let desired = reported_document();
+	let mut observed = reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
 	settle(&desired, &mut observed);
 
-	observed.modems[0].addresses.clear();
-	observed.modems[0].gateways.clear();
+	observed.reports[0].addresses.clear();
+	observed.reports[0].gateways.clear();
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 	let mut removed = names(&plan);
 	removed.sort_unstable();
@@ -1640,19 +1640,19 @@ fn the_default_route_goes_when_the_bearer_does() {
 /// netcfgd has no instruction for. Installing a default route on the strength
 /// of a file somebody dropped in `/run` is not something to invent.
 #[test]
-fn a_report_without_a_modem_source_installs_no_route() {
+fn a_report_without_the_source_installs_no_route() {
 	let desired = document(r#"interface wwan0 { kind = "dummy"; config = "null" }"#);
-	let mut observed = modem_reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
+	let mut observed = reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
 	let plan = settle(&desired, &mut observed);
 	assert!(names(&plan).is_empty(), "got {:?}", names(&plan));
 }
 
-/// The point of the source. A helper reported an address; netcfgd installs it,
-/// because the helper deliberately does not (`docs/modem-report.md`).
+/// The point of the source. Something reported an address; netcfgd installs it,
+/// because the writer deliberately does not (`docs/interface-report.md`).
 #[test]
-fn an_address_a_modem_helper_reported_is_installed() {
-	let desired = modem_document();
-	let mut observed = modem_observed(&["10.64.1.23/30"]);
+fn a_reported_address_is_installed() {
+	let desired = reported_document();
+	let mut observed = reported_observed(&["10.64.1.23/30"]);
 
 	let plan = settle(&desired, &mut observed);
 	assert_eq!(names(&plan), ["addr.add"]);
@@ -1671,7 +1671,7 @@ fn an_address_a_modem_helper_reported_is_installed() {
 	// because the document only names the source -- the value came from a file
 	// somebody else wrote.
 	assert!(
-		added.reason.desired.contains("reported by a modem helper"),
+		added.reason.desired.contains("(reported)"),
 		"got {:?}",
 		added.reason
 	);
@@ -1682,18 +1682,18 @@ fn an_address_a_modem_helper_reported_is_installed() {
 /// and no backend to restart, so the address is netcfgd's to withdraw.
 #[test]
 fn an_address_the_report_stops_naming_is_withdrawn() {
-	let desired = modem_document();
-	let mut observed = modem_observed(&["10.64.1.23/30"]);
+	let desired = reported_document();
+	let mut observed = reported_observed(&["10.64.1.23/30"]);
 	settle(&desired, &mut observed);
 
 	// The bearer drops. The helper truncates its report, as the contract asks.
-	observed.modems[0].addresses.clear();
+	observed.reports[0].addresses.clear();
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 	assert_eq!(names(&plan), ["addr.del"]);
 	assert!(
 		plan.warnings
 			.iter()
-			.any(|warning| warning.message.contains("bearer is down")),
+			.any(|warning| warning.message.contains("the link is down")),
 		"got {:?}",
 		plan.warnings
 	);
@@ -1704,7 +1704,7 @@ fn an_address_the_report_stops_naming_is_withdrawn() {
 /// means look at the helper.
 #[test]
 fn no_report_and_an_empty_report_say_different_things() {
-	let desired = modem_document();
+	let desired = reported_document();
 
 	let mut nothing = observed_with(&["wwan0"]);
 	nothing.links[0].up = true;
@@ -1712,17 +1712,17 @@ fn no_report_and_an_empty_report_say_different_things() {
 	assert!(
 		plan.warnings
 			.iter()
-			.any(|warning| warning.message.contains("no helper has reported")),
+			.any(|warning| warning.message.contains("nothing has")),
 		"got {:?}",
 		plan.warnings
 	);
 
-	let mut empty = modem_observed(&[]);
+	let mut empty = reported_observed(&[]);
 	let plan = settle(&desired, &mut empty);
 	assert!(
 		plan.warnings
 			.iter()
-			.any(|warning| warning.message.contains("bearer is down")),
+			.any(|warning| warning.message.contains("the link is down")),
 		"got {:?}",
 		plan.warnings
 	);
