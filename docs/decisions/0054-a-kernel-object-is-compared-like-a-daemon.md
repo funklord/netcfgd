@@ -1,6 +1,8 @@
 # 0054: A kernel object is compared like a daemon
 
-Status: accepted
+Status: accepted; the limit in "What is deliberately not compared" about a
+rotated private key is lifted by [0055](0055-a-secret-can-be-hashed-too.md) --
+the question turned out not to need curve25519, only a digest
 Date: 2026-08-03
 Milestone: closes for `WireGuard` what [0052](0052-a-daemon-is-compared-to-what-it-was-started-with.md) closed for hostapd and radvd
 
