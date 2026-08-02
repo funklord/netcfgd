@@ -313,6 +313,7 @@ impl KernelExecutor {
 			resolved
 				.as_ref()
 				.map(|(user, password)| (user.as_str(), password.expose())),
+			&report_path(&self.run_dir, iface),
 		)
 	}
 
@@ -741,7 +742,7 @@ impl Executor for KernelExecutor {
 					// process found by name: an operator's own OpenVPN tunnels
 					// are common, and decision 0014's sentence about the
 					// supplicant applies here without changing a word.
-					openvpn::stop(&self.run_dir, iface)?;
+					openvpn::stop(&self.run_dir, iface, &report_path(&self.run_dir, iface))?;
 					self.effects.stopped_backends.push((*kind, iface.clone()));
 					return Ok(());
 				}
@@ -1436,6 +1437,24 @@ pub fn pd_hook_script(iface: &str, target: &std::path::Path) -> String {
 		 mv \"$out.tmp\" \"$out\"\n",
 		target.display()
 	)
+}
+
+/// Where something that is not netcfgd writes what an interface was given.
+///
+/// The one definition of this path. `netcfgd-host` reads reports and this crate
+/// hands the path to whatever writes one, and the two crates cannot be allowed
+/// to spell it differently -- so the reader calls this rather than joining
+/// `reported` for itself. `docs/interface-report.md` is the contract, and this
+/// is the sentence in it that says *where*.
+#[must_use]
+pub fn report_dir(run_dir: &std::path::Path) -> std::path::PathBuf {
+	run_dir.join("reported")
+}
+
+/// One interface's report.
+#[must_use]
+pub fn report_path(run_dir: &std::path::Path, iface: &str) -> std::path::PathBuf {
+	report_dir(run_dir).join(iface)
 }
 
 /// Where `/run` is, for code that has no executor to hand.

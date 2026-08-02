@@ -151,11 +151,23 @@ A host whose `global { dns { } }` sets no mode manages no resolver, and a report
 arriving is not a reason for it to start. The servers are read and shown and
 nothing is delivered.
 
-netcfgd will not configure the interface at all until a document asks it to --
-an `interface` with no `reported` source gets nothing, however complete the
-report. A writer must not assume its report has been applied, and must never
-apply the addresses itself: two writers on one interface is the failure this
-whole project is arranged to avoid.
+netcfgd will not configure the interface at all until a document gives it a
+reason to believe the report. There are two, and both are the same question
+asked of different documents:
+
+- **The interface says `config = "reported"`.** This is how a modem helper's
+  report is claimed. netcfgd did not start that helper and has no idea it
+  exists, so an operator has to say the file is meant.
+- **Or netcfgd started the writer.** A tunnel reports through a script netcfgd
+  generated, run by a process netcfgd started, on an interface the document
+  named. There is nothing left to opt into, and requiring the word anyway would
+  mean a tunnel that silently kept none of its routes until somebody added it
+  ([0048](decisions/0048-a-tunnels-routes-arrive-through-the-report.md)).
+
+A report for an interface the document says nothing about is read, shown, and
+otherwise ignored. A writer must not assume its report has been applied, and
+must never apply the addresses itself: two writers on one interface is the
+failure this whole project is arranged to avoid.
 
 ## What writes one
 

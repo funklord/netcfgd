@@ -242,4 +242,12 @@ netcfgd
 # two-line file `--auth-user-pass` reads. Small because the secret machinery
 # was already there -- the resolver, the provider and the `SecretRef` type all
 # predate this, and what was added is one more place that calls them.
-total 1976856
+# +12 KB for the routes a report can name and the tunnel that reports them.
+# Three pieces, none of them large on its own: a `ReportedRoute` in the model
+# with its serde, the parsing and planning of a route line, and the shell
+# script netcfgd generates for openvpn's --route-up -- which is a format string
+# in the binary and is most of this step.
+#
+# It also carries the rename of the reporting contract, which cost nothing: the
+# same code under a different word.
+total 1989144

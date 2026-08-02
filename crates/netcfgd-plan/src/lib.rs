@@ -2668,6 +2668,32 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 		.collect()
 }
 
+/// Whether a report for this interface is one netcfgd was told to act on.
+///
+/// Two ways, and they are the same question asked of different documents.
+///
+/// **The addressing list says `reported`**, which is how a modem helper's
+/// report is claimed: netcfgd did not start that helper and has no idea it
+/// exists, so the operator has to say that the file in `/run` is meant.
+///
+/// **Or netcfgd started the writer itself.** A tunnel daemon reports through a
+/// script netcfgd generated, launched by a process netcfgd started, on an
+/// interface the document named -- there is nothing left to opt into. Requiring
+/// `config = "reported"` as well would mean a tunnel that silently kept none of
+/// its routes until somebody added a word whose absence explained nothing.
+///
+/// What this is *not* is "there is a file". A report for an interface the
+/// document says nothing about is an observation netcfgd has no instruction
+/// for, and installing a default route off the strength of a file somebody
+/// dropped in `/run` is not something to invent.
+fn takes_reports(interface: &Interface) -> bool {
+	interface
+		.addressing
+		.iter()
+		.any(|source| matches!(source, AddressSource::Reported(_)))
+		|| matches!(interface.kind, InterfaceKind::OpenVpn(_))
+}
+
 /// The routes a report implies for one interface.
 ///
 /// A default route per reported gateway -- two of them on a dual-stack bearer,
@@ -2684,16 +2710,10 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 /// what the document no longer asks for. A second route planner would be a
 /// second set of those rules to keep in step.
 ///
-/// Empty unless the interface actually asks for `reported` addressing. A report
-/// for an interface whose document does not ask for one is an observation
-/// netcfgd has no instruction about, and installing a default route off the
-/// strength of a file somebody dropped in `/run` is not one it should invent.
+/// Empty unless the document gave netcfgd a reason to believe the report; see
+/// [`takes_reports`].
 fn reported_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
-	if !interface
-		.addressing
-		.iter()
-		.any(|source| matches!(source, AddressSource::Reported(_)))
-	{
+	if !takes_reports(interface) {
 		return Vec::new();
 	}
 	let reports = || {
