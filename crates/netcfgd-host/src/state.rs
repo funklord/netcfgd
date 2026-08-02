@@ -114,9 +114,14 @@ pub fn read_delegations(run_dir: &Path) -> Vec<netcfgd_model::Delegation> {
 ///
 /// Named `reported` rather than `modem` because a modem helper was merely the
 /// first writer; decision 0047 has the argument for taking the name off it.
+///
+/// Not spelled here. `netcfgd-apply` hands this path to the scripts it
+/// generates for the daemons it starts, and a reader that joined `reported` for
+/// itself would be a second definition of where the contract's files live --
+/// which would work until one of the two moved.
 #[must_use]
 pub fn report_dir(run_dir: &Path) -> PathBuf {
-	run_dir.join("reported")
+	netcfgd_apply::kernel::report_dir(run_dir)
 }
 
 /// Read every report that has been written.
