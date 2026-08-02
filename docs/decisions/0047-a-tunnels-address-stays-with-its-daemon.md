@@ -1,6 +1,10 @@
 # 0047: A tunnel's address stays with its daemon
 
-Status: accepted
+Status: accepted; both things it deferred are done. The routes half is built by
+[0048](0048-a-tunnels-routes-arrive-through-the-report.md), and the rename this
+record left crooked has happened -- `docs/modem-report.md` below is now
+[docs/interface-report.md](../interface-report.md), `/run/netcfgd/modem/` is
+`/run/netcfgd/reported/`, and the config word is `reported`
 Date: 2026-08-02
 Milestone: answers what 0046 deferred
 
