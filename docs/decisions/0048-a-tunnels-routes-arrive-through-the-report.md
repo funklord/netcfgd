@@ -1,6 +1,9 @@
 # 0048: A tunnel's routes arrive through the report
 
-Status: accepted
+Status: accepted; the nameservers left in "What is deliberately not taken" are
+taken by [0049](0049-a-server-may-name-resolvers-not-where-queries-go.md), on
+the terms that section asks for -- the servers are reported and the routing
+domains are not
 Date: 2026-08-02
 Milestone: implements the half [0047](0047-a-tunnels-address-stays-with-its-daemon.md) chose
 
