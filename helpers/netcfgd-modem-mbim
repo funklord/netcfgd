@@ -1,0 +1,162 @@
+#!/bin/sh
+# A modem helper for netcfgd, over MBIM, with no bus and no ModemManager.
+#
+#     netcfgd-modem-mbim connect    -d /dev/cdc-wdm0 -i wwan0 -a internet
+#     netcfgd-modem-mbim disconnect -d /dev/cdc-wdm0 -i wwan0
+#     netcfgd-modem-mbim stop       -i wwan0
+#
+# netcfgd does not start this, supervise it or speak to it. It connects a
+# cellular bearer and writes what the network gave it to
+# `/run/netcfgd/modem/<interface>`; netcfgd reads that file and configures the
+# interface from it. `docs/modem-report.md` is the whole contract between the
+# two, and this script is one implementation of the writing half -- decision
+# 0045 is explicit that it is not a privileged one. `umbim` on OpenWrt is the
+# other obvious way, on hardware where libmbim does not fit.
+#
+# It does NOT configure the interface. That is netcfgd's job, and two writers
+# on one interface is the failure the whole arrangement exists to avoid. Set
+# `config = "modem"` on the interface and netcfgd installs the address, the
+# default route and the nameservers from the report.
+#
+# What it needs: `mbimcli` from libmbim-utils, and read/write on the modem's
+# control device. No D-Bus, no systemd, no ModemManager -- mbimcli links
+# neither libdbus nor libsystemd and talks to /dev/cdc-wdmX and nothing else.
+#
+# The APN lives here rather than in netcfgd's document because connecting the
+# bearer is this script's job, not netcfgd's. netcfgd is told the result, never
+# asked for the parameters.
+
+set -eu
+
+usage() {
+	sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+	exit "${1:-2}"
+}
+
+command=${1:-}
+[ -n "$command" ] || usage
+shift || true
+
+device=
+interface=
+apn=
+user=
+password=
+
+while [ $# -gt 0 ]; do
+	case $1 in
+		-d|--device)    device=${2:?--device needs a path}; shift 2 ;;
+		-i|--interface) interface=${2:?--interface needs a name}; shift 2 ;;
+		-a|--apn)       apn=${2:?--apn needs a name}; shift 2 ;;
+		-u|--user)      user=${2:?--user needs a name}; shift 2 ;;
+		-p|--password)  password=${2:?--password needs a value}; shift 2 ;;
+		-h|--help)      usage 0 ;;
+		*) echo "netcfgd-modem-mbim: unknown option $1" >&2; exit 2 ;;
+	esac
+done
+
+[ -n "$interface" ] || { echo "netcfgd-modem-mbim: --interface is required" >&2; exit 2; }
+
+# The same directory netcfgd reads, and the same environment variable it
+# honours, so a helper can be exercised somewhere other than /run.
+run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
+report="$run_dir/modem/$interface"
+
+mbimcli=${MBIMCLI:-mbimcli}
+
+# `--device-open-proxy` throughout. Without it each invocation opens and closes
+# the control device, and closing it drops the session on a good many modems --
+# so `connect` would succeed and `--query-ip-configuration` would come back
+# empty. The proxy is started on demand by mbimcli itself.
+mbim() {
+	"$mbimcli" --device-open-proxy --device="$device" "$@"
+}
+
+# Atomically, as the contract asks: netcfgd may read at any moment and a
+# half-written file is a file it will believe.
+write_report() {
+	mkdir -p "$run_dir/modem"
+	cat > "$report.tmp"
+	mv "$report.tmp" "$report"
+}
+
+# What `mbimcli --query-ip-configuration` prints, turned into what netcfgd
+# reads. The format is out of libmbim 1.32's `mbimcli_print_ip_config`, which
+# is the only place it is written down:
+#
+#     [/dev/cdc-wdm0] IPv4 configuration available: 'address, gateway, dns'
+#          IP [0]: '10.64.1.23/30'
+#         Gateway: '10.64.1.24'
+#         DNS [0]: '8.8.8.8'
+#             MTU: '1428'
+#
+# The v6 section repeats the same labels, so the family does not have to be
+# tracked -- the addresses say which they are, and netcfgd takes both. Values
+# are single-quoted, which is what makes this a `sed` rather than a parser.
+#
+# `mtu` is reported even though netcfgd ignores it today: the contract promises
+# unknown keys are skipped, so reporting it costs nothing and the day netcfgd
+# uses it this helper needs no change.
+to_report() {
+	sed -n "
+		s/^ *IP \[[0-9]*\]: '\(.*\)'$/address=\1/p
+		s/^ *Gateway: '\(.*\)'$/gateway=\1/p
+		s/^ *DNS \[[0-9]*\]: '\(.*\)'$/dns=\1/p
+		s/^ *MTU: '\(.*\)'$/mtu=\1/p
+	"
+}
+
+case $command in
+connect)
+	[ -n "$device" ] || { echo "netcfgd-modem-mbim: --device is required" >&2; exit 2; }
+	[ -n "$apn" ] || { echo "netcfgd-modem-mbim: --apn is required" >&2; exit 2; }
+
+	# `access-string` is the APN. Credentials are passed only when given: an
+	# empty `username=` is not the same as no username to every network.
+	settings="access-string=$apn"
+	[ -n "$user" ] && settings="$settings,username=$user"
+	[ -n "$password" ] && settings="$settings,password=$password"
+
+	if ! mbim --connect="$settings" > /dev/null; then
+		echo "netcfgd-modem-mbim: could not connect $interface via $apn" >&2
+		exit 1
+	fi
+
+	config=$(mbim --query-ip-configuration) || {
+		echo "netcfgd-modem-mbim: connected but could not read the ip configuration" >&2
+		exit 1
+	}
+
+	body=$(printf '%s\n' "$config" | to_report)
+	if ! printf '%s\n' "$body" | grep -q '^address='; then
+		# A bearer that connected and produced no address is not a bearer. Say
+		# so rather than writing an empty report, which would tell netcfgd the
+		# modem is down when it is up and misconfigured.
+		echo "netcfgd-modem-mbim: $interface connected but the network gave no address" >&2
+		exit 1
+	fi
+
+	printf '# %s via %s, %s\n%s\n' "$interface" "$apn" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+		"$body" | write_report
+	;;
+
+disconnect)
+	[ -n "$device" ] || { echo "netcfgd-modem-mbim: --device is required" >&2; exit 2; }
+	mbim --disconnect > /dev/null || true
+	# Truncated rather than removed: while this helper is around, an empty
+	# report says "connected to nothing", which is different from "nobody is
+	# watching this modem".
+	: | write_report
+	;;
+
+stop)
+	# The helper is going away, so the report stops being maintained and must
+	# not be left for the next person to believe.
+	rm -f "$report"
+	;;
+
+*)
+	echo "netcfgd-modem-mbim: unknown command $command" >&2
+	usage
+	;;
+esac
