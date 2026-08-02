@@ -806,6 +806,7 @@ impl Builder {
 		if matches!(interface.kind, InterfaceKind::OpenVpn(_)) {
 			return self.plan_backend(interface, BackendKind::OpenVpn, "openvpn", observed, base);
 		}
+
 		// Before the supplicant, because a radio that runs an access point does
 		// not also join networks with the same interface. The warning that says
 		// so is emitted once, up front, rather than here -- this runs per
@@ -1122,6 +1123,8 @@ impl Builder {
 			self.plan_route(interface, route, observed, &base);
 		}
 
+		self.plan_advertising(interface, observed, &base, &addressing_ids);
+
 		// Rule 6: post_up runs after the last addressing action completes.
 		for hook in interface
 			.hooks
@@ -1141,6 +1144,61 @@ impl Builder {
 				None,
 			);
 		}
+	}
+
+	/// What this interface tells the hosts behind it.
+	///
+	/// Not a prerequisite and not an addressing source: a LAN with a static
+	/// address and an `advertise` block gets both. It waits on the addressing
+	/// rather than racing it, because a router that advertises a prefix it does
+	/// not itself hold is advertising a route to nowhere -- and because the
+	/// prefix being advertised is very often the one the addressing just derived
+	/// from a delegation.
+	fn plan_advertising(
+		&mut self,
+		interface: &Interface,
+		observed: &Observed,
+		base: &[u32],
+		addressing: &[u32],
+	) {
+		let Some(policy) = &interface.advertise else {
+			return;
+		};
+		// Nothing is planned until there is something to advertise, and that is
+		// the same rule a tunnel taught: an action that must fail, planned
+		// before the one that would make it succeed, stops the apply and takes
+		// the rest with it. Here the rest is the `DHCPv6` client on the *other*
+		// interface -- the one whose delegation this is waiting for -- so a
+		// router would never have come up at all.
+		let resolvable = policy.prefixes.iter().any(|reference| {
+			observed
+				.delegation(&reference.source)
+				.is_some_and(|delegation| delegation.prefixes.len() > reference.index as usize)
+		});
+		if !resolvable {
+			let sources: Vec<&str> = policy
+				.prefixes
+				.iter()
+				.map(|reference| reference.source.as_str())
+				.collect();
+			self.warn(
+				&interface.name,
+				format!(
+					"waiting on a delegated prefix from {} before advertising",
+					sources.join(", ")
+				),
+			);
+			return;
+		}
+		let mut deps = base.to_vec();
+		deps.extend(addressing.iter().copied());
+		self.plan_backend(
+			interface,
+			BackendKind::RouterAdvert,
+			"advertise",
+			observed,
+			&deps,
+		);
 	}
 
 	fn plan_source(
@@ -2254,7 +2312,15 @@ impl Builder {
 			// an action rather than a process; router advertisement is not
 			// implemented. Reporting them as unwanted would stop something
 			// netcfgd never started.
-			BackendKind::WireGuard | BackendKind::Dns | BackendKind::RouterAdvert => (true, ""),
+			BackendKind::RouterAdvert => (
+				on_interface(&|interface| interface.advertise.is_some()),
+				"advertise",
+			),
+			// Not started by the planner, so not stopped by it either: a
+			// WireGuard device is configured at creation and a DNS delivery is
+			// an action rather than a process. Reporting them as unwanted would
+			// stop something netcfgd never started.
+			BackendKind::WireGuard | BackendKind::Dns => (true, ""),
 		}
 	}
 
