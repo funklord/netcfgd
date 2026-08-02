@@ -13,19 +13,26 @@
 #
 # `kea-dhcp6` is the ISP. A veth pair is the line. There is no hardware here.
 #
-# **Needs real root**, so `make live` does not run it: odhcp6c binds port 546
-# and opens a packet socket, and kea binds 547. The same bucket as `hwsim.sh`
-# and `pppoe-session.sh`, and it makes its own namespaces for the same reason.
+# **Needs real root**: odhcp6c binds port 546 and opens a packet socket, and kea
+# binds 547. The same bucket as `hwsim.sh` and `pppoe-session.sh`, and it makes
+# its own namespaces for the same reason. `make live` invokes it either way and
+# an unprivileged run skips -- so an unprivileged suite says nothing about any of
+# this, and the way to hear from it is to run the suite as root.
 #
 # It also needs **odhcp6c**, which Debian does not package -- decision 0050 is
 # why netcfgd will not pretend dhcpcd can do this instead. It builds from source
-# in a couple of minutes:
+# in a couple of minutes, and the dependencies are named here because the recipe
+# that omitted them stopped at `None of the required 'json-c' found` on a clean
+# trixie:
 #
+#     apt-get install -y kea-dhcp6-server radvd \
+#         git cmake build-essential pkg-config libjson-c-dev
 #     git clone https://github.com/openwrt/libubox && cd libubox
 #     cmake -B build -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF && cmake --build build
-#     sudo cmake --install build
+#     sudo cmake --install build && sudo ldconfig
 #     git clone https://github.com/openwrt/odhcp6c && cd odhcp6c
 #     cmake -B build && cmake --build build
+#     sudo install -m 0755 build/odhcp6c /usr/local/bin/odhcp6c
 #
 # On OpenWrt, where prefix delegation is the ordinary case, it is already there.
 
