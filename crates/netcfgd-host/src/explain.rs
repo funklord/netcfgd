@@ -84,6 +84,65 @@ fn ownership_fact(observed: &Observed, ownership: Ownership, proto: Option<u8>) 
 	}
 }
 
+/// What the configuration says about this interface.
+///
+/// Split from the observation half so that neither grows past the point where a
+/// reader can hold it: an explanation is a list of facts from two different
+/// worlds, and the code should read that way too.
+fn declared(
+	name: &str,
+	interface: &netcfgd_model::Interface,
+	document: &Document,
+	provenance: &Provenance,
+) -> Vec<Fact> {
+	let mut facts = Vec::new();
+	let path = netcfgd_compile::provenance::interface_path(name);
+	facts.push(sourced(
+		"desired",
+		"declared in the configuration",
+		location(provenance, &path),
+	));
+	if let Some(mtu) = interface.mtu {
+		facts.push(sourced(
+			"desired",
+			format!("mtu {mtu}"),
+			location(
+				provenance,
+				&netcfgd_compile::provenance::field_path(name, "mtu"),
+			),
+		));
+	}
+	for (index, source) in interface.addressing.iter().enumerate() {
+		facts.push(sourced(
+			"desired",
+			format!("addressing[{index}] is {}", render_source(source)),
+			location(
+				provenance,
+				&netcfgd_compile::provenance::field_path(name, &format!("addressing[{index}]")),
+			),
+		));
+	}
+	if let Some(guard) = &interface.guard {
+		facts.push(sourced(
+			"guard",
+			format!(
+				"{} depends on this interface, so disruptive changes are refused",
+				guard.reason
+			),
+			location(
+				provenance,
+				&netcfgd_compile::provenance::field_path(name, "guard"),
+			),
+		));
+	}
+	let policy = interface.on_drift.map_or_else(
+		|| format!("{:?} (from globals)", document.globals.on_drift_default),
+		|policy| format!("{policy:?}"),
+	);
+	facts.push(fact("drift", format!("on_drift is {policy}")));
+	facts
+}
+
 fn interface(
 	name: &str,
 	desired: Option<&Document>,
@@ -91,68 +150,15 @@ fn interface(
 	provenance: &Provenance,
 ) -> Explanation {
 	let mut facts = Vec::new();
-	let path = netcfgd_compile::provenance::interface_path(name);
-
 	match desired.and_then(|document| {
 		document
 			.interfaces
 			.iter()
 			.find(|interface| interface.name == name)
+			.map(|interface| (document, interface))
 	}) {
-		Some(interface) => {
-			facts.push(sourced(
-				"desired",
-				"declared in the configuration",
-				location(provenance, &path),
-			));
-			if let Some(mtu) = interface.mtu {
-				facts.push(sourced(
-					"desired",
-					format!("mtu {mtu}"),
-					location(
-						provenance,
-						&netcfgd_compile::provenance::field_path(name, "mtu"),
-					),
-				));
-			}
-			for (index, source) in interface.addressing.iter().enumerate() {
-				facts.push(sourced(
-					"desired",
-					format!("addressing[{index}] is {}", render_source(source)),
-					location(
-						provenance,
-						&netcfgd_compile::provenance::field_path(
-							name,
-							&format!("addressing[{index}]"),
-						),
-					),
-				));
-			}
-			if let Some(guard) = &interface.guard {
-				facts.push(sourced(
-					"guard",
-					format!(
-						"{} depends on this interface, so disruptive changes are refused",
-						guard.reason
-					),
-					location(
-						provenance,
-						&netcfgd_compile::provenance::field_path(name, "guard"),
-					),
-				));
-			}
-			let policy = interface.on_drift.map_or_else(
-				|| {
-					format!(
-						"{:?} (from globals)",
-						desired
-							.map(|d| d.globals.on_drift_default)
-							.unwrap_or_default()
-					)
-				},
-				|policy| format!("{policy:?}"),
-			);
-			facts.push(fact("drift", format!("on_drift is {policy}")));
+		Some((document, interface)) => {
+			facts.extend(declared(name, interface, document, provenance));
 		}
 		None => facts.push(fact(
 			"desired",
@@ -187,6 +193,8 @@ fn interface(
 		}
 		None => facts.push(fact("observed", "no such interface is present")),
 	}
+
+	facts.extend(backends_on(name, observed));
 
 	facts.extend(pending(name, desired, observed));
 
@@ -227,9 +235,136 @@ fn report_for<'a>(
 		.find(|report| report.interface == interface)
 }
 
+/// The indirection that produced an address, where one did.
+///
+/// Two of the six addressing sources name a *source* rather than a value, and
+/// both used to explain as "the configuration does not ask for this address"
+/// about an address netcfgd had installed itself and would withdraw itself:
+///
+/// - a **report**, whose value is in a file something else wrote
+///   (decisions 0045, 0047), and
+/// - a **delegated prefix**, whose value did not exist until an ISP handed one
+///   out (decision 0009).
+///
+/// Following the indirection is the whole of what `ncfg explain` is for on
+/// these two. Naming the file it ends at is the other half: the next question
+/// after "why is this here" is "where does that come from", and an answer that
+/// stops at "a report" has only moved the question.
+fn indirect_source(
+	interface: &str,
+	address: &str,
+	desired: Option<&Document>,
+	observed: &Observed,
+) -> Option<(String, Option<String>)> {
+	if report_for(interface, desired, observed)
+		.is_some_and(|report| report.addresses.iter().any(|held| held == address))
+	{
+		return Some((
+			"the configuration takes this interface's addresses from a report, and the \
+			 report names this one"
+				.to_owned(),
+			Some(report_source(interface)),
+		));
+	}
+
+	// A delegated address is derived rather than reported, so the check is the
+	// derivation the planner performs -- the same function, so the two cannot
+	// disagree about which address a reference produces.
+	let interface_block = desired?
+		.interfaces
+		.iter()
+		.find(|candidate| candidate.name == interface)?;
+	for source in &interface_block.addressing {
+		let AddressSource::Delegated(delegated) = source else {
+			continue;
+		};
+		let Some(delegation) = observed.delegation(&delegated.prefix.source) else {
+			continue;
+		};
+		let Some(prefix) = delegation.prefixes.get(delegated.prefix.index as usize) else {
+			continue;
+		};
+		if netcfgd_model::derive_from_delegation(prefix, &delegated.prefix, &delegated.suffix)
+			.is_ok_and(|derived| derived == address)
+		{
+			return Some((
+				format!(
+					"the configuration builds it from `{}`, which {} was delegated as {prefix}",
+					delegated.suffix, delegated.prefix.source
+				),
+				Some(format!("/run/netcfgd/prefixes/{}", delegated.prefix.source)),
+			));
+		}
+	}
+	None
+}
+
 /// The file a report was read from, for a fact's source.
 fn report_source(interface: &str) -> String {
 	format!("/run/netcfgd/reported/{interface}")
+}
+
+/// What netcfgd started on this interface, and whether it is still current.
+///
+/// The interface's own facts come from the kernel; a backend's cannot. hostapd
+/// and radvd read a file once and report almost nothing back, so what netcfgd
+/// knows is what it wrote -- and decisions 0052 and 0053 turned that into three
+/// answers worth surfacing here, because "why did my access point restart" is
+/// the question `ncfg explain` exists for and the plan alone answers it only
+/// while the restart is still pending.
+fn backends_on(interface: &str, observed: &Observed) -> Vec<Fact> {
+	let mut facts = Vec::new();
+	for backend in observed
+		.backends
+		.iter()
+		.filter(|backend| backend.interface == interface && backend.running)
+	{
+		facts.push(sourced(
+			"backend",
+			format!("{:?} is running", backend.kind),
+			Some("/run/netcfgd/owned.json".to_owned()),
+		));
+		if let Some(started) = &backend.started_with {
+			facts.push(fact(
+				"backend",
+				format!(
+					"started with ssid {}{}{}",
+					started.ssid.to_hex(),
+					started
+						.channel
+						.map_or_else(String::new, |channel| format!(", channel {channel}")),
+					started
+						.band
+						.as_ref()
+						.map_or_else(String::new, |band| format!(", {band} GHz")),
+				),
+			));
+		}
+		// Only the answers that mean something is wrong. "Still current" is the
+		// ordinary case and would be a line every reader learns to skip, which
+		// is how the one line that matters gets skipped with it.
+		if backend.secret_matches == Some(false) {
+			facts.push(fact(
+				"backend",
+				"the passphrase in the secret store is not the one it was started with, so it \
+				 will be restarted",
+			));
+		}
+		if backend.config_matches == Some(false) {
+			facts.push(fact(
+				"backend",
+				"the configuration file it was started from has changed since, so it will be \
+				 restarted",
+			));
+		}
+		if !backend.advertised.is_empty() {
+			facts.push(fact(
+				"backend",
+				format!("advertising {}", backend.advertised.join(" ")),
+			));
+		}
+	}
+	facts
 }
 
 fn address(
@@ -268,15 +403,8 @@ fn address(
 		)),
 		// The document names a source rather than a value, so "does not ask
 		// for it" would be wrong about an address netcfgd installed itself.
-		None => match report_for(interface, desired, observed)
-			.filter(|report| report.addresses.iter().any(|held| held == address))
-		{
-			Some(_) => facts.push(sourced(
-				"desired",
-				"the configuration takes this interface's addresses from a \
-				 report, and the report names this one",
-				Some(report_source(interface)),
-			)),
+		None => match indirect_source(interface, address, desired, observed) {
+			Some((detail, source)) => facts.push(sourced("desired", detail, source)),
 			None => facts.push(fact(
 				"desired",
 				"the configuration does not ask for this address",
@@ -654,6 +782,103 @@ mod tests {
 
 	/// A guard is the reason a change is not happening, so explaining an
 	/// interface has to mention both the guard and the refusal it causes.
+	/// And so does one built from a delegated prefix.
+	///
+	/// The other of the two sources the document names by reference rather than
+	/// by value (decision 0009). It explained as "the configuration does not
+	/// ask for this address" about an address netcfgd derived itself -- and the
+	/// answer an operator wants is which delegation it came from, because that
+	/// is where the next question goes.
+	#[test]
+	fn a_delegated_address_names_the_delegation_it_came_from() {
+		let mut interface = interface_named("lan0");
+		interface.addressing = vec![AddressSource::Delegated(netcfgd_model::Delegated {
+			prefix: netcfgd_model::PrefixRef {
+				source: "wan0".to_owned(),
+				index: 0,
+				subnet: 0,
+			},
+			suffix: "::1/64".to_owned(),
+		})];
+		let document = document_with(interface);
+
+		let mut observed = observed_with(
+			ObservedAddress {
+				interface: "lan0".to_owned(),
+				address: "2001:db8:1234::1/64".to_owned(),
+				proto: Some(110),
+				ownership: Ownership::Ours,
+				origin: Some(Origin::Delegated),
+			},
+			true,
+		);
+		observed.delegations.push(netcfgd_model::Delegation {
+			interface: "wan0".to_owned(),
+			prefixes: vec!["2001:db8:1234::/56".to_owned()],
+		});
+
+		let explanation = explain(
+			&Subject::Address {
+				interface: "lan0".to_owned(),
+				address: "2001:db8:1234::1/64".to_owned(),
+			},
+			Some(&document),
+			&observed,
+			&Provenance::default(),
+		);
+		let desired = detail(&explanation, "desired");
+		assert!(desired.contains("2001:db8:1234::/56"), "got {desired}");
+		assert!(desired.contains("wan0"), "got {desired}");
+		assert!(
+			explanation
+				.facts
+				.iter()
+				.any(|item| item.source.as_deref() == Some("/run/netcfgd/prefixes/wan0")),
+			"the fact should name the file: {:?}",
+			explanation.facts
+		);
+	}
+
+	/// An access point that is about to be restarted says why, and says it
+	/// where somebody asking about the interface will see it.
+	///
+	/// The plan answers this too, and only while the restart is pending. What
+	/// an operator asks after the fact is "what is this thing running", and
+	/// hostapd cannot be asked -- so netcfgd's own record is the answer
+	/// (decisions 0052, 0053).
+	#[test]
+	fn a_stale_backend_says_so_on_the_interface() {
+		let document = document_with(interface_named("wlan0"));
+		let mut observed = Observed::default();
+		observed.backends.push(netcfgd_model::ObservedBackend {
+			kind: netcfgd_model::BackendKind::AccessPoint,
+			interface: "wlan0".to_owned(),
+			running: true,
+			access_control: None,
+			started_with: Some(netcfgd_model::ObservedAccessPoint {
+				ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
+				band: None,
+				channel: Some(6),
+			}),
+			secret_matches: Some(false),
+			config_matches: None,
+			advertised: Vec::new(),
+		});
+
+		let explanation = explain(
+			&Subject::Interface {
+				name: "wlan0".to_owned(),
+			},
+			Some(&document),
+			&observed,
+			&Provenance::default(),
+		);
+		let backend = detail(&explanation, "backend");
+		assert!(backend.contains("686f6d65"), "got {backend}");
+		assert!(backend.contains("channel 6"), "got {backend}");
+		assert!(backend.contains("passphrase"), "got {backend}");
+	}
+
 	/// An address netcfgd installed from a report explains itself.
 	///
 	/// It used to answer "the configuration does not ask for this address"
