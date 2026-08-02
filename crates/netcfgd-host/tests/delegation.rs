@@ -62,14 +62,34 @@ fn the_hook_and_the_reader_agree_for_odhcp6c() {
 	let _ = fs::remove_dir_all(&dir);
 }
 
-/// dhcpcd uses a different variable and reports one.
+/// dhcpcd's variable is *not* read, and that is the point.
+///
+/// This test used to assert the opposite, on a variable dhcpcd does not set.
+/// The nearest thing it has is `$new_delegated_dhcp6_prefix`, which carries
+/// the addresses dhcpcd derived from a prefix rather than the prefix, and only
+/// on an interface dhcpcd delegated to -- which netcfgd never asks it to do,
+/// because deriving is netcfgd's (decision 0009). Measured against a real
+/// dhcpcd and a real kea; decision 0050 has it.
+///
+/// So the hook reads odhcp6c's variable and nothing else, and `start_dhcp6`
+/// refuses a document that asks dhcpcd for a prefix instead of starting a
+/// client that would take a lease and report nothing.
 #[test]
-fn the_hook_and_the_reader_agree_for_dhcpcd() {
+fn dhcpcds_variables_are_not_read_because_neither_carries_a_prefix() {
 	let dir = scratch("dhcpcd");
-	run_hook(&dir, "wan0", &[("new_dhcp6_prefix", "2001:db8:abcd::/56")]);
+	run_hook(
+		&dir,
+		"wan0",
+		&[
+			("new_dhcp6_prefix", "2001:db8:abcd::/56"),
+			("new_delegated_dhcp6_prefix", "2001:db8:abcd::1/64"),
+		],
+	);
 
-	let delegations = read_delegations(&dir);
-	assert_eq!(delegations[0].prefixes, ["2001:db8:abcd::/56"]);
+	assert!(
+		read_delegations(&dir)[0].prefixes.is_empty(),
+		"an address is not a prefix, and neither variable is odhcp6c's"
+	);
 
 	let _ = fs::remove_dir_all(&dir);
 }

@@ -76,6 +76,8 @@ pub struct KernelExecutor {
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
+	/// Interfaces whose `dhcp6` source asks for a delegated prefix.
+	delegating: Vec<String>,
 	/// The `OpenVPN` tunnel on each interface that is one.
 	///
 	/// Carried for the reason the `PPPoE` session above is: the op says which
@@ -140,6 +142,7 @@ impl KernelExecutor {
 			dot1x: Vec::new(),
 			mac_policy: Vec::new(),
 			pppoe: Vec::new(),
+			delegating: Vec::new(),
 			openvpn: Vec::new(),
 			preferences: Vec::new(),
 			networks: Vec::new(),
@@ -204,6 +207,20 @@ impl KernelExecutor {
 				InterfaceKind::OpenVpn(config) => Some((interface.name.clone(), config.clone())),
 				_ => None,
 			})
+			.collect();
+		// Which interfaces asked for a delegated prefix. The op carries only
+		// the kind and the interface, and whether a prefix was asked for
+		// decides which client can serve it at all -- see `start_dhcp6`.
+		self.delegating = document
+			.interfaces
+			.iter()
+			.filter(|interface| {
+				interface.addressing.iter().any(|source| {
+					matches!(source, netcfgd_model::AddressSource::Dhcp6(dhcp6)
+						if dhcp6.prefix_delegation.is_some())
+				})
+			})
+			.map(|interface| interface.name.clone())
 			.collect();
 		self.pppoe = document
 			.interfaces
@@ -728,6 +745,11 @@ impl Executor for KernelExecutor {
 				}
 				if *kind == netcfgd_model::BackendKind::AccessPoint {
 					self.start_access_point(iface)?;
+					self.effects.started_backends.push((*kind, iface.clone()));
+					return Ok(());
+				}
+				if *kind == netcfgd_model::BackendKind::Dhcp6 {
+					start_dhcp6(iface, self.delegating.iter().any(|name| name == iface))?;
 					self.effects.started_backends.push((*kind, iface.clone()));
 					return Ok(());
 				}
@@ -1289,7 +1311,10 @@ fn start_backend(
 				"no DHCPv4 client found for {iface}; install dhcpcd or busybox udhcpc"
 			))
 		}
-		BackendKind::Dhcp6 => start_dhcp6(iface),
+		BackendKind::Dhcp6 => Err(format!(
+			"a dhcp6 client on {iface} needs to know whether the document asked for \
+			 a delegated prefix, which the plain backend path does not carry"
+		)),
 		BackendKind::Pppoe => Err(format!(
 			"a pppoe session on {iface} needs its configuration, which the plain \
 			 backend path does not carry"
@@ -1301,53 +1326,90 @@ fn start_backend(
 	}
 }
 
+/// Which `DHCPv6` client can serve what the document asked for.
+///
+/// Pure and separate, because the interesting case cannot be reached from a
+/// config file yet -- the model carries `PdRequest` and the DSL has no way to
+/// set it (decision 0009's request half is unwritten) -- and a branch no test
+/// can make fire is untested code however defensive it looks. This is the test
+/// making it fire.
+///
+/// **Prefix delegation is odhcp6c's.** Measured against a real `kea-dhcp6` over
+/// a veth pair, with decision 0050 carrying the whole of it: dhcpcd exposes a
+/// delegated prefix to a script only as `$new_delegated_dhcp6_prefix`, which
+/// `dhcp6.c` fills with **the addresses dhcpcd itself derived** from the
+/// prefix, on an interface it delegated to. netcfgd does the deriving (0009
+/// makes `PrefixRef` an indirection the document resolves), so there is no
+/// interface for dhcpcd to delegate to and the variable is always empty.
+///
+/// So a document that asks for a prefix with only dhcpcd installed is refused,
+/// rather than served by a client that would take a lease from the ISP and
+/// report nothing.
+fn dhcp6_client(delegating: bool, has_odhcp6c: bool, iface: &str) -> Result<&'static str, String> {
+	match (delegating, has_odhcp6c) {
+		(_, true) => Ok("odhcp6c"),
+		(false, false) => Ok("dhcpcd"),
+		(true, false) => Err(format!(
+			"`{iface}` asks for a delegated prefix and only dhcpcd is installed. \
+			 dhcpcd never reports the prefix itself to a script -- it reports the \
+			 addresses it derived from one, and netcfgd does that deriving -- so \
+			 the lease would arrive and nothing would come of it. Install odhcp6c, \
+			 or drop the delegation from this interface. See docs/decisions/0050"
+		)),
+	}
+}
+
 /// Start a `DHCPv6` client, with the hook that reports a delegated prefix.
 ///
-/// Decision 0004 delegates DHCP, so netcfgd does not learn the prefix by
-/// speaking the protocol -- it learns it because the client tells it. The
-/// mechanism is a script netcfgd writes and the client runs: the client
-/// exports the delegation in the environment, the script writes it to a file
-/// under `/run`, and the observer reads that file.
-///
-/// A file rather than a socket callback, deliberately. Design section 5.2 says
-/// hooks never need to call back into netcfgd, and a delegated prefix arriving
-/// through the same greppable-file route as everything else in `/run` means an
-/// operator can see what the client reported without netcfgd running.
-fn start_dhcp6(iface: &str) -> Result<(), String> {
+/// `-P 0` asks odhcp6c for a prefix of whatever length the server offers, and
+/// is passed **only when the document asked for one**. It used to be
+/// unconditional, so every `config = "dhcp6"` solicited a delegation nobody had
+/// written down and an ISP handed one out that nothing would ever use.
+fn start_dhcp6(iface: &str, delegating: bool) -> Result<(), String> {
 	let hook = write_pd_hook(iface)?;
+	let has_odhcp6c = which("odhcp6c");
 
-	for (program, args) in [
-		// odhcp6c takes the script as an argument, which is the shape this
-		// wants: no global hook directory to share with other clients.
-		(
-			"odhcp6c",
-			vec![
-				"-d".to_owned(),
-				"-P".to_owned(),
-				"0".to_owned(),
-				"-s".to_owned(),
-				hook.display().to_string(),
-				iface.to_owned(),
-			],
-		),
-		// dhcpcd reads hooks from a directory rather than an argument, so the
-		// script is installed there by `write_pd_hook` and this only asks for
-		// prefix delegation.
-		(
-			"dhcpcd",
-			vec!["-b".to_owned(), "-6".to_owned(), iface.to_owned()],
-		),
-	] {
-		match Command::new(program).args(&args).status() {
-			Ok(status) if status.success() => return Ok(()),
-			Ok(status) => return Err(format!("{program} on {iface} exited with {status}")),
-			Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-			Err(error) => return Err(format!("could not run {program}: {error}")),
+	let mut arguments: Vec<String> = Vec::new();
+	match dhcp6_client(delegating, has_odhcp6c, iface)? {
+		"odhcp6c" => {
+			arguments.push("-d".to_owned());
+			if delegating {
+				arguments.push("-P".to_owned());
+				arguments.push("0".to_owned());
+			}
+			// The script as an argument, which is the shape this wants: no
+			// global hook directory to share with other clients.
+			arguments.push("-s".to_owned());
+			arguments.push(hook.display().to_string());
+			arguments.push(iface.to_owned());
+			run_client("odhcp6c", &arguments, iface)
 		}
+		// No hook: dhcpcd has nothing to report through one, and pointing it at
+		// netcfgd's would replace the hooks its own package installs.
+		_ => run_client(
+			"dhcpcd",
+			&["-b".to_owned(), "-6".to_owned(), iface.to_owned()],
+			iface,
+		),
 	}
-	Err(format!(
-		"no DHCPv6 client found for {iface}; install odhcp6c or dhcpcd"
-	))
+}
+
+/// Whether a program is on `PATH`.
+fn which(program: &str) -> bool {
+	std::env::var_os("PATH")
+		.is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
+}
+
+/// Run a client, turning "not installed" into a message that names it.
+fn run_client(program: &str, arguments: &[String], iface: &str) -> Result<(), String> {
+	match Command::new(program).args(arguments).status() {
+		Ok(status) if status.success() => Ok(()),
+		Ok(status) => Err(format!("{program} on {iface} exited with {status}")),
+		Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(format!(
+			"no DHCPv6 client found for {iface}; install odhcp6c or dhcpcd"
+		)),
+		Err(error) => Err(format!("could not run {program}: {error}")),
+	}
 }
 
 /// Write the script a `DHCPv6` client runs when a lease changes.
@@ -1603,11 +1665,18 @@ fn quote_ppp(value: &str) -> String {
 /// and the only thing holding them together is that file format.
 #[must_use]
 pub fn pd_hook_script(iface: &str, target: &std::path::Path) -> String {
-	// `PREFIXES` is odhcp6c's and `new_dhcp6_prefix` is dhcpcd's; whichever is
-	// set is the one that ran us. Written to a temporary and renamed, because
-	// the observer may read at any moment and a half-written file would be
-	// read as a shorter list rather than as an error. Rewritten rather than
-	// appended, because a renewal that changed the prefix must not leave both.
+	// `PREFIXES` is odhcp6c's, and there is deliberately no second variable
+	// beside it. This used to also read `$new_dhcp6_prefix` "for dhcpcd",
+	// which is not a variable dhcpcd sets -- the nearest thing it has is
+	// `$new_delegated_dhcp6_prefix`, which carries the addresses dhcpcd
+	// derived rather than the prefix, and only where dhcpcd did the deriving.
+	// `start_dhcp6` refuses that combination outright now, so this script is
+	// odhcp6c's and says so (decision 0050).
+	//
+	// Written to a temporary and renamed, because the observer may read at any
+	// moment and a half-written file would be read as a shorter list rather
+	// than as an error. Rewritten rather than appended, because a renewal that
+	// changed the prefix must not leave both.
 	//
 	// `${p%%,*}` strips odhcp6c's trailing lifetime fields: it reports
 	// `2001:db8::/56,3600,7200`, and the prefix is everything before the first
@@ -1616,10 +1685,14 @@ pub fn pd_hook_script(iface: &str, target: &std::path::Path) -> String {
 		"#!/bin/sh\n\
 		 # Written by netcfgd. Reports the prefixes delegated on {iface}.\n\
 		 # One per line; an empty file means the lease is gone.\n\
+		 #\n\
+		 # Run by odhcp6c. dhcpcd cannot report a delegated prefix to a script\n\
+		 # at all -- see docs/decisions/0050 -- so netcfgd refuses that pairing\n\
+		 # rather than leaving a variable here that would never be set.\n\
 		 set -u\n\
 		 out={}\n\
 		 : > \"$out.tmp\"\n\
-		 for p in ${{PREFIXES:-}} ${{new_dhcp6_prefix:-}}; do\n\
+		 for p in ${{PREFIXES:-}}; do\n\
 		 \tprintf '%s\\n' \"${{p%%,*}}\" >> \"$out.tmp\"\n\
 		 done\n\
 		 mv \"$out.tmp\" \"$out\"\n",
@@ -1815,5 +1888,34 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 		other => Err(format!(
 			"stopping the {other:?} backend is not implemented in this build"
 		)),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::dhcp6_client;
+
+	/// The branch no config file can reach yet, made to fire.
+	///
+	/// The model carries `PdRequest` and the DSL has no way to set it, so
+	/// nothing an operator writes produces `delegating = true` today. Decision
+	/// 0050 is why the branch exists all the same, and this is what stops it
+	/// being untested code: whoever writes the config syntax gets the refusal
+	/// already working rather than a comment saying it should.
+	#[test]
+	fn a_delegation_with_only_dhcpcd_is_refused_by_name() {
+		let error = dhcp6_client(true, false, "wan0").expect_err("dhcpcd cannot report a prefix");
+		assert!(error.contains("odhcp6c"), "got {error}");
+		assert!(error.contains("0050"), "got {error}");
+	}
+
+	/// And every other combination is served rather than refused. An ordinary
+	/// `DHCPv6` address is not the prefix's problem, which is the distinction the
+	/// refusal above would be worthless without.
+	#[test]
+	fn everything_else_is_served() {
+		assert_eq!(dhcp6_client(false, false, "wan0"), Ok("dhcpcd"));
+		assert_eq!(dhcp6_client(false, true, "wan0"), Ok("odhcp6c"));
+		assert_eq!(dhcp6_client(true, true, "wan0"), Ok("odhcp6c"));
 	}
 }
