@@ -357,6 +357,7 @@ fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 				// idempotence gate would then pass because the feature was
 				// invisible rather than because it converged.
 				access_control: started_access_control(*kind, iface, desired),
+				started_with: None,
 				advertised: Vec::new(),
 			}),
 			Op::BackendStop { kind, iface } => observed
@@ -758,6 +759,7 @@ fn a_lease_address_is_left_to_its_backend() {
 		interface: "eth0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 	// The lease produced this, and it is tagged as ours.
@@ -787,6 +789,7 @@ fn removing_dhcp_stops_the_backend() {
 		interface: "eth0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 
@@ -1149,6 +1152,7 @@ fn removing_dot1x_stops_the_supplicant() {
 		interface: "eth0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 
@@ -1333,6 +1337,7 @@ fn a_running_tunnel_is_left_alone() {
 		interface: "vpn0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut observed);
@@ -1356,6 +1361,7 @@ fn a_tunnel_stops_when_its_block_goes() {
 		interface: "vpn0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -1751,6 +1757,86 @@ interface vpn0 {
 	assert_eq!(delivered(&plan, "vpn0"), ["10.0.0.53"]);
 }
 
+/// An edited SSID restarts the access point, which is what hostapd needs.
+///
+/// The gap project.md carried since 0041: hostapd reads its configuration once
+/// and reports almost none of it back, so an SSID changed in the document left
+/// the radio announcing the old one with an empty plan to explain it.
+#[test]
+fn an_edited_ssid_restarts_the_access_point() {
+	let desired = document(
+		r#"
+device wlan0 { }
+access_point "after" {
+	device = "wlan0"
+	wifi   { psk = "@secret:ap"; proto = "wpa2" }
+}
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: true,
+		access_control: None,
+		started_with: Some(netcfgd_model::ObservedAccessPoint {
+			ssid: netcfgd_model::Ssid::new(b"before".to_vec()).expect("an ssid"),
+			band: None,
+			channel: None,
+		}),
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(names(&plan), ["backend.stop", "backend.start"]);
+	assert_eq!(plan.actions[0].reason.field, "access_point.ssid");
+	// And it says what the restart costs, because nothing else will.
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("deauthenticated")),
+		"got {:?}",
+		plan.warnings
+	);
+}
+
+/// An access point running what the document asks for is left alone, which is
+/// what stops the restart happening on every reconcile.
+#[test]
+fn an_access_point_that_matches_is_not_restarted() {
+	let desired = document(
+		r#"
+device wlan0 { }
+access_point "home" {
+	device  = "wlan0"
+	channel = 6
+	wifi    { psk = "@secret:ap"; proto = "wpa2" }
+}
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: true,
+		access_control: None,
+		started_with: Some(netcfgd_model::ObservedAccessPoint {
+			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
+			// The band the file records is the one netcfgd worked out from the
+			// channel; the document states none. Comparing those would restart
+			// the access point on every reconcile for a document nobody edited.
+			band: Some("2.4".to_owned()),
+			channel: Some(6),
+		}),
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(plan.actions.is_empty(), "got {:?}", names(&plan));
+}
+
 /// A renumbered delegation reloads what is being advertised.
 ///
 /// The prefix is the one value in the document that arrives after the document
@@ -1782,6 +1868,7 @@ interface lan0 {
 		interface: "lan0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	// And the address it derived from the new one, so the only thing left to
@@ -1825,6 +1912,7 @@ interface lan0 {
 		interface: "lan0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	observed.addresses.push(netcfgd_model::ObservedAddress {
@@ -2276,6 +2364,7 @@ interface wg0 {
 		interface: "wlan0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 
@@ -2338,6 +2427,7 @@ fn running_access_point(
 			denied: owned(denied),
 			accepted: owned(accepted),
 		}),
+		started_with: None,
 		advertised: Vec::new(),
 	});
 }
@@ -2545,6 +2635,7 @@ fn an_unreachable_access_point_is_not_converged_against() {
 		interface: "wlan0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut unreachable);
@@ -2577,6 +2668,7 @@ fn an_access_point_stops_when_its_block_goes() {
 		interface: "wlan0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -2668,6 +2760,7 @@ interface wlan0 { config = "null" }
 		interface: "wlan0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -3198,6 +3291,7 @@ interface ppp0 {
 		interface: "ppp0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: Vec::new(),
 	});
 

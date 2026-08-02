@@ -275,4 +275,8 @@ netcfgd
 # the delegation now implies, and the reload that rewrites and signals. Small
 # because the expensive half -- a backend with a lifecycle -- was already paid
 # for by the advertisement itself.
-total 2034200
+# +8 KB for asking the same question of an access point: the observed identity
+# read back from the file netcfgd wrote, the comparison in the planner, and the
+# restart with the warning about what it costs. The same shape as the
+# advertisement one commit earlier, which is why it is half the price.
+total 2042392

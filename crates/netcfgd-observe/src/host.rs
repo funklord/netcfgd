@@ -99,7 +99,37 @@ fn read_access_control(observed: &mut Observed, run_dir: &Path) {
 			denied: live.denied,
 			accepted: live.accepted,
 		});
+		backend.started_with = started_with(run_dir, &backend.interface);
 	}
+}
+
+/// What a running access point was started with, from the file netcfgd wrote.
+///
+/// hostapd reads its configuration once, at startup (decision 0026), and
+/// reports none of it back -- `GET_CONFIG` gives the SSID and the ciphers and
+/// says nothing about the channel or the band. So the only account of what it
+/// is running is netcfgd's own, and this reads it back into the model's
+/// vocabulary rather than hostapd's: the planner then compares an `Ssid` to an
+/// `Ssid` and can name the field that moved.
+///
+/// The passphrase is not read. It is in that file in the clear -- hostapd has
+/// no indirection for one -- and an observation goes over the socket and into
+/// `/run`, where constraint 5 says a secret may not.
+fn started_with(run_dir: &Path, device: &str) -> Option<netcfgd_model::ObservedAccessPoint> {
+	let text = fs::read_to_string(netcfgd_hostapd::config_path(run_dir, device)).ok()?;
+	let value = |key: &str| -> Option<String> {
+		text.lines()
+			.map(str::trim)
+			.find_map(|line| line.strip_prefix(&format!("{key}=")))
+			.map(ToOwned::to_owned)
+	};
+	Some(netcfgd_model::ObservedAccessPoint {
+		// `ssid2=` is hex, which is what the model holds: an SSID is 0..32
+		// arbitrary octets and never guaranteed text.
+		ssid: netcfgd_model::Ssid::from_hex(&value("ssid2")?).ok()?,
+		band: value("hw_mode").and_then(|mode| netcfgd_hostapd::band_of_hw_mode(&mode)),
+		channel: value("channel").and_then(|channel| channel.parse().ok()),
+	})
 }
 
 /// What a running router advertisement daemon was last given.

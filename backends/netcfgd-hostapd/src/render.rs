@@ -244,6 +244,25 @@ fn channel_in(band: (&str, &str), channel: u16) -> bool {
 /// carries `band` at all. So `band` decides when it is present, the channel
 /// decides when it is not, and a channel that belongs to neither band is
 /// refused either way rather than passed to hostapd to fail on later.
+/// The band a `hw_mode` came from, as the document spells it.
+///
+/// The other direction of [`band_of`], for reading back what an access point
+/// was started with. `hw_mode` is hostapd's word and `2.4`/`5` are netcfgd's,
+/// and the observation is kept in netcfgd's so that a planner comparing it to a
+/// document compares like with like.
+///
+/// `None` for anything this build does not render, which is the honest answer
+/// rather than a guess: a file with a mode netcfgd never writes was not written
+/// by this netcfgd.
+#[must_use]
+pub fn band_of_hw_mode(hw_mode: &str) -> Option<String> {
+	match hw_mode {
+		"g" => Some("2.4".to_owned()),
+		"a" => Some("5".to_owned()),
+		_ => None,
+	}
+}
+
 fn band_of(access_point: &AccessPoint) -> Result<(&'static str, &'static str), Unsupported> {
 	let declared = match access_point.band.as_deref() {
 		None => None,

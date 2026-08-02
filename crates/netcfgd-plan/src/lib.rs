@@ -2484,16 +2484,21 @@ impl Builder {
 	fn plan_access_control(&mut self, desired: &Document, observed: &Observed) {
 		for access_point in &desired.access_points {
 			let device = &access_point.device;
-			let Some(live) = observed
-				.backends
-				.iter()
-				.find(|backend| {
-					backend.kind == BackendKind::AccessPoint
-						&& &backend.interface == device
-						&& backend.running
-				})
-				.and_then(|backend| backend.access_control.as_ref())
-			else {
+			let Some(running) = observed.backends.iter().find(|backend| {
+				backend.kind == BackendKind::AccessPoint
+					&& &backend.interface == device
+					&& backend.running
+			}) else {
+				continue;
+			};
+			// Before the station lists, because a restart makes them moot: the
+			// access point comes back with the whole configuration rebuilt, and
+			// converging a list on a hostapd that is about to be replaced is
+			// work that fails or is undone.
+			if self.restart_if_identity_changed(access_point, running) {
+				continue;
+			}
+			let Some(live) = running.access_control.as_ref() else {
 				continue;
 			};
 
@@ -2587,6 +2592,76 @@ impl Builder {
 		}
 	}
 
+	/// Restart an access point whose SSID, band or channel no longer match.
+	///
+	/// hostapd reads its configuration once, at startup (decision 0026), and
+	/// reports almost none of it back -- `GET_CONFIG` gives the SSID and the
+	/// ciphers and says nothing about the channel. So the only account of what
+	/// it is running is netcfgd's own record of what it started, which the
+	/// observation reads back into the model's own vocabulary.
+	///
+	/// Until this existed, project.md carried the gap in as many words: an
+	/// edited SSID or channel was invisible, the plan was empty, and the
+	/// document said one thing while the radio said another. The shape is the
+	/// one router advertisement arrived at first -- record what the daemon was
+	/// started with, compare against what the document implies, act on the
+	/// difference -- and the only thing that differs here is the act, because
+	/// hostapd cannot be reloaded and radvd can.
+	///
+	/// **A changed passphrase is not noticed**, and that is a limit rather than
+	/// an oversight: the secret is not in the observation (constraint 5 keeps it
+	/// out of `/run` and the socket) and not in the document either, so a pure
+	/// planner has nothing to compare. Decision 0052 says what to do about it.
+	///
+	/// Returns whether a restart was planned, so the caller can leave the
+	/// station lists alone -- an access point that is coming back rebuilds them
+	/// from the file anyway.
+	fn restart_if_identity_changed(
+		&mut self,
+		access_point: &netcfgd_model::AccessPoint,
+		running: &netcfgd_model::ObservedBackend,
+	) -> bool {
+		let Some(started) = &running.started_with else {
+			return false;
+		};
+		let device = &access_point.device;
+		let (field, desired, observed) = if started.ssid != access_point.ssid {
+			(
+				"access_point.ssid",
+				access_point.ssid.to_hex(),
+				started.ssid.to_hex(),
+			)
+		} else if started.channel != access_point.channel {
+			(
+				"access_point.channel",
+				render_option(access_point.channel),
+				render_option(started.channel),
+			)
+		} else if started.band != access_point.band && access_point.band.is_some() {
+			// Only where the document states one. An absent `band` means "work
+			// it out from the channel", and the file records what was worked
+			// out -- comparing those would restart the access point on every
+			// reconcile for a document that never changed.
+			(
+				"access_point.band",
+				access_point.band.clone().unwrap_or_default(),
+				started.band.clone().unwrap_or_default(),
+			)
+		} else {
+			return false;
+		};
+
+		self.warn(
+			device,
+			format!(
+				"{field} changed, which hostapd only reads at startup, so the access point \
+				 on {device} is restarted -- every station associated with it is \
+				 deauthenticated and reconnects"
+			),
+		);
+		self.restart_with(device, Reason::differs(device, field, desired, observed))
+	}
+
 	/// Restart an access point whose access control policy changed.
 	///
 	/// The one change to an `access_control` block that cannot be made in place.
@@ -2630,6 +2705,15 @@ impl Builder {
 			),
 		);
 
+		self.restart_with(device, reason);
+	}
+
+	/// The stop and the start, as one pair with one reason.
+	///
+	/// Returns whether the restart was planned at all. A guard can refuse the
+	/// stop, and an unmanaged device drops it -- and emitting the start on its
+	/// own would bring the access point up a second time rather than back up.
+	fn restart_with(&mut self, device: &str, reason: Reason) -> bool {
 		let stop = self.push_root(
 			Op::BackendStop {
 				kind: BackendKind::AccessPoint,
@@ -2641,11 +2725,8 @@ impl Builder {
 				iface: device.to_owned(),
 			}),
 		);
-		// Refused by a guard, or dropped for an unmanaged device. Emitting the
-		// start on its own would bring the access point up a second time rather
-		// than back up, so there is nothing further to plan.
 		if stop == u32::MAX {
-			return;
+			return false;
 		}
 		self.push(
 			Op::BackendStart {
@@ -2659,6 +2740,7 @@ impl Builder {
 				iface: device.to_owned(),
 			}),
 		);
+		true
 	}
 
 	fn teardown_backends(&mut self, desired: &Document, observed: &Observed) {
@@ -2925,6 +3007,11 @@ fn advertised_prefixes(policy: &netcfgd_model::RaPolicy, observed: &Observed) ->
 			netcfgd_model::derive_from_delegation(prefix, reference, "::/64").ok()
 		})
 		.collect()
+}
+
+/// A number, or the word for not having one, for a plan's reason line.
+fn render_option(value: Option<u16>) -> String {
+	value.map_or_else(|| "<absent>".to_owned(), |value| value.to_string())
 }
 
 /// A reported destination in the one spelling netcfgd uses for it.

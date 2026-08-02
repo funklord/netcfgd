@@ -368,6 +368,7 @@ impl OwnedState {
 					interface: interface.clone(),
 					running: true,
 					access_control: None,
+					started_with: None,
 					advertised: Vec::new(),
 				});
 			}

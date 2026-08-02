@@ -293,6 +293,53 @@ check "stopping the access point asked hostapd to terminate" \
 check "and left no passphrase anywhere under /run" \
 	"$(grep -rl 'correct-horse-battery' "$work/run" 2>/dev/null | wc -l)" "0"
 
+# ------------------------------------- the rest of the configuration, at last
+
+# hostapd reads its configuration once, at startup, and reports almost none of
+# it back: `GET_CONFIG` gives the SSID and the ciphers and says nothing about
+# the channel. So the only account of what it is running is netcfgd's own --
+# the file it generated -- and until this existed an edited SSID left the radio
+# announcing the old one with an empty plan to explain it. project.md carried
+# that gap in as many words since 0041.
+#
+# The file is written here rather than by an apply, because an apply cannot get
+# that far: a dummy has no radio and hostapd exits before it daemonizes.
+start_fake --deny 00:11:22:33:44:55
+seed_run_state deny
+write_config '	access_control { deny = ["00:11:22:33:44:55"] }'
+cat > "$work/run/hostapd/ap0.conf" <<'STARTED'
+# hostapd configuration for the `guest` access point.
+interface=ap0
+ssid2=6f6c64
+hw_mode=g
+channel=11
+STARTED
+
+"$ncfg" plan > "$work/identity.txt" 2>&1 || true
+check "an edited ssid restarts the access point" \
+	"$(grep -c 'backend.stop' "$work/identity.txt" || true)" "1"
+check "and comes back up in the same plan" \
+	"$(grep -c 'backend.start' "$work/identity.txt" || true)" "1"
+# Twice on the actions and once in the warning, which is the point: the reason
+# travels with both halves of the restart so a plan read from the middle still
+# says why.
+check "naming the field that moved, on both halves and in the warning" \
+	"$(grep -c 'access_point.ssid' "$work/identity.txt" || true)" "3"
+check "and saying what the restart costs" \
+	"$(grep -c 'deauthenticated' "$work/identity.txt" || true)" "1"
+# The station lists are left alone while a restart is planned: the access point
+# comes back with the whole file rebuilt, so converging a list on the hostapd
+# that is about to be replaced is work that fails or is undone.
+check "rather than converging a list on a daemon that is about to go" \
+	"$(grep -cE 'access_control\.(add|del)' "$work/identity.txt" || true)" "0"
+
+# And the same file, matching the document, plans nothing. Without this the
+# check above passes for a netcfgd that restarts on every reconcile.
+sed -i 's/^ssid2=6f6c64$/ssid2=6775657374/' "$work/run/hostapd/ap0.conf"
+"$ncfg" plan > "$work/identity2.txt" 2>&1 || true
+check "an access point already running what the document says is left alone" \
+	"$(grep -cE 'backend\.(stop|start)' "$work/identity2.txt" || true)" "0"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "acl.sh: all checks passed"

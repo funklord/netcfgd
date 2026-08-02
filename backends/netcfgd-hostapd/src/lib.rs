@@ -26,7 +26,7 @@ pub mod render;
 pub mod station;
 
 pub use acl::Live;
-pub use render::{config, to_file, to_redacted, Line, Unsupported};
+pub use render::{band_of_hw_mode, config, to_file, to_redacted, Line, Unsupported};
 pub use station::{stations, Station};
 
 use netcfgd_model::{AccessPoint, ObservedPolicy};

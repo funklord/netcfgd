@@ -283,6 +283,16 @@
       "advertised": [
         "2001:db8:1234::/64"
       ]
+    },
+    {
+      "kind": "access_point",
+      "interface": "wlan9",
+      "running": true,
+      "started_with": {
+        "ssid": "686f6d65",
+        "band": "2.4",
+        "channel": 6
+      }
     }
   ],
   "dns": [

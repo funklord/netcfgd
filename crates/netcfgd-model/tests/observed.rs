@@ -311,6 +311,7 @@ fn backends(observed: &mut Observed) {
 			interface: "eth0".to_owned(),
 			running: true,
 			access_control: None,
+			started_with: None,
 			advertised: Vec::new(),
 		});
 	}
@@ -324,6 +325,7 @@ fn backends(observed: &mut Observed) {
 				denied: vec!["02:00:00:00:00:aa".to_owned()],
 				accepted: vec!["02:00:00:00:00:bb".to_owned()],
 			}),
+			started_with: None,
 			advertised: Vec::new(),
 		});
 	}
@@ -334,7 +336,24 @@ fn backends(observed: &mut Observed) {
 		interface: "lan0".to_owned(),
 		running: true,
 		access_control: None,
+		started_with: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
+	});
+	// And the identity an access point was started with, which is the other
+	// half of the same question (decision 0052). Sampled on its own backend
+	// rather than beside the ACL, because the two are read from different
+	// places -- one from a control socket, one from the file netcfgd wrote.
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::AccessPoint,
+		interface: "wlan9".to_owned(),
+		running: true,
+		access_control: None,
+		started_with: Some(netcfgd_model::ObservedAccessPoint {
+			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
+			band: Some("2.4".to_owned()),
+			channel: Some(6),
+		}),
+		advertised: Vec::new(),
 	});
 }
 
