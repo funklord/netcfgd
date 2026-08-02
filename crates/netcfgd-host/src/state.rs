@@ -160,6 +160,7 @@ pub fn parse_report(interface: &str, body: &str) -> netcfgd_model::ObservedRepor
 		addresses: Vec::new(),
 		gateways: Vec::new(),
 		nameservers: Vec::new(),
+		routes: Vec::new(),
 	};
 	for line in body.lines() {
 		// No `#` branch, deliberately. A comment is ignored because its key
@@ -183,10 +184,38 @@ pub fn parse_report(interface: &str, body: &str) -> netcfgd_model::ObservedRepor
 			"address" => report.addresses.push(value.to_owned()),
 			"gateway" => report.gateways.push(value.to_owned()),
 			"dns" => report.nameservers.push(value.to_owned()),
+			// The one key with a shape of its own, because a route needs two
+			// values and the contract will not make somebody number them.
+			// Whether the *addresses* in it are addresses is still decided
+			// where they are used.
+			"route" => report.routes.extend(parse_reported_route(value)),
 			_ => {}
 		}
 	}
 	report
+}
+
+/// `<destination>` or `<destination> via <gateway>`.
+///
+/// Deliberately the spelling a `routes` line in a config file already uses, so
+/// that somebody reading a report and somebody reading a config are reading the
+/// same thing. Nothing else is accepted: a metric belongs to netcfgd rather than
+/// to the writer (decision 0047 wants one that composes with `preference`), and
+/// an unrecognised tail is a line the writer thought meant something, which is
+/// worse to half-apply than to skip.
+fn parse_reported_route(value: &str) -> Option<netcfgd_model::ReportedRoute> {
+	let mut words = value.split_whitespace();
+	let destination = words.next()?.to_owned();
+	let via = match words.next() {
+		None => None,
+		Some("via") => Some(words.next()?.to_owned()),
+		Some(_) => return None,
+	};
+	// Anything after the gateway is a word this contract does not define.
+	if words.next().is_some() {
+		return None;
+	}
+	Some(netcfgd_model::ReportedRoute { destination, via })
 }
 
 /// The prior state an observation needs: what netcfgd did, plus what a client
@@ -584,6 +613,39 @@ mod tests {
 		let report = parse_report("wwan0", "");
 		assert_eq!(report.interface, "wwan0");
 		assert!(report.addresses.is_empty());
+	}
+
+	#[test]
+	fn a_route_is_read_the_way_a_config_file_spells_one() {
+		let report = parse_report(
+			"vpn0",
+			"route=10.0.0.0/8 via 10.8.0.1\nroute=192.168.5.0/24\n",
+		);
+		assert_eq!(report.routes.len(), 2);
+		assert_eq!(report.routes[0].destination, "10.0.0.0/8");
+		assert_eq!(report.routes[0].via.as_deref(), Some("10.8.0.1"));
+		assert_eq!(report.routes[1].destination, "192.168.5.0/24");
+		assert_eq!(report.routes[1].via, None);
+	}
+
+	#[test]
+	fn a_route_line_the_contract_does_not_define_is_skipped() {
+		// Not refused: the rest of the report is still worth having. A line
+		// with a word this contract never defined is one the writer thought
+		// meant something, and half-applying it is worse than dropping it --
+		// `metric 50` silently ignored would be a route with a metric netcfgd
+		// chose and an operator thought they had.
+		let report = parse_report(
+			"vpn0",
+			"route=10.0.0.0/8 metric 50\nroute=10.1.0.0/16 via 10.8.0.1 metric 50\n\
+			 route=10.2.0.0/16 via\nroute=10.3.0.0/16 via 10.8.0.1\n",
+		);
+		let kept: Vec<&str> = report
+			.routes
+			.iter()
+			.map(|route| route.destination.as_str())
+			.collect();
+		assert_eq!(kept, ["10.3.0.0/16"]);
 	}
 
 	#[test]
