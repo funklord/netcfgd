@@ -76,6 +76,14 @@ pub struct KernelExecutor {
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
+	/// The `WireGuard` configuration for each interface that is one.
+	///
+	/// Held for the same reason `pppoe` and `dot1x` are: `wg.set_device` and
+	/// `wg.set_peers` name an interface and the field that moved, and the
+	/// values come from the document the executor was given. A plan carrying a
+	/// peer list would write every public key and allowed prefix into
+	/// `/run/netcfgd/plan.last.json` to say what the document already says.
+	wireguard: Vec<(String, netcfgd_model::interface::WireGuardConfig)>,
 	/// What each interface's `dhcp6` source asks for by way of a prefix.
 	delegating: Vec<(String, netcfgd_model::PdRequest)>,
 	/// What each interface advertises, and the nameservers its own scope holds.
@@ -142,6 +150,7 @@ impl KernelExecutor {
 				.collect(),
 			dns_scopes: Vec::new(),
 			dot1x: Vec::new(),
+			wireguard: Vec::new(),
 			mac_policy: Vec::new(),
 			pppoe: Vec::new(),
 			delegating: Vec::new(),
@@ -192,6 +201,7 @@ impl KernelExecutor {
 					.map(|config| (interface.name.clone(), config))
 			})
 			.collect();
+		self.wireguard = wireguard_configs(document);
 		self.networks.clone_from(&document.networks);
 		self.access_points.clone_from(&document.access_points);
 		self.preferences = document
@@ -559,17 +569,61 @@ impl KernelExecutor {
 		Ok(())
 	}
 
-	/// Give a freshly created `WireGuard` device its keys and peers.
+	/// The document's `WireGuard` configuration for one interface.
+	///
+	/// An executor built without a document has none of these, which is the
+	/// failure `make executor-policy` exists to prevent -- so this says what
+	/// happened rather than silently configuring a device with nothing.
+	fn wireguard_config(
+		&self,
+		iface: &str,
+	) -> Result<netcfgd_model::interface::WireGuardConfig, String> {
+		self.wireguard
+			.iter()
+			.find(|(name, _)| name == iface)
+			.map(|(_, config)| config.clone())
+			.ok_or_else(|| {
+				format!("{iface}: no wireguard configuration in the document being applied")
+			})
+	}
+
+	/// Give a `WireGuard` device its keys and peers.
+	///
+	/// Called when the link is created and again by `wg.set_device` and
+	/// `wg.set_peers` when the document has moved under a device that already
+	/// exists (decision 0054). One function rather than three: the peer list a
+	/// revocation depends on is built here, and a second copy of this loop is
+	/// how the create path and the correct-an-existing-device path come to
+	/// disagree about what a peer is.
+	///
+	/// `parts` says which half is meant. The whole thing at creation; the
+	/// device's own fields or its peer list on their own afterwards, because
+	/// the kernel takes them separately and a plan that says `wg.set_device`
+	/// should not quietly replace peers.
 	fn configure_wireguard(
 		name: &str,
 		config: &netcfgd_model::interface::WireGuardConfig,
+		parts: WgParts,
 	) -> Result<(), String> {
 		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
-		let private = resolve_key(&resolver, &config.private_key)
-			.map_err(|error| format!("{name}: private key: {error}"))?;
+		let private = match parts {
+			WgParts::Peers => None,
+			WgParts::Whole | WgParts::DeviceOnly => Some(
+				resolve_key(&resolver, &config.private_key)
+					.map_err(|error| format!("{name}: private key: {error}"))?,
+			),
+		};
 
 		let mut peers = Vec::new();
-		for peer in &config.peers {
+		// Built only where they are meant, so a `wg.set_device` does not
+		// resolve a preshared key or a hostname it has no use for -- either of
+		// which can fail, and failing over something the op was not about is
+		// how an unrelated change stops a port being set.
+		let wanted = match parts {
+			WgParts::DeviceOnly => &[][..],
+			WgParts::Whole | WgParts::Peers => &config.peers[..],
+		};
+		for peer in wanted {
 			let preshared = match &peer.preshared_key {
 				Some(reference) => Some(
 					resolve_key(&resolver, reference)
@@ -607,9 +661,18 @@ impl KernelExecutor {
 			&netcfgd_sys::wg::Device {
 				name: name.to_owned(),
 				private_key: private,
-				listen_port: config.listen_port,
-				fwmark: config.fwmark,
+				// A `wg.set_peers` says nothing about the device's own fields,
+				// so it sends neither -- and the kernel leaves what it has.
+				listen_port: match parts {
+					WgParts::Peers => None,
+					WgParts::Whole | WgParts::DeviceOnly => config.listen_port,
+				},
+				fwmark: match parts {
+					WgParts::Peers => None,
+					WgParts::Whole | WgParts::DeviceOnly => config.fwmark,
+				},
 				peers,
+				replace_peers: matches!(parts, WgParts::Whole | WgParts::Peers),
 			},
 		)
 		.map_err(|error| {
@@ -699,7 +762,7 @@ impl Executor for KernelExecutor {
 				// nothing -- so this is part of creating it rather than a
 				// separate action.
 				if let InterfaceKind::WireGuard(config) = &**kind {
-					Self::configure_wireguard(name, config)?;
+					Self::configure_wireguard(name, config, WgParts::Whole)?;
 				}
 				if let InterfaceKind::Bridge(bridge) = &**kind {
 					let index = self.index_of(name)?;
@@ -1206,6 +1269,26 @@ impl Executor for KernelExecutor {
 					)
 				})
 			}
+			// Both of these were declared in the action taxonomy, pinned by the
+			// plan witness, and reached the arm below saying they were not
+			// implemented in this build -- because nothing emitted them. A
+			// WireGuard device was configured when its link was created and
+			// never again, so an edited listen port did nothing and a deleted
+			// peer kept its access (decision 0054).
+			//
+			// The document is found by name rather than carried in the op: the
+			// op names the interface and the fields that moved, and the
+			// executor already holds the document it is applying. Putting a
+			// peer list in the plan would put public keys and every allowed
+			// prefix into `/run/netcfgd/plan.last.json` for no gain.
+			Op::WgSetDevice { iface, .. } => {
+				let config = self.wireguard_config(iface)?;
+				Self::configure_wireguard(iface, &config, WgParts::DeviceOnly)
+			}
+			Op::WgSetPeers { iface, .. } => {
+				let config = self.wireguard_config(iface)?;
+				Self::configure_wireguard(iface, &config, WgParts::Peers)
+			}
 			// The commit family is a marker in the plan rather than something
 			// the kernel does. The window lives in the daemon, which opens it
 			// after the apply succeeds and owns the timer, so the executor's
@@ -1215,6 +1298,42 @@ impl Executor for KernelExecutor {
 			other => Err(format!("{} is not implemented in this build", other.name())),
 		}
 	}
+}
+
+/// Every interface that is a `WireGuard` device, with its configuration.
+///
+/// A free function rather than a block inside `with_context`, which is at the
+/// hundred-line limit clippy enforces -- and is a list of one-liners for a
+/// reason, being the one place that decides what the executor knows.
+fn wireguard_configs(
+	document: &netcfgd_model::Document,
+) -> Vec<(String, netcfgd_model::interface::WireGuardConfig)> {
+	document
+		.interfaces
+		.iter()
+		.filter_map(|interface| match &interface.kind {
+			netcfgd_model::InterfaceKind::WireGuard(config) => {
+				Some((interface.name.clone(), config.clone()))
+			}
+			_ => None,
+		})
+		.collect()
+}
+
+/// Which half of a `WireGuard` device a call is about.
+///
+/// The kernel takes the device's own fields and its peer list separately, and
+/// the action taxonomy has an op for each. Naming the three cases here rather
+/// than passing two booleans is what stops "device only, but also replace the
+/// peers with the empty list I did not fill in" being expressible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WgParts {
+	/// Everything, which is what a newly created device needs.
+	Whole,
+	/// The private key, listen port and firewall mark. `wg.set_device`.
+	DeviceOnly,
+	/// The peer list, replacing what the device holds. `wg.set_peers`.
+	Peers,
 }
 
 /// A model rule as the wire wants it.

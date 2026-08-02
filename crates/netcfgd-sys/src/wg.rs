@@ -100,19 +100,38 @@ pub struct Peer {
 	pub keepalive: Option<u16>,
 }
 
-/// A device's desired configuration.
+/// A device's desired configuration, whole or in part.
+///
+/// The kernel's `SET_DEVICE` is deliberately partial: an attribute that is not
+/// present is left alone, and the peer list is replaced only when the
+/// `REPLACE_PEERS` flag says so. That is how `wg set wg0 listen-port 51821`
+/// changes a port without touching a peer, and netcfgd needs the same thing for
+/// the same reason -- two ops in the action taxonomy, `wg.set_device` and
+/// `wg.set_peers`, that are supposed to mean different things (decision 0054).
+///
+/// So both halves are optional here, and the type says which is meant rather
+/// than the caller remembering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
 	/// Interface name.
 	pub name: String,
-	/// The device's private key.
-	pub private_key: RawKey,
-	/// UDP port to listen on, or none for an ephemeral one.
+	/// The device's private key, or `None` to leave the loaded one alone.
+	pub private_key: Option<RawKey>,
+	/// UDP port to listen on. `None` leaves it as it is -- which on a device
+	/// being created means the kernel picks an ephemeral one.
 	pub listen_port: Option<u16>,
-	/// Firewall mark to set on outgoing packets.
+	/// Firewall mark to set on outgoing packets, or `None` to leave it.
 	pub fwmark: Option<u32>,
-	/// Every peer the document describes.
+	/// The peers, when `replace_peers` says they are meant.
 	pub peers: Vec<Peer>,
+	/// Whether `peers` is the whole list, replacing what the device holds.
+	///
+	/// **Never `true` with an empty list by accident.** `true` and no peers is
+	/// a legitimate instruction -- it is how the last peer is removed -- and it
+	/// is also what a caller that forgot to fill the list produces. The callers
+	/// are `configure_wireguard` and the `wg.set_peers` arm beside it, both of
+	/// which build the list from the document immediately above.
+	pub replace_peers: bool,
 }
 
 /// Encode a peer's allowed IPs nest.
@@ -196,8 +215,12 @@ fn peer_attrs(peer: &Peer) -> AttrBuf {
 pub fn set_device_attrs(device: &Device) -> AttrBuf {
 	let mut attrs = AttrBuf::new();
 	attrs.push_str(WGDEVICE_A_IFNAME, &device.name);
-	attrs.push_u32(WGDEVICE_A_FLAGS, WGDEVICE_F_REPLACE_PEERS);
-	attrs.push(WGDEVICE_A_PRIVATE_KEY, &device.private_key);
+	if device.replace_peers {
+		attrs.push_u32(WGDEVICE_A_FLAGS, WGDEVICE_F_REPLACE_PEERS);
+	}
+	if let Some(private_key) = &device.private_key {
+		attrs.push(WGDEVICE_A_PRIVATE_KEY, private_key);
+	}
 	if let Some(port) = device.listen_port {
 		attrs.push(WGDEVICE_A_LISTEN_PORT, &port.to_ne_bytes());
 	}
@@ -205,21 +228,32 @@ pub fn set_device_attrs(device: &Device) -> AttrBuf {
 		attrs.push_u32(WGDEVICE_A_FWMARK, fwmark);
 	}
 
-	let mut peers = AttrBuf::new();
-	for (index, peer) in device.peers.iter().enumerate() {
-		#[allow(clippy::cast_possible_truncation)]
-		peers.push(index as u16 | NLA_F_NESTED, peer_attrs(peer).as_bytes());
+	// The nest is written only when the peer list is meant. An empty nest with
+	// no `REPLACE_PEERS` beside it says nothing to the kernel, but it is a
+	// message saying "and here are the peers: none", which is a sentence worth
+	// not writing when the intent was to change a port.
+	if device.replace_peers {
+		let mut peers = AttrBuf::new();
+		for (index, peer) in device.peers.iter().enumerate() {
+			#[allow(clippy::cast_possible_truncation)]
+			peers.push(index as u16 | NLA_F_NESTED, peer_attrs(peer).as_bytes());
+		}
+		attrs.push(WGDEVICE_A_PEERS | NLA_F_NESTED, peers.as_bytes());
 	}
-	attrs.push(WGDEVICE_A_PEERS | NLA_F_NESTED, peers.as_bytes());
 	attrs
 }
 
-/// Apply a device's whole configuration.
+/// Apply a device's configuration, whole or in part.
 ///
-/// One message, replacing everything. `WireGuard` has no partial update that
-/// netcfgd wants: the document is the peer list, so anything the kernel holds
-/// that the document does not is drift to be removed rather than state to be
-/// preserved.
+/// One message. What it carries is what [`Device`] says is meant: with
+/// `replace_peers` the peer list is the document's and anything the kernel
+/// holds besides is drift to be removed, and without it the peers are not
+/// mentioned at all and a port or a mark changes on its own.
+///
+/// That sentence used to read "one message, replacing everything --
+/// `WireGuard` has no partial update that netcfgd wants". It wanted one: a
+/// device configured only at creation is a device whose edited port and
+/// **deleted peer** were never applied, which is decision 0054.
 ///
 /// # Errors
 ///
