@@ -103,9 +103,11 @@ fn every_address_source() -> Vec<AddressSource> {
 		AddressSource::Reported(_) => "reported",
 	};
 
-	// And this one does fail at runtime, for the case the compiler cannot see:
-	// an arm written above with no sample added below. Sorted and compared as a
-	// set, so it says which one is missing rather than that a count is wrong.
+	// And this one fails at runtime for a sample that went away or a name that
+	// moved -- *not* for an arm written above with no sample added below, which
+	// this comment claimed until the claim was tried: neither list would mention
+	// the new name and the two would agree. Sorted and compared as a set, so it
+	// says which one is missing rather than that a count is wrong.
 	let mut present: Vec<&str> = sources.iter().map(name).collect();
 	present.sort_unstable();
 	present.dedup();
@@ -435,8 +437,10 @@ fn credentialled_kinds() -> Vec<(&'static str, InterfaceKind)> {
 fn every_kind() -> Vec<Interface> {
 	// Exhaustive, never a wildcard: adding a variant stops this file compiling
 	// until somebody writes an arm, and writing the arm is what reminds them to
-	// add the sample. The assertion underneath catches what the compiler cannot
-	// see -- an arm written with no sample added to either list.
+	// add the sample. That reminder is the whole mechanism -- the assertion
+	// underneath does *not* back it up, because an arm with no sample leaves
+	// both lists unchanged and agreeing. What the assertion catches is a sample
+	// that went away or a name that moved.
 	fn name(kind: &InterfaceKind) -> &'static str {
 		match kind {
 			InterfaceKind::Physical => "physical",
