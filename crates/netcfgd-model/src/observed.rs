@@ -197,6 +197,21 @@ pub struct ObservedWireGuard {
 	/// The firewall mark on outgoing packets, where one is set.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub fwmark: Option<u32>,
+	/// Whether the private key the kernel holds is the one the store has now.
+	///
+	/// A boolean, computed in the observer, for the reason
+	/// [`ObservedBackend::secret_matches`] is one: the value belongs in
+	/// neither the observation nor the document, and what travels is the
+	/// answer. The kernel reports the public key it derived and nothing that
+	/// could be compared against a `SecretRef`, so netcfgd compares a digest of
+	/// what it loaded against a digest of what the store holds -- the same
+	/// trick decision 0053 plays on a file it will not read.
+	///
+	/// `None` means netcfgd could not tell: no record of what it loaded, a
+	/// secret that cannot be resolved, or a device somebody else configured. A
+	/// tunnel is not torn down over an unanswered question.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub key_matches: Option<bool>,
 	/// Every peer, **sorted by public key**.
 	///
 	/// The kernel's own order is the order it happens to hold them in, which is
