@@ -189,7 +189,28 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		forwarding: Some(true),
 		ownership,
 		private_key_loaded: true,
+		// Every field of the WireGuard state as well, for the reason this
+		// function exists: a field with no sample is a field the witness cannot
+		// notice changing, which is how three socket messages went unpinned for
+		// a whole milestone.
+		wireguard: Some(netcfgd_model::ObservedWireGuard {
+			public_key: Some(key(0x11)),
+			listen_port: Some(51820),
+			fwmark: Some(0x6e),
+			peers: vec![netcfgd_model::ObservedWgPeer {
+				public_key: key(0x22),
+				preshared_key: true,
+				endpoint: Some("198.51.100.7:51820".to_owned()),
+				allowed_ips: vec!["10.0.0.0/24".to_owned(), "fd00::/64".to_owned()],
+				keepalive: Some(25),
+			}],
+		}),
 	}
+}
+
+/// A key with every octet the same, which is enough to be a distinct sample.
+fn key(seed: u8) -> netcfgd_model::Key {
+	netcfgd_model::Key::from_bytes([seed; 32])
 }
 
 /// The one DNS scope netcfgd records having delivered.

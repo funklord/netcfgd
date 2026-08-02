@@ -66,8 +66,56 @@ fn read_wireguard_keys(observed: &mut Observed) {
 		// than as carrying something. This feeds a refusal, and a refusal that
 		// fires because a read failed is one people learn to override by
 		// reflex -- which would leave them overriding the real ones too.
-		link.private_key_loaded = netcfgd_sys::wg::get_device(&mut genl, &link.name)
-			.is_ok_and(|state| state.public_key.is_some());
+		let Ok(state) = netcfgd_sys::wg::get_device(&mut genl, &link.name) else {
+			continue;
+		};
+		link.private_key_loaded = state.public_key.is_some();
+		link.wireguard = Some(carried(&state));
+	}
+}
+
+/// What of a device's state travels, which is everything the kernel offered.
+///
+/// The same request already answered `private_key_loaded` and the rest was
+/// dropped on the floor, so an edited listen port or a deleted peer reached a
+/// planner with nothing to compare (decision 0054). None of it is secret: the
+/// device's public key is derived by the kernel and is what a peer is given,
+/// and a preshared key arrives zeroed and becomes a boolean.
+fn carried(state: &netcfgd_sys::wg::DeviceState) -> netcfgd_model::ObservedWireGuard {
+	let mut peers: Vec<netcfgd_model::ObservedWgPeer> = state
+		.peers
+		.iter()
+		.map(|peer| netcfgd_model::ObservedWgPeer {
+			public_key: netcfgd_model::Key::from_bytes(peer.public_key),
+			preshared_key: peer.has_preshared_key,
+			endpoint: peer.endpoint.map(|endpoint| endpoint.to_string()),
+			allowed_ips: {
+				let mut prefixes: Vec<String> = peer
+					.allowed_ips
+					.iter()
+					.map(|(address, length)| format!("{address}/{length}"))
+					.collect();
+				prefixes.sort();
+				prefixes
+			},
+			// The kernel spells "no keepalive" as zero and the model spells it
+			// as absent, which is the same distinction `Option` exists for. A
+			// zero surviving into the model would differ from a document that
+			// says nothing, every time, forever.
+			keepalive: (peer.keepalive != 0).then_some(peer.keepalive),
+		})
+		.collect();
+	// Sorted by the one field both sides have. The kernel's order is its own
+	// and the document's is by the operator's label.
+	peers.sort();
+	netcfgd_model::ObservedWireGuard {
+		public_key: state.public_key.map(netcfgd_model::Key::from_bytes),
+		listen_port: state.listen_port,
+		// Zero is how the kernel spells "no mark", the same way it spells "no
+		// keepalive" -- and a `Some(0)` here would be a value in `/run` and on
+		// the socket that says a mark is set when none is.
+		fwmark: state.fwmark.filter(|mark| *mark != 0),
+		peers,
 	}
 }
 

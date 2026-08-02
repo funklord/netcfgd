@@ -688,6 +688,7 @@ mod tests {
 				forwarding: None,
 				ownership: Ownership::Unknown,
 				private_key_loaded: false,
+				wireguard: None,
 			}],
 			addresses: vec![address],
 			address_proto_supported: proto_supported,
