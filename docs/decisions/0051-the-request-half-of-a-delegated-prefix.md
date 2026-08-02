@@ -67,8 +67,10 @@ perfectly correct address, and the tag is netcfgd's own in both cases.
   OpenWrt -- the device this feature is for -- that is already installed. On
   Debian it is a build, and `tests/live/delegation.sh` says how in its header.
 - `tests/live/delegation.sh` is the third root-only live test, alongside
-  `hwsim.sh` and `pppoe-session.sh`. It skips without root or without odhcp6c,
-  and `make live` does not run it.
+  `hwsim.sh` and `pppoe-session.sh`. It skips without root or without odhcp6c.
+  `make live` does invoke it -- what it does not do is *run* it as anybody
+  ordinarily invokes the suite, and a suite that skips three of its scripts is
+  the shape a reader should know about rather than infer.
 - 0050 stands in every other respect. dhcpcd still cannot report a prefix, the
   refusal still names odhcp6c, and the reasoning there is unchanged -- what
   changed is that the client could be run after all.
