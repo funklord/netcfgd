@@ -323,13 +323,25 @@ fn address_ownership(proto: Option<u8>, proto_supported: bool, recorded: bool) -
 /// an access point's control socket and the record of the policy it was started
 /// with both live under it.
 ///
+/// `desired` is the document, where the caller has one, and is needed for
+/// exactly one question: whether a running daemon still holds the secret the
+/// store has. That comparison cannot happen anywhere else -- the planner is
+/// pure and the secret is in neither the document nor the observation
+/// (decision 0052) -- so it happens here and only a boolean comes out. `None`
+/// is an ordinary answer: `ncfg status` on a machine whose config does not
+/// compile still observes the kernel.
+///
 /// # Errors
 ///
 /// Returns the underlying `io::Error` from the netlink socket.
-pub fn current(prior: &PriorState, run_dir: &std::path::Path) -> io::Result<Observed> {
+pub fn current(
+	prior: &PriorState,
+	run_dir: &std::path::Path,
+	desired: Option<&netcfgd_model::Document>,
+) -> io::Result<Observed> {
 	let snapshot = netcfgd_sys::snapshot()?;
 	let mut observed = build(&snapshot, prior);
-	host::augment(&mut observed, run_dir);
+	host::augment(&mut observed, run_dir, desired);
 	Ok(observed)
 }
 
