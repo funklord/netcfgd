@@ -196,6 +196,42 @@ fn interface(
 	}
 }
 
+/// What a report says about this interface, where the document asked for one.
+///
+/// `ncfg explain` answers "why is this here", and until this existed it
+/// answered "the configuration does not ask for it" about an address netcfgd
+/// had installed itself and would withdraw itself. The document names a
+/// *source* rather than a value for these (decisions 0045, 0047), so the
+/// explanation has to follow the indirection the way the planner does --
+/// through `netcfgd_plan::takes_reports`, so the two cannot disagree about
+/// which reports are believed.
+fn report_for<'a>(
+	interface: &str,
+	desired: Option<&Document>,
+	observed: &'a Observed,
+) -> Option<&'a netcfgd_model::ObservedReport> {
+	let asked = desired
+		.and_then(|document| {
+			document
+				.interfaces
+				.iter()
+				.find(|candidate| candidate.name == interface)
+		})
+		.is_some_and(netcfgd_plan::takes_reports);
+	if !asked {
+		return None;
+	}
+	observed
+		.reports
+		.iter()
+		.find(|report| report.interface == interface)
+}
+
+/// The file a report was read from, for a fact's source.
+fn report_source(interface: &str) -> String {
+	format!("/run/netcfgd/reported/{interface}")
+}
+
 fn address(
 	interface: &str,
 	address: &str,
@@ -230,10 +266,22 @@ fn address(
 				),
 			),
 		)),
-		None => facts.push(fact(
-			"desired",
-			"the configuration does not ask for this address",
-		)),
+		// The document names a source rather than a value, so "does not ask
+		// for it" would be wrong about an address netcfgd installed itself.
+		None => match report_for(interface, desired, observed)
+			.filter(|report| report.addresses.iter().any(|held| held == address))
+		{
+			Some(_) => facts.push(sourced(
+				"desired",
+				"the configuration takes this interface's addresses from a \
+				 report, and the report names this one",
+				Some(report_source(interface)),
+			)),
+			None => facts.push(fact(
+				"desired",
+				"the configuration does not ask for this address",
+			)),
+		},
 	}
 
 	match observed
@@ -319,7 +367,26 @@ fn route(
 				),
 			),
 		)),
-		None => facts.push(fact("desired", "the configuration does not ask for it")),
+		// Same indirection as an address: a reported gateway becomes a
+		// default route and a reported `route=` line names its own
+		// destination, and neither appears in the document.
+		None => match report_for(interface, desired, observed).and_then(|report| {
+			if destination == "default" && !report.gateways.is_empty() {
+				return Some("a gateway, which becomes this default route");
+			}
+			report
+				.routes
+				.iter()
+				.any(|route| route.destination == destination)
+				.then_some("this route")
+		}) {
+			Some(what) => facts.push(sourced(
+				"desired",
+				format!("the configuration takes this interface's routes from a report, and the report names {what}"),
+				Some(report_source(interface)),
+			)),
+			None => facts.push(fact("desired", "the configuration does not ask for it")),
+		},
 	}
 
 	match observed
@@ -587,6 +654,117 @@ mod tests {
 
 	/// A guard is the reason a change is not happening, so explaining an
 	/// interface has to mention both the guard and the refusal it causes.
+	/// An address netcfgd installed from a report explains itself.
+	///
+	/// It used to answer "the configuration does not ask for this address"
+	/// about an address netcfgd had installed itself and would withdraw
+	/// itself, because the document names a source rather than a value and the
+	/// explanation only looked for values.
+	#[test]
+	fn a_reported_address_says_where_the_value_came_from() {
+		let mut interface = interface_named("wwan0");
+		interface.addressing = vec![AddressSource::Reported(netcfgd_model::Reported::default())];
+		let document = document_with(interface);
+
+		let mut observed = observed_with(
+			ObservedAddress {
+				interface: "wwan0".to_owned(),
+				address: "10.64.1.23/30".to_owned(),
+				proto: Some(110),
+				ownership: Ownership::Ours,
+				origin: None,
+			},
+			true,
+		);
+		observed.reports.push(netcfgd_model::ObservedReport {
+			interface: "wwan0".to_owned(),
+			addresses: vec!["10.64.1.23/30".to_owned()],
+			gateways: vec!["10.64.1.24".to_owned()],
+			nameservers: Vec::new(),
+			routes: Vec::new(),
+		});
+
+		let explanation = explain(
+			&Subject::Address {
+				interface: "wwan0".to_owned(),
+				address: "10.64.1.23/30".to_owned(),
+			},
+			Some(&document),
+			&observed,
+			&Provenance::default(),
+		);
+		let desired = detail(&explanation, "desired");
+		assert!(desired.contains("from a report"), "got {desired}");
+		assert!(
+			explanation
+				.facts
+				.iter()
+				.any(|item| item.source.as_deref() == Some("/run/netcfgd/reported/wwan0")),
+			"the fact should name the file: {:?}",
+			explanation.facts
+		);
+	}
+
+	/// And so does the default route a reported gateway implies.
+	#[test]
+	fn a_reported_gateway_explains_the_default_route_it_implies() {
+		let mut interface = interface_named("wwan0");
+		interface.addressing = vec![AddressSource::Reported(netcfgd_model::Reported::default())];
+		let document = document_with(interface);
+
+		let mut observed = Observed::default();
+		observed.reports.push(netcfgd_model::ObservedReport {
+			interface: "wwan0".to_owned(),
+			addresses: Vec::new(),
+			gateways: vec!["10.64.1.24".to_owned()],
+			nameservers: Vec::new(),
+			routes: Vec::new(),
+		});
+
+		let explanation = explain(
+			&Subject::Route {
+				interface: "wwan0".to_owned(),
+				destination: "default".to_owned(),
+			},
+			Some(&document),
+			&observed,
+			&Provenance::default(),
+		);
+		let desired = detail(&explanation, "desired");
+		assert!(desired.contains("a gateway"), "got {desired}");
+	}
+
+	/// A report for an interface the document says nothing about is still not
+	/// an answer. The explanation follows the planner's gate rather than the
+	/// existence of a file, or it would explain routes netcfgd never installed.
+	#[test]
+	fn a_report_the_document_never_asked_for_explains_nothing() {
+		let document = document_with(interface_named("wwan0"));
+		let mut observed = Observed::default();
+		observed.reports.push(netcfgd_model::ObservedReport {
+			interface: "wwan0".to_owned(),
+			addresses: Vec::new(),
+			gateways: vec!["10.64.1.24".to_owned()],
+			nameservers: Vec::new(),
+			routes: Vec::new(),
+		});
+
+		let explanation = explain(
+			&Subject::Route {
+				interface: "wwan0".to_owned(),
+				destination: "default".to_owned(),
+			},
+			Some(&document),
+			&observed,
+			&Provenance::default(),
+		);
+		assert!(
+			detail(&explanation, "desired").contains("does not ask"),
+			"got {}",
+			detail(&explanation, "desired")
+		);
+	}
+
 	#[test]
 	fn a_guarded_interface_explains_what_is_blocked_and_how_to_allow_it() {
 		let mut interface = interface_named("eth0");
