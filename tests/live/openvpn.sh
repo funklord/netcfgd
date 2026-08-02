@@ -127,6 +127,33 @@ done
 check "the daemon is listening on it" \
 	"$([ -S "$work/run/openvpn/vpn0.sock" ] && echo yes || echo no)" "yes"
 
+# ------------------------------------------------- the file changing underneath
+
+# openvpn reads its configuration once, and netcfgd does not read it at all
+# (decision 0046). What it does is hash it, the same way a hook's `sha256`
+# notices a script changing underneath -- so an edited `.ovpn` is something the
+# next reconcile can see (decision 0053).
+check "netcfgd recorded which file the tunnel was started from" \
+	"$([ -s "$work/run/openvpn/vpn0.ovpn.sha256" ] && echo yes || echo no)" "yes"
+
+"$ncfg" plan > "$work/unchanged.txt" 2>&1 || true
+check "an unchanged file plans nothing" \
+	"$(grep -cE 'backend\.(stop|start)' "$work/unchanged.txt" || true)" "0"
+
+printf '# and now the operator has edited it\n' >> "$work/etc/work.ovpn"
+"$ncfg" plan > "$work/edited.txt" 2>&1 || true
+check "an edited one restarts the tunnel" \
+	"$(grep -c 'backend.stop vpn0' "$work/edited.txt" || true)" "1"
+check "and brings it back in the same plan" \
+	"$(grep -c 'backend.start vpn0' "$work/edited.txt" || true)" "1"
+check "saying what that costs" \
+	"$(grep -c 'drops it' "$work/edited.txt" || true)" "1"
+# The file is the operator's and stays unread: what netcfgd holds is 64 hex
+# characters, and nothing in /run is a copy of the configuration.
+check "without keeping a copy of the file it will not read" \
+	"$(grep -rc 'not valid openvpn configuration' "$work/run" 2>/dev/null | grep -v ':0$' \
+		| wc -l)" "0"
+
 # ------------------------------------------------------------------- stopping
 
 # Deleting the block is what stops it, and it goes through the management

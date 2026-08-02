@@ -472,6 +472,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	builder.plan_forwarding(desired, observed);
 	builder.plan_nat(desired, observed);
 	builder.plan_access_control(desired, observed);
+	builder.plan_stale_tunnels(desired, observed);
 	builder.plan_stranded_credentials(observed, &options.strand_credentials);
 
 	// Teardown comes last, so a change to an address is make-before-break: the
@@ -781,6 +782,87 @@ impl Builder {
 				}),
 			);
 		}
+	}
+
+	/// Every tunnel whose file changed under it.
+	///
+	/// A top-level pass rather than part of an interface's contents, and the
+	/// difference is not cosmetic: a tunnel's *device* may not exist -- openvpn
+	/// creates it seconds after it starts, and a tunnel that is still
+	/// negotiating has none at all -- so anything hung off the interface's
+	/// contents is skipped for exactly the tunnels this is about. The question
+	/// is about a backend, so it is asked where backends are.
+	fn plan_stale_tunnels(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			self.restart_stale_tunnel(interface, observed);
+		}
+	}
+
+	/// Restart a tunnel whose `.ovpn` is no longer the one it was started from.
+	///
+	/// The last of the "is what is running still what the document says"
+	/// questions (decision 0053). netcfgd never reads that file for meaning --
+	/// 0046 keeps it the operator's -- so what it compares is a hash the
+	/// observer took, the same trick a hook's `sha256` plays on a script netcfgd
+	/// equally does not interpret.
+	///
+	/// A restart drops the tunnel, so the warning says so. `None` restarts
+	/// nothing: no record and an unreadable file are both "could not check".
+	fn restart_stale_tunnel(&mut self, interface: &Interface, observed: &Observed) {
+		if !matches!(interface.kind, InterfaceKind::OpenVpn(_)) {
+			return;
+		}
+		let name = &interface.name;
+		let stale = observed.backends.iter().any(|backend| {
+			backend.kind == BackendKind::OpenVpn
+				&& &backend.interface == name
+				&& backend.running
+				&& backend.config_matches == Some(false)
+		});
+		if !stale {
+			return;
+		}
+
+		self.warn(
+			name,
+			format!(
+				"the openvpn configuration for {name} has changed since the tunnel was \
+				 started, and openvpn reads it once -- so the tunnel is restarted, which \
+				 drops it for as long as the handshake takes"
+			),
+		);
+		let reason = Reason::differs(
+			name,
+			"openvpn.config",
+			"the file as it is now".to_owned(),
+			"the file the tunnel was started from".to_owned(),
+		);
+		let stop = self.push_root(
+			Op::BackendStop {
+				kind: BackendKind::OpenVpn,
+				iface: name.clone(),
+			},
+			reason.clone(),
+			Some(Op::BackendStart {
+				kind: BackendKind::OpenVpn,
+				iface: name.clone(),
+			}),
+		);
+		if stop == u32::MAX {
+			return;
+		}
+		self.push(
+			Op::BackendStart {
+				kind: BackendKind::OpenVpn,
+				iface: name.clone(),
+			},
+			reason,
+			vec![stop],
+			Some(Op::BackendStop {
+				kind: BackendKind::OpenVpn,
+				iface: name.clone(),
+			}),
+		);
 	}
 
 	/// The backend an interface needs before it can carry anything.

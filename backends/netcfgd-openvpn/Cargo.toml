@@ -11,3 +11,4 @@ repository.workspace   = true
 workspace = true
 
 [dependencies]
+netcfgd-model = { path = "../../crates/netcfgd-model" }
