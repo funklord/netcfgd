@@ -229,6 +229,51 @@ pub fn start(
 	Ok(())
 }
 
+/// Rewrite the configuration and tell a running radvd to re-read it.
+///
+/// radvd handles `SIGHUP` by calling `reload_config`, which re-reads the file
+/// it was started with -- checked in radvd 2.20's own `radvd.c` rather than
+/// taken from the manual page, which does not mention it. So a changed prefix
+/// costs nothing on the wire: the daemon keeps running, nothing is
+/// deauthenticated, and the next advertisement carries the new block. That is
+/// the opposite of an access point, where the same question means a restart
+/// (decision 0026), and it is worth knowing which of the two a backend is.
+///
+/// Rewriting before signalling is the order that matters: radvd reads the file
+/// when it is told to, so a signal sent first would reload the old contents.
+///
+/// # Errors
+///
+/// Returns a message naming what failed. A daemon that is not running is *not*
+/// success here: `start` is what a stopped daemon needs, and quietly doing
+/// nothing would leave the document and the wire disagreeing with nothing to
+/// say so.
+pub fn reload(
+	run: &Path,
+	iface: &str,
+	policy: &RaPolicy,
+	prefixes: &[String],
+	servers: &[String],
+) -> Result<(), String> {
+	if prefixes.is_empty() {
+		return Err(format!(
+			"`{iface}` would advertise no prefix after the change, which is not \
+			 something to reload into -- stop advertising instead"
+		));
+	}
+	let Some(pid) = running_pid(run, iface) else {
+		return Err(format!(
+			"no radvd of netcfgd's is running on {iface} to reload; it has to be \
+			 started rather than reloaded"
+		));
+	};
+	let path = config_path(run, iface);
+	std::fs::write(&path, render(iface, policy, prefixes, servers))
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	netcfgd_sys::process::hangup(pid)
+		.map_err(|error| format!("could not tell radvd on {iface} to re-read: {error}"))
+}
+
 /// Stop advertising on one interface.
 ///
 /// radvd has no control socket, so this is the `pppd` shape: read the pid file

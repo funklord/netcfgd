@@ -275,6 +275,14 @@
           "02:00:00:00:00:bb"
         ]
       }
+    },
+    {
+      "kind": "router_advert",
+      "interface": "lan0",
+      "running": true,
+      "advertised": [
+        "2001:db8:1234::/64"
+      ]
     }
   ],
   "dns": [
