@@ -51,7 +51,7 @@ pub(crate) fn has_sysfs_wireless(interface: &str) -> bool {
 
 /// Which flavour of device object one link becomes.
 ///
-/// There are four, and the reason there are four rather than a dozen was found
+/// There are five, and the reason there are five rather than a dozen was found
 /// by pointing a real `nmcli` at this: **libnm decides what a device is from
 /// the interfaces present on the object, not from the `DeviceType` property**.
 /// A device carrying only `org.freedesktop.NetworkManager.Device` is not a
@@ -65,6 +65,13 @@ pub(crate) fn has_sysfs_wireless(interface: &str) -> bool {
 /// leaves `.Device.Bridge` free to be implemented properly later without
 /// having shipped a device that claims to be one and has none of its
 /// properties.
+///
+/// `WireGuard` is the first kind to leave `Generic` on those terms, and it left
+/// only once the properties existed to leave with: NM's
+/// `.Device.WireGuard` carries a public key, a listen port and a firewall
+/// mark, none of which netcfgd could observe until decision 0054. Claiming the
+/// type without them would have been the shipped-a-lie case this paragraph
+/// warns about, which is why the constant sat unused in `enums.rs` until now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Flavour {
 	/// The loopback.
@@ -73,6 +80,8 @@ pub(crate) enum Flavour {
 	Wireless,
 	/// A real NIC that is not a radio.
 	Wired,
+	/// A `WireGuard` tunnel.
+	WireGuard,
 	/// Anything else netcfgd can create.
 	Generic,
 }
@@ -100,10 +109,17 @@ pub(crate) fn flavour_of(link: &ObservedLink, radio: bool) -> Flavour {
 	// link-kind: a real NIC. Which of the two it is does not come from the name
 	// -- `eth0` is a convention, not a fact.
 	if link.kind.is_empty() {
-		Flavour::Wired
-	} else {
-		Flavour::Generic
+		return Flavour::Wired;
 	}
+	// The kernel's own word for the link kind, which is also netcfgd's. Not the
+	// presence of `link.wireguard`: that is the observation of a device's
+	// contents and it is absent for a device netcfgd has created and not yet
+	// configured, so keying on it would move a device between types depending
+	// on how far an apply had got.
+	if link.kind == "wireguard" {
+		return Flavour::WireGuard;
+	}
+	Flavour::Generic
 }
 
 /// NM's device type for a netcfgd link.
@@ -118,6 +134,7 @@ pub(crate) fn type_of(link: &ObservedLink, radio: bool) -> u32 {
 		Flavour::Loopback => device_type::LOOPBACK,
 		Flavour::Wireless => device_type::WIFI,
 		Flavour::Wired => device_type::ETHERNET,
+		Flavour::WireGuard => device_type::WIREGUARD,
 		Flavour::Generic => device_type::GENERIC,
 	}
 }
@@ -532,6 +549,78 @@ impl Generic {
 	}
 }
 
+/// The `WireGuard` half of a device.
+///
+/// Three properties, which is all NM defines for one. They are the device's
+/// own configuration rather than its peers: NM has no peer list on the device
+/// interface at all -- peers live in a connection profile there -- so this is
+/// the whole of what a client can ask about a running tunnel.
+pub(crate) struct WireGuard {
+	state: Arc<State>,
+	interface: String,
+}
+
+impl WireGuard {
+	/// A `WireGuard` interface for one device.
+	#[must_use]
+	pub(crate) fn new(state: Arc<State>, interface: String) -> Self {
+		Self { state, interface }
+	}
+
+	/// What the observation says this device holds, if anything.
+	fn observed(&self) -> Option<netcfgd_model::ObservedWireGuard> {
+		self.state
+			.link(&self.interface)
+			.and_then(|link| link.wireguard)
+	}
+}
+
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device.WireGuard",
+	introspection_docs = false
+)]
+impl WireGuard {
+	/// The device's public key, as octets.
+	///
+	/// NM types this `ay` and means the raw key, not its base64 spelling --
+	/// libnm hands it to `nm_utils_base64secret_...` shaped helpers for
+	/// display. Empty where netcfgd could not read one, which is a device with
+	/// no private key loaded: a tunnel that has been created and not
+	/// configured, and not a value to invent.
+	///
+	/// A public key is not a secret. It is the thing an operator hands the
+	/// other end, and decision 0029's rule about secrets not travelling is
+	/// about the private one -- which is in neither the observation nor the
+	/// document, so there is nothing here to leak.
+	#[zbus(property)]
+	fn public_key(&self) -> Vec<u8> {
+		self.observed()
+			.and_then(|state| state.public_key)
+			.map(|key| key.as_bytes().to_vec())
+			.unwrap_or_default()
+	}
+
+	/// The UDP port it listens on, or zero.
+	///
+	/// Zero is NM's own spelling for "none" here, and it is also the kernel's:
+	/// a device with an ephemeral port reports the port it was given, and one
+	/// that has not been configured reports nothing at all.
+	#[zbus(property)]
+	fn listen_port(&self) -> u16 {
+		self.observed()
+			.and_then(|state| state.listen_port)
+			.unwrap_or_default()
+	}
+
+	/// The firewall mark on outgoing packets, or zero for none.
+	#[zbus(property)]
+	fn fw_mark(&self) -> u32 {
+		self.observed()
+			.and_then(|state| state.fwmark)
+			.unwrap_or_default()
+	}
+}
+
 /// The wireless half of a device.
 pub(crate) struct Wireless {
 	state: Arc<State>,
@@ -763,7 +852,7 @@ mod tests {
 	/// has never heard of -- `ifb` is one -- and they are not broken devices.
 	#[test]
 	fn everything_with_a_link_kind_is_generic_rather_than_unknown() {
-		for kind in ["bridge", "bond", "vlan", "wireguard", "gre", "ifb", "dummy"] {
+		for kind in ["bridge", "bond", "vlan", "gre", "ifb", "dummy"] {
 			assert_eq!(
 				flavour_of(&link("x0", kind), false),
 				Flavour::Generic,
@@ -771,6 +860,28 @@ mod tests {
 			);
 			assert_eq!(type_of(&link("x0", kind), false), 14, "for kind {kind}");
 		}
+	}
+
+	/// A `WireGuard` device is the one kind that has left `Generic`.
+	///
+	/// It left because the properties existed to leave with (decision 0054);
+	/// until the observation carried a public key, a listen port and a firewall
+	/// mark, claiming the type would have shipped a device that says what it is
+	/// and cannot answer a single question about itself.
+	#[test]
+	fn a_wireguard_link_is_a_wireguard_device() {
+		assert_eq!(
+			flavour_of(&link("wg0", "wireguard"), false),
+			Flavour::WireGuard
+		);
+		assert_eq!(type_of(&link("wg0", "wireguard"), false), 29);
+		// And a radio still outranks it, for the reason every other kind does:
+		// agreeing with the daemon about what it is driving is worth more than
+		// second-guessing the operator.
+		assert_eq!(
+			flavour_of(&link("wg0", "wireguard"), true),
+			Flavour::Wireless
+		);
 	}
 
 	/// The type and the interface are derived from one answer, because libnm
