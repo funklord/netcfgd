@@ -592,7 +592,9 @@ Three techniques make that reachable without root or a clean machine:
 
 **Fake only what cannot exist, which is a radio — never the protocol.** `fake_supplicant.py` and `fake_hostapd.py` speak the real `wpa_ctrl` wire format with replies copied from upstream source; the real daemons are driven elsewhere, which is what would catch a parser changing its mind. Anything needing a real association needs `mac80211_hwsim` and therefore real root: `sudo sh tests/live/hwsim.sh`.
 
-**Know what an ordinary `make live` skipped.** Three scripts need real root — `hwsim.sh` loads a module and moves a phy between namespaces, `pppoe-session.sh` opens `/dev/ppp`, `delegation.sh` binds ports 546 and 547 — and `make live` invokes each of them either way, so an unprivileged run prints three skips and a green suite. Two more skip on a package a netcfgd machine has no reason to have: `tunnel.sh` wants `openvpn`, `ap.sh` wants `hostapd`. That is five scripts saying nothing, and the skip lines are the only place it is written down. **A privileged container closes all five** and does not touch the machine's own network — `docker run --rm --privileged -v $PWD:/repo -w /repo debian:trixie`, plus the packages each header names. Doing that after the 0047–0053 session found two things an unprivileged run could not: `delegation.sh`'s own build recipe stopped at `None of the required 'json-c' found` on a clean trixie, and `hwsim.sh` **failed** rather than skipped where the kernel has no `mac80211_hwsim`, which aborts the suite at the one moment somebody is running it properly.
+**Know what an ordinary `make live` skipped.** Three scripts need real root — `hwsim.sh` loads a module and moves a phy between namespaces, `pppoe-session.sh` opens `/dev/ppp`, `delegation.sh` binds ports 546 and 547 — and `make live` invokes each of them either way, so an unprivileged run prints three skips and a green suite. Two more skip on a package a netcfgd machine has no reason to have: `tunnel.sh` wants `openvpn`, `ap.sh` wants `hostapd`. That is five scripts saying nothing, and the skip lines are the only place it is written down. **A privileged container closes all five** and does not touch the machine's own network — `docker run --rm --privileged -v $PWD:/repo -w /repo debian:trixie`, plus the packages each header names. A container also needs `libncursesw6`, which is not obvious from anything: the daemon links ncurses for the TUI behind a default-on feature ([0025](docs/decisions/0025-the-audited-crate-is-the-libc-boundary-not-netlink.md)), so a bare image gets `error while loading shared libraries` and a test that looks like a daemon which will not start.
+
+**Doing it found four defects, all in the suite rather than in netcfgd.** `delegation.sh`'s own build recipe stopped at `None of the required 'json-c' found` on a clean trixie. `hwsim.sh` **failed** rather than skipped where a kernel has no `mac80211_hwsim`, aborting the suite at the one moment somebody is running it properly — and the first repair of that asked `$PATH` rather than the machine, which skipped a machine that can run it. And `hwsim.sh` passed while leaving `netcfgd` and both supplicants running, because it killed by namespace and the background job's subshell is not in one; the run that showed it was still holding them ten minutes later, with the pipeline reading its output waiting on an end-of-file that could not arrive. None of the four is reachable without root, and three of them are the kind that leave a green suite.
 
 **If a regression would make a test hang rather than fail, wrap it in `timeout`.** A stuck suite reports nothing, which is worse than a red one.
 
@@ -828,39 +830,28 @@ was reachable by reading seven records end to end.
 
 ### Next, roughly in order
 
-1. **Run `hwsim.sh`, which this machine can.** `delegation.sh` and
-   `pppoe-session.sh` are green end to end, checked as root in a privileged
-   container after the 0047–0053 session. `hwsim.sh` is the one left, and
-   association is the only part of wifi nothing has exercised since that
-   session. Everything it needs is here: the module is at
-   `/lib/modules/$(uname -r)/kernel/drivers/net/wireless/virtual/`, nothing has
-   it loaded, and the preflight passes in full — checked by running the script
-   with the `modprobe` line replaced by an echo, in a container with
-   `--net=host` and `/lib/modules` mounted read-only. What stopped it earlier
-   was neither of those: a plain container's `/lib/modules` is not this
-   kernel's, and the first version of the preflight asked `$PATH` rather than
-   the machine. `sudo sh tests/live/hwsim.sh` is the whole of it.
-
-   Worth knowing before running it: this laptop has a **real** wifi card, phy0
-   on `iwlmvm`, and `mac80211`/`cfg80211` are already loaded for it — which is
-   the condition the script's header calls safe, since nothing that card
-   depends on gets reloaded. The two virtual radios exist in the initial
-   namespace for about a second before the script moves them out of reach of
-   anything that would adopt them.
-2. **Run the modem path against a real modem.** Everything is written and
+1. **Run the modem path against a real modem.** Everything is written and
    nothing has met hardware: `helpers/netcfgd-modem-mbim` drives `mbimcli`
    against a fake whose output is copied from libmbim's own `g_print` calls.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-3. **WireGuard as a first-class NM device**, if the shim is worth more
+2. **WireGuard as a first-class NM device**, if the shim is worth more
    attention than the core.
+
+**The whole suite has now been run as root**, which is what the previous entry
+here asked for. All three root-only scripts pass: `delegation.sh` through
+renumbering and withdrawal, `pppoe-session.sh` through a real IPCP negotiation,
+and `hwsim.sh` through association, SAE from a transitional offer, and a scan
+that finds the access point. Association was the part nothing had exercised
+since the 0047–0053 session and it holds.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one.
 
 ### Things that are true and non-obvious
 
 - **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
+- **A test that cleans up by category misses what is not in the category.** `hwsim.sh` killed everything in its network namespace, which is netcfgd and both supplicants and is not everything it started: the subshell a background job forks stays in the initial namespace, holds the script's stdout, and keeps a reader of that pipe waiting after the script has exited. The test passed and left a root netcfgd running. Kill what you started by the handle you were given, and treat an enumeration as the second answer rather than the only one.
 - **A comment is falsified by the commit after it, and nothing goes red.** Four places in one session said an access point's passphrase, SSID or channel was not compared — written true, left standing when the next commit compared them, and sitting directly above the code that does. Every gate stayed green because no gate reads prose. The habit that catches it is the one §10 already asks for: when a session closes a gap it earlier wrote down, grep for the sentence that wrote it down, not only for the code.
 - **A record that defers something needs a forward pointer when the deferral is lifted.** 0050 has one to 0051 and it works; 0047 and 0048 deferred work the same session then did and had none, so a reader landing on 0047 from `docs/interface-report.md` — which links there — was told the rename had not happened. The body stays as written, because a decision is changed by superseding it; the `Status` line is where the pointer goes.
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
