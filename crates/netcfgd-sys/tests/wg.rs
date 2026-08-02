@@ -50,9 +50,10 @@ fn key(seed: u8) -> [u8; 32] {
 fn sample() -> Device {
 	Device {
 		name: "wg-test".to_owned(),
-		private_key: key(1),
+		private_key: Some(key(1)),
 		listen_port: Some(51820),
 		fwmark: Some(42),
+		replace_peers: true,
 		peers: vec![Peer {
 			public_key: key(100),
 			preshared_key: Some(key(200)),
