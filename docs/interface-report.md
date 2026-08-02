@@ -141,15 +141,32 @@ goes through the same planner path a route out of the config file does, so the
 carrier check that stops a dead link keeping a route, the ordering that puts
 `addr.add` first, and the teardown all apply to it unchanged.
 
-**`dns=`** is delivered, when the host manages DNS at all. The reported servers
-join the interface's DNS scope, after any the document wrote for it -- so a
-server an operator chose is consulted before one the network handed out. The
-delivery mode is not a choice: every scope in one delivery has to agree about
-it, so the reported servers go out however the rest of the host's DNS does.
+**`dns=`** is delivered, when the host manages DNS at all **and the document
+asked for this link's servers**. The reported servers join the interface's DNS
+scope, after any the document wrote for it -- so a server an operator chose is
+consulted before one the network handed out. The delivery mode is not a choice:
+every scope in one delivery has to agree about it, so the reported servers go
+out however the rest of the host's DNS does.
 
 A host whose `global { dns { } }` sets no mode manages no resolver, and a report
 arriving is not a reason for it to start. The servers are read and shown and
 nothing is delivered.
+
+**There is no key for a routing domain, and there will not be.** A resolver is
+information netcfgd could not have had; *which names use it* is a decision about
+where every query on the machine goes, and a remote server does not get to make
+that one by connecting
+([0049](decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)).
+Write it in the document instead, where it can be read, diffed and deleted:
+
+```
+global { dns { dns_mode = "dnsmasq" } }
+
+interface vpn0 {
+	openvpn { config = "/etc/netcfgd/work.ovpn" }
+	dns { domains = ["corp.example"] }
+}
+```
 
 netcfgd will not configure the interface at all until a document gives it a
 reason to believe the report. There are two, and both are the same question
@@ -163,6 +180,13 @@ asked of different documents:
   named. There is nothing left to opt into, and requiring the word anyway would
   mean a tunnel that silently kept none of its routes until somebody added it
   ([0048](decisions/0048-a-tunnels-routes-arrive-through-the-report.md)).
+
+**Nameservers are gated more narrowly than addresses and routes**, and only
+these two reasons apply to them: the addressing comes from the report, or the
+interface has a `dns` block. Started-by-netcfgd is not enough. A route down a
+tunnel goes down that tunnel; a nameserver changes where names resolve for the
+whole machine, so netcfgd waits to be told. An empty `dns { }` is the minimal
+way to tell it.
 
 A report for an interface the document says nothing about is read, shown, and
 otherwise ignored. A writer must not assume its report has been applied, and

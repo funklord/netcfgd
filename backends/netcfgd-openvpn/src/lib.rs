@@ -91,6 +91,12 @@ pub fn script_path(run: &Path, iface: &str) -> PathBuf {
 ///   even for a route the config gave no gateway -- it becomes the tunnel's own
 ///   endpoint.
 /// - `route_ipv6_network_N` already in CIDR, with `route_ipv6_gateway_N`.
+/// - `foreign_option_N` for everything the server said about resolvers, as
+///   `dhcp-option DNS 10.0.0.53` and the like. **2.6's newer `--dns server`
+///   syntax arrives in the same list**: on anything that is not Windows,
+///   `foreign_options_copy_dns` rewrites it into `dhcp-option` form, so reading
+///   one spelling reads both. A locally configured `dhcp-option` lands there
+///   too, which is what lets a test exercise this without a server.
 /// - Both **survive `--route-noexec`**, because the environment is filled in
 ///   when the route list is built and the flag only skips installing it.
 /// - `N` is not guaranteed contiguous: `setenv_route` skips a route that is not
@@ -108,6 +114,9 @@ pub fn script_path(run: &Path, iface: &str) -> PathBuf {
 #[must_use]
 pub fn report_script(iface: &str, report: &Path) -> String {
 	let report = report.display();
+	let mask = mask_conversion();
+	let routes = route_lines();
+	let servers = server_lines();
 	format!(
 		"#!/bin/sh\n\
 		 # Written by netcfgd for {iface}. Do not edit; it is rewritten on every\n\
@@ -132,67 +141,108 @@ pub fn report_script(iface: &str, report: &Path) -> String {
 		 \texit 0\n\
 		 fi\n\
 		 \n\
-		 # 255.255.255.0 -> 24. Fails on a mask with a hole in it, which the\n\
-		 # kernel would refuse anyway and which is better skipped here, where\n\
-		 # the line it came from is still visible.\n\
-		 prefix_of() {{\n\
-		 \ttotal=0\n\
-		 \tended=\n\
-		 \tfor octet in $(printf '%s' \"$1\" | tr '.' ' '); do\n\
-		 \t\tcase \"$octet\" in\n\
-		 \t\t255) bits=8 ;;\n\
-		 \t\t254) bits=7 ;;\n\
-		 \t\t252) bits=6 ;;\n\
-		 \t\t248) bits=5 ;;\n\
-		 \t\t240) bits=4 ;;\n\
-		 \t\t224) bits=3 ;;\n\
-		 \t\t192) bits=2 ;;\n\
-		 \t\t128) bits=1 ;;\n\
-		 \t\t0) bits=0 ;;\n\
-		 \t\t*) return 1 ;;\n\
-		 \t\tesac\n\
-		 \t\t[ -n \"$ended\" ] && [ \"$bits\" != 0 ] && return 1\n\
-		 \t\t[ \"$bits\" = 8 ] || ended=yes\n\
-		 \t\ttotal=$((total + bits))\n\
-		 \tdone\n\
-		 \tprintf '%s' \"$total\"\n\
-		 }}\n\
-		 \n\
+		 {mask}\n\
 		 {{\n\
 		 \tprintf '# %s, written by netcfgd from openvpn --route-up\\n' '{iface}'\n\
-		 \t# A fixed range rather than a break on the first gap: openvpn skips\n\
-		 \t# a route it did not fully define and the number moves on anyway.\n\
-		 \ti=1\n\
-		 \twhile [ \"$i\" -le 256 ]; do\n\
-		 \t\teval \"network=\\${{route_network_$i:-}}\"\n\
-		 \t\teval \"netmask=\\${{route_netmask_$i:-}}\"\n\
-		 \t\teval \"gateway=\\${{route_gateway_$i:-}}\"\n\
-		 \t\ti=$((i + 1))\n\
-		 \t\t[ -n \"$network\" ] || continue\n\
-		 \t\tprefix=$(prefix_of \"$netmask\") || continue\n\
-		 \t\tif [ -n \"$gateway\" ]; then\n\
-		 \t\t\tprintf 'route=%s/%s via %s\\n' \"$network\" \"$prefix\" \"$gateway\"\n\
-		 \t\telse\n\
-		 \t\t\tprintf 'route=%s/%s\\n' \"$network\" \"$prefix\"\n\
-		 \t\tfi\n\
-		 \tdone\n\
-		 \t# Already CIDR on this side, which is openvpn's asymmetry and not\n\
-		 \t# netcfgd's.\n\
-		 \ti=1\n\
-		 \twhile [ \"$i\" -le 256 ]; do\n\
-		 \t\teval \"network=\\${{route_ipv6_network_$i:-}}\"\n\
-		 \t\teval \"gateway=\\${{route_ipv6_gateway_$i:-}}\"\n\
-		 \t\ti=$((i + 1))\n\
-		 \t\t[ -n \"$network\" ] || continue\n\
-		 \t\tif [ -n \"$gateway\" ]; then\n\
-		 \t\t\tprintf 'route=%s via %s\\n' \"$network\" \"$gateway\"\n\
-		 \t\telse\n\
-		 \t\t\tprintf 'route=%s\\n' \"$network\"\n\
-		 \t\tfi\n\
-		 \tdone\n\
+		 {routes}\
+		 {servers}\
 		 }} > \"$tmp\" || exit 1\n\
 		 mv \"$tmp\" \"$target\"\n"
 	)
+}
+
+/// The one piece of arithmetic: `255.255.255.0` becomes `24`.
+///
+/// openvpn hands IPv4 netmasks dotted and IPv6 prefixes already in CIDR, which
+/// is its asymmetry rather than netcfgd's. A mask with a hole in it fails
+/// rather than summing to a number that means something else -- the kernel
+/// would refuse such a route anyway, and skipping it here leaves the line it
+/// came from visible in the log.
+fn mask_conversion() -> String {
+	"prefix_of() {\n\
+	 \ttotal=0\n\
+	 \tended=\n\
+	 \tfor octet in $(printf '%s' \"$1\" | tr '.' ' '); do\n\
+	 \t\tcase \"$octet\" in\n\
+	 \t\t255) bits=8 ;;\n\
+	 \t\t254) bits=7 ;;\n\
+	 \t\t252) bits=6 ;;\n\
+	 \t\t248) bits=5 ;;\n\
+	 \t\t240) bits=4 ;;\n\
+	 \t\t224) bits=3 ;;\n\
+	 \t\t192) bits=2 ;;\n\
+	 \t\t128) bits=1 ;;\n\
+	 \t\t0) bits=0 ;;\n\
+	 \t\t*) return 1 ;;\n\
+	 \t\tesac\n\
+	 \t\t[ -n \"$ended\" ] && [ \"$bits\" != 0 ] && return 1\n\
+	 \t\t[ \"$bits\" = 8 ] || ended=yes\n\
+	 \t\ttotal=$((total + bits))\n\
+	 \tdone\n\
+	 \tprintf '%s' \"$total\"\n\
+	 }\n"
+	.to_owned()
+}
+
+/// Both families of route, out of the environment openvpn filled in.
+///
+/// A fixed range rather than a break on the first gap: `setenv_route` skips a
+/// route it did not fully define and the counter moves on anyway, so the
+/// numbering has holes in it.
+fn route_lines() -> String {
+	"\ti=1\n\
+	 \twhile [ \"$i\" -le 256 ]; do\n\
+	 \t\teval \"network=\\${route_network_$i:-}\"\n\
+	 \t\teval \"netmask=\\${route_netmask_$i:-}\"\n\
+	 \t\teval \"gateway=\\${route_gateway_$i:-}\"\n\
+	 \t\ti=$((i + 1))\n\
+	 \t\t[ -n \"$network\" ] || continue\n\
+	 \t\tprefix=$(prefix_of \"$netmask\") || continue\n\
+	 \t\tif [ -n \"$gateway\" ]; then\n\
+	 \t\t\tprintf 'route=%s/%s via %s\\n' \"$network\" \"$prefix\" \"$gateway\"\n\
+	 \t\telse\n\
+	 \t\t\tprintf 'route=%s/%s\\n' \"$network\" \"$prefix\"\n\
+	 \t\tfi\n\
+	 \tdone\n\
+	 \ti=1\n\
+	 \twhile [ \"$i\" -le 256 ]; do\n\
+	 \t\teval \"network=\\${route_ipv6_network_$i:-}\"\n\
+	 \t\teval \"gateway=\\${route_ipv6_gateway_$i:-}\"\n\
+	 \t\ti=$((i + 1))\n\
+	 \t\t[ -n \"$network\" ] || continue\n\
+	 \t\tif [ -n \"$gateway\" ]; then\n\
+	 \t\t\tprintf 'route=%s via %s\\n' \"$network\" \"$gateway\"\n\
+	 \t\telse\n\
+	 \t\t\tprintf 'route=%s\\n' \"$network\"\n\
+	 \t\tfi\n\
+	 \tdone\n"
+		.to_owned()
+}
+
+/// The nameservers, and the two things a server does not get to decide.
+///
+/// openvpn folds both the old `dhcp-option DNS` and 2.6's `--dns server` into
+/// one `foreign_option` list on anything that is not Windows, so reading one
+/// spelling reads both.
+///
+/// `DOMAIN` and `DOMAIN-SEARCH` are written down and **not** reported. Which
+/// names travel down a tunnel is the operator's to say in the document, not a
+/// remote server's to push -- decision 0049. The comment keeps what the server
+/// suggested visible to whoever reads the file, without netcfgd acting on it.
+fn server_lines() -> String {
+	"\ti=1\n\
+	 \twhile [ \"$i\" -le 256 ]; do\n\
+	 \t\teval \"option=\\${foreign_option_$i:-}\"\n\
+	 \t\ti=$((i + 1))\n\
+	 \t\t[ -n \"$option\" ] || continue\n\
+	 \t\tset -- $option\n\
+	 \t\t[ \"${1:-}\" = dhcp-option ] || continue\n\
+	 \t\tcase \"${2:-}\" in\n\
+	 \t\tDNS|DNS6) [ -n \"${3:-}\" ] && printf 'dns=%s\\n' \"$3\" ;;\n\
+	 \t\t*) printf '# the server also said: %s\\n' \"$option\" ;;\n\
+	 \t\tesac\n\
+	 \tdone\n"
+		.to_owned()
 }
 
 /// Where the credentials for one tunnel go, when the server wants any.
@@ -596,6 +646,15 @@ mod tests {
 		let status = Command::new("sh")
 			.arg(&path)
 			.env("script_type", "route-up")
+			// Both spellings of a nameserver, and the two the server does not
+			// get to decide -- copied from a real openvpn's environment.
+			.env("foreign_option_1", "dhcp-option DNS 10.0.0.53")
+			.env("foreign_option_2", "dhcp-option DNS6 fd00::53")
+			.env("foreign_option_3", "dhcp-option DOMAIN corp.example")
+			.env(
+				"foreign_option_4",
+				"dhcp-option DOMAIN-SEARCH sub.corp.example",
+			)
 			.env("route_network_1", "10.9.0.0")
 			.env("route_netmask_1", "255.255.255.0")
 			.env("route_gateway_1", "10.8.0.2")
@@ -627,6 +686,28 @@ mod tests {
 				"route=fd77::/32 via fd00::2"
 			],
 			"got:\n{written}"
+		);
+
+		// Both families of nameserver, and neither of the two ways a server
+		// tries to say where queries go (decision 0049). The suggestion is
+		// kept as a comment, which netcfgd's reader drops and a person
+		// reading the file does not.
+		let servers: Vec<&str> = written
+			.lines()
+			.filter(|line| line.starts_with("dns="))
+			.collect();
+		assert_eq!(
+			servers,
+			["dns=10.0.0.53", "dns=fd00::53"],
+			"got:\n{written}"
+		);
+		assert!(
+			!written.contains("domain="),
+			"a pushed domain is not a key this contract has:\n{written}"
+		);
+		assert!(
+			written.contains("# the server also said: dhcp-option DOMAIN corp.example"),
+			"what was declined should still be visible:\n{written}"
 		);
 	}
 

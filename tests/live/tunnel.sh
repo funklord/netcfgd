@@ -69,6 +69,9 @@ mkdir -p "$work/etc" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
+# So a test of DNS delivery does not rewrite the resolver of the machine
+# running it.
+export NCFG_RESOLV_CONF="$work/resolv.conf"
 ncfg="$repo/target/debug/ncfg"
 
 failures=0
@@ -104,15 +107,25 @@ cipher AES-256-CBC
 data-ciphers AES-256-GCM:AES-256-CBC
 route 10.9.0.0 255.255.255.0
 route 10.10.0.0 255.255.0.0 192.168.99.1
+dhcp-option DNS 10.0.0.53
+dhcp-option DOMAIN corp.example
 ping-exit 60
 verb 3
 OVPN
 
+# A locally configured `dhcp-option` reaches the script's environment in
+# exactly the form a pushed one does -- openvpn puts both in foreign_option_N --
+# which is what lets this exercise the DNS half without a server.
+#
 # `routes = "default"` is decision 0048's answer to the one thing openvpn will
 # not tell a --route-up script: that the server asked for `redirect-gateway`.
 # The record recommends writing it in the document instead, so the recommendation
 # is checked here rather than asserted there.
+# The host manages its resolver, which is what makes the DNS checks below mean
+# something: on a host that manages none, nothing is delivered for any reason
+# and "the tunnel's server was not delivered" would pass for the wrong one.
 cat > "$work/etc/netcfgd.conf" <<CONF
+global { dns { dns_mode = "write_resolv_conf" } }
 interface vpn0 {
 	preference = 700
 	routes     = "default"
@@ -181,6 +194,49 @@ check "a default route written in the document goes down the tunnel" \
 	"$(ip -4 route show default | grep -c 'dev vpn0' || true)" "1"
 check "with the same preference, so it can be ranked against another uplink" \
 	"$(ip -4 route show default | grep -c 'metric 700' || true)" "1"
+
+# ------------------------------------------------------------------- resolvers
+
+# The server named a resolver and also tried to say which names go through it.
+# Decision 0049 takes the first and declines the second: where queries go is
+# the operator's, in the document, and not a remote party's to push.
+check "the daemon's nameserver was reported" \
+	"$(grep -c '^dns=10.0.0.53$' "$report" 2>/dev/null || true)" "1"
+check "and the domain it pushed was not" \
+	"$(grep -c '^domain' "$report" 2>/dev/null || true)" "0"
+# Declined, not hidden. Whoever reads this file can see what was suggested.
+check "though what it suggested is still visible in the file" \
+	"$(grep -c 'the server also said: dhcp-option DOMAIN corp.example' "$report" \
+		2>/dev/null || true)" "1"
+
+# And nothing was delivered, because the document never gave this link a scope.
+# This is the failure decision 0007 opens on -- bring up a VPN and every query
+# on the machine silently goes to the corporate resolver. The host *is*
+# managing its resolver here, so this is a refusal rather than an absence.
+check "the host's resolver was written, so this is not a vacuous check" \
+	"$([ -f "$work/resolv.conf" ] && echo yes || echo no)" "yes"
+check "and nothing was delivered, because the document did not ask" \
+	"$(grep -c '10.0.0.53' "$work/resolv.conf" 2>/dev/null || true)" "0"
+
+# It arrives the moment the document does ask. A `dns` block on the tunnel is
+# the operator saying this link answers for something; the server that answers
+# comes from the report. Flat here rather than split, because splitting needs a
+# scope-capable resolver and this check is about the gate rather than the mode.
+cat > "$work/etc/netcfgd.conf" <<CONF
+global { dns { dns_mode = "write_resolv_conf" } }
+interface vpn0 {
+	preference = 700
+	routes     = "default"
+	dns        = "9.9.9.9"
+	openvpn { config = "$work/etc/work.ovpn" }
+}
+CONF
+"$ncfg" apply > "$work/dns.txt" 2>&1 || true
+check "a dns block on the tunnel is what asks for it" \
+	"$(grep -c '^nameserver 10.0.0.53' "$work/resolv.conf" 2>/dev/null || true)" "1"
+# Rule 4: the operator's server comes first, the reported one after.
+check "and the operator's own server still comes first" \
+	"$(grep -n 'nameserver' "$work/resolv.conf" | head -1 | grep -c '9.9.9.9' || true)" "1"
 
 "$ncfg" plan > "$work/replan.txt" 2>&1 || true
 check "and the next plan has nothing to do" \

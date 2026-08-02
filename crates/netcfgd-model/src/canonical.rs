@@ -5,7 +5,7 @@
 //! that holds, so it is tested rather than asserted.
 
 use crate::address::check_multiplicity;
-use crate::dns::DnsPolicy;
+use crate::dns::{DnsMode, DnsPolicy};
 use crate::{Document, Error, InterfaceKind, SCHEMA_VERSION};
 
 impl Document {
@@ -84,12 +84,13 @@ impl Document {
 		check_unique("interface", self.interfaces.iter().map(|i| i.name.as_str()))?;
 		check_unique("network", self.networks.iter().map(|n| n.id.as_str()))?;
 
-		check_dns_capability("globals", &self.globals.dns)?;
+		let host_mode = &self.globals.dns.mode;
+		check_dns_capability("globals", &self.globals.dns, host_mode)?;
 
 		for interface in &self.interfaces {
 			check_multiplicity(&interface.name, &interface.addressing)?;
 			if let Some(dns) = &interface.dns {
-				check_dns_capability(&interface.name, dns)?;
+				check_dns_capability(&interface.name, dns, host_mode)?;
 			}
 			for hook in &interface.hooks {
 				if !hook.path.starts_with('/') {
@@ -103,7 +104,7 @@ impl Document {
 		for network in &self.networks {
 			check_multiplicity(&network.id, &network.addressing)?;
 			if let Some(dns) = &network.dns {
-				check_dns_capability(&network.id, dns)?;
+				check_dns_capability(&network.id, dns, host_mode)?;
 			}
 			for hook in &network.hooks {
 				if !hook.path.starts_with('/') {
@@ -173,11 +174,36 @@ fn check_unique<'a>(
 	Ok(())
 }
 
-fn check_dns_capability(scope: &str, dns: &DnsPolicy) -> Result<(), Error> {
-	if dns.needs_routing() && !dns.mode.can_route() {
+/// Decision 0007's capability check, asked of the mode that will actually
+/// deliver this scope.
+///
+/// **The mode is not a per-interface choice**, and this used to be asked as
+/// though it were. A scope states one only to override, so
+///
+/// ```text
+/// global    { dns { dns_mode = "dnsmasq" } }
+/// interface vpn0 { dns { domains = ["corp.example"] } }
+/// ```
+///
+/// was refused with "mode none cannot express routing domains" -- naming a mode
+/// nobody wrote and no delivery would use, for a config that is the recommended
+/// way to split DNS down a tunnel. The only way past it was to repeat
+/// `dns_mode` in every interface block, which is a second place for the host's
+/// resolver to be stated and disagree.
+///
+/// This is the compile-time twin of the defect `dns::inheriting` fixed at
+/// delivery, found the same way: by writing the config the documentation
+/// recommends and watching it be refused.
+fn check_dns_capability(scope: &str, dns: &DnsPolicy, host_mode: &DnsMode) -> Result<(), Error> {
+	let effective = if dns.mode == DnsMode::None {
+		host_mode
+	} else {
+		&dns.mode
+	};
+	if dns.needs_routing() && !effective.can_route() {
 		return Err(Error::DnsModeCannotRoute {
 			scope: scope.to_owned(),
-			mode: dns.mode.name(),
+			mode: effective.name(),
 		});
 	}
 	Ok(())

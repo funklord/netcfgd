@@ -332,6 +332,61 @@ fn a_scope_capable_dns_mode_accepts_routing_domains() {
 	assert!(doc.validate().is_ok());
 }
 
+/// A scope that states no mode of its own is checked against the host's.
+///
+/// The mode is not a per-interface choice -- a scope states one only to
+/// override -- so a scope with routing domains and no mode is checked against
+/// the mode that will actually deliver it. This used to be refused as "mode
+/// none cannot express routing domains", naming a mode nobody wrote, for the
+/// config that is the recommended way to split DNS down a tunnel.
+#[test]
+fn a_scope_with_no_mode_inherits_the_hosts_before_being_checked() {
+	let mut doc = Document::default();
+	doc.globals.dns = DnsPolicy {
+		mode: DnsMode::Dnsmasq,
+		..DnsPolicy::default()
+	};
+	let mut vpn = iface("vpn0");
+	vpn.dns = Some(DnsPolicy {
+		domains: vec![RoutingDomain {
+			suffix: "corp.example".to_owned(),
+			exclusive: true,
+		}],
+		..DnsPolicy::default()
+	});
+	doc.interfaces.push(vpn);
+
+	assert_eq!(doc.validate(), Ok(()));
+}
+
+/// And refused when the host's mode cannot route either -- with that mode
+/// named, rather than the `none` the scope happened to hold.
+#[test]
+fn a_scope_with_no_mode_is_refused_by_the_hosts_mode_and_names_it() {
+	let mut doc = Document::default();
+	doc.globals.dns = DnsPolicy {
+		mode: DnsMode::WriteResolvConf,
+		..DnsPolicy::default()
+	};
+	let mut vpn = iface("vpn0");
+	vpn.dns = Some(DnsPolicy {
+		domains: vec![RoutingDomain {
+			suffix: "corp.example".to_owned(),
+			exclusive: true,
+		}],
+		..DnsPolicy::default()
+	});
+	doc.interfaces.push(vpn);
+
+	assert_eq!(
+		doc.validate(),
+		Err(Error::DnsModeCannotRoute {
+			scope: "vpn0".to_owned(),
+			mode: "write_resolv_conf",
+		})
+	);
+}
+
 /// A flat mode with no routing domains is not an error. The check is about
 /// what the config asks for, not about which mode was chosen.
 #[test]
