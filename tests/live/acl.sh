@@ -111,6 +111,16 @@ start_fake() {
 		[ "$waited" -gt 50 ] && skip "the fake hostapd never started"
 		sleep 0.1
 	done
+	# A round trip nobody reads, before anything is measured. The socket
+	# existing is not the same as the process answering on it, and netcfgd
+	# reads a running access point's ACL under a one-second deadline that is
+	# there on purpose -- a wedged hostapd must not stall the reconcile loop.
+	# On a loaded machine a Python fake's *first* reply can cost more than
+	# that, and netcfgd then correctly treats the list as unreadable and
+	# converges nothing, which reads as two checks failing for no reason.
+	# Seen once, during a `make live` sharing the machine with a container
+	# build; the deadline is not the thing to change.
+	"$ncfg" plan > /dev/null 2>&1 || true
 }
 
 # --------------------------------------------------- an edited list converges
