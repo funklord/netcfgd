@@ -2806,6 +2806,13 @@ const MODIFIERS: &[(&str, usize)] = &[
 	("metric", 1),
 	("preferred_lft", 1),
 	("valid_lft", 1),
+	// Prefix delegation, which is a property of the `dhcp6` entry rather than
+	// of an address. `pd` alone asks for whatever the ISP offers; the other two
+	// say what to ask for, and each implies `pd` so that a length without it is
+	// not silently inert.
+	("pd", 0),
+	("pd_hint", 1),
+	("pd_length", 1),
 	("nodad", 0),
 	("home", 0),
 	("mngtmpaddr", 0),
@@ -2926,14 +2933,146 @@ fn netmask_to_prefix(text: &str) -> Option<u8> {
 	u8::try_from(ones).ok()
 }
 
+/// A keyword source that takes no modifiers says so.
+///
+/// These arms used to `return` before the modifier loop ran, so
+/// `config = "dhcp4 metric 100"` compiled and dropped the metric. Section 2's
+/// rule about unknown fields is a rule about the language too: acting on a
+/// subset of what the author wrote is the failure mode, and it is worse here
+/// than in the document because the author is looking at the line.
+fn no_modifiers(entry: &Spanned<AddressEntry>, source: &str, diags: &mut Diagnostics) -> bool {
+	let Some((keyword, _)) = entry.node.modifiers.first() else {
+		return true;
+	};
+	diags.push(
+		Diagnostic::new(
+			entry.span,
+			format!("`{keyword}` is not something `{source}` takes"),
+		)
+		.with_help("modifiers belong to an address; `pd` and its two settings belong to dhcp6"),
+	);
+	false
+}
+
+/// `dhcp6`, and the prefix delegation it may ask for.
+///
+/// `pd` alone asks for whatever the ISP offers. `pd_length 56` asks for a
+/// size, and `pd_hint 2001:db8::` asks for a particular block -- both of which
+/// a server may ignore, which is why they are a request and not a value. Each
+/// implies `pd`, so a length with no `pd` beside it is not silently inert.
+///
+/// Only odhcp6c can serve any of this; decision 0050 has why dhcpcd cannot, and
+/// `netcfgd-apply` refuses the pairing rather than starting a client that would
+/// take a lease and report nothing.
+fn dhcp6_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Option<AddressSource> {
+	let mut dhcp6 = Dhcp6::default();
+	let mut request = netcfgd_model::PdRequest::default();
+	let mut asked = false;
+
+	for (keyword, argument) in &entry.node.modifiers {
+		match (keyword.as_str(), argument.as_deref()) {
+			("pd", _) => asked = true,
+			("pd_length", Some(value)) => {
+				let Ok(length) = value.parse::<u8>() else {
+					diags.push(Diagnostic::new(
+						entry.span,
+						format!("`{value}` is not a prefix length"),
+					));
+					return None;
+				};
+				if length > 128 {
+					diags.push(Diagnostic::new(
+						entry.span,
+						format!("a prefix length is between 0 and 128, not {length}"),
+					));
+					return None;
+				}
+				request.length = Some(length);
+				asked = true;
+			}
+			("pd_hint", Some(value)) => {
+				if value.parse::<std::net::Ipv6Addr>().is_err() {
+					diags.push(
+						Diagnostic::new(
+							entry.span,
+							format!("`{value}` is not an IPv6 prefix to ask for"),
+						)
+						.with_help("a hint is an address without a length, such as 2001:db8::"),
+					);
+					return None;
+				}
+				request.hint = Some(value.to_owned());
+				asked = true;
+			}
+			(other, _) => {
+				diags.push(
+					Diagnostic::new(
+						entry.span,
+						format!("`{other}` is not something `dhcp6` takes"),
+					)
+					.with_help("dhcp6 takes pd, pd_hint and pd_length"),
+				);
+				return None;
+			}
+		}
+	}
+
+	if asked {
+		dhcp6.prefix_delegation = Some(request);
+	}
+	Some(AddressSource::Dhcp6(dhcp6))
+}
+
+/// `@pd:wan0` and `@pd:wan0/2`, the DSL spelling of a delegated prefix.
+///
+/// Matching `@secret:` in shape because both are indirections the document
+/// carries instead of a value.
+fn delegated_source(
+	entry: &Spanned<AddressEntry>,
+	diags: &mut Diagnostics,
+) -> Option<AddressSource> {
+	let rest = entry.node.head.trim().strip_prefix("@pd:")?;
+	let (source, suffix) = rest.split_once('=').unwrap_or((rest, "::1/64"));
+	let (source, subnet) = match source.split_once('/') {
+		Some((name, index)) => {
+			if let Ok(subnet) = index.parse::<u16>() {
+				(name, subnet)
+			} else {
+				diags.push(Diagnostic::new(
+					entry.span,
+					format!("`{index}` is not a subnet number"),
+				));
+				return None;
+			}
+		}
+		None => (source, 0),
+	};
+	Some(AddressSource::Delegated(Delegated {
+		prefix: PrefixRef {
+			source: source.to_owned(),
+			index: 0,
+			subnet,
+		},
+		suffix: suffix.to_owned(),
+	}))
+}
+
 /// One entry of a `config` value.
 fn address_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Option<AddressSource> {
 	let text = entry.node.head.trim();
 	match text {
-		"dhcp" | "dhcp4" => return Some(AddressSource::Dhcp4(Dhcp4::default())),
-		"dhcp6" | "dhcpv6" => return Some(AddressSource::Dhcp6(Dhcp6::default())),
-		"slaac" => return Some(AddressSource::Slaac(Slaac::default())),
-		"link-local" | "link_local" => return Some(AddressSource::LinkLocal),
+		"dhcp" | "dhcp4" => {
+			return no_modifiers(entry, "dhcp4", diags)
+				.then(|| AddressSource::Dhcp4(Dhcp4::default()))
+		}
+		"dhcp6" | "dhcpv6" => return dhcp6_source(entry, diags),
+		"slaac" => {
+			return no_modifiers(entry, "slaac", diags)
+				.then(|| AddressSource::Slaac(Slaac::default()))
+		}
+		"link-local" | "link_local" => {
+			return no_modifiers(entry, "link-local", diags).then_some(AddressSource::LinkLocal)
+		}
 		// Whatever something outside netcfgd reported for this interface -- a
 		// modem helper, or the tunnel daemon netcfgd itself started. There is no
 		// backend to name and no value to carry: the report is the value, and
@@ -2943,7 +3082,10 @@ fn address_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Opt
 		// modem's (decision 0047), and there is deliberately no second spelling:
 		// two words for one source is how a config language stops being
 		// greppable.
-		"reported" => return Some(AddressSource::Reported(netcfgd_model::Reported::default())),
+		"reported" => {
+			return no_modifiers(entry, "reported", diags)
+				.then(|| AddressSource::Reported(netcfgd_model::Reported::default()))
+		}
 		// netifrc's "no address at all", used on bridge members. An empty
 		// addressing list is already legal (decision 0006 rule 6), so this
 		// contributes nothing rather than being an error.
@@ -2963,33 +3105,8 @@ fn address_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Opt
 		_ => {}
 	}
 
-	// `@pd:wan0` and `@pd:wan0/2` are the DSL spelling of a delegated prefix,
-	// matching `@secret:` in shape because both are indirections the document
-	// carries instead of a value.
-	if let Some(rest) = text.strip_prefix("@pd:") {
-		let (source, suffix) = rest.split_once('=').unwrap_or((rest, "::1/64"));
-		let (source, subnet) = match source.split_once('/') {
-			Some((name, index)) => {
-				if let Ok(subnet) = index.parse::<u16>() {
-					(name, subnet)
-				} else {
-					diags.push(Diagnostic::new(
-						entry.span,
-						format!("`{index}` is not a subnet number"),
-					));
-					return None;
-				}
-			}
-			None => (source, 0),
-		};
-		return Some(AddressSource::Delegated(Delegated {
-			prefix: PrefixRef {
-				source: source.to_owned(),
-				index: 0,
-				subnet,
-			},
-			suffix: suffix.to_owned(),
-		}));
+	if text.starts_with("@pd:") {
+		return delegated_source(entry, diags);
 	}
 
 	let mut address = text.to_owned();

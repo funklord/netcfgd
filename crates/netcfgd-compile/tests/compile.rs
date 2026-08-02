@@ -1715,3 +1715,102 @@ fn a_colliding_ifb_name_is_refused() {
 		"got: {rendered}"
 	);
 }
+
+/// The request half of prefix delegation, which had no spelling until now.
+///
+/// The model has carried `PdRequest` since the M4 freeze and nothing could set
+/// it, so a router could consume a prefix (`@pd:`) that it had no way to ask
+/// for. Decision 0051.
+#[test]
+fn a_dhcp6_source_can_ask_for_a_prefix() {
+	let document = build_ok(
+		r#"
+		interface wan0 { config = "dhcp6 pd" }
+		"#,
+	);
+	let AddressSource::Dhcp6(dhcp6) = &document.interfaces[0].addressing[0] else {
+		panic!("got {:?}", document.interfaces[0].addressing);
+	};
+	let request = dhcp6.prefix_delegation.as_ref().expect("`pd` asks for one");
+	// Bare `pd` asks for whatever the ISP gives out, which is odhcp6c's `-P 0`.
+	assert_eq!(request.length, None);
+	assert_eq!(request.hint, None);
+}
+
+/// And it can say what to ask for. Both are a request rather than a value: a
+/// server may hand back a different size or a different block, which is why the
+/// prefix that arrives is read back from the report.
+#[test]
+fn a_prefix_request_can_carry_a_length_and_a_hint() {
+	let document = build_ok(
+		r#"
+		interface wan0 { config = "dhcp6 pd_length 56 pd_hint 2001:db8::" }
+		"#,
+	);
+	let AddressSource::Dhcp6(dhcp6) = &document.interfaces[0].addressing[0] else {
+		panic!("got {:?}", document.interfaces[0].addressing);
+	};
+	let request = dhcp6.prefix_delegation.as_ref().expect("a request");
+	assert_eq!(request.length, Some(56));
+	assert_eq!(request.hint.as_deref(), Some("2001:db8::"));
+}
+
+/// A `dhcp6` with nothing said about delegation asks for no prefix.
+///
+/// It used to ask anyway -- `-P 0` went to odhcp6c unconditionally, so every
+/// `config = "dhcp6"` solicited a delegation nobody had written down.
+#[test]
+fn a_plain_dhcp6_asks_for_no_prefix() {
+	let document = build_ok(r#"interface wan0 { config = "dhcp6" }"#);
+	let AddressSource::Dhcp6(dhcp6) = &document.interfaces[0].addressing[0] else {
+		panic!("got {:?}", document.interfaces[0].addressing);
+	};
+	assert!(dhcp6.prefix_delegation.is_none());
+}
+
+/// A length or a hint implies the request, so neither is silently inert.
+#[test]
+fn a_length_alone_still_asks() {
+	let document = build_ok(r#"interface wan0 { config = "dhcp6 pd_length 60" }"#);
+	let AddressSource::Dhcp6(dhcp6) = &document.interfaces[0].addressing[0] else {
+		panic!("got {:?}", document.interfaces[0].addressing);
+	};
+	assert_eq!(
+		dhcp6
+			.prefix_delegation
+			.as_ref()
+			.and_then(|request| request.length),
+		Some(60)
+	);
+}
+
+/// A value that is not a length says so where the line is.
+#[test]
+fn a_prefix_length_that_is_not_one_is_refused() {
+	assert!(
+		errors(r#"interface wan0 { config = "dhcp6 pd_length wide" }"#)
+			.contains("is not a prefix length")
+	);
+	assert!(
+		errors(r#"interface wan0 { config = "dhcp6 pd_hint nonsense" }"#)
+			.contains("is not an IPv6 prefix to ask for")
+	);
+}
+
+/// A modifier a keyword source does not take is refused rather than dropped.
+///
+/// These arms used to return before the modifier loop ran, so
+/// `config = "dhcp4 metric 100"` compiled and threw the metric away. Section 2's
+/// rule about unknown fields is a rule about the language too.
+#[test]
+fn a_modifier_a_keyword_source_does_not_take_is_refused() {
+	let message = errors(r#"interface eth0 { config = "dhcp4 preferred_lft 60" }"#);
+	assert!(
+		message.contains("is not something `dhcp4` takes"),
+		"got {message}"
+	);
+	assert!(
+		errors(r#"interface wan0 { config = "dhcp6 preferred_lft 60" }"#)
+			.contains("is not something `dhcp6` takes")
+	);
+}

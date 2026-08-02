@@ -1,6 +1,7 @@
 # 0050: A delegated prefix is odhcp6c's to report
 
-Status: accepted
+Status: accepted; the deferral in "And nothing could ask for one anyway" is
+lifted by [0051](0051-the-request-half-of-a-delegated-prefix.md)
 Date: 2026-08-02
 Milestone: closes a hole in M4's `Delegated` (0009)
 
@@ -66,6 +67,11 @@ surface that nothing here can exercise end to end -- odhcp6c is not packaged for
 Debian, so the client that serves the feature cannot be run on the machine this
 was written on -- and a language addition tested only against itself is how a
 keyword gets frozen in the wrong shape.
+
+**[0051](0051-the-request-half-of-a-delegated-prefix.md) lifts that**, on the
+only grounds that should lift it: the reason stopped being true. odhcp6c builds
+from source in two minutes, so the syntax could be exercised against a real
+client and a real server after all, and it was.
 
 ## Decision
 
