@@ -2670,6 +2670,10 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 
 /// Whether a report for this interface is one netcfgd was told to act on.
 ///
+/// Public because `ncfg explain` has to answer the same question: an operator
+/// asking why a route is there gets "the configuration does not ask for it"
+/// unless the explanation knows what the planner knows.
+///
 /// Two ways, and they are the same question asked of different documents.
 ///
 /// **The addressing list says `reported`**, which is how a modem helper's
@@ -2692,7 +2696,8 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 /// in `netcfgd_model::dns`: netcfgd having started the writer is enough to
 /// install a route down that link and deliberately not enough to change where
 /// every query on the machine goes (decision 0049).
-fn takes_reports(interface: &Interface) -> bool {
+#[must_use]
+pub fn takes_reports(interface: &Interface) -> bool {
 	interface
 		.addressing
 		.iter()
