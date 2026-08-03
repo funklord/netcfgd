@@ -669,13 +669,15 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after the session that finished what
-[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md) started —
-comparing what a link kind carries against what the kernel holds — for a macvlan,
-the seven tunnel kinds and a VXLAN, leaving only the VLAN. It is another answer
-to the question the four sessions before it kept finding new places to ask: **is
-what is running still what the document says?** What follows is organised by
-subject, not by the order it was built in.
+Last rewritten after the session that **closed**
+[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s list:
+every link kind's own settings are now compared against what the kernel holds,
+the VLAN last and by the only route the kernel allows — deleting the interface
+and making it again
+([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)).
+It is the last answer to the question the sessions before it kept finding new
+places to ask: **is what is running still what the document says?** What follows
+is organised by subject, not by the order it was built in.
 
 **Milestones.** M1–M6 are done. M7's NetworkManager shim has tiers 1 and 2
 complete and tier 3 bounded rather than built — and **tier 3 bounds the shim,
@@ -854,12 +856,27 @@ Three rules hold across all four, and every one was paid for:
   what *was* chosen rebuilds the thing on every reconcile. This mistake has now
   been made and caught three times.
 
-**What is still silent**, so that nobody assumes otherwise: **a VLAN's id and
-tag protocol** under a name that does not encode them, and **a macvlan's
-parent**. Both are the kernel's worst answer — accepted and ignored — so a set
-would report a change nobody made, and correcting a VLAN id means a delete and a
-create. That is the one job left on this list and it wants its own session
-([0058](docs/decisions/0058-a-change-carries-the-whole-nest.md)).
+**And where the kernel will not change a thing at all, the interface is remade.**
+A VLAN's id and tag protocol are set at creation and `vlan_changelink` ignores
+them afterwards, which is the kernel's worst answer: it takes the request and
+does nothing. So the planner deletes the interface and makes it again, and the
+passes below it put back everything that went with it — addresses, routes, the
+client that was leasing, the members that were enslaved — because they run
+against an observation the doomed interface is no longer in
+([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)).
+An interface that exists as an entirely *different kind* takes the same road; that
+was silent too, and worse, because netcfgd brought somebody else's device up and
+called the network configured.
+
+**Only a link netcfgd created is ever thrown away.** This is the one destructive
+thing in a plan, and the ownership rule that governs addresses and routes governs
+it: a link netcfgd has no record of creating gets a sentence and is left alone. A
+guard refuses the whole sequence, delete and backend stop together, rather than
+half of it.
+
+**What is still silent**, so that nobody assumes otherwise: **a macvlan's
+parent**, which the kernel also accepts and ignores. Same answer, same remedy,
+and nothing has asked for it.
 
 #### Explaining it
 
@@ -904,7 +921,9 @@ them and turned up the question nobody had asked at all — what happens to the
 attributes a change request leaves out. Two of the answers would have shipped as
 defects: a macvlan mode netcfgd would refuse to move, and a VXLAN whose endpoint
 could never be corrected because the nest carried a port the kernel refuses to
-see.
+see. The session after it found its own defect the same way — not from a test, but
+from asking what *else* would fall into the safe direction of a new comparison,
+which is how an interface existing as the wrong kind turned out to be invisible.
 
 **A gate can be blind because its input does not contain its subject.** Six
 instances across two sessions now. The newest is the sharpest: a live check that
@@ -931,32 +950,23 @@ match.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **The VLAN, which is the last of [0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s
-   list and the only one that is not the bridge's shape.** A macvlan, all seven
-   tunnel kinds and a VXLAN were done in
-   [0058](docs/decisions/0058-a-change-carries-the-whole-nest.md); a VLAN's `id`
-   and `protocol` are *accepted and ignored* by the kernel, so a set would report
-   a change nobody made. Correcting one means a delete and a create, which drops
-   the addresses and routes on the interface and interacts with the planner's
-   creation pass — the reason it was left last twice now. A macvlan's parent is
-   the same answer at a smaller size and rides along with it.
+2. **The shim's remaining device types, which are now unblocked rather than
+   forbidden.** `.Device.Vlan` wants an id and a parent, and `.Device.IPTunnel` a
+   local and a remote; the observation carries the id and both endpoints because
+   0058 and 0059 needed them for a local reason, which is the direction
+   constraint 6 requires and the road a bridge, a bond and a WireGuard tunnel all
+   took. **The parent is the piece still missing** for a VLAN, and it should be
+   added for a local reason too or not at all — a macvlan's parent being silently
+   ignored by the kernel is one, and is the last thing on 0057's list that nothing
+   compares.
 
-   **The delete-and-create pass it needs has a second customer**: an interface
-   that exists as the *wrong kind* is not recreated either, and plans nothing but
-   a `link.up` — measured, and written down under "true and non-obvious". One
-   session should do both.
-
-   Ask the kernel before writing it. Fourteen attributes have been measured
-   across seven families and they answer four different ways; 0058 has the table,
-   and it corrected two rows of 0057's by asking again.
-
-3. **The shim's remaining device types follow from that, not the reverse.**
-   `.Device.IPTunnel` wants a local and a remote, and the observation now carries
-   both — 0058 put them there for a local reason, so the shim gets them for free,
-   which is the direction constraint 6 requires. `.Device.Vlan` still wants an id
-   and a parent the observation does not carry, and it should get them from the
-   work above rather than from the shim asking. A bridge, a bond and a WireGuard
-   tunnel all went that way round.
+3. **Nothing else on the "is it still what the document says?" question is
+   open.** Daemons, kernel objects, secrets and unread files all have an answer,
+   and 0059 closed the last kind. The next thing of this shape, when it turns up,
+   is likely to be a backend netcfgd did *not* start — which
+   [0053](docs/decisions/0053-a-file-netcfgd-does-not-read-can-still-be-hashed.md)
+   guessed at once already and was wrong about, so it is a suspicion rather than a
+   plan.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one.
 
@@ -974,7 +984,9 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A record that defers something needs a forward pointer when the deferral is lifted.** 0050 has one to 0051 and it works; 0047 and 0048 deferred work the same session then did and had none, so a reader landing on 0047 from `docs/interface-report.md` — which links there — was told the rename had not happened. The body stays as written, because a decision is changed by superseding it; the `Status` line is where the pointer goes.
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
-- **An interface that exists as the wrong kind is not recreated, and nothing says so.** Measured while bounding this work: a document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, plans `link.up` and nothing else. The kind is observed and never compared. Everything 0057 and 0058 added degrades safely into it — a macvlan whose device is not a macvlan reports no macvlan settings, so nothing is compared and nothing is corrected — but the gap is its own defect, and it wants the same delete-and-create pass a VLAN id does. Which is one more reason those two belong in one session.
+- **~~An interface that exists as the wrong kind is not recreated, and nothing says so.~~ Closed** ([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)), in the commit after the one that wrote it down. A document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, planned `link.up` and nothing else — netcfgd brought somebody else's device up and called the network configured. It shared its remedy with the VLAN id, which is why one session did both. What is worth keeping from it is the measurement habit that found it: the finding came from asking what *else* would fall into the safe direction of the new comparisons, not from a test.
+- **A break that hits two protections proves nothing about either.** Disabling the recreation pass's ownership check by replacing `if !link.ownership.may_remove() {` also disabled `teardown_links`', because the line is identical in both -- eight fixtures went red and none of them said which protection had gone. The re-run with a unique anchor failed exactly one. Section 9 already warns about a check that passes because of a *different* protection; this is the same disease in the break rather than in the check.
+- **A fake that leaves a field blank makes a loop look like convergence.** The fixture harness's simulated `link.create` produced an empty link with the right name, so a remade VLAN came back with no id at all -- and the second plan found nothing to compare and called that agreement. Every comparison 0057 to 0059 added was invisible to the idempotence gate for the same reason. The fake now fills in what the kernel would report about the device it just made, with the fields the document does *not* state deliberately left absent, because that is also what the kernel does.
 - **A reference tool can hide the kernel's behaviour by being helpful.** `ip link set tun0 type gre remote X` keeps the tunnel's key and local address, which looks like the kernel merging a partial update. It is not: `ip` reads the device and refills every field before it sends anything. Forty lines of python sending one raw attribute said the opposite, and the design turned on which answer was true. Section 9's advice is to prefer a reference tool over a fixture, and this is its limit — a reference tool answers "what does this command do", and sometimes the question is "what does the kernel do".
 - **A guard whose condition is a comparison needs the case where both halves moved.** The geneve VNI is left out of a change nest because the kernel refuses a *changed* one — and restating the VNI it already has is accepted. So the first live test, which edited the remote alone, passed with the omission deliberately removed: the nest carried the VNI, at the value the kernel already had, and nothing failed. What made the gate real was editing the VNI *and* the remote in one go, which is also the only case an operator would notice. The neighbour of section 9's input-set rule: a check on a difference has to contain the difference.
 - **`make live` is where defects are found**, not `make check`. Nearly every real bug in the last several milestones came from a real kernel or a real reference tool, and several came from a test that had been passing for the wrong reason.

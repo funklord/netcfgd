@@ -179,6 +179,15 @@ pub struct ObservedLink {
 	/// between any of those and `passthru`. Decision 0058.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub macvlan: Option<ObservedMacvlan>,
+	/// A VLAN's id and tag protocol, where this link is one.
+	///
+	/// Neither can be corrected in place: `vlan_changelink` accepts a request to
+	/// change either and ignores it, so an edited id is applied by deleting the
+	/// interface and making it again. This is what says one has moved -- and a
+	/// VLAN is usually named for its id, so the operator who gets any use out of
+	/// it is the one who named it something else. Decision 0059.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub vlan: Option<ObservedVlan>,
 	/// A tunnel's endpoints, where this link is one of the seven kinds.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub tunnel: Option<ObservedTunnel>,
@@ -256,6 +265,24 @@ pub struct ObservedMacvlan {
 	/// something this build cannot express -- and nothing is corrected on one.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub mode: Option<String>,
+}
+
+/// A VLAN's id and tag protocol, as the kernel reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedVlan {
+	/// The VLAN id.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub id: Option<u16>,
+	/// The tag protocol, as the document spells it: `dot1q` or `dot1ad`.
+	///
+	/// Named rather than carried as an ethertype, for the reason
+	/// [`ObservedBond::mode`] is named: the planner compares what the config says
+	/// against a word. `None` for a tag protocol netcfgd has no name for, which
+	/// is not compared -- an interface is not deleted over a value this build
+	/// cannot describe.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub protocol: Option<String>,
 }
 
 /// A tunnel's endpoints, as the kernel reports them.

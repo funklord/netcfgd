@@ -448,6 +448,20 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		);
 	}
 
+	// Before the creation pass, because what it decides is that an interface
+	// which exists is about to not: a VLAN whose id the kernel will not change
+	// has to be deleted and made again (0059). What comes back is the same
+	// observation with those interfaces, and everything the kernel holds on
+	// them, taken out -- so every pass below plans for them the way it plans for
+	// an interface that was never there, which is what they are about to be.
+	//
+	// One reconciliation of the two views rather than a flag threaded through
+	// eleven passes. A pass added later gets the right answer without knowing
+	// this happened.
+	let recreating = builder.plan_recreation(desired, observed);
+	let rebuilt = without_links(observed, &recreating);
+	let observed = rebuilt.as_ref().unwrap_or(observed);
+
 	// Three passes over the interfaces rather than one. Rule 1 wants every
 	// link created before anything references it, and rule 2 wants every
 	// enslavement done before the master is addressed or brought up -- and a
@@ -957,6 +971,107 @@ impl Builder {
 	}
 
 	/// Rule 1: create a link before anything references it.
+	/// Delete an interface whose identity the kernel will not change, so that the
+	/// creation pass can make it again.
+	///
+	/// The last shape on 0057's list and the one that is not the bridge's
+	/// (0059). Two kinds of difference get here, and both are the kernel's worst
+	/// answer -- it takes the request and changes nothing:
+	///
+	/// - **A VLAN's id or tag protocol.** `vlan_changelink` handles flags and the
+	///   priority maps and ignores the rest, so `ip link set eth0.42 type vlan id 43`
+	///   succeeds and the interface still carries 42. Measured.
+	/// - **An interface that exists as a different kind entirely**, which nothing
+	///   compared before this: a document declaring `mixup` as a macvlan, against
+	///   a `mixup` that is a dummy, planned `link.up` and nothing else.
+	///
+	/// **Only a link netcfgd created is deleted.** That is the safety property
+	/// this whole crate is built around, and it matters more here than anywhere
+	/// else: everything else in a plan adds or corrects, while this throws an
+	/// interface away. A link netcfgd has no record of creating gets a sentence
+	/// naming what differs and what correcting it would cost, and nothing else.
+	///
+	/// A guarded interface refuses this the way it refuses any interruption
+	/// (0010). It refuses the `backend.stop` beside it too -- both ops are
+	/// disruptive and both go through the one place that decides -- so a refusal
+	/// leaves the interface entirely alone rather than half torn down, and the
+	/// name does not join the returned list.
+	fn plan_recreation(&mut self, desired: &Document, observed: &Observed) -> Vec<String> {
+		let mut recreating = Vec::new();
+		for interface in &desired.interfaces {
+			let Some(link) = observed.link(&interface.name) else {
+				continue;
+			};
+			let Some((field, desired_value, seen)) = recreation_reason(interface, link) else {
+				continue;
+			};
+			let name = &interface.name;
+			if !link.ownership.may_remove() {
+				self.warn(
+					name,
+					format!(
+						"the {field} of {name} is {desired_value} in the config and {seen} in the \
+						 kernel, and the kernel will not change it on an interface that exists -- \
+						 correcting it means deleting {name} and making it again, which netcfgd \
+						 will not do to a link it did not create"
+					),
+				);
+				continue;
+			}
+			// What runs on it stops first. A client bound to an interface that is
+			// about to be deleted would be left holding a name that comes back as
+			// a different device, with netcfgd's own record still saying it runs
+			// -- which is a plan that converges while nothing is leasing.
+			let mut stopped = Vec::new();
+			for backend in observed
+				.backends
+				.iter()
+				.filter(|backend| backend.interface == *name)
+			{
+				let id = self.push(
+					Op::BackendStop {
+						kind: backend.kind,
+						iface: name.clone(),
+					},
+					Reason::differs(
+						name,
+						field,
+						format!("{desired_value}, which needs {name} remade"),
+						seen.clone(),
+					),
+					Vec::new(),
+					Some(Op::BackendStart {
+						kind: backend.kind,
+						iface: name.clone(),
+					}),
+				);
+				stopped.push(id);
+			}
+			let id = self.push(
+				Op::LinkDelete { name: name.clone() },
+				Reason::differs(name, field, desired_value, seen),
+				stopped,
+				// The create that follows is the inverse in every sense that
+				// matters, and it is in this same plan. Offering `link.create`
+				// here would claim commit-confirm can put back an interface's
+				// addresses and routes, which it cannot: what this deletes is
+				// remade by the pass below from the document, not from the
+				// observation.
+				None,
+			);
+			// Refused by a guard, or dropped because the device is unmanaged. The
+			// interface is then left exactly as it is: not deleted, and -- because
+			// its name does not go in the list -- not planned for as though it had
+			// been.
+			if id == u32::MAX {
+				continue;
+			}
+			self.gates.push((name.clone(), id));
+			recreating.push(name.clone());
+		}
+		recreating
+	}
+
 	fn plan_link_creation(&mut self, interface: &Interface, observed: &Observed) {
 		if observed.link(&interface.name).is_some() {
 			return;
@@ -983,12 +1098,17 @@ impl Builder {
 			);
 			return;
 		}
-		let id = self.push_root(
+		// Root for an interface that was simply absent, and after the delete for
+		// one being remade -- `plan_recreation` leaves that delete's id in the
+		// gates, so this is the same call for both and neither has to know which
+		// case it is in.
+		let id = self.push(
 			Op::LinkCreate {
 				name: interface.name.clone(),
 				kind: Box::new(interface.kind.clone()),
 			},
 			Reason::absent(&interface.name, "kind", kind_name(&interface.kind)),
+			self.gate(&interface.name),
 			Some(Op::LinkDelete {
 				name: interface.name.clone(),
 			}),
@@ -3444,6 +3564,168 @@ impl Builder {
 			stranded: self.stranded,
 		}
 	}
+}
+
+/// The kernel kind netcfgd would create this interface as, where it creates one.
+///
+/// `None` for the four kinds that do not come from netlink: a physical device is
+/// the hardware's, a `PPPoE` session's interface is `pppd`'s, an `OpenVPN`
+/// tunnel's is `openvpn`'s, and a tun or tap comes from an ioctl. netcfgd cannot
+/// remake any of them, so what the kernel calls them is not netcfgd's business
+/// and a mismatch there must not be read as one.
+///
+/// Exhaustive on purpose: a kind added later has to decide which of the two it
+/// is, in this function, rather than defaulting into "delete it and try again".
+fn recreatable_kind(kind: &InterfaceKind) -> Option<&'static str> {
+	match kind {
+		InterfaceKind::Bridge(_) => Some("bridge"),
+		InterfaceKind::Bond(_) => Some("bond"),
+		InterfaceKind::Vlan(_) => Some("vlan"),
+		InterfaceKind::Vxlan(_) => Some("vxlan"),
+		InterfaceKind::WireGuard(_) => Some("wireguard"),
+		InterfaceKind::Dummy => Some("dummy"),
+		InterfaceKind::Veth(_) => Some("veth"),
+		InterfaceKind::Vrf(_) => Some("vrf"),
+		InterfaceKind::Macvlan(_) => Some("macvlan"),
+		InterfaceKind::Tunnel(tunnel) => Some(tunnel.mode.name()),
+		InterfaceKind::Ifb => Some("ifb"),
+		InterfaceKind::Physical
+		| InterfaceKind::Pppoe(_)
+		| InterfaceKind::OpenVpn(_)
+		| InterfaceKind::Tun(_) => None,
+	}
+}
+
+/// Why this interface has to be remade rather than corrected, if it does.
+///
+/// Returns the dotted field, what the document says and what the kernel has --
+/// the three things a `Reason` carries, because that is what this is for.
+fn recreation_reason(
+	interface: &Interface,
+	link: &netcfgd_model::ObservedLink,
+) -> Option<(&'static str, String, String)> {
+	let wanted = recreatable_kind(&interface.kind)?;
+	// An empty kind is a device with no `LINKINFO` at all -- a NIC, or the
+	// loopback. It is not compared: the document says this is a dummy and the
+	// kernel says nothing, and the honest reading of that is "somebody else's
+	// device with a name netcfgd wants", which the ownership check below turns
+	// into a sentence rather than a deletion.
+	if !link.kind.is_empty() && link.kind != wanted {
+		return Some(("kind", wanted.to_owned(), link.kind.clone()));
+	}
+	let InterfaceKind::Vlan(vlan) = &interface.kind else {
+		return None;
+	};
+	// Only where the kernel answered. A VLAN whose `INFO_DATA` did not arrive,
+	// or whose tag protocol this build has no word for, is not compared -- an
+	// interface is not thrown away over an unanswered question, which is the
+	// `None` is not `false` rule (0052) applied to the most destructive action
+	// in the planner.
+	let seen = link.vlan.as_ref()?;
+	if let Some(id) = seen.id {
+		if id != vlan.id {
+			return Some(("vlan.id", vlan.id.to_string(), id.to_string()));
+		}
+	}
+	let protocol = seen.protocol.as_deref()?;
+	if protocol != vlan.protocol.name() {
+		return Some((
+			"vlan.protocol",
+			vlan.protocol.name().to_owned(),
+			protocol.to_owned(),
+		));
+	}
+	None
+}
+
+/// The same observation with some interfaces, and everything the kernel holds on
+/// them, taken out.
+///
+/// `None` when there is nothing to take out, which is every ordinary plan --
+/// this must not clone a whole observation to change nothing.
+///
+/// Every field is listed rather than filled in with `..observed.clone()`, so
+/// that a new per-interface field in [`Observed`] stops this compiling instead of
+/// being carried through unfiltered. A stale entry here is not a cosmetic
+/// problem: it is the planner believing something survived a deletion.
+fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
+	if gone.is_empty() {
+		return None;
+	}
+	let doomed = |name: &String| gone.iter().any(|entry| entry == name);
+	// A bridge VLAN is keyed by interface *index*, which is the one thing about a
+	// remade interface that does not survive: the kernel hands out a new one. So
+	// the indices are resolved here, while the links are still in hand.
+	let indices: Vec<u32> = observed
+		.links
+		.iter()
+		.filter(|link| doomed(&link.name))
+		.map(|link| link.index)
+		.collect();
+	Some(Observed {
+		links: observed
+			.links
+			.iter()
+			.filter(|link| !doomed(&link.name))
+			.cloned()
+			// A member of a bridge that is about to be deleted is about to have
+			// no master, and a redirect onto a device that is going away is
+			// about to be no redirect. Left as they are, the enslavement pass
+			// would see the membership it wants and plan nothing, leaving the
+			// remade bridge empty.
+			.map(|link| netcfgd_model::ObservedLink {
+				master: link.master.filter(|master| !doomed(master)),
+				ingress_redirect: link.ingress_redirect.filter(|target| !doomed(target)),
+				..link
+			})
+			.collect(),
+		addresses: observed
+			.addresses
+			.iter()
+			.filter(|address| !doomed(&address.interface))
+			.cloned()
+			.collect(),
+		routes: observed
+			.routes
+			.iter()
+			.filter(|route| !doomed(&route.interface))
+			.cloned()
+			.collect(),
+		// The stop for each of these is in the plan already, emitted beside the
+		// delete. Taking them out here is what makes the pass below start them
+		// again on the interface that comes back.
+		backends: observed
+			.backends
+			.iter()
+			.filter(|backend| !doomed(&backend.interface))
+			.cloned()
+			.collect(),
+		bridge_vlans: observed
+			.bridge_vlans
+			.iter()
+			.filter(|vlan| !indices.contains(&vlan.index))
+			.copied()
+			.collect(),
+		// A report is a file a helper wrote, not kernel state, and no kind that
+		// can be remade here has one -- a tunnel's interface is its daemon's and
+		// is never deleted by this. Kept, so that nothing is lost if that ever
+		// changes.
+		reports: observed.reports.clone(),
+		delegations: observed.delegations.clone(),
+		dns: observed.dns.clone(),
+		rules: observed.rules.clone(),
+		// Three records of "netcfgd did this to that interface". They are not
+		// filtered: each says what netcfgd once applied, which is still true and
+		// is what makes deleting the setting from the document mean something.
+		// What the *kernel* holds is what went away with the link, and that is
+		// the links list above.
+		qdisc_applied: observed.qdisc_applied.clone(),
+		ingress_applied: observed.ingress_applied.clone(),
+		forwarding_applied: observed.forwarding_applied.clone(),
+		nat: observed.nat.clone(),
+		nat_conflicts: observed.nat_conflicts.clone(),
+		address_proto_supported: observed.address_proto_supported,
+	})
 }
 
 /// Whether a desired route and an observed one are the same route.

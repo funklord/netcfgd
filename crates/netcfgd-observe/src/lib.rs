@@ -211,6 +211,15 @@ fn observed_link(
 				.and_then(netcfgd_model::MacvlanMode::from_number)
 				.map(|mode| mode.name().to_owned()),
 		}),
+		// An ethertype to the name the config uses, in the one place every other
+		// kernel-to-model translation in this function happens.
+		vlan: link.vlan.map(|vlan| netcfgd_model::ObservedVlan {
+			id: vlan.id,
+			protocol: vlan
+				.protocol
+				.and_then(netcfgd_model::VlanProtocol::from_ethertype)
+				.map(|protocol| protocol.name().to_owned()),
+		}),
 		tunnel: link.tunnel.map(|tunnel| netcfgd_model::ObservedTunnel {
 			local: tunnel.local,
 			remote: tunnel.remote,
@@ -399,6 +408,7 @@ mod tests {
 			bond: None,
 			bridge: None,
 			macvlan: None,
+			vlan: None,
 			tunnel: None,
 			vxlan: None,
 			index,

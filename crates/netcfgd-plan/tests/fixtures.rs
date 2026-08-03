@@ -47,6 +47,7 @@ fn link(name: &str) -> ObservedLink {
 		bond: None,
 		bridge: None,
 		macvlan: None,
+		vlan: None,
 		tunnel: None,
 		vxlan: None,
 	}
@@ -338,12 +339,105 @@ fn started_backend(
 	}
 }
 
+/// Fill in what the kernel would say about a link that was just created.
+///
+/// The document is the source, because the kernel's answer for a device netcfgd
+/// just made *is* what netcfgd asked for -- with one exception that matters and
+/// is the reason this exists at all: a field the document does not state comes
+/// back as whatever the kernel chose, which is not the document's `None`. Those
+/// are left absent here rather than guessed, so a comparison that treats "not
+/// stated" as a difference still converges in this harness and only a real
+/// comparison bug loops.
+fn describe_created(link: &mut ObservedLink, desired: &Document) {
+	use netcfgd_model::InterfaceKind as Kind;
+
+	let Some(interface) = desired
+		.interfaces
+		.iter()
+		.find(|interface| interface.name == link.name)
+	else {
+		return;
+	};
+	let kind = match &interface.kind {
+		Kind::Bridge(_) => "bridge",
+		Kind::Bond(_) => "bond",
+		Kind::Vlan(_) => "vlan",
+		Kind::Vxlan(_) => "vxlan",
+		Kind::WireGuard(_) => "wireguard",
+		Kind::Dummy => "dummy",
+		Kind::Veth(_) => "veth",
+		Kind::Vrf(_) => "vrf",
+		Kind::Macvlan(_) => "macvlan",
+		Kind::Tunnel(tunnel) => tunnel.mode.name(),
+		Kind::Ifb => "ifb",
+		// A physical device reports no kind, and the three that come from
+		// somewhere other than netlink are not created by a `link.create` at
+		// all.
+		Kind::Physical | Kind::Pppoe(_) | Kind::OpenVpn(_) | Kind::Tun(_) => "",
+	};
+	kind.clone_into(&mut link.kind);
+	match &interface.kind {
+		Kind::Vlan(vlan) => {
+			link.vlan = Some(netcfgd_model::ObservedVlan {
+				id: Some(vlan.id),
+				protocol: Some(vlan.protocol.name().to_owned()),
+			});
+		}
+		Kind::Macvlan(macvlan) => {
+			link.macvlan = Some(netcfgd_model::ObservedMacvlan {
+				mode: Some(macvlan.mode.name().to_owned()),
+			});
+		}
+		Kind::Vxlan(vxlan) => {
+			link.vxlan = Some(netcfgd_model::ObservedVxlan {
+				id: Some(vxlan.id),
+				local: vxlan.local,
+				remote: vxlan.remote,
+				port: vxlan.port,
+			});
+		}
+		Kind::Tunnel(tunnel) => {
+			link.tunnel = Some(netcfgd_model::ObservedTunnel {
+				local: tunnel.local,
+				remote: tunnel.remote,
+				ttl: tunnel.ttl,
+				key: tunnel.key,
+			});
+		}
+		Kind::Bond(bond) => {
+			link.bond = Some(netcfgd_model::ObservedBond {
+				mode: Some(bond.mode.name().to_owned()),
+				miimon: bond.miimon,
+			});
+		}
+		Kind::Bridge(bridge) => {
+			link.bridge = Some(netcfgd_model::ObservedBridge {
+				stp: bridge.stp,
+				forward_delay: bridge.forward_delay,
+				hello_time: bridge.hello_time,
+				ageing_time: bridge.ageing_time,
+				priority: bridge.priority,
+				vlan_filtering: bridge.vlan_filtering,
+			});
+		}
+		_ => {}
+	}
+}
+
 fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 	for action in &plan.actions {
 		match &action.op {
 			Op::LinkCreate { name, .. } => {
 				let mut created = link(name);
 				created.ownership = Ownership::Ours;
+				// What the kernel would report about the thing that was just
+				// made, not an empty link with the right name. A fake that left
+				// the kind and the per-kind settings blank cannot see a
+				// comparison that never converges: the second plan would find
+				// nothing to compare and call that agreement, which is how a
+				// recreation loop would look like a converged one here and loop
+				// on a real kernel (0057, 0058, 0059).
+				describe_created(&mut created, desired);
 				observed.links.push(created);
 			}
 			Op::LinkDelete { name } => {
@@ -4759,6 +4853,325 @@ interface bond0 {
 	assert!(
 		matches!(action.op, Op::LinkSetBond { mode: false, .. }),
 		"the mode rode along with an interval the kernel would then refuse"
+	);
+}
+
+/// An edited VLAN id is applied by making the interface again.
+///
+/// The kernel accepts `ip link set work-net type vlan id 43` and changes nothing,
+/// so there is no set to emit -- and a VLAN is usually named for its id, which is
+/// why this was invisible for so long: renaming the interface is a create and a
+/// delete already. The operator who names one `work-net` is the one who got
+/// silence (0059).
+#[test]
+fn an_edited_vlan_id_is_remade() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface work-net {
+	vlan { parent = "base0"; id = 43 }
+	config = "10.4.0.1/24"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "work-net"]);
+	"vlan".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+	observed.links[1].vlan = Some(netcfgd_model::ObservedVlan {
+		id: Some(42),
+		protocol: Some("dot1q".to_owned()),
+	});
+	observed.addresses.push(ObservedAddress {
+		interface: "work-net".to_owned(),
+		address: "10.4.0.1/24".to_owned(),
+		proto: Some(netcfgd_model::route::NETCFGD_PROTO),
+		ownership: Ownership::Ours,
+		origin: Some(Origin::Static),
+	});
+
+	let plan = settle(&desired, &mut observed);
+	let deleted = position(&plan, "link.delete");
+	let created = position(&plan, "link.create");
+	assert!(
+		deleted < created,
+		"the interface was created before it was deleted: {:?}",
+		names(&plan)
+	);
+	let action = &plan.actions[deleted];
+	assert_eq!(action.reason.field, "vlan.id");
+	assert_eq!(action.reason.desired, "43");
+	assert_eq!(action.reason.observed, "42");
+	// The address is the point of the exercise. It went with the interface, so
+	// the plan has to put it back -- and it is the pass *after* the delete that
+	// does, which only works because the observation those passes see no longer
+	// has the interface in it.
+	assert!(
+		position(&plan, "addr.add") > created,
+		"the address was not re-added after the interface was remade: {:?}",
+		names(&plan)
+	);
+	// And `settle` has already asserted the second plan is empty, which is the
+	// half that would fail if the remade interface were compared against the old
+	// id forever.
+}
+
+/// The tag protocol is the same answer, and it is checked separately.
+///
+/// `vlan_changelink` ignores an edited protocol exactly as it ignores an edited
+/// id -- measured, because the two are different attributes and one being
+/// ignored does not prove the other is.
+#[test]
+fn an_edited_vlan_protocol_is_remade() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface work-net {
+	vlan { parent = "base0"; id = 42; protocol = "dot1ad" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "work-net"]);
+	"vlan".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+	observed.links[1].vlan = Some(netcfgd_model::ObservedVlan {
+		id: Some(42),
+		protocol: Some("dot1q".to_owned()),
+	});
+
+	let plan = settle(&desired, &mut observed);
+	let action = &plan.actions[position(&plan, "link.delete")];
+	assert_eq!(action.reason.field, "vlan.protocol");
+	assert_eq!(action.reason.desired, "dot1ad");
+}
+
+/// A VLAN that agrees with its document is left alone.
+#[test]
+fn a_vlan_matching_its_document_is_not_remade() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface work-net {
+	vlan { parent = "base0"; id = 42 }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "work-net"]);
+	"vlan".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+	observed.links[1].vlan = Some(netcfgd_model::ObservedVlan {
+		id: Some(42),
+		protocol: Some("dot1q".to_owned()),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"link.delete"),
+		"a VLAN that matches its document was deleted: {:?}",
+		names(&plan)
+	);
+}
+
+/// An interface that exists as a different kind entirely is remade.
+///
+/// Nothing compared this before 0059: a document declaring `mixup` as a macvlan,
+/// against a `mixup` that is a dummy, planned a `link.up` and nothing else.
+#[test]
+fn an_interface_of_the_wrong_kind_is_remade() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface mixup {
+	macvlan { parent = "base0"; mode = "bridge" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "mixup"]);
+	"dummy".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+
+	let plan = settle(&desired, &mut observed);
+	let action = &plan.actions[position(&plan, "link.delete")];
+	assert_eq!(action.reason.field, "kind");
+	assert_eq!(action.reason.desired, "macvlan");
+	assert_eq!(action.reason.observed, "dummy");
+}
+
+/// A link netcfgd did not create is reported and never deleted.
+///
+/// The safety property, and the one place in the planner where getting it wrong
+/// destroys something: everything else in a plan adds or corrects.
+#[test]
+fn a_vlan_netcfgd_did_not_create_is_only_reported() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface work-net {
+	vlan { parent = "base0"; id = 43 }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "work-net"]);
+	"vlan".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	// The default, spelled out: nobody recorded creating it.
+	observed.links[1].ownership = Ownership::Unknown;
+	observed.links[1].vlan = Some(netcfgd_model::ObservedVlan {
+		id: Some(42),
+		protocol: Some("dot1q".to_owned()),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("a link it did not create")),
+		"nothing said why the id was not corrected: {:?}",
+		plan.warnings
+	);
+	assert!(
+		!names(&plan).contains(&"link.delete"),
+		"a link netcfgd did not create was deleted: {:?}",
+		names(&plan)
+	);
+	assert!(
+		!names(&plan).contains(&"link.create"),
+		"a link that still exists was planned for creation: {:?}",
+		names(&plan)
+	);
+}
+
+/// A guard refuses the deletion, and then nothing else happens either.
+///
+/// The interaction that has to hold: a refused delete must not leave the rest of
+/// the plan written as though the interface had gone. `link.create` on an
+/// interface that still exists fails with `EEXIST`, and every address after it
+/// would be planned against a device that is not the one in the document.
+#[test]
+fn a_guard_refuses_a_recreation_whole() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface work-net {
+	vlan   { parent = "base0"; id = 43 }
+	guard  = "the office VLAN carries the phones"
+	config = "10.4.0.1/24"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "work-net"]);
+	"vlan".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+	observed.links[1].vlan = Some(netcfgd_model::ObservedVlan {
+		id: Some(42),
+		protocol: Some("dot1q".to_owned()),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.refusals
+			.iter()
+			.any(|refusal| refusal.op == "link.delete"),
+		"the guard did not refuse the deletion: {:?}",
+		plan.refusals
+	);
+	assert!(
+		!names(&plan).contains(&"link.delete") && !names(&plan).contains(&"link.create"),
+		"a guarded interface was remade anyway: {:?}",
+		names(&plan)
+	);
+}
+
+/// What runs on the interface is stopped before it goes.
+///
+/// A DHCP client bound to an interface that is about to be deleted would be left
+/// holding a name that comes back as a different device, with netcfgd's own
+/// record still saying it runs -- a plan that converges while nothing is leasing.
+#[test]
+fn a_backend_on_a_remade_interface_is_stopped_first() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface work-net {
+	vlan { parent = "base0"; id = 43 }
+	config = "dhcp"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "work-net"]);
+	"vlan".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+	observed.links[1].vlan = Some(netcfgd_model::ObservedVlan {
+		id: Some(42),
+		protocol: Some("dot1q".to_owned()),
+	});
+	observed.backends.push(started_backend(
+		netcfgd_model::BackendKind::Dhcp4,
+		"work-net",
+		&desired,
+	));
+
+	let plan = settle(&desired, &mut observed);
+	let stopped = position(&plan, "backend.stop");
+	let deleted = position(&plan, "link.delete");
+	let started = position(&plan, "backend.start");
+	assert!(
+		stopped < deleted && deleted < started,
+		"the client was not stopped before the interface went and started after \
+		 it came back: {:?}",
+		names(&plan)
+	);
+}
+
+/// A member of a remade master is enslaved to it again.
+///
+/// The half of the observation surgery that is not about the interface itself.
+/// A member's `master` field still names the bridge that is about to be deleted,
+/// so left as it is the enslavement pass sees the membership it wants and plans
+/// nothing -- and the bridge comes back empty, with a plan that said nothing was
+/// wrong.
+#[test]
+fn a_member_of_a_remade_master_is_enslaved_again() {
+	let desired = document(
+		r#"
+interface br0 { bridge { }; config = "null" }
+interface port0 { kind = "dummy"; master = "br0"; config = "null" }
+"#,
+	);
+	let mut observed = observed_with(&["br0", "port0"]);
+	// The name is right and the kind is not: this `br0` is a bond, which is what
+	// a document edited from `bond` to `bridge` leaves behind.
+	"bond".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].ownership = Ownership::Ours;
+	observed.links[0].bond = Some(netcfgd_model::ObservedBond {
+		mode: Some("balance-rr".to_owned()),
+		miimon: None,
+	});
+	"dummy".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+	observed.links[1].master = Some("br0".to_owned());
+
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		names(&plan).contains(&"link.set_master"),
+		"the member was left with a master that had been deleted: {:?}",
+		names(&plan)
+	);
+	assert!(
+		position(&plan, "link.set_master") > position(&plan, "link.create"),
+		"the member was enslaved before the master existed: {:?}",
+		names(&plan)
 	);
 }
 

@@ -48,6 +48,13 @@ pub struct LinkRecord {
 	pub bridge: Option<BridgeInfo>,
 	/// A macvlan's own settings, where this link is one.
 	pub macvlan: Option<MacvlanInfo>,
+	/// A VLAN's id and tag protocol, where this link is one.
+	///
+	/// Read even though neither can be *set* on a live device: the kernel
+	/// accepts a change to either and ignores it, so the only way to apply an
+	/// edited id is to make the interface again -- and knowing that it differs is
+	/// what decides to.
+	pub vlan: Option<VlanInfo>,
 	/// A point-to-point tunnel's endpoints, where this link is one.
 	///
 	/// Three attribute families answer to this one struct -- GRE, the ip
@@ -163,7 +170,14 @@ pub mod requests {
 }
 
 /// Decode one `RTM_NEWLINK` payload.
+///
+/// `vlan` and `vxlan` are two of the locals, and clippy is right that the names
+/// are one letter apart. They are the kernel's own words for two different link
+/// kinds, and the style rule here is one word per concept everywhere -- inventing
+/// a synonym for either to please the lint would put a name in this file that
+/// appears nowhere else in the tree or in `ip -d link show`.
 #[must_use]
+#[allow(clippy::similar_names)]
 pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 	let info = wire::IfInfo::decode(payload)?;
 	let attrs = Attrs::new(payload.get(wire::IFINFO_LEN..)?);
@@ -229,6 +243,9 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 	let macvlan = (kind == "macvlan")
 		.then(|| info_data().map(|data| macvlan_info(data.value)))
 		.flatten();
+	let vlan = (kind == "vlan")
+		.then(|| info_data().map(|data| vlan_info(data.value)))
+		.flatten();
 	let vxlan = (kind == "vxlan")
 		.then(|| info_data().map(|data| vxlan_info(data.value)))
 		.flatten();
@@ -247,6 +264,7 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		bond,
 		bridge,
 		macvlan,
+		vlan,
 		tunnel,
 		vxlan,
 		ipv6_token,
@@ -362,6 +380,34 @@ fn macvlan_info(data: &[u8]) -> MacvlanInfo {
 	let attrs = Attrs::new(data);
 	MacvlanInfo {
 		mode: attrs.get(ifla_macvlan::MODE).and_then(|attr| attr.u32()),
+	}
+}
+
+/// What a VLAN reports about itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct VlanInfo {
+	/// The VLAN id.
+	pub id: Option<u16>,
+	/// The tag protocol, as an ethertype: `0x8100` or `0x88a8`.
+	pub protocol: Option<u16>,
+}
+
+/// The VLAN attributes, numbered as `if_link.h` numbers them.
+mod ifla_vlan {
+	pub(super) const ID: u16 = 1;
+	pub(super) const PROTOCOL: u16 = 5;
+}
+
+/// Decode a VLAN's `INFO_DATA`.
+fn vlan_info(data: &[u8]) -> VlanInfo {
+	let attrs = Attrs::new(data);
+	VlanInfo {
+		id: attrs.get(ifla_vlan::ID).and_then(|attr| attr.u16()),
+		// Big-endian, because it is an ethertype and the kernel reads and
+		// reports it as one -- the same asymmetry the writing half has.
+		protocol: attrs
+			.get(ifla_vlan::PROTOCOL)
+			.and_then(|attr| be_u16(attr.value)),
 	}
 }
 
