@@ -1871,7 +1871,12 @@ fn start_backend(
 			// dhcpcd gets one too, for the nameservers and to stop its own hooks
 			// writing resolv.conf behind netcfgd's back (0066).
 			let hook = write_dhcpcd_script(iface)?;
-			let dhcpcd = dhcpcd_start_args(iface, metric.as_deref(), &hook.display().to_string());
+			let dhcpcd = dhcpcd_start_args(
+				DHCPCD_V4,
+				iface,
+				metric.as_deref(),
+				Some(&hook.display().to_string()),
+			);
 			let udhcpc = vec![
 				"-b".to_owned(),
 				"-i".to_owned(),
@@ -1923,30 +1928,39 @@ fn start_backend(
 	}
 }
 
-/// The family flag netcfgd runs dhcpcd with.
+/// The family flags netcfgd runs dhcpcd with, one address family each.
 ///
-/// One constant because it is two decisions that have to be the same one: what
-/// dhcpcd does, and which pid file it does it under. See [`dhcpcd_stop_args`].
-const DHCPCD_FAMILY: &str = "-4";
+/// Named rather than written out at four call sites, because the family is one
+/// decision with two consumers: what dhcpcd does, and which pid file it does it
+/// under. See [`dhcpcd_stop_args`].
+const DHCPCD_V4: &str = "-4";
+const DHCPCD_V6: &str = "-6";
 
 /// What netcfgd starts dhcpcd with.
 ///
-/// `-4` because netcfgd owns IPv6 addressing itself -- a dhcpcd left to its own
-/// devices would also do `DHCPv6` and SLAAC on the interface, which is two
-/// things configuring one link.
+/// One family at a time and never both, because netcfgd decides per address
+/// source what each family does: a dhcpcd left to its own devices would do
+/// `DHCPv4`, `DHCPv6` and SLAAC on one interface, which is three things
+/// configuring one link and only one of them written down.
 ///
 /// The metric matters as much as the address on a machine with two uplinks: the
 /// lease's default route has to lose to the wired one or win over the wifi, and
 /// the client is what installs it. busybox udhcpc has no metric option -- its
-/// script does the routing -- so this is the one thing the two clients cannot do
-/// the same way.
-fn dhcpcd_start_args(iface: &str, metric: Option<&str>, hook: &str) -> Vec<String> {
-	let mut args = vec![
-		"-c".to_owned(),
-		hook.to_owned(),
-		"-b".to_owned(),
-		DHCPCD_FAMILY.to_owned(),
-	];
+/// script does the routing -- so this is the one thing the two `DHCPv4` clients
+/// cannot do the same way.
+fn dhcpcd_start_args(
+	family: &str,
+	iface: &str,
+	metric: Option<&str>,
+	hook: Option<&str>,
+) -> Vec<String> {
+	let mut args = Vec::new();
+	if let Some(hook) = hook {
+		args.push("-c".to_owned());
+		args.push(hook.to_owned());
+	}
+	args.push("-b".to_owned());
+	args.push(family.to_owned());
 	if let Some(metric) = metric {
 		args.push("-m".to_owned());
 		args.push(metric.to_owned());
@@ -1965,8 +1979,8 @@ fn dhcpcd_start_args(iface: &str, metric: Option<&str>, hook: &str) -> Vec<Strin
 /// backend while a real dhcpcd kept renewing the lease and holding the address.
 /// Measured against dhcpcd 10.1.0 in `tests/live/dhcpcd.sh`, which is the first
 /// thing here to have run a real one. Decision 0070.
-fn dhcpcd_stop_args(iface: &str) -> Vec<String> {
-	vec![DHCPCD_FAMILY.to_owned(), "-k".to_owned(), iface.to_owned()]
+fn dhcpcd_stop_args(family: &str, iface: &str) -> Vec<String> {
+	vec![family.to_owned(), "-k".to_owned(), iface.to_owned()]
 }
 
 /// Which `DHCPv6` client can serve what the document asked for.
@@ -2016,6 +2030,14 @@ fn start_dhcp6(iface: &str, delegating: Option<&netcfgd_model::PdRequest>) -> Re
 	match dhcp6_client(delegating.is_some(), has_odhcp6c, iface)? {
 		"odhcp6c" => {
 			arguments.push("-d".to_owned());
+			// Where it will write its pid, which is the only handle there is:
+			// odhcp6c has no control socket and no `-k`, so a client netcfgd
+			// cannot find is a client netcfgd cannot stop. It writes the file
+			// only when it daemonises and removes it on the way out, both read
+			// out of its `odhcp6c.c`. Decision 0071.
+			let pidfile = client_pid_path("odhcp6c", iface)?;
+			arguments.push("-p".to_owned());
+			arguments.push(pidfile.display().to_string());
 			if let Some(request) = delegating {
 				arguments.push("-P".to_owned());
 				arguments.push(prefix_request(request));
@@ -2027,14 +2049,64 @@ fn start_dhcp6(iface: &str, delegating: Option<&netcfgd_model::PdRequest>) -> Re
 			arguments.push(iface.to_owned());
 			run_client("odhcp6c", &arguments, iface)
 		}
-		// No hook: dhcpcd has nothing to report through one, and pointing it at
-		// netcfgd's would replace the hooks its own package installs.
+		// No hook: dhcpcd has nothing to report a prefix through, and 0050
+		// refuses the pairing that would want one. What it *does* still do here
+		// is write `/etc/resolv.conf` from a `DHCPv6` lease through its own
+		// hooks, which is 0066's contention unfixed on this side -- see the
+		// open question in decision 0071.
 		_ => run_client(
 			"dhcpcd",
-			&["-b".to_owned(), "-6".to_owned(), iface.to_owned()],
+			&dhcpcd_start_args(DHCPCD_V6, iface, None, None),
 			iface,
 		),
 	}
+}
+
+/// Where a client that has no control socket records its pid.
+///
+/// `/run/netcfgd/<program>/<iface>.pid`, made by netcfgd and named on the
+/// client's own command line -- `udhcpc -p` and `odhcp6c -p`. Both are stopped
+/// by [`stop_recorded_client`], and the two halves are here together so that a
+/// third client cannot invent a third convention.
+fn client_pid_path(program: &str, iface: &str) -> Result<std::path::PathBuf, String> {
+	let dir = run_dir_path().join(program);
+	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+	Ok(dir.join(format!("{iface}.pid")))
+}
+
+/// Stop a client by the pid it was told to record.
+///
+/// The pid is checked against `/proc/<pid>/cmdline` before anything is
+/// signalled, for the reason `pppd_pid` does it: a pid file outlives the process
+/// it names and pids are recycled. A stale file is removed and nothing is
+/// signalled, which is the whole of the correct action.
+///
+/// `SIGTERM` rather than a control socket because neither client has one.
+/// odhcp6c answers it by sending a RELEASE, calling its script one last time
+/// with no prefixes -- which is what empties the report -- and exiting; read out
+/// of its `odhcp6c.c` rather than assumed, because "does it release?" decides
+/// whether an ISP still believes the prefix is ours.
+fn stop_recorded_client(program: &str, iface: &str) -> Result<(), String> {
+	let path = run_dir_path().join(program).join(format!("{iface}.pid"));
+	let Some(pid) = std::fs::read_to_string(&path)
+		.ok()
+		.and_then(|text| text.trim().parse::<i32>().ok())
+	else {
+		return Ok(());
+	};
+	let ours = std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
+		cmdline
+			.split(|byte| *byte == 0)
+			.any(|argument| argument == iface.as_bytes())
+	});
+	if !ours {
+		let _ = std::fs::remove_file(&path);
+		return Ok(());
+	}
+	netcfgd_sys::process::terminate(pid)
+		.map_err(|error| format!("could not stop {program} on {iface} (pid {pid}): {error}"))?;
+	let _ = std::fs::remove_file(&path);
+	Ok(())
 }
 
 /// What the document asks the ISP for, in odhcp6c's spelling.
@@ -2830,36 +2902,31 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 			// client is udhcpc. Which is why the missing `-4` was invisible --
 			// see `dhcpcd_stop_args` and decision 0070.
 			match Command::new("dhcpcd")
-				.args(dhcpcd_stop_args(iface))
+				.args(dhcpcd_stop_args(DHCPCD_V4, iface))
 				.status()
 			{
 				Ok(_) => {}
 				Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
 				Err(error) => return Err(format!("could not stop dhcpcd on {iface}: {error}")),
 			}
-			let path = run_dir_path().join("udhcpc").join(format!("{iface}.pid"));
-			let Some(pid) = std::fs::read_to_string(&path)
-				.ok()
-				.and_then(|text| text.trim().parse::<i32>().ok())
-			else {
-				return Ok(());
-			};
-			let ours = std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
-				cmdline
-					.split(|byte| *byte == 0)
-					.any(|argument| argument == iface.as_bytes())
-			});
-			if !ours {
-				// A stale pid file, or a pid that has been recycled by something
-				// else. Removing the file is the whole of the correct action.
-				let _ = std::fs::remove_file(&path);
-				return Ok(());
+			stop_recorded_client("udhcpc", iface)
+		}
+		BackendKind::Dhcp6 => {
+			// The same two shapes as `Dhcp4`, and for the same reason: which
+			// client is running is a property of the machine, not of the
+			// document, so stopping asks both. dhcpcd names the family here too
+			// -- its pid file is `<iface>-6.pid` -- and odhcp6c is stopped by the
+			// pid it was told to write, because it has no control socket and no
+			// `-k` of its own. Decision 0071.
+			match Command::new("dhcpcd")
+				.args(dhcpcd_stop_args(DHCPCD_V6, iface))
+				.status()
+			{
+				Ok(_) => {}
+				Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+				Err(error) => return Err(format!("could not stop dhcpcd on {iface}: {error}")),
 			}
-			netcfgd_sys::process::terminate(pid).map_err(|error| {
-				format!("could not stop udhcpc on {iface} (pid {pid}): {error}")
-			})?;
-			let _ = std::fs::remove_file(&path);
-			Ok(())
+			stop_recorded_client("odhcp6c", iface)
 		}
 		BackendKind::Supplicant => {
 			// Terminated through its own control socket rather than by signal:
@@ -2948,34 +3015,46 @@ mod tests {
 	/// already been bitten by, and the answer is the one it settled on there: the
 	/// test iterates one list and asserts the other agrees. A `-4` added to the
 	/// start alone is a client netcfgd can no longer stop, which is what shipped
-	/// until a real dhcpcd was run. Decision 0070.
+	/// until a real dhcpcd was run (0070) -- and the `DHCPv6` half was worse,
+	/// because nothing stopped that client at all (0071). Both families are
+	/// walked here, so neither can be the one nobody checked.
 	#[test]
 	fn a_client_is_stopped_the_way_it_was_started() {
-		let start =
-			super::dhcpcd_start_args("eth0", Some("512"), "/run/netcfgd/dhcpcd/eth0.script");
-		let stop = super::dhcpcd_stop_args("eth0");
-		let family: Vec<&String> = start
-			.iter()
-			.filter(|argument| matches!(argument.as_str(), "-4" | "-6"))
-			.collect();
-		assert_eq!(
-			family.len(),
-			1,
-			"the start names no family, or more than one: {start:?}"
-		);
+		for family in [super::DHCPCD_V4, super::DHCPCD_V6] {
+			let start = super::dhcpcd_start_args(
+				family,
+				"eth0",
+				Some("512"),
+				Some("/run/netcfgd/dhcpcd/eth0.script"),
+			);
+			let stop = super::dhcpcd_stop_args(family, "eth0");
+			let named: Vec<&String> = start
+				.iter()
+				.filter(|argument| matches!(argument.as_str(), "-4" | "-6"))
+				.collect();
+			assert_eq!(
+				named.len(),
+				1,
+				"the start names no family, or more than one: {start:?}"
+			);
+			assert_eq!(named[0], family, "the start names the wrong family");
+			assert!(
+				stop.contains(named[0]),
+				"the stop does not name {family}, so it looks for the wrong pid file: {stop:?}"
+			);
+			// And both name the interface, which is the other half of the pid file.
+			assert!(start.contains(&"eth0".to_owned()));
+			assert!(stop.contains(&"eth0".to_owned()));
+		}
+		// The metric reaches the client rather than being carried and dropped,
+		// and a document that named none passes no flag at all.
+		let ranked = super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", Some("512"), None);
+		assert!(ranked.windows(2).any(|pair| pair == ["-m", "512"]));
 		assert!(
-			stop.contains(family[0]),
-			"the stop does not name {}, so it looks for the wrong pid file: {stop:?}",
-			family[0]
+			super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", None, None)
+				.iter()
+				.all(|argument| argument != "-m")
 		);
-		// And both name the interface, which is the other half of the pid file.
-		assert!(start.contains(&"eth0".to_owned()));
-		assert!(stop.contains(&"eth0".to_owned()));
-		// The metric reaches the client rather than being carried and dropped.
-		assert!(start.windows(2).any(|pair| pair == ["-m", "512"]));
-		assert!(super::dhcpcd_start_args("eth0", None, "/x")
-			.iter()
-			.all(|argument| argument != "-m"));
 	}
 }
 

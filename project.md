@@ -676,10 +676,14 @@ Kept current deliberately: this is the section to read after a break, and the on
 Last rewritten after ten pieces of work on the laptop list, every one of them
 started by asking what an operator would actually hit rather than what the roadmap
 said next. The tenth is the shortest to state and the worst that was found:
-**netcfgd could not stop a dhcpcd**, the client it prefers, because the pid file
-carries the family and the stop did not name it
-([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)) — which
-nothing could have caught, because nothing had ever run a real dhcpcd. Before it:
+**netcfgd could not stop a DHCP client**, and in two different ways. A dhcpcd,
+because the pid file carries the address family and the stop did not name it
+([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)); a
+DHCPv6 client, because `stop_backend` had no arm for one at all
+([0071](docs/decisions/0071-a-client-with-no-socket-is-stopped-by-the-pid-it-wrote.md)).
+Neither could have been caught by anything here, because nothing had ever run a
+real dhcpcd and the test that runs a real odhcp6c stopped it with `pkill`. Before
+them:
 four config keys that compiled and did nothing
 ([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)),
 **rfkill** — a radio that is switched off looked exactly like a network that would
@@ -1025,6 +1029,19 @@ client kept the address and went on renewing the lease. One constant now names t
 family for both the start and the stop, and a unit test reads the start arguments and
 asserts the stop agrees.
 
+**The DHCPv6 half was worse and is closed too**
+([0071](docs/decisions/0071-a-client-with-no-socket-is-stopped-by-the-pid-it-wrote.md)).
+`stop_backend` answered `Dhcp6` with "not implemented in this build", so dropping
+`config = "dhcp6"` was a *failed apply* with the client still holding the lease.
+dhcpcd takes `-6 -k`; odhcp6c has no control socket, no `-k` and no `-x`, so netcfgd
+tells it where to write its pid and stops it by that — sharing udhcpc's one function
+rather than growing a second copy of it. A stopped odhcp6c releases the delegation,
+calls its script once more with nothing bound, and the prefix file empties itself,
+which is the path the hook's own comment described and nothing had run.
+`delegation.sh` used to tear down with `pkill -f odhcp6c` and a truncated prefix
+file — the test doing by hand the two things netcfgd could not do, which is how it
+stayed hidden through every green run.
+
 **The test runs dhcpcd once with its own hooks first**, which is what makes the rest
 of it mean anything: without `-c`, a lease sets the machine's hostname to
 `leased-name.lan.example` and rewrites `/etc/resolv.conf` — both measured, in a UTS
@@ -1204,11 +1221,20 @@ match.
      was not in the script: **netcfgd could not stop a dhcpcd at all**, because the
      pid file carries the family and the stop did not name it. `tests/live/dhcpcd.sh`
      drives a real one now.
-   - **A DHCPv6 client is not stopped at all**, which the same reading turned up:
-     `stop_backend` answers `Dhcp6` with "not implemented in this build". Loud
-     rather than silent, so an apply that drops `config = "dhcp6"` fails and says
-     so — but it is the other half of the defect above, and it needs a live test at
-     port 546, which means `delegation.sh` and real root.
+   - ~~**A DHCPv6 client is not stopped at all**~~ — **closed**
+     ([0071](docs/decisions/0071-a-client-with-no-socket-is-stopped-by-the-pid-it-wrote.md)).
+     dhcpcd takes `-6 -k`, the family being 0070's rule with a parameter; odhcp6c
+     has no socket and no `-k`, so it is told where to write its pid and stopped by
+     it, sharing udhcpc's one function rather than a second copy of it.
+     `delegation.sh`'s teardown used to be `pkill -f odhcp6c` and a truncated
+     prefix file — the test doing the two things netcfgd could not — and is an edit
+     to the document now.
+   - **dhcpcd's own hooks still write `/etc/resolv.conf` from a DHCPv6 lease**,
+     which is 0066's contention unfixed on the v6 side: the v6 start passes no
+     `-c`. The generated hook already carries the branch, asserted by a unit test
+     and never run. It is not only a missing flag — the interface report is one
+     file per interface and two clients on one interface would clobber each
+     other's `dns=` lines — so it wants its own decision (0071's open question).
    - **Five hook phases still do not fire**: `up`, `pre_down`, `roam`, `portal` and
      `drift`. None of them is a laptop's now that `carrier` fires; `roam` is the next
      one worth having, and it wants the supplicant's event socket rather than an
@@ -1281,6 +1307,9 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A prompt that echoes is invisible to every test that drives a pipe.** A pipe has no `ECHO` to clear, so a passphrase prompt reading standard input passes identically whether the code turns echo off or not. Only a pty can say, which is why the second python test in the tree exists — and turning echo off has a matching hazard the TUI already paid for once: a process killed between clearing and restoring hands back a shell with echo off.
 - **A test that does not pin which implementation it drives tests whichever one the machine has.** `dhcp.sh` is about the busybox client and never said so: netcfgd prefers dhcpcd, so on any PATH containing sbin — a root shell, the privileged container — it drove dhcpcd instead, and under `unshare -rn` that meant the *entire script* failing at the first apply for a reason having nothing to do with what it tests. It passed for years because an ordinary user's PATH has no sbin. The daemon now gets the machine's PATH with every directory holding a dhcpcd removed, and the first attempt at that — a PATH with busybox alone on it — broke the generated script, which needs `ip`. Where a fallback chain exists, a test of one link has to make the others unreachable.
 - **The address arriving is not the hook having run.** dhcpcd installs the address itself and calls its hook afterwards, so a test that waits for the address and then asserts on what the hook did is a race — this one lost one run in three, in the *counter-proof*, which is the half that fails visibly. The other half is where it would have been silent: the checks that netcfgd's hook did not set the hostname and did not touch `/etc/resolv.conf` are satisfied by a hook that has not run yet. Waiting until the hook has demonstrably done its one job — written the report — is what makes both of them mean something. Same family as `switch.sh`'s note that the socket appearing does not mean the first apply has finished.
+- **A test that tidies up by hand is hiding whatever cannot tidy itself.** `delegation.sh` ended with `pkill -f odhcp6c` and `: > "$prefixes"`, then checked that netcfgd reacted correctly — to a world the test had arranged. Both of those lines were things netcfgd could not do, and one of them was a *failed apply*. The assertion after them was fine; the step before it was not netcfgd's. Where a teardown in a test is a command rather than a configuration change, ask what would happen if the operator did it the way the documentation says.
+- **The break that proves a gate can fail can prove the opposite instead.** Taking `-p` off odhcp6c's arguments left three of the new checks green: no pid file means the test reads `pid=0`, `/proc/0/cmdline` does not exist, so "is it still running?" answers no and "the pid file is gone" is true because there never was one. A missing input makes a *negative* check pass, every time, and it is the break rather than the test that says so. Read what a break turns green as carefully as what it turns red.
+- **`kill -0` is not "is it running".** A daemonised process is reparented to init, and an init that does not reap — a container whose pid 1 is `sleep infinity` — leaves a zombie that `kill -0` reports as alive. `/proc/<pid>/cmdline` is empty for a zombie, which makes it the honest question and the same one netcfgd's own ownership check asks.
 - **An exit status ignored for a good reason hides a defect of a different shape.** `dhcpcd -k` says "dhcpcd is not running" and exits 1, which is the ordinary answer on every machine whose client is udhcpc — so netcfgd could not check the status, and the *same* sentence appearing because the pid file's name was wrong was invisible. The two failures are indistinguishable from the outside, and only running the daemon showed which one was happening. Where a status is deliberately unchecked, the comment saying why is also the note saying what it can no longer catch.
 - **Breaking a gate to prove it fails needs the artefact rebuilt.** Restoring a file from a copy can leave it with an *older* mtime than the broken build, and cargo then keeps the broken artefact — so the "restored" run silently tests the break. It looked like a new test failing for no reason. `touch` after restoring, or the whole break-it-and-watch-it-go-red method reports on a binary nobody has.
 
