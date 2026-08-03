@@ -1061,6 +1061,7 @@ mod tests {
 			bond: None,
 			bridge: None,
 			macvlan: None,
+			vlan: None,
 			tunnel: None,
 			vxlan: None,
 		}

@@ -57,6 +57,17 @@ interface vx100 {
 	config = "null"
 }
 
+# A VLAN whose name does not encode its id, which is the only operator decision
+# 0059's silence ever depended on: renaming `br0.42` to `br0.43` is a create and
+# a delete already, and this one is not.
+interface work-net {
+	vlan   { parent = "br0"; id = 77 }
+	config = "10.6.0.1/24"
+}
+
+# Declared as one kind here and edited into another below.
+interface flip0 { kind = "dummy"; config = "null" }
+
 # Everything below came out of the pre-freeze format audit.
 interface mgmt-vrf { vrf { table = 100 }; config = "null" }
 interface base0    { kind = "dummy"; config = "10.7.0.1/24" }
@@ -395,6 +406,73 @@ esac
 # And the bridge the config says nothing about keeps its own. The authority is
 # over ports that are configured, not over the bridge.
 contains "an unconfigured bridge keeps vlan 1" "$(vlans_of brkeep)" "1 "
+
+# ---------------------------------------------------------------------------
+# The last shape on 0057's list, which is 0059: what the kernel takes and
+# ignores. `ip link set work-net type vlan id 78` succeeds and changes nothing,
+# so the only way to apply an edited id is to delete the interface and make it
+# again -- with everything on it.
+contains "a vlan gets the id its name does not carry" "$(detail work-net)" "id 77"
+contains "and its address"              "$(ip -br addr show work-net)" "10.6.0.1/24"
+
+sed -i '/work-net/,+1s/id = 77/id = 78/' "$work/etc/netcfgd.conf"
+vlan_plan=$("$ncfg" plan 2>&1 || true)
+contains "an edited vlan id plans a delete" "$vlan_plan" "link.delete work-net"
+contains "and a create after it"        "$vlan_plan" "link.create work-net"
+contains "and the reason names the field" "$vlan_plan" "vlan.id"
+# The kernel's own answer, asked rather than remembered: it takes this request
+# and changes nothing, which is why there is no `link.set_vlan` to emit.
+before=$(detail work-net | grep -o "id 7[0-9]")
+ip link set work-net type vlan id 78 2>&1 | head -1
+if [ "$before" = "$(detail work-net | grep -o "id 7[0-9]")" ]; then
+	echo "ok   the kernel accepts an id change and ignores it ($before)"
+else
+	echo "FAIL the kernel changed a vlan id in place; link.set_vlan would be the answer"
+	failures=$((failures + 1))
+fi
+
+"$ncfg" apply > "$work/apply-vlan.txt" 2>&1 || { cat "$work/apply-vlan.txt" >&2; exit 1; }
+contains "the remade interface has the new id" "$(detail work-net)" "id 78"
+# The point of the exercise. The address went with the interface, and the passes
+# after the delete are what put it back -- which only works because they see an
+# observation the doomed interface is not in.
+contains "and its address came back"    "$(ip -br addr show work-net)" "10.6.0.1/24"
+contains "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+# An interface that exists as a different kind entirely. Before 0059 this planned
+# a `link.up` and nothing else, on a device that was not what the document said.
+contains "the interface starts as a dummy" "$(detail flip0)" "dummy"
+sed -i 's|interface flip0 { kind = "dummy"|interface flip0 { macvlan { parent = "base0"; mode = "bridge" }|' \
+	"$work/etc/netcfgd.conf"
+flip_plan=$("$ncfg" plan 2>&1 || true)
+contains "a wrong kind plans a delete"  "$flip_plan" "link.delete flip0"
+contains "and the reason is the kind"   "$flip_plan" "kind: macvlan (was dummy)"
+"$ncfg" apply > "$work/apply-flip.txt" 2>&1 || { cat "$work/apply-flip.txt" >&2; exit 1; }
+contains "and the interface comes back as the right one" "$(detail flip0)" \
+	"macvlan mode bridge"
+contains "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+# And the safety property, which matters more here than anywhere else in a plan:
+# netcfgd will not throw away a link it did not create. This one is made by hand,
+# so nothing in /run records it as netcfgd's.
+ip link add link br0 name hand-vlan type vlan id 90
+cat >> "$work/etc/netcfgd.conf" <<'CONF'
+interface hand-vlan {
+	vlan   { parent = "br0"; id = 91 }
+	config = "null"
+}
+CONF
+hand_plan=$("$ncfg" plan 2>&1 || true)
+contains "a link netcfgd did not create is explained" "$hand_plan" \
+	"will not do to a link it did not create"
+missing "and not deleted"               "$hand_plan" "link.delete hand-vlan"
+missing "and not recreated either"      "$hand_plan" "link.create hand-vlan"
+contains "and the kernel still has it, untouched" "$(detail hand-vlan)" "id 90"
+# Out of the way again, so the checks below see the document they expect.
+ip link del hand-vlan
+sed -i '/^interface hand-vlan {$/,/^}$/d' "$work/etc/netcfgd.conf"
 
 # One apply, not two. This is the property the veth peer nearly broke.
 second=$("$ncfg" apply 2>&1)
