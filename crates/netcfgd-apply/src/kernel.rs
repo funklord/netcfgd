@@ -39,6 +39,8 @@ pub struct Effects {
 	pub forwarding: Vec<(String, bool)>,
 	/// `(interface, enabled)` for each `use_tempaddr` sysctl written.
 	pub privacy: Vec<(String, bool)>,
+	/// `(interface, value)` for each `accept_ra` sysctl written.
+	pub accept_ra: Vec<(String, u8)>,
 	/// `(interface, phase, value)` for each event hook that was run.
 	pub hook_state: Vec<(String, netcfgd_model::HookPhase, String)>,
 	/// `(interface, set)` for each root qdisc changed. `false` is a reset.
@@ -1383,6 +1385,11 @@ impl Executor for KernelExecutor {
 					.push((iface.clone(), *prefer_temporary));
 				Ok(())
 			}
+			Op::SysctlSetAcceptRa { iface, value } => {
+				set_accept_ra(iface, *value)?;
+				self.effects.accept_ra.push((iface.clone(), *value));
+				Ok(())
+			}
 			Op::NatReplace { uplinks } => {
 				let nft = match &mut self.nft {
 					Some(nft) => nft,
@@ -1744,6 +1751,28 @@ fn set_privacy(iface: &str, prefer_temporary: bool) -> Result<(), String> {
 		value,
 	)
 	.map_err(|error| format!("cannot set temporary addresses on {iface}: {error}"))
+}
+
+/// Whether the kernel acts on a router advertisement here.
+///
+/// Fatal on failure, as `set_privacy` is and for the same reason: the
+/// observation of an absent sysctl is `None` and nothing is planned on one, so
+/// reaching this means the file was there when it was read.
+///
+/// netcfgd writes only `2` -- accept even while forwarding -- and `1`, which is
+/// the kernel's own default and is what an interface that stops asking for SLAAC
+/// gets back. It never writes `0`: switching advertisements off is a thing an
+/// operator may have chosen and no document here asks for. Decision 0073.
+fn set_accept_ra(iface: &str, value: u8) -> Result<(), String> {
+	let root = std::env::var_os("NCFG_PROC_ROOT").map_or_else(
+		|| std::path::PathBuf::from("/proc"),
+		std::path::PathBuf::from,
+	);
+	std::fs::write(
+		root.join(format!("sys/net/ipv6/conf/{iface}/accept_ra")),
+		value.to_string(),
+	)
+	.map_err(|error| format!("cannot set accept_ra on {iface}: {error}"))
 }
 
 /// Where `resolv.conf` is: the environment, or the usual place.

@@ -581,6 +581,13 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	for interface in &desired.interfaces {
 		builder.plan_link_creation(interface, observed);
 	}
+	// Before the attributes pass, and that is not tidiness: `link.up` is where
+	// the kernel decides whether to solicit a router at all, and it does not
+	// solicit on an interface whose advertisements it would ignore. Writing
+	// `accept_ra` afterwards leaves an interface waiting for the router's own
+	// unsolicited timer -- measured at 14.2 seconds against a dnsmasq set to five,
+	// and minutes on a real network. Decision 0073.
+	builder.plan_accept_ra(desired, observed);
 	for interface in &desired.interfaces {
 		builder.plan_link_attributes(interface, observed);
 		// In the attributes pass rather than the contents one: a WireGuard
@@ -2202,29 +2209,19 @@ impl Builder {
 				// SLAAC is the kernel's own: given a router advertisement it
 				// builds the address itself, and `tests/live/delegation.sh`
 				// watches one appear with `proto kernel_ra`. So this is not an
-				// unimplemented feature, and the warning that used to say it was
-				// "not yet applied by this build; it lands with M4" was stale as
-				// well as misleading -- what netcfgd does not manage is
-				// `accept_ra`, and that has a trap worth naming rather than a
-				// milestone.
+				// unimplemented feature and plans no addressing action.
 				//
-				// The privacy modifier *is* netcfgd's, and is planned by
-				// `plan_privacy` rather than here: it is a sysctl on the
-				// interface, not an addressing action, because the address it
-				// produces arrives with the next advertisement rather than with
-				// the apply.
-				if interface.forwarding == Some(true) {
-					self.warn(
-						name,
-						format!(
-							"{name} both forwards and asks for slaac: the kernel's \
-							 `accept_ra` default ignores advertisements on a forwarding \
-							 interface, and netcfgd does not manage that sysctl -- set \
-							 `net.ipv6.conf.{name}.accept_ra=2` if this interface really \
-							 should autoconfigure"
-						),
-					);
-				}
+				// Two sysctls are netcfgd's, and both are planned elsewhere
+				// because they are properties of the interface rather than
+				// addressing actions: `plan_privacy` for the temporary address,
+				// and `plan_accept_ra` for whether the kernel listens at all.
+				//
+				// **The warning that used to be here is gone**, and deliberately.
+				// It said netcfgd "does not manage that sysctl" and told the
+				// operator to set it by hand -- true when it was written, false
+				// the moment 0073 landed, and read from the *document's*
+				// `forwarding` field, so it never fired for the commonest case of
+				// all: a container that forwards without being asked.
 				Vec::new()
 			}
 			AddressSource::LinkLocal => {
@@ -3004,6 +3001,110 @@ impl Builder {
 				current.map(|previous| Op::SysctlSetPrivacy {
 					iface: interface.name.clone(),
 					prefer_temporary: previous,
+				}),
+			);
+		}
+	}
+
+	/// Whether the kernel will act on a router advertisement, per interface.
+	///
+	/// **The trap this exists for**: `accept_ra` defaults to `1`, which means
+	/// "accept unless this interface forwards". So `config = "slaac"` on a router's
+	/// WAN -- or on any machine whose `sysctl.conf` or container runtime turned
+	/// IPv6 forwarding on -- obtains no address at all, and nothing says why. The
+	/// document asked for something, the apply succeeded, and `ip addr` shows a
+	/// link-local and nothing else. Decision 0073.
+	///
+	/// **Only where it would otherwise be ignored.** An interface that already
+	/// acts on advertisements is left alone, so an ordinary laptop has no sysctl
+	/// written and no line in its plan. That is the difference between fixing what
+	/// the document made untrue and setting a value everywhere because netcfgd can.
+	///
+	/// The inverse is the same shape `plan_privacy` has: an interface that stops
+	/// asking is handed back only where netcfgd is what changed it, and what it is
+	/// handed is `1`, the kernel's own default. netcfgd does not record the value
+	/// it found -- the record is a list of names, as `privacy_applied` is -- so
+	/// "back to the default" is what "back" can mean here, and it is said out loud
+	/// rather than left for somebody to discover.
+	fn plan_accept_ra(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			let asked = interface
+				.addressing
+				.iter()
+				.any(|source| matches!(source, AddressSource::Slaac(_)));
+			let wanted: u8 = if asked {
+				2
+			} else if observed.accept_ra_applied.contains(&interface.name) {
+				1
+			} else {
+				continue;
+			};
+			let link = observed.link(&interface.name);
+			let current = link.and_then(|link| link.accept_ra);
+			// An interface that exists and has no `accept_ra` is an IPv6-disabled
+			// kernel or a container without `/proc/sys`. Writing there fails this
+			// apply and every one after it, so it is reported instead -- the same
+			// answer `use_tempaddr` gives, for the same reason.
+			if link.is_some() && current.is_none() {
+				self.warn(
+					&interface.name,
+					format!(
+						"the `accept_ra` sysctl for {} cannot be read, so a router \
+						 advertisement may be ignored and SLAAC obtain no address -- an \
+						 IPv6-disabled kernel, or a container without /proc/sys",
+						interface.name
+					),
+				);
+				continue;
+			}
+			// Nothing to do where advertisements already arrive and the document
+			// asks for SLAAC, and nothing to do where netcfgd's own value is
+			// already back at the default.
+			let settled = match current {
+				Some(state) if asked => state.effective,
+				Some(state) => state.value == wanted,
+				// An interface this plan is about to create has nothing to read
+				// yet. The write is planned and gated on the creation, as its
+				// forwarding and its qdisc are.
+				None => false,
+			};
+			if settled {
+				continue;
+			}
+			self.push(
+				Op::SysctlSetAcceptRa {
+					iface: interface.name.clone(),
+					value: wanted,
+				},
+				Reason {
+					interface: Some(interface.name.clone()),
+					field: "addressing[slaac]".to_owned(),
+					desired: if asked {
+						"router advertisements accepted".to_owned()
+					} else {
+						"accept_ra back to the kernel default".to_owned()
+					},
+					observed: current.map_or_else(
+						|| "<absent>".to_owned(),
+						|state| {
+							if state.effective {
+								format!("accept_ra {}, advertisements accepted", state.value)
+							} else if state.value == 1 {
+								format!(
+									"accept_ra {}, and {} forwards -- advertisements ignored",
+									state.value, interface.name
+								)
+							} else {
+								format!("accept_ra {}, advertisements ignored", state.value)
+							}
+						},
+					),
+				},
+				self.gate(&interface.name),
+				// Only where there was a value to go back to.
+				current.map(|previous| Op::SysctlSetAcceptRa {
+					iface: interface.name.clone(),
+					value: previous.value,
 				}),
 			);
 		}
@@ -4291,6 +4392,7 @@ fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
 		ingress_applied: observed.ingress_applied.clone(),
 		forwarding_applied: observed.forwarding_applied.clone(),
 		privacy_applied: observed.privacy_applied.clone(),
+		accept_ra_applied: observed.accept_ra_applied.clone(),
 		// Not filtered either, for the same reason: it records what a hook was
 		// told, which stays true whether or not the interface survives this plan.
 		hook_state: observed.hook_state.clone(),

@@ -26,6 +26,10 @@
         "hard": false
       },
       "privacy": true,
+      "accept_ra": {
+        "value": 2,
+        "effective": true
+      },
       "ownership": "ours",
       "private_key_loaded": true,
       "bond": {
@@ -105,6 +109,10 @@
         "hard": false
       },
       "privacy": true,
+      "accept_ra": {
+        "value": 2,
+        "effective": true
+      },
       "ownership": "foreign",
       "private_key_loaded": true,
       "bond": {
@@ -184,6 +192,10 @@
         "hard": false
       },
       "privacy": true,
+      "accept_ra": {
+        "value": 2,
+        "effective": true
+      },
       "ownership": "unknown",
       "private_key_loaded": true,
       "bond": {
@@ -562,6 +574,9 @@
     "eth0"
   ],
   "privacy_applied": [
+    "eth0"
+  ],
+  "accept_ra_applied": [
     "eth0"
   ],
   "forwarding_applied": [
