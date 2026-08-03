@@ -2494,6 +2494,22 @@ fn lower_tunnel(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind>
 	};
 	config.mode = kind;
 
+	// A geneve tunnel has no underlay device. There is no attribute for one in
+	// its netlink family and `ip` offers no `dev` for it either, so a `parent`
+	// here could only ever be dropped -- and it was, silently, until somebody
+	// asked the kernel what it does with one. Refused by name, at the one point
+	// that can still say which line it was on.
+	if config.mode == TunnelKind::Geneve && config.parent.is_some() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				"a `geneve` tunnel has no underlay interface, so `parent` means nothing to it",
+			)
+			.with_help("remove `parent`; geneve sends its outer packets through the routing table"),
+		);
+		return None;
+	}
+
 	// The endpoints have to agree with each other and with the encapsulation.
 	// A v6 remote on an `ipip` produces a link the kernel refuses to build,
 	// with an error naming neither.

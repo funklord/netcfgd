@@ -45,6 +45,15 @@ const IFLA_BOND_MIIMON: u16 = 3;
 /// `IFLA_VXLAN_*`.
 const IFLA_VXLAN_ID: u16 = 1;
 const IFLA_VXLAN_GROUP: u16 = 2;
+/// The underlay device, which for a `VXLAN` is **inside** the `INFO_DATA` nest
+/// and not the outer `IFLA_LINK` every other kind here uses.
+///
+/// Measured, after the outer one was sent for as long as VXLANs have existed
+/// and did nothing at all: `vxlan_nl2conf` reads `data[IFLA_VXLAN_LINK]` and
+/// nothing reads `tb[IFLA_LINK]`, so a document naming a parent got a VXLAN
+/// whose outer packets the kernel routed itself. `ip` shows the difference in
+/// one word -- its VXLAN says `dev base0` and netcfgd's said nothing.
+const IFLA_VXLAN_LINK: u16 = 3;
 const IFLA_VXLAN_LOCAL: u16 = 4;
 const IFLA_VXLAN_PORT: u16 = 15;
 const IFLA_VXLAN_GROUP6: u16 = 16;
@@ -54,6 +63,12 @@ const IFLA_VRF_TABLE: u16 = 1;
 /// `IFLA_MACVLAN_MODE`.
 const IFLA_MACVLAN_MODE: u16 = 1;
 /// `IFLA_IPTUN_*`, for ipip, sit and ip6tnl.
+///
+/// `LINK` is the underlay device, in the nest for the reason a `VXLAN`'s is:
+/// the kernel reads it from here and reports it in the outer `IFLA_LINK`, which
+/// is what makes `ip link show` print `tun0@base0` for a tunnel whose parent was
+/// never sent as an outer attribute.
+const IFLA_IPTUN_LINK: u16 = 1;
 const IFLA_IPTUN_LOCAL: u16 = 2;
 const IFLA_IPTUN_REMOTE: u16 = 3;
 const IFLA_IPTUN_TTL: u16 = 4;
@@ -65,6 +80,7 @@ const IFLA_IPTUN_TTL: u16 = 4;
 /// 6 and 7, where an ip tunnel has the endpoints at 2 and 3. Sending an ip
 /// tunnel's numbering to GRE puts the local address in `IFLA_GRE_IFLAGS` and
 /// the kernel answers `EINVAL`.
+const IFLA_GRE_LINK: u16 = 1;
 const IFLA_GRE_IFLAGS: u16 = 2;
 const IFLA_GRE_OFLAGS: u16 = 3;
 const IFLA_GRE_IKEY: u16 = 4;
@@ -157,26 +173,38 @@ pub enum NewLink {
 		mode: u32,
 	},
 	/// A point-to-point tunnel.
-	Tunnel {
-		/// The kernel's name for the encapsulation.
-		kind: &'static str,
-		/// Index of the underlay interface, where one is named.
-		parent: Option<u32>,
-		/// Local endpoint.
-		local: Option<std::net::IpAddr>,
-		/// Remote endpoint.
-		remote: Option<std::net::IpAddr>,
-		/// Outer TTL.
-		ttl: Option<u8>,
-		/// GRE key, where the kind has one.
-		key: Option<u32>,
-	},
+	Tunnel(TunnelSpec),
 	/// A `WireGuard` device.
 	///
 	/// The link is ordinary rtnetlink; everything that makes it a tunnel --
 	/// keys, peers, allowed IPs -- goes over generic netlink afterwards. See
 	/// [`crate::wg`].
 	WireGuard,
+}
+
+/// What a point-to-point tunnel is made of.
+///
+/// A struct rather than six fields in the variant, for the reason [`VlanChange`]
+/// is one: the encoder below needs all of them, and two of the six are addresses
+/// of the same type -- the pair a transposition would swap without the compiler
+/// noticing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelSpec {
+	/// The kernel's name for the encapsulation.
+	pub kind: &'static str,
+	/// Index of the underlay interface, where one is named.
+	///
+	/// Sent inside the tunnel's own `INFO_DATA` nest, which is where the kernel
+	/// reads it -- not the outer `IFLA_LINK`, which it ignores.
+	pub parent: Option<u32>,
+	/// Local endpoint.
+	pub local: Option<std::net::IpAddr>,
+	/// Remote endpoint.
+	pub remote: Option<std::net::IpAddr>,
+	/// Outer TTL.
+	pub ttl: Option<u8>,
+	/// GRE key, or a geneve tunnel's VNI, where the kind has one.
+	pub key: Option<u32>,
 }
 
 /// One change to a bridge VLAN.
@@ -220,20 +248,25 @@ pub struct BridgeAttrs {
 /// Its own function only because the three attribute families -- geneve, GRE
 /// and the ip tunnels -- disagree about numbering, and saying so takes more
 /// room than the code does.
-fn tunnel_data(
-	data: &mut AttrBuf,
-	kind: &str,
-	local: Option<std::net::IpAddr>,
-	remote: Option<std::net::IpAddr>,
-	ttl: Option<u8>,
-	key: Option<u32>,
-	changing: bool,
-) {
+fn tunnel_data(data: &mut AttrBuf, tunnel: &TunnelSpec, changing: bool) {
+	let TunnelSpec {
+		kind,
+		parent,
+		local,
+		remote,
+		ttl,
+		key,
+	} = *tunnel;
 	// geneve numbers its attributes independently of the ip/gre
 	// family, so it cannot share the block below -- and using the
 	// wrong numbers produces a tunnel the kernel accepts with the
 	// remote landing in a field that means something else.
 	if kind == "geneve" {
+		// A geneve tunnel has no underlay device: there is no attribute for one
+		// in its family, and `ip` offers no `dev` for it either. A document that
+		// names a parent for one is refused at compile time rather than silently
+		// dropped here.
+		let _ = parent;
 		// A geneve tunnel needs a VNI; the model has no separate
 		// field for one, so the GRE key doubles as it. Named here
 		// because that reuse is not obvious from the config.
@@ -260,6 +293,9 @@ fn tunnel_data(
 			data.push_u8(IFLA_GENEVE_TTL, ttl);
 		}
 	} else if kind.contains("gre") {
+		if let Some(parent) = parent {
+			data.push_u32(IFLA_GRE_LINK, parent);
+		}
 		if let Some(key) = key {
 			// The flags first: a key with no flag bit is ignored,
 			// and two ends with different keys would then pass
@@ -281,6 +317,9 @@ fn tunnel_data(
 			data.push_u8(IFLA_GRE_TTL, ttl);
 		}
 	} else {
+		if let Some(parent) = parent {
+			data.push_u32(IFLA_IPTUN_LINK, parent);
+		}
 		if let Some(address) = local {
 			data.push_ip(IFLA_IPTUN_LOCAL, address);
 		}
@@ -326,10 +365,10 @@ impl NewLink {
 			}
 			Self::Vxlan {
 				id,
+				parent,
 				local,
 				remote,
 				port,
-				..
 			} => {
 				// Left out on a change, for the reason the port below is and
 				// with one difference: the kernel refuses a VNI only when the
@@ -339,6 +378,12 @@ impl NewLink {
 				// acceptable form is "the same as now" says nothing.
 				if !changing {
 					data.push_u32(IFLA_VXLAN_ID, *id);
+				}
+				// The underlay, which goes here and not in the outer
+				// `IFLA_LINK` -- see the constant. The kernel takes it on a
+				// change too, so this one is not conditional on `changing`.
+				if let Some(parent) = parent {
+					data.push_u32(IFLA_VXLAN_LINK, *parent);
 				}
 				// The v4 and v6 attributes are different numbers, so the
 				// family decides which one is sent rather than the value being
@@ -373,14 +418,7 @@ impl NewLink {
 			}
 			Self::Vrf { table } => data.push_u32(IFLA_VRF_TABLE, *table),
 			Self::Macvlan { mode, .. } => data.push_u32(IFLA_MACVLAN_MODE, *mode),
-			Self::Tunnel {
-				kind,
-				local,
-				remote,
-				ttl,
-				key,
-				..
-			} => tunnel_data(&mut data, kind, *local, *remote, *ttl, *key, changing),
+			Self::Tunnel(tunnel) => tunnel_data(&mut data, tunnel, changing),
 			Self::Veth { peer } => {
 				// The peer's whole definition, not just its name: an
 				// `ifinfomsg` followed by its own attributes, nested inside
@@ -412,7 +450,7 @@ impl NewLink {
 			Self::WireGuard => "wireguard",
 			Self::Vrf { .. } => "vrf",
 			Self::Macvlan { .. } => "macvlan",
-			Self::Tunnel { kind, .. } => kind,
+			Self::Tunnel(tunnel) => tunnel.kind,
 		}
 	}
 }
@@ -684,19 +722,15 @@ impl Netlink {
 
 		let mut attrs = AttrBuf::new();
 		attrs.push_str(ifla::IFNAME, name);
-		// The parent a virtual link rides on. A vlan must have one; a vxlan
-		// may, and without it the kernel routes the underlay itself.
-		if let NewLink::Vlan { parent, .. }
-		| NewLink::Macvlan { parent, .. }
-		| NewLink::Vxlan {
-			parent: Some(parent),
-			..
-		}
-		| NewLink::Tunnel {
-			parent: Some(parent),
-			..
-		} = kind
-		{
+		// The parent a virtual link rides on -- for the two kinds that read it
+		// here. A VLAN must have one and a macvlan must have one, and both take
+		// it as the outer `IFLA_LINK`.
+		//
+		// A VXLAN and a tunnel do not: their underlay is an attribute inside
+		// their own `INFO_DATA` nest, and the outer one is ignored. It was sent
+		// there for as long as both kinds have existed, so `parent = "base0"` on
+		// either produced a device with no underlay at all and nothing said so.
+		if let NewLink::Vlan { parent, .. } | NewLink::Macvlan { parent, .. } = kind {
 			attrs.push_u32(IFLA_LINK, *parent);
 		}
 		attrs.push(ifla::LINKINFO, info.as_bytes());

@@ -933,6 +933,7 @@ mod tests {
 			mtu: 1500,
 			mac: Some("aa:bb:cc:dd:ee:ff".to_owned()),
 			master: None,
+			parent: None,
 			offloads: Vec::new(),
 			ipv6_token: None,
 			qdisc: None,

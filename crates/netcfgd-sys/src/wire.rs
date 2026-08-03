@@ -86,6 +86,13 @@ pub mod ifla {
 	pub const IFNAME: u16 = 3;
 	/// MTU.
 	pub const MTU: u16 = 4;
+	/// The device a virtual link rides on.
+	///
+	/// What a VLAN or a macvlan is *configured* with, and what the kernel
+	/// *reports* for a tunnel whose underlay was set in its own nest -- so this
+	/// is the one place to read a parent from for every kind but a `VXLAN`,
+	/// which reports its underlay only inside `INFO_DATA`.
+	pub const LINK: u16 = 5;
 	/// Bridge or bond this link is enslaved to.
 	pub const MASTER: u16 = 10;
 	/// RFC 2863 operational state.

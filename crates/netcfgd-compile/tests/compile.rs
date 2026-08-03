@@ -1443,6 +1443,27 @@ fn a_vrf_needs_a_table() {
 	assert!(message.contains("needs a `table`"), "got: {message}");
 }
 
+/// A geneve tunnel has no underlay interface, so a `parent` could only be dropped.
+///
+/// There is no attribute for one in geneve's netlink family and `ip` offers no
+/// `dev` for it either -- asked, rather than assumed, after the same value turned
+/// out to be going to the wrong place for a VXLAN and for every other tunnel
+/// kind (0060). Refused here because this is the layer that can still name the
+/// line it was written on.
+#[test]
+fn a_geneve_tunnel_has_no_parent() {
+	let message = errors(r#"interface g { tunnel { mode = "geneve"; vni = 1; parent = "eth0" } }"#);
+	assert!(message.contains("no underlay interface"), "got: {message}");
+
+	// And the kinds that do have one still take it.
+	let document =
+		build_ok(r#"interface t { tunnel { mode = "gre"; parent = "eth0" }; config = "null" }"#);
+	let netcfgd_model::InterfaceKind::Tunnel(tunnel) = &document.interfaces[0].kind else {
+		panic!("expected a tunnel");
+	};
+	assert_eq!(tunnel.parent.as_deref(), Some("eth0"));
+}
+
 /// A v6 endpoint on a v4 encapsulation produces a link the kernel refuses to
 /// build, with an error naming neither the interface nor the field.
 #[test]

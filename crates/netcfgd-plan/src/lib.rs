@@ -1494,7 +1494,10 @@ impl Builder {
 			return;
 		};
 		let name = &interface.name;
-		let Some(running) = observed.link(name).and_then(|link| link.tunnel) else {
+		let Some(link) = observed.link(name) else {
+			return;
+		};
+		let Some(running) = link.tunnel else {
 			return;
 		};
 		let geneve = tunnel.mode == netcfgd_model::TunnelKind::Geneve;
@@ -1539,6 +1542,12 @@ impl Builder {
 				render_address(tunnel.local),
 				render_address(running.local),
 			))
+		} else if parent_differs(tunnel.parent.as_deref(), link.parent.as_deref()) {
+			Some((
+				"tunnel.parent",
+				tunnel.parent.clone().unwrap_or_default(),
+				link.parent.clone().unwrap_or_else(|| "<absent>".to_owned()),
+			))
 		} else if stated_differs(tunnel.ttl, running.ttl) {
 			Some(("tunnel.ttl", render_u8(tunnel.ttl), render_u8(running.ttl)))
 		} else if !geneve && stated_differs(tunnel.key, running.key) {
@@ -1575,7 +1584,10 @@ impl Builder {
 			return;
 		};
 		let name = &interface.name;
-		let Some(running) = observed.link(name).and_then(|link| link.vxlan) else {
+		let Some(link) = observed.link(name) else {
+			return;
+		};
+		let Some(running) = link.vxlan else {
 			return;
 		};
 		if running.id.is_some_and(|id| id != vxlan.id) {
@@ -1625,6 +1637,12 @@ impl Builder {
 				"vxlan.local",
 				render_address(vxlan.local),
 				render_address(running.local),
+			))
+		} else if parent_differs(vxlan.parent.as_deref(), link.parent.as_deref()) {
+			Some((
+				"vxlan.parent",
+				vxlan.parent.clone().unwrap_or_default(),
+				link.parent.clone().unwrap_or_else(|| "<absent>".to_owned()),
 			))
 		} else {
 			None
@@ -3613,6 +3631,21 @@ fn recreation_reason(
 	if !link.kind.is_empty() && link.kind != wanted {
 		return Some(("kind", wanted.to_owned(), link.kind.clone()));
 	}
+	// A VLAN's and a macvlan's parent are the outer `IFLA_LINK`, which the kernel
+	// accepts on a live device and ignores -- the same answer as a VLAN's id and
+	// therefore the same remedy. A VXLAN's and a tunnel's underlay is *not* here:
+	// it lives in their own nest, the kernel moves it, and `plan_vxlan` and
+	// `plan_tunnel` correct it in place.
+	let stated_parent = match &interface.kind {
+		InterfaceKind::Vlan(vlan) => Some(vlan.parent.as_str()),
+		InterfaceKind::Macvlan(macvlan) => Some(macvlan.parent.as_str()),
+		_ => None,
+	};
+	if let (Some(parent), Some(seen)) = (stated_parent, link.parent.as_deref()) {
+		if parent != seen {
+			return Some(("parent", parent.to_owned(), seen.to_owned()));
+		}
+	}
 	let InterfaceKind::Vlan(vlan) = &interface.kind else {
 		return None;
 	};
@@ -4064,6 +4097,16 @@ fn stated_differs<T: PartialEq + Copy>(desired: Option<T>, seen: Option<T>) -> b
 /// none is not.
 fn address_differs(desired: Option<std::net::IpAddr>, seen: Option<std::net::IpAddr>) -> bool {
 	stated_differs(desired, seen)
+}
+
+/// Whether the document names a parent and the kernel has a different one.
+///
+/// A parent the document does not name is not compared, which is the same rule
+/// every other field follows -- and here it also covers the interface whose
+/// parent lives in another network namespace, where the observation has a
+/// number and no name to put against the document's word.
+fn parent_differs(desired: Option<&str>, seen: Option<&str>) -> bool {
+	desired.is_some() && desired != seen
 }
 
 /// Whether both sides name an endpoint and they are in different families.
