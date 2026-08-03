@@ -172,6 +172,19 @@ pub struct ObservedLink {
 	/// the one that writes them.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub bridge: Option<ObservedBridge>,
+	/// A macvlan's own settings, where this link is one.
+	///
+	/// One field, and the kernel has three answers for it: it moves the mode
+	/// freely among `private`, `vepa` and `bridge`, and refuses either direction
+	/// between any of those and `passthru`. Decision 0058.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub macvlan: Option<ObservedMacvlan>,
+	/// A tunnel's endpoints, where this link is one of the seven kinds.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub tunnel: Option<ObservedTunnel>,
+	/// A `VXLAN`'s own settings, where this link is one.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub vxlan: Option<ObservedVxlan>,
 	/// What a `WireGuard` device actually holds, where this link is one.
 	///
 	/// The kernel reports all of this for free on the request that answers
@@ -229,6 +242,68 @@ pub struct ObservedBridge {
 	/// Whether the bridge is VLAN-aware.
 	#[serde(default)]
 	pub vlan_filtering: bool,
+}
+
+/// A macvlan's own settings, as the kernel reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedMacvlan {
+	/// The mode, as the document spells it.
+	///
+	/// Named here rather than numbered, for the reason [`ObservedBond::mode`] is:
+	/// the planner compares a `bridge` against a `bridge`. `None` is a mode
+	/// netcfgd has no name for -- somebody else's macvlan, configured with
+	/// something this build cannot express -- and nothing is corrected on one.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub mode: Option<String>,
+}
+
+/// A tunnel's endpoints, as the kernel reports them.
+///
+/// One struct for seven kinds across three attribute families, because what the
+/// document says about all of them is one struct too ([`crate::TunnelConfig`]).
+/// The reading is per family; the comparison is not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedTunnel {
+	/// Local endpoint, where the kind has one netcfgd sets.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub local: Option<std::net::IpAddr>,
+	/// Remote endpoint.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub remote: Option<std::net::IpAddr>,
+	/// Outer TTL. Zero is the kernel's word for "inherit from the inner packet".
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ttl: Option<u8>,
+	/// The GRE key, or a geneve tunnel's VNI.
+	///
+	/// One field for both because the document has one: a geneve tunnel needs a
+	/// VNI and `key` is where it goes. `None` for the ip tunnels, which have
+	/// neither.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub key: Option<u32>,
+}
+
+/// A `VXLAN`'s own settings, as the kernel reports them.
+///
+/// Two of these four cannot be corrected on a device that exists -- see
+/// [`crate::VxlanConfig`] and decision 0058 -- and they are observed anyway,
+/// because a plan that cannot fix something should still say it is wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedVxlan {
+	/// The VXLAN network identifier.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub id: Option<u32>,
+	/// Source address for the outer header.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub local: Option<std::net::IpAddr>,
+	/// Remote unicast address, or the multicast group.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub remote: Option<std::net::IpAddr>,
+	/// Destination UDP port.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub port: Option<u16>,
 }
 
 /// What a `WireGuard` device holds, as the kernel reports it.

@@ -80,6 +80,14 @@ pub struct KernelExecutor {
 	bonds: Vec<(String, netcfgd_model::interface::BondConfig)>,
 	/// The bridge settings for each interface that is one.
 	bridges: Vec<(String, netcfgd_model::interface::BridgeConfig)>,
+	/// The whole kind of each macvlan, tunnel and `VXLAN` the document declares.
+	///
+	/// The three ops that re-send a kind's own settings to a device that already
+	/// exists want exactly what creation wants -- a `NewLink` -- so what is held
+	/// here is the `InterfaceKind` rather than a per-kind settings struct. That
+	/// is what lets one function build the nest for both paths, which is the
+	/// property 0057 insisted on and 0058 kept.
+	link_kinds: Vec<(String, InterfaceKind)>,
 	/// The `WireGuard` configuration for each interface that is one.
 	///
 	/// Held for the same reason `pppoe` and `dot1x` are: `wg.set_device` and
@@ -157,6 +165,7 @@ impl KernelExecutor {
 			wireguard: Vec::new(),
 			bridges: Vec::new(),
 			bonds: Vec::new(),
+			link_kinds: Vec::new(),
 			mac_policy: Vec::new(),
 			pppoe: Vec::new(),
 			delegating: Vec::new(),
@@ -210,6 +219,7 @@ impl KernelExecutor {
 		self.wireguard = wireguard_configs(document);
 		self.bridges = bridge_configs(document);
 		self.bonds = bond_configs(document);
+		self.link_kinds = comparable_kinds(document);
 		self.networks.clone_from(&document.networks);
 		self.access_points.clone_from(&document.access_points);
 		self.preferences = document
@@ -617,6 +627,15 @@ impl KernelExecutor {
 			.find(|(bond, _)| bond == name)
 			.map(|(_, config)| config.clone())
 			.ok_or_else(|| format!("{name}: no bond settings in the document being applied"))
+	}
+
+	/// The document's kind for one macvlan, tunnel or `VXLAN`.
+	fn link_kind(&self, name: &str) -> Result<InterfaceKind, String> {
+		self.link_kinds
+			.iter()
+			.find(|(iface, _)| iface == name)
+			.map(|(_, kind)| kind.clone())
+			.ok_or_else(|| format!("{name}: no link settings in the document being applied"))
 	}
 
 	/// The document's settings for one bridge.
@@ -1367,6 +1386,20 @@ impl Executor for KernelExecutor {
 				let bridge = self.bridge_config(name)?;
 				self.apply_bridge_attrs(name, &bridge)
 			}
+			// One arm for three kinds, because what each of them needs is the
+			// nest its own creation would build. The op says which interface and
+			// the reason says which field moved; the values come from the
+			// document, as they do for a bridge and for a `WireGuard` device.
+			Op::LinkSetMacvlan { name }
+			| Op::LinkSetTunnel { name }
+			| Op::LinkSetVxlan { name } => {
+				let kind = self.link_kind(name)?;
+				let link = new_link(name, &kind, self)?;
+				let index = self.index_of(name)?;
+				self.socket
+					.set_link_kind(index, &link, name)
+					.map_err(|error| format!("could not set the settings of {name}: {error}"))
+			}
 			Op::WgSetDevice { iface, .. } => {
 				let config = self.wireguard_config(iface)?;
 				self.configure_wireguard(iface, &config, WgParts::DeviceOnly)
@@ -1453,6 +1486,26 @@ fn record_presets(run: &std::path::Path, iface: &str, presets: &[String]) {
 		let _ =
 			std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
 	}
+}
+
+/// Every interface whose kind's own settings are corrected on a live device.
+///
+/// The whole kind rather than a settings struct, unlike [`bond_configs`] and
+/// [`bridge_configs`]: what `link.set_macvlan`, `link.set_tunnel` and
+/// `link.set_vxlan` need is the same `NewLink` the create path builds, so what
+/// they are given is what `new_link` takes.
+fn comparable_kinds(document: &netcfgd_model::Document) -> Vec<(String, InterfaceKind)> {
+	document
+		.interfaces
+		.iter()
+		.filter(|interface| {
+			matches!(
+				interface.kind,
+				InterfaceKind::Macvlan(_) | InterfaceKind::Tunnel(_) | InterfaceKind::Vxlan(_)
+			)
+		})
+		.map(|interface| (interface.name.clone(), interface.kind.clone()))
+		.collect()
 }
 
 /// Every interface that is a bond, with its settings.
