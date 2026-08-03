@@ -321,6 +321,12 @@ pub fn start(
 /// Returns a message if hostapd is listening and refuses to stop. Nothing
 /// listening is the state this was asked to produce, so that is success.
 pub fn stop(run_dir: &Path, device: &str) -> Result<(), String> {
+	// Nothing listening is taken as nothing running, and that is safe *here*
+	// because hostapd's `-B` returns only after the control interface is up --
+	// measured against a real hostapd 2.10, where the socket is already there
+	// the moment the parent exits. openvpn's `--daemon` is the opposite and
+	// needed a pid file for it (0074); do not make these symmetrical without
+	// measuring the daemon in question.
 	let dir = ctrl_dir(run_dir);
 	let outcome = match netcfgd_supplicant::Client::connect(&dir, device) {
 		Ok(client) => client
