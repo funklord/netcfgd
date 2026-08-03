@@ -111,6 +111,18 @@ interface quiet0 {
 	kind = "dummy"
 }
 
+# A bridge with something on it, for the two kinds whose NM properties are
+# answerable from what netcfgd already observes.
+interface port0 {
+	kind   = "dummy"
+	master = "br0"
+}
+
+interface br0 {
+	bridge { stp = false }
+	config = "10.6.6.1/24"
+}
+
 # A tunnel, for the one link kind that is not `Generic` to the shim. The
 # private key is written beside this file at run time; nothing here is a key.
 interface wg0 {
@@ -303,6 +315,50 @@ done
 check "a link that goes away leaves the device list" "$(field quiet0)" ""
 check "and the others are still there" "$(field probe0)" "dummy:connected"
 
+# ------------------------------------------------------------------- bridge
+#
+# A bridge answers three questions NM asks of one, and the interesting one is
+# the third: `Slaves` is netcfgd's `master` field read from the other end, so a
+# bridge that lists its port is a bridge whose device object was built from the
+# observation rather than from the config file.
+#
+# Read as properties rather than from a column, for the reason the wireguard
+# block gives at length: nmcli renders a generic device's type description into
+# the same column, and `bridge` is exactly what that description would say.
+
+if ! command -v busctl >/dev/null 2>&1; then
+	echo "nm.sh: skipping the bridge checks: no busctl to read the properties"
+else
+	br_path=$(busctl --user --address="$address" call \
+		org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+		org.freedesktop.NetworkManager GetDeviceByIpIface s br0 2>/dev/null |
+		awk '{print $2}' | tr -d '"')
+	port_path=$(busctl --user --address="$address" call \
+		org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+		org.freedesktop.NetworkManager GetDeviceByIpIface s port0 2>/dev/null |
+		awk '{print $2}' | tr -d '"')
+	brprop() {
+		busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$br_path" \
+			org.freedesktop.NetworkManager.Device.Bridge "$1" 2>/dev/null
+	}
+	check "a bridge says it is one in the property clients switch on" \
+		"$(busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$br_path" \
+			org.freedesktop.NetworkManager.Device DeviceType 2>/dev/null)" "u 13"
+	check "and lists the port that is on it" \
+		"$(brprop Slaves | awk '{print $2, $3}' | tr -d '\"')" "1 $port_path"
+	check "and the port is a device in its own right, not just a path" \
+		"$(printf '%s' "$port_path" | grep -c '^/org/freedesktop/NetworkManager/Devices/' || true)" "1"
+	# A device that is *not* a master lists nothing, which is the check that
+	# would catch `slaves_of` answering with every link it can see.
+	check "a dummy that is nobody's master has no interface saying otherwise" \
+		"$(busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$port_path" \
+			org.freedesktop.NetworkManager.Device.Bridge Slaves 2>&1 |
+			grep -c "Unknown interface\|No such interface" || true)" "1"
+fi
+
 # ---------------------------------------------------------------- wireguard
 #
 # The one link kind the shim reports as itself rather than as `Generic`, and it
@@ -440,9 +496,14 @@ else
 	# block: what you activate on a radio is a network, and an 802-3-ethernet
 	# profile named `radio0` would be a thing in every client's list that
 	# cannot be activated and is not an ethernet.
+	# Including the bridge and its port, which is *not* the same call as the
+	# tunnel below. What keeps a WireGuard interface out is that NM's profile
+	# for one carries the peers and the private key; a bridge's carries neither,
+	# and an 802-3-ethernet profile for a device that is not an ethernet is
+	# already what a dummy gets here and has been since the first version.
 	check "every interface block is a profile" \
 		"$(connections | awk -F: '{print $1}' | LC_ALL=C sort | tr '\n' ' ')" \
-		"HomeFiber Prompted probe0 quiet0 "
+		"HomeFiber Prompted br0 port0 probe0 quiet0 "
 	# Nor a tunnel's, for the same reason and one more: NM's WireGuard profile
 	# carries the peers and the private key, and this shim projects neither.
 	check "a wireguard interface block is not a profile either" \
