@@ -2188,6 +2188,14 @@ pub fn backend_pid_file(
 				config.to_string_lossy().into_owned(),
 			))
 		}
+		// The pid file's own path is the marker, which is the strongest kind:
+		// netcfgd chose it, it names the interface, and `-P` puts it in the
+		// command line. Decision 0080.
+		BackendKind::Supplicant => {
+			let path = run.join("supplicant").join(format!("{iface}.pid"));
+			let marker = path.to_string_lossy().into_owned();
+			Some((path, marker))
+		}
 		// The interface name is the weakest marker netcfgd uses and is what
 		// these two clients give it -- neither is invoked with a path netcfgd
 		// chose that ends up in its command line.
@@ -2946,12 +2954,24 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 	std::fs::create_dir_all(&dir)
 		.map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
 
+	let pidfile = client_pid_path("supplicant", iface)?;
 	if dir.join(iface).exists() {
 		// Already running -- started by a previous apply, or surviving a
 		// netcfgd restart. Decision 0015 makes that harmless: whoever
 		// populates it calls REMOVE_NETWORK all first, so it holds nothing
 		// nobody can account for.
-		return Ok(());
+		//
+		// **Unless it is not running.** A supplicant that died leaves its
+		// socket behind, and this used to read that as "already running" and
+		// return -- so a plan that had correctly decided to start one did
+		// nothing, twice over. The pid file settles it, and a socket with no
+		// process behind it is removed rather than bound around: the next
+		// supplicant would fail to bind it. Decision 0080.
+		if netcfgd_sys::process::pid_of(&pidfile, &pidfile.to_string_lossy()).is_some() {
+			return Ok(());
+		}
+		let _ = std::fs::remove_file(dir.join(iface));
+		let _ = std::fs::remove_file(&pidfile);
 	}
 
 	// `/sys/class/net/<iface>/wireless` exists for a radio and does not for
@@ -2977,6 +2997,13 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 		.arg(iface)
 		.arg("-C")
 		.arg(&dir)
+		// So that a supplicant which died can be told from one that is running,
+		// which the control socket alone cannot say: a socket outlives the
+		// process that bound it. The path is its own marker -- it names the
+		// interface and netcfgd chose it, so no other command line has it.
+		// Decision 0080.
+		.arg("-P")
+		.arg(&pidfile)
 		.status()
 		.map_err(|error| format!("could not run {}: {error}", program.display()))?;
 	if !status.success() {
@@ -3061,13 +3088,23 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 			// openvpn's `--daemon` returns at the fork and needed a pid file
 			// for exactly that reason (0074).
 			let dir = ctrl_dir();
-			match netcfgd_supplicant::Client::connect(&dir, iface) {
+			let outcome = match netcfgd_supplicant::Client::connect(&dir, iface) {
 				Ok(client) => client
 					.command("TERMINATE")
 					.map_err(|error| format!("could not stop the supplicant on {iface}: {error}")),
 				// Nothing listening is the state this was asked to produce.
 				Err(_) => Ok(()),
-			}
+			};
+			// The pid file goes either way. wpa_supplicant removes its own on a
+			// clean exit; one that was killed leaves it, and a stale file would
+			// have the next observation asking about a pid that is somebody
+			// else's by then. Decision 0080.
+			let _ = std::fs::remove_file(
+				run_dir_path()
+					.join("supplicant")
+					.join(format!("{iface}.pid")),
+			);
+			outcome
 		}
 		other => Err(format!(
 			"stopping the {other:?} backend is not implemented in this build"

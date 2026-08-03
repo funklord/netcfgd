@@ -132,6 +132,53 @@ check "the password resolved from the secrets directory" "$(get password)" "*"
 check "update_config is pinned off" \
 	"$("$cli" -p "$work/ctrl" -i lo get update_config)" "0"
 
+# --------------------------------------------- a supplicant that died on its own
+
+# 0078 taught netcfgd to notice a backend whose process is gone, for the kinds it
+# holds a pid for -- and a supplicant was not one of them, because it is reached
+# through a control socket and a socket outlives the process that bound it. So a
+# supplicant killed by anything left netcfgd reporting a managed radio with
+# nothing behind it, and on a wired port an authentication that would never
+# happen again. Decision 0080.
+pidfile=$work/run/supplicant/lo.pid
+check "netcfgd told the supplicant where to record its pid" \
+	"$([ -s "$pidfile" ] && echo yes || echo no)" "yes"
+died=$(cat "$pidfile" 2>/dev/null || echo 0)
+
+kill -9 "$died" 2>/dev/null || true
+waited=0
+while kill -0 "$died" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+# Both leftovers are the point: a `kill -9` gives wpa_supplicant no chance to
+# remove either, and a check that trusted the socket would report a running
+# supplicant on the strength of a file.
+check "its control socket outlived it" \
+	"$([ -e "$work/ctrl/lo" ] && echo yes || echo no)" "yes"
+contains "netcfgd notices it is gone" "$("$ncfg" plan 2>&1)" "backend.start lo"
+
+"$ncfg" apply > "$work/revive.log" 2>&1 || true
+waited=0
+while [ ! -s "$pidfile" ] || [ "$(cat "$pidfile")" = "$died" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+revived=$(cat "$pidfile" 2>/dev/null || echo 0)
+if [ "$revived" -gt 0 ] && [ "$revived" != "$died" ] && kill -0 "$revived" 2>/dev/null; then
+	echo "ok   and starts another, having cleared the socket the dead one left"
+else
+	echo "FAIL and starts another, having cleared the socket the dead one left"
+	echo "       was $died, now $revived, and netcfgd said:"
+	sed 's/^/       /' "$work/revive.log"
+	failures=$((failures + 1))
+fi
+# And the networks are back, which is what makes the restart worth anything: a
+# supplicant that holds no state (0015) is one netcfgd has to repopulate.
+check "and the network it was configured with is back" "$(get key_mgmt)" "IEEE8021X"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "dot1x.sh: all checks passed"
