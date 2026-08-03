@@ -1443,6 +1443,66 @@ fn a_vrf_needs_a_table() {
 	assert!(message.contains("needs a `table`"), "got: {message}");
 }
 
+/// A hostname is checked here, because the kernel's refusal names nothing.
+///
+/// A write to `/proc/sys/kernel/hostname` fails with `EINVAL` for a name with a
+/// space in it, which arrives at apply time with no line number and no key.
+#[test]
+fn a_hostname_is_a_hostname() {
+	let document = build_ok(r#"global { hostname = "laptop.example" }"#);
+	assert!(matches!(
+		document.globals.hostname_policy,
+		netcfgd_model::HostnamePolicy::Static(ref name) if name == "laptop.example"
+	));
+
+	// The one overloaded word, which stays what it has always meant.
+	let document = build_ok(r#"global { hostname = "dhcp" }"#);
+	assert!(matches!(
+		document.globals.hostname_policy,
+		netcfgd_model::HostnamePolicy::FromDhcp
+	));
+
+	for bad in ["a name", "-leading", "trailing-", "two..dots", ""] {
+		let message = errors(&format!(r#"global {{ hostname = "{bad}" }}"#));
+		assert!(
+			message.contains("is not a hostname"),
+			"`{bad}` was accepted: {message}"
+		);
+	}
+}
+
+/// `slaac` takes a privacy setting, which had no spelling until decision 0061.
+///
+/// The model has carried `SlaacPrivacy` since M1 and the config language had no
+/// way to reach it, so a reader of the schema would have thought RFC 4941
+/// temporary addresses worked. They now do.
+#[test]
+fn slaac_takes_a_privacy_setting() {
+	let document = build_ok(r#"interface eth0 { config = "slaac privacy prefer_temporary" }"#);
+	assert!(matches!(
+		document.interfaces[0].addressing[0],
+		netcfgd_model::AddressSource::Slaac(netcfgd_model::Slaac {
+			privacy: netcfgd_model::SlaacPrivacy::PreferTemporary
+		})
+	));
+
+	// The default is off, and saying so explicitly is allowed.
+	let document = build_ok(r#"interface eth0 { config = "slaac" }"#);
+	assert!(matches!(
+		document.interfaces[0].addressing[0],
+		netcfgd_model::AddressSource::Slaac(netcfgd_model::Slaac {
+			privacy: netcfgd_model::SlaacPrivacy::None
+		})
+	));
+	build_ok(r#"interface eth0 { config = "slaac privacy none" }"#);
+
+	// And a value nobody can act on is refused rather than ignored.
+	let message = errors(r#"interface eth0 { config = "slaac privacy yes" }"#);
+	assert!(message.contains("not a privacy setting"), "got: {message}");
+	let message = errors(r#"interface eth0 { config = "slaac privacy" }"#);
+	assert!(message.contains("needs a value"), "got: {message}");
+}
+
 /// A geneve tunnel has no underlay interface, so a `parent` could only be dropped.
 ///
 /// There is no attribute for one in geneve's netlink family and `ip` offers no

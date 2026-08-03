@@ -19,8 +19,13 @@ pub enum HookPhase {
 	/// aborts on "no link" deadlocks here: it refuses the bring-up that would
 	/// have produced the carrier it wanted. See `docs/decisions/0011`.
 	///
-	/// Use [`HookPhase::Up`] for anything needing an initialised device, and
-	/// [`HookPhase::Carrier`] for anything reacting to a cable.
+	/// Use [`HookPhase::PostUp`] for anything needing an addressed device.
+	///
+	/// This comment used to send the reader to [`HookPhase::Up`] and
+	/// [`HookPhase::Carrier`], **neither of which this build ever runs** -- only
+	/// `pre_up` and `post_up` fire. The other nine phases are recognised,
+	/// materialised into `/run/netcfgd/hooks/` and hashed, and never executed; a
+	/// plan says so per phase rather than leaving the script looking installed.
 	PreUp,
 	/// As the link comes up.
 	Up,
@@ -47,6 +52,32 @@ pub enum HookPhase {
 	Portal,
 	/// Observed state stopped matching desired state.
 	Drift,
+}
+
+impl HookPhase {
+	/// The name the config spells it with, and the value of `NCFG_PHASE`.
+	///
+	/// One table rather than the two this used to be -- `netcfgd-apply` needed it
+	/// for the environment and `netcfgd-host` for the materialised filename, and
+	/// each had its own copy. The names reach a script and a filename, so a
+	/// spelling that drifted between the two would be an operator's hook that
+	/// runs with an environment naming a phase their file is not named after.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::PreUp => "pre_up",
+			Self::Up => "up",
+			Self::PostUp => "post_up",
+			Self::PreDown => "pre_down",
+			Self::Down => "down",
+			Self::PostDown => "post_down",
+			Self::Carrier => "carrier",
+			Self::Lease => "lease",
+			Self::Roam => "roam",
+			Self::Portal => "portal",
+			Self::Drift => "drift",
+		}
+	}
 }
 
 /// A reference to a hook script on disk.

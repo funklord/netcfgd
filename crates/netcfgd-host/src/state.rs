@@ -49,6 +49,9 @@ pub struct OwnedState {
 	pub dns: Vec<netcfgd_model::AppliedDns>,
 	/// Interfaces netcfgd turned IP forwarding on for.
 	pub forwarding: Vec<String>,
+	/// Interfaces netcfgd turned temporary addresses on for.
+	#[serde(default)]
+	pub privacy: Vec<String>,
 	/// Interfaces netcfgd set the root qdisc on.
 	pub qdisc: Vec<String>,
 	/// Interfaces netcfgd installed an ingress redirect on.
@@ -268,6 +271,7 @@ impl OwnedState {
 			backends: self.backends.clone(),
 			dns: self.dns.clone(),
 			forwarding: self.forwarding.clone(),
+			privacy: self.privacy.clone(),
 			qdisc: self.qdisc.clone(),
 			ingress: self.ingress.clone(),
 			// Not from this file. A delegation is not something netcfgd did,
@@ -291,6 +295,15 @@ impl OwnedState {
 			self.forwarding.retain(|name| name != interface);
 			if *enabled {
 				self.forwarding.push(interface.clone());
+			}
+		}
+
+		// The same, for the same reason: turning temporary addresses off drops
+		// the record rather than storing `false`.
+		for (interface, enabled) in &effects.privacy {
+			self.privacy.retain(|name| name != interface);
+			if *enabled {
+				self.privacy.push(interface.clone());
 			}
 		}
 

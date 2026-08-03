@@ -20,6 +20,7 @@
       "qdisc_ingress": true,
       "ingress_redirect": "ifb-eth0",
       "forwarding": true,
+      "privacy": true,
       "ownership": "ours",
       "private_key_loaded": true,
       "bond": {
@@ -93,6 +94,7 @@
       "qdisc_ingress": true,
       "ingress_redirect": "ifb-eth0",
       "forwarding": true,
+      "privacy": true,
       "ownership": "foreign",
       "private_key_loaded": true,
       "bond": {
@@ -166,6 +168,7 @@
       "qdisc_ingress": true,
       "ingress_redirect": "ifb-eth0",
       "forwarding": true,
+      "privacy": true,
       "ownership": "unknown",
       "private_key_loaded": true,
       "bond": {
@@ -540,6 +543,9 @@
   "ingress_applied": [
     "eth0"
   ],
+  "privacy_applied": [
+    "eth0"
+  ],
   "forwarding_applied": [
     "eth0"
   ],
@@ -549,5 +555,6 @@
   "nat_conflicts": [
     "somebody-elses-table"
   ],
+  "hostname": "host.example",
   "address_proto_supported": true
 }

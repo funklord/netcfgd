@@ -1039,10 +1039,9 @@
     {
       "id": 40,
       "op": {
-        "op": "nat_replace",
-        "uplinks": [
-          "eth0"
-        ]
+        "op": "sysctl_set_privacy",
+        "iface": "eth0",
+        "prefer_temporary": true
       },
       "reason": {
         "interface": "eth0",
@@ -1054,19 +1053,16 @@
         0
       ],
       "inverse": {
-        "op": "nat_replace",
-        "uplinks": [
-          "eth0"
-        ]
+        "op": "sysctl_set_privacy",
+        "iface": "eth0",
+        "prefer_temporary": true
       }
     },
     {
       "id": 41,
       "op": {
-        "op": "hook_run",
-        "iface": "eth0",
-        "phase": "post_up",
-        "path": "/run/netcfgd/hooks/eth0-post_up"
+        "op": "hostname_set",
+        "name": "host.example"
       },
       "reason": {
         "interface": "eth0",
@@ -1078,15 +1074,61 @@
         0
       ],
       "inverse": {
-        "op": "hook_run",
-        "iface": "eth0",
-        "phase": "post_up",
-        "path": "/run/netcfgd/hooks/eth0-post_up"
+        "op": "hostname_set",
+        "name": "host.example"
       }
     },
     {
       "id": 42,
       "op": {
+        "op": "nat_replace",
+        "uplinks": [
+          "eth0"
+        ]
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "nat_replace",
+        "uplinks": [
+          "eth0"
+        ]
+      }
+    },
+    {
+      "id": 43,
+      "op": {
+        "op": "hook_run",
+        "iface": "eth0",
+        "phase": "post_up",
+        "path": "/run/netcfgd/hooks/eth0-post_up"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "hook_run",
+        "iface": "eth0",
+        "phase": "post_up",
+        "path": "/run/netcfgd/hooks/eth0-post_up"
+      }
+    },
+    {
+      "id": 44,
+      "op": {
         "op": "commit_arm",
         "window_seconds": 90
       },
@@ -1105,7 +1147,7 @@
       }
     },
     {
-      "id": 43,
+      "id": 45,
       "op": {
         "op": "commit_confirm"
       },
@@ -1123,7 +1165,7 @@
       }
     },
     {
-      "id": 44,
+      "id": 46,
       "op": {
         "op": "commit_revert",
         "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"
