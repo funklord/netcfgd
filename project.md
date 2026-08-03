@@ -814,6 +814,16 @@ kernel randomness with no dictionary behind it, and **not** a technique to reach
 for with a passphrase, which is why an access point's is still compared in
 memory and written down nowhere.
 
+**Each peer's preshared key too**
+([0056](docs/decisions/0056-a-peers-secret-is-recorded-per-peer.md)), recorded
+per peer and keyed by the public key — the only name the kernel and the document
+share. *Adding or removing* one was already noticed, because the two peer lists
+disagree about whether there is one; **rotating** one was invisible, because the
+kernel returns a preshared key zeroed and both sides go on saying "there is one".
+So every secret a WireGuard device holds is now compared, and what netcfgd
+notices no longer depends on which of the two an operator edited — which is
+0053's argument about predictable coverage, applied where it was next needed.
+
 #### Explaining it
 
 `ncfg explain` follows the indirections. An address the document named by
@@ -876,11 +886,7 @@ was reachable by reading seven records end to end.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **A peer's preshared key is the same shape and is not compared** (0055). It
-   is a `SecretRef` in the document and a boolean in the kernel's reply, so the
-   digest technique fits it exactly — what it needs is a per-peer record rather
-   than a per-device one, and a reason to want it beyond symmetry.
-3. **The other link kinds are still `Generic` to the shim**, and that is
+2. **The other link kinds are still `Generic` to the shim**, and that is
    correct until each has properties to answer with. `enums.rs` holds constants
    for bridge, bond, VLAN, VXLAN, tunnel and veth that `flavour_of` never
    returns; WireGuard is the one that left, because 0054 gave it the three
