@@ -129,6 +129,7 @@ fn every_op() -> Vec<Op> {
 		Op::IngressRedirectClear { .. } => "ingress.redirect.clear",
 		Op::SysctlSetForwarding { .. } => "sysctl.set_forwarding",
 		Op::SysctlSetPrivacy { .. } => "sysctl.set_privacy",
+		Op::SysctlSetAcceptRa { .. } => "sysctl.set_accept_ra",
 		Op::HostnameSet { .. } => "hostname.set",
 		Op::NatReplace { .. } => "nat.replace",
 		Op::HookRun { .. } => "hook.run",
@@ -179,6 +180,7 @@ fn every_op() -> Vec<Op> {
 		"route.del",
 		"rule.add",
 		"rule.del",
+		"sysctl.set_accept_ra",
 		"sysctl.set_forwarding",
 		"sysctl.set_privacy",
 		"hostname.set",
@@ -388,6 +390,10 @@ fn every_op_sample() -> Vec<Op> {
 		Op::SysctlSetPrivacy {
 			iface: "eth0".to_owned(),
 			prefer_temporary: true,
+		},
+		Op::SysctlSetAcceptRa {
+			iface: "eth0".to_owned(),
+			value: 2,
 		},
 		Op::HostnameSet {
 			name: "host.example".to_owned(),

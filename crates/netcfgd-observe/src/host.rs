@@ -42,6 +42,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	for link in &mut observed.links {
 		link.forwarding = forwarding(&root, &link.name);
 		link.privacy = privacy(&root, &link.name);
+		link.accept_ra = accept_ra(&root, &link.name);
 	}
 	observed.hostname = hostname(&root);
 	let sys = sys_root();
@@ -549,6 +550,34 @@ fn hostname(root: &std::path::Path) -> Option<String> {
 fn privacy(root: &std::path::Path, name: &str) -> Option<bool> {
 	let path = root.join(format!("sys/net/ipv6/conf/{name}/use_tempaddr"));
 	Some(fs::read_to_string(path).ok()?.trim() == "2")
+}
+
+/// What this interface will do with a router advertisement.
+///
+/// Two files, read together, because neither answers on its own: `accept_ra=1`
+/// is the kernel's default and means "accept unless this interface forwards", so
+/// the same value is the working state on a laptop and the broken one on a
+/// router. Decision 0073.
+///
+/// The forwarding file read here is the **IPv6** one alone. `ObservedLink::
+/// forwarding` is `Some(true)` only when both families forward, which is the
+/// right answer to a different question -- a machine with IPv6 forwarding on and
+/// IPv4 off ignores advertisements while that field says `false`.
+///
+/// A forwarding sysctl that cannot be read is treated as off, which is the
+/// kernel's own default for an interface: the value that is *there* is
+/// `accept_ra`, and refusing to answer at all because its neighbour is missing
+/// would report "netcfgd cannot tell" on a machine where it plainly can.
+fn accept_ra(root: &std::path::Path, name: &str) -> Option<netcfgd_model::ObservedAcceptRa> {
+	let path = root.join(format!("sys/net/ipv6/conf/{name}/accept_ra"));
+	let value: u8 = fs::read_to_string(path).ok()?.trim().parse().ok()?;
+	let forwards = fs::read_to_string(root.join(format!("sys/net/ipv6/conf/{name}/forwarding")))
+		.map(|text| text.trim() == "1")
+		.unwrap_or(false);
+	Some(netcfgd_model::ObservedAcceptRa {
+		value,
+		effective: value == 2 || (value == 1 && !forwards),
+	})
 }
 
 /// Every managed offload that is on, per interface.

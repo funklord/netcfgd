@@ -659,7 +659,7 @@ Three techniques make that reachable without root or a clean machine:
 - **A macvlan cannot be moved into or out of `passthru`, and its parent cannot be moved at all.** `macvlan_changelink` refuses the `passthru` transition in either direction with `EINVAL`; an `IFLA_LINK` naming a different parent is accepted and silently ignored. The other three modes move freely on a live device.
 - **A VXLAN refuses its `port` on presence rather than on difference.** Restating the port it already has fails the whole message with `EOPNOTSUPP`, so a change built from creation's nest could never correct an endpoint. Its `id` is refused only when the value differs, and a group address in the other family is refused by name.
 - **iproute2 prints the same protocol tag in two bases.** A route shows `proto 110` and an address shows `proto 0x6e`. The obvious assertion fails on a perfectly correct address.
-- **`accept_ra=1` means "accept unless this interface forwards".** A host in an environment that starts with forwarding on ignores every router advertisement, and `ip addr` shows nothing that explains it. `accept_ra=2` is the other way to say it.
+- **`accept_ra=1` means "accept unless this interface forwards".** A host in an environment that starts with forwarding on ignores every router advertisement, and `ip addr` shows nothing that explains it. `accept_ra=2` is the other way to say it. netcfgd writes that value itself now, where a document asks for `slaac` and the advertisement would otherwise be ignored ([0073](docs/decisions/0073-a-document-that-asks-for-slaac-makes-the-kernel-listen.md)) — and **a DHCPv6 client is not affected**, measured: `dhcpcd -6` solicits routers itself and took a lease on an interface with `forwarding=1` and `accept_ra=1`.
 - **A host fills in the bottom 64 bits of an advertised prefix itself**, so the address is `2001:db8:1234:0:...` and a grep for `2001:db8:1234::` matches nothing. `proto kernel_ra` is the kernel saying where an address came from, and is the thing worth asserting.
 - **A backend's *device* may not exist while the backend is running.** openvpn creates its `tun` seconds after starting, and a tunnel still negotiating has none at all — so anything planned from an interface's contents is skipped for exactly the tunnels that need it. The stale-configuration check for a `.ovpn` is a top-level pass for that reason, and the live test is what said so while every unit test passed.
 - **The kernel's `SET_DEVICE` is a partial update and netcfgd used to send the whole device.** An attribute that is absent is left alone and the peer list is replaced only under `WGDEVICE_F_REPLACE_PEERS`, which is how `wg set wg0 listen-port` changes a port without touching a peer. A comment in `netcfgd-sys` said WireGuard "has no partial update that netcfgd wants", true while the only caller was link creation and false the moment there was a second.
@@ -926,6 +926,23 @@ two are now implemented (`slaac privacy prefer_temporary`, which writes
 hostname), and two are reported with the reason (`hostname = "dhcp"` needs a lease
 netcfgd never sees; `portal_check` would need netcfgd to fetch a hard-coded URL,
 which is the operator's decision and not a default).
+
+**And `config = "slaac"` now makes the kernel listen**
+([0073](docs/decisions/0073-a-document-that-asks-for-slaac-makes-the-kernel-listen.md)).
+`accept_ra` defaults to "accept unless this interface forwards", so SLAAC on a
+router's WAN — or in a container, which usually forwards — obtained no address at
+all while `ncfg apply` reported success. netcfgd writes `2` where an advertisement
+would otherwise be ignored and nowhere else, so an ordinary laptop has no sysctl
+written and no line in its plan; an interface that stops asking gets the kernel's
+default back, and one netcfgd never wrote is left alone, `0` included. The reading
+is two files — the value means nothing without the interface's IPv6 forwarding —
+so both halves are combined in the observer and only the answer travels. The write
+goes **before** `link.up`, because the kernel does not solicit a router on an
+interface whose advertisements it would ignore — written afterwards, the address
+waits for the router's own timer. And the warning that used to tell an operator to
+set the sysctl by hand is gone: it was true when written, false the moment this
+landed, tested by nothing, and it read the *document's* `forwarding` field, so it
+never fired for a container that forwards without being asked.
 
 **Six of the eleven hook phases fire**, and the five that do not each say so in the
 plan. `pre_up` and `post_up` were the two. `down` and `post_down` joined them in
@@ -1270,8 +1287,14 @@ match.
    - **An enterprise network cannot be added from the command line.** `eap` wants an
      identity, a method and certificates, which is a form and not a flag list; the
      same is true of `dot1x` on a wired port.
-   - **`accept_ra` is unmanaged**, which a router asking for `slaac` on its WAN
-     discovers the hard way.
+   - ~~**`accept_ra` is unmanaged**~~ — **closed**
+     ([0073](docs/decisions/0073-a-document-that-asks-for-slaac-makes-the-kernel-listen.md)).
+     The kernel's default means "accept unless this interface forwards", so
+     `config = "slaac"` on a router's WAN — or in a container, which usually
+     forwards — obtained no address while the apply reported success. netcfgd
+     writes `2` where an advertisement would otherwise be ignored, nowhere else,
+     and hands it back only where it wrote it. `tests/live/slaac.sh` drives a real
+     advertisement from a real dnsmasq.
    - **Nothing reads `/dev/rfkill`'s event stream**, so a flipped switch is noticed
      on the next observation rather than as it happens.
 
@@ -1330,6 +1353,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **The break that proves a gate can fail can prove the opposite instead.** Taking `-p` off odhcp6c's arguments left three of the new checks green: no pid file means the test reads `pid=0`, `/proc/0/cmdline` does not exist, so "is it still running?" answers no and "the pid file is gone" is true because there never was one. A missing input makes a *negative* check pass, every time, and it is the break rather than the test that says so. Read what a break turns green as carefully as what it turns red.
 - **`kill -0` is not "is it running".** A daemonised process is reparented to init, and an init that does not reap — a container whose pid 1 is `sleep infinity` — leaves a zombie that `kill -0` reports as alive. `/proc/<pid>/cmdline` is empty for a zombie, which makes it the honest question and the same one netcfgd's own ownership check asks.
 - **`[ -n "$x" ] && kill` in a cleanup trap eats the rest of the trap.** Under `set -e` an AND-list whose last command fails takes the function with it, so a `kill` of something already stopped means the `rm -rf` below it never runs. `dhcpcd.sh` left five work directories in `/tmp` before anyone looked, and it only bit there because that script stops its own server before exiting where the others leave theirs running. Nothing was red: a leaked temporary directory is invisible to every gate, and the only reason to look is habit. Looking properly then found the bigger one — `cargo test --workspace` left five directories in `/tmp` on every run, and 1252 had accumulated. That one wanted a `Drop` rather than a tidy-up line, because a test that panics never reaches its last line.
+- **The kernel does not solicit a router on an interface whose advertisements it would ignore.** So `accept_ra` has to be written *before* `link.up`, not after: written after, the interface waits for the router's own unsolicited timer, measured at 14.2 seconds against a dnsmasq told to advertise every five and running to minutes on a real network. Nothing else in a plan cares where a sysctl goes, which is why this one had to be looked at rather than copied from `forwarding` and `use_tempaddr` -- and the assertion is on the *order of the two lines*, because the address still arrives eventually and every other check passes.
+- **A daemon that drops privileges will not start in `unshare -rn`, and each one says so differently.** dhcpcd cannot become its own unprivileged user, because a single-uid namespace has nobody to become; dnsmasq cannot `setgroups`, because an unprivileged gid mapping writes `deny` to `/proc/self/setgroups`. Both exit before doing anything, and dnsmasq puts the reason in its log file and nowhere else — so it looks exactly like a router that is not advertising. `unshare --map-root-user --map-auto` fixes both, at the cost of `newuidmap` and a range in `/etc/subuid`; real root fixes both for free. Two daemons in two sessions, which is enough to expect a third.
 - **A negative check with no event of its own needs a bound somebody measured.** "dhcpcd did not write that file" is satisfied by "has not written it yet", and there is nothing to wait for, because the whole assertion is that nothing happens. The answer that works is to wait twice as long as the counter-proof needed for the same exchange *in the same run on the same machine* — which scales with a loaded machine, where a sleep somebody guessed does not. That is also the only kind of wait this repository has that cannot be tuned into passing.
 - **An exit status ignored for a good reason hides a defect of a different shape.** `dhcpcd -k` says "dhcpcd is not running" and exits 1, which is the ordinary answer on every machine whose client is udhcpc — so netcfgd could not check the status, and the *same* sentence appearing because the pid file's name was wrong was invisible. The two failures are indistinguishable from the outside, and only running the daemon showed which one was happening. Where a status is deliberately unchecked, the comment saying why is also the note saying what it can no longer catch.
 - **Breaking a gate to prove it fails needs the artefact rebuilt.** Restoring a file from a copy can leave it with an *older* mtime than the broken build, and cargo then keeps the broken artefact — so the "restored" run silently tests the break. It looked like a new test failing for no reason. `touch` after restoring, or the whole break-it-and-watch-it-go-red method reports on a binary nobody has.

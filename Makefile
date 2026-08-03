@@ -491,6 +491,11 @@ live:
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/privacy.sh"
+	@# SLAAC against a real advertisement, which is the half privacy.sh will not
+	@# do. Neither under NCFG_LIVE nor under unshare: dnsmasq is a package, and it
+	@# drops privileges at startup -- which `unshare -rn` forbids, so the script
+	@# makes its own namespace the way dhcpcd.sh does.
+	@sh tests/live/slaac.sh
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/hooks.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dhcp.sh"
 	@# The other client, and the one netcfgd prefers. Neither under NCFG_LIVE
