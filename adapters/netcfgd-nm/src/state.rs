@@ -1057,6 +1057,7 @@ mod tests {
 			ingress_redirect: None,
 			forwarding: None,
 			privacy: None,
+			rfkill: None,
 			ownership: netcfgd_model::Ownership::Unknown,
 			private_key_loaded: false,
 			wireguard: None,

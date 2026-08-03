@@ -182,6 +182,31 @@ fn interface(
 				),
 				Some("kernel".to_owned()),
 			));
+			// Before the addresses, because it is the answer to the question
+			// somebody is asking when they run this on a radio that will not
+			// associate. A blocked radio has no addresses to list, so a fact
+			// buried after them would be a fact nobody reached.
+			if let Some(rfkill) = &link.rfkill {
+				facts.push(sourced(
+					"radio",
+					if rfkill.hard {
+						format!(
+							"switched off at {} by hardware -- a physical switch, which \
+							 nothing in software can clear",
+							rfkill.switch
+						)
+					} else if rfkill.soft {
+						format!(
+							"switched off at {} in software -- `rfkill unblock wifi` clears \
+							 it",
+							rfkill.switch
+						)
+					} else {
+						format!("on ({} is not blocked)", rfkill.switch)
+					},
+					Some("rfkill".to_owned()),
+				));
+			}
 			for address in observed.addresses_on(name) {
 				facts.push(ownership_fact(observed, address.ownership, address.proto));
 				facts.push(sourced(
@@ -688,6 +713,7 @@ mod tests {
 				ingress_redirect: None,
 				forwarding: None,
 				privacy: None,
+				rfkill: None,
 				ownership: Ownership::Unknown,
 				private_key_loaded: false,
 				wireguard: None,

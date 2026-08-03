@@ -189,6 +189,11 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		ingress_redirect: Some("ifb-eth0".to_owned()),
 		forwarding: Some(true),
 		privacy: Some(true),
+		rfkill: Some(netcfgd_model::ObservedRfkill {
+			switch: "phy0".to_owned(),
+			soft: true,
+			hard: false,
+		}),
 		ownership,
 		private_key_loaded: true,
 		// Every field of the WireGuard state as well, for the reason this

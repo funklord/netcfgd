@@ -43,6 +43,7 @@ fn link(name: &str) -> ObservedLink {
 		ingress_redirect: None,
 		forwarding: None,
 		privacy: None,
+		rfkill: None,
 		ownership: Ownership::Unknown,
 		private_key_loaded: false,
 		wireguard: None,
@@ -5169,6 +5170,79 @@ interface work-net {
 		"the client was not stopped before the interface went and started after \
 		 it came back: {:?}",
 		names(&plan)
+	);
+}
+
+/// A blocked radio is named, with the remedy for the switch that blocked it.
+///
+/// The gap this closes is a sentence rather than a feature: a radio that is off
+/// looks exactly like a network that will not associate -- the supplicant starts,
+/// the scan is empty, nothing fails. Decision 0062.
+#[test]
+fn a_blocked_radio_is_named_with_its_remedy() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { } }
+interface wlan0 { config = "dhcp" }
+"#,
+	);
+
+	for (soft, hard, expected) in [
+		(true, false, "`rfkill unblock wifi` clears"),
+		(false, true, "nothing in software can clear"),
+	] {
+		let mut observed = observed_with(&["wlan0"]);
+		observed.links[0].rfkill = Some(netcfgd_model::ObservedRfkill {
+			switch: "phy0".to_owned(),
+			soft,
+			hard,
+		});
+
+		let plan = plan(&desired, &observed, &PlanOptions::default());
+		assert!(
+			plan.warnings
+				.iter()
+				.any(|warning| warning.message.contains(expected)),
+			"the {} block was not explained: {:?}",
+			if hard { "hard" } else { "soft" },
+			plan.warnings
+		);
+		// And the supplicant still starts: the switch may come back a second
+		// later, and a radio nobody configured would then sit there doing
+		// nothing.
+		assert!(
+			names(&plan).contains(&"backend.start"),
+			"a blocked radio stopped the supplicant being planned: {:?}",
+			names(&plan)
+		);
+	}
+}
+
+/// A radio that is on says nothing, and one that is not a radio says nothing.
+#[test]
+fn an_unblocked_radio_is_not_reported() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { } }
+interface wlan0 { config = "dhcp" }
+interface eth0  { config = "dhcp" }
+"#,
+	);
+	let mut observed = observed_with(&["wlan0", "eth0"]);
+	observed.links[0].rfkill = Some(netcfgd_model::ObservedRfkill {
+		switch: "phy0".to_owned(),
+		soft: false,
+		hard: false,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("switched off")),
+		"a working radio was reported as off: {:?}",
+		plan.warnings
 	);
 }
 

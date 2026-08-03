@@ -952,6 +952,48 @@ fn observe_with_document(options: &Options, run_dir: &std::path::Path) -> Result
 	observe_against(run_dir, compiled.as_ref().map(|(document, _)| document))
 }
 
+/// The per-link lines that are neither an address nor a VLAN.
+///
+/// Split out when the radio line arrived and the function passed what the style
+/// allows. Each of these prints only when there is something to say: a status
+/// listing is read to find out why something is wrong, and a line per feature per
+/// interface buries the one that matters.
+fn print_link_settings(link: &netcfgd_model::ObservedLink, observed: &netcfgd_model::Observed) {
+	if !link.offloads.is_empty() {
+		println!("    offloads {}", link.offloads.join(" "));
+	}
+	if let Some(kind) = &link.qdisc {
+		let shaped = link.qdisc_bandwidth_bits.map_or_else(String::new, |bits| {
+			let inbound = if link.qdisc_ingress { " inbound" } else { "" };
+			format!(" at {bits} bit/s{inbound}")
+		});
+		let ours = if observed.qdisc_applied.contains(&link.name) {
+			""
+		} else {
+			" [kernel default or set elsewhere]"
+		};
+		println!("    qdisc {kind}{shaped}{ours}");
+	}
+	if let Some(target) = &link.ingress_redirect {
+		println!("    ingress redirected to {target}");
+	}
+	if observed.nat.contains(&link.name) {
+		println!("    masquerade");
+	}
+	if link.forwarding == Some(true) {
+		println!("    forwarding");
+	}
+	// Only when it is off. A radio that works needs no line, and an operator
+	// scanning this list is looking for the reason something does not work --
+	// `ncfg explain interface` reports it either way.
+	if let Some(rfkill) = &link.rfkill {
+		if rfkill.blocked() {
+			let switch = if rfkill.hard { "hardware" } else { "software" };
+			println!("    radio off [{switch} block at {}]", rfkill.switch);
+		}
+	}
+}
+
 fn command_status(options: &Options) -> Result<ExitCode, String> {
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
 	let observed = observe_with_document(options, &run_dir)?;
@@ -985,30 +1027,7 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 			};
 			println!("    vlan {}{flags}", vlan.vid);
 		}
-		if !link.offloads.is_empty() {
-			println!("    offloads {}", link.offloads.join(" "));
-		}
-		if let Some(kind) = &link.qdisc {
-			let shaped = link.qdisc_bandwidth_bits.map_or_else(String::new, |bits| {
-				let inbound = if link.qdisc_ingress { " inbound" } else { "" };
-				format!(" at {bits} bit/s{inbound}")
-			});
-			let ours = if observed.qdisc_applied.contains(&link.name) {
-				""
-			} else {
-				" [kernel default or set elsewhere]"
-			};
-			println!("    qdisc {kind}{shaped}{ours}");
-		}
-		if let Some(target) = &link.ingress_redirect {
-			println!("    ingress redirected to {target}");
-		}
-		if observed.nat.contains(&link.name) {
-			println!("    masquerade");
-		}
-		if link.forwarding == Some(true) {
-			println!("    forwarding");
-		}
+		print_link_settings(link, &observed);
 		// What something outside netcfgd reported, shown as reported rather than
 		// as applied -- because it is not applied. netcfgd reads this file and
 		// does nothing with it until an `addressing` source asks (0044, 0045,

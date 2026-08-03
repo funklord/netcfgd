@@ -141,6 +141,14 @@ pub struct ObservedLink {
 	/// ordinary case in a container without `/proc/sys` mounted writable.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub forwarding: Option<bool>,
+	/// Whether this interface's radio is switched off, where it has one.
+	///
+	/// `None` for anything that is not a radio, and for a radio whose rfkill
+	/// switch could not be found -- a kernel without `CONFIG_RFKILL`, or a driver
+	/// that registers none. Nothing is planned on a `None`: netcfgd does not know
+	/// and says so.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub rfkill: Option<ObservedRfkill>,
 	/// Whether this interface prefers a temporary address, from `use_tempaddr`.
 	///
 	/// `Some(true)` for the kernel's `2`, which is RFC 4941 with the temporary
@@ -273,6 +281,40 @@ pub struct ObservedBridge {
 	/// Whether the bridge is VLAN-aware.
 	#[serde(default)]
 	pub vlan_filtering: bool,
+}
+
+/// Whether a radio is switched off, and by which of the two switches.
+///
+/// Both are read because the remedy differs and nothing else can tell them apart:
+/// a soft block is software and comes back with one command, a hard block is a
+/// physical switch and no amount of configuration will move it.
+///
+/// netcfgd reads the **phy's own** switch, which is the one the driver obeys. A
+/// laptop usually has a second `wlan` switch as well -- a Dell here reports
+/// `dell-wifi` beside `phy0` -- which is the platform button's, and whether
+/// blocking that one propagates to the phy was not measured: doing so means
+/// switching off somebody's real radio. Decision 0062 says what is known and what
+/// is not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedRfkill {
+	/// Which switch this was read from, as the kernel names it: `phy0`.
+	pub switch: String,
+	/// Blocked in software. `rfkill unblock wifi` clears it.
+	#[serde(default)]
+	pub soft: bool,
+	/// Blocked by hardware: a physical switch, or a firmware one the kernel
+	/// cannot override. Nothing in software clears this.
+	#[serde(default)]
+	pub hard: bool,
+}
+
+impl ObservedRfkill {
+	/// Whether the radio is off, by either switch.
+	#[must_use]
+	pub fn blocked(&self) -> bool {
+		self.soft || self.hard
+	}
 }
 
 /// A macvlan's own settings, as the kernel reports them.

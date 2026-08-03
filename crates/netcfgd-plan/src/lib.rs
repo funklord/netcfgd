@@ -181,6 +181,50 @@ impl Plan {
 /// The list has shrunk as the M4 freeze's inert features were built. What is
 /// left is the half of the `ethtool` block that needs a physical NIC, and the
 /// parts of an access point that hostapd can do and the schema cannot say.
+/// Say when a radio the document wants to use is switched off.
+///
+/// The gap this closes is not a missing feature, it is a missing sentence: a
+/// blocked radio looks exactly like a network that will not associate. The
+/// supplicant starts, the scan comes back empty, nothing fails, and the operator
+/// has no way to tell that the hardware is off -- which on a laptop is one
+/// keystroke away at all times.
+///
+/// The remedy differs by switch and so does the message. A soft block is software
+/// and `rfkill unblock wifi` clears it; a hard block is a physical switch or a
+/// firmware one, and nothing in software will move it.
+///
+/// **Nothing is refused and nothing is unblocked.** A supplicant on a blocked
+/// radio costs nothing and is right the moment the switch comes back, and the
+/// block is somebody's deliberate act -- see decision 0062 for why netcfgd will
+/// not undo it.
+fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Observed) {
+	for interface in &desired.interfaces {
+		let Some(rfkill) = observed
+			.link(&interface.name)
+			.and_then(|link| link.rfkill.as_ref())
+		else {
+			continue;
+		};
+		if !rfkill.blocked() {
+			continue;
+		}
+		let remedy = if rfkill.hard {
+			"a hardware switch, which nothing in software can clear -- the button or \
+			 slider on the machine"
+		} else {
+			"a soft block, which `rfkill unblock wifi` clears"
+		};
+		builder.warnings.push(Warning {
+			message: format!(
+				"the radio for {} is switched off at {}: {remedy}. netcfgd configures it \
+				 anyway, and it will associate when the switch comes back",
+				interface.name, rfkill.switch
+			),
+			interface: Some(interface.name.clone()),
+		});
+	}
+}
+
 /// The hook phases this build actually runs.
 ///
 /// Two of the eleven the model declares. The other nine are recognised, written
@@ -477,6 +521,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// they were still empty made one of its three warnings unreachable.
 	warn_unapplied(&mut builder, desired);
 	warn_unmanaged(&mut builder, desired);
+	warn_blocked_radios(&mut builder, desired, observed);
 
 	for interface in &desired.interfaces {
 		if let Some(guard) = &interface.guard {

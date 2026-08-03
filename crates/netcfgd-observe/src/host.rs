@@ -25,6 +25,17 @@ fn proc_root() -> PathBuf {
 	std::env::var_os("NCFG_PROC_ROOT").map_or_else(|| PathBuf::from("/proc"), PathBuf::from)
 }
 
+/// Where the device tree lives, overridable for the same reason.
+///
+/// rfkill is the first thing here that reads `/sys`, and it cannot be faked any
+/// other way: a switch belongs to a radio, and a radio is the one thing this
+/// project does not pretend to have (`fake_supplicant.py` speaks a protocol, not a
+/// phy). A tree under a temporary directory is what makes the mapping testable at
+/// a desk; `tests/live/rfkill.sh` reads the real one.
+fn sys_root() -> PathBuf {
+	std::env::var_os("NCFG_SYS_ROOT").map_or_else(|| PathBuf::from("/sys"), PathBuf::from)
+}
+
 /// Fill in everything the netlink snapshot could not supply.
 pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd_model::Document>) {
 	let root = proc_root();
@@ -33,6 +44,10 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 		link.privacy = privacy(&root, &link.name);
 	}
 	observed.hostname = hostname(&root);
+	let sys = sys_root();
+	for link in &mut observed.links {
+		link.rfkill = rfkill(&sys, &link.name);
+	}
 	read_netfilter(observed);
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
@@ -456,6 +471,61 @@ fn forwarding(root: &std::path::Path, name: &str) -> Option<bool> {
 	Some(read("ipv4")? && read("ipv6")?)
 }
 
+/// Whether one interface's radio is switched off.
+///
+/// Two reads and a search. `/sys/class/net/<iface>/phy80211/name` is the phy this
+/// interface belongs to, and exists only for a radio -- so anything wired returns
+/// `None` here without a special case. Then the `rfkill` entry whose `name` is
+/// that phy carries `soft` and `hard`.
+///
+/// **The phy's own switch, deliberately.** A laptop has a second `wlan` entry for
+/// the platform button -- `dell-wifi` on the machine this was written on -- and
+/// reading that one instead would report a block for a different radio on a
+/// machine with two cards. What the driver obeys is the phy's, which is why that
+/// is the answer, and decision 0062 records the part that was not measured.
+///
+/// `None` for a kernel with no `CONFIG_RFKILL`, and for a phy with no switch
+/// registered. Both mean "netcfgd cannot tell", which nothing is planned on.
+fn rfkill(sys: &Path, iface: &str) -> Option<netcfgd_model::ObservedRfkill> {
+	let phy = fs::read_to_string(sys.join(format!("class/net/{iface}/phy80211/name")))
+		.ok()?
+		.trim()
+		.to_owned();
+	// Sorted, because `read_dir` order is the filesystem's and a laptop has two
+	// `wlan` switches: whichever comes first is luck, and a test that depends on
+	// that luck proves nothing about the search below. Deleting the name match
+	// left the unit test passing until this sort was here.
+	let mut entries: Vec<PathBuf> = fs::read_dir(sys.join("class/rfkill"))
+		.ok()?
+		.flatten()
+		.map(|entry| entry.path())
+		.collect();
+	entries.sort();
+	for path in entries {
+		let name = fs::read_to_string(path.join("name")).ok()?;
+		let name = name.trim().to_owned();
+		if name != phy {
+			continue;
+		}
+		// A flag that cannot be read is not a flag that is clear. Both are
+		// required, so a truncated read reports nothing rather than a radio that
+		// looks fine.
+		let flag = |file: &str| -> Option<bool> {
+			Some(fs::read_to_string(path.join(file)).ok()?.trim() == "1")
+		};
+		return Some(netcfgd_model::ObservedRfkill {
+			// The name read from *this* entry, not the phy name the search started
+			// from. They are equal by the check above -- which is the point: a
+			// field describing where the flags came from must be able to disagree,
+			// or it cannot be wrong when the search is.
+			switch: name,
+			soft: flag("soft")?,
+			hard: flag("hard")?,
+		});
+	}
+	None
+}
+
 /// The running hostname.
 ///
 /// `/proc/sys/kernel/hostname` rather than the `gethostname` syscall, which would
@@ -533,4 +603,131 @@ fn read_netfilter(observed: &mut Observed) {
 	conflicts.sort();
 	conflicts.dedup();
 	observed.nat_conflicts = conflicts;
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A sysfs tree with one radio, one wired interface and two `wlan` switches.
+	///
+	/// The second switch is the point. A laptop registers one for the platform
+	/// button beside the phy's own -- `dell-wifi` and `phy0` on the machine this
+	/// was written on -- and a reader that took the first `wlan` entry it found
+	/// would report the button's state for the card, which on a machine with two
+	/// cards is somebody else's radio.
+	fn sysfs(soft: &str, hard: &str) -> tempdir::TempDir {
+		let dir = tempdir::TempDir::new("ncfg-rfkill");
+		let write = |path: PathBuf, value: &str| {
+			fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
+			fs::write(path, value).expect("a file");
+		};
+		let root = dir.path().to_owned();
+		write(root.join("class/net/wlan0/phy80211/name"), "phy0\n");
+		// The wired interface has no `phy80211` at all, which is how the reader
+		// tells them apart with no special case.
+		write(root.join("class/net/eth0/mtu"), "1500\n");
+
+		write(root.join("class/rfkill/rfkill0/name"), "dell-wifi\n");
+		write(root.join("class/rfkill/rfkill0/type"), "wlan\n");
+		write(root.join("class/rfkill/rfkill0/soft"), "1\n");
+		write(root.join("class/rfkill/rfkill0/hard"), "0\n");
+
+		write(root.join("class/rfkill/rfkill1/name"), "phy0\n");
+		write(root.join("class/rfkill/rfkill1/type"), "wlan\n");
+		write(root.join("class/rfkill/rfkill1/soft"), soft);
+		write(root.join("class/rfkill/rfkill1/hard"), hard);
+		dir
+	}
+
+	#[test]
+	fn a_radio_reports_its_own_switch_and_not_the_platform_button() {
+		let dir = sysfs("0\n", "0\n");
+		let state = rfkill(dir.path(), "wlan0").expect("a switch");
+		assert_eq!(state.switch, "phy0");
+		// `dell-wifi` is soft-blocked in the fixture and this must not read it.
+		assert!(!state.blocked(), "the platform button's state was reported");
+	}
+
+	#[test]
+	fn a_soft_block_and_a_hard_block_are_told_apart() {
+		let dir = sysfs("1\n", "0\n");
+		let state = rfkill(dir.path(), "wlan0").expect("a switch");
+		assert!(state.soft && !state.hard && state.blocked());
+
+		let dir = sysfs("0\n", "1\n");
+		let state = rfkill(dir.path(), "wlan0").expect("a switch");
+		assert!(state.hard && !state.soft && state.blocked());
+	}
+
+	#[test]
+	fn anything_that_is_not_a_radio_reports_nothing() {
+		let dir = sysfs("0\n", "0\n");
+		assert!(rfkill(dir.path(), "eth0").is_none());
+		assert!(rfkill(dir.path(), "nonesuch").is_none());
+	}
+
+	/// A switch whose flags cannot be read is not a switch that is clear.
+	///
+	/// `None` is not `false` (0052's rule): a truncated entry -- a name with no
+	/// `soft` beside it, which is what a partially-populated sysfs looks like --
+	/// must report nothing rather than a radio that appears to be working.
+	#[test]
+	fn a_switch_with_no_flags_reports_nothing() {
+		let dir = tempdir::TempDir::new("ncfg-rfkill-partial");
+		let root = dir.path().to_owned();
+		let write = |path: PathBuf, value: &str| {
+			fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
+			fs::write(path, value).expect("a file");
+		};
+		write(root.join("class/net/wlan0/phy80211/name"), "phy0\n");
+		write(root.join("class/rfkill/rfkill0/name"), "phy0\n");
+		// No `soft`, no `hard`.
+		assert!(rfkill(dir.path(), "wlan0").is_none());
+	}
+
+	/// A kernel with no rfkill at all, which is not the same as a clear switch.
+	#[test]
+	fn a_kernel_without_rfkill_reports_nothing() {
+		let dir = tempdir::TempDir::new("ncfg-rfkill-none");
+		let path = dir.path().join("class/net/wlan0/phy80211/name");
+		fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
+		fs::write(path, "phy0\n").expect("a file");
+		assert!(rfkill(dir.path(), "wlan0").is_none());
+	}
+
+	/// A directory that removes itself, with no dependency to do it.
+	mod tempdir {
+		use std::path::{Path, PathBuf};
+
+		pub(super) struct TempDir(PathBuf);
+
+		impl TempDir {
+			pub(super) fn new(tag: &str) -> Self {
+				// A counter as well as the process id, because the tag is *not*
+				// enough: cargo runs these tests in parallel threads of one
+				// process, and three of them ask for the same tree. The first
+				// version wiped one test's fixture from under another and failed
+				// whichever lost the race.
+				static NEXT: std::sync::atomic::AtomicUsize =
+					std::sync::atomic::AtomicUsize::new(0);
+				let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+				let path =
+					std::env::temp_dir().join(format!("{tag}-{}-{unique}", std::process::id()));
+				let _ = std::fs::remove_dir_all(&path);
+				std::fs::create_dir_all(&path).expect("a temporary directory");
+				Self(path)
+			}
+
+			pub(super) fn path(&self) -> &Path {
+				&self.0
+			}
+		}
+
+		impl Drop for TempDir {
+			fn drop(&mut self) {
+				let _ = std::fs::remove_dir_all(&self.0);
+			}
+		}
+	}
 }
