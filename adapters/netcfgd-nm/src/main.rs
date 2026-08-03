@@ -391,6 +391,9 @@ fn publish(
 			device::Flavour::Bond => {
 				server.at(&path, device::Bond::new(Arc::clone(state), name.clone()))
 			}
+			device::Flavour::Vlan => {
+				server.at(&path, device::Vlan::new(Arc::clone(state), name.clone()))
+			}
 			device::Flavour::Generic => {
 				server.at(&path, device::Generic::new(Arc::clone(state), name.clone()))
 			}

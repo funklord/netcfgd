@@ -86,6 +86,8 @@ pub(crate) enum Flavour {
 	Bridge,
 	/// A bond.
 	Bond,
+	/// A VLAN.
+	Vlan,
 	/// Anything else netcfgd can create.
 	Generic,
 }
@@ -131,6 +133,7 @@ pub(crate) fn flavour_of(link: &ObservedLink, radio: bool) -> Flavour {
 		"wireguard" => Flavour::WireGuard,
 		"bridge" => Flavour::Bridge,
 		"bond" => Flavour::Bond,
+		"vlan" => Flavour::Vlan,
 		_ => Flavour::Generic,
 	}
 }
@@ -150,6 +153,7 @@ pub(crate) fn type_of(link: &ObservedLink, radio: bool) -> u32 {
 		Flavour::WireGuard => device_type::WIREGUARD,
 		Flavour::Bridge => device_type::BRIDGE,
 		Flavour::Bond => device_type::BOND,
+		Flavour::Vlan => device_type::VLAN,
 		Flavour::Generic => device_type::GENERIC,
 	}
 }
@@ -635,6 +639,94 @@ impl Bridge {
 	}
 }
 
+/// The VLAN half of a device.
+///
+/// Four properties, which is what libnm asks a VLAN device for -- read off its
+/// own accessors (`nm_device_vlan_get_carrier`, `_hw_address`, `_parent`,
+/// `_vlan_id`) rather than from memory, because "every property on the
+/// interface" is the test a type has to pass before it leaves `Generic`, and a
+/// list somebody wrote down from memory is not that test.
+///
+/// The id and the parent are both things netcfgd observes only because it needed
+/// them for itself: 0059 made a VLAN's id something the planner compares, and
+/// 0060 made a parent something it sends and reads back. Constraint 6 in the
+/// direction it is meant to run -- the shim gained a device type because the core
+/// grew a capability for a local reason, and nothing in the core changed here.
+pub(crate) struct Vlan {
+	state: Arc<State>,
+	interface: String,
+}
+
+impl Vlan {
+	/// A VLAN interface for one device.
+	#[must_use]
+	pub(crate) fn new(state: Arc<State>, interface: String) -> Self {
+		Self { state, interface }
+	}
+}
+
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device.Vlan",
+	introspection_docs = false
+)]
+impl Vlan {
+	#[zbus(property)]
+	fn hw_address(&self) -> String {
+		self.state
+			.link(&self.interface)
+			.and_then(|link| link.mac)
+			.unwrap_or_default()
+			.to_uppercase()
+	}
+
+	#[zbus(property)]
+	fn carrier(&self) -> bool {
+		self.state
+			.link(&self.interface)
+			.is_some_and(|link| link.carrier)
+	}
+
+	/// The device this VLAN is on, as an object path.
+	///
+	/// `/` where the parent is not a device this shim is serving -- an interface
+	/// outside the document, or one that has gone. NM spells an absent object
+	/// path that way, and inventing a path to a device that is not there would
+	/// have libnm fetch properties from nothing.
+	#[zbus(property)]
+	fn parent(&self) -> zbus::zvariant::OwnedObjectPath {
+		parent_path(&self.state, &self.interface)
+	}
+
+	/// The tag, or zero where netcfgd could not read one.
+	///
+	/// Zero is not a valid VLAN id, so it is unambiguous as "unknown" -- which
+	/// is the honest answer for a device the kernel reported without one, and
+	/// better than a number that is somebody's guess.
+	#[zbus(property)]
+	fn vlan_id(&self) -> u32 {
+		self.state
+			.link(&self.interface)
+			.and_then(|link| link.vlan)
+			.and_then(|vlan| vlan.id)
+			.map_or(0, u32::from)
+	}
+}
+
+/// The object path of an interface's parent, or `/`.
+fn parent_path(state: &State, interface: &str) -> zbus::zvariant::OwnedObjectPath {
+	let Some(parent) = state.link(interface).and_then(|link| link.parent) else {
+		return zbus::zvariant::OwnedObjectPath::try_from("/").expect("a valid path");
+	};
+	state
+		.devices()
+		.iter()
+		.find(|(name, _)| *name == parent)
+		.map_or_else(
+			|| zbus::zvariant::OwnedObjectPath::try_from("/").expect("a valid path"),
+			|(_, number)| path_for(*number),
+		)
+}
+
 /// The bond half of a device.
 ///
 /// The same three properties as a bridge, and NM defines them on a separate
@@ -986,14 +1078,19 @@ mod tests {
 		);
 	}
 
-	/// Everything with a link kind is generic, and specifically not `UNKNOWN`.
+	/// A kind that has not left `Generic` is generic, and specifically not
+	/// `UNKNOWN`.
 	///
 	/// `GENERIC` is NM's word for a real device it has no special handling
 	/// for; `UNKNOWN` is what an applet draws as broken. netcfgd has kinds NM
 	/// has never heard of -- `ifb` is one -- and they are not broken devices.
+	///
+	/// `vlan` was in this list until 0077 and is now in the test above, which is
+	/// the direction a kind moves in: out of here, once every property libnm
+	/// asks for is something netcfgd already observes.
 	#[test]
 	fn everything_with_a_link_kind_is_generic_rather_than_unknown() {
-		for kind in ["vlan", "vxlan", "gre", "ifb", "dummy", "veth"] {
+		for kind in ["vxlan", "gre", "ifb", "dummy", "veth"] {
 			assert_eq!(
 				flavour_of(&link("x0", kind), false),
 				Flavour::Generic,
@@ -1044,10 +1141,37 @@ mod tests {
 	/// reads the interface list and `nmcli` prints the type, and a device that
 	/// says `bridge` while carrying `.Device.Generic` is a device those two
 	/// disagree about.
+	/// A VLAN is itself, and a tunnel deliberately is not.
+	///
+	/// libnm asks a VLAN device for four things -- carrier, hardware address,
+	/// parent and id -- and netcfgd observes all four, the last two only because
+	/// 0059 and 0060 needed them for the planner. It asks an *IP tunnel* device
+	/// for fourteen, and netcfgd observes eight: there is no encapsulation
+	/// limit, no flags, no flow label, no fwmark, no path-MTU-discovery bit and
+	/// no TOS anywhere in the observation or in the document. Answering those
+	/// with zeroes would be a device that claims a type and lies about half of
+	/// it, which is the case `Flavour`'s own comment warns about -- so a tunnel
+	/// stays `GENERIC` until netcfgd has a local reason to observe the rest.
+	/// Decision 0077.
+	#[test]
+	fn a_vlan_is_itself_and_a_tunnel_is_not() {
+		assert_eq!(flavour_of(&link("eth0.10", "vlan"), false), Flavour::Vlan);
+		assert_eq!(type_of(&link("eth0.10", "vlan"), false), 11);
+		for kind in ["gre", "sit", "ip6tnl", "gretap", "vti", "ipip", "geneve"] {
+			assert_eq!(
+				flavour_of(&link("tun0", kind), false),
+				Flavour::Generic,
+				"`{kind}` claimed a type netcfgd cannot answer for"
+			);
+		}
+	}
+
 	#[test]
 	fn the_type_number_always_agrees_with_the_flavour() {
 		for (kind, flavour, number) in [
 			("bridge", Flavour::Bridge, 13),
+			("vlan", Flavour::Vlan, 11),
+			("gre", Flavour::Generic, 14),
 			("dummy", Flavour::Generic, 14),
 			("", Flavour::Wired, 1),
 		] {
