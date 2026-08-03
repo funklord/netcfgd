@@ -201,6 +201,7 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 			peers: vec![netcfgd_model::ObservedWgPeer {
 				public_key: key(0x22),
 				preshared_key: true,
+				preshared_matches: Some(false),
 				endpoint: Some("198.51.100.7:51820".to_owned()),
 				allowed_ips: vec!["10.0.0.0/24".to_owned(), "fd00::/64".to_owned()],
 				keepalive: Some(25),
