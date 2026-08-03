@@ -227,7 +227,7 @@ fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Obs
 
 /// The hook phases this build actually runs.
 ///
-/// Four of the eleven the model declares. The other seven are recognised, written
+/// Five of the eleven the model declares. The other six are recognised, written
 /// into `/run/netcfgd/hooks/`, hashed and carried in the document -- and never
 /// executed, which reads exactly like a working feature: the file is there, the
 /// plan mentions nothing, and the script never runs.
@@ -239,6 +239,7 @@ const FIRED_PHASES: &[HookPhase] = &[
 	HookPhase::PostUp,
 	HookPhase::Down,
 	HookPhase::PostDown,
+	HookPhase::Lease,
 ];
 
 /// Say which hooks the document declares that nothing will run.
@@ -605,6 +606,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	builder.plan_forwarding(desired, observed);
 	builder.plan_privacy(desired, observed);
 	builder.plan_hostname(desired, observed);
+	builder.plan_lease_hooks(desired, observed);
 	builder.plan_nat(desired, observed);
 	builder.plan_access_control(desired, observed);
 	builder.plan_stale_tunnels(desired, observed);
@@ -3002,6 +3004,100 @@ impl Builder {
 		}
 	}
 
+	/// Run a `lease` hook where the lease has moved since it last ran.
+	///
+	/// netcfgd does not implement DHCP (decision 0004) and never sees the protocol, so
+	/// "a lease arrived" is not an event it is told about -- what it has is an
+	/// address on an interface that **it did not install**, on an interface whose
+	/// document asks for DHCP. That is the whole trigger, and it works for any
+	/// client: dhcpcd, udhcpc, or something a helper wrote (0045's rule that the
+	/// contract is the decision and the implementation is plural).
+	///
+	/// Three exclusions, and each is an address the kernel made rather than a lease:
+	/// a link-local (`169.254/16` or `fe80::/10`), anything the kernel tags as its
+	/// own -- `kernel_lo`, `kernel_ra`, `kernel_ll` -- and, on a kernel too old for
+	/// `IFA_PROTO`, whatever the value checks catch. A SLAAC address is the one that
+	/// matters there: it is not netcfgd's, it is not a lease, and on a pre-5.18
+	/// kernel it is indistinguishable from one. That is 0002's weakness in a second
+	/// place rather than a new one.
+	///
+	/// **It fires once per lease, not once per reconcile**, which is the whole
+	/// reason there is a record. The record is written whether or not the hook
+	/// succeeded: a failing `lease` hook that kept the plan non-empty would be a
+	/// plan that never converges, and section 4 promises otherwise. The failure is
+	/// in the journal.
+	///
+	/// The first apply of a fresh interface will not fire it -- the client is being
+	/// started in this same plan and the address arrives seconds later. The daemon
+	/// gets there on the netlink event; `ncfg apply --oneshot` needs a second run,
+	/// which is the same shape a `PPPoE` session has.
+	fn plan_lease_hooks(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			let wants: Vec<bool> = interface
+				.addressing
+				.iter()
+				.filter_map(|source| match source {
+					AddressSource::Dhcp4(_) => Some(true),
+					AddressSource::Dhcp6(_) => Some(false),
+					_ => None,
+				})
+				.collect();
+			if wants.is_empty()
+				|| interface
+					.hooks
+					.iter()
+					.all(|hook| hook.phase != HookPhase::Lease)
+			{
+				continue;
+			}
+			let leased = observed
+				.addresses_on(&interface.name)
+				.filter(|address| is_lease(address))
+				.find(|address| {
+					net::parse_cidr(&address.address)
+						.is_some_and(|(value, _)| wants.contains(&value.is_ipv4()))
+				})
+				.map(|address| address.address.clone());
+			let Some(leased) = leased else {
+				continue;
+			};
+			let told = observed
+				.lease_hooks
+				.iter()
+				.find(|record| record.interface == interface.name)
+				.map(|record| record.address.as_str());
+			if told == Some(leased.as_str()) {
+				continue;
+			}
+			let name = &interface.name;
+			let gate = self.gate(name);
+			for hook in interface
+				.hooks
+				.iter()
+				.filter(|hook| hook.phase == HookPhase::Lease)
+			{
+				self.push(
+					Op::HookRun {
+						iface: name.clone(),
+						phase: HookPhase::Lease,
+						path: hook.path.clone(),
+						// `NCFG_ADDR`, which is the one thing a lease script wants
+						// that it cannot get from the interface name.
+						address: Some(leased.clone()),
+					},
+					Reason::differs(
+						name,
+						"lease",
+						leased.clone(),
+						told.unwrap_or("<absent>").to_owned(),
+					),
+					gate.clone(),
+					None,
+				);
+			}
+		}
+	}
+
 	/// The running hostname, where the document names one.
 	///
 	/// Whole-host and one-directional: netcfgd sets the name when the config says
@@ -4070,6 +4166,9 @@ fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
 		ingress_applied: observed.ingress_applied.clone(),
 		forwarding_applied: observed.forwarding_applied.clone(),
 		privacy_applied: observed.privacy_applied.clone(),
+		// Not filtered either, for the same reason: it records what a hook was
+		// told, which stays true whether or not the interface survives this plan.
+		lease_hooks: observed.lease_hooks.clone(),
 		nat: observed.nat.clone(),
 		nat_conflicts: observed.nat_conflicts.clone(),
 		// Whole-host, so no interface going away can change it.
@@ -4414,6 +4513,31 @@ fn stated_differs<T: PartialEq + Copy>(desired: Option<T>, seen: Option<T>) -> b
 /// none is not.
 fn address_differs(desired: Option<std::net::IpAddr>, seen: Option<std::net::IpAddr>) -> bool {
 	stated_differs(desired, seen)
+}
+
+/// Whether an observed address could be a DHCP lease.
+///
+/// Not netcfgd's, not a link-local, and not something the kernel made for itself.
+/// The `IFA_PROTO` values are the kernel's own: 1 is the loopback's, 2 is a router
+/// advertisement's -- a SLAAC address -- and 3 is a link-local. Anything netcfgd
+/// installed carries 110 and has an origin recorded beside it.
+fn is_lease(address: &netcfgd_model::ObservedAddress) -> bool {
+	const KERNEL_PROTOS: [u8; 3] = [1, 2, 3];
+	if address.origin.is_some() || address.ownership == netcfgd_model::Ownership::Ours {
+		return false;
+	}
+	if address
+		.proto
+		.is_some_and(|proto| KERNEL_PROTOS.contains(&proto))
+	{
+		return false;
+	}
+	// By value as well, because a kernel older than 5.18 reports no `IFA_PROTO` at
+	// all and every address there would otherwise look like a lease.
+	net::parse_cidr(&address.address).is_some_and(|(value, _)| match value {
+		std::net::IpAddr::V4(v4) => !v4.is_link_local() && !v4.is_loopback(),
+		std::net::IpAddr::V6(v6) => !v6.is_loopback() && (v6.segments()[0] & 0xffc0) != 0xfe80,
+	})
 }
 
 /// Whether the document names a parent and the kernel has a different one.
