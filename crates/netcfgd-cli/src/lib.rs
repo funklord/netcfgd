@@ -10,6 +10,7 @@
 mod client;
 #[cfg(feature = "tui")]
 mod tui;
+mod wifi;
 
 use netcfgd_host::{config, hooks, state};
 
@@ -34,6 +35,10 @@ usage:
                              scan       [IFACE]  list access points in range
                              status     [IFACE]  what the radio is doing
                              clients    [IFACE]  who is on the access point
+                             add SSID            remember a network: writes
+                                                 conf.d/wifi-ID.conf and asks
+                                                 for the passphrase, or reads
+                                                 it from standard input
                              connect ID [IFACE]  join a configured network
                              disconnect [IFACE]  leave it, keeping the config
                            IFACE may be omitted when the config describes one
@@ -64,6 +69,14 @@ options:
                            `on_unmanage = \"clear\"` is the durable answer
   -h, --help               this text
 
+options for `wifi add`:
+  --id LABEL               name the block this, for an SSID that is not usable
+                           as a name. The SSID itself is kept exactly, as hex
+  --open                   no security at all, and no passphrase asked for
+  --wpa2, --wpa3           pin one generation; the default negotiates both
+  --hidden                 the SSID is not broadcast, so probe for it
+  --priority N             higher wins when several are in range
+
 exit codes:
   0  the desired state was reached, or already held
   1  an action failed, or the config did not compile
@@ -91,6 +104,10 @@ pub fn main() -> ExitCode {
 	}
 }
 
+/// `Default` is for the tests, which want one field and not the other eight.
+/// `parse_options` deliberately does not use it: a new option that reached the
+/// struct and not the parser would then compile.
+#[derive(Default)]
 pub(crate) struct Options {
 	config_dir: Option<String>,
 	factory_dir: Option<String>,
@@ -100,6 +117,9 @@ pub(crate) struct Options {
 	confirm: Option<u32>,
 	allow_disruption: Vec<String>,
 	strand_credentials: Vec<String>,
+	/// `wifi add` only, and named for what they mean in the config file they
+	/// write rather than for the flag that set them.
+	wifi: wifi::Wanted,
 }
 
 fn run(arguments: &[String]) -> Result<ExitCode, String> {
@@ -112,16 +132,16 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		return Ok(ExitCode::SUCCESS);
 	}
 
-	let options = parse_options(&arguments[1..])?;
+	let (options, positional) = parse_options(&arguments[1..])?;
 
 	match command.as_str() {
 		"plan" => command_plan(&options),
 		"apply" => command_apply(&options),
 		"status" => command_status(&options),
 		"show" => command_show(&options),
-		"explain" => command_explain(&arguments[1..], &options),
+		"explain" => command_explain(&positional, &options),
 		"monitor" => command_monitor(&options),
-		"wifi" => command_wifi(&positional(&arguments[1..]), &options),
+		"wifi" => command_wifi(&positional, &options),
 		#[cfg(feature = "tui")]
 		"tui" => tui::run(&options),
 		#[cfg(not(feature = "tui"))]
@@ -133,7 +153,16 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	}
 }
 
-fn parse_options(arguments: &[String]) -> Result<Options, String> {
+/// The options, and the arguments that were not options.
+///
+/// One pass, because there used to be three -- this function, a `positional`
+/// helper with its own list of which flags take a value, and `explain`'s
+/// `take_while` on the first `--`. The lists had already drifted:
+/// `--factory-dir` and `--strand-credentials` were missing from the helper's,
+/// so `ncfg wifi --factory-dir /some/dir scan` read the directory as a
+/// subcommand, and `ncfg explain --json interface eth0` found no subject at
+/// all. A single walk cannot disagree with itself.
+fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String> {
 	let mut options = Options {
 		config_dir: None,
 		factory_dir: None,
@@ -143,7 +172,9 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 		confirm: None,
 		allow_disruption: Vec::new(),
 		strand_credentials: Vec::new(),
+		wifi: wifi::Wanted::default(),
 	};
+	let mut positional = Vec::new();
 	let mut index = 0;
 	while index < arguments.len() {
 		let argument = arguments[index].as_str();
@@ -172,20 +203,31 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
 				.push(take_value("--strand-credentials")?),
 			"--json" => options.json = true,
 			"--yes" => options.yes = true,
+			"--id" => options.wifi.id = Some(take_value("--id")?),
+			"--priority" => {
+				let value = take_value("--priority")?;
+				options.wifi.priority = Some(value.parse().map_err(|_| {
+					format!("--priority wants a number, and higher wins, not `{value}`")
+				})?);
+			}
+			"--open" => options.wifi.open = true,
+			"--wpa2" => options.wifi.proto = Some("wpa2"),
+			"--wpa3" => options.wifi.proto = Some("wpa3"),
+			"--hidden" => options.wifi.hidden = true,
 			// There is no daemon yet, so oneshot is the only mode there is.
 			// Accepting the flag now means the command line does not change
 			// when the daemon lands in M2.
 			"--oneshot" => {}
 			// Positional arguments belong to the subcommand -- `explain` takes
-			// three. An unknown *option* is still an error, because a typo in
-			// a flag silently ignored is how somebody thinks they passed
-			// --confirm-within and did not.
+			// three, `wifi add` takes one. An unknown *option* is still an
+			// error, because a typo in a flag silently ignored is how somebody
+			// thinks they passed --confirm-within and did not.
 			other if other.starts_with('-') => return Err(format!("unknown option `{other}`")),
-			_ => {}
+			other => positional.push(other.to_owned()),
 		}
 		index += 1;
 	}
-	Ok(options)
+	Ok((options, positional))
 }
 
 /// Compile the config, and write the result where `cat` can reach it.
@@ -455,23 +497,18 @@ fn outcome(plan: &Plan) -> ExitCode {
 /// daemon-optional a property rather than a fallback, and explain is exactly
 /// the command somebody reaches for when things are broken -- which is when a
 /// daemon is least likely to be running.
-fn command_explain(arguments: &[String], options: &Options) -> Result<ExitCode, String> {
-	let positional: Vec<&String> = arguments
-		.iter()
-		.take_while(|argument| !argument.starts_with("--"))
-		.collect();
-
-	let subject = match positional.as_slice() {
-		[kind, name] if *kind == "interface" => netcfgd_proto::Subject::Interface {
-			name: (*name).clone(),
+fn command_explain(positional: &[String], options: &Options) -> Result<ExitCode, String> {
+	let subject = match positional {
+		[kind, name] if kind == "interface" => {
+			netcfgd_proto::Subject::Interface { name: name.clone() }
+		}
+		[kind, interface, address] if kind == "address" => netcfgd_proto::Subject::Address {
+			interface: interface.clone(),
+			address: address.clone(),
 		},
-		[kind, interface, address] if *kind == "address" => netcfgd_proto::Subject::Address {
-			interface: (*interface).clone(),
-			address: (*address).clone(),
-		},
-		[kind, interface, destination] if *kind == "route" => netcfgd_proto::Subject::Route {
-			interface: (*interface).clone(),
-			destination: (*destination).clone(),
+		[kind, interface, destination] if kind == "route" => netcfgd_proto::Subject::Route {
+			interface: interface.clone(),
+			destination: destination.clone(),
 		},
 		_ => {
 			return Err("explain what? try `ncfg explain interface eth0`, \
@@ -519,29 +556,6 @@ fn command_explain(arguments: &[String], options: &Options) -> Result<ExitCode, 
 /// `explain` does its own thing with indexes; this is for the subcommands
 /// added later, which need the positional arguments without caring where the
 /// flags were.
-fn positional(arguments: &[String]) -> Vec<String> {
-	const TAKES_VALUE: &[&str] = &[
-		"--config-dir",
-		"--run-dir",
-		"--confirm-within",
-		"--allow-disruption",
-	];
-	let mut out = Vec::new();
-	let mut skip_next = false;
-	for argument in arguments {
-		if skip_next {
-			skip_next = false;
-			continue;
-		}
-		if argument.starts_with('-') {
-			skip_next = TAKES_VALUE.contains(&argument.as_str());
-			continue;
-		}
-		out.push(argument.clone());
-	}
-	out
-}
-
 /// Which wireless interface, when the command line did not say.
 ///
 /// Naming an interface every time is friction on the machine this is for --
@@ -582,10 +596,18 @@ fn wireless_interface(given: Option<&String>, options: &Options) -> Result<Strin
 fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, String> {
 	let Some(subcommand) = positional.first() else {
 		return Err(
-			"`ncfg wifi` needs a subcommand: scan, status, connect or disconnect".to_owned(),
+			"`ncfg wifi` needs a subcommand: scan, status, add, connect or disconnect".to_owned(),
 		);
 	};
 	let rest = &positional[1..];
+
+	// Before the socket: `add` writes the configuration and needs no daemon,
+	// which is the point -- a machine with no network yet is a machine where
+	// nothing else is running either.
+	if subcommand == "add" {
+		return wifi::add(rest, options);
+	}
+
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
 	let socket = client::socket_path(&run_dir);
 
@@ -617,7 +639,7 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 		},
 		other => {
 			return Err(format!(
-				"unknown wifi subcommand `{other}`; try scan, status, clients, connect or \
+				"unknown wifi subcommand `{other}`; try scan, status, clients, add, connect or \
 				 disconnect"
 			))
 		}
@@ -1174,4 +1196,65 @@ fn describe(op: &str, reason: &netcfgd_plan::Reason) -> String {
 		"{op}{where_}  {}: {} (was {})",
 		reason.field, reason.desired, reason.observed
 	)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::parse_options;
+
+	fn split(arguments: &[&str]) -> (super::Options, Vec<String>) {
+		let owned: Vec<String> = arguments.iter().map(|a| (*a).to_owned()).collect();
+		parse_options(&owned).expect("it parses")
+	}
+
+	/// The regression the one-pass parse fixes. Every option that takes a value
+	/// has to consume it, or the value becomes a subcommand -- and it used to,
+	/// for the two options that were in this parser and not in the separate
+	/// list the subcommands used.
+	#[test]
+	fn a_value_is_never_mistaken_for_a_subcommand() {
+		for option in [
+			"--config-dir",
+			"--factory-dir",
+			"--run-dir",
+			"--allow-disruption",
+			"--strand-credentials",
+			"--id",
+		] {
+			let (_, positional) = split(&[option, "value", "scan"]);
+			assert_eq!(
+				positional,
+				vec!["scan".to_owned()],
+				"`{option} value` left its value behind as a positional"
+			);
+		}
+		let (_, positional) = split(&["--confirm-within", "30", "scan"]);
+		assert_eq!(positional, vec!["scan".to_owned()]);
+		let (_, positional) = split(&["--priority", "30", "add", "Home"]);
+		assert_eq!(positional, vec!["add".to_owned(), "Home".to_owned()]);
+	}
+
+	/// And a flag before the positionals no longer hides them, which is what
+	/// `explain` did with its own `take_while`.
+	#[test]
+	fn a_flag_may_come_first() {
+		let (options, positional) = split(&["--json", "interface", "eth0"]);
+		assert!(options.json);
+		assert_eq!(positional, vec!["interface".to_owned(), "eth0".to_owned()]);
+	}
+
+	#[test]
+	fn a_missing_value_is_an_error_rather_than_a_default() {
+		let owned = vec!["--priority".to_owned()];
+		match parse_options(&owned) {
+			Ok(_) => panic!("a value-taking option with no value must be refused"),
+			Err(error) => assert!(error.contains("needs a value"), "{error}"),
+		}
+	}
+
+	#[test]
+	fn a_mistyped_flag_is_refused_rather_than_ignored() {
+		let owned = vec!["--jsonn".to_owned()];
+		assert!(parse_options(&owned).is_err());
+	}
 }

@@ -672,16 +672,21 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after four sessions on the laptop list, all of them started by asking
-what an operator would actually hit: four config keys that compiled and did nothing
+Last rewritten after nine pieces of work on the laptop list, every one of them
+started by asking what an operator would actually hit rather than what the roadmap
+said next: four config keys that compiled and did nothing
 ([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)),
 **rfkill** — a radio that is switched off looked exactly like a network that would
 not associate, and checking it put the first real wifi hardware under test here
 ([0062](docs/decisions/0062-a-blocked-radio-is-reported-and-not-unblocked.md)) — the
-**`down` and `lease` hooks** (0063, 0064), and **DHCPv4 with busybox**, which had
-never worked at all
-([0065](docs/decisions/0065-udhcpc-needs-a-script-and-netcfgd-writes-it.md)).
-Every one of the four found a defect older than the work itself.
+**`down`, `lease` and `carrier` hooks** (0063, 0064, 0068), **DHCPv4 with busybox**,
+which had never worked at all
+([0065](docs/decisions/0065-udhcpc-needs-a-script-and-netcfgd-writes-it.md)), **what
+a lease says about names** (0066, 0067), and **joining a network without an editor**
+([0069](docs/decisions/0069-adding-a-network-is-writing-a-file.md)).
+Nearly every one found a defect older than the work itself — including netcfgd
+overwriting a working `/etc/resolv.conf` with an empty one, up hooks running on
+every reconcile, and a DHCP fallback that got a lease and configured nothing.
 Before it, the session that **closed**
 [0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s list and
 found that a VXLAN's and a tunnel's parent had never reached the kernel at all
@@ -1024,6 +1029,36 @@ because that is the one the driver obeys. Whether blocking the platform button
 propagates to the phy is **not measured** and is written down as unknown — finding
 out means switching off the radio of the machine running the test.
 
+#### Joining a network
+
+**`ncfg wifi add SSID` writes the config file, and the daemon is not involved**
+([0069](docs/decisions/0069-adding-a-network-is-writing-a-file.md)). It cannot be:
+`netcfgd.service` mounts `/etc/netcfgd` read-only and nothing in the protocol writes
+configuration — which is the shape 0030 settled when the NetworkManager shim needed
+the same thing. So a client writes one `network` block into
+`conf.d/wifi-<id>.conf`, the passphrase into `secrets/<id>` at 0600, and the daemon
+notices by inotify. Forgetting a network is `rm` on that file.
+
+**The passphrase is never an argument**, because `ps` shows one to every user on the
+machine and the shell writes it to a history file. On a terminal it is prompted for
+with echo off — a new `EchoOff` guard in `netcfgd-sys::term`, next to `is_terminal`
+for the reason that module exists: constraint 4's crate is where the libc boundary
+lives, not where netlink lives. The termination signals are blocked for exactly as
+long as echo is off, so `^C` aborts *after* the terminal is restored rather than
+instead of it. On a pipe it is one line of standard input, which is what makes the
+command scriptable.
+
+**What it writes, it reads back**: the whole configuration is compiled again through
+the daemon's own loader, and if the result does not compile or does not contain the
+network asked for, both files are removed and the compiler's diagnostic is the error.
+A generated file that does not compile takes every other interface with it.
+
+**An id is a label, a filename and a secret name at once**, so the strictest of the
+three wins — no quote, no backslash, no control character, no `/` and no `..`, the
+last two because a secret's name is a path under `secrets/`. An SSID that fails is
+refused with the fix: `--id` gives a plain label and the SSID is kept exactly, as
+hex, which is the mechanism the DSL already had.
+
 #### Explaining it
 
 `ncfg explain` follows the indirections. An address the document named by
@@ -1108,8 +1143,10 @@ match.
 
 3. **What a laptop still wants, in the order it will bite.** Settled so far: the
    four inert config keys (0061), rfkill (0062), the `down` and `post_down` hooks
-   (0063), the `lease` hook (0064) and DHCPv4 with busybox (0065). What is left, and
-   none of it is a schema question:
+   (0063), the `lease` hook (0064), DHCPv4 with busybox (0065), a lease's
+   nameservers and search suffixes (0066, 0067), the `carrier` hook (0068) and
+   joining a network without an editor (0069). What is left, and none of it is a
+   schema question:
 
    - **dhcpcd's generated script has never been run by dhcpcd**, which is not
      installed here. Its shape was read out of dhcpcd 10.1.0's own hooks and its
@@ -1120,9 +1157,18 @@ match.
      `drift`. None of them is a laptop's now that `carrier` fires; `roam` is the next
      one worth having, and it wants the supplicant's event socket rather than an
      observation.
-   - **Joining a network needs an editor and root.** `ncfg wifi connect` takes the id
-     of a `network` block and there is no `ncfg wifi add`; the NM shim's write path is
-     the current answer.
+   - **`ncfg secret set NAME` does not exist**, and until 0069 the compiler's
+     diagnostic for a missing passphrase told the reader to run it — 0061's disease
+     in a help string. `ncfg wifi add` now contains everything it
+     needs — an atomic 0600 write and a no-echo prompt
+     ([0069](docs/decisions/0069-adding-a-network-is-writing-a-file.md)) — so a
+     WireGuard or DSL credential still being an editor's job is a small separate
+     command rather than a design question. **Nothing forgets a network** either:
+     `rm` on the file is the whole of it, and an `ncfg wifi forget` would take the
+     secret with it the way the shim's delete path does.
+   - **An enterprise network cannot be added from the command line.** `eap` wants an
+     identity, a method and certificates, which is a form and not a flag list; the
+     same is true of `dot1x` on a wired port.
    - **`accept_ra` is unmanaged**, which a router asking for `slaac` on its WAN
      discovers the hard way.
    - **Nothing reads `/dev/rfkill`'s event stream**, so a flipped switch is noticed
@@ -1174,6 +1220,9 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **Size and RSS both ratchet, and RSS is noisy.** See §6. Raising either is a deliberate, reviewable edit with a line saying what it bought.
 - **An observation that asks another process needs its own deadline, and the deadline has to cover the connect.** Reading a running hostapd's ACL put a control-socket round trip in the reconcile loop, which runs on every netlink event. A hostapd that is *wedged* — alive, socket bound, not answering — held a single `ncfg plan` for 10.2 seconds; a one-second deadline brings it to 1.0. The first attempt shortened nothing, because `Client::connect` opens with a `PING` and a timeout set on the returned client never covers it. Measured both times rather than reasoned about, and `tests/live/acl.sh` now keeps it measured.
 - **Reading the daemon you are integrating with beats reading its documentation, and `apt-get source` is how.** Three separate design errors in 0041 came from believing the wpa_ctrl documentation and `strings` output; all three were settled in twenty minutes by reading `hostapd/ctrl_iface.c`. This is the third feature in a row where the source answered a question the documentation got wrong.
+- **Two lists of the same thing have already drifted.** The CLI parsed its arguments three times: `parse_options` knew which flags take a value, a `positional` helper had its *own* copy of that list, and `explain` used neither and took arguments up to the first `--`. The copy was missing `--factory-dir` and `--strand-credentials`, so `ncfg wifi --factory-dir /d scan` read the directory as a subcommand and `ncfg explain --json interface eth0` found no subject at all. Nothing was red, because no test passed a global option before a positional one. One walk returning both cannot disagree with itself — and where a second list is genuinely needed, the test to write is the one that iterates it and asserts the other half agrees.
+- **A defensive check needs a break to be worth its lines.** `wifi add` compiles what it wrote and removes it if that fails, and no input reaches that path: every way an operator can make an invalid block is refused earlier, by name. Rendering the block without its closing brace is what proved the rollback works — the command quoted `unclosed block \`network\`` with the file and line, and left both directories empty. A check that cannot be reached by input can still be reached by a patch, and until it has been, it is a comment.
+- **A prompt that echoes is invisible to every test that drives a pipe.** A pipe has no `ECHO` to clear, so a passphrase prompt reading standard input passes identically whether the code turns echo off or not. Only a pty can say, which is why the second python test in the tree exists — and turning echo off has a matching hazard the TUI already paid for once: a process killed between clearing and restoring hands back a shell with echo off.
 - **Breaking a gate to prove it fails needs the artefact rebuilt.** Restoring a file from a copy can leave it with an *older* mtime than the broken build, and cargo then keeps the broken artefact — so the "restored" run silently tests the break. It looked like a new test failing for no reason. `touch` after restoring, or the whole break-it-and-watch-it-go-red method reports on a binary nobody has.
 
 ---

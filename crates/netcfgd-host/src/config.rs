@@ -174,6 +174,62 @@ pub fn writable_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
 	Ok(out)
 }
 
+/// Write a file into the config directory, or leave what was there.
+///
+/// Through a temporary file in the same directory and a rename, so a reader --
+/// and the daemon's inotify watch is one -- sees either the old file or the new
+/// one and never half of either. The temporary carries the final mode from the
+/// moment it exists, which for a secret is the whole point: a mode applied
+/// after the write is a mode that was wrong once, and the window is exactly
+/// when the passphrase is on disk under another name.
+///
+/// The same reasoning, and nearly the same code, as `netcfgd-nm`'s
+/// `write_atomically`. Not shared with it: that adapter depends on
+/// `netcfgd-proto` and `netcfgd-model` and nothing else on purpose (decision
+/// 0030), and pulling this crate in to save twenty lines would undo the
+/// containment the packaging gate enforces.
+///
+/// # Errors
+///
+/// Returns an `io::Error`. The temporary is removed on a failed rename, so a
+/// full disk does not leave a dotfile behind next to the config.
+pub fn write_atomically(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
+	use std::io::Write as _;
+	use std::os::unix::fs::OpenOptionsExt as _;
+
+	let directory = path.parent().unwrap_or_else(|| Path::new("."));
+	fs::create_dir_all(directory)?;
+	let temporary = directory.join(format!(
+		".{}.{}",
+		path.file_name().map_or_else(
+			|| "tmp".to_owned(),
+			|name| name.to_string_lossy().into_owned()
+		),
+		std::process::id()
+	));
+
+	let outcome = (|| -> io::Result<()> {
+		let mut file = fs::OpenOptions::new()
+			.write(true)
+			.create(true)
+			.truncate(true)
+			.mode(mode)
+			.open(&temporary)?;
+		file.write_all(bytes)?;
+		// Durable before it is visible. A rename that beats the data to disk is
+		// a truncated config file after a power cut, which on a router is the
+		// failure that needs a serial cable.
+		file.sync_all()?;
+		drop(file);
+		fs::rename(&temporary, path)
+	})();
+
+	if outcome.is_err() {
+		let _ = fs::remove_file(&temporary);
+	}
+	outcome
+}
+
 /// The factory directory to use: the argument, the environment, or the
 /// default.
 #[must_use]
