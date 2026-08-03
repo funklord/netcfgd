@@ -1108,7 +1108,8 @@
         "op": "hook_run",
         "iface": "eth0",
         "phase": "post_up",
-        "path": "/run/netcfgd/hooks/eth0-post_up"
+        "path": "/run/netcfgd/hooks/eth0-post_up",
+        "address": "192.168.1.50/24"
       },
       "reason": {
         "interface": "eth0",
@@ -1123,7 +1124,8 @@
         "op": "hook_run",
         "iface": "eth0",
         "phase": "post_up",
-        "path": "/run/netcfgd/hooks/eth0-post_up"
+        "path": "/run/netcfgd/hooks/eth0-post_up",
+        "address": "192.168.1.50/24"
       }
     },
     {

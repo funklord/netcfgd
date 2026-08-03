@@ -232,11 +232,15 @@ takes the id of a `network` block, not an SSID from a scan. Adding a new
 network means editing the config, which needs the `admin` tier. `ncfg wifi
 scan` marks which networks in range you can actually join.
 
-**Two of the eleven hook phases run.** `pre_up` and `post_up` fire; `up`,
-`down`, `pre_down`, `post_down`, `carrier`, `lease`, `roam`, `portal` and `drift`
-are parsed, written into `/run/netcfgd/hooks/` and never executed. `ncfg plan`
-names each one it finds, so this is visible rather than silent -- but if your plan
-for a laptop involved a `carrier` or a `lease` hook, it does not work yet.
+**Four of the eleven hook phases run.** `pre_up`, `post_up`, `down` and
+`post_down` fire; `up`, `pre_down`, `carrier`, `lease`, `roam`, `portal` and
+`drift` are parsed, written into `/run/netcfgd/hooks/` and never executed. `ncfg
+plan` names each one it finds, so this is visible rather than silent -- but if your
+plan for a laptop involved a `carrier` or a `lease` hook, it does not work yet.
+
+A `down` hook runs *before* the interface goes and while it still has its
+addresses, which is what you want for unmounting something. If it fails, the
+interface stays up: the down phases can veto.
 
 **Nothing manages `accept_ra`, and its default ignores router advertisements on a
 forwarding interface.** Not a laptop problem unless you turn on `forwarding` for a

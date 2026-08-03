@@ -779,8 +779,13 @@ fn hooks_bracket_the_interface_lifecycle() {
 	let desired = compile(&sources, &mut TestHooks).expect("compiles");
 
 	let mut observed = observed_with(&["eth0"]);
-	let plan = plan(&desired, &observed, &PlanOptions::default());
-	simulate(&plan, &mut observed, &desired);
+	// Through `settle`, which is the idempotence gate -- and which no fixture with
+	// hooks in it had ever used. Both up hooks were emitted unconditionally, so a
+	// converged interface ran them on every apply and the second plan was never
+	// empty; nothing in the harness asked, because the one test with hooks called
+	// `plan` and `simulate` by hand. Section 6's gate with the subject missing from
+	// its input set, one more time (0063).
+	let plan = settle(&desired, &mut observed);
 
 	let hooks: Vec<usize> = plan
 		.actions
@@ -5173,6 +5178,145 @@ interface work-net {
 	);
 }
 
+/// `down` runs before the interface goes, `post_down` after it.
+///
+/// The ordering is the point. Teardown runs last in a plan, so at the moment a
+/// `down` hook fires the interface still has its addresses and routes -- which is
+/// what lets one unmount a share or stop a service that is using them. Decision
+/// 0063.
+#[test]
+fn down_hooks_bracket_the_interface_going_down() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"interface eth0 {\n\
+		 \tconfig  = \"10.0.0.2/24\"\n\
+		 \tenabled = false\n\
+		 \tdown {\necho going\n}\n\
+		 \tpost_down {\necho gone\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let hooks: Vec<usize> = plan
+		.actions
+		.iter()
+		.enumerate()
+		.filter(|(_, action)| matches!(action.op, Op::HookRun { .. }))
+		.map(|(index, _)| index)
+		.collect();
+	assert_eq!(hooks.len(), 2, "expected two hooks: {:?}", names(&plan));
+	let down = position(&plan, "link.down");
+	assert!(
+		hooks[0] < down && down < hooks[1],
+		"the hooks do not bracket the link going down: {:?}",
+		names(&plan)
+	);
+	// And the dependencies say so as well as the order, because a plan is a DAG
+	// and a reader of `depends_on` must get the same answer as a reader of the
+	// list.
+	assert!(plan.actions[down]
+		.depends_on
+		.contains(&plan.actions[hooks[0]].id));
+	assert!(plan.actions[hooks[1]]
+		.depends_on
+		.contains(&plan.actions[down].id));
+	assert!(
+		!plan
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("never run by this build")),
+		"a phase that now fires was reported as inert: {:?}",
+		plan.warnings
+	);
+}
+
+/// An interface being remade fires them too, and the up hooks on the way back.
+///
+/// The symmetry 0059 left open: the creation pass plans a remade interface as
+/// absent, so `pre_up` and `post_up` fire again -- and without a `down` beside
+/// them, an operator's pair would run half as often as it should.
+#[test]
+fn a_remade_interface_fires_down_and_up_hooks() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"interface base0 { kind = \"dummy\"; config = \"null\" }\n\
+		 interface work-net {\n\
+		 \tvlan { parent = \"base0\"; id = 43 }\n\
+		 \tconfig = \"null\"\n\
+		 \tdown {\necho going\n}\n\
+		 \tpost_up {\necho back\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+	let mut observed = observed_with(&["base0", "work-net"]);
+	"vlan".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+	observed.links[1].vlan = Some(netcfgd_model::ObservedVlan {
+		id: Some(42),
+		protocol: Some("dot1q".to_owned()),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let phases: Vec<&str> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::HookRun { phase, .. } => Some(phase.name()),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(
+		phases,
+		vec!["down", "post_up"],
+		"a remade interface did not run both halves: {:?}",
+		names(&plan)
+	);
+	assert!(position(&plan, "hook.run") < position(&plan, "link.delete"));
+}
+
+/// A guarded interface refuses the down hook with the transition it belongs to.
+///
+/// `link.down` is disruptive and a guard refuses it (0010). The hook must go with
+/// it: a `down` script that runs when nothing goes down is worse than one that
+/// does not run, because it has already unmounted the share.
+#[test]
+fn a_guard_refusing_a_link_down_takes_its_hook_with_it() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"interface eth0 {\n\
+		 \tconfig  = \"10.0.0.2/24\"\n\
+		 \tenabled = false\n\
+		 \tguard   = \"nfs root\"\n\
+		 \tdown {\necho going\n}\n\
+		 \tpost_down {\necho gone\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.refusals
+			.iter()
+			.any(|refusal| refusal.op == "link.down"),
+		"the guard did not refuse the transition: {:?}",
+		plan.refusals
+	);
+	assert!(
+		!names(&plan).contains(&"hook.run"),
+		"a hook ran for a transition that was refused: {:?}",
+		names(&plan)
+	);
+}
+
 /// A blocked radio is named, with the remedy for the switch that blocked it.
 ///
 /// The gap this closes is a sentence rather than a feature: a radio that is off
@@ -5259,8 +5403,8 @@ fn a_hook_in_a_phase_nothing_fires_is_reported() {
 		"interface eth0 {\n\
 		 \tconfig = \"10.0.0.2/24\"\n\
 		 \tpost_up {\necho up\n}\n\
-		 \tdown {\necho down\n}\n\
-		 \ton lease {\necho leased\n}\n\
+		 \ton carrier {\necho carrier\n}\n\
+		 \ton roam {\necho roamed\n}\n\
 		 }\n",
 	);
 	let desired = compile(&sources, &mut TestHooks).expect("compiles");
@@ -5276,11 +5420,13 @@ fn a_hook_in_a_phase_nothing_fires_is_reported() {
 	assert_eq!(
 		said.len(),
 		2,
-		"expected the `down` and the `lease` hook to be named and nothing else: {:?}",
+		"expected the `carrier` and the `roam` hook to be named and nothing else: {:?}",
 		plan.warnings
 	);
-	assert!(said.iter().any(|message| message.contains("`down` hook")));
-	assert!(said.iter().any(|message| message.contains("`lease` hook")));
+	assert!(said
+		.iter()
+		.any(|message| message.contains("`carrier` hook")));
+	assert!(said.iter().any(|message| message.contains("`roam` hook")));
 	// And the one that does fire is still planned, rather than warned about.
 	assert!(names(&plan).contains(&"hook.run"));
 }
