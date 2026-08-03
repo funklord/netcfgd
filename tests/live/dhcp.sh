@@ -45,7 +45,25 @@ mkdir -p "$work/etc" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+
+# netcfgd looks for its client on PATH and prefers dhcpcd, so on a machine that
+# has dhcpcd installed -- which is most of them, and which `dhcpcd.sh` is the
+# other half of -- this script would silently drive the client it is not written
+# for, and would say so several checks later as a missing pid file. So the daemon
+# is handed the machine's own PATH with every directory holding a dhcpcd taken
+# out. That is narrower than it sounds: dhcpcd installs into sbin, and the one
+# tool the generated script needs is `ip`, which iproute2 moved to /usr/bin --
+# handing the daemon a PATH with busybox alone on it broke the script instead,
+# which is the first thing this was tried as.
+client_path=
+saved_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+	if [ -x "$dir/dhcpcd" ]; then continue; fi
+	client_path="${client_path:+$client_path:}$dir"
+done
+IFS=$saved_ifs
+ncfg() { PATH="$client_path" "$repo/target/debug/ncfg" "$@"; }
 
 failures=0
 check() {
@@ -131,7 +149,7 @@ if ! command -v udhcpc >/dev/null 2>&1; then
 	echo "dhcp.sh: no udhcpc in PATH, so the busybox applet is what gets used"
 fi
 
-if ! "$ncfg" apply > "$work/apply.log" 2>&1; then
+if ! ncfg apply > "$work/apply.log" 2>&1; then
 	if grep -q 'Operation not permitted' "$work/apply.log"; then
 		skip "no CAP_NET_ADMIN (run under unshare -rn)"
 	fi
@@ -166,7 +184,7 @@ contains "and the lease's default route is installed" \
 
 # What netcfgd makes of it: the address is the client's, not netcfgd's, exactly as a
 # dhcpcd lease is (0004). So it is not tagged, and netcfgd will not remove it.
-status=$("$ncfg" status 2>/dev/null | sed -n '/^cli /,/^[^ ]/p')
+status=$(ncfg status 2>/dev/null | sed -n '/^cli /,/^[^ ]/p')
 # `Foreign` on a kernel that reports `IFA_PROTO` and `Unknown` on one older than
 # 5.18, where the answer comes from netcfgd's own records and cannot be definite
 # (0002). Both mean "not netcfgd's", and neither may be removed -- so what is
@@ -191,13 +209,13 @@ contains "and its own address as its own"                "$status" "10.44.9.9/24
 # next apply has -- the same asynchrony the lease hook has (0064). This is that
 # apply, and what follows it is the state an operator ends up in.
 contains "the lease's nameservers are work for the next apply" \
-	"$("$ncfg" plan 2>&1)" "dns.apply cli"
-"$ncfg" apply > "$work/apply-dns.log" 2>&1 || {
+	"$(ncfg plan 2>&1)" "dns.apply cli"
+ncfg apply > "$work/apply-dns.log" 2>&1 || {
 	cat "$work/apply-dns.log" >&2
 	exit 1
 }
 contains "and then there is nothing to do" \
-	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+	"$(ncfg plan 2>&1 | head -1)" "nothing to do"
 
 # The nameservers, which are the whole of decision 0066. The client reports them
 # into the interface report and netcfgd delivers them because the interface asked
@@ -247,7 +265,7 @@ interface cli {
 	config = "dhcp 10.44.9.9/24"
 }
 CONF
-ungated=$("$ncfg" plan 2>&1 || true)
+ungated=$(ncfg plan 2>&1 || true)
 contains "without a dns block the plan says the file will resolve nothing" \
 	"$ungated" "resolves nothing"
 contains "and names the interface whose lease offered servers" "$ungated" \
@@ -276,7 +294,7 @@ pid=$(cat "$work/run/udhcpc/cli.pid" 2>/dev/null || echo 0)
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 interface cli { config = "10.44.9.9/24" }
 CONF
-"$ncfg" apply > "$work/apply-stop.log" 2>&1 || {
+ncfg apply > "$work/apply-stop.log" 2>&1 || {
 	cat "$work/apply-stop.log" >&2
 	exit 1
 }
