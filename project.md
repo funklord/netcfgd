@@ -515,15 +515,17 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 
 **Access points carry a station list**, which is the single-host half of the Ubiquiti-style roaming [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) wrote down: forcing a client onto one access point means every other access point refusing it. `access_control { deny = [..] }` or `allow`, never both, because hostapd reads one file or the other ([0039](docs/decisions/0039-a-station-list-is-one-list.md)). Changing the list still needs a restart, which for this feature is the wrong answer — converging it over hostapd's control socket instead is the next piece, and the record says why.
 
-**A WireGuard tunnel, a bridge and a bond are themselves in the shim**, the
-three link kinds to stop being `GENERIC` — each on the same terms: NM defines an
+**A WireGuard tunnel, a bridge, a bond and a VLAN are themselves in the shim**,
+the four link kinds to stop being `GENERIC` — each on the same terms: NM defines an
 interface for it, and netcfgd can answer every property on that interface from
 what it already observes. WireGuard needed 0054 first; a bridge and a bond
 needed nothing, because a `Slaves` list is the `master` field on every other
-link read from the other end. **That is also the rule for what has not left**:
-`.Device.Vlan` wants an id and a parent the observation does not carry, and
-adding them to the model to satisfy a shim is the direction constraint 6
-forbids. Its `interface` block is deliberately *not* a connection
+link read from the other end. **That is also the rule for what has not left**: an IP tunnel's interface wants
+thirteen properties and netcfgd can answer eight, and adding the other five to the
+model to satisfy a shim is the direction constraint 6 forbids
+([0077](docs/decisions/0077-a-type-leaves-generic-when-every-property-is-answerable.md)).
+The VLAN did leave, once 0059 and 0060 gave the planner its own reasons to observe
+an id and a parent. Its `interface` block is deliberately *not* a connection
 profile, which is the radio rule read twice: an `802-3-ethernet` profile named
 `wg0` is a thing in every client's list that is not an ethernet, and NM's own
 WireGuard profile carries the peers and the private key, which this shim will
@@ -1273,15 +1275,18 @@ match.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **The shim's remaining device types, which have everything they need now.**
-   `.Device.Vlan` wants an id and a parent and `.Device.IPTunnel` a local, a remote
-   and a parent; every one of those is in the observation, put there by 0058, 0059
-   and [0060](docs/decisions/0060-a-parent-is-one-word-and-two-attributes.md) for
-   local reasons — which is the direction constraint 6 requires and the road a
-   bridge, a bond and a WireGuard tunnel all took. **No model change is needed**,
-   which is the whole point of having done it in that order. Looking for the local
-   reason is also what found the parent defect below, so the order paid for itself
-   twice.
+2. ~~**The shim's remaining device types, which have everything they need now.**~~
+   **Half done, and the other half is refused with a reason**
+   ([0077](docs/decisions/0077-a-type-leaves-generic-when-every-property-is-answerable.md)).
+   A **VLAN** is a `.Device.Vlan` now: libnm asks for four properties and netcfgd
+   observes all four, the id and the parent only because 0059 and 0060 needed them
+   for the planner — constraint 6 in the direction it is meant to run, with no
+   model change. An **IP tunnel stays `GENERIC`**: libnm asks for thirteen and
+   netcfgd observes eight, with no encapsulation limit, flags, flow label, fwmark,
+   path-MTU-discovery bit or TOS anywhere in the observation *or* the document.
+   The item above was written from what netcfgd happens to observe rather than
+   from what libnm asks for, which is the lesson: **a type leaves `Generic` when
+   *every* property on the interface is answerable, not the ones somebody listed.**
 
 3. **What a laptop still wants, in the order it will bite.** Settled so far: the
    four inert config keys (0061), rfkill (0062), the `down` and `post_down` hooks
@@ -1362,6 +1367,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
 - **A column that renders two things the same way cannot tell them apart, and neither can a check reading it.** `nmcli`'s TYPE column prints a *generic* device's `TypeDescription`, and netcfgd's type description is the kernel's link kind — so "the tunnel shows as `wireguard`" passed with the device-type mapping deliberately broken, because a generic device whose description is the word `wireguard` renders identically to a real one. The repair is to assert a value only the real thing can produce: a listen port the document chose, and the type as a *number* rather than as a rendered column.
 - **A script that skips on a missing package is a script whose failures nobody sees.** `tunnel.sh` had been red on every machine with openvpn installed since 0067 landed, and green everywhere else because it skips without the package -- so the suite said nothing. What it was asserting is that a pushed `dhcp-option DOMAIN` shows up as a *declined* comment in the report; 0067 made it a `search=` suffix, and neither the check nor the doc comment above the code followed. Both are the same disease in two media, and the second one is the reason to grep prose when behaviour changes. The bucket of scripts that skip on a package needs running *deliberately*, on a machine that has it, or it is a bucket of tests nobody is running.
+- **"It has everything it needs" is a claim about the *other* side's interface, and only that side can settle it.** The shim's remaining device types were written down as ready because netcfgd observed the properties somebody had listed. Reading libnm's own accessors said four for a VLAN and thirteen for an IP tunnel, of which netcfgd answers eight — so one shipped and one is refused with the six missing names in a test. A capability list assembled from what you have, rather than from what the consumer asks for, is a list that will be wrong in the direction that flatters you.
 - **`/sys` in an `unshare -rn` test is the host's, and the interface under test is not in it.** A hook reading `/sys/class/net/<iface>/carrier` got "No such file or directory" for a device that plainly existed — sysfs is a mount, the mount is the machine's, and only netlink is namespace-correct without `unshare -m`. Every live script here that asks about a link uses `ip`, which is why this had never come up.
 - **A check that counts lines is not counting runs.** `grep -c '^pre_up '` said "the hook ran once" until the hook grew a second `echo`, and then said twice. Count one specific line — the transcript is a record of what happened, not of how often.
 - **A cleanup whose pattern matches nothing is a cleanup nobody has.** `openvpn.sh`'s trap ran `pkill -f "$work/fake_openvpn"`, and the fake is installed at `$work/bin/openvpn` -- so it matched nothing on every run since the file was renamed, and the correct pattern was sitting five lines further down in the same file, used mid-script. Nine daemons were found alive on the machine, the oldest 21 hours old, each holding its `/tmp` directory open. Nothing was red: a leaked daemon is invisible to every gate here. Two things follow -- name the pattern once so the two uses cannot drift, and treat "did this `pkill` actually kill anything?" as a question worth asking, because `|| true` swallows the answer.
