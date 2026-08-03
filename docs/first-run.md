@@ -247,15 +247,10 @@ A `down` hook runs *before* the interface goes and while it still has its
 addresses, which is what you want for unmounting something. If it fails, the
 interface stays up: the down phases can veto.
 
-**DHCPv4 needs dhcpcd installed.** netcfgd's fallback to busybox `udhcpc` invokes
-it without a script, and busybox's client configures nothing without one -- Debian
-ships no default script either, so the client gets a lease and nothing happens.
-Install `dhcpcd-base`.
-
-**DHCPv4 needs dhcpcd installed.** netcfgd's fallback to busybox `udhcpc` invokes
-it without a script, and busybox's client configures nothing without one -- Debian
-ships no default script either, so the client gets a lease and nothing happens.
-Install `dhcpcd-base`.
+**A DHCP lease gives you an address and a route, and no nameservers.** Neither
+client tells netcfgd about the ones it was offered, so DNS comes from your config.
+That is the one thing about DHCPv4 that is still missing -- it works with dhcpcd and
+with busybox `udhcpc` alike now, including on a machine that has only busybox.
 
 **Nothing manages `accept_ra`, and its default ignores router advertisements on a
 forwarding interface.** Not a laptop problem unless you turn on `forwarding` for a
