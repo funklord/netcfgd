@@ -948,8 +948,15 @@ set the sysctl by hand is gone: it was true when written, false the moment this
 landed, tested by nothing, and it read the *document's* `forwarding` field, so it
 never fired for a container that forwards without being asked.
 
-**Six of the eleven hook phases fire**, and the five that do not each say so in the
-plan. `pre_up` and `post_up` were the two. `down` and `post_down` joined them in
+**Seven of the eleven hook phases fire**, and the four that do not each say so in
+the plan. `pre_up` and `post_up` were the two. `up` is the newest
+([0076](docs/decisions/0076-the-up-hook-is-the-moment-a-link-is-live-and-bare.md)),
+and it earns a phase of its own by having a moment of its own: the link is up and
+nothing is addressed. **The addressing waits for it**, which is what makes that a
+fact rather than emission order — and the price, a slow hook delaying the
+addresses, is in the phase's documentation rather than left to be discovered. The
+warning that lists which phases fire now reads the list instead of naming two by
+hand; it had said "only `pre_up` and `post_up`" since before `down` landed. `down` and `post_down` joined them in
 [0063](docs/decisions/0063-the-down-hooks-run-before-the-interface-goes.md), where the
 ordering is the whole point: teardown is the *last* thing in a plan, so a `down` hook
 runs while the interface still has its addresses and routes — which is what lets it
@@ -1307,9 +1314,12 @@ match.
      would clobber each other's `dns=` lines on every renewal. What a v6 lease
      says about names therefore still reaches nothing, which is now a stated gap
      with a shape (a fragment directory) rather than an accident.
-   - **Five hook phases still do not fire**: `up`, `pre_down`, `roam`, `portal` and
-     `drift`. None of them is a laptop's now that `carrier` fires; `roam` is the next
-     one worth having, and it wants the supplicant's event socket rather than an
+   - **Four hook phases still do not fire**: `pre_down`, `roam`, `portal` and
+     `drift`. `up` was the fifth and now fires
+     ([0076](docs/decisions/0076-the-up-hook-is-the-moment-a-link-is-live-and-bare.md)):
+     it is the one moment where the link is live and nothing is addressed, which is
+     what `pre_up` cannot see and `post_up` is too late for. `roam` is the next one
+     worth having, and it wants the supplicant's event socket rather than an
      observation.
    - ~~**`ncfg secret set NAME` does not exist**~~ — **closed**
      ([0075](docs/decisions/0075-a-secret-is-stored-by-a-command-that-never-shows-it.md)).
@@ -1352,6 +1362,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
 - **A column that renders two things the same way cannot tell them apart, and neither can a check reading it.** `nmcli`'s TYPE column prints a *generic* device's `TypeDescription`, and netcfgd's type description is the kernel's link kind — so "the tunnel shows as `wireguard`" passed with the device-type mapping deliberately broken, because a generic device whose description is the word `wireguard` renders identically to a real one. The repair is to assert a value only the real thing can produce: a listen port the document chose, and the type as a *number* rather than as a rendered column.
 - **A script that skips on a missing package is a script whose failures nobody sees.** `tunnel.sh` had been red on every machine with openvpn installed since 0067 landed, and green everywhere else because it skips without the package -- so the suite said nothing. What it was asserting is that a pushed `dhcp-option DOMAIN` shows up as a *declined* comment in the report; 0067 made it a `search=` suffix, and neither the check nor the doc comment above the code followed. Both are the same disease in two media, and the second one is the reason to grep prose when behaviour changes. The bucket of scripts that skip on a package needs running *deliberately*, on a machine that has it, or it is a bucket of tests nobody is running.
+- **`/sys` in an `unshare -rn` test is the host's, and the interface under test is not in it.** A hook reading `/sys/class/net/<iface>/carrier` got "No such file or directory" for a device that plainly existed — sysfs is a mount, the mount is the machine's, and only netlink is namespace-correct without `unshare -m`. Every live script here that asks about a link uses `ip`, which is why this had never come up.
+- **A check that counts lines is not counting runs.** `grep -c '^pre_up '` said "the hook ran once" until the hook grew a second `echo`, and then said twice. Count one specific line — the transcript is a record of what happened, not of how often.
 - **A cleanup whose pattern matches nothing is a cleanup nobody has.** `openvpn.sh`'s trap ran `pkill -f "$work/fake_openvpn"`, and the fake is installed at `$work/bin/openvpn` -- so it matched nothing on every run since the file was renamed, and the correct pattern was sitting five lines further down in the same file, used mid-script. Nine daemons were found alive on the machine, the oldest 21 hours old, each holding its `/tmp` directory open. Nothing was red: a leaked daemon is invisible to every gate here. Two things follow -- name the pattern once so the two uses cannot drift, and treat "did this `pkill` actually kill anything?" as a question worth asking, because `|| true` swallows the answer.
 - **~~And one daemon in about every other `openvpn.sh` run is not stopped at all.~~ Closed** ([0074](docs/decisions/0074-a-daemon-that-cannot-answer-is-still-running.md)), and it *was* a netcfgd defect: `--daemon` returns as soon as openvpn forks, the child binds its management socket a moment later, and a stop arriving in that window found nothing listening and called the tunnel stopped. It would not reproduce on an idle machine — ten runs clean — so the window was opened deliberately instead, and then `ncfg apply` printed `ok backend.stop vpn0` beside a daemon that was still running, followed by `nothing to do` forever. netcfgd now passes `--writepid` and falls back to that pid when the socket does not answer. **Do not read "unreproducible" as "not real": every reproduction was on a loaded machine, and the way to settle it was to make the timing explicit rather than to wait for it again.**
 - **A test that cleans up by category misses what is not in the category.** `hwsim.sh` killed everything in its network namespace, which is netcfgd and both supplicants and is not everything it started: the subshell a background job forks stays in the initial namespace, holds the script's stdout, and keeps a reader of that pipe waiting after the script has exited. The test passed and left a root netcfgd running. Kill what you started by the handle you were given, and treat an enumeration as the second answer rather than the only one.

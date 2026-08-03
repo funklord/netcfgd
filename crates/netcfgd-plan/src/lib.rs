@@ -227,7 +227,7 @@ fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Obs
 
 /// The hook phases this build actually runs.
 ///
-/// Six of the eleven the model declares. The other five are recognised, written
+/// Seven of the eleven the model declares. The other five are recognised, written
 /// into `/run/netcfgd/hooks/`, hashed and carried in the document -- and never
 /// executed, which reads exactly like a working feature: the file is there, the
 /// plan mentions nothing, and the script never runs.
@@ -236,6 +236,7 @@ fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Obs
 /// planner cannot disagree about which ones.
 const FIRED_PHASES: &[HookPhase] = &[
 	HookPhase::PreUp,
+	HookPhase::Up,
 	HookPhase::PostUp,
 	HookPhase::Down,
 	HookPhase::PostDown,
@@ -258,11 +259,21 @@ fn warn_unfired_hooks(builder: &mut Builder, desired: &Document) {
 			said.push(hook.phase);
 			builder.warnings.push(Warning {
 				message: format!(
-					"the `{}` hook on {} is recognised and never run by this build: only \
-					 `pre_up` and `post_up` fire. The script is materialised and hashed, so \
+					"the `{}` hook on {} is recognised and never run by this build. \
+					 What does fire: {}. The script is materialised and hashed, so \
 					 nothing about the config is wrong -- it simply does not happen yet",
 					hook.phase.name(),
-					interface.name
+					interface.name,
+					// Read off the list rather than written out again: this
+					// sentence named `pre_up` and `post_up` alone from the day
+					// it was written, and was wrong the moment 0063 added the
+					// `down` pair -- a warning that misdescribes the feature it
+					// is warning about.
+					FIRED_PHASES
+						.iter()
+						.map(|phase| format!("`{}`", phase.name()))
+						.collect::<Vec<String>>()
+						.join(", ")
 				),
 				interface: Some(interface.name.clone()),
 			});
@@ -2005,6 +2016,19 @@ impl Builder {
 				Some(Op::LinkDown { name: name.clone() }),
 			);
 			self.link_up.push((name.clone(), id));
+
+			// `up` is the third distinct moment, and the only one of the three
+			// where the link is live and has nothing on it yet: `pre_up` runs
+			// before the kernel will answer for the interface at all (0011), and
+			// `post_up` after the addressing. So this is where a script sets
+			// something that has to be in place before an address exists -- and
+			// the addressing below waits for it, or the ordering would be a
+			// claim rather than a fact. Decision 0076.
+			let mut after_up = base.clone();
+			if id != u32::MAX {
+				after_up.push(id);
+			}
+			base.extend(self.plan_hooks(interface, HookPhase::Up, &after_up));
 		} else if !interface.enabled && link.is_some_and(|link| link.up) {
 			// `down` before the interface goes, `post_down` after it. Both are
 			// emitted here rather than in the teardown pass, and the reason is

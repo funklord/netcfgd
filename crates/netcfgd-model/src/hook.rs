@@ -19,21 +19,35 @@ pub enum HookPhase {
 	/// aborts on "no link" deadlocks here: it refuses the bring-up that would
 	/// have produced the carrier it wanted. See `docs/decisions/0011`.
 	///
-	/// Use [`HookPhase::PostUp`] for anything needing an addressed device.
+	/// Use [`HookPhase::Up`] for anything that needs the link live and the
+	/// interface still bare, and [`HookPhase::PostUp`] for anything needing an
+	/// addressed device.
 	///
-	/// This comment used to send the reader to [`HookPhase::Up`] and
-	/// [`HookPhase::Carrier`], neither of which this build runs. Four phases fire
-	/// now -- `pre_up`, `post_up`, `down` and `post_down` -- and the other seven
-	/// are recognised, materialised into `/run/netcfgd/hooks/` and hashed, and
-	/// never executed; a plan says so per phase rather than leaving the script
-	/// looking installed.
+	/// **Which phases this build runs is one list, in `netcfgd-plan`**, and it is
+	/// not repeated here. This comment carried a count and an enumeration twice,
+	/// and both went stale within a release: it sent the reader to `Up` and
+	/// `Carrier` when neither fired, and then said "four phases fire" after the
+	/// number had changed. A phase that does not fire is named by the plan, per
+	/// phase and per interface, which is where an operator will see it.
 	///
 	/// **The up phases fire only when netcfgd is bringing the interface up.** They
 	/// used to be emitted unconditionally, which ran them on every apply of an
 	/// already-correct interface and on the apply that took a disabled one *down*
 	/// (0063).
 	PreUp,
-	/// As the link comes up.
+	/// After the link is up and before anything is addressed.
+	///
+	/// The one moment of the three where the interface is live and bare: the
+	/// kernel will answer for it -- carrier, speed, an `ethtool` setting that
+	/// needs an up device -- and no address or route netcfgd is about to install
+	/// exists yet. `pre_up` cannot see any of that (0011) and `post_up` is after
+	/// the fact.
+	///
+	/// The addressing waits for it, which is what makes "before anything is
+	/// addressed" a fact rather than a claim: a script here that has to be in
+	/// place first -- a firewall rule, a VLAN filter, a driver knob -- is in place
+	/// first. That also means a slow one delays the addresses, which is the price
+	/// of the guarantee and is worth knowing before writing one. Decision 0076.
 	Up,
 	/// After the last addressing action for the interface completes.
 	PostUp,
