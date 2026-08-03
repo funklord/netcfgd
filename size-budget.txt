@@ -349,4 +349,8 @@ netcfgd
 # dhcpcd half also ends a fight nobody had noticed -- its own `20-resolv.conf` hook
 # was writing the file netcfgd's DNS mode owns. And a delivery with no servers in it
 # now says so instead of silently writing a resolver file that resolves nothing.
-total 2161176
+# +4 KB for a lease's search suffixes, which are the weaker half of what a server
+# pushes: what to append to a bare name, never which resolver answers. Same gate as
+# the servers -- a party already answering every query gains nothing by appending a
+# suffix -- and all three writers report it, so one contract means one thing.
+total 2165272

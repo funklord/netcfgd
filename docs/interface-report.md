@@ -71,6 +71,7 @@ dns=10.0.0.53
 | `address` | yes | An address the network assigned, in CIDR form. IPv4 or IPv6. |
 | `gateway` | yes | A next hop for a default route. IPv4 or IPv6; give both on a dual-stack link. |
 | `dns` | yes | A nameserver. IPv4 or IPv6. |
+| `search` | yes | A suffix to complete an unqualified name with. One per line. **Not a routing domain** -- see below. |
 | `route` | yes | A route the far end handed over: `<destination>`, optionally followed by `via <gateway>`. |
 
 A `route` line is spelled the way a `routes` line in a netcfgd config is, so
@@ -159,10 +160,21 @@ A host whose `global { dns { } }` sets no mode manages no resolver, and a report
 arriving is not a reason for it to start. The servers are read and shown and
 nothing is delivered.
 
+**`search=`** is delivered on exactly the same terms as `dns=`, and the reason is
+worth reading before changing either
+([0067](decisions/0067-a-suffix-is-not-a-routing-domain.md)). A suffix is only used
+where that report's resolvers are already answering -- and a party answering every
+query gains nothing by also getting to append a suffix. Where an operator kept their
+own resolvers, a report that could set the search list would make `wiki` resolve as
+`wiki.somewhere-else.example` *through the trusted resolver*, which is the one case
+that matters and the one the shared gate refuses. The document's own suffixes come
+first.
+
 **There is no key for a routing domain, and there will not be.** A resolver is
-information netcfgd could not have had; *which names use it* is a decision about
-where every query on the machine goes, and a remote server does not get to make
-that one by connecting
+information netcfgd could not have had, and a suffix says what to append to a bare
+name -- but *which resolver answers for a zone* is a decision about where every
+query on the machine goes, and a remote server does not get to make that one by
+connecting
 ([0049](decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)).
 Write it in the document instead, where it can be read, diffed and deleted:
 
@@ -188,9 +200,9 @@ asked of different documents:
   mean a tunnel that silently kept none of its routes until somebody added it
   ([0048](decisions/0048-a-tunnels-routes-arrive-through-the-report.md)).
 
-**Nameservers are gated more narrowly than addresses and routes**, and only
-these two reasons apply to them: the addressing comes from the report, or the
-interface has a `dns` block. Started-by-netcfgd is not enough. A route down a
+**Nameservers and search suffixes are gated more narrowly than addresses and
+routes**, and only these two reasons apply to them: the addressing comes from the
+report, or the interface has a `dns` block. Started-by-netcfgd is not enough. A route down a
 tunnel goes down that tunnel; a nameserver changes where names resolve for the
 whole machine, so netcfgd waits to be told. An empty `dns { }` is the minimal
 way to tell it.
@@ -215,6 +227,14 @@ of them is privileged by netcfgd:
   where the vendor quirk handling for non-conforming modems lives.
 
 netcfgd does not start, supervise or speak to any of them. It reads a file.
+
+**And netcfgd writes three of these itself**, which are the shortest worked examples
+there are: the scripts it hands `dhcpcd -c` and `udhcpc -s`, which report a lease's
+nameservers and search suffixes because netcfgd never sees DHCP
+([0066](decisions/0066-a-lease-reports-its-nameservers.md)), and the `--route-up`
+script it hands `openvpn`, which reports a tunnel's routes and resolvers
+([0048](decisions/0048-a-tunnels-routes-arrive-through-the-report.md)). Each reports
+only the keys it has values for and touches nothing else.
 
 A tunnel and a DSL line are the other half, and there netcfgd *does* start the
 daemon -- but the report reaches it by the same road, written by a script
