@@ -8,7 +8,6 @@ use netcfgd_sys::inotify::{mask, Event, Events, EVENT_HDR_LEN};
 use netcfgd_sys::watch::Mechanism;
 use netcfgd_sys::Watcher;
 use std::fs;
-use std::path::PathBuf;
 
 /// Build one `struct inotify_event` with a trailing name.
 fn encode(wd: i32, mask: u32, name: Option<&str>) -> Vec<u8> {
@@ -97,26 +96,23 @@ fn adversarial_event_bytes_never_panic() {
 	}
 }
 
-fn scratch(name: &str) -> PathBuf {
-	let base = std::env::temp_dir().join(format!("ncfg-watch-{name}-{}", std::process::id()));
-	let _ = fs::remove_dir_all(&base);
-	fs::create_dir_all(&base).expect("scratch directory");
-	base
+fn scratch(name: &str) -> netcfgd_testdir::TestDir {
+	netcfgd_testdir::TestDir::new(&format!("watch-{name}"))
 }
 
 /// Every behavioural assertion runs against both mechanisms, because a
 /// fallback that is only reached when something else has gone wrong is a
 /// fallback nobody has ever watched work.
-fn both_mechanisms(name: &str) -> Vec<(PathBuf, Watcher)> {
+fn both_mechanisms(name: &str) -> Vec<(netcfgd_testdir::TestDir, Watcher)> {
 	vec![
 		{
 			let dir = scratch(&format!("{name}-inotify"));
-			let watcher = Watcher::new(&[dir.clone()]);
+			let watcher = Watcher::new(&[dir.to_path_buf()]);
 			(dir, watcher)
 		},
 		{
 			let dir = scratch(&format!("{name}-polling"));
-			let watcher = Watcher::polling(&[dir.clone()]);
+			let watcher = Watcher::polling(&[dir.to_path_buf()]);
 			(dir, watcher)
 		},
 	]
@@ -156,9 +152,9 @@ fn deleting_a_config_file_is_observed() {
 		// Built after the file exists, so its absence is the change.
 		let inotify = dir.to_string_lossy().contains("inotify");
 		let mut watcher = if inotify {
-			Watcher::new(&[dir.clone()])
+			Watcher::new(&[dir.to_path_buf()])
 		} else {
-			Watcher::polling(&[dir.clone()])
+			Watcher::polling(&[dir.to_path_buf()])
 		};
 		assert!(!watcher.wait(50).expect("watch works"));
 
@@ -186,9 +182,9 @@ fn modifying_an_existing_config_file_is_observed() {
 
 		let inotify = dir.to_string_lossy().contains("inotify");
 		let mut watcher = if inotify {
-			Watcher::new(&[dir.clone()])
+			Watcher::new(&[dir.to_path_buf()])
 		} else {
-			Watcher::polling(&[dir.clone()])
+			Watcher::polling(&[dir.to_path_buf()])
 		};
 		assert!(
 			!watcher.wait(50).expect("watch works"),
@@ -235,7 +231,7 @@ fn a_directory_appearing_later_is_observed() {
 #[test]
 fn inotify_is_used_where_it_is_available() {
 	let dir = scratch("mechanism");
-	let watcher = Watcher::new(&[dir.clone()]);
+	let watcher = Watcher::new(&[dir.to_path_buf()]);
 	assert_eq!(
 		watcher.mechanism(),
 		Mechanism::Inotify,

@@ -148,11 +148,10 @@ mod tests {
 		}
 	}
 
-	fn scratch(name: &str) -> std::path::PathBuf {
-		let dir = std::env::temp_dir().join(format!("ncfg-confirm-{name}-{}", std::process::id()));
-		let _ = fs::remove_dir_all(&dir);
-		fs::create_dir_all(&dir).expect("scratch");
-		dir
+	/// A scratch directory that removes itself when the test ends -- panic or
+	/// no panic, which a tidy-up line at the end of a test cannot do.
+	fn scratch(name: &str) -> netcfgd_testdir::TestDir {
+		netcfgd_testdir::TestDir::new(&format!("confirm-{name}"))
 	}
 
 	#[test]

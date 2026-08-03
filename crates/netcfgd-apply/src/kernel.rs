@@ -3183,8 +3183,7 @@ mod udhcpc_tests {
 			std::path::Path::new("/run/x/cli.address"),
 			std::path::Path::new("/run/x/reported/cli"),
 		);
-		let dir = std::env::temp_dir().join(format!("ncfg-udhcpc-{}", std::process::id()));
-		std::fs::create_dir_all(&dir).expect("a directory");
+		let dir = netcfgd_testdir::TestDir::new("udhcpc");
 		let path = dir.join("script");
 		std::fs::write(&path, &script).expect("written");
 		let checked = std::process::Command::new("sh")
@@ -3229,7 +3228,6 @@ mod udhcpc_tests {
 			!code.contains("domain=%s"),
 			"it reports a domain as a key: {code}"
 		);
-		let _ = std::fs::remove_dir_all(&dir);
 	}
 
 	/// dhcpcd's script, on the same terms and with one more thing to prove: it
@@ -3237,8 +3235,7 @@ mod udhcpc_tests {
 	#[test]
 	fn the_dhcpcd_script_reports_and_configures_nothing() {
 		let script = super::dhcpcd_script("eth0", std::path::Path::new("/run/x/reported/eth0"));
-		let dir = std::env::temp_dir().join(format!("ncfg-dhcpcd-{}", std::process::id()));
-		std::fs::create_dir_all(&dir).expect("a directory");
+		let dir = netcfgd_testdir::TestDir::new("dhcpcd");
 		let path = dir.join("script");
 		std::fs::write(&path, &script).expect("written");
 		let checked = std::process::Command::new("sh")
@@ -3275,6 +3272,5 @@ mod udhcpc_tests {
 		// The variable names are dhcpcd's own, read out of its `20-resolv.conf`.
 		assert!(code.contains("new_domain_name_servers"));
 		assert!(code.contains("new_dhcp6_name_servers"));
-		let _ = std::fs::remove_dir_all(&dir);
 	}
 }

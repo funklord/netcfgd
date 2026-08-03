@@ -14,11 +14,8 @@ fn write_secret(dir: &std::path::Path, name: &str, body: &str, mode: u32) -> Pat
 	path
 }
 
-fn scratch(name: &str) -> PathBuf {
-	let dir = std::env::temp_dir().join(format!("ncfg-secret-{name}-{}", std::process::id()));
-	let _ = fs::remove_dir_all(&dir);
-	fs::create_dir_all(&dir).expect("scratch");
-	dir
+fn scratch(name: &str) -> netcfgd_testdir::TestDir {
+	netcfgd_testdir::TestDir::new(&format!("secret-{name}"))
 }
 
 fn reference(name: &str, provider: SecretProvider) -> SecretRef {
@@ -33,7 +30,7 @@ fn a_file_secret_resolves() {
 	let dir = scratch("read");
 	write_secret(&dir, "wifi-psk", "hunter2\n", 0o600);
 
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 	let secret = resolver
 		.resolve(&reference("wifi-psk", SecretProvider::File))
 		.expect("resolves");
@@ -52,7 +49,7 @@ fn exactly_one_trailing_newline_is_stripped() {
 	write_secret(&dir, "two", "value\n\n", 0o600);
 	write_secret(&dir, "none", "value", 0o600);
 
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 	let get = |name: &str| {
 		resolver
 			.resolve(&reference(name, SecretProvider::File))
@@ -76,7 +73,7 @@ fn a_world_readable_secret_is_refused() {
 	let dir = scratch("mode");
 	write_secret(&dir, "leaky", "hunter2\n", 0o644);
 
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 	match resolver.resolve(&reference("leaky", SecretProvider::File)) {
 		Err(Error::Exposed { mode, .. }) => assert_eq!(mode, 0o644),
 		other => panic!("a world-readable secret must be refused, got {other:?}"),
@@ -93,7 +90,7 @@ fn a_group_readable_secret_is_refused() {
 	let dir = scratch("group");
 	write_secret(&dir, "shared", "hunter2\n", 0o640);
 
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 	assert!(matches!(
 		resolver.resolve(&reference("shared", SecretProvider::File)),
 		Err(Error::Exposed { .. })
@@ -111,7 +108,7 @@ fn the_refusal_explains_the_consequence_not_just_the_fix() {
 	let dir = scratch("message");
 	write_secret(&dir, "leaky", "hunter2\n", 0o644);
 
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 	let error = resolver
 		.resolve(&reference("leaky", SecretProvider::File))
 		.expect_err("refused");
@@ -133,7 +130,7 @@ fn the_refusal_explains_the_consequence_not_just_the_fix() {
 #[test]
 fn a_name_cannot_escape_the_secrets_directory() {
 	let dir = scratch("escape");
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 
 	for name in ["../../etc/shadow", "sub/dir", "..", ""] {
 		assert!(
@@ -152,7 +149,7 @@ fn a_name_cannot_escape_the_secrets_directory() {
 #[test]
 fn a_missing_secret_says_where_it_looked() {
 	let dir = scratch("missing");
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 
 	match resolver.resolve(&reference("absent", SecretProvider::File)) {
 		Err(Error::NotFound { where_, .. }) => {
@@ -190,7 +187,7 @@ fn an_empty_secret_is_resolvable_and_visibly_empty() {
 	let dir = scratch("empty");
 	write_secret(&dir, "blank", "\n", 0o600);
 
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 	let secret = resolver
 		.resolve(&reference("blank", SecretProvider::File))
 		.expect("resolves");
