@@ -128,6 +128,8 @@ fn every_op() -> Vec<Op> {
 		Op::IngressRedirect { .. } => "ingress.redirect",
 		Op::IngressRedirectClear { .. } => "ingress.redirect.clear",
 		Op::SysctlSetForwarding { .. } => "sysctl.set_forwarding",
+		Op::SysctlSetPrivacy { .. } => "sysctl.set_privacy",
+		Op::HostnameSet { .. } => "hostname.set",
 		Op::NatReplace { .. } => "nat.replace",
 		Op::HookRun { .. } => "hook.run",
 		Op::CommitArm { .. } => "commit.arm",
@@ -178,6 +180,8 @@ fn every_op() -> Vec<Op> {
 		"rule.add",
 		"rule.del",
 		"sysctl.set_forwarding",
+		"sysctl.set_privacy",
+		"hostname.set",
 		"wg.set_device",
 		"wg.set_peers",
 		"wifi.associate",
@@ -380,6 +384,13 @@ fn every_op_sample() -> Vec<Op> {
 		Op::SysctlSetForwarding {
 			iface: "eth0".to_owned(),
 			enabled: true,
+		},
+		Op::SysctlSetPrivacy {
+			iface: "eth0".to_owned(),
+			prefer_temporary: true,
+		},
+		Op::HostnameSet {
+			name: "host.example".to_owned(),
 		},
 		Op::NatReplace {
 			uplinks: vec!["eth0".to_owned()],

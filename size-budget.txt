@@ -326,4 +326,11 @@ netcfgd
 # all and nothing said so. Both now go inside their own nest, the observation
 # reads one back, and a moved parent is corrected: in place for the two kinds the
 # kernel moves, and by remaking the interface for the two it does not.
-total 2124312
+# +8 KB for four config keys that compiled and did nothing. Two are implemented:
+# `slaac privacy prefer_temporary` writes `use_tempaddr` per interface, which is
+# what a laptop on other people's networks wants, and `hostname = "name"` sets the
+# running hostname. Two are reported instead, with the reason: `hostname = "dhcp"`
+# needs a lease netcfgd never sees, and `portal_check` would need netcfgd to fetch
+# a hard-coded URL. The same pass caught nine hook phases that are recognised,
+# materialised, hashed and never run -- which read exactly like a working feature.
+total 2132504

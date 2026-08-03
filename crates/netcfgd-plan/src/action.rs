@@ -291,6 +291,32 @@ pub enum Op {
 		/// The identifier, or `::` to clear it.
 		token: String,
 	},
+	/// Set the running hostname.
+	///
+	/// `/proc/sys/kernel/hostname`, which is the running value and not
+	/// `/etc/hostname` -- netcfgd writes nothing under `/etc` but the DNS
+	/// artifacts, and the file the init system reads at boot is the
+	/// distribution's business.
+	///
+	/// Whole-host, so unlike every other op here it names no interface: a guard
+	/// cannot match it and commit-confirm reverts it by name rather than by
+	/// interface.
+	HostnameSet {
+		/// The name to set.
+		name: String,
+	},
+	/// Turn RFC 4941 temporary addresses on or off for one interface.
+	///
+	/// `net.ipv6.conf.<iface>.use_tempaddr`, written per interface rather than
+	/// globally for the reason `sysctl.set_forwarding` is: the global one would
+	/// change every interface on the machine, including the ones the document
+	/// says nothing about.
+	SysctlSetPrivacy {
+		/// Which interface.
+		iface: String,
+		/// Whether a temporary address is preferred for outgoing connections.
+		prefer_temporary: bool,
+	},
 	/// Install a policy routing rule.
 	RuleAdd {
 		/// The rule.
@@ -436,6 +462,8 @@ impl Op {
 			Self::IngressRedirectClear { .. } => "ingress.redirect.clear",
 			Self::QdiscReset { .. } => "qdisc.reset",
 			Self::SysctlSetForwarding { .. } => "sysctl.set_forwarding",
+			Self::SysctlSetPrivacy { .. } => "sysctl.set_privacy",
+			Self::HostnameSet { .. } => "hostname.set",
 			Self::NatReplace { .. } => "nat.replace",
 			Self::HookRun { .. } => "hook.run",
 			Self::CommitArm { .. } => "commit.arm",
@@ -556,6 +584,16 @@ impl Op {
 			// the old one lingers until it expires, so nothing is cut off at
 			// the moment of the change.
 			| Self::LinkSetIpv6Token { .. }
+			// The hostname is not traffic. Changing it can confuse something
+			// that cached it -- a Kerberos ticket, a shell prompt -- but nothing
+			// in flight is cut, and a guard exists to protect a connection.
+			| Self::HostnameSet { .. }
+			// Turning temporary addresses on adds an address and prefers it for
+			// new connections; turning them off stops new ones being made. The
+			// stable address is there throughout and nothing in flight is cut, so
+			// a guard has no interruption to prevent -- unlike `addr.del`, which
+			// takes an address away.
+			| Self::SysctlSetPrivacy { .. }
 			// Toggling an offload re-initialises the driver's transmit path on
 			// some hardware, which drops what is queued. That is a packet or
 			// two, not a lost session -- and a guard that blocked it would
@@ -597,6 +635,7 @@ impl Op {
 			| Self::WgSetDevice { iface, .. }
 			| Self::WgSetPeers { iface, .. }
 			| Self::SysctlSetForwarding { iface, .. }
+			| Self::SysctlSetPrivacy { iface, .. }
 			| Self::QdiscSet { iface, .. }
 			| Self::QdiscReset { iface }
 			| Self::IngressRedirect { iface, .. }
@@ -619,6 +658,10 @@ impl Op {
 			Self::RuleAdd { .. }
 			| Self::RuleDel { .. }
 			| Self::NatReplace { .. }
+			// The hostname belongs to the machine, not to a device. Attributing
+			// it to the interface whose lease suggested it would let a guard on
+			// that interface refuse a change to the whole host's name.
+			| Self::HostnameSet { .. }
 			| Self::DnsApply { .. }
 			| Self::CommitArm { .. }
 			| Self::CommitConfirm

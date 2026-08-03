@@ -141,6 +141,19 @@ pub struct ObservedLink {
 	/// ordinary case in a container without `/proc/sys` mounted writable.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub forwarding: Option<bool>,
+	/// Whether this interface prefers a temporary address, from `use_tempaddr`.
+	///
+	/// `Some(true)` for the kernel's `2`, which is RFC 4941 with the temporary
+	/// address preferred for outgoing connections -- the only thing the document
+	/// can ask for. `Some(false)` covers both `0` and `1`: the middle value
+	/// generates a temporary address and prefers the stable one, which no config
+	/// here can request, so netcfgd reports it as "not what was asked for" and
+	/// leaves it alone unless it wrote it itself.
+	///
+	/// `None` means the sysctl could not be read -- an IPv6-disabled kernel, or a
+	/// container without `/proc/sys`. Nothing is written on one.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub privacy: Option<bool>,
 	/// Whether netcfgd created this link.
 	///
 	/// Netlink has no protocol field for links, so unlike an address or a
@@ -866,6 +879,13 @@ pub struct Observed {
 	/// Interfaces netcfgd installed an ingress redirect on, sorted.
 	#[serde(default)]
 	pub ingress_applied: Vec<String>,
+	/// Interfaces netcfgd turned temporary addresses on for, sorted.
+	///
+	/// Recorded for the reason [`Observed::forwarding_applied`] is: the sysctl
+	/// carries no owner, and a machine that had `use_tempaddr` set globally before
+	/// netcfgd existed is not netcfgd's to undo.
+	#[serde(default)]
+	pub privacy_applied: Vec<String>,
 	/// Interfaces netcfgd turned forwarding on for, sorted.
 	///
 	/// Recorded rather than inferred, because a sysctl carries no owner. An
@@ -892,6 +912,13 @@ pub struct Observed {
 	/// netcfgd cannot evaluate.
 	#[serde(default)]
 	pub nat_conflicts: Vec<String>,
+	/// The running hostname, as the kernel reports it.
+	///
+	/// `None` where it could not be read, which is a container with no
+	/// `/proc/sys`. Nothing is planned on a `None`: a hostname netcfgd cannot see
+	/// is one it cannot tell whether it has already set.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub hostname: Option<String>,
 	/// Whether address ownership came from `IFA_PROTO` or from the weaker
 	/// `/run` fallback.
 	///

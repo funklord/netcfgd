@@ -323,14 +323,47 @@ fn expand_members(
 	}
 }
 
+/// Whether a string is a hostname the kernel will take.
+///
+/// Deliberately narrow: letters, digits, hyphens and dots, with the label and
+/// total lengths RFC 1035 gives. A leading hyphen or an empty label is refused
+/// too, because both are names that resolve to arguments in somebody's shell
+/// script.
+fn is_hostname(name: &str) -> bool {
+	if name.is_empty() || name.len() > 253 {
+		return false;
+	}
+	name.split('.').all(|label| {
+		!label.is_empty()
+			&& label.len() <= 63
+			&& !label.starts_with('-')
+			&& !label.ends_with('-')
+			&& label
+				.chars()
+				.all(|character| character.is_ascii_alphanumeric() || character == '-')
+	})
+}
+
 fn lower_global_key(document: &mut Document, assignment: &Assignment, diags: &mut Diagnostics) {
 	match assignment.key.as_str() {
 		"hostname" => {
 			if let Some(name) = as_string(&assignment.value, diags) {
 				document.globals.hostname_policy = if name == "dhcp" {
 					HostnamePolicy::FromDhcp
-				} else {
+				} else if is_hostname(&name) {
 					HostnamePolicy::Static(name)
+				} else {
+					// Checked here because the kernel's refusal arrives at apply
+					// time as `EINVAL` on a file write, which names neither the
+					// key nor the line.
+					diags.push(
+						Diagnostic::new(assignment.span, format!("`{name}` is not a hostname"))
+							.with_help(
+								"letters, digits, hyphens and dots; each label at most 63 \
+							 characters and the whole name at most 253",
+							),
+					);
+					return;
 				};
 			}
 		}
@@ -2945,6 +2978,9 @@ const MODIFIERS: &[(&str, usize)] = &[
 	("pd", 0),
 	("pd_hint", 1),
 	("pd_length", 1),
+	// RFC 4941 temporary addresses, which are a property of the `slaac` entry
+	// rather than of an address -- the same shape `pd` has on `dhcp6`.
+	("privacy", 1),
 	("nodad", 0),
 	("home", 0),
 	("mngtmpaddr", 0),
@@ -3086,6 +3122,59 @@ fn no_modifiers(entry: &Spanned<AddressEntry>, source: &str, diags: &mut Diagnos
 	false
 }
 
+/// `slaac`, and whether it prefers a temporary address.
+///
+/// `privacy prefer_temporary` is RFC 4941: the host generates a second address
+/// from a random interface identifier, ages it out, and prefers it for outgoing
+/// connections -- so what a server on the far side records is not the same value
+/// for weeks at a time. It is what a laptop on other people's networks wants, and
+/// the reason it is spelled out rather than defaulted is that it is *not* free: an
+/// inbound connection to the stable address still works, but anything that
+/// authenticates a host by the address it comes from will see it move.
+///
+/// The model has carried the field since M1 (design section 2.1) with no way to
+/// say it in a config, which is worse than not having it -- a reader of the schema
+/// would think this worked. Decision 0061.
+fn slaac_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Option<AddressSource> {
+	let mut slaac = Slaac::default();
+	for (keyword, argument) in &entry.node.modifiers {
+		match (keyword.as_str(), argument.as_deref()) {
+			("privacy", Some("prefer_temporary" | "prefer-temporary")) => {
+				slaac.privacy = netcfgd_model::SlaacPrivacy::PreferTemporary;
+			}
+			("privacy", Some("none")) => slaac.privacy = netcfgd_model::SlaacPrivacy::None,
+			("privacy", Some(other)) => {
+				diags.push(
+					Diagnostic::new(
+						entry.span,
+						format!("`{other}` is not a privacy setting for `slaac`"),
+					)
+					.with_help("one of prefer_temporary, none"),
+				);
+				return None;
+			}
+			("privacy", None) => {
+				diags.push(
+					Diagnostic::new(entry.span, "`privacy` needs a value")
+						.with_help("`slaac privacy prefer_temporary`"),
+				);
+				return None;
+			}
+			(other, _) => {
+				diags.push(
+					Diagnostic::new(
+						entry.span,
+						format!("`{other}` is not something `slaac` takes"),
+					)
+					.with_help("`privacy` is the only one, and it takes prefer_temporary or none"),
+				);
+				return None;
+			}
+		}
+	}
+	Some(AddressSource::Slaac(slaac))
+}
+
 /// `dhcp6`, and the prefix delegation it may ask for.
 ///
 /// `pd` alone asks for whatever the ISP offers. `pd_length 56` asks for a
@@ -3198,10 +3287,7 @@ fn address_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Opt
 				.then(|| AddressSource::Dhcp4(Dhcp4::default()))
 		}
 		"dhcp6" | "dhcpv6" => return dhcp6_source(entry, diags),
-		"slaac" => {
-			return no_modifiers(entry, "slaac", diags)
-				.then(|| AddressSource::Slaac(Slaac::default()))
-		}
+		"slaac" => return slaac_source(entry, diags),
 		"link-local" | "link_local" => {
 			return no_modifiers(entry, "link-local", diags).then_some(AddressSource::LinkLocal)
 		}

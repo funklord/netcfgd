@@ -42,6 +42,7 @@ fn link(name: &str) -> ObservedLink {
 		qdisc_ingress: false,
 		ingress_redirect: None,
 		forwarding: None,
+		privacy: None,
 		ownership: Ownership::Unknown,
 		private_key_loaded: false,
 		wireguard: None,
@@ -425,6 +426,56 @@ fn describe_created(link: &mut ObservedLink, desired: &Document) {
 	}
 }
 
+/// The two per-link attributes that are neither addressing nor a link setting.
+fn simulate_attribute(op: &Op, observed: &mut Observed) {
+	match op {
+		Op::LinkSetOffloads { name, features } => {
+			if let Some(link) = observed.links.iter_mut().find(|link| &link.name == name) {
+				for (feature, on) in features {
+					link.offloads.retain(|held| held != feature);
+					if *on {
+						link.offloads.push(feature.clone());
+					}
+				}
+				link.offloads.sort();
+			}
+		}
+		Op::LinkSetIpv6Token { name, token } => {
+			if let Some(link) = observed.links.iter_mut().find(|link| &link.name == name) {
+				// `::` is how the kernel spells "none", so it clears rather than
+				// storing an address.
+				link.ipv6_token = (token != "::").then(|| token.clone());
+			}
+		}
+		_ => {}
+	}
+}
+
+/// The whole-host half of [`simulate`]: the hostname and the privacy sysctl.
+///
+/// Split out for the reason the VLAN and qdisc halves were: one match arm per op
+/// had grown past what the style allows.
+fn simulate_host(op: &Op, observed: &mut Observed) {
+	match op {
+		Op::HostnameSet { name } => observed.hostname = Some(name.clone()),
+		Op::SysctlSetPrivacy {
+			iface,
+			prefer_temporary,
+		} => {
+			if let Some(link) = observed.links.iter_mut().find(|link| &link.name == iface) {
+				link.privacy = Some(*prefer_temporary);
+			}
+			// And the record of who set it, without which the "stopped asking"
+			// direction cannot be tested at all.
+			observed.privacy_applied.retain(|name| name != iface);
+			if *prefer_temporary {
+				observed.privacy_applied.push(iface.clone());
+			}
+		}
+		_ => {}
+	}
+}
+
 fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 	for action in &plan.actions {
 		match &action.op {
@@ -501,29 +552,17 @@ fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 			Op::IngressRedirect { .. } | Op::IngressRedirectClear { .. } => {
 				simulate_ingress(&action.op, observed);
 			}
-			Op::LinkSetOffloads { name, features } => {
-				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
-					for (feature, on) in features {
-						link.offloads.retain(|held| held != feature);
-						if *on {
-							link.offloads.push(feature.clone());
-						}
-					}
-					link.offloads.sort();
-				}
-			}
-			Op::LinkSetIpv6Token { name, token } => {
-				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == name) {
-					// `::` is how the kernel spells "none", so it clears
-					// rather than storing an address.
-					link.ipv6_token = (token != "::").then(|| token.clone());
-				}
+			Op::LinkSetOffloads { .. } | Op::LinkSetIpv6Token { .. } => {
+				simulate_attribute(&action.op, observed);
 			}
 			Op::RuleAdd { .. } | Op::RuleDel { .. } => simulate_rule(&action.op, observed),
 			Op::SysctlSetForwarding { iface, enabled } => {
 				if let Some(link) = observed.links.iter_mut().find(|l| &l.name == iface) {
 					link.forwarding = Some(*enabled);
 				}
+			}
+			Op::HostnameSet { .. } | Op::SysctlSetPrivacy { .. } => {
+				simulate_host(&action.op, observed);
 			}
 			// Whole-table replacement, so the observed list becomes the
 			// requested one rather than accumulating -- which is the point of
@@ -5130,6 +5169,253 @@ interface work-net {
 		"the client was not stopped before the interface went and started after \
 		 it came back: {:?}",
 		names(&plan)
+	);
+}
+
+/// A hook in a phase nothing fires says so.
+///
+/// Nine of the eleven phases are recognised, materialised into `/run` with a
+/// hash, and never run -- which reads exactly like a working feature. `PreUp`'s
+/// own documentation used to point at two of them.
+#[test]
+fn a_hook_in_a_phase_nothing_fires_is_reported() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"interface eth0 {\n\
+		 \tconfig = \"10.0.0.2/24\"\n\
+		 \tpost_up {\necho up\n}\n\
+		 \tdown {\necho down\n}\n\
+		 \ton lease {\necho leased\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+	let observed = observed_with(&["eth0"]);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let said: Vec<&str> = plan
+		.warnings
+		.iter()
+		.map(|warning| warning.message.as_str())
+		.filter(|message| message.contains("never run by this build"))
+		.collect();
+	assert_eq!(
+		said.len(),
+		2,
+		"expected the `down` and the `lease` hook to be named and nothing else: {:?}",
+		plan.warnings
+	);
+	assert!(said.iter().any(|message| message.contains("`down` hook")));
+	assert!(said.iter().any(|message| message.contains("`lease` hook")));
+	// And the one that does fire is still planned, rather than warned about.
+	assert!(names(&plan).contains(&"hook.run"));
+}
+
+/// `portal_check` says what it does not do.
+#[test]
+fn a_portal_check_is_reported_rather_than_dropped() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { portal_check = true } }
+interface wlan0 { config = "dhcp" }
+"#,
+	);
+	let observed = observed_with(&["wlan0"]);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("netcfgd probes nothing")),
+		"nothing said the key was not applied: {:?}",
+		plan.warnings
+	);
+}
+
+/// A hostname the document names is set, once.
+#[test]
+fn a_static_hostname_is_set_and_then_left_alone() {
+	let desired = document(
+		r#"
+global { hostname = "laptop" }
+interface eth0 { config = "10.0.0.2/24" }
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.hostname = Some("localhost".to_owned());
+
+	let plan = settle(&desired, &mut observed);
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::HostnameSet { .. }))
+		.expect("the hostname is set");
+	assert_eq!(action.reason.observed, "localhost");
+	assert_eq!(action.reason.desired, "laptop");
+	// Whole-host, so it names no interface -- a guard on eth0 must not be able to
+	// refuse the machine's name.
+	assert!(action.reason.interface.is_none());
+	assert_eq!(observed.hostname.as_deref(), Some("laptop"));
+}
+
+/// `hostname = "dhcp"` says what it will not do, rather than doing nothing.
+///
+/// netcfgd delegates DHCP (0004) and never sees the lease, so the name a server
+/// offered is the client's to act on. Before decision 0061 this key compiled and
+/// was silently dropped.
+#[test]
+fn a_hostname_from_dhcp_is_explained_rather_than_dropped() {
+	let desired = document(
+		r#"
+global { hostname = "dhcp" }
+interface eth0 { config = "dhcp" }
+"#,
+	);
+	let observed = observed_with(&["eth0"]);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("never sees the lease")),
+		"nothing said the key was not applied: {:?}",
+		plan.warnings
+	);
+	assert!(
+		!names(&plan).contains(&"hostname.set"),
+		"a name netcfgd does not have was set anyway: {:?}",
+		names(&plan)
+	);
+}
+
+/// A hostname that cannot be read is not written.
+#[test]
+fn an_unreadable_hostname_plans_nothing() {
+	let desired = document(r#"global { hostname = "laptop" }"#);
+	let mut observed = observed_with(&["eth0"]);
+	observed.hostname = None;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"hostname.set"),
+		"a hostname that could not be read was written: {:?}",
+		names(&plan)
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("cannot be read")),
+		"nothing said why: {:?}",
+		plan.warnings
+	);
+}
+
+/// `slaac privacy prefer_temporary` writes the sysctl, once.
+///
+/// The whole point of the key, and the reason it needed the `use_tempaddr`
+/// plumbing rather than an address action: a temporary address is the kernel's to
+/// build from the next router advertisement, and netcfgd's job is to have asked.
+#[test]
+fn asking_for_temporary_addresses_writes_the_sysctl() {
+	let desired = document(
+		r#"
+interface eth0 {
+	config = "slaac privacy prefer_temporary"
+}
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].privacy = Some(false);
+
+	let plan = settle(&desired, &mut observed);
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::SysctlSetPrivacy { .. }))
+		.expect("the sysctl is written");
+	assert_eq!(action.reason.field, "addressing[slaac].privacy");
+	assert_eq!(action.reason.desired, "prefer_temporary");
+	assert!(
+		matches!(
+			action.op,
+			Op::SysctlSetPrivacy {
+				prefer_temporary: true,
+				..
+			}
+		),
+		"the op asked for the wrong value"
+	);
+	// `settle` has already asserted the second plan is empty, which is the half
+	// that fails if the observation reads the sysctl and the comparison does not
+	// agree about what `2` means.
+}
+
+/// Plain `slaac` leaves the sysctl alone unless netcfgd is what set it.
+///
+/// The two halves of the forwarding rule, in one test because they are one
+/// decision: a machine whose `sysctl.conf` prefers temporary addresses globally
+/// keeps them, and an interface that netcfgd switched on and that stops asking is
+/// switched back off.
+#[test]
+fn temporary_addresses_are_only_undone_where_netcfgd_set_them() {
+	let desired = document(r#"interface eth0 { config = "slaac" }"#);
+
+	// Somebody else's setting: no record, so nothing is planned.
+	let mut theirs = observed_with(&["eth0"]);
+	theirs.links[0].privacy = Some(true);
+	let plan = plan(&desired, &theirs, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"sysctl.set_privacy"),
+		"a setting netcfgd did not make was undone: {:?}",
+		names(&plan)
+	);
+
+	// netcfgd's own, which the document has stopped asking for.
+	let mut ours = observed_with(&["eth0"]);
+	ours.links[0].privacy = Some(true);
+	ours.privacy_applied = vec!["eth0".to_owned()];
+	let plan = settle(&desired, &mut ours);
+	assert!(
+		matches!(
+			plan.actions
+				.iter()
+				.find(|action| matches!(action.op, Op::SysctlSetPrivacy { .. }))
+				.map(|action| &action.op),
+			Some(Op::SysctlSetPrivacy {
+				prefer_temporary: false,
+				..
+			})
+		),
+		"netcfgd's own setting was not withdrawn: {:?}",
+		names(&plan)
+	);
+}
+
+/// A sysctl that cannot be read is not written.
+///
+/// An IPv6-disabled kernel, or a container with no `/proc/sys`. `None` is not
+/// `false`: writing on one would fail the apply on every reconcile for a machine
+/// that cannot have the feature at all.
+#[test]
+fn an_unreadable_privacy_sysctl_plans_nothing() {
+	let desired = document(r#"interface eth0 { config = "slaac privacy prefer_temporary" }"#);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].privacy = None;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"sysctl.set_privacy"),
+		"a sysctl that could not be read was written anyway: {:?}",
+		names(&plan)
+	);
+	// And it says so, rather than leaving the operator with a key that compiled
+	// and did nothing -- which is the whole reason this key was implemented.
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("cannot be read")),
+		"nothing said the sysctl was unreadable: {:?}",
+		plan.warnings
 	);
 }
 

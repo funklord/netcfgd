@@ -181,8 +181,67 @@ impl Plan {
 /// The list has shrunk as the M4 freeze's inert features were built. What is
 /// left is the half of the `ethtool` block that needs a physical NIC, and the
 /// parts of an access point that hostapd can do and the schema cannot say.
+/// The hook phases this build actually runs.
+///
+/// Two of the eleven the model declares. The other nine are recognised, written
+/// into `/run/netcfgd/hooks/`, hashed and carried in the document -- and never
+/// executed, which reads exactly like a working feature: the file is there, the
+/// plan mentions nothing, and the script never runs.
+///
+/// Named here rather than hidden in a filter so that the warning below and the
+/// planner cannot disagree about which two.
+const FIRED_PHASES: &[HookPhase] = &[HookPhase::PreUp, HookPhase::PostUp];
+
+/// Say which hooks the document declares that nothing will run.
+///
+/// Per phase and per interface rather than one blanket sentence, for the reason
+/// the `ethtool` block's warning is: an operator who wrote a `post_up` and a
+/// `down` should be told about the `down`, not that hooks are unimplemented.
+fn warn_unfired_hooks(builder: &mut Builder, desired: &Document) {
+	for interface in &desired.interfaces {
+		let mut said: Vec<HookPhase> = Vec::new();
+		for hook in &interface.hooks {
+			if FIRED_PHASES.contains(&hook.phase) || said.contains(&hook.phase) {
+				continue;
+			}
+			said.push(hook.phase);
+			builder.warnings.push(Warning {
+				message: format!(
+					"the `{}` hook on {} is recognised and never run by this build: only \
+					 `pre_up` and `post_up` fire. The script is materialised and hashed, so \
+					 nothing about the config is wrong -- it simply does not happen yet",
+					hook.phase.name(),
+					interface.name
+				),
+				interface: Some(interface.name.clone()),
+			});
+		}
+	}
+}
+
 fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_access_points(builder, desired);
+	warn_unfired_hooks(builder, desired);
+	// A radio asking for something this build does not do. `portal_check` is the
+	// one that would otherwise look like a feature: a laptop on a hotel network
+	// gets an address, no route to anywhere, and a config that said to check.
+	for device in &desired.devices {
+		let Some(wifi) = &device.wifi else {
+			continue;
+		};
+		if wifi.portal_check {
+			builder.warnings.push(Warning {
+				message: format!(
+					"`portal_check` on {} is recognised and not applied: netcfgd probes \
+					 nothing, because a network daemon that fetches a hard-coded URL to \
+					 decide whether the internet works is a decision for the operator \
+					 rather than a default. Decision 0061 has the shape a probe would take",
+					device.name
+				),
+				interface: Some(device.name.clone()),
+			});
+		}
+	}
 	for interface in &desired.interfaces {
 		// The offloads are applied; the rest of the `ethtool` block is not, and
 		// says so field by field rather than as one blanket sentence -- an
@@ -494,6 +553,8 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	builder.plan_qdisc(desired, observed);
 	builder.plan_ingress(desired, observed);
 	builder.plan_forwarding(desired, observed);
+	builder.plan_privacy(desired, observed);
+	builder.plan_hostname(desired, observed);
 	builder.plan_nat(desired, observed);
 	builder.plan_access_control(desired, observed);
 	builder.plan_stale_tunnels(desired, observed);
@@ -2039,13 +2100,32 @@ impl Builder {
 				self.plan_backend(interface, BackendKind::Dhcp6, &field, observed, base)
 			}
 			AddressSource::Slaac(_) => {
-				// SLAAC is the kernel's job once accept_ra is set, which is a
-				// sysctl this build does not manage yet. Say so rather than
-				// silently doing nothing.
-				self.warn(
-					name,
-					"slaac is accepted but not yet applied by this build; it lands with M4",
-				);
+				// SLAAC is the kernel's own: given a router advertisement it
+				// builds the address itself, and `tests/live/delegation.sh`
+				// watches one appear with `proto kernel_ra`. So this is not an
+				// unimplemented feature, and the warning that used to say it was
+				// "not yet applied by this build; it lands with M4" was stale as
+				// well as misleading -- what netcfgd does not manage is
+				// `accept_ra`, and that has a trap worth naming rather than a
+				// milestone.
+				//
+				// The privacy modifier *is* netcfgd's, and is planned by
+				// `plan_privacy` rather than here: it is a sysctl on the
+				// interface, not an addressing action, because the address it
+				// produces arrives with the next advertisement rather than with
+				// the apply.
+				if interface.forwarding == Some(true) {
+					self.warn(
+						name,
+						format!(
+							"{name} both forwards and asks for slaac: the kernel's \
+							 `accept_ra` default ignores advertisements on a forwarding \
+							 interface, and netcfgd does not manage that sysctl -- set \
+							 `net.ipv6.conf.{name}.accept_ra=2` if this interface really \
+							 should autoconfigure"
+						),
+					);
+				}
 				Vec::new()
 			}
 			AddressSource::LinkLocal => {
@@ -2744,6 +2824,148 @@ impl Builder {
 					enabled: previous,
 				}),
 			);
+		}
+	}
+
+	/// RFC 4941 temporary addresses, per interface.
+	///
+	/// The `forwarding` sysctl's shape exactly, including the part that matters
+	/// most: an interface that *stops* asking is turned back off only where
+	/// netcfgd is what turned it on. Without that this would be a one-way door,
+	/// and a machine whose `sysctl.conf` sets `use_tempaddr` globally would have
+	/// netcfgd undo somebody else's choice the first time it ran.
+	///
+	/// The kernel's third value has no spelling in the document: `1` generates a
+	/// temporary address and prefers the stable one, which nothing here can ask
+	/// for -- so it reads as "not preferring temporary" and is left alone unless
+	/// netcfgd wrote it.
+	fn plan_privacy(&mut self, desired: &Document, observed: &Observed) {
+		for interface in &desired.interfaces {
+			let asked = interface.addressing.iter().any(|source| {
+				matches!(
+					source,
+					AddressSource::Slaac(slaac)
+						if slaac.privacy == netcfgd_model::SlaacPrivacy::PreferTemporary
+				)
+			});
+			let wanted = if asked {
+				true
+			} else if observed.privacy_applied.contains(&interface.name) {
+				false
+			} else {
+				continue;
+			};
+			// An interface this plan is about to create has no sysctl to read
+			// yet, which is not the same thing as a kernel that has none. The
+			// write is planned and gated on the creation, exactly as its qdisc
+			// and its forwarding are -- without this a virtual interface would
+			// need a second apply to get what the document asked for on the
+			// first, and `ncfg apply` does not get another go.
+			let link = observed.link(&interface.name);
+			let current = link.and_then(|link| link.privacy);
+			// `None` on an interface that *exists* is a different answer: an
+			// IPv6-disabled kernel has no `use_tempaddr` at all, and a container
+			// may have no `/proc/sys`. Writing on that would fail this apply and
+			// every one after it -- an action planned before the thing that would
+			// make it succeed. Said rather than skipped, because a key that
+			// quietly does nothing is the reason this one was implemented.
+			if link.is_some() && current.is_none() {
+				self.warn(
+					&interface.name,
+					format!(
+						"the `use_tempaddr` sysctl for {} cannot be read, so temporary \
+						 addresses are not configured -- an IPv6-disabled kernel, or a \
+						 container without /proc/sys",
+						interface.name
+					),
+				);
+				continue;
+			}
+			if current == Some(wanted) {
+				continue;
+			}
+			self.push(
+				Op::SysctlSetPrivacy {
+					iface: interface.name.clone(),
+					prefer_temporary: wanted,
+				},
+				Reason {
+					interface: Some(interface.name.clone()),
+					field: "addressing[slaac].privacy".to_owned(),
+					desired: if wanted { "prefer_temporary" } else { "none" }.to_owned(),
+					observed: current.map_or_else(
+						|| "<absent>".to_owned(),
+						|on| if on { "prefer_temporary" } else { "none" }.to_owned(),
+					),
+				},
+				self.gate(&interface.name),
+				// Only where the previous value is known. An interface that does
+				// not exist yet has no previous value, and inventing one would
+				// have commit-confirm write a sysctl nobody had set.
+				current.map(|previous| Op::SysctlSetPrivacy {
+					iface: interface.name.clone(),
+					prefer_temporary: previous,
+				}),
+			);
+		}
+	}
+
+	/// The running hostname, where the document names one.
+	///
+	/// Whole-host and one-directional: netcfgd sets the name when the config says
+	/// one and does nothing when it does not. There is deliberately no withdraw
+	/// direction, unlike every sysctl here -- the value to put back would be
+	/// whatever the init system read out of `/etc/hostname` at boot, which netcfgd
+	/// does not know and must not guess.
+	///
+	/// `hostname = "dhcp"` is refused with a sentence rather than obeyed. netcfgd
+	/// does not implement DHCP (0004), so the name a server offered is known only
+	/// to the client -- and a hostname is the machine's identity, which is the
+	/// class of thing 0049 already decided a remote server does not get to change
+	/// by connecting. The mechanism that does exist is the `lease` hook, which
+	/// runs with the client's environment.
+	fn plan_hostname(&mut self, desired: &Document, observed: &Observed) {
+		match &desired.globals.hostname_policy {
+			netcfgd_model::HostnamePolicy::None => {}
+			netcfgd_model::HostnamePolicy::FromDhcp => self.warnings.push(Warning {
+				message: "`hostname = \"dhcp\"` is not applied: netcfgd delegates DHCP and \
+				          never sees the lease, so the name a server offered is the client's \
+				          to act on -- run `hostnamectl` or `hostname` from a `lease` hook if \
+				          that is what you want"
+					.to_owned(),
+				interface: None,
+			}),
+			netcfgd_model::HostnamePolicy::Static(name) => {
+				// A hostname netcfgd cannot read is one it cannot tell whether it
+				// has already set, and writing it on every reconcile would be a
+				// plan that never converges.
+				let Some(current) = &observed.hostname else {
+					self.warnings.push(Warning {
+						message: "the hostname cannot be read, so it is not set -- a container \
+						          without /proc/sys"
+							.to_owned(),
+						interface: None,
+					});
+					return;
+				};
+				if current == name {
+					return;
+				}
+				self.push_root(
+					Op::HostnameSet { name: name.clone() },
+					Reason {
+						interface: None,
+						field: "globals.hostname".to_owned(),
+						desired: name.clone(),
+						observed: current.clone(),
+					},
+					// The previous name is known, so the revert is the real thing
+					// rather than a guess.
+					Some(Op::HostnameSet {
+						name: current.clone(),
+					}),
+				);
+			}
 		}
 	}
 
@@ -3747,7 +3969,7 @@ fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
 		delegations: observed.delegations.clone(),
 		dns: observed.dns.clone(),
 		rules: observed.rules.clone(),
-		// Three records of "netcfgd did this to that interface". They are not
+		// Four records of "netcfgd did this to that interface". They are not
 		// filtered: each says what netcfgd once applied, which is still true and
 		// is what makes deleting the setting from the document mean something.
 		// What the *kernel* holds is what went away with the link, and that is
@@ -3755,8 +3977,11 @@ fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
 		qdisc_applied: observed.qdisc_applied.clone(),
 		ingress_applied: observed.ingress_applied.clone(),
 		forwarding_applied: observed.forwarding_applied.clone(),
+		privacy_applied: observed.privacy_applied.clone(),
 		nat: observed.nat.clone(),
 		nat_conflicts: observed.nat_conflicts.clone(),
+		// Whole-host, so no interface going away can change it.
+		hostname: observed.hostname.clone(),
 		address_proto_supported: observed.address_proto_supported,
 	})
 }

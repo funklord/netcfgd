@@ -45,6 +45,8 @@ pub struct PriorState {
 	pub dns: Vec<netcfgd_model::AppliedDns>,
 	/// Interfaces netcfgd turned IP forwarding on for.
 	pub forwarding: Vec<String>,
+	/// Interfaces netcfgd turned temporary addresses on for.
+	pub privacy: Vec<String>,
 	/// Interfaces netcfgd set the root qdisc on.
 	pub qdisc: Vec<String>,
 	/// Interfaces netcfgd installed an ingress redirect on.
@@ -178,6 +180,7 @@ fn observed_link(
 		// Not in the netlink snapshot; filled in by `host::augment`,
 		// which is why `build` can stay pure.
 		forwarding: None,
+		privacy: None,
 		ownership: if prior.created_links.contains(&link.name) {
 			Ownership::Ours
 		} else {
@@ -326,6 +329,10 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		nat: Vec::new(),
 		nat_conflicts: Vec::new(),
 		forwarding_applied: prior.forwarding.clone(),
+		privacy_applied: prior.privacy.clone(),
+		// Read in `host::augment` beside the sysctls, for the reason they are:
+		// `build` stays a pure function of a netlink snapshot.
+		hostname: None,
 		ingress_applied: prior.ingress.clone(),
 		qdisc_applied: prior.qdisc.clone(),
 		links,

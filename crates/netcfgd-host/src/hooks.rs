@@ -37,7 +37,7 @@ impl HookSink for RunHooks {
 		fs::create_dir_all(&self.dir)
 			.map_err(|error| format!("could not create {}: {error}", self.dir.display()))?;
 
-		let name = format!("{owner}.{}.{}", phase_name(phase), self.written);
+		let name = format!("{owner}.{}.{}", phase.name(), self.written);
 		let path = self.dir.join(&name);
 
 		// A hook body is shell, and the runner executes it directly rather
@@ -76,22 +76,6 @@ fn set_executable(path: &std::path::Path) -> Result<(), String> {
 #[cfg(not(unix))]
 fn set_executable(_path: &std::path::Path) -> Result<(), String> {
 	Ok(())
-}
-
-fn phase_name(phase: HookPhase) -> &'static str {
-	match phase {
-		HookPhase::PreUp => "pre_up",
-		HookPhase::Up => "up",
-		HookPhase::PostUp => "post_up",
-		HookPhase::PreDown => "pre_down",
-		HookPhase::Down => "down",
-		HookPhase::PostDown => "post_down",
-		HookPhase::Carrier => "carrier",
-		HookPhase::Lease => "lease",
-		HookPhase::Roam => "roam",
-		HookPhase::Portal => "portal",
-		HookPhase::Drift => "drift",
-	}
 }
 
 /// SHA-256, from the model so that the hash written here and the hash

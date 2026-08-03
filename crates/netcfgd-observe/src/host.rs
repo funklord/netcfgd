@@ -30,7 +30,9 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	let root = proc_root();
 	for link in &mut observed.links {
 		link.forwarding = forwarding(&root, &link.name);
+		link.privacy = privacy(&root, &link.name);
 	}
+	observed.hostname = hostname(&root);
 	read_netfilter(observed);
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
@@ -452,6 +454,31 @@ fn forwarding(root: &std::path::Path, name: &str) -> Option<bool> {
 	// IPv6-disabled kernel, where reporting the IPv4 answer alone would have
 	// the planner satisfied by half a change it can never complete.
 	Some(read("ipv4")? && read("ipv6")?)
+}
+
+/// The running hostname.
+///
+/// `/proc/sys/kernel/hostname` rather than the `gethostname` syscall, which would
+/// be an `unsafe` FFI call in a crate that forbids it -- and the file is the same
+/// value. Trimmed, because the kernel's file ends in a newline and the config's
+/// string does not.
+fn hostname(root: &std::path::Path) -> Option<String> {
+	let name = fs::read_to_string(root.join("sys/kernel/hostname")).ok()?;
+	Some(name.trim().to_owned())
+}
+
+/// Whether one interface prefers a temporary address.
+///
+/// `2` is the only value the document can ask for, so it is the only one that
+/// reads as true -- `1` generates a temporary address and prefers the stable one,
+/// which is a state nothing here can request and netcfgd therefore does not claim
+/// as its own.
+///
+/// `None` where the file is not there at all, which is an IPv6-disabled kernel or
+/// a container with no `/proc/sys`. Nothing is planned on a `None`.
+fn privacy(root: &std::path::Path, name: &str) -> Option<bool> {
+	let path = root.join(format!("sys/net/ipv6/conf/{name}/use_tempaddr"));
+	Some(fs::read_to_string(path).ok()?.trim() == "2")
 }
 
 /// Every managed offload that is on, per interface.

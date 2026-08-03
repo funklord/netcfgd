@@ -37,6 +37,8 @@ pub struct Effects {
 	pub applied_dns: Vec<netcfgd_model::AppliedDns>,
 	/// `(interface, enabled)` for each forwarding sysctl written.
 	pub forwarding: Vec<(String, bool)>,
+	/// `(interface, enabled)` for each `use_tempaddr` sysctl written.
+	pub privacy: Vec<(String, bool)>,
 	/// `(interface, set)` for each root qdisc changed. `false` is a reset.
 	pub qdisc: Vec<(String, bool)>,
 	/// `(interface, set)` for each ingress redirect changed.
@@ -1339,6 +1341,17 @@ impl Executor for KernelExecutor {
 				self.effects.forwarding.push((iface.clone(), *enabled));
 				Ok(())
 			}
+			Op::HostnameSet { name } => set_hostname(name),
+			Op::SysctlSetPrivacy {
+				iface,
+				prefer_temporary,
+			} => {
+				set_privacy(iface, *prefer_temporary)?;
+				self.effects
+					.privacy
+					.push((iface.clone(), *prefer_temporary));
+				Ok(())
+			}
 			Op::NatReplace { uplinks } => {
 				let nft = match &mut self.nft {
 					Some(nft) => nft,
@@ -1650,6 +1663,56 @@ fn set_forwarding(iface: &str, enabled: bool) -> Result<(), String> {
 		);
 	}
 	Ok(())
+}
+
+/// Set the running hostname.
+///
+/// `/proc/sys/kernel/hostname`, not `sethostname(2)`: the syscall would be an
+/// `unsafe` FFI call, and this crate forbids `unsafe` -- the file is the same
+/// value and needs no exception. Not `/etc/hostname` either, which is what the
+/// init system reads at boot and is not netcfgd's to write (constraint 1 makes
+/// `/etc/netcfgd` the authority, and the DNS artifacts are the only files netcfgd
+/// puts anywhere else in `/etc`).
+///
+/// So this does not survive a reboot on its own, and that is the honest
+/// behaviour: netcfgd sets the name on every apply, and the first apply after
+/// boot is what puts it back.
+fn set_hostname(name: &str) -> Result<(), String> {
+	let root = std::env::var_os("NCFG_PROC_ROOT").map_or_else(
+		|| std::path::PathBuf::from("/proc"),
+		std::path::PathBuf::from,
+	);
+	std::fs::write(root.join("sys/kernel/hostname"), name)
+		.map_err(|error| format!("cannot set the hostname to `{name}`: {error}"))
+}
+
+/// Turn RFC 4941 temporary addresses on or off for one interface.
+///
+/// `2` prefers the temporary address for outgoing connections and `0` turns the
+/// mechanism off; the kernel's `1` -- generate one but prefer the stable address
+/// -- has no spelling in the document and is never written here.
+///
+/// **This only decides what happens to prefixes from now on.** The kernel builds
+/// a temporary address when it processes a router advertisement, so an interface
+/// that is already configured gains one at the next RA rather than at the moment
+/// this is written. Nothing here waits for that: the sysctl is the state the
+/// document asks for, and the address is the kernel's to produce.
+///
+/// Fatal on failure, unlike the IPv6 half of `set_forwarding`. There is no IPv4
+/// equivalent to fall back to -- a machine whose kernel has no IPv6 has no
+/// temporary addresses to configure, and the planner never asks, because the
+/// observation of an absent sysctl is `None` and nothing is planned on one.
+fn set_privacy(iface: &str, prefer_temporary: bool) -> Result<(), String> {
+	let root = std::env::var_os("NCFG_PROC_ROOT").map_or_else(
+		|| std::path::PathBuf::from("/proc"),
+		std::path::PathBuf::from,
+	);
+	let value = if prefer_temporary { "2" } else { "0" };
+	std::fs::write(
+		root.join(format!("sys/net/ipv6/conf/{iface}/use_tempaddr")),
+		value,
+	)
+	.map_err(|error| format!("cannot set temporary addresses on {iface}: {error}"))
 }
 
 /// Where `resolv.conf` is: the environment, or the usual place.

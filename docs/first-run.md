@@ -12,7 +12,8 @@ radio.
 ## What works
 
 Wired DHCP and static addressing. Wifi with WPA2, WPA3, OWE and enterprise
-EAP. Preference between uplinks, so the cable wins when it is plugged in and
+EAP. RFC 4941 temporary addresses, if you ask for them: `config = "slaac privacy
+prefer_temporary"` on an interface that autoconfigures. Preference between uplinks, so the cable wins when it is plugged in and
 wifi takes over when it is not, with no command run. DNS through
 `resolv.conf`, `resolvconf`, openresolv, `systemd-resolved`, dnsmasq or
 unbound. Drift detection, commit-confirm, and an authorisation tier that lets
@@ -230,6 +231,24 @@ re-apply a corrected config.
 takes the id of a `network` block, not an SSID from a scan. Adding a new
 network means editing the config, which needs the `admin` tier. `ncfg wifi
 scan` marks which networks in range you can actually join.
+
+**Two of the eleven hook phases run.** `pre_up` and `post_up` fire; `up`,
+`down`, `pre_down`, `post_down`, `carrier`, `lease`, `roam`, `portal` and `drift`
+are parsed, written into `/run/netcfgd/hooks/` and never executed. `ncfg plan`
+names each one it finds, so this is visible rather than silent -- but if your plan
+for a laptop involved a `carrier` or a `lease` hook, it does not work yet.
+
+**Nothing manages `accept_ra`, and its default ignores router advertisements on a
+forwarding interface.** Not a laptop problem unless you turn on `forwarding` for a
+container bridge or a VM host, at which point IPv6 autoconfiguration on that
+interface stops and `ip addr` shows nothing that explains it.
+
+**No captive portal detection.** `portal_check` is recognised and does nothing,
+and says so in the plan. A hotel or a train needs a browser and patience.
+
+**Nothing knows about rfkill.** The hardware wifi switch is invisible to netcfgd:
+a blocked radio looks like a network that will not associate, and `ncfg explain`
+cannot tell you why.
 
 **systemd-networkd detection is unverified.** The NetworkManager path was
 checked against a running NetworkManager. The networkd equivalent was written

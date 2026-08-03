@@ -490,6 +490,7 @@ live:
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/privacy.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/rules.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/qdisc.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ingress.sh"
