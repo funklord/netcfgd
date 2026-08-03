@@ -283,6 +283,21 @@ pub struct ObservedBridge {
 	pub vlan_filtering: bool,
 }
 
+/// What a `lease` hook on one interface was last told.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedLease {
+	/// Which interface.
+	pub interface: String,
+	/// The address, in CIDR notation.
+	///
+	/// One address, which is the first qualifying one in canonical order. A lease
+	/// is one address; an interface carrying two that netcfgd did not install has
+	/// something else going on, and netcfgd reports the first rather than inventing
+	/// an order of its own.
+	pub address: String,
+}
+
 /// Whether a radio is switched off, and by which of the two switches.
 ///
 /// Both are read because the remedy differs and nothing else can tell them apart:
@@ -954,6 +969,15 @@ pub struct Observed {
 	/// netcfgd cannot evaluate.
 	#[serde(default)]
 	pub nat_conflicts: Vec<String>,
+	/// The lease each interface had when netcfgd last ran its `lease` hook.
+	///
+	/// netcfgd's own memory rather than kernel state, like
+	/// [`Observed::forwarding_applied`] -- and named carefully for that reason:
+	/// this is not the current lease, it is the one a hook has already been told
+	/// about. The comparison between the two is what makes a `lease` hook fire once
+	/// per lease instead of once per reconcile (0064).
+	#[serde(default)]
+	pub lease_hooks: Vec<ObservedLease>,
 	/// The running hostname, as the kernel reports it.
 	///
 	/// `None` where it could not be read, which is a container with no
