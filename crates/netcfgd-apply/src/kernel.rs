@@ -1697,14 +1697,14 @@ fn new_link(
 		InterfaceKind::Vrf(vrf) => Ok(NewLink::Vrf { table: vrf.table }),
 		InterfaceKind::Macvlan(macvlan) => Ok(NewLink::Macvlan {
 			parent: executor.index_of(&macvlan.parent)?,
-			mode: match macvlan.mode {
-				netcfgd_model::MacvlanMode::Private => 1,
-				netcfgd_model::MacvlanMode::Vepa => 2,
-				netcfgd_model::MacvlanMode::Bridge => 4,
-				netcfgd_model::MacvlanMode::Passthru => 8,
-			},
+			// The model's own function, not a second copy of the kernel's
+			// numbering: the observer reads these back through
+			// `MacvlanMode::from_number`, and two lists of four numbers in two
+			// crates is how a mode comes to mean one thing on the way out and
+			// another on the way in.
+			mode: macvlan.mode.number(),
 		}),
-		InterfaceKind::Tunnel(tunnel) => Ok(NewLink::Tunnel {
+		InterfaceKind::Tunnel(tunnel) => Ok(NewLink::Tunnel(netcfgd_sys::ops::TunnelSpec {
 			kind: tunnel.mode.name(),
 			parent: match &tunnel.parent {
 				Some(parent) => Some(executor.index_of(parent)?),
@@ -1714,7 +1714,7 @@ fn new_link(
 			remote: tunnel.remote,
 			ttl: tunnel.ttl,
 			key: tunnel.key,
-		}),
+		})),
 		InterfaceKind::Ifb => Ok(NewLink::Ifb),
 		InterfaceKind::Tun(_) => Err(format!(
 			"{name} is a tun/tap device, which this build cannot create: they come from a \

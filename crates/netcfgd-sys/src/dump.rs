@@ -33,6 +33,11 @@ pub struct LinkRecord {
 	pub mac: Option<String>,
 	/// Index of the master, where enslaved.
 	pub master: Option<u32>,
+	/// Index of the device this virtual link rides on, where it has one.
+	///
+	/// From the outer `IFLA_LINK` for every kind that reports one there, and from
+	/// the `INFO_DATA` nest for a `VXLAN`, which is the one kind that does not.
+	pub parent: Option<u32>,
 	/// A bond's own settings, where this link is one.
 	///
 	/// From the same `INFO_DATA` nest a bridge's comes from, decoded with the
@@ -189,6 +194,7 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		.unwrap_or(0);
 	let mac = attrs.get(ifla::ADDRESS).and_then(|attr| attr.mac());
 	let master = attrs.get(ifla::MASTER).and_then(|attr| attr.u32());
+	let outer_parent = attrs.get(ifla::LINK).and_then(|attr| attr.u32());
 
 	// Two levels down: IFLA_AF_SPEC, then the AF_INET6 block. Present in an
 	// ordinary link dump, so this needs no second request.
@@ -252,6 +258,13 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 	let tunnel = tunnel_family(&kind)
 		.and_then(|family| info_data().map(|data| tunnel_info(family, data.value)));
 
+	// A VXLAN reports its underlay inside its own nest and *not* in the outer
+	// attribute every other kind uses -- measured, because the two disagreeing is
+	// how a parent came to be sent to the wrong place for years. Everything else
+	// reports it outside, tunnels included: the kernel reads a tunnel's underlay
+	// from the nest and reports it here.
+	let parent = outer_parent.or_else(|| vxlan.and_then(|vxlan| vxlan.link));
+
 	Some(LinkRecord {
 		index: u32::try_from(info.index).unwrap_or(0),
 		name,
@@ -261,6 +274,7 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		mtu,
 		mac,
 		master,
+		parent,
 		bond,
 		bridge,
 		macvlan,
@@ -421,6 +435,8 @@ fn vlan_info(data: &[u8]) -> VlanInfo {
 pub struct VxlanInfo {
 	/// The VXLAN network identifier.
 	pub id: Option<u32>,
+	/// Index of the underlay device, which lives in the nest for this kind alone.
+	pub link: Option<u32>,
 	/// Source address for the outer header.
 	pub local: Option<IpAddr>,
 	/// Remote unicast address, or the multicast group.
@@ -437,6 +453,7 @@ pub struct VxlanInfo {
 mod ifla_vxlan {
 	pub(super) const ID: u16 = 1;
 	pub(super) const GROUP: u16 = 2;
+	pub(super) const LINK: u16 = 3;
 	pub(super) const LOCAL: u16 = 4;
 	pub(super) const PORT: u16 = 15;
 	pub(super) const GROUP6: u16 = 16;
@@ -459,6 +476,7 @@ fn vxlan_info(data: &[u8]) -> VxlanInfo {
 	};
 	VxlanInfo {
 		id: attrs.get(ifla_vxlan::ID).and_then(|attr| attr.u32()),
+		link: attrs.get(ifla_vxlan::LINK).and_then(|attr| attr.u32()),
 		local: either(ifla_vxlan::LOCAL, ifla_vxlan::LOCAL6),
 		remote: either(ifla_vxlan::GROUP, ifla_vxlan::GROUP6),
 		// Big-endian, like every port number on the wire.
