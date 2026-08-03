@@ -570,6 +570,12 @@
   "nat_conflicts": [
     "somebody-elses-table"
   ],
+  "lease_hooks": [
+    {
+      "interface": "eth0",
+      "address": "192.168.1.50/24"
+    }
+  ],
   "hostname": "host.example",
   "address_proto_supported": true
 }

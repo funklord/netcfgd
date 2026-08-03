@@ -458,6 +458,25 @@ fn simulate_attribute(op: &Op, observed: &mut Observed) {
 /// had grown past what the style allows.
 fn simulate_host(op: &Op, observed: &mut Observed) {
 	match op {
+		// A lease hook's record, without which the "once per lease" property cannot
+		// be tested at all: the second plan would fire it again and `settle` would
+		// catch that as a non-empty plan -- which is what this models rather than
+		// hides. Every other hook leaves no observable state, which is why they fall
+		// through.
+		Op::HookRun {
+			iface,
+			phase: netcfgd_model::HookPhase::Lease,
+			address: Some(address),
+			..
+		} => {
+			observed
+				.lease_hooks
+				.retain(|record| &record.interface != iface);
+			observed.lease_hooks.push(netcfgd_model::ObservedLease {
+				interface: iface.clone(),
+				address: address.clone(),
+			});
+		}
 		Op::HostnameSet { name } => observed.hostname = Some(name.clone()),
 		Op::SysctlSetPrivacy {
 			iface,
@@ -562,7 +581,7 @@ fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 					link.forwarding = Some(*enabled);
 				}
 			}
-			Op::HostnameSet { .. } | Op::SysctlSetPrivacy { .. } => {
+			Op::HostnameSet { .. } | Op::SysctlSetPrivacy { .. } | Op::HookRun { .. } => {
 				simulate_host(&action.op, observed);
 			}
 			// Whole-table replacement, so the observed list becomes the
@@ -5174,6 +5193,147 @@ interface work-net {
 		stopped < deleted && deleted < started,
 		"the client was not stopped before the interface went and started after \
 		 it came back: {:?}",
+		names(&plan)
+	);
+}
+
+/// A lease hook fires when the address arrives, and once.
+///
+/// netcfgd never sees DHCP (0004), so the trigger is an address on the interface
+/// that netcfgd did not install -- and the record of what a hook was already told
+/// is what stops it firing on every reconcile. Decision 0064.
+#[test]
+fn a_lease_hook_fires_once_when_the_address_arrives() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"interface eth0 {\n\
+		 \tconfig = \"dhcp\"\n\
+		 \ton lease {\necho leased\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+
+	// Before the client has a lease: the interface is up, the backend is running,
+	// and there is no address. Nothing to tell a hook about.
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+	observed.backends.push(started_backend(
+		netcfgd_model::BackendKind::Dhcp4,
+		"eth0",
+		&desired,
+	));
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"hook.run"),
+		"a lease hook fired before there was a lease: {:?}",
+		names(&plan)
+	);
+
+	// The client gets one. netcfgd installed nothing, which is what identifies it.
+	observed.addresses.push(ObservedAddress {
+		interface: "eth0".to_owned(),
+		address: "192.168.1.50/24".to_owned(),
+		proto: None,
+		ownership: Ownership::Foreign,
+		origin: None,
+	});
+
+	// `settle` asserts the second plan is empty, which is the "once" half: without
+	// the record this fires again on every reconcile, forever.
+	let plan = settle(&desired, &mut observed);
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::HookRun { .. }))
+		.expect("the lease hook fires");
+	assert_eq!(action.reason.field, "lease");
+	assert_eq!(action.reason.desired, "192.168.1.50/24");
+	assert!(
+		matches!(
+			&action.op,
+			Op::HookRun { address: Some(address), .. } if address == "192.168.1.50/24"
+		),
+		"the address the script gets is not the lease: {:?}",
+		action.op
+	);
+
+	// And it fires again when the lease moves, which is the other half of once.
+	observed.addresses[0].address = "192.168.1.77/24".to_owned();
+	let plan = settle(&desired, &mut observed);
+	assert!(
+		names(&plan).contains(&"hook.run"),
+		"a changed lease did not fire the hook: {:?}",
+		names(&plan)
+	);
+}
+
+/// What is not a lease: netcfgd's own address, a link-local, and SLAAC.
+///
+/// Each would otherwise look like one -- an address on the interface that arrived
+/// without netcfgd asking -- and none of them is news a `lease` hook wants.
+#[test]
+fn a_lease_hook_ignores_what_is_not_a_lease() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"interface eth0 {\n\
+		 \tconfig = \"dhcp dhcp6\"\n\
+		 \ton lease {\necho leased\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+
+	let mut add = |address: &str, proto: Option<u8>, ownership, origin| {
+		observed.addresses.push(ObservedAddress {
+			interface: "eth0".to_owned(),
+			address: address.to_owned(),
+			proto,
+			ownership,
+			origin,
+		});
+	};
+	// netcfgd's own, from the config.
+	add(
+		"10.0.0.9/24",
+		Some(netcfgd_model::route::NETCFGD_PROTO),
+		Ownership::Ours,
+		Some(Origin::Static),
+	);
+	// A v4 link-local, which is what a failed DHCP leaves behind.
+	add("169.254.7.7/16", None, Ownership::Foreign, None);
+	// A v6 link-local and a SLAAC address, the second one tagged `kernel_ra`.
+	add("fe80::1/64", Some(3), Ownership::Foreign, None);
+	add("2001:db8::1/64", Some(2), Ownership::Foreign, None);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"hook.run"),
+		"something that is not a lease fired the hook: {:?}",
+		plan.actions
+	);
+}
+
+/// An interface with no `lease` hook plans nothing, however its addresses arrived.
+#[test]
+fn an_interface_with_no_lease_hook_is_left_alone() {
+	let desired = document(r#"interface eth0 { config = "dhcp" }"#);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+	observed.addresses.push(ObservedAddress {
+		interface: "eth0".to_owned(),
+		address: "192.168.1.50/24".to_owned(),
+		proto: None,
+		ownership: Ownership::Foreign,
+		origin: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"hook.run"),
+		"a hook ran for an interface that declares none: {:?}",
 		names(&plan)
 	);
 }

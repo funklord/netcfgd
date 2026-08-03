@@ -201,6 +201,76 @@ contains "a tampered down hook is refused by hash" "$tamper" \
 contains "and the transition it bracketed did not happen" "$still" "UP"
 check "and the tampered line never ran" "$(grep -c tampered "$log" || true)" "0"
 
+# ---------------------------------------------------------------------------
+# The `lease` hook, which fires on an address netcfgd did not install. There is no
+# DHCP server here and there does not need to be one: netcfgd never sees the
+# protocol (0004), so what it reacts to is the address -- and an address put on the
+# interface by something other than netcfgd is exactly what a client leaves behind.
+# `ip addr add` is that something, and it is real kernel state rather than a fake.
+#
+# What this cannot check is a real client's timing, which is why the document says
+# the first apply of a fresh interface does not fire it: the client is being started
+# in that same plan and the address arrives seconds later.
+: > "$log"
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface leased0 {
+	kind   = "dummy"
+	# A static address beside the lease, so netcfgd's own address is on the same
+	# interface: it sorts *before* the one the client adds, so a comparison that
+	# forgot to exclude what netcfgd installed would pick this one and the
+	# environment check below would say so. A SLAAC address would be the third case
+	# and needs a real router advertisement -- the fixtures cover that one.
+	config = "dhcp 10.9.9.9/24"
+	on lease {
+	echo "lease addr=\$NCFG_ADDR iface=\$NCFG_IFACE phase=\$NCFG_PHASE" >> $log
+	}
+}
+CONF
+
+# A stub client, because there is no dhcpcd on this machine and because what is
+# under test is netcfgd's reaction to the *address*, not the protocol. netcfgd runs
+# `dhcpcd -b -4 <iface>` and expects it to go into the background; a script that
+# exits 0 is a client that got no lease, which is a state a real one passes through.
+# The address below is what the client would have installed. Faking the client and
+# not the protocol is the same line `fake_supplicant.py` draws.
+mkdir -p "$work/bin"
+cat > "$work/bin/dhcpcd" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+chmod +x "$work/bin/dhcpcd"
+PATH="$work/bin:$PATH"
+export PATH
+
+ip link add leased0 type dummy
+ip link set leased0 up
+"$ncfg" apply > "$work/apply-lease.log" 2>&1 || true
+check "no lease, no hook" "$(grep -c '^lease ' "$log" || true)" "0"
+
+# What a client does: an address appears that netcfgd did not put there.
+ip addr add 192.168.77.5/24 dev leased0
+plan=$("$ncfg" plan 2>&1 || true)
+contains "an address netcfgd did not install plans the lease hook" "$plan" \
+	"hook.run leased0"
+contains "and the reason names the address" "$plan" "lease: 192.168.77.5/24"
+"$ncfg" apply > "$work/apply-lease2.log" 2>&1 || true
+check "the lease hook ran"  "$(grep -c '^lease ' "$log" || true)" "1"
+contains "and its environment carries the address" "$(grep '^lease ' "$log")" \
+	"addr=192.168.77.5/24 iface=leased0 phase=lease"
+
+# Once per lease, not once per reconcile. This is the check the /run record exists
+# for, and the one that fails loudly if the record is not written.
+"$ncfg" apply > /dev/null 2>&1 || true
+"$ncfg" apply > /dev/null 2>&1 || true
+check "and not again on the next two applies" "$(grep -c '^lease ' "$log" || true)" "1"
+
+# And again when the lease moves, which is the other half of "once".
+ip addr del 192.168.77.5/24 dev leased0
+ip addr add 192.168.77.9/24 dev leased0
+"$ncfg" apply > /dev/null 2>&1 || true
+check "a changed lease fires it again" "$(grep -c '^lease ' "$log" || true)" "2"
+contains "with the new address" "$(tail -1 "$log")" "addr=192.168.77.9/24"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "hooks.sh: all checks passed"
