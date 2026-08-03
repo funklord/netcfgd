@@ -54,6 +54,25 @@ pub fn log_path(run: &Path, iface: &str) -> PathBuf {
 	run_dir(run).join(format!("{iface}.log"))
 }
 
+/// Where the daemon writes its own pid, and the only handle netcfgd has when
+/// the management socket is not answering.
+///
+/// **The socket is not always there.** `--daemon` means the invocation returns
+/// as soon as openvpn forks, and the child binds its management socket a moment
+/// later -- so a stop that arrives inside that window found nothing listening,
+/// reported the tunnel stopped, and left a daemon running that netcfgd would
+/// never speak to again. Measured: with a three-second gap between the fork and
+/// the bind, `ncfg apply` printed `ok backend.stop vpn0` and then `nothing to
+/// do`, with the tunnel still up. Decision 0074.
+///
+/// `--writepid` is openvpn's own option for this, so the file is the daemon's
+/// claim about itself rather than netcfgd's guess -- which matters because the
+/// pid netcfgd could observe is the parent that exits.
+#[must_use]
+pub fn pid_path(run: &Path, iface: &str) -> PathBuf {
+	run_dir(run).join(format!("{iface}.pid"))
+}
+
 /// Where netcfgd records the `.ovpn` it started this tunnel from.
 ///
 /// A hash, not a copy. The file is the operator's and netcfgd does not read it
@@ -248,10 +267,17 @@ fn route_lines() -> String {
 /// one `foreign_option` list on anything that is not Windows, so reading one
 /// spelling reads both.
 ///
-/// `DOMAIN` and `DOMAIN-SEARCH` are written down and **not** reported. Which
-/// names travel down a tunnel is the operator's to say in the document, not a
-/// remote server's to push -- decision 0049. The comment keeps what the server
-/// suggested visible to whoever reads the file, without netcfgd acting on it.
+/// `DOMAIN` and `DOMAIN-SEARCH` are reported as **search suffixes**, which is
+/// decision 0067 splitting 0049 in two: what to append to a bare name is the
+/// weaker half and travels under the same gate as a nameserver, while *which
+/// names go through this tunnel* is a routing domain, is the operator's to say
+/// in the document, and has no report key at all. This comment said the
+/// opposite for as long as 0067 had been in -- written true, left standing, and
+/// with a live check beside it that had been red on every machine with openvpn
+/// installed and green everywhere else, because `tunnel.sh` skips without it.
+///
+/// Everything else openvpn's server suggested becomes a comment: declined, and
+/// visible to whoever reads the file rather than silently dropped.
 fn server_lines() -> String {
 	"\ti=1\n\
 	 \twhile [ \"$i\" -le 256 ]; do\n\
@@ -439,6 +465,11 @@ pub fn start(
 		// behaves -- the planner gets there on the next reconcile.
 		.arg("--daemon")
 		.arg(format!("netcfgd-{iface}"))
+		// So there is a handle when the management socket is not answering --
+		// which is every moment between the fork this returns from and the bind
+		// its child gets round to. See `pid_path` and decision 0074.
+		.arg("--writepid")
+		.arg(pid_path(run, iface))
 		.arg("--log")
 		.arg(&log)
 		// The routes are netcfgd's, which is the half of a tunnel decision 0047
@@ -517,11 +548,16 @@ pub fn stop(run: &Path, iface: &str, report: &Path) -> Result<(), String> {
 
 	let socket = socket_path(run, iface);
 	let Ok(mut client) = Management::connect(&socket) else {
-		return Ok(());
+		// Nothing is listening, which used to end the matter -- and did so
+		// wrongly for a daemon that had forked and not yet bound. So the pid it
+		// was told to write is asked next, and only a daemon that is neither
+		// reachable nor running counts as already stopped. Decision 0074.
+		return stop_by_pid(run, iface);
 	};
 	client
 		.command("signal SIGTERM")
 		.map_err(|error| format!("could not stop the openvpn tunnel on {iface}: {error}"))?;
+	let _ = std::fs::remove_file(pid_path(run, iface));
 	// The daemon removes its own socket on the way out, but only if it got far
 	// enough to install the handler. Left behind, it would take the bind on the
 	// next start.
@@ -529,6 +565,45 @@ pub fn stop(run: &Path, iface: &str, report: &Path) -> Result<(), String> {
 	// And the credentials, which have nothing left to authenticate. `/run` is
 	// tmpfs so they would go at the next reboot regardless, but a password
 	// sitting beside a tunnel that is not running is one nobody is watching.
+	let _ = std::fs::remove_file(auth_path(run, iface));
+	Ok(())
+}
+
+/// Stop a daemon that is not answering its socket, by the pid it wrote.
+///
+/// The pid is checked against `/proc/<pid>/cmdline` before anything is
+/// signalled, and against **this interface's own socket path** rather than the
+/// interface name alone: `vpn0` is a short string that a wholly unrelated
+/// command line could contain, where the socket path is unique to this tunnel
+/// on this machine. That is the same reasoning `pppd_pid` and the `DHCP`
+/// clients use, one notch stricter because the argument here is a path netcfgd
+/// chose.
+///
+/// A pid file naming nothing, or naming something that is not this tunnel, is
+/// removed and reported as stopped -- which is the state the caller asked for
+/// and is what "stopping one that is already stopped is not an error" means.
+fn stop_by_pid(run: &Path, iface: &str) -> Result<(), String> {
+	let path = pid_path(run, iface);
+	let Some(pid) = std::fs::read_to_string(&path)
+		.ok()
+		.and_then(|text| text.trim().parse::<i32>().ok())
+	else {
+		return Ok(());
+	};
+	let socket = socket_path(run, iface);
+	let ours = std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
+		cmdline
+			.split(|byte| *byte == 0)
+			.any(|argument| argument == socket.as_os_str().as_encoded_bytes())
+	});
+	if !ours {
+		let _ = std::fs::remove_file(&path);
+		return Ok(());
+	}
+	netcfgd_sys::process::terminate(pid).map_err(|error| {
+		format!("could not stop the openvpn tunnel on {iface} (pid {pid}): {error}")
+	})?;
+	let _ = std::fs::remove_file(&path);
 	let _ = std::fs::remove_file(auth_path(run, iface));
 	Ok(())
 }
