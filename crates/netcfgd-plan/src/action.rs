@@ -192,6 +192,23 @@ pub enum Op {
 		/// ISO 3166-1 alpha-2.
 		country: String,
 	},
+	/// Set a bond's own settings on a bond that already exists.
+	///
+	/// The kernel takes `mode` and `miimon` on a live bond -- asked rather than
+	/// assumed, which matters because the same question has the opposite answer
+	/// for a VLAN (0057).
+	LinkSetBond {
+		/// Interface name.
+		name: String,
+		/// Whether the mode is part of this.
+		///
+		/// It can only be on a bond with **no members**: the kernel answers
+		/// `ENOTEMPTY` otherwise, and it rejects the whole message -- so a
+		/// request carrying a mode it will not take also fails to set the
+		/// monitoring interval beside it. The planner knows which case this is
+		/// and says so here rather than leaving the executor to ask.
+		mode: bool,
+	},
 	/// Set a bridge's own settings on a bridge that already exists.
 	///
 	/// Separate from `link.create`, which carries them for a bridge being made.
@@ -374,6 +391,7 @@ impl Op {
 			Self::WifiSetRegdom { .. } => "wifi.set_regdom",
 			Self::AccessControlAdd { .. } => "access_control.add",
 			Self::AccessControlDel { .. } => "access_control.del",
+			Self::LinkSetBond { .. } => "link.set_bond",
 			Self::LinkSetBridge { .. } => "link.set_bridge",
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
@@ -427,6 +445,9 @@ impl Op {
 			// as the forward delay says, which on a live bridge is traffic
 			// stopping.
 			| Self::LinkSetBridge { .. }
+			// Changing a bond's mode restarts how traffic is distributed
+			// across its members, which on a live bond is a pause.
+			| Self::LinkSetBond { .. }
 			// Removing a VLAN from a port stops traffic in it reaching that
 			// port, which is the same kind of interruption as taking an
 			// address away.
@@ -519,6 +540,7 @@ impl Op {
 			| Self::LinkSetIpv6Token { name, .. }
 			| Self::LinkSetOffloads { name, .. }
 			| Self::LinkSetBridge { name }
+			| Self::LinkSetBond { name, .. }
 			| Self::LinkDown { name } => Some(name),
 			Self::BridgeVlanAdd { iface, .. }
 			| Self::BridgeVlanDel { iface, .. }

@@ -33,6 +33,12 @@ pub struct LinkRecord {
 	pub mac: Option<String>,
 	/// Index of the master, where enslaved.
 	pub master: Option<u32>,
+	/// A bond's own settings, where this link is one.
+	///
+	/// From the same `INFO_DATA` nest a bridge's comes from, decoded with the
+	/// bond's numbering -- which is why the two are read separately rather than
+	/// by one function that takes a kind.
+	pub bond: Option<BondInfo>,
 	/// A bridge's own settings, where this link is one.
 	///
 	/// From `IFLA_INFO_DATA` inside the `LINKINFO` nest -- the same place the
@@ -194,6 +200,14 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 	// Only for a bridge: every kind puts something different in this nest, and
 	// decoding one kind's numbering out of another's is how a VXLAN comes to
 	// report a forward delay.
+	let info_data = || {
+		attrs
+			.get(ifla::LINKINFO)
+			.and_then(|nest| Attrs::new(nest.value).get(IFLA_INFO_DATA))
+	};
+	let bond = (kind == "bond")
+		.then(|| info_data().map(|data| bond_info(data.value)))
+		.flatten();
 	let bridge = (kind == "bridge")
 		.then(|| {
 			attrs
@@ -212,6 +226,7 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		mtu,
 		mac,
 		master,
+		bond,
 		bridge,
 		ipv6_token,
 	})
@@ -238,6 +253,34 @@ pub struct BridgeInfo {
 	pub priority: Option<u16>,
 	/// Whether the bridge is VLAN-aware.
 	pub vlan_filtering: bool,
+}
+
+/// What a bond reports about itself.
+///
+/// Only the two netcfgd sets. A bond has thirty-odd parameters and reading all
+/// of them would put a page of kernel detail in `/run` to answer a question
+/// about two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BondInfo {
+	/// Bonding mode, as the kernel numbers them.
+	pub mode: Option<u8>,
+	/// Link monitoring interval in milliseconds.
+	pub miimon: Option<u32>,
+}
+
+/// The bond attributes read back, numbered as `if_link.h` numbers them.
+mod ifla_bond {
+	pub(super) const MODE: u16 = 1;
+	pub(super) const MIIMON: u16 = 3;
+}
+
+/// Decode a bond's `INFO_DATA`.
+fn bond_info(data: &[u8]) -> BondInfo {
+	let attrs = Attrs::new(data);
+	BondInfo {
+		mode: attrs.get(ifla_bond::MODE).and_then(|attr| attr.u8()),
+		miimon: attrs.get(ifla_bond::MIIMON).and_then(|attr| attr.u32()),
+	}
 }
 
 /// `IFLA_INFO_DATA`, one along from the kind in the `LINKINFO` nest.
