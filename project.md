@@ -606,7 +606,7 @@ Three techniques make that reachable without root or a clean machine:
 
 **Fake only what cannot exist, which is a radio — never the protocol.** `fake_supplicant.py` and `fake_hostapd.py` speak the real `wpa_ctrl` wire format with replies copied from upstream source; the real daemons are driven elsewhere, which is what would catch a parser changing its mind. Anything needing a real association needs `mac80211_hwsim` and therefore real root: `sudo sh tests/live/hwsim.sh`.
 
-**Know what an ordinary `make live` skipped.** Three scripts need real root — `hwsim.sh` loads a module and moves a phy between namespaces, `pppoe-session.sh` opens `/dev/ppp`, `delegation.sh` binds ports 546 and 547 — and `make live` invokes each of them either way, so an unprivileged run prints three skips and a green suite. Two more skip on a package a netcfgd machine has no reason to have: `tunnel.sh` wants `openvpn`, `ap.sh` wants `hostapd`. That is five scripts saying nothing, and the skip lines are the only place it is written down. **A privileged container closes all five** and does not touch the machine's own network — `docker run --rm --privileged -v $PWD:/repo -w /repo debian:trixie`, plus the packages each header names. A container also needs `libncursesw6`, which is not obvious from anything: the daemon links ncurses for the TUI behind a default-on feature ([0025](docs/decisions/0025-the-audited-crate-is-the-libc-boundary-not-netlink.md)), so a bare image gets `error while loading shared libraries` and a test that looks like a daemon which will not start.
+**Know what an ordinary `make live` skipped.** Three scripts need real root — `hwsim.sh` loads a module and moves a phy between namespaces, `pppoe-session.sh` opens `/dev/ppp`, `delegation.sh` binds ports 546 and 547 — and `make live` invokes each of them either way, so an unprivileged run prints three skips and a green suite. Three more skip on a package a machine may not have: `tunnel.sh` wants `openvpn`, `ap.sh` wants `hostapd`, `dhcpcd.sh` wants `dhcpcd` — and that last one skips for a second reason too, because dhcpcd drops privileges to an unprivileged user and a `unshare -rn` namespace has one uid in it. It makes its own namespaces for that reason, and an unprivileged machine needs `newuidmap` and a range in `/etc/subuid` before it can run at all. That is six scripts saying nothing, and the skip lines are the only place it is written down. **A privileged container closes all six** and does not touch the machine's own network — `docker run --rm --privileged -v $PWD:/repo -w /repo debian:trixie`, plus the packages each header names. A container also needs `libncursesw6`, which is not obvious from anything: the daemon links ncurses for the TUI behind a default-on feature ([0025](docs/decisions/0025-the-audited-crate-is-the-libc-boundary-not-netlink.md)), so a bare image gets `error while loading shared libraries` and a test that looks like a daemon which will not start.
 
 **Doing it found four defects, all in the suite rather than in netcfgd.** `delegation.sh`'s own build recipe stopped at `None of the required 'json-c' found` on a clean trixie. `hwsim.sh` **failed** rather than skipped where a kernel has no `mac80211_hwsim`, aborting the suite at the one moment somebody is running it properly — and the first repair of that asked `$PATH` rather than the machine, which skipped a machine that can run it. And `hwsim.sh` passed while leaving `netcfgd` and both supplicants running, because it killed by namespace and the background job's subshell is not in one; the run that showed it was still holding them ten minutes later, with the pipeline reading its output waiting on an end-of-file that could not arrive. None of the four is reachable without root, and three of them are the kind that leave a green suite.
 
@@ -646,6 +646,7 @@ Three techniques make that reachable without root or a clean machine:
 - **pppd hands the `ip-down` call the same environment as the `ip-up` call.** `IPLOCAL`, `DNS1` and `DNS2` all stay set; what it unsets is `OLDIPLOCAL` and `CONNECT_TIME`. A single script deciding "up or down?" from its environment cannot, which is why netcfgd generates two.
 - **The rp-pppoe plugin opens `/dev/ppp` when it is loaded**, part-way through pppd's option parsing. So an unprivileged pppd never reaches the options *after* the `plugin` line, and "no unrecognized option" on a whole options file is a check that passes because nothing was parsed. `tests/live/ppp.sh` checks netcfgd's own options with the plugin line removed, and names the plugin's own as the part it cannot reach.
 - **`pppoe-server` looks for its plugin at `/etc/ppp/plugins/rp-pppoe.so`,** and Debian ships it under `/usr/lib/pppd/<version>/`. The default therefore fails *inside the server's own forked pppd*, where a client sees a session that connects and then never starts IPCP; syslog is the only place that says why. `-g` names the path.
+- **dhcpcd's pid file carries the family it was started with, and `-k` has to name the same one.** A client started `-4` writes `<rundir>/<iface>-4.pid`; `dhcpcd -k <iface>` looks for `<iface>.pid`, prints "dhcpcd is not running" and exits 1 — which is also exactly what a machine whose client is udhcpc says, so netcfgd ignored the status and could not stop the client it prefers ([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)). Also: **dhcpcd will not run under `unshare -rn`.** It drops privileges to an unprivileged user and a namespace with one mapped uid has nobody to become, so a live test needs real root or `unshare --map-root-user --map-auto`, which wants `newuidmap` and a range in `/etc/subuid`.
 - **dhcpcd cannot report a delegated prefix to a script**, and never could. `$new_delegated_dhcp6_prefix` is the addresses it derived from one, filled from `ap->delegating_prefix` in `dhcp6.c`, and only on an interface it delegated to. `$new_dhcp6_prefix` — which netcfgd's hook read for years — is not a dhcpcd variable at all.
 - **`kea-dhcp6` binds before duplicate address detection finishes and fails.** "Cannot assign requested address" on a link-local it can see with `ip addr`; the address is tentative for about a second after the link comes up. Anything starting a DHCPv6 server right after `ip link set up` has to wait for DAD.
 - **The outer `IFLA_LINK` is not where every kind takes its parent.** A VLAN and a macvlan read it there; a tunnel reads `IFLA_GRE_LINK` or `IFLA_IPTUN_LINK` and a VXLAN reads `IFLA_VXLAN_LINK`, both inside their own nest. netcfgd sent the outer one for all of them, so `parent = "base0"` on a tunnel or a VXLAN produced a device with no underlay at all and a successful apply ([0060](docs/decisions/0060-a-parent-is-one-word-and-two-attributes.md)). **A VXLAN is also the only kind that does not report its parent in the outer attribute**, so the reading half is split the same way the writing half is.
@@ -672,9 +673,14 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after nine pieces of work on the laptop list, every one of them
+Last rewritten after ten pieces of work on the laptop list, every one of them
 started by asking what an operator would actually hit rather than what the roadmap
-said next: four config keys that compiled and did nothing
+said next. The tenth is the shortest to state and the worst that was found:
+**netcfgd could not stop a dhcpcd**, the client it prefers, because the pid file
+carries the family and the stop did not name it
+([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)) — which
+nothing could have caught, because nothing had ever run a real dhcpcd. Before it:
+four config keys that compiled and did nothing
 ([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)),
 **rfkill** — a radio that is switched off looked exactly like a network that would
 not associate, and checking it put the first real wifi hardware under test here
@@ -1007,6 +1013,27 @@ address with it.
 DISCOVER/OFFER/REQUEST/ACK, and netcfgd's own script putting the address on. It needs
 no package a machine with busybox does not already have.
 
+**And now the other client is driven too, which found the same defect again**
+([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)).
+`tests/live/dhcpcd.sh` runs a real dhcpcd against the same busybox server. 0065 had
+fixed "a udhcpc cannot be stopped" and left standing, unnoticed, that **a dhcpcd
+could not be stopped either**: its pid file carries the family it was started with,
+`dhcpcd -k <iface>` looks for the name without one, and "dhcpcd is not running" is
+also what a machine whose client is udhcpc says — so the status could not be checked
+and was not. Dropping `config = "dhcp"` reported a stopped backend while a real
+client kept the address and went on renewing the lease. One constant now names the
+family for both the start and the stop, and a unit test reads the start arguments and
+asserts the stop agrees.
+
+**The test runs dhcpcd once with its own hooks first**, which is what makes the rest
+of it mean anything: without `-c`, a lease sets the machine's hostname to
+`leased-name.lan.example` and rewrites `/etc/resolv.conf` — both measured, in a UTS
+namespace and behind a bind mount so neither reaches the machine. Only then is
+"netcfgd's hook left them alone" worth asserting. It is also the first check here
+that `preference` reaches a lease's default route, which it can only do through
+`dhcpcd -m`: netcfgd does not install that route, the client does, and busybox has no
+equivalent.
+
 #### The radio, and what netcfgd will not switch
 
 **A blocked radio is named, with the remedy for the switch that blocked it**
@@ -1104,8 +1131,12 @@ one, dhcpcd's own hooks fighting netcfgd for that same file, and up hooks runnin
 on every reconcile against the brief's own words. Not one of those was on any
 list, and no gate was red for any of them. **Ask what an operator hits, not what
 the milestone says next** — and when the answer is a list, take it one item at a
-time with a decision record each, because five of the nine items found a defect
-older than the work itself.
+time with a decision record each, because six of the ten items found a defect
+older than the work itself. The tenth is the cleanest example of why the list is
+worth finishing rather than skimming: it was written down as a test gap — "the
+dhcpcd script has never been run by dhcpcd, and a machine with the package would
+close this in one run" — and running it found that the client could not be
+stopped at all.
 
 **Asking the kernel beat reading the previous session's table.** 0057 wrote down
 seven measurements and told the next session to ask again; asking corrected two of
@@ -1167,11 +1198,17 @@ match.
    joining a network without an editor (0069). What is left, and none of it is a
    schema question:
 
-   - **dhcpcd's generated script has never been run by dhcpcd**, which is not
-     installed here. Its shape was read out of dhcpcd 10.1.0's own hooks and its
-     `-c` option out of the man page, and `sh -n` plus assertions cover the text;
-     the busybox half is driven end to end. A machine with the package would close
-     this in one run.
+   - ~~**dhcpcd's generated script has never been run by dhcpcd**~~ — **closed**
+     ([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)),
+     and it took one run on a machine with the package, as predicted. What it found
+     was not in the script: **netcfgd could not stop a dhcpcd at all**, because the
+     pid file carries the family and the stop did not name it. `tests/live/dhcpcd.sh`
+     drives a real one now.
+   - **A DHCPv6 client is not stopped at all**, which the same reading turned up:
+     `stop_backend` answers `Dhcp6` with "not implemented in this build". Loud
+     rather than silent, so an apply that drops `config = "dhcp6"` fails and says
+     so — but it is the other half of the defect above, and it needs a live test at
+     port 546, which means `delegation.sh` and real root.
    - **Five hook phases still do not fire**: `up`, `pre_down`, `roam`, `portal` and
      `drift`. None of them is a laptop's now that `carrier` fires; `roam` is the next
      one worth having, and it wants the supplicant's event socket rather than an
@@ -1242,6 +1279,9 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **Two lists of the same thing have already drifted.** The CLI parsed its arguments three times: `parse_options` knew which flags take a value, a `positional` helper had its *own* copy of that list, and `explain` used neither and took arguments up to the first `--`. The copy was missing `--factory-dir` and `--strand-credentials`, so `ncfg wifi --factory-dir /d scan` read the directory as a subcommand and `ncfg explain --json interface eth0` found no subject at all. Nothing was red, because no test passed a global option before a positional one. One walk returning both cannot disagree with itself — and where a second list is genuinely needed, the test to write is the one that iterates it and asserts the other half agrees.
 - **A defensive check needs a break to be worth its lines.** `wifi add` compiles what it wrote and removes it if that fails, and no input reaches that path: every way an operator can make an invalid block is refused earlier, by name. Rendering the block without its closing brace is what proved the rollback works — the command quoted `unclosed block \`network\`` with the file and line, and left both directories empty. A check that cannot be reached by input can still be reached by a patch, and until it has been, it is a comment.
 - **A prompt that echoes is invisible to every test that drives a pipe.** A pipe has no `ECHO` to clear, so a passphrase prompt reading standard input passes identically whether the code turns echo off or not. Only a pty can say, which is why the second python test in the tree exists — and turning echo off has a matching hazard the TUI already paid for once: a process killed between clearing and restoring hands back a shell with echo off.
+- **A test that does not pin which implementation it drives tests whichever one the machine has.** `dhcp.sh` is about the busybox client and never said so: netcfgd prefers dhcpcd, so on any PATH containing sbin — a root shell, the privileged container — it drove dhcpcd instead, and under `unshare -rn` that meant the *entire script* failing at the first apply for a reason having nothing to do with what it tests. It passed for years because an ordinary user's PATH has no sbin. The daemon now gets the machine's PATH with every directory holding a dhcpcd removed, and the first attempt at that — a PATH with busybox alone on it — broke the generated script, which needs `ip`. Where a fallback chain exists, a test of one link has to make the others unreachable.
+- **The address arriving is not the hook having run.** dhcpcd installs the address itself and calls its hook afterwards, so a test that waits for the address and then asserts on what the hook did is a race — this one lost one run in three, in the *counter-proof*, which is the half that fails visibly. The other half is where it would have been silent: the checks that netcfgd's hook did not set the hostname and did not touch `/etc/resolv.conf` are satisfied by a hook that has not run yet. Waiting until the hook has demonstrably done its one job — written the report — is what makes both of them mean something. Same family as `switch.sh`'s note that the socket appearing does not mean the first apply has finished.
+- **An exit status ignored for a good reason hides a defect of a different shape.** `dhcpcd -k` says "dhcpcd is not running" and exits 1, which is the ordinary answer on every machine whose client is udhcpc — so netcfgd could not check the status, and the *same* sentence appearing because the pid file's name was wrong was invisible. The two failures are indistinguishable from the outside, and only running the daemon showed which one was happening. Where a status is deliberately unchecked, the comment saying why is also the note saying what it can no longer catch.
 - **Breaking a gate to prove it fails needs the artefact rebuilt.** Restoring a file from a copy can leave it with an *older* mtime than the broken build, and cargo then keeps the broken artefact — so the "restored" run silently tests the break. It looked like a new test failing for no reason. `touch` after restoring, or the whole break-it-and-watch-it-go-red method reports on a binary nobody has.
 
 ---
