@@ -227,8 +227,11 @@ interface leased0 {
 }
 CONF
 
-# A stub client, because there is no dhcpcd on this machine and because what is
-# under test is netcfgd's reaction to the *address*, not the protocol. netcfgd runs
+# A stub client, because what is under test is netcfgd's reaction to the *address*
+# and not the protocol -- and because a real dhcpcd could not run here anyway: it
+# drops privileges to a user that `unshare -rn` does not have, which is why
+# `dhcpcd.sh` makes its own namespaces. The stub shadows a real one where the
+# machine has it, and this is the only reason that keeps working. netcfgd runs
 # `dhcpcd -b -4 <iface>` and expects it to go into the background; a script that
 # exits 0 is a client that got no lease, which is a state a real one passes through.
 # The address below is what the client would have installed. Faking the client and
