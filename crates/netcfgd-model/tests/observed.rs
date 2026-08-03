@@ -470,6 +470,10 @@ fn witness() -> Observed {
 		ingress_applied: vec!["eth0".to_owned()],
 		forwarding_applied: vec!["eth0".to_owned()],
 		privacy_applied: vec!["eth0".to_owned()],
+		lease_hooks: vec![netcfgd_model::ObservedLease {
+			interface: "eth0".to_owned(),
+			address: "192.168.1.50/24".to_owned(),
+		}],
 		hostname: Some("host.example".to_owned()),
 		nat: vec!["eth0".to_owned()],
 		nat_conflicts: vec!["somebody-elses-table".to_owned()],

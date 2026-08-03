@@ -338,4 +338,9 @@ netcfgd
 # remedy for the switch that did it. What it bought is the answer to "why will
 # this not associate" on a laptop, where the switch is one keystroke away at all
 # times and a blocked radio looks exactly like a network that is not there.
-total 2144792
+# +8 KB for the two hook phases an operator reaches for first. `down` and
+# `post_down` bracket the action that takes an interface away, and `lease` fires on
+# an address netcfgd did not install -- which is the only way netcfgd can know a
+# lease arrived, since it never sees DHCP. Most of the cost is the `/run` record
+# that makes the lease hook fire once per lease instead of once per reconcile.
+total 2152984

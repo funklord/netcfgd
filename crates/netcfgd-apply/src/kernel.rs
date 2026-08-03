@@ -39,6 +39,8 @@ pub struct Effects {
 	pub forwarding: Vec<(String, bool)>,
 	/// `(interface, enabled)` for each `use_tempaddr` sysctl written.
 	pub privacy: Vec<(String, bool)>,
+	/// `(interface, address)` for each `lease` hook that was run.
+	pub lease_hooks: Vec<(String, String)>,
 	/// `(interface, set)` for each root qdisc changed. `false` is a reset.
 	pub qdisc: Vec<(String, bool)>,
 	/// `(interface, set)` for each ingress redirect changed.
@@ -1186,6 +1188,15 @@ impl Executor for KernelExecutor {
 				};
 				let mut env = crate::hooks::HookEnv::for_interface(iface);
 				env.addr.clone_from(address);
+				// Recorded before the hook runs rather than after, and on purpose:
+				// a `lease` hook that failed and was retried on every reconcile
+				// would be a plan that never converges, which section 4 promises
+				// against. What went wrong is in the journal instead (0064).
+				if let (netcfgd_model::HookPhase::Lease, Some(address)) = (*phase, address) {
+					self.effects
+						.lease_hooks
+						.push((iface.clone(), address.clone()));
+				}
 				match crate::hooks::run(&reference, &env) {
 					crate::hooks::Outcome::Ok => Ok(()),
 					// A pre_* veto stops the plan, which is section 5.2's

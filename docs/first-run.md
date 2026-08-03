@@ -232,15 +232,30 @@ takes the id of a `network` block, not an SSID from a scan. Adding a new
 network means editing the config, which needs the `admin` tier. `ncfg wifi
 scan` marks which networks in range you can actually join.
 
-**Four of the eleven hook phases run.** `pre_up`, `post_up`, `down` and
-`post_down` fire; `up`, `pre_down`, `carrier`, `lease`, `roam`, `portal` and
-`drift` are parsed, written into `/run/netcfgd/hooks/` and never executed. `ncfg
-plan` names each one it finds, so this is visible rather than silent -- but if your
-plan for a laptop involved a `carrier` or a `lease` hook, it does not work yet.
+**Five of the eleven hook phases run.** `pre_up`, `post_up`, `down`, `post_down`
+and `lease` fire; `up`, `pre_down`, `carrier`, `roam`, `portal` and `drift` are
+parsed, written into `/run/netcfgd/hooks/` and never executed. `ncfg plan` names
+each one it finds, so this is visible rather than silent -- but if your plan for a
+laptop involved a `carrier` hook, it does not work yet.
+
+`on lease` fires when an address arrives that netcfgd did not install, which is how
+it notices a DHCP lease without seeing DHCP. `$NCFG_ADDR` carries it. It fires once
+per lease, and not on the apply that starts the client -- the address arrives a
+moment later, and the daemon gets there on the netlink event.
 
 A `down` hook runs *before* the interface goes and while it still has its
 addresses, which is what you want for unmounting something. If it fails, the
 interface stays up: the down phases can veto.
+
+**DHCPv4 needs dhcpcd installed.** netcfgd's fallback to busybox `udhcpc` invokes
+it without a script, and busybox's client configures nothing without one -- Debian
+ships no default script either, so the client gets a lease and nothing happens.
+Install `dhcpcd-base`.
+
+**DHCPv4 needs dhcpcd installed.** netcfgd's fallback to busybox `udhcpc` invokes
+it without a script, and busybox's client configures nothing without one -- Debian
+ships no default script either, so the client gets a lease and nothing happens.
+Install `dhcpcd-base`.
 
 **Nothing manages `accept_ra`, and its default ignores router advertisements on a
 forwarding interface.** Not a laptop problem unless you turn on `forwarding` for a
