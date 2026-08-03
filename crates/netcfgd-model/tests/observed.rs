@@ -302,6 +302,7 @@ fn maximal_report() -> ObservedReport {
 		addresses: vec!["10.8.0.2/24".to_owned()],
 		gateways: vec!["10.8.0.1".to_owned()],
 		nameservers: vec!["10.0.0.53".to_owned()],
+		search: vec!["corp.example".to_owned()],
 		routes: vec![
 			ReportedRoute {
 				destination: "10.0.0.0/8".to_owned(),

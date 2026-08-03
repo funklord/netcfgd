@@ -541,6 +541,9 @@
       "nameservers": [
         "10.0.0.53"
       ],
+      "search": [
+        "corp.example"
+      ],
       "routes": [
         {
           "destination": "10.0.0.0/8",
