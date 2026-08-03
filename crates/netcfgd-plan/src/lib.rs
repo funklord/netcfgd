@@ -227,14 +227,19 @@ fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Obs
 
 /// The hook phases this build actually runs.
 ///
-/// Two of the eleven the model declares. The other nine are recognised, written
+/// Four of the eleven the model declares. The other seven are recognised, written
 /// into `/run/netcfgd/hooks/`, hashed and carried in the document -- and never
 /// executed, which reads exactly like a working feature: the file is there, the
 /// plan mentions nothing, and the script never runs.
 ///
 /// Named here rather than hidden in a filter so that the warning below and the
-/// planner cannot disagree about which two.
-const FIRED_PHASES: &[HookPhase] = &[HookPhase::PreUp, HookPhase::PostUp];
+/// planner cannot disagree about which ones.
+const FIRED_PHASES: &[HookPhase] = &[
+	HookPhase::PreUp,
+	HookPhase::PostUp,
+	HookPhase::Down,
+	HookPhase::PostDown,
+];
 
 /// Say which hooks the document declares that nothing will run.
 ///
@@ -1077,6 +1082,43 @@ impl Builder {
 	}
 
 	/// Rule 1: create a link before anything references it.
+	/// Emit the hooks one interface declares for one phase, in file order.
+	///
+	/// One function for what had been two copies and was about to be four. Every
+	/// hook action is the same shape -- the op names the interface, the phase and
+	/// the path, the reason names the phase it is for, and there is no inverse
+	/// because a hook is arbitrary shell and claiming an undo would make
+	/// commit-confirm lie about what it restores.
+	///
+	/// Returns the ids, because every caller has something that must wait for them
+	/// or that they must wait for.
+	fn plan_hooks(&mut self, interface: &Interface, phase: HookPhase, deps: &[u32]) -> Vec<u32> {
+		let name = &interface.name;
+		interface
+			.hooks
+			.iter()
+			.filter(|hook| hook.phase == phase)
+			.map(|hook| {
+				let field = format!("hooks[{}]", phase.name());
+				self.push(
+					Op::HookRun {
+						iface: name.clone(),
+						phase,
+						path: hook.path.clone(),
+						address: None,
+					},
+					Reason::absent(name, &field, hook.path.clone()),
+					deps.to_vec(),
+					None,
+				)
+			})
+			// A refused or dropped action is `u32::MAX` and is not in the plan, so
+			// it must not be in anybody's dependency list either -- a dependency on
+			// an action that does not exist is a DAG edge to nowhere.
+			.filter(|id| *id != u32::MAX)
+			.collect()
+	}
+
 	/// Delete an interface whose identity the kernel will not change, so that the
 	/// creation pass can make it again.
 	///
@@ -1153,6 +1195,11 @@ impl Builder {
 				);
 				stopped.push(id);
 			}
+			// The interface is about to stop existing, so it goes down as far as a
+			// hook is concerned -- and it comes back in this same plan, where
+			// `pre_up` and `post_up` fire again because the creation pass plans it
+			// as absent. Firing `down` here is what makes those two symmetrical.
+			stopped.extend(self.plan_hooks(interface, HookPhase::Down, &[]));
 			let id = self.push(
 				Op::LinkDelete { name: name.clone() },
 				Reason::differs(name, field, desired_value, seen),
@@ -1172,6 +1219,7 @@ impl Builder {
 			if id == u32::MAX {
 				continue;
 			}
+			self.plan_hooks(interface, HookPhase::PostDown, &[id]);
 			self.gates.push((name.clone(), id));
 			recreating.push(name.clone());
 		}
@@ -1907,30 +1955,28 @@ impl Builder {
 			.collect();
 		base.extend(enslavements);
 
+		// Whether this plan is bringing the interface into service, which is what
+		// the up hooks are *for*. Computed before either is emitted, because
+		// `pre_up` has to be a dependency of the `link.up` it precedes.
+		//
+		// Both hooks used to be emitted unconditionally, and the two things that
+		// made that visible were putting them in front of a real kernel: a
+		// converged interface ran its `pre_up` and `post_up` on **every apply** --
+		// so the second plan was never empty, against section 4's promise that an
+		// already-correct state runs zero hooks -- and a *disabled* interface ran
+		// them too, producing a plan that went `pre_up`, `link.down`, `post_down`,
+		// `post_up`. Decision 0063.
+		let bringing_up = interface.enabled && link.is_none_or(|link| !link.up);
+
 		// Rule 6: pre_up runs before link.up. Deliberately, and not the same
 		// as netifrc, which runs `up; preup; up` so that a preup hook can read
 		// carrier -- the kernel returns EINVAL for carrier on a down
 		// interface. Decision 0011 keeps this ordering and documents the
 		// breakage; do not "fix" it to match netifrc without reading that.
-		for hook in interface
-			.hooks
-			.iter()
-			.filter(|h| h.phase == HookPhase::PreUp)
-		{
-			let id = self.push(
-				Op::HookRun {
-					iface: name.clone(),
-					phase: hook.phase,
-					path: hook.path.clone(),
-				},
-				Reason::absent(name, "hooks[pre_up]", hook.path.clone()),
-				base.clone(),
-				// A hook is arbitrary shell. Nothing can be said about how to
-				// undo it, and claiming otherwise would make commit-confirm
-				// lie about what it restores.
-				None,
-			);
-			self.pre_up.push((name.clone(), id));
+		if bringing_up {
+			for id in self.plan_hooks(interface, HookPhase::PreUp, &base) {
+				self.pre_up.push((name.clone(), id));
+			}
 		}
 
 		let mut up_deps = base.clone();
@@ -1941,7 +1987,7 @@ impl Builder {
 				.map(|(_, id)| *id),
 		);
 
-		if interface.enabled && link.is_none_or(|link| !link.up) {
+		if bringing_up {
 			let id = self.push(
 				Op::LinkUp { name: name.clone() },
 				Reason::differs(name, "enabled", "true", "false"),
@@ -1950,12 +1996,23 @@ impl Builder {
 			);
 			self.link_up.push((name.clone(), id));
 		} else if !interface.enabled && link.is_some_and(|link| link.up) {
-			self.push(
+			// `down` before the interface goes, `post_down` after it. Both are
+			// emitted here rather than in the teardown pass, and the reason is
+			// worth stating: teardown runs *last* in a plan, so at the moment
+			// this fires the interface still has its addresses and routes -- which
+			// is what makes a `down` hook able to unmount a share or stop a
+			// service that is using them. Decision 0063.
+			let mut deps = base.clone();
+			deps.extend(self.plan_hooks(interface, HookPhase::Down, &base));
+			let id = self.push(
 				Op::LinkDown { name: name.clone() },
 				Reason::differs(name, "enabled", "false", "true"),
-				base.clone(),
+				deps,
 				Some(Op::LinkUp { name: name.clone() }),
 			);
+			if id != u32::MAX {
+				self.plan_hooks(interface, HookPhase::PostDown, &[id]);
+			}
 		}
 
 		// 802.1X comes before addressing, not after. A port that has not
@@ -1986,24 +2043,14 @@ impl Builder {
 
 		self.plan_advertising(interface, observed, &base, &addressing_ids);
 
-		// Rule 6: post_up runs after the last addressing action completes.
-		for hook in interface
-			.hooks
-			.iter()
-			.filter(|h| h.phase == HookPhase::PostUp)
-		{
+		// Rule 6: post_up runs after the last addressing action completes -- and
+		// only where there was one, or where the interface was brought up. "After
+		// the last addressing action" is not a moment that exists in a plan with no
+		// addressing action in it.
+		if bringing_up || !addressing_ids.is_empty() {
 			let mut deps = base.clone();
 			deps.extend(addressing_ids.iter().copied());
-			self.push(
-				Op::HookRun {
-					iface: name.clone(),
-					phase: hook.phase,
-					path: hook.path.clone(),
-				},
-				Reason::absent(name, "hooks[post_up]", hook.path.clone()),
-				deps,
-				None,
-			);
+			self.plan_hooks(interface, HookPhase::PostUp, &deps);
 		}
 	}
 
