@@ -115,7 +115,7 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		false
 	} else {
 		let passphrase = read_passphrase(&id)?;
-		make_secrets_dir(&secret)?;
+		crate::secret::make_secrets_dir(&secret)?;
 		config::write_atomically(&secret, passphrase.as_bytes(), 0o600)
 			.map_err(|error| format!("could not write {}: {error}", secret.display()))?;
 		true
@@ -181,31 +181,6 @@ fn secret_path(config_dir: &Path, id: &str) -> PathBuf {
 	config_dir.join("secrets").join(id)
 }
 
-/// Create the secrets directory, if this is the thing that first needs it.
-///
-/// `make install` deliberately does not create it -- constraint 2, the
-/// filesystem reflects use -- so whichever command first stores a secret
-/// decides its mode, and until now nothing did. 0700, so that the directory
-/// does not list which networks a machine remembers to every user on it; the
-/// files inside are 0600 either way, which is what `netcfgd-secret` checks.
-///
-/// An existing directory is left exactly as it is, mode included. Its mode is
-/// the operator's, and quietly tightening it would break a machine that had
-/// deliberately opened it to a group.
-fn make_secrets_dir(secret: &Path) -> Result<(), String> {
-	use std::os::unix::fs::DirBuilderExt as _;
-
-	let directory = secret.parent().unwrap_or_else(|| Path::new("."));
-	if directory.is_dir() {
-		return Ok(());
-	}
-	std::fs::DirBuilder::new()
-		.recursive(true)
-		.mode(0o700)
-		.create(directory)
-		.map_err(|error| format!("could not create {}: {error}", directory.display()))
-}
-
 /// Whether an id can be a block label, a filename and a secret name at once.
 ///
 /// It has to be all three, and the strictest of the three wins. The label rules
@@ -215,31 +190,12 @@ fn make_secrets_dir(secret: &Path) -> Result<(), String> {
 /// separator or `..` because a config file that could name any path would let a
 /// network read `/etc/shadow` as its passphrase.
 fn usable_label(id: &str) -> Result<(), String> {
-	let refusal = |why: &str| {
-		Err(format!(
+	crate::secret::usable_name(id).map_err(|why| {
+		format!(
 			"`{id}` cannot be used as a name here: {why}. Pass `--id` with a \
 			 plainer one -- the SSID itself is kept exactly, as hex"
-		))
-	};
-	if id.is_empty() {
-		return refusal("it is empty");
-	}
-	if id.len() > 64 {
-		return refusal("it is longer than 64 bytes");
-	}
-	if id.contains(['"', '\\']) {
-		return refusal("it contains a quote or a backslash");
-	}
-	if id.chars().any(char::is_control) {
-		return refusal("it contains a control character");
-	}
-	if id.contains('/') {
-		return refusal("it contains a path separator, and it names a file");
-	}
-	if id.contains("..") || id.starts_with('.') {
-		return refusal("it would name a hidden file or one outside the directory");
-	}
-	Ok(())
+		)
+	})
 }
 
 /// The block, as text.
@@ -379,66 +335,9 @@ fn report(
 /// standard input, which is what makes the command scriptable without a
 /// passphrase ever reaching a command line.
 fn read_passphrase(id: &str) -> Result<String, String> {
-	use std::io::{BufRead as _, Write as _};
-
-	// Standard input, by number, because that is what the terminal calls want.
-	const STDIN: std::os::fd::RawFd = 0;
-	let interactive = netcfgd_sys::term::is_terminal(STDIN);
-
-	// The signals are blocked for exactly as long as echo is off. `^C` at the
-	// prompt then arrives after the restore rather than instead of it, which is
-	// the difference between an aborted command and a shell with echo off --
-	// see `netcfgd_sys::signals`, which exists because that happened.
-	//
-	// Declared first so that it is dropped last: Rust drops in reverse
-	// declaration order, and unblocking before restoring would reopen the
-	// window this closes.
-	let _signals = if interactive {
-		netcfgd_sys::signals::Signals::new().ok()
-	} else {
-		None
-	};
-	let _echo = if interactive {
-		netcfgd_sys::term::EchoOff::new(STDIN)
-			.map_err(|error| format!("could not turn echo off: {error}"))?
-	} else {
-		None
-	};
-
-	if interactive {
-		// On standard error, so that a shell function wrapping this command can
-		// still capture its output, and flushed by hand because a prompt with
-		// no newline would otherwise appear after the answer.
-		eprint!("passphrase for `{id}`: ");
-		let _ = std::io::stderr().flush();
-	}
-
-	let mut line = String::new();
-	let read = std::io::stdin()
-		.lock()
-		.read_line(&mut line)
-		.map_err(|error| format!("could not read the passphrase: {error}"))?;
-	if interactive {
-		// The newline the operator typed was not echoed either.
-		eprintln!();
-	}
-	if read == 0 {
-		return Err("no passphrase given".to_owned());
-	}
-
-	// The line terminator, and nothing else. A passphrase may legitimately
-	// begin or end with a space, and trimming one that does would store
-	// something that never associates and looks right in every diagnostic.
-	let mut passphrase = line.as_str();
-	if let Some(shorter) = passphrase.strip_suffix('\n') {
-		passphrase = shorter;
-	}
-	if let Some(shorter) = passphrase.strip_suffix('\r') {
-		passphrase = shorter;
-	}
-
-	check_passphrase(passphrase)?;
-	Ok(passphrase.to_owned())
+	let passphrase = crate::secret::read_without_echo(&format!("passphrase for `{id}`"))?;
+	check_passphrase(&passphrase)?;
+	Ok(passphrase)
 }
 
 /// The passphrase rules, refused here rather than by the supplicant.

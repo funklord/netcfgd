@@ -1503,16 +1503,17 @@ fn as_secret(value: &Spanned<Value>, diags: &mut Diagnostics) -> Option<SecretRe
 		// rather than a property, and the first person to paste a passphrase
 		// in would find it works.
 		diags.push(
-			// It named `ncfg secret set NAME`, which design section 3.3
-			// specifies and nothing implements -- so the help told the reader
-			// to run a command that does not exist. It names the file instead,
-			// which is what the `file` provider actually reads, and the one
-			// command that writes one today.
+			// This named `ncfg secret set NAME` before the command existed --
+			// design section 3.3 specified it and nothing implemented it, which
+			// is 0061's disease in a help string. 0069 rewrote it to name the
+			// file, and 0075 wrote the command, so it names both: the file is
+			// what the `file` provider reads, and the command is what writes
+			// one without an editor or a chmod.
 			Diagnostic::new(value.span, "a credential must be a secret reference").with_help(
-				"write `@secret:NAME`, and put the value in \
-					 /etc/netcfgd/secrets/NAME with mode 0600 -- outside the \
-					 config, which is what keeps the config safe to commit. \
-					 `ncfg wifi add` does both for a wireless passphrase",
+				"write `@secret:NAME`, then `ncfg secret set NAME` -- which asks \
+					 for the value with echo off and writes \
+					 /etc/netcfgd/secrets/NAME at 0600, outside the config, which \
+					 is what keeps the config safe to commit",
 			),
 		);
 		return None;
