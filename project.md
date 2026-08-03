@@ -652,11 +652,6 @@ Three techniques make that reachable without root or a clean machine:
 - **`accept_ra=1` means "accept unless this interface forwards".** A host in an environment that starts with forwarding on ignores every router advertisement, and `ip addr` shows nothing that explains it. `accept_ra=2` is the other way to say it.
 - **A host fills in the bottom 64 bits of an advertised prefix itself**, so the address is `2001:db8:1234:0:...` and a grep for `2001:db8:1234::` matches nothing. `proto kernel_ra` is the kernel saying where an address came from, and is the thing worth asserting.
 - **A backend's *device* may not exist while the backend is running.** openvpn creates its `tun` seconds after starting, and a tunnel still negotiating has none at all — so anything planned from an interface's contents is skipped for exactly the tunnels that need it. The stale-configuration check for a `.ovpn` is a top-level pass for that reason, and the live test is what said so while every unit test passed.
-- **Ask the kernel what it will take, one attribute at a time.** Three link kinds, three answers: a bridge takes its settings on a live bridge; a bond takes `miimon` and refuses `mode` with `ENOTEMPTY` while it has members; a VLAN accepts an id and silently ignores it. The middle one also refuses the *whole* `RTM_NEWLINK`, so an attribute the kernel will not take stops its neighbours in the same message being set. A planner that assumes "observed differs, therefore set it" produces an apply that fails and a plan that repeats forever — or, in the VLAN case, one that reports a change nobody made.
-- **A units conversion is invisible to a pure test.** The bridge fixtures build an observation in *model* units, so the divide between the kernel's hundredths of a second and the document's seconds is not on their path — removing it leaves all 139 of them green while every bridge differs from itself by a factor of a hundred. Only `links.sh` sees it, because there the observation comes from a real dump. Where a value crosses a unit boundary, the test that matters is the one on the far side of the boundary.
-- **A fixture that does not exercise a field cannot see a comparison break on it.** Four times in one session, in four disguises. The live WireGuard test asserted "an unchanged device plans nothing" — the right check — with peers that had no endpoint, so it could not notice that the comparison replaced the peer list on every reconcile for any peer that had one. The nmcli check asserted the right column with a value two different devices render identically into. And a zero the kernel spells as absent had to be written *in a document* before anything noticed the document's side kept it. When a check is about a field, the input set has to contain that field with a value that is not the default.
-- **A limit can be an artefact of the question rather than of the world.** 0054 wrote down that a rotated WireGuard key could not be noticed without curve25519, and project.md carried it as work needing "a plan for where that arithmetic lives". Both were true about *deriving a public key* and neither was true about the question anyone actually had, which is whether the secret moved. The rewrite cost a digest and no dependency. Worth asking of any limit stated in terms of a technique rather than in terms of an answer.
-- **An op can be declared, frozen and pinned without anything emitting it.** `wg.set_device` and `wg.set_peers` were in the action taxonomy, in the `Op` enum and in `docs/schema/plan.json` from M4, and the executor answered both with "not implemented in this build" — because no planner path had ever produced one. A witness proves an op's *shape*; nothing in the repository was asking whether an op is reachable. Worth suspecting wherever a taxonomy was written before the code that fills it.
 - **The kernel's `SET_DEVICE` is a partial update and netcfgd used to send the whole device.** An attribute that is absent is left alone and the peer list is replaced only under `WGDEVICE_F_REPLACE_PEERS`, which is how `wg set wg0 listen-port` changes a port without touching a peer. A comment in `netcfgd-sys` said WireGuard "has no partial update that netcfgd wants", true while the only caller was link creation and false the moment there was a second.
 - **A MAC-based allow list is policy, not security.** An address is asserted by the station and changed with one command. It keeps honest devices off a network and stops nobody who does not want to be stopped; anything that must be secure belongs in `wifi { .. }` where the key material is.
 
@@ -669,10 +664,11 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last touched by the session that read 0047–0053 as a whole rather than adding to
-them, and then found what that reading pointed at: a WireGuard device netcfgd
-could not see (0054);
-what follows is organised by subject, not by the order it was built in.
+Last rewritten after the session that read 0047–0053 as a whole rather than
+adding to them — and then spent itself on what that reading pointed at, which was
+one question asked in four more places: **is what is running still what the
+document says?** What follows is organised by subject, not by the order it was
+built in.
 
 **Milestones.** M1–M6 are done. M7's NetworkManager shim has tiers 1 and 2
 complete and tier 3 bounded rather than built — and **tier 3 bounds the shim,
@@ -780,57 +776,66 @@ re-reads on `SIGHUP`, so nothing on the wire is disturbed.
 
 #### Is what is running still what the document says?
 
-Yes, for everything netcfgd starts
-([0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md),
+The question this project keeps finding new places to ask. Four kinds of answer
+now exist, and the shape of each is worth knowing before adding a fifth.
+
+**A daemon netcfgd started** is compared against the file netcfgd generated for
+it ([0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md),
 [0053](docs/decisions/0053-a-file-netcfgd-does-not-read-can-still-be-hashed.md)).
-The observation records what each daemon was started with — read back from the
-file netcfgd itself wrote, in netcfgd's own vocabulary — and the planner compares
-it against what the document implies now. An edited SSID, channel, band,
-passphrase, advertised prefix or `.ovpn` is noticed.
+An edited SSID, channel, band, passphrase, advertised prefix or `.ovpn` is
+noticed. The act differs by daemon and that difference is not cosmetic: radvd
+reloads and costs nothing, hostapd restarts and every station is deauthenticated,
+which the plan says in those words.
 
-The act differs by daemon and that difference is not cosmetic: radvd reloads and
-costs nothing, hostapd restarts and every station is deauthenticated, which the
-plan says in those words. Two comparisons need something a pure planner may not
-touch — a secret, and a file 0046 says netcfgd does not read — so both are made
-in the **observer**, where both halves are already in hand, and what travels is
-a boolean. `None` is not `false`: "could not check" never restarts anything.
+**A kernel object netcfgd configured** is compared against what the kernel
+reports ([0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md),
+[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)). This is
+where 0053 guessed wrong — it expected the next gap to be a backend netcfgd does
+not start, and it was a **WireGuard device**, which netcfgd creates itself.
+Everything that makes one a tunnel went over generic netlink inside
+`link.create` and never again, so an edited listen port did nothing and **a peer
+deleted from the config kept its access** while `ncfg apply` said there was
+nothing to do: a wrong answer shaped like a completed revocation. The same was
+true of every other link kind's own settings, and a bridge's and a bond's are
+closed now too.
 
-**And for a kernel object too, which is where 0053 guessed wrong.** It said the
-next thing of this shape would be a backend netcfgd does not start; it was a
-**WireGuard device**, which netcfgd creates itself
-([0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md)). Its
-configuration went over generic netlink inside `link.create` and never again, so
-an edited listen port did nothing and **a peer deleted from the config kept its
-access** while `ncfg apply` said there was nothing to do. That is the same drift
-as an edited SSID with a much worse face on it: a wrong answer shaped like a
-completed revocation. The observation now carries what the kernel holds — port,
-mark, public key, peers — and the planner emits `wg.set_device` and
-`wg.set_peers`, two ops that had been declared in the taxonomy and pinned by the
-plan witness since M4 without anything ever emitting one. What is not compared: a
-peer's **endpoint**, because a peer roams and the kernel rewrites it, and a port
-the document does not state, because that one is the kernel's to choose.
+**A secret netcfgd loaded** is compared by *digest*
+([0055](docs/decisions/0055-a-secret-can-be-hashed-too.md),
+[0056](docs/decisions/0056-a-peers-secret-is-recorded-per-peer.md)). 0054 said a
+rotated WireGuard key needed curve25519; it does not. The question is not what
+public key a private one derives but whether the secret has moved since netcfgd
+loaded it, and netcfgd answers that by recording `sha256` of what it handed the
+kernel, at 0600 under `/run`, and hashing the store again on the next
+observation. 0053's trick played on a secret rather than a file: it hashed bytes
+it was forbidden to *interpret*, this hashes bytes it is forbidden to *keep*.
+Every secret a WireGuard device holds is covered, the peers' preshared keys
+included, recorded per peer and keyed by the public key — the only name the
+kernel and the document share.
 
-**A rotated private key is compared too**, which 0054 said needed curve25519 and
-[0055](docs/decisions/0055-a-secret-can-be-hashed-too.md) found it did not. The
-question is not what public key a private one derives — it is whether the secret
-has moved since netcfgd loaded it, and that is answered by a **digest**: netcfgd
-records `sha256` of the key it handed the kernel, at 0600 under `/run`, and the
-observer compares it against the store. 0053's trick played on a secret rather
-than on a file — it hashed bytes it was forbidden to *interpret*, this hashes
-bytes it is forbidden to *keep*. Safe because a WireGuard key is 32 octets of
-kernel randomness with no dictionary behind it, and **not** a technique to reach
-for with a passphrase, which is why an access point's is still compared in
-memory and written down nowhere.
+**Safe because of what the secret is, not because the technique is safe.** A
+WireGuard key is 32 octets of kernel randomness with no dictionary behind it. A
+*passphrase* is the opposite, which is why an access point's is still compared in
+memory and written down nowhere. Anyone reaching for the digest on a third secret
+has to make that argument again.
 
-**Each peer's preshared key too**
-([0056](docs/decisions/0056-a-peers-secret-is-recorded-per-peer.md)), recorded
-per peer and keyed by the public key — the only name the kernel and the document
-share. *Adding or removing* one was already noticed, because the two peer lists
-disagree about whether there is one; **rotating** one was invisible, because the
-kernel returns a preshared key zeroed and both sides go on saying "there is one".
-So every secret a WireGuard device holds is now compared, and what netcfgd
-notices no longer depends on which of the two an operator edited — which is
-0053's argument about predictable coverage, applied where it was next needed.
+Three rules hold across all four, and every one was paid for:
+
+- **The comparison goes where both halves already are.** A secret and an unread
+  file cannot reach a pure planner, so those comparisons happen in the observer
+  and only a boolean travels.
+- **`None` is not `false`.** No record, an unresolvable secret, an unreadable
+  file and a device netcfgd did not configure are all "could not check", and
+  nothing is restarted, rekeyed or replaced on one.
+- **What the document does not state is not compared.** An absent band, listen
+  port or forward delay means "whatever was chosen", and comparing it against
+  what *was* chosen rebuilds the thing on every reconcile. This mistake has now
+  been made and caught three times.
+
+**What is still silent**, so that nobody assumes otherwise: a VLAN's id under a
+name that does not encode it, a VXLAN's id, a tunnel's endpoints, a macvlan's
+mode. The measurement and the reason each is a different job are in
+[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md), and the
+next entry under "Next" is that work.
 
 #### Explaining it
 
@@ -859,32 +864,36 @@ change and need a deliberate `make schema-bless`. Two of them are new:
 and nothing had ever pinned either while the socket witness claimed in a comment
 that something did.
 
-**And the socket witness had the same hole the comment was about.** Its header
-said "every request, response and event"; the lists were plain `vec![]`s nobody
-had to add to, so `Request::ApStations`, `Response::ApStations` and
-`Response::Journal` were never in them — and `StationReport`, `StationEntry` and
-the journal's `Record` were pinned by nothing anywhere. All three lists now go
-through the exhaustive match the model's witness arrived at, both halves of it
-watched failing. The payload-heavy variants carry an *empty* payload: enough to
-pin the tag and the framing, with the contents left to the witness that owns
-them.
+All four are exhaustive now rather than sampled: each goes through a match that
+stops the file compiling when a variant appears, and the payload-heavy socket
+responses carry an *empty* payload — enough to pin the tag and the framing, with
+the contents left to the witness that owns them.
 
-#### Reading the last session as a whole
+#### What this session's own gates were worth
 
-The thing §10 asked for, and what it turned up. Vocabulary: the `modem` →
-`reported` rename is complete everywhere the name could be read, and the four
-"is this daemon still current" fields divide cleanly — two carry what a daemon
-was started with, two carry an answer computed where a secret or an unread file
-was already in hand. Gates: no two of the new ones overlap, and each new script
-says in its header what its neighbour covers instead.
+Two sessions in a row now have found more in the *tests* than in the code, and
+the pattern is worth carrying rather than rediscovering.
 
-What was wrong was **comments a later commit in the same session falsified and
-nobody re-read**: three places said an edited passphrase was not noticed, beside
-code that notices it; one said the ACL policy was the only thing anything noticed
-changing, sixty lines below the function that notices the rest. Records 0047 and
-0048 deferred work that the same session then did, with no forward pointer of the
-kind 0050 already carried. None of it was reachable by any gate, and all of it
-was reachable by reading seven records end to end.
+**The suite was run as root for the first time since those tests were written**,
+in a privileged container. All three root-only scripts pass. Getting there found
+four defects, every one of them in the suite and three of them leaving a green
+run behind: a build recipe that does not build, a preflight that failed where it
+should skip, its repair which then skipped where it should run, and `hwsim.sh`
+passing while leaving a root `netcfgd` and two supplicants alive.
+
+**Four checks in this session were correct and blind**, each in a different
+disguise — a peer with no endpoint, an `nmcli` column two devices render
+identically into, a zero nobody had written in a document, and a units
+conversion a pure test builds its input on the far side of. Section 9's rule is
+that a gate nobody has seen fail is not evidence; the neighbour of it is that a
+gate whose input does not contain its subject is not evidence either.
+
+**And the socket witness had the hole its own comment was about.** Its header
+said "every request, response and event" while the lists were plain `vec![]`s:
+`Request::ApStations`, `Response::ApStations` and `Response::Journal` were never
+in them, so `StationReport`, `StationEntry` and the journal's `Record` were
+pinned by nothing anywhere. All three lists now go through the exhaustive match
+the model's witness arrived at.
 
 ### Next, roughly in order
 
@@ -894,60 +903,34 @@ was reachable by reading seven records end to end.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **A link's kind-specific attributes are applied once and never compared**,
-   which is the WireGuard gap again in every other link kind. **The bridge and the
-   bond are done** ([0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md));
-   VLAN, VXLAN, tunnel, macvlan and veth are not. Measured, not suspected:
+2. **Finish comparing what a link kind carries** — the work
+   [0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md) started
+   and deliberately did not finish. A bridge and a bond are done; a macvlan's
+   mode, a tunnel's endpoints, a VXLAN's id and a VLAN's id are not, and they
+   are four different jobs rather than one:
 
-   ```
-   interface work-net { vlan { parent = "base0"; id = 42 } }   # apply
-   # edit the id to 43, under the same interface name
-   $ ncfg plan
-   nothing to do
-   $ ip -d link show work-net
-   vlan protocol 802.1Q id 42
-   ```
+   - **macvlan and tunnel** change in place, so they are the bridge's shape and
+     are the cheap ones. Each still needs its own `INFO_DATA` decoding — the
+     numbering is per kind, and reading one kind's attributes with another's
+     constants is how a VXLAN comes to report a forward delay — and its own
+     live test.
+   - **VXLAN's id** is refused with `Cannot change VNI`, so it wants the bond's
+     answer: a sentence saying what to do, not an action that cannot work.
+   - **VLAN's id** is *accepted and ignored*, so a set would report a change
+     nobody made. Correcting one means a delete and a create, which drops the
+     addresses on the interface and interacts with the planner's creation pass.
+     It is last for that reason, and it wants its own session.
+   - **veth** has nothing to compare: its `peer` is what creation means.
 
-   A bridge's `stp` and `forward_delay` and a bond's `miimon` behaved the same
-   way until 0057 and now do not. Still silent: a VXLAN's id and remote, a
-   tunnel's local and remote, a VLAN's id under a name that does not encode it.
-   Everything
-   the kernel takes as `IFLA_INFO_DATA` goes over the wire inside
-   `Op::LinkCreate` and is never sent again — exactly what
-   [0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md)
-   found for a WireGuard device, in the six kinds it did not look at.
+   Ask the kernel before writing any of them. Seven attributes have been
+   measured and no two families answered alike; 0057 has the table.
 
-   **The common case hides it.** A VLAN is usually named for its id, so editing
-   `base0.42` to `base0.43` is a different interface *name* and plans a create
-   and a delete, correctly. It is the operator who names a VLAN `work-net` — or
-   who edits a bridge, where the name never encodes anything — who gets
-   silence.
-
-   Each remaining kind needs its own `INFO_DATA` decoding — the numbering is per
-   kind, and decoding one kind's attributes with another's constants is how a
-   VXLAN comes to report a forward delay — plus its own live test. **And each
-   needs the kernel asked what it will take.** All seven attributes measured so
-   far answer in one of three ways and no two families agree — 0057 has the
-   table. A macvlan's mode and a tunnel's endpoints *change*, so they are the
-   bridge's shape and are the cheap ones to do next. A VXLAN's id is **refused**
-   with `Cannot change VNI`, so it wants the bond's sentence. A VLAN's id is
-   **accepted and ignored**, which is the one that would report a change nobody
-   made — it needs a delete and a create, which drops the addresses on the
-   interface and interacts with the planner's creation pass, and is the reason
-   it is last rather than first.
-
-   **The shim's remaining device types fall out of this and not the other way
-   round.** `.Device.Vlan` wants an id and a parent, `.Device.IPTunnel` a local
-   and a remote — the same values. Adding them to the model for the shim is
-   what constraint 6 forbids; adding them because an edited VLAN id is
-   invisible is a local justification, and the shim then follows for free.
-
-**The whole suite has now been run as root**, which is what the previous entry
-here asked for. All three root-only scripts pass: `delegation.sh` through
-renumbering and withdrawal, `pppoe-session.sh` through a real IPCP negotiation,
-and `hwsim.sh` through association, SAE from a transitional offer, and a scan
-that finds the access point. Association was the part nothing had exercised
-since the 0047–0053 session and it holds.
+3. **The shim's remaining device types follow from that, not the reverse.**
+   `.Device.Vlan` wants an id and a parent, `.Device.IPTunnel` a local and a
+   remote — the same values. Adding them to the model *for the shim* is what
+   constraint 6 forbids; adding them because an edited VLAN id is invisible is a
+   local justification, and the shim then gets them for free. A bridge, a bond
+   and a WireGuard tunnel already went that way round.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one.
 
@@ -956,6 +939,11 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
 - **A column that renders two things the same way cannot tell them apart, and neither can a check reading it.** `nmcli`'s TYPE column prints a *generic* device's `TypeDescription`, and netcfgd's type description is the kernel's link kind — so "the tunnel shows as `wireguard`" passed with the device-type mapping deliberately broken, because a generic device whose description is the word `wireguard` renders identically to a real one. The repair is to assert a value only the real thing can produce: a listen port the document chose, and the type as a *number* rather than as a rendered column.
 - **A test that cleans up by category misses what is not in the category.** `hwsim.sh` killed everything in its network namespace, which is netcfgd and both supplicants and is not everything it started: the subshell a background job forks stays in the initial namespace, holds the script's stdout, and keeps a reader of that pipe waiting after the script has exited. The test passed and left a root netcfgd running. Kill what you started by the handle you were given, and treat an enumeration as the second answer rather than the only one.
+- **Ask the kernel what it will take, one attribute at a time.** Three link kinds, three answers: a bridge takes its settings on a live bridge; a bond takes `miimon` and refuses `mode` with `ENOTEMPTY` while it has members; a VLAN accepts an id and silently ignores it. The middle one also refuses the *whole* `RTM_NEWLINK`, so an attribute the kernel will not take stops its neighbours in the same message being set. A planner that assumes "observed differs, therefore set it" produces an apply that fails and a plan that repeats forever — or, in the VLAN case, one that reports a change nobody made.
+- **A units conversion is invisible to a pure test.** The bridge fixtures build an observation in *model* units, so the divide between the kernel's hundredths of a second and the document's seconds is not on their path — removing it leaves all 139 of them green while every bridge differs from itself by a factor of a hundred. Only `links.sh` sees it, because there the observation comes from a real dump. Where a value crosses a unit boundary, the test that matters is the one on the far side of the boundary.
+- **A fixture that does not exercise a field cannot see a comparison break on it.** Four times in one session, in four disguises. The live WireGuard test asserted "an unchanged device plans nothing" — the right check — with peers that had no endpoint, so it could not notice that the comparison replaced the peer list on every reconcile for any peer that had one. The nmcli check asserted the right column with a value two different devices render identically into. And a zero the kernel spells as absent had to be written *in a document* before anything noticed the document's side kept it. When a check is about a field, the input set has to contain that field with a value that is not the default.
+- **A limit can be an artefact of the question rather than of the world.** 0054 wrote down that a rotated WireGuard key could not be noticed without curve25519, and project.md carried it as work needing "a plan for where that arithmetic lives". Both were true about *deriving a public key* and neither was true about the question anyone actually had, which is whether the secret moved. The rewrite cost a digest and no dependency. Worth asking of any limit stated in terms of a technique rather than in terms of an answer.
+- **An op can be declared, frozen and pinned without anything emitting it.** `wg.set_device` and `wg.set_peers` were in the action taxonomy, in the `Op` enum and in `docs/schema/plan.json` from M4, and the executor answered both with "not implemented in this build" — because no planner path had ever produced one. A witness proves an op's *shape*; nothing in the repository was asking whether an op is reachable. Worth suspecting wherever a taxonomy was written before the code that fills it.
 - **A comment is falsified by the commit after it, and nothing goes red.** Four places in one session said an access point's passphrase, SSID or channel was not compared — written true, left standing when the next commit compared them, and sitting directly above the code that does. Every gate stayed green because no gate reads prose. The habit that catches it is the one §10 already asks for: when a session closes a gap it earlier wrote down, grep for the sentence that wrote it down, not only for the code.
 - **A record that defers something needs a forward pointer when the deferral is lifted.** 0050 has one to 0051 and it works; 0047 and 0048 deferred work the same session then did and had none, so a reader landing on 0047 from `docs/interface-report.md` — which links there — was told the rename had not happened. The body stays as written, because a decision is changed by superseding it; the `Status` line is where the pointer goes.
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
