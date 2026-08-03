@@ -943,6 +943,7 @@ mod tests {
 			ownership: netcfgd_model::Ownership::Unknown,
 			private_key_loaded: false,
 			wireguard: None,
+			bridge: None,
 		}
 	}
 
