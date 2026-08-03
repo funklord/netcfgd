@@ -2371,12 +2371,14 @@ pub fn dhcpcd_script(iface: &str, report: &std::path::Path) -> String {
 		 iface=${{interface:-{iface}}}\n\
 		 \n\
 		 servers=${{new_domain_name_servers:-}}\n\
-		 domain=${{new_domain_name:-}}\n\
+		 # Option 119 where the server sent one, option 15 otherwise, which is the\n\
+		 # precedence dhcpcd's own 20-resolv.conf uses.\n\
+		 search=${{new_domain_search:-${{new_domain_name:-}}}}\n\
 		 case \"${{reason:-}}\" in\n\
 		 *6)\n\
 		 \t# The DHCPv6 names for the same two things.\n\
 		 \tservers=${{new_dhcp6_name_servers:-}}\n\
-		 \tdomain=${{new_dhcp6_domain_search:-}}\n\
+		 \tsearch=${{new_dhcp6_domain_search:-}}\n\
 		 \t;;\n\
 		 esac\n\
 		 \n\
@@ -2387,10 +2389,11 @@ pub fn dhcpcd_script(iface: &str, report: &std::path::Path) -> String {
 		 \t\tfor server in $servers; do\n\
 		 \t\t\tprintf 'dns=%s\\n' \"$server\"\n\
 		 \t\tdone\n\
-		 \t\t# A domain is a comment, not a key: decision 0049 says a server may\n\
-		 \t\t# name resolvers and not where queries go.\n\
-		 \t\t[ -n \"$domain\" ] &&\n\
-		 \t\t\tprintf '# the server also said: domain %s\\n' \"$domain\"\n\
+		 \t\t# A suffix to complete a bare name with, and never a routing domain:\n\
+		 \t\t# 0049 refuses one from a server and 0067 says why a suffix is not one.\n\
+		 \t\tfor suffix in $search; do\n\
+		 \t\t\tprintf 'search=%s\\n' \"$suffix\"\n\
+		 \t\tdone\n\
 		 \t}} > \"$report.tmp\"\n\
 		 \tmv \"$report.tmp\" \"$report\"\n\
 		 \t;;\n\
@@ -2478,8 +2481,12 @@ pub fn udhcpc_script(iface: &str, state: &std::path::Path, report: &std::path::P
 		 \t\tfor server in ${{dns:-}}; do\n\
 		 \t\t\tprintf 'dns=%s\\n' \"$server\"\n\
 		 \t\tdone\n\
-		 \t\t[ -n \"${{domain:-}}\" ] &&\n\
-		 \t\t\tprintf '# the server also said: domain %s\\n' \"$domain\"\n\
+		 \t\t# The search list, which is option 119 where the server sent one and\n\
+		 \t\t# option 15 otherwise -- the same precedence dhcpcd's own hook uses.\n\
+		 \t\t# A suffix, never a routing domain: 0067 says which is which.\n\
+		 \t\tfor suffix in ${{search:-${{domain:-}}}}; do\n\
+		 \t\t\tprintf 'search=%s\\n' \"$suffix\"\n\
+		 \t\tdone\n\
 		 \t}} > \"$report.tmp\"\n\
 		 \tmv \"$report.tmp\" \"$report\"\n\
 		 }}\n\

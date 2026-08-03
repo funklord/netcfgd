@@ -1592,6 +1592,7 @@ fn reporting(addresses: &[&str], gateways: &[&str]) -> Observed {
 		addresses: owned(addresses),
 		gateways: owned(gateways),
 		nameservers: Vec::new(),
+		search: Vec::new(),
 		routes: Vec::new(),
 	});
 	observed
@@ -1827,6 +1828,7 @@ interface vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }
 		addresses: Vec::new(),
 		gateways: Vec::new(),
 		nameservers: vec!["10.0.0.53".to_owned()],
+		search: Vec::new(),
 		routes: vec![netcfgd_model::ReportedRoute {
 			destination: "10.0.0.0/8".to_owned(),
 			via: Some("10.8.0.1".to_owned()),
@@ -1871,6 +1873,7 @@ interface vpn0 {
 		addresses: Vec::new(),
 		gateways: Vec::new(),
 		nameservers: vec!["10.0.0.53".to_owned()],
+		search: Vec::new(),
 		routes: Vec::new(),
 	});
 
@@ -1905,6 +1908,7 @@ interface ppp0 {{
 			addresses: Vec::new(),
 			gateways: Vec::new(),
 			nameservers: vec!["195.190.228.10".to_owned()],
+			search: Vec::new(),
 			routes: Vec::new(),
 		});
 		observed
@@ -1949,6 +1953,7 @@ interface vpn0 {
 		addresses: Vec::new(),
 		gateways: Vec::new(),
 		nameservers: vec!["10.0.0.53".to_owned()],
+		search: Vec::new(),
 		routes: Vec::new(),
 	});
 
@@ -5197,6 +5202,83 @@ interface work-net {
 	);
 }
 
+/// A reported search suffix is delivered where the report's servers are, and never
+/// as a routing domain.
+///
+/// The gate is the same one and that is the argument (0067): a suffix is only used
+/// where that network's resolvers are already answering, and a party answering every
+/// query gains nothing by also appending a suffix. Where an operator kept their own
+/// resolvers -- no `dns` block, nothing claimed -- a lease does not get to redefine
+/// what a bare name means.
+#[test]
+fn a_reported_search_suffix_follows_the_servers() {
+	let report = |interface: &str| netcfgd_model::ObservedReport {
+		interface: interface.to_owned(),
+		addresses: Vec::new(),
+		gateways: Vec::new(),
+		nameservers: vec!["192.168.1.1".to_owned()],
+		search: vec!["lan.example".to_owned()],
+		routes: Vec::new(),
+	};
+
+	// Asked for: `dns { }` claims what the network offers.
+	let asked = document(
+		r#"
+global { dns { mode = "write_resolv_conf" } }
+interface eth0 { config = "dhcp"; dns { } }
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+	observed.reports.push(report("eth0"));
+
+	let scopes = netcfgd_model::dns::scopes(&asked, &observed);
+	let scope = scopes
+		.iter()
+		.find(|(name, _)| name == "eth0")
+		.map(|(_, policy)| policy)
+		.expect("the interface has a scope");
+	assert_eq!(scope.search, vec!["lan.example".to_owned()]);
+	// The line 0049 draws: a suffix completes a name, a routing domain decides
+	// which resolver answers. Nothing reported ever becomes the second.
+	assert!(
+		scope.domains.is_empty(),
+		"a reported suffix became a routing domain: {scope:?}"
+	);
+
+	// Not asked for: no `dns` block, so neither the servers nor the suffix.
+	let unasked = document(
+		r#"
+global { dns { mode = "write_resolv_conf" } }
+interface eth0 { config = "dhcp" }
+"#,
+	);
+	let scopes = netcfgd_model::dns::scopes(&unasked, &observed);
+	assert!(
+		!scopes.iter().any(|(name, _)| name == "eth0"),
+		"an interface that asked for nothing was given a scope: {scopes:?}"
+	);
+
+	// And what the operator wrote comes first, because resolution tries suffixes in
+	// order and a document beats a suggestion.
+	let both = document(
+		r#"
+global { dns { mode = "write_resolv_conf" } }
+interface eth0 { config = "dhcp"; dns { search = ["ours.example"] } }
+"#,
+	);
+	let scopes = netcfgd_model::dns::scopes(&both, &observed);
+	let scope = scopes
+		.iter()
+		.find(|(name, _)| name == "eth0")
+		.map(|(_, policy)| policy)
+		.expect("the interface has a scope");
+	assert_eq!(
+		scope.search,
+		vec!["ours.example".to_owned(), "lan.example".to_owned()]
+	);
+}
+
 /// A resolver file with nothing in it is not written silently.
 ///
 /// The mode the first-run guide recommends, an interface on DHCP, and no `dns`
@@ -5239,6 +5321,7 @@ interface eth0 { config = "dhcp" }
 		addresses: Vec::new(),
 		gateways: Vec::new(),
 		nameservers: vec!["192.168.1.1".to_owned()],
+		search: Vec::new(),
 		routes: Vec::new(),
 	});
 	let offered = plan(&desired, &observed, &PlanOptions::default());

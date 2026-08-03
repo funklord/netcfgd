@@ -691,6 +691,16 @@ pub struct ObservedReport {
 	pub gateways: Vec<String>,
 	/// Nameservers, in the order reported.
 	pub nameservers: Vec<String>,
+	/// Suffixes to complete an unqualified name with, as the far end offered them.
+	///
+	/// **Not routing domains, and netcfgd will never make them into any.** A search
+	/// suffix says what to append to a bare name; a routing domain says which
+	/// resolver answers for a zone, and
+	/// [0049](../../../docs/decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)
+	/// refuses one from a report and has no key for it. These land in
+	/// [`crate::DnsPolicy::search`] and nowhere else (0067).
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub search: Vec<String>,
 	/// Routes beyond the default one, in the order reported.
 	///
 	/// A cellular bearer usually names none -- it gives a way off the link, not

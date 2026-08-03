@@ -255,10 +255,11 @@ A `down` hook runs *before* the interface goes and while it still has its
 addresses, which is what you want for unmounting something. If it fails, the
 interface stays up: the down phases can veto.
 
-**A lease's `search` domain is not used.** Its nameservers are, through the
-`dns { }` block above. The domain the server sent is written into
-`/run/netcfgd/reported/<interface>` as a comment so you can see it, and netcfgd does
-not act on it: which names resolve where is yours to write down.
+**A lease's search suffixes come with its nameservers**, through the `dns { }`
+block above -- so `ssh wiki` works on a network that sends a domain. What does *not*
+come from a lease is split DNS: a rule sending `*.corp.example` to one resolver and
+everything else to another is yours to write, as `dns { domains = [...] }`. A network
+you joined does not get to decide that by handing out a lease.
 
 **netcfgd replaces dhcpcd's hook scripts** while it manages an interface, which is
 what stops dhcpcd writing `resolv.conf` behind netcfgd's back. If you relied on

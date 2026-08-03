@@ -171,6 +171,7 @@ pub fn parse_report(interface: &str, body: &str) -> netcfgd_model::ObservedRepor
 		addresses: Vec::new(),
 		gateways: Vec::new(),
 		nameservers: Vec::new(),
+		search: Vec::new(),
 		routes: Vec::new(),
 	};
 	for line in body.lines() {
@@ -195,6 +196,9 @@ pub fn parse_report(interface: &str, body: &str) -> netcfgd_model::ObservedRepor
 			"address" => report.addresses.push(value.to_owned()),
 			"gateway" => report.gateways.push(value.to_owned()),
 			"dns" => report.nameservers.push(value.to_owned()),
+			// One suffix per line, like a nameserver. A writer with several has
+			// several lines, which is the shape every repeating key here has.
+			"search" => report.search.push(value.to_owned()),
 			// The one key with a shape of its own, because a route needs two
 			// values and the contract will not make somebody number them.
 			// Whether the *addresses* in it are addresses is still decided

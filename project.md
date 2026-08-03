@@ -932,12 +932,23 @@ device path out of `/sys`.
 
 #### DHCPv4, which nothing had ever driven
 
-**A lease's nameservers reach the resolver through the report contract**
+**A lease's nameservers and search suffixes reach the resolver through the report
+contract**
 ([0066](docs/decisions/0066-a-lease-reports-its-nameservers.md)). Both clients run a
 netcfgd-generated script that writes `dns=` into `/run/netcfgd/reported/<iface>`, and
 0049's existing gate delivers them to an interface that asked with an empty
 `dns { }` block. No new mechanism and no new gate: only the reporting half 0049 left
 for later, so a modem, a tunnel and a lease all arrive the same way.
+
+**A search suffix is not a routing domain**, which is 0049 split in two
+([0067](docs/decisions/0067-a-suffix-is-not-a-routing-domain.md)). It refused
+`dhcp-option DOMAIN` as authority over where queries go; on the wire that option is
+usually the weaker thing — what to append to a bare name. So `search=` is a report
+key now, under the *same* gate as a server, and the argument is what makes it safe:
+if you took the network's resolvers they already answer everything, so appending a
+suffix adds nothing; if you kept your own, a lease that could set the search list
+would make `wiki` resolve as `wiki.evil.example` through your trusted resolver. The
+gate keeps the two together. A routing domain is still refused and still has no key.
 
 **It was worse than a missing feature.** With the mode the first-run guide
 recommends, netcfgd overwrote a working `/etc/resolv.conf` with a file containing one
@@ -1081,11 +1092,6 @@ match.
    (0063), the `lease` hook (0064) and DHCPv4 with busybox (0065). What is left, and
    none of it is a schema question:
 
-   - **A lease's `search` domain is still nowhere.** Its nameservers arrive now
-     ([0066](docs/decisions/0066-a-lease-reports-its-nameservers.md)); `search` is
-     suffix completion rather than query routing, so unlike `domains` it is not what
-     0049 refuses and could honestly be a report key — but that is a change to a
-     contract marked stable and wants its own decision.
    - **dhcpcd's generated script has never been run by dhcpcd**, which is not
      installed here. Its shape was read out of dhcpcd 10.1.0's own hooks and its
      `-c` option out of the man page, and `sh -n` plus assertions cover the text;

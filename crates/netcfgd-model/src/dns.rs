@@ -217,7 +217,8 @@ pub fn scopes(document: &crate::Document, observed: &crate::Observed) -> Vec<(St
 		}
 
 		let reported = reported_servers(interface, observed);
-		match (&interface.dns, reported.is_empty()) {
+		let suffixes = reported_search(interface, observed);
+		match (&interface.dns, reported.is_empty() && suffixes.is_empty()) {
 			// A policy with a mode of its own and nothing to say. `dns { }`
 			// with no servers, no search and no options is a block that asks
 			// for nothing, and a scope for it is an action that does nothing.
@@ -233,6 +234,11 @@ pub fn scopes(document: &crate::Document, observed: &crate::Observed) -> Vec<(St
 				let mut merged = inheriting(policy, global_mode);
 				merged.servers.extend(reported);
 				merged.servers.dedup();
+				// The document's suffixes first, for the reason its servers are:
+				// what an operator wrote beats what the network suggested, and
+				// resolution tries them in order.
+				merged.search.extend(suffixes);
+				merged.search.dedup();
 				scopes.push((interface.name.clone(), merged));
 			}
 			// No `dns` block, but something reported servers. The mode is not a
@@ -245,6 +251,7 @@ pub fn scopes(document: &crate::Document, observed: &crate::Observed) -> Vec<(St
 					..DnsPolicy::default()
 				};
 				policy.servers.extend(reported);
+				policy.search.extend(suffixes);
 				scopes.push((interface.name.clone(), policy));
 			}
 			// Servers reported and nowhere to put them, because this host
@@ -304,13 +311,42 @@ fn inheriting(policy: &DnsPolicy, global_mode: &DnsMode) -> DnsPolicy {
 /// applied, and delivered nowhere. That is the failure decision 0007 opens on:
 /// bring up a VPN and every query on the machine silently goes to the corporate
 /// resolver. netcfgd will not do that because a remote server asked it to.
-fn reported_servers(interface: &crate::Interface, observed: &crate::Observed) -> Vec<DnsServer> {
-	let claimed = interface
+/// Whether this interface has asked for what a report offers.
+///
+/// `Reported` addressing says the report *is* the configuration; a `dns` block says
+/// the operator wants this interface's resolvers from wherever they come. Started-by-
+/// netcfgd is deliberately not enough (0049).
+fn claimed(interface: &crate::Interface) -> bool {
+	interface
 		.addressing
 		.iter()
 		.any(|source| matches!(source, crate::AddressSource::Reported(_)))
-		|| interface.dns.is_some();
-	if !claimed {
+		|| interface.dns.is_some()
+}
+
+/// The search suffixes a report offers, where the interface asked.
+///
+/// **The same gate as the servers, and that is the argument** rather than a
+/// convenience: a suffix is only delivered where that network's *resolvers* are
+/// already answering, and a party answering every query gains nothing by also
+/// appending a suffix. Where an operator kept their own resolvers, a lease does not
+/// get to redefine what a bare name means -- which is the case 0049 was protecting.
+///
+/// These become [`DnsPolicy::search`] and never `domains`. Decision 0067.
+fn reported_search(interface: &crate::Interface, observed: &crate::Observed) -> Vec<String> {
+	if !claimed(interface) {
+		return Vec::new();
+	}
+	observed
+		.reports
+		.iter()
+		.filter(|report| report.interface == interface.name)
+		.flat_map(|report| report.search.iter().cloned())
+		.collect()
+}
+
+fn reported_servers(interface: &crate::Interface, observed: &crate::Observed) -> Vec<DnsServer> {
+	if !claimed(interface) {
 		return Vec::new();
 	}
 	observed

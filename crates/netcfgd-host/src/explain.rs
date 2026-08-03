@@ -941,6 +941,7 @@ mod tests {
 			addresses: vec!["10.64.1.23/30".to_owned()],
 			gateways: vec!["10.64.1.24".to_owned()],
 			nameservers: Vec::new(),
+			search: Vec::new(),
 			routes: Vec::new(),
 		});
 
@@ -978,6 +979,7 @@ mod tests {
 			addresses: Vec::new(),
 			gateways: vec!["10.64.1.24".to_owned()],
 			nameservers: Vec::new(),
+			search: Vec::new(),
 			routes: Vec::new(),
 		});
 
@@ -1006,6 +1008,7 @@ mod tests {
 			addresses: Vec::new(),
 			gateways: vec!["10.64.1.24".to_owned()],
 			nameservers: Vec::new(),
+			search: Vec::new(),
 			routes: Vec::new(),
 		});
 

@@ -262,6 +262,12 @@ fn server_lines() -> String {
 	 \t\t[ \"${1:-}\" = dhcp-option ] || continue\n\
 	 \t\tcase \"${2:-}\" in\n\
 	 \t\tDNS|DNS6) [ -n \"${3:-}\" ] && printf 'dns=%s\\n' \"$3\" ;;\n\
+	 \t\tDOMAIN|DOMAIN-SEARCH)\n\
+	 \t\t\tshift 2\n\
+	 \t\t\tfor suffix in \"$@\"; do\n\
+	 \t\t\t\t[ -n \"$suffix\" ] && printf 'search=%s\\n' \"$suffix\"\n\
+	 \t\t\tdone\n\
+	 \t\t\t;;\n\
 	 \t\t*) printf '# the server also said: %s\\n' \"$option\" ;;\n\
 	 \t\tesac\n\
 	 \tdone\n"
@@ -690,6 +696,10 @@ mod tests {
 				"foreign_option_4",
 				"dhcp-option DOMAIN-SEARCH sub.corp.example",
 			)
+			// Something the contract has no key for at all, so the comment path
+			// still has a subject: without one, deleting it would leave every
+			// assertion here passing.
+			.env("foreign_option_5", "dhcp-option WINS 10.0.0.7")
 			.env("route_network_1", "10.9.0.0")
 			.env("route_netmask_1", "255.255.255.0")
 			.env("route_gateway_1", "10.8.0.2")
@@ -723,10 +733,10 @@ mod tests {
 			"got:\n{written}"
 		);
 
-		// Both families of nameserver, and neither of the two ways a server
-		// tries to say where queries go (decision 0049). The suggestion is
-		// kept as a comment, which netcfgd's reader drops and a person
-		// reading the file does not.
+		// Both families of nameserver, and both spellings of a search suffix --
+		// which is what `DOMAIN` and `DOMAIN-SEARCH` are on the wire (0067). A
+		// *routing* domain is still refused and still has no key: 0049 stands, and
+		// the assertion below says so.
 		let servers: Vec<&str> = written
 			.lines()
 			.filter(|line| line.starts_with("dns="))
@@ -736,12 +746,24 @@ mod tests {
 			["dns=10.0.0.53", "dns=fd00::53"],
 			"got:\n{written}"
 		);
+		let suffixes: Vec<&str> = written
+			.lines()
+			.filter(|line| line.starts_with("search="))
+			.collect();
+		assert_eq!(
+			suffixes,
+			["search=corp.example", "search=sub.corp.example"],
+			"got:\n{written}"
+		);
 		assert!(
 			!written.contains("domain="),
 			"a pushed domain is not a key this contract has:\n{written}"
 		);
+		// And what the contract has no key for at all is still visible as a
+		// comment, which netcfgd's reader drops and a person reading the file does
+		// not.
 		assert!(
-			written.contains("# the server also said: dhcp-option DOMAIN corp.example"),
+			written.contains("# the server also said: dhcp-option WINS 10.0.0.7"),
 			"what was declined should still be visible:\n{written}"
 		);
 	}
