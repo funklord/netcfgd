@@ -1,6 +1,8 @@
 # 0055: A secret can be hashed too
 
-Status: accepted; lifts the limit [0054](0054-a-kernel-object-is-compared-like-a-daemon.md) stated
+Status: accepted; the preshared key its last consequence names is taken by
+[0056](0056-a-peers-secret-is-recorded-per-peer.md). Lifts the limit
+[0054](0054-a-kernel-object-is-compared-like-a-daemon.md) stated
 Date: 2026-08-03
 Milestone: the last of the "is what is running still what the document says" questions
 
