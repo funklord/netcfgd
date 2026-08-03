@@ -93,10 +93,12 @@ interface srv
 option subnet 255.255.255.0
 option router 10.44.0.1
 option dns 10.44.0.53
-# A domain, so the report has one to get wrong: 0049 says a server may name
-# resolvers and not where queries go, so this must arrive as a comment and never as
-# a key. Without a server sending one, the check that says so has no subject.
+# A domain and a search list, which are options 15 and 119 and are two different
+# things on the wire. Both must arrive as `search=` suffixes and never as a routing
+# domain (0049, 0067) -- and the client prefers 119 where it has one, which is why
+# both are sent here: without the pair, the precedence has no subject.
 option domain lan.example
+option search a.example b.example
 option lease 600
 lease_file $work/udhcpd.leases
 pidfile $work/udhcpd.pid
@@ -210,18 +212,20 @@ report=$work/run/reported/cli
 		failures=$((failures + 1))
 	}
 contains "naming the lease's nameserver" "$(cat "$report" 2>/dev/null)" "dns=10.44.0.53"
-# The domain the server sent arrives as a comment and never as a key, which is
-# 0049: a server may name resolvers, and which names use them is the operator's to
-# write down.
-contains "with the server's domain as a comment" "$(cat "$report" 2>/dev/null)" \
-	"# the server also said: domain lan.example"
-missing "and never as a key"             "$(cat "$report" 2>/dev/null)" "domain=lan.example"
-# And nothing in the resolver file claims it either: a `search` line would be
-# netcfgd acting on a suffix the operator never wrote.
-missing "and the resolver file has no search line" "$(cat "$work/resolv.conf")" "search"
+# The search list, which is option 119 here because the server sent one -- and the
+# domain from option 15 is *not* used, because 119 wins where both arrive.
+contains "and the search list the server sent" "$(cat "$report" 2>/dev/null)" \
+	"search=a.example"
+contains "all of it"                     "$(cat "$report" 2>/dev/null)" "search=b.example"
+missing "and not the domain option, which option 119 supersedes" \
+	"$(cat "$report" 2>/dev/null)" "lan.example"
+# Never a key that decides where queries go: 0049 refuses a routing domain from a
+# report and 0067 says why a suffix is not one.
+missing "and never a domain key"         "$(cat "$report" 2>/dev/null)" "domain="
 
 resolver=$(cat "$work/resolv.conf")
 contains "the lease's nameserver reaches the resolver file" "$resolver" "nameserver 10.44.0.53"
+contains "and its search list"           "$resolver" "search a.example b.example"
 missing "and what was there before is gone, because netcfgd owns the file" \
 	"$resolver" "203.0.113.99"
 

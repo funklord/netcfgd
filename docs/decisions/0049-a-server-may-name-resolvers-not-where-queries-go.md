@@ -1,6 +1,10 @@
 # 0049: A server may name resolvers, not where queries go
 
-Status: accepted
+Status: accepted, and **split in two by
+[0067](0067-a-suffix-is-not-a-routing-domain.md)**: the refusal below covers two
+different things, and a *search suffix* -- what to append to a bare name -- is now a
+report key under the same gate as a server. A *routing domain* is still refused and
+still has no key, which is what this record is about.
 Date: 2026-08-02
 Milestone: finishes what [0048](0048-a-tunnels-routes-arrive-through-the-report.md) left
 
