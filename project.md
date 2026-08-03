@@ -652,6 +652,7 @@ Three techniques make that reachable without root or a clean machine:
 - **`accept_ra=1` means "accept unless this interface forwards".** A host in an environment that starts with forwarding on ignores every router advertisement, and `ip addr` shows nothing that explains it. `accept_ra=2` is the other way to say it.
 - **A host fills in the bottom 64 bits of an advertised prefix itself**, so the address is `2001:db8:1234:0:...` and a grep for `2001:db8:1234::` matches nothing. `proto kernel_ra` is the kernel saying where an address came from, and is the thing worth asserting.
 - **A backend's *device* may not exist while the backend is running.** openvpn creates its `tun` seconds after starting, and a tunnel still negotiating has none at all — so anything planned from an interface's contents is skipped for exactly the tunnels that need it. The stale-configuration check for a `.ovpn` is a top-level pass for that reason, and the live test is what said so while every unit test passed.
+- **Ask the kernel what it will take, one attribute at a time.** Three link kinds, three answers: a bridge takes its settings on a live bridge; a bond takes `miimon` and refuses `mode` with `ENOTEMPTY` while it has members; a VLAN accepts an id and silently ignores it. The middle one also refuses the *whole* `RTM_NEWLINK`, so an attribute the kernel will not take stops its neighbours in the same message being set. A planner that assumes "observed differs, therefore set it" produces an apply that fails and a plan that repeats forever — or, in the VLAN case, one that reports a change nobody made.
 - **A units conversion is invisible to a pure test.** The bridge fixtures build an observation in *model* units, so the divide between the kernel's hundredths of a second and the document's seconds is not on their path — removing it leaves all 139 of them green while every bridge differs from itself by a factor of a hundred. Only `links.sh` sees it, because there the observation comes from a real dump. Where a value crosses a unit boundary, the test that matters is the one on the far side of the boundary.
 - **A fixture that does not exercise a field cannot see a comparison break on it.** Four times in one session, in four disguises. The live WireGuard test asserted "an unchanged device plans nothing" — the right check — with peers that had no endpoint, so it could not notice that the comparison replaced the peer list on every reconcile for any peer that had one. The nmcli check asserted the right column with a value two different devices render identically into. And a zero the kernel spells as absent had to be written *in a document* before anything noticed the document's side kept it. When a check is about a field, the input set has to contain that field with a value that is not the default.
 - **A limit can be an artefact of the question rather than of the world.** 0054 wrote down that a rotated WireGuard key could not be noticed without curve25519, and project.md carried it as work needing "a plan for where that arithmetic lives". Both were true about *deriving a public key* and neither was true about the question anyone actually had, which is whether the secret moved. The rewrite cost a digest and no dependency. Worth asking of any limit stated in terms of a technique rather than in terms of an answer.
@@ -894,9 +895,9 @@ was reachable by reading seven records end to end.
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
 2. **A link's kind-specific attributes are applied once and never compared**,
-   which is the WireGuard gap again in every other link kind. **The bridge half
-   is done** ([0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md));
-   VLAN, VXLAN, bond, tunnel, macvlan and veth are not. Measured, not suspected:
+   which is the WireGuard gap again in every other link kind. **The bridge and the
+   bond are done** ([0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md));
+   VLAN, VXLAN, tunnel, macvlan and veth are not. Measured, not suspected:
 
    ```
    interface work-net { vlan { parent = "base0"; id = 42 } }   # apply
@@ -907,10 +908,10 @@ was reachable by reading seven records end to end.
    vlan protocol 802.1Q id 42
    ```
 
-   A bridge's `stp` and `forward_delay` behaved the same way until 0057 and now
-   do not. Still silent: a bond's `mode` and `miimon`, a VXLAN's id and remote,
-   a tunnel's local and remote, a VLAN's id under a name that does not encode
-   it. Everything
+   A bridge's `stp` and `forward_delay` and a bond's `miimon` behaved the same
+   way until 0057 and now do not. Still silent: a VXLAN's id and remote, a
+   tunnel's local and remote, a VLAN's id under a name that does not encode it.
+   Everything
    the kernel takes as `IFLA_INFO_DATA` goes over the wire inside
    `Op::LinkCreate` and is never sent again — exactly what
    [0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md)
@@ -924,10 +925,13 @@ was reachable by reading seven records end to end.
 
    Each remaining kind needs its own `INFO_DATA` decoding — the numbering is per
    kind, and decoding one kind's attributes with another's constants is how a
-   VXLAN comes to report a forward delay — plus its own live test. A session per
-   two or three kinds. The bridge shows the shape: read the nest the dump
-   already carries, compare only what the document states, and give the executor
-   a second caller rather than a second function.
+   VXLAN comes to report a forward delay — plus its own live test. **And each
+   needs the kernel asked what it will take**, because the three answers so far
+   are all different: a bridge takes its settings live, a bond takes `miimon`
+   live and refuses `mode` with `ENOTEMPTY` while it has members, and a VLAN id
+   **succeeds and changes nothing**. The VLAN is therefore not this shape at
+   all: correcting one means a delete and a create, which drops the addresses
+   on it and interacts with the planner's creation pass.
 
    **The shim's remaining device types fall out of this and not the other way
    round.** `.Device.Vlan` wants an id and a parent, `.Device.IPTunnel` a local
