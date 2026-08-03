@@ -3,6 +3,17 @@
 #
 #     sudo sh tests/live/delegation.sh
 #
+# Or in a privileged container, which is how it is usually run here and needs
+# nothing of the machine's own network:
+#
+#     docker run --rm --privileged -v $PWD:/repo -w /repo debian:trixie \
+#         sh -c '<the packages below>; sh tests/live/delegation.sh'
+#
+# One thing to know about a container: its pid 1 is whatever the image was told
+# to run, and `sleep infinity` never reaps. A daemon this script stops is then a
+# zombie rather than gone, and `kill -0` calls a zombie alive -- which is why the
+# teardown below reads /proc/<pid>/cmdline instead.
+#
 # This is decision 0009's whole loop, which nothing had ever run end to end: the
 # document asks for a prefix, `odhcp6c` solicits one, the ISP delegates one, the
 # hook netcfgd generated reports it, netcfgd derives an address on the LAN from
@@ -67,6 +78,11 @@ work=$(mktemp -d /tmp/ncfg-pd.XXXXXX)
 cleanup() {
 	pkill -f 'kea-dhcp6 -c' 2>/dev/null || true
 	pkill -f 'odhcp6c' 2>/dev/null || true
+	# Scoped to this run's directory: netcfgd starts radvd, and a run that
+	# failed before the teardown would otherwise leave one advertising on a
+	# namespace that no longer exists. Killing every radvd on the machine is
+	# not this script's business.
+	pkill -f "radvd --config $work" 2>/dev/null || true
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -298,14 +314,78 @@ check "and the advertisement followed the address" \
 check "rather than still announcing the prefix that was taken back" \
 	"$(grep -c 'prefix 2001:db8:1234::/64' "$work/run/radvd/lan0.conf" || true)" "0"
 
-# The lease going away takes the address with it. odhcp6c is stopped rather
-# than the lease being expired, which is the same thing from netcfgd's side: the
-# hook empties the file and the reference has nothing behind it again.
-pkill -f odhcp6c 2>/dev/null || true
-: > "$prefixes"
-"$ncfg" apply > "$work/gone.txt" 2>&1 || true
+# ------------------------------------------------------- stopping the client
+
+# The lease going away takes the address with it. This used to be written as
+# `pkill -f odhcp6c` followed by truncating the prefix file by hand -- the test
+# doing what netcfgd could not, which is exactly how the defect stayed hidden:
+# `stop_backend` answered `Dhcp6` with "not implemented in this build", so an
+# apply that dropped `config = "dhcp6"` failed outright and nothing stopped the
+# client. Decision 0071. So the document is edited instead, which is what an
+# operator does.
+pid=$(cat "$work/run/odhcp6c/wan0.pid" 2>/dev/null || echo 0)
+check "the client wrote its pid where netcfgd told it to" \
+	"$([ "$pid" -gt 0 ] && echo yes || echo no)" "yes"
+
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface wan0 {
+}
+
+interface lan0 {
+	forwarding = true
+}
+CONF
+if "$ncfg" apply > "$work/gone.txt" 2>&1; then
+	echo "ok   dropping dhcp6 from the document is an apply that succeeds"
+else
+	echo "FAIL dropping dhcp6 from the document is an apply that succeeds"
+	sed 's/^/       /' "$work/gone.txt"
+	failures=$((failures + 1))
+fi
+
+# Read through /proc rather than `kill -0`, because a daemonised client is
+# reparented to init and a pid 1 that does not reap -- a container's `sleep
+# infinity`, say -- leaves a zombie that `kill -0` reports as alive. A zombie has
+# no command line at all, so this is the same question netcfgd's own ownership
+# check asks: does that pid still name this client?
+still_running() { cat "/proc/$1/cmdline" 2>/dev/null | tr '\0' ' ' | grep -q odhcp6c; }
+
+# The guard is not decoration. With no pid, `/proc/0/cmdline` does not exist,
+# "is it still running?" answers no, and all three checks below go green because
+# the feature is broken -- which is what happened when `-p` was taken off the
+# client's arguments to see whether these could fail. Section 9's first
+# corollary, in the run that was meant to prove the opposite.
+if [ "$pid" -le 0 ]; then
+	echo "FAIL and the client is gone"
+	echo "       there is no pid to look for, so nothing below could be checked"
+	failures=$((failures + 1))
+else
+	waited=0
+	while still_running "$pid"; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 100 ] && break
+		sleep 0.1
+	done
+	check "and the client is gone" "$(still_running "$pid" && echo yes || echo no)" "no"
+	# odhcp6c calls its script one last time on the way out, and PREFIXES is
+	# unset once it is no longer bound -- so the hook writes an empty file and
+	# the reference has nothing behind it again. Nothing here truncated that
+	# file, which the old teardown did by hand.
+	check "and emptied the prefix file itself on the way out" \
+		"$(grep -c '^2001:db8:5678::/56$' "$prefixes" 2>/dev/null || true)" "0"
+	check "and removed the pid file with it" \
+		"$([ -e "$work/run/odhcp6c/wan0.pid" ] && echo yes || echo no)" "no"
+fi
+
+"$ncfg" apply > "$work/gone2.txt" 2>&1 || true
 check "a prefix that goes takes the address derived from it" \
-	"$(ip -6 addr show lan0 | grep -c '2001:db8:1234::1/64' || true)" "0"
+	"$(ip -6 addr show lan0 | grep -c '2001:db8:5678::1/64' || true)" "0"
+# And the advertiser goes with the advertisement. netcfgd started this radvd and
+# stops it by the pid file it told it to write, which is the same shape the
+# client above has -- and the reason the old teardown left one running on every
+# run of this script.
+check "and the advertiser netcfgd started is stopped too" \
+	"$(pgrep -f "radvd --config $work" >/dev/null 2>&1 && echo yes || echo no)" "no"
 
 echo
 if [ "$failures" -eq 0 ]; then
