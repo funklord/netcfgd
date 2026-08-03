@@ -170,6 +170,75 @@ try:
 
     os.close(master)
     os.close(slave)
+
+    # ------------------------------------------------ `ncfg secret set`
+    #
+    # The same reader, reached through a different command -- so what is under
+    # test here is the wiring, not the mechanism. A pipe would say nothing
+    # either way: it has no ECHO to clear, so the check that matters can only be
+    # made on a pty. Decision 0075.
+    KEY = "not-a-real-wireguard-key-0000000000000000000="
+    master, slave = pty.openpty()
+    ok("echo is on to begin with, again", termios.tcgetattr(slave)[3] & termios.ECHO)
+    proc = subprocess.Popen(
+        [NCFG, "secret", "set", "wg-key"],
+        env=env,
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+    )
+    os.set_blocking(master, False)
+    seen = ""
+    deadline = time.time() + 5
+    while "wg-key" not in seen and time.time() < deadline:
+        try:
+            seen += os.read(master, 4096).decode(errors="replace")
+        except BlockingIOError:
+            time.sleep(0.02)
+    ok("the prompt names the secret", "value for `wg-key`" in seen, seen)
+    ok(
+        "and echo is off while it is typed",
+        not termios.tcgetattr(slave)[3] & termios.ECHO,
+    )
+
+    os.write(master, (KEY + "\n").encode())
+    after = ""
+    deadline = time.time() + 5
+    while proc.poll() is None and time.time() < deadline:
+        try:
+            after += os.read(master, 4096).decode(errors="replace")
+        except BlockingIOError:
+            time.sleep(0.02)
+    try:
+        after += os.read(master, 65536).decode(errors="replace")
+    except (BlockingIOError, OSError):
+        pass
+    check("it succeeded", proc.wait(timeout=5), 0)
+    ok("the value was never echoed", KEY not in seen + after, seen + after)
+    ok("and the terminal is the way it was", termios.tcgetattr(slave)[3] & termios.ECHO)
+
+    stored = f"{work}/etc/secrets/wg-key"
+    check("the value is stored exactly", open(stored).read(), KEY)
+    check("at mode 0600", oct(os.stat(stored).st_mode & 0o777), "0o600")
+    # Nothing in this configuration refers to it, and saying so is the half of
+    # the report that catches a name typed one way in the file and another here.
+    ok("and it says nothing refers to it yet", "nothing in the configuration refers" in after, after)
+    os.close(master)
+    os.close(slave)
+
+    # The value is never an argument, on this command either.
+    attempt = subprocess.run(
+        [NCFG, "secret", "set", "wg-key", KEY],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    ok(
+        "there is no way to pass a secret on the command line",
+        attempt.returncode != 0 and "never an argument" in attempt.stderr,
+        attempt.stderr,
+    )
 finally:
     shutil.rmtree(work, ignore_errors=True)
 

@@ -366,4 +366,11 @@ netcfgd
 # a container, which usually forwards -- obtained no address at all while the apply
 # reported success. Most of the cost is the reading, which has to combine the
 # sysctl with the interface's IPv6 forwarding before either half means anything.
-total 2189848
+# +16 KB for `ncfg secret set`, which is the last credential a laptop or a router
+# needed an editor and a `chmod` for -- a WireGuard key, a DSL password, an
+# 802.1X certificate key. The value is never an argument (`ps` shows one to every
+# user) and never echoed, and the file is 0600 from the moment it exists rather
+# than after a chmod. Most of the cost is the report: which blocks refer to the
+# name, which is what turns a typo into a sentence instead of a backend failing
+# with "no such secret" an hour later.
+total 2206232
