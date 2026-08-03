@@ -907,14 +907,33 @@ hostname), and two are reported with the reason (`hostname = "dhcp"` needs a lea
 netcfgd never sees; `portal_check` would need netcfgd to fetch a hard-coded URL,
 which is the operator's decision and not a default).
 
-**Four of the eleven hook phases fire**, and the seven that do not each say so in
-the plan. `pre_up` and `post_up` were the two; `down` and `post_down` joined them
-in [0063](docs/decisions/0063-the-down-hooks-run-before-the-interface-goes.md),
-where the ordering is the whole point: teardown is the *last* thing in a plan, so a
-`down` hook runs while the interface still has its addresses and routes — which is
-what lets it unmount a share. `pre_down` is deliberately not implemented, because it
-would fire at the same point and its distinct meaning needs a teardown ordering
-netcfgd does not have.
+**Six of the eleven hook phases fire**, and the five that do not each say so in the
+plan. `pre_up` and `post_up` were the two. `down` and `post_down` joined them in
+[0063](docs/decisions/0063-the-down-hooks-run-before-the-interface-goes.md), where the
+ordering is the whole point: teardown is the *last* thing in a plan, so a `down` hook
+runs while the interface still has its addresses and routes — which is what lets it
+unmount a share. `pre_down` is deliberately not implemented, because it would fire at
+the same point and its distinct meaning needs a teardown ordering netcfgd does not
+have.
+
+**`lease` and `carrier` are the two event phases**, and they share one mechanism.
+`lease` fires on an address netcfgd did not install
+([0064](docs/decisions/0064-a-lease-is-an-address-netcfgd-did-not-install.md)), which
+is the only way netcfgd can know a lease arrived — it never sees DHCP. `carrier` fires
+when the cable comes or goes
+([0068](docs/decisions/0068-a-carrier-hook-fires-where-the-cable-matters.md)), which
+nothing else reported, and *where* it goes in the plan depends on which way it went:
+gained after the addressing, because a script that reacts by connecting somewhere
+needs the network to work; lost early, before the teardown withdraws anything.
+`NCFG_REASON` is `up` or `down`, and the first observation fires it, which is what
+`ifplugd -i` does.
+
+**One `/run` record serves both**, and every event phase after them: `hook_state`,
+keyed by interface and phase, is what makes an event hook fire once per event rather
+than once per reconcile. It was the lease's alone for two commits until `carrier`
+arrived wanting the same thing with a different value in it, which is the signal to
+generalise rather than duplicate. It is written whether or not the script succeeded,
+because a hook that kept the plan non-empty would be a plan that never converges.
 
 **And the up hooks now fire only when netcfgd is bringing the interface up.** They
 were unconditional, so a converged interface ran them on **every apply** — the
@@ -1097,8 +1116,10 @@ match.
      `-c` option out of the man page, and `sh -n` plus assertions cover the text;
      the busybox half is driven end to end. A machine with the package would close
      this in one run.
-   - **Six hook phases still do not fire**: `up`, `pre_down`, `carrier`, `roam`,
-     `portal` and `drift`. `carrier` is the one a laptop would notice.
+   - **Five hook phases still do not fire**: `up`, `pre_down`, `roam`, `portal` and
+     `drift`. None of them is a laptop's now that `carrier` fires; `roam` is the next
+     one worth having, and it wants the supplicant's event socket rather than an
+     observation.
    - **Joining a network needs an editor and root.** `ncfg wifi connect` takes the id
      of a `network` block and there is no `ncfg wifi add`; the NM shim's write path is
      the current answer.
@@ -1132,6 +1153,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **~~An interface that exists as the wrong kind is not recreated, and nothing says so.~~ Closed** ([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)), in the commit after the one that wrote it down. A document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, planned `link.up` and nothing else — netcfgd brought somebody else's device up and called the network configured. It shared its remedy with the VLAN id, which is why one session did both. What is worth keeping from it is the measurement habit that found it: the finding came from asking what *else* would fall into the safe direction of the new comparisons, not from a test.
+- **A `depends_on` edge with no assertion on it is decoration.** Actions execute in list order, so a fixture checking that a hook comes *after* the addressing passes on emission order alone — deleting the dependency changed nothing any test could see. It asserts the edge now as well as the position. The live test was blind to the same thing for a different reason: it plugged the cable in on an interface that already had its address, so the ordering could not fail either way. Both found by breaking the code and watching nothing happen.
+- **A doc edit that silently does not apply is a lie that survives review.** Two paragraph edits to project.md in this run asserted their anchor, failed, and wrote nothing — so the section claimed "four of the eleven phases fire" for two commits after it was six. `make check` does not read prose, and neither does a diff you did not look at. Verify a documentation edit the way a gate is verified: grep for the new sentence afterwards.
 - **`all` on an empty list is true, and that is a warning nobody asked for.** The check for "this DNS delivery has no servers" fired on every document that manages no DNS at all, because the scope list was empty and `all` said yes. Two existing fixtures caught it — both of them asserting that a converged plan warns about nothing, which is a cheap assertion to have in a lot of tests.
 - **A break that silently fails to apply reads exactly like a gate that works.** Two runs in this session proved nothing: one patch did not match the source and its script had no assertion, so it built the unmodified tree and reported "all checks passed"; another had its restore skipped by `set -e` and left the tree broken for the *next* break, which then failed for the wrong reason. A break script needs to assert that it changed something, and to restore whether or not the test passed — the same discipline as the gates it is checking.
 - **A gate that has never seen its subject is not a gate.** The plan-idempotence check has run on every fixture for milestones, and not one of them had a hook in it — the single fixture that did called `plan` and `simulate` by hand. So the up hooks being emitted unconditionally, which made every converged plan non-empty, was invisible to the exact gate that exists to catch it. When a feature has one test, check whether that test goes through the harness the others do.

@@ -52,9 +52,9 @@ pub struct OwnedState {
 	/// Interfaces netcfgd turned temporary addresses on for.
 	#[serde(default)]
 	pub privacy: Vec<String>,
-	/// What a `lease` hook on each interface was last told (0064).
+	/// What each event hook was last told, per interface and phase (0064, 0068).
 	#[serde(default)]
-	pub lease_hooks: Vec<netcfgd_model::ObservedLease>,
+	pub hook_state: Vec<netcfgd_model::ObservedHookState>,
 	/// Interfaces netcfgd set the root qdisc on.
 	pub qdisc: Vec<String>,
 	/// Interfaces netcfgd installed an ingress redirect on.
@@ -279,7 +279,7 @@ impl OwnedState {
 			dns: self.dns.clone(),
 			forwarding: self.forwarding.clone(),
 			privacy: self.privacy.clone(),
-			lease_hooks: self.lease_hooks.clone(),
+			hook_state: self.hook_state.clone(),
 			qdisc: self.qdisc.clone(),
 			ingress: self.ingress.clone(),
 			// Not from this file. A delegation is not something netcfgd did,
@@ -306,15 +306,16 @@ impl OwnedState {
 			}
 		}
 
-		// One record per interface, replaced rather than appended: what matters is
-		// the lease a hook was last told about, and the previous answer is of no
-		// use once a newer one exists.
-		for (interface, address) in &effects.lease_hooks {
-			self.lease_hooks
-				.retain(|record| &record.interface != interface);
-			self.lease_hooks.push(netcfgd_model::ObservedLease {
+		// One record per interface and phase, replaced rather than appended: what
+		// matters is what a hook was last told, and the previous answer is of no use
+		// once a newer one exists.
+		for (interface, phase, value) in &effects.hook_state {
+			self.hook_state
+				.retain(|record| &record.interface != interface || record.phase != *phase);
+			self.hook_state.push(netcfgd_model::ObservedHookState {
 				interface: interface.clone(),
-				address: address.clone(),
+				phase: *phase,
+				value: value.clone(),
 			});
 		}
 

@@ -227,7 +227,7 @@ fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Obs
 
 /// The hook phases this build actually runs.
 ///
-/// Five of the eleven the model declares. The other six are recognised, written
+/// Six of the eleven the model declares. The other five are recognised, written
 /// into `/run/netcfgd/hooks/`, hashed and carried in the document -- and never
 /// executed, which reads exactly like a working feature: the file is there, the
 /// plan mentions nothing, and the script never runs.
@@ -240,6 +240,7 @@ const FIRED_PHASES: &[HookPhase] = &[
 	HookPhase::Down,
 	HookPhase::PostDown,
 	HookPhase::Lease,
+	HookPhase::Carrier,
 ];
 
 /// Say which hooks the document declares that nothing will run.
@@ -1107,7 +1108,7 @@ impl Builder {
 						iface: name.clone(),
 						phase,
 						path: hook.path.clone(),
-						address: None,
+						value: None,
 					},
 					Reason::absent(name, &field, hook.path.clone()),
 					deps.to_vec(),
@@ -2054,6 +2055,10 @@ impl Builder {
 			deps.extend(addressing_ids.iter().copied());
 			self.plan_hooks(interface, HookPhase::PostUp, &deps);
 		}
+
+		// Here rather than in a pass of its own, because where it goes in the plan
+		// depends on the addressing actions above and on this interface's gate.
+		self.plan_carrier_hook(interface, observed, &base, &addressing_ids);
 	}
 
 	/// What this interface tells the hosts behind it.
@@ -3004,6 +3009,86 @@ impl Builder {
 		}
 	}
 
+	/// What an event hook on this interface was last told, if anything.
+	///
+	/// `None` means netcfgd has never run one here, which the callers treat as
+	/// "fire": a hook that has never been told anything is told the current state.
+	/// That is what `ifplugd -i` does with a carrier script and it is the honest
+	/// reading -- netcfgd has just arrived and this is how things are.
+	fn hook_told(observed: &Observed, interface: &str, phase: HookPhase) -> Option<String> {
+		observed
+			.hook_state
+			.iter()
+			.find(|record| record.interface == interface && record.phase == phase)
+			.map(|record| record.value.clone())
+	}
+
+	/// Run a `carrier` hook where the cable has come or gone since it last ran.
+	///
+	/// The one event on a laptop that nothing else reports: `pre_up` runs before
+	/// there is a cable and `post_up` after the addressing, and neither fires when
+	/// somebody unplugs one. Decision 0068.
+	///
+	/// **Where in the plan it goes depends on which way it went**, and that is the
+	/// same reasoning `down` needed (0063):
+	///
+	/// - **Lost**: early, at the interface's own gate. Teardown runs last, so at
+	///   that point the routes and addresses are still there -- which is what lets a
+	///   script stop a service that is using them.
+	/// - **Gained**: after the addressing actions, like `post_up`. A script that
+	///   reacts to a cable by connecting somewhere needs the network to work, and
+	///   before the addresses that is not true.
+	fn plan_carrier_hook(
+		&mut self,
+		interface: &Interface,
+		observed: &Observed,
+		base: &[u32],
+		addressing: &[u32],
+	) {
+		if interface
+			.hooks
+			.iter()
+			.all(|hook| hook.phase != HookPhase::Carrier)
+		{
+			return;
+		}
+		let Some(link) = observed.link(&interface.name) else {
+			return;
+		};
+		let now = if link.carrier { "up" } else { "down" };
+		if Self::hook_told(observed, &interface.name, HookPhase::Carrier).as_deref() == Some(now) {
+			return;
+		}
+		let mut deps = base.to_vec();
+		if link.carrier {
+			deps.extend(addressing.iter().copied());
+		}
+		let name = &interface.name;
+		for hook in interface
+			.hooks
+			.iter()
+			.filter(|hook| hook.phase == HookPhase::Carrier)
+		{
+			self.push(
+				Op::HookRun {
+					iface: name.clone(),
+					phase: HookPhase::Carrier,
+					path: hook.path.clone(),
+					value: Some(now.to_owned()),
+				},
+				Reason::differs(
+					name,
+					"carrier",
+					now.to_owned(),
+					Self::hook_told(observed, name, HookPhase::Carrier)
+						.unwrap_or_else(|| "<absent>".to_owned()),
+				),
+				deps.clone(),
+				None,
+			);
+		}
+	}
+
 	/// Run a `lease` hook where the lease has moved since it last ran.
 	///
 	/// netcfgd does not implement DHCP (decision 0004) and never sees the protocol, so
@@ -3061,12 +3146,8 @@ impl Builder {
 			let Some(leased) = leased else {
 				continue;
 			};
-			let told = observed
-				.lease_hooks
-				.iter()
-				.find(|record| record.interface == interface.name)
-				.map(|record| record.address.as_str());
-			if told == Some(leased.as_str()) {
+			let told = Self::hook_told(observed, &interface.name, HookPhase::Lease);
+			if told.as_deref() == Some(leased.as_str()) {
 				continue;
 			}
 			let name = &interface.name;
@@ -3083,13 +3164,13 @@ impl Builder {
 						path: hook.path.clone(),
 						// `NCFG_ADDR`, which is the one thing a lease script wants
 						// that it cannot get from the interface name.
-						address: Some(leased.clone()),
+						value: Some(leased.clone()),
 					},
 					Reason::differs(
 						name,
 						"lease",
 						leased.clone(),
-						told.unwrap_or("<absent>").to_owned(),
+						told.clone().unwrap_or_else(|| "<absent>".to_owned()),
 					),
 					gate.clone(),
 					None,
@@ -4212,7 +4293,7 @@ fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
 		privacy_applied: observed.privacy_applied.clone(),
 		// Not filtered either, for the same reason: it records what a hook was
 		// told, which stays true whether or not the interface survives this plan.
-		lease_hooks: observed.lease_hooks.clone(),
+		hook_state: observed.hook_state.clone(),
 		nat: observed.nat.clone(),
 		nat_conflicts: observed.nat_conflicts.clone(),
 		// Whole-host, so no interface going away can change it.

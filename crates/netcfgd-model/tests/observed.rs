@@ -471,10 +471,20 @@ fn witness() -> Observed {
 		ingress_applied: vec!["eth0".to_owned()],
 		forwarding_applied: vec!["eth0".to_owned()],
 		privacy_applied: vec!["eth0".to_owned()],
-		lease_hooks: vec![netcfgd_model::ObservedLease {
-			interface: "eth0".to_owned(),
-			address: "192.168.1.50/24".to_owned(),
-		}],
+		// Both phases that have a memory, so the witness carries a sample of each --
+		// one value that is an address and one that is a word.
+		hook_state: vec![
+			netcfgd_model::ObservedHookState {
+				interface: "eth0".to_owned(),
+				phase: netcfgd_model::HookPhase::Lease,
+				value: "192.168.1.50/24".to_owned(),
+			},
+			netcfgd_model::ObservedHookState {
+				interface: "eth0".to_owned(),
+				phase: netcfgd_model::HookPhase::Carrier,
+				value: "up".to_owned(),
+			},
+		],
 		hostname: Some("host.example".to_owned()),
 		nat: vec!["eth0".to_owned()],
 		nat_conflicts: vec!["somebody-elses-table".to_owned()],

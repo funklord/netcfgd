@@ -47,8 +47,8 @@ pub struct PriorState {
 	pub forwarding: Vec<String>,
 	/// Interfaces netcfgd turned temporary addresses on for.
 	pub privacy: Vec<String>,
-	/// What a `lease` hook on each interface was last told.
-	pub lease_hooks: Vec<netcfgd_model::ObservedLease>,
+	/// What each event hook was last told, per interface and phase.
+	pub hook_state: Vec<netcfgd_model::ObservedHookState>,
 	/// Interfaces netcfgd set the root qdisc on.
 	pub qdisc: Vec<String>,
 	/// Interfaces netcfgd installed an ingress redirect on.
@@ -335,7 +335,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		nat_conflicts: Vec::new(),
 		forwarding_applied: prior.forwarding.clone(),
 		privacy_applied: prior.privacy.clone(),
-		lease_hooks: prior.lease_hooks.clone(),
+		hook_state: prior.hook_state.clone(),
 		// Read in `host::augment` beside the sysctls, for the reason they are:
 		// `build` stays a pure function of a netlink snapshot.
 		hostname: None,
