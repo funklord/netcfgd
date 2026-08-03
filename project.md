@@ -511,9 +511,15 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 
 **Access points carry a station list**, which is the single-host half of the Ubiquiti-style roaming [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) wrote down: forcing a client onto one access point means every other access point refusing it. `access_control { deny = [..] }` or `allow`, never both, because hostapd reads one file or the other ([0039](docs/decisions/0039-a-station-list-is-one-list.md)). Changing the list still needs a restart, which for this feature is the wrong answer — converging it over hostapd's control socket instead is the next piece, and the record says why.
 
-**A WireGuard tunnel is a WireGuard device in the shim**, the first link kind
-to stop being `GENERIC` — and it stopped only once 0054 gave it the three values
-NM asks a tunnel for. Its `interface` block is deliberately *not* a connection
+**A WireGuard tunnel, a bridge and a bond are themselves in the shim**, the
+three link kinds to stop being `GENERIC` — each on the same terms: NM defines an
+interface for it, and netcfgd can answer every property on that interface from
+what it already observes. WireGuard needed 0054 first; a bridge and a bond
+needed nothing, because a `Slaves` list is the `master` field on every other
+link read from the other end. **That is also the rule for what has not left**:
+`.Device.Vlan` wants an id and a parent the observation does not carry, and
+adding them to the model to satisfy a shim is the direction constraint 6
+forbids. Its `interface` block is deliberately *not* a connection
 profile, which is the radio rule read twice: an `802-3-ethernet` profile named
 `wg0` is a thing in every client's list that is not an ethernet, and NM's own
 WireGuard profile carries the peers and the private key, which this shim will
@@ -886,12 +892,13 @@ was reachable by reading seven records end to end.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **The other link kinds are still `Generic` to the shim**, and that is
-   correct until each has properties to answer with. `enums.rs` holds constants
-   for bridge, bond, VLAN, VXLAN, tunnel and veth that `flavour_of` never
-   returns; WireGuard is the one that left, because 0054 gave it the three
-   values NM asks a tunnel for. A bridge would need `.Device.Bridge`, and
-   claiming the type without it is the failure that shim comment warns about.
+2. **VLAN, VXLAN, tunnel and veth are still `Generic` to the shim**, and the
+   reason is now a rule rather than a backlog: each of NM's interfaces for them
+   wants something netcfgd does not observe — a VLAN id, a parent, a tunnel's
+   local and remote. Getting them into the observation is a *core* question
+   about drift, worth asking on its own terms (an edited VLAN id is invisible
+   today, the way an edited listen port was), and answering it would let the
+   shim follow. Doing it the other way round is what constraint 6 forbids.
 
 **The whole suite has now been run as root**, which is what the previous entry
 here asked for. All three root-only scripts pass: `delegation.sh` through
