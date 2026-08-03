@@ -113,7 +113,14 @@ impl fmt::Display for Error {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::NotFound { name, where_ } => {
-				write!(f, "secret `{name}` was not found in {where_}")
+				// The command is named because this is exactly the moment
+				// somebody needs it: the config refers to a credential and the
+				// machine does not have it. Decision 0075.
+				write!(
+					f,
+					"secret `{name}` was not found in {where_} -- \
+					 `ncfg secret set {name}` stores one"
+				)
 			}
 			Self::Exposed { name, path, mode } => write!(
 				f,

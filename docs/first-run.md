@@ -82,6 +82,21 @@ The passphrase does not go in this file. It goes in
 read a secret any other user can, and refuses an inline passphrase outright, so
 the config stays safe to commit.
 
+Any credential a config refers to is stored the same way, and there is a command
+for it rather than an editor and a `chmod`:
+
+```
+sudo ncfg secret set wg-key
+value for `wg-key`:
+```
+
+It asks with echo off, writes the file at 0600, and then tells you which blocks
+refer to that name -- or that nothing does yet, which is how a name typed one way
+in the config and another at the prompt gets caught now instead of as "no such
+secret" the first time the tunnel comes up. `--replace` is needed to overwrite one
+that already exists. There is no command to print a secret back: a credential goes
+to the thing that needs it and nowhere else.
+
 You do not have to write either of those two pieces by hand:
 
 ```

@@ -8,6 +8,7 @@
 //! bind on the first binary or it never binds at all.
 
 mod client;
+mod secret;
 #[cfg(feature = "tui")]
 mod tui;
 mod wifi;
@@ -43,6 +44,14 @@ usage:
                              disconnect [IFACE]  leave it, keeping the config
                            IFACE may be omitted when the config describes one
                            wireless device.
+  ncfg secret SUBCOMMAND   credentials the config refers to. SUBCOMMAND is:
+                             set NAME            store the value of
+                                                 `@secret:NAME`, asked for at
+                                                 the prompt with echo off, or
+                                                 read from standard input.
+                                                 Written 0600; --replace to
+                                                 overwrite an existing one.
+                                                 Removing one is `rm`
   ncfg tui [options]       full-screen client: devices, wifi, plan, events
   ncfg monitor [options]   stream events until interrupted (needs netcfgd)
   ncfg confirm [options]   keep a change made under a confirm window
@@ -55,6 +64,7 @@ options:
   --factory-dir PATH       default /usr/share/netcfgd, or $NCFG_FACTORY_DIR.
                            Read before --config-dir, which overrides it
   --yes                    for `reset`: actually remove the files
+  --replace                for `secret set`: overwrite one that already exists
   --run-dir PATH           default /run/netcfgd, or $NCFG_RUN_DIR
   --oneshot                apply once and exit; the default, there being no
                            daemon yet
@@ -112,6 +122,8 @@ pub(crate) struct Options {
 	config_dir: Option<String>,
 	factory_dir: Option<String>,
 	yes: bool,
+	/// `secret set` only: overwrite a credential that is already stored.
+	replace: bool,
 	run_dir: Option<String>,
 	json: bool,
 	confirm: Option<u32>,
@@ -142,6 +154,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"explain" => command_explain(&positional, &options),
 		"monitor" => command_monitor(&options),
 		"wifi" => command_wifi(&positional, &options),
+		"secret" => command_secret(&positional, &options),
 		#[cfg(feature = "tui")]
 		"tui" => tui::run(&options),
 		#[cfg(not(feature = "tui"))]
@@ -167,6 +180,7 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 		config_dir: None,
 		factory_dir: None,
 		yes: false,
+		replace: false,
 		run_dir: None,
 		json: false,
 		confirm: None,
@@ -203,6 +217,7 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 				.push(take_value("--strand-credentials")?),
 			"--json" => options.json = true,
 			"--yes" => options.yes = true,
+			"--replace" => options.replace = true,
 			"--id" => options.wifi.id = Some(take_value("--id")?),
 			"--priority" => {
 				let value = take_value("--priority")?;
@@ -593,6 +608,34 @@ fn wireless_interface(given: Option<&String>, options: &Options) -> Result<Strin
 /// None of these compile or apply anything. They reach the supplicant through
 /// netcfgd, which is what makes them available to the `wifi` tier without
 /// giving that tier the ability to change configuration (decision 0013).
+/// `ncfg secret SUBCOMMAND`.
+///
+/// One subcommand so far, and the shape is deliberate: `set` writes a file that
+/// the `file` provider reads, and there is no `get` -- the whole point of a
+/// `SecretRef` is that the value travels to the backend that needs it and
+/// nowhere else. Decision 0075.
+///
+/// Removing one is `rm`, which is the answer 0069 gave for forgetting a network
+/// and is honest here for the same reason: there is nothing a command could add
+/// to `rm` beyond a longer way to spell it.
+fn command_secret(positional: &[String], options: &Options) -> Result<ExitCode, String> {
+	let Some(subcommand) = positional.first() else {
+		return Err("`ncfg secret` needs a subcommand: set".to_owned());
+	};
+	match subcommand.as_str() {
+		"set" => secret::set(&positional[1..], options),
+		"get" | "show" | "print" => Err(format!(
+			"there is no `ncfg secret {subcommand}`, and that is the point: a secret goes to \
+			 the backend that needs it and nowhere else (project.md section 2). The file is \
+			 readable by root if you must -- and if it is a WireGuard key, the kernel has it \
+			 too"
+		)),
+		other => Err(format!(
+			"unknown `ncfg secret` subcommand `{other}`; there is one: set"
+		)),
+	}
+}
+
 fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, String> {
 	let Some(subcommand) = positional.first() else {
 		return Err(

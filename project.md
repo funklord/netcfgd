@@ -1124,6 +1124,23 @@ because that is the one the driver obeys. Whether blocking the platform button
 propagates to the phy is **not measured** and is written down as unknown — finding
 out means switching off the radio of the machine running the test.
 
+#### Storing a credential
+
+**`ncfg secret set NAME` writes the file a `@secret:` reference points at**
+([0075](docs/decisions/0075-a-secret-is-stored-by-a-command-that-never-shows-it.md)),
+with echo off and at 0600, and says which blocks refer to the name — or that
+nothing does yet, which is how a typo is caught at the moment it is made rather
+than as "no such secret" from a backend an hour later. An existing secret is
+refused rather than replaced unless `--replace` says so: one of the things this
+stores is a WireGuard private key, which nobody can get back. There is no `get`,
+and asking gets a sentence explaining why rather than an unknown-subcommand error.
+
+The prompt is 0069's, *moved* rather than copied — both commands call one reader,
+and breaking it shows the value in the transcript of both. Design section 3.3 had
+specified this command since before there was a compiler; the help pointed at it
+while it did not exist, which is 0061's disease in a help string and is now two
+diagnostics that point at something real.
+
 #### Joining a network
 
 **`ncfg wifi add SSID` writes the config file, and the daemon is not involved**
@@ -1294,15 +1311,18 @@ match.
      `drift`. None of them is a laptop's now that `carrier` fires; `roam` is the next
      one worth having, and it wants the supplicant's event socket rather than an
      observation.
-   - **`ncfg secret set NAME` does not exist**, and until 0069 the compiler's
-     diagnostic for a missing passphrase told the reader to run it — 0061's disease
-     in a help string. `ncfg wifi add` now contains everything it
-     needs — an atomic 0600 write and a no-echo prompt
-     ([0069](docs/decisions/0069-adding-a-network-is-writing-a-file.md)) — so a
-     WireGuard or DSL credential still being an editor's job is a small separate
-     command rather than a design question. **Nothing forgets a network** either:
-     `rm` on the file is the whole of it, and an `ncfg wifi forget` would take the
-     secret with it the way the shim's delete path does.
+   - ~~**`ncfg secret set NAME` does not exist**~~ — **closed**
+     ([0075](docs/decisions/0075-a-secret-is-stored-by-a-command-that-never-shows-it.md)).
+     The value is never an argument, never echoed, and the file is 0600 from the
+     moment it exists; an existing secret is refused rather than replaced unless
+     `--replace` says so, because one of the things it stores is the key 0042
+     calls irrecoverable. It also says which blocks refer to the name, which is
+     what turns a typo into a sentence instead of a backend failing an hour later.
+     0069's prompt *moved* rather than being written twice, and the two
+     diagnostics that pointed elsewhere now point at the command — which is what
+     the item was really about. **Nothing forgets a network** either: `rm` on the
+     file is the whole of it, and an `ncfg wifi forget` would take the secret with
+     it the way the shim's delete path does.
    - **An enterprise network cannot be added from the command line.** `eap` wants an
      identity, a method and certificates, which is a form and not a flag list; the
      same is true of `dot1x` on a wired port.
