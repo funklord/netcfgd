@@ -5983,6 +5983,54 @@ fn an_unreadable_hostname_plans_nothing() {
 	);
 }
 
+/// A backend that will not stay up is started five times and then left alone.
+///
+/// Since 0078 the observation notices a daemon that died, and the planner
+/// restarts it -- which on an interface set to `reconcile` meant 181 starts in
+/// twelve seconds for a daemon that lived half a second. Decision 0079.
+#[test]
+fn a_backend_that_will_not_stay_up_stops_being_restarted() {
+	let desired = document(
+		r#"
+interface vpn0 {
+	openvpn { config = "/etc/netcfgd/work.ovpn" }
+}
+"#,
+	);
+	let mut observed = observed_with(&["vpn0"]);
+
+	// Four starts in: still trying, because a daemon can be slow to settle.
+	observed
+		.backend_restarts
+		.push((netcfgd_model::BackendKind::OpenVpn, "vpn0".to_owned(), 4));
+	assert!(
+		names(&plan(&desired, &observed, &PlanOptions::default())).contains(&"backend.start"),
+		"it gave up too early"
+	);
+
+	// Five, and it stops -- with a warning naming the interface, because a
+	// tunnel that silently stops being retried is the same shape of defect as
+	// one that is retried forever.
+	observed.backend_restarts.clear();
+	observed
+		.backend_restarts
+		.push((netcfgd_model::BackendKind::OpenVpn, "vpn0".to_owned(), 5));
+	let capped = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&capped).contains(&"backend.start"),
+		"it kept starting a daemon that will not stay up: {:?}",
+		names(&capped)
+	);
+	assert!(
+		capped
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("has not stayed up")),
+		"nothing said why: {:?}",
+		capped.warnings
+	);
+}
+
 /// SLAAC on an interface that forwards makes the kernel listen.
 ///
 /// The defect this pass exists for: `accept_ra` defaults to `1`, which means

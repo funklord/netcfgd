@@ -576,6 +576,13 @@
   "privacy_applied": [
     "eth0"
   ],
+  "backend_restarts": [
+    [
+      "open_vpn",
+      "vpn0",
+      2
+    ]
+  ],
   "accept_ra_applied": [
     "eth0"
   ],

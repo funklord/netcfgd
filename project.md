@@ -829,6 +829,14 @@ re-reads on `SIGHUP`, so nothing on the wire is disturbed.
 The question this project keeps finding new places to ask. Five kinds of answer
 now exist, and the shape of each is worth knowing before adding a sixth.
 
+**And it stops trying after five**
+([0079](docs/decisions/0079-netcfgd-stops-restarting-what-will-not-stay-up.md)),
+which is the defect the paragraph below introduced and the same session closed: a
+daemon that dies as fast as it is started produced 181 starts in twelve seconds on
+an interface set to `reconcile`. The count is of consecutive starts that did not
+lead to a live process, cleared the moment one is seen running — so a flapping
+daemon is still restarted indefinitely, and one that never comes up is not.
+
 **A daemon netcfgd started may simply be gone**, and until
 [0078](docs/decisions/0078-a-record-is-a-memory-and-a-process-is-a-fact.md)
 nothing looked: `running` came from netcfgd's own record in `/run`, so a tunnel
@@ -1378,9 +1386,14 @@ match.
      rather than a thing that cannot be done;
    - **a daemon that is alive and wedged still counts as running**, which is 0052's
      shape applied to behaviour rather than to configuration;
-   - **restarting is unconditional** — a tunnel whose daemon exits immediately is
-     restarted on every reconcile forever, and a backoff needs state that needs a
-     home.
+   - ~~**restarting is unconditional**~~ — **closed in the same session, because
+     it was a live defect rather than a future concern**
+     ([0079](docs/decisions/0079-netcfgd-stops-restarting-what-will-not-stay-up.md)).
+     Measured rather than reasoned about: a daemon that lived half a second, on an
+     interface set to `reconcile`, went from 1 start in twelve seconds before 0078
+     to **181** after it. netcfgd tries five times and then stops and says so. What
+     it deliberately does *not* stop is a daemon that comes up and dies later —
+     each of those is a real event and restarting is the right answer.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one.
 
@@ -1390,6 +1403,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A column that renders two things the same way cannot tell them apart, and neither can a check reading it.** `nmcli`'s TYPE column prints a *generic* device's `TypeDescription`, and netcfgd's type description is the kernel's link kind — so "the tunnel shows as `wireguard`" passed with the device-type mapping deliberately broken, because a generic device whose description is the word `wireguard` renders identically to a real one. The repair is to assert a value only the real thing can produce: a listen port the document chose, and the type as a *number* rather than as a rendered column.
 - **A script that skips on a missing package is a script whose failures nobody sees.** `tunnel.sh` had been red on every machine with openvpn installed since 0067 landed, and green everywhere else because it skips without the package -- so the suite said nothing. What it was asserting is that a pushed `dhcp-option DOMAIN` shows up as a *declined* comment in the report; 0067 made it a `search=` suffix, and neither the check nor the doc comment above the code followed. Both are the same disease in two media, and the second one is the reason to grep prose when behaviour changes. The bucket of scripts that skip on a package needs running *deliberately*, on a machine that has it, or it is a bucket of tests nobody is running.
 - **A live script piped into `head` leaves its work directory behind.** `trap ... EXIT INT TERM` does not catch `SIGPIPE`, and a shell killed by one runs no EXIT trap — so `sh tests/live/hooks.sh | head -20`, which is how a person reads output, leaks the directory that a plain run cleans up. Found by counting `/tmp` after a session of doing exactly that. Not swept across the scripts: adding `PIPE` to each trap is a one-word change and a thirty-file diff, and the leak only bites an interactive reader. Worth knowing before blaming a script's trap for a directory you find.
+- **A note in "what is still open" is worth measuring before it is believed.** 0078 ended with "restarting is unconditional… a backoff needs state that needs a home", which reads like a design task for later. Measuring it took ten minutes and turned it into a live defect: 181 starts in twelve seconds, introduced by the change that wrote the note. The note was accurate and its *tone* was wrong, which is the failure mode — an open question written calmly enough that the next reader files it rather than checking it.
 - **A record of what you started is a memory, and it ages.** `running: true` came out of `/run` and was never checked against the machine, so every "is it still what the document says?" answer this project had built compared *configuration* — a file, a kernel object, a secret — and none of them asked whether the process was there at all. A `kill -9` on a tunnel left netcfgd reporting a converged network with nothing behind it. The check is two file reads; the reason it took four decisions to get to is that the record reads exactly like an observation at the call site.
 - **"It has everything it needs" is a claim about the *other* side's interface, and only that side can settle it.** The shim's remaining device types were written down as ready because netcfgd observed the properties somebody had listed. Reading libnm's own accessors said four for a VLAN and thirteen for an IP tunnel, of which netcfgd answers eight — so one shipped and one is refused with the six missing names in a test. A capability list assembled from what you have, rather than from what the consumer asks for, is a list that will be wrong in the direction that flatters you.
 - **`/sys` in an `unshare -rn` test is the host's, and the interface under test is not in it.** A hook reading `/sys/class/net/<iface>/carrier` got "No such file or directory" for a device that plainly existed — sysfs is a mount, the mount is the machine's, and only netlink is namespace-correct without `unshare -m`. Every live script here that asks about a link uses `ip`, which is why this had never come up.

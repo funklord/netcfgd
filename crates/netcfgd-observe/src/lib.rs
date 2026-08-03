@@ -45,6 +45,8 @@ pub struct PriorState {
 	pub dns: Vec<netcfgd_model::AppliedDns>,
 	/// Interfaces netcfgd turned IP forwarding on for.
 	pub forwarding: Vec<String>,
+	/// `(kind, interface, count)` -- starts of a backend that did not stay up.
+	pub backend_restarts: Vec<(netcfgd_model::BackendKind, String, u32)>,
 	/// Interfaces netcfgd turned temporary addresses on for.
 	pub privacy: Vec<String>,
 	/// Interfaces netcfgd wrote the `accept_ra` sysctl for.
@@ -339,6 +341,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		forwarding_applied: prior.forwarding.clone(),
 		privacy_applied: prior.privacy.clone(),
 		accept_ra_applied: prior.accept_ra.clone(),
+		backend_restarts: prior.backend_restarts.clone(),
 		hook_state: prior.hook_state.clone(),
 		// Read in `host::augment` beside the sysctls, for the reason they are:
 		// `build` stays a pure function of a netlink snapshot.
