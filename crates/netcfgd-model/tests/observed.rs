@@ -189,6 +189,10 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		ingress_redirect: Some("ifb-eth0".to_owned()),
 		forwarding: Some(true),
 		privacy: Some(true),
+		accept_ra: Some(netcfgd_model::ObservedAcceptRa {
+			value: 2,
+			effective: true,
+		}),
 		rfkill: Some(netcfgd_model::ObservedRfkill {
 			switch: "phy0".to_owned(),
 			soft: true,
@@ -471,6 +475,7 @@ fn witness() -> Observed {
 		ingress_applied: vec!["eth0".to_owned()],
 		forwarding_applied: vec!["eth0".to_owned()],
 		privacy_applied: vec!["eth0".to_owned()],
+		accept_ra_applied: vec!["eth0".to_owned()],
 		// Both phases that have a memory, so the witness carries a sample of each --
 		// one value that is an address and one that is a word.
 		hook_state: vec![

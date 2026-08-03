@@ -942,6 +942,7 @@ mod tests {
 			ingress_redirect: None,
 			forwarding: None,
 			privacy: None,
+			accept_ra: None,
 			rfkill: None,
 			ownership: netcfgd_model::Ownership::Unknown,
 			private_key_loaded: false,

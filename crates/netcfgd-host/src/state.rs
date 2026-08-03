@@ -52,6 +52,10 @@ pub struct OwnedState {
 	/// Interfaces netcfgd turned temporary addresses on for.
 	#[serde(default)]
 	pub privacy: Vec<String>,
+	/// Interfaces netcfgd wrote `accept_ra` for, so that an interface which
+	/// stops asking for SLAAC is put back only where netcfgd changed it.
+	#[serde(default)]
+	pub accept_ra: Vec<String>,
 	/// What each event hook was last told, per interface and phase (0064, 0068).
 	#[serde(default)]
 	pub hook_state: Vec<netcfgd_model::ObservedHookState>,
@@ -279,6 +283,7 @@ impl OwnedState {
 			dns: self.dns.clone(),
 			forwarding: self.forwarding.clone(),
 			privacy: self.privacy.clone(),
+			accept_ra: self.accept_ra.clone(),
 			hook_state: self.hook_state.clone(),
 			qdisc: self.qdisc.clone(),
 			ingress: self.ingress.clone(),
@@ -295,15 +300,11 @@ impl OwnedState {
 	/// Removals are applied before additions so that replacing an address in
 	/// one plan leaves exactly one record, not zero.
 	pub fn absorb(&mut self, effects: &Effects) {
-		// Only the interfaces netcfgd switched *on* are recorded. Switching
-		// one off drops the record rather than storing `false`: the question
-		// this answers is "is this ours to turn off later", and once it is off
-		// the answer is no.
+		// Five lists of interface names, all folded the same way -- see
+		// [`remember`], which is where the "off drops the record" rule is
+		// written down once instead of five times.
 		for (interface, enabled) in &effects.forwarding {
-			self.forwarding.retain(|name| name != interface);
-			if *enabled {
-				self.forwarding.push(interface.clone());
-			}
+			remember(&mut self.forwarding, interface, *enabled);
 		}
 
 		// One record per interface and phase, replaced rather than appended: what
@@ -319,30 +320,23 @@ impl OwnedState {
 			});
 		}
 
-		// The same, for the same reason: turning temporary addresses off drops
-		// the record rather than storing `false`.
 		for (interface, enabled) in &effects.privacy {
-			self.privacy.retain(|name| name != interface);
-			if *enabled {
-				self.privacy.push(interface.clone());
-			}
+			remember(&mut self.privacy, interface, *enabled);
 		}
 
-		// Same shape: a reset drops the record rather than storing it, because
-		// the question is "is this ours to put back", and once the kernel
-		// default is restored the answer is no.
+		// `accept_ra` is the one whose "off" is not `false`: the value netcfgd
+		// writes to give an interface back is `1`, the kernel's own default, so
+		// that is what drops the record. Decision 0073.
+		for (interface, value) in &effects.accept_ra {
+			remember(&mut self.accept_ra, interface, *value != 1);
+		}
+
 		for (interface, set) in &effects.qdisc {
-			self.qdisc.retain(|name| name != interface);
-			if *set {
-				self.qdisc.push(interface.clone());
-			}
+			remember(&mut self.qdisc, interface, *set);
 		}
 
 		for (interface, set) in &effects.ingress {
-			self.ingress.retain(|name| name != interface);
-			if *set {
-				self.ingress.push(interface.clone());
-			}
+			remember(&mut self.ingress, interface, *set);
 		}
 
 		self.created_links
@@ -414,6 +408,22 @@ impl OwnedState {
 			self.dns.retain(|existing| existing.scope != applied.scope);
 			self.dns.push(applied.clone());
 		}
+	}
+}
+
+/// Remember an interface netcfgd changed, or forget one it changed back.
+///
+/// Only the interfaces netcfgd switched *on* are recorded. Switching one off
+/// drops the record rather than storing `false`: the question this answers is
+/// "is this ours to undo later", and once it has been undone the answer is no.
+///
+/// One function because there are five lists of exactly this shape, and five
+/// copies of a three-line rule is how two of them come to disagree about what
+/// "off" means.
+fn remember(list: &mut Vec<String>, interface: &str, ours: bool) {
+	list.retain(|name| name != interface);
+	if ours {
+		list.push(interface.to_owned());
 	}
 }
 

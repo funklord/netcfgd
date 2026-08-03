@@ -43,6 +43,14 @@ fn link(name: &str) -> ObservedLink {
 		ingress_redirect: None,
 		forwarding: None,
 		privacy: None,
+		// An ordinary interface: the kernel's default, and it forwards nothing,
+		// so advertisements arrive. A fixture that wants the trap -- `accept_ra`
+		// 1 on an interface that forwards -- says so by hand, because that is the
+		// state the whole pass exists for.
+		accept_ra: Some(netcfgd_model::ObservedAcceptRa {
+			value: 1,
+			effective: true,
+		}),
 		rfkill: None,
 		ownership: Ownership::Unknown,
 		private_key_loaded: false,
@@ -479,6 +487,29 @@ fn simulate_host(op: &Op, observed: &mut Observed) {
 			});
 		}
 		Op::HostnameSet { name } => observed.hostname = Some(name.clone()),
+		Op::SysctlSetAcceptRa { iface, value } => {
+			// What the kernel would report afterwards, both halves of it: a `2`
+			// is effective whatever the interface forwards, and a `1` is
+			// effective only where it does not. Without the second half a plan
+			// that hands an interface back would never converge -- the fake
+			// would keep reporting the state the write had just left.
+			let forwards = observed
+				.links
+				.iter()
+				.find(|link| &link.name == iface)
+				.and_then(|link| link.accept_ra)
+				.is_some_and(|state| state.value == 1 && !state.effective);
+			if let Some(link) = observed.links.iter_mut().find(|link| &link.name == iface) {
+				link.accept_ra = Some(netcfgd_model::ObservedAcceptRa {
+					value: *value,
+					effective: *value == 2 || !forwards,
+				});
+			}
+			observed.accept_ra_applied.retain(|name| name != iface);
+			if *value != 1 {
+				observed.accept_ra_applied.push(iface.clone());
+			}
+		}
 		Op::SysctlSetPrivacy {
 			iface,
 			prefer_temporary,
@@ -582,7 +613,10 @@ fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 					link.forwarding = Some(*enabled);
 				}
 			}
-			Op::HostnameSet { .. } | Op::SysctlSetPrivacy { .. } | Op::HookRun { .. } => {
+			Op::HostnameSet { .. }
+			| Op::SysctlSetPrivacy { .. }
+			| Op::SysctlSetAcceptRa { .. }
+			| Op::HookRun { .. } => {
 				simulate_host(&action.op, observed);
 			}
 			// Whole-table replacement, so the observed list becomes the
@@ -5929,6 +5963,140 @@ fn an_unreadable_hostname_plans_nothing() {
 		plan.warnings
 			.iter()
 			.any(|warning| warning.message.contains("cannot be read")),
+		"nothing said why: {:?}",
+		plan.warnings
+	);
+}
+
+/// SLAAC on an interface that forwards makes the kernel listen.
+///
+/// The defect this pass exists for: `accept_ra` defaults to `1`, which means
+/// "accept unless this interface forwards", so a router asking for SLAAC on its
+/// WAN gets no address and nothing says why. Decision 0073.
+#[test]
+fn slaac_where_advertisements_are_ignored_writes_the_sysctl() {
+	let desired = document(
+		r#"
+interface eth0 {
+	config = "slaac"
+}
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	// The trap, spelled out: the kernel's default value, on an interface that
+	// forwards. Both halves have to be here -- the value alone is the ordinary
+	// working state of every laptop.
+	observed.links[0].accept_ra = Some(netcfgd_model::ObservedAcceptRa {
+		value: 1,
+		effective: false,
+	});
+
+	let plan = settle(&desired, &mut observed);
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::SysctlSetAcceptRa { .. }))
+		.expect("the sysctl is written");
+	assert!(
+		matches!(action.op, Op::SysctlSetAcceptRa { value: 2, .. }),
+		"the value written is not the one that survives forwarding: {:?}",
+		action.op
+	);
+	// And the reason says which of the two halves is the problem, because
+	// "accept_ra 1" on its own reads as the state that works.
+	assert!(
+		action.reason.observed.contains("forwards"),
+		"the reason does not say why 1 is not enough: {:?}",
+		action.reason
+	);
+}
+
+/// And an interface that already listens is left alone.
+///
+/// Every ordinary laptop: `accept_ra` at the kernel's default with nothing
+/// forwarding. A pass that wrote `2` here would touch a sysctl on every machine
+/// to change nothing, and the plan would say so on every first apply.
+#[test]
+fn slaac_where_advertisements_already_arrive_plans_nothing() {
+	let desired = document(
+		r#"
+interface eth0 {
+	config = "slaac"
+}
+"#,
+	);
+	let observed = observed_with(&["eth0"]);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"sysctl.set_accept_ra"),
+		"a working interface had its sysctl written anyway: {:?}",
+		names(&plan)
+	);
+}
+
+/// An interface that stops asking is handed back, and only netcfgd's own.
+#[test]
+fn dropping_slaac_hands_the_sysctl_back() {
+	let desired = document(
+		r#"
+interface eth0 {
+	config = "192.0.2.1/24"
+}
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].accept_ra = Some(netcfgd_model::ObservedAcceptRa {
+		value: 2,
+		effective: true,
+	});
+
+	// Nobody's record: netcfgd did not write it, so it is not netcfgd's to undo.
+	let untouched = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&untouched).contains(&"sysctl.set_accept_ra"),
+		"a value netcfgd never wrote was reset: {:?}",
+		names(&untouched)
+	);
+
+	// With the record, it goes back to the kernel's default rather than to `0`.
+	observed.accept_ra_applied.push("eth0".to_owned());
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::SysctlSetAcceptRa { .. }))
+		.expect("the sysctl is handed back");
+	assert!(
+		matches!(action.op, Op::SysctlSetAcceptRa { value: 1, .. }),
+		"handed back the wrong value: {:?}",
+		action.op
+	);
+}
+
+/// A kernel with no `accept_ra` at all is reported, not written to.
+#[test]
+fn an_unreadable_accept_ra_says_so() {
+	let desired = document(
+		r#"
+interface eth0 {
+	config = "slaac"
+}
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].accept_ra = None;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"sysctl.set_accept_ra"),
+		"a sysctl that cannot be read was written: {:?}",
+		names(&plan)
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("accept_ra")),
 		"nothing said why: {:?}",
 		plan.warnings
 	);
