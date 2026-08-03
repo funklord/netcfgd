@@ -446,6 +446,15 @@ netcfgd/
                                 # qmake behind a Makefile, no CMake and no QML.
                                 # Its own build; not in the Rust workspace and
                                 # not in the size budget. See gui/project.md
+  client/                       # C. The frontend layer under the widgets:
+                                # connections, request matching, models. Shared
+                                # by any client, and C so that anything can use it
+  wire/                         # C. The remote protocol: a `situ` schema for the
+                                # frame, hand-written framing under it, and
+                                # Monocypher bound as the codec
+  agent/                        # C. On the netcfgd host: terminates the remote
+                                # protocol and holds an ordinary local socket
+                                # connection. The daemon itself is unchanged
   crates/
     netcfgd-model/              # document types, serde, canonical encode. NO I/O.
     netcfgd-compile/            # DSL -> model. Pure.
