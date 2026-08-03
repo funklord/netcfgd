@@ -301,4 +301,9 @@ netcfgd
 # against the document. What it bought is an edited `stp` or `forward_delay`
 # doing something -- before this they were sent inside `link.create` and never
 # again, and a bridge's name encodes nothing, so nothing anywhere said so.
-total 2079256
+# +8 KB for the same question asked of a bond: the dump reads its mode and
+# monitoring interval back, and the planner compares them. What it bought is an
+# edited miimon being applied -- and an edited *mode* being explained instead,
+# because the kernel takes one only on a bond with no members and rejects the
+# whole message otherwise, interval included.
+total 2087448
