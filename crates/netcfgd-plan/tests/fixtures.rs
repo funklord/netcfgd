@@ -4512,3 +4512,74 @@ fn transmit_checksumming_covers_every_spelling() {
 	assert_eq!(features.len(), 3, "{features:?}");
 	assert!(features.iter().all(|(_, on)| !on));
 }
+
+/// A peer with an endpoint plans nothing, which is not what it did.
+///
+/// The comparison sets the desired endpoint to `None` because a peer roams and
+/// the kernel rewrites it -- and the observation carries what the kernel says,
+/// which after one handshake is an address. Comparing those two as values makes
+/// every reconcile replace the peer list forever. The live test could not see
+/// it: its peers have no endpoint and never handshake, so both sides were
+/// `None` and agreed for the wrong reason.
+#[test]
+fn a_peer_with_an_endpoint_is_not_replaced_on_every_reconcile() {
+	let desired = wireguard_document("");
+	let mut observed = wireguard_observed(true);
+	let mut running = wireguard_running(None, &[HUB]);
+	running.peers[0].endpoint = Some("198.51.100.7:51820".to_owned());
+	observed.links[0].wireguard = Some(running);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::WgSetPeers { .. })),
+		"a roaming peer's endpoint was treated as a difference"
+	);
+}
+
+/// A document that spells "none" as zero agrees with a kernel that omits it.
+///
+/// The kernel says "no firewall mark", "no keepalive" and "an ephemeral port"
+/// with a zero, and the observation turns each into an absent field. A document
+/// is allowed to write the zero, and if it arrived any other way the device
+/// would differ from the kernel on every reconcile -- the same shape as the
+/// endpoint, from the other side.
+#[test]
+fn a_zero_in_the_document_means_what_the_kernel_means_by_one() {
+	let desired = document(
+		r#"
+interface wg0 {
+	wireguard {
+		private_key = "@secret:wg0"
+		listen_port = 0
+		fwmark      = 0
+		peer hub {
+			public_key  = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+			allowed_ips = "10.0.0.0/24"
+			keepalive   = 0
+		}
+	}
+	config = "10.0.0.5/32"
+}
+"#,
+	);
+	let mut observed = wireguard_observed(true);
+	// What the kernel reports for exactly that: a port it chose, and nothing
+	// for the mark or the keepalive.
+	observed.links[0].wireguard = Some(wireguard_running(Some(45_678), &[HUB]));
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::WgSetDevice { .. } | Op::WgSetPeers { .. })),
+		"a zero the kernel spells as absent was treated as a difference: {:?}",
+		plan.actions
+			.iter()
+			.map(|action| (action.op.name(), action.reason.field.clone()))
+			.collect::<Vec<_>>()
+	);
+}

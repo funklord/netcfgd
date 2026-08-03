@@ -102,9 +102,14 @@ interface wg0 {
 CONF
 }
 
+# With an endpoint, which is what a real peer has and is the field the
+# comparison must *not* own: the kernel rewrites it as a peer roams, so a plan
+# that compared it would replace the peer list on every reconcile forever. The
+# first version of this script had no endpoint anywhere, so both sides were
+# absent and agreed for the wrong reason -- and the defect shipped.
 peer_block() {
-	printf 'peer %s {\n\t\t\tpublic_key  = "%s"\n\t\t\tallowed_ips = "%s"\n\t\t}' \
-		"$1" "$2" "$3"
+	printf 'peer %s {\n\t\t\tpublic_key  = "%s"\n\t\t\tallowed_ips = "%s"\n\t\t\tendpoint    = "198.51.100.%s:51820"\n\t\t}' \
+		"$1" "$2" "$3" "${4:-7}"
 }
 
 # ----------------------------------------------------------- bring one up
