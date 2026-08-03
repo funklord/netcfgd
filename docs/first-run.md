@@ -82,6 +82,24 @@ The passphrase does not go in this file. It goes in
 read a secret any other user can, and refuses an inline passphrase outright, so
 the config stays safe to commit.
 
+You do not have to write either of those two pieces by hand:
+
+```
+sudo ncfg wifi add "YourNetworkName"
+passphrase for `YourNetworkName`:
+```
+
+writes the `network` block into `/etc/netcfgd/conf.d/wifi-YourNetworkName.conf`
+and the passphrase into `secrets/YourNetworkName` at mode 0600, prompts without
+echoing, and compiles the result before leaving it there. The passphrase is
+never a command-line argument -- `ps` would show it to every user on the machine
+-- so pipe it in (`printf '%s\n' "$pass" | sudo ncfg wifi add ...`) if you are
+scripting. `--open` for a network with no passphrase, `--hidden` for one that
+does not broadcast its SSID, `--priority N` when several are in range, and
+`--id` for an SSID that is not usable as a filename. The file it writes is
+ordinary configuration: read it, edit it, commit it, or delete it to forget the
+network.
+
 ## 2. Read the plan
 
 ```
@@ -236,9 +254,10 @@ If a revert leaves you with the wrong `/etc/resolv.conf`, fix it by hand or
 re-apply a corrected config.
 
 **A network that is not in the config cannot be joined.** `ncfg wifi connect`
-takes the id of a `network` block, not an SSID from a scan. Adding a new
-network means editing the config, which needs the `admin` tier. `ncfg wifi
-scan` marks which networks in range you can actually join.
+takes the id of a `network` block, not an SSID from a scan -- so joining
+somewhere new means adding it to the config first, which is what `ncfg wifi add`
+is for (see below). `ncfg wifi scan` marks which networks in range you can
+actually join.
 
 **Six of the eleven hook phases run.** `pre_up`, `post_up`, `down`, `post_down`,
 `lease` and `carrier` fire; `up`, `pre_down`, `roam`, `portal` and `drift` are

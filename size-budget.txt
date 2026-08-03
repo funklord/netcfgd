@@ -353,4 +353,11 @@ netcfgd
 # pushes: what to append to a bare name, never which resolver answers. Same gate as
 # the servers -- a party already answering every query gains nothing by appending a
 # suffix -- and all three writers report it, so one contract means one thing.
-total 2165272
+# +20 KB for `ncfg wifi add`, which is the last thing on a laptop that needed an
+# editor and root. It writes one `network` block into conf.d, stores the passphrase
+# in secrets/ at 0600 with the mode set by the open, and compiles the result back
+# through the daemon's own loader -- removing what it wrote if that does not hold.
+# Most of the cost is the diagnostics: a refusal that names the file, the id and
+# the fix is worth more here than anywhere else, because the operator running this
+# has no network to look anything up with.
+total 2185752

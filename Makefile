@@ -535,6 +535,15 @@ live:
 	else \
 		echo "tui.py: skipping: no python3"; \
 	fi
+	@# The second python test, and for the same reason: a passphrase prompt has
+	@# one property worth checking -- that the passphrase is not echoed -- and a
+	@# pipe has no echo to turn off, so only a pty can say. It needs no daemon
+	@# and no namespace; it writes a config file in a temporary directory.
+	@if command -v python3 >/dev/null 2>&1; then \
+		NCFG_LIVE=1 python3 tests/live/wifi_add.py; \
+	else \
+		echo "wifi_add.py: skipping: no python3"; \
+	fi
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/stations.sh"
