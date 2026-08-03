@@ -210,6 +210,10 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		macvlan: Some(netcfgd_model::ObservedMacvlan {
 			mode: Some("bridge".to_owned()),
 		}),
+		vlan: Some(netcfgd_model::ObservedVlan {
+			id: Some(42),
+			protocol: Some("dot1ad".to_owned()),
+		}),
 		tunnel: Some(netcfgd_model::ObservedTunnel {
 			local: Some("192.0.2.1".parse().expect("an address")),
 			remote: Some("192.0.2.2".parse().expect("an address")),

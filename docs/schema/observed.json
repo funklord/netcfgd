@@ -36,6 +36,10 @@
       "macvlan": {
         "mode": "bridge"
       },
+      "vlan": {
+        "id": 42,
+        "protocol": "dot1ad"
+      },
       "tunnel": {
         "local": "192.0.2.1",
         "remote": "192.0.2.2",
@@ -104,6 +108,10 @@
       "macvlan": {
         "mode": "bridge"
       },
+      "vlan": {
+        "id": 42,
+        "protocol": "dot1ad"
+      },
       "tunnel": {
         "local": "192.0.2.1",
         "remote": "192.0.2.2",
@@ -171,6 +179,10 @@
       },
       "macvlan": {
         "mode": "bridge"
+      },
+      "vlan": {
+        "id": 42,
+        "protocol": "dot1ad"
       },
       "tunnel": {
         "local": "192.0.2.1",

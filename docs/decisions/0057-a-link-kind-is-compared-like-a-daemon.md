@@ -1,10 +1,12 @@
 # 0057: A link kind is compared like a daemon
 
-Status: accepted; the bridge and the bond are done, the other kinds are named,
-not built. **The naming was taken up by
-[0058](0058-a-change-carries-the-whole-nest.md)**, which did the macvlan, the
-tunnels and the VXLAN -- and corrected two rows of the table below by asking the
-kernel again. The VLAN is still named and not built.
+Status: accepted; the bridge and the bond are done here. **The rest of the list
+was taken up by [0058](0058-a-change-carries-the-whole-nest.md)** -- the macvlan,
+the tunnels and the VXLAN, which also corrected two rows of the table below by
+asking the kernel again -- **and closed by
+[0059](0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)**,
+which did the VLAN the only way the kernel allows: by deleting the interface and
+making it again.
 Date: 2026-08-03
 Milestone: [0054](0054-a-kernel-object-is-compared-like-a-daemon.md) again, in the kinds it did not look at
 
