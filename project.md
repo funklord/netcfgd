@@ -904,13 +904,22 @@ hostname), and two are reported with the reason (`hostname = "dhcp"` needs a lea
 netcfgd never sees; `portal_check` would need netcfgd to fetch a hard-coded URL,
 which is the operator's decision and not a default).
 
-**Nine of the eleven hook phases are recognised and never run.** Only `pre_up` and
-`post_up` fire. The rest are parsed, materialised into `/run/netcfgd/hooks/` and
-hashed into the document — a script on disk under the name the config gave it,
-which reads exactly like a feature. `PreUp`'s own documentation recommended two of
-them. A plan now names each one; implementing them is its own piece of work, with
-the ordering question a `down` hook raises against the teardown that removes the
-interface.
+**Four of the eleven hook phases fire**, and the seven that do not each say so in
+the plan. `pre_up` and `post_up` were the two; `down` and `post_down` joined them
+in [0063](docs/decisions/0063-the-down-hooks-run-before-the-interface-goes.md),
+where the ordering is the whole point: teardown is the *last* thing in a plan, so a
+`down` hook runs while the interface still has its addresses and routes — which is
+what lets it unmount a share. `pre_down` is deliberately not implemented, because it
+would fire at the same point and its distinct meaning needs a teardown ordering
+netcfgd does not have.
+
+**And the up hooks now fire only when netcfgd is bringing the interface up.** They
+were unconditional, so a converged interface ran them on **every apply** — the
+second plan was never empty, against §4 — and a *disabled* interface ran them too,
+in a plan that went `pre_up`, `link.down`, `post_down`, `post_up`. Both were found
+by putting hooks in front of a real kernel, and neither was visible to the
+idempotence gate: the one fixture with hooks called `plan` and `simulate` by hand
+instead of going through `settle`.
 
 **`Device.match` is unreachable from the config**, and that is now written down
 rather than looking like a feature: the model carries `mac`, `path`, `driver` and
@@ -1022,9 +1031,11 @@ match.
    reason is also what found the parent defect below, so the order paid for itself
    twice.
 
-3. **What a laptop still wants, in the order it will bite.** The four keys and
-   rfkill are settled; these are the gaps behind them, and none is a schema
-   question: **the nine unfired hook phases**
+3. **What a laptop still wants, in the order it will bite.** The four keys, rfkill
+   and the down hooks are settled; these are the gaps behind them, and none is a
+   schema question: **the `lease` hook** — the other one an operator reaches for,
+   and the one that needs netcfgd to notice a lease it did not install; **the six
+   remaining unfired phases**
    above, of which `down` and `lease` are the two an operator reaches for first;
    **joining a network needs an editor and root**, since `ncfg wifi connect` takes
    the id of a `network` block and there is no `ncfg wifi add` (the NM shim's write
@@ -1058,6 +1069,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **~~An interface that exists as the wrong kind is not recreated, and nothing says so.~~ Closed** ([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)), in the commit after the one that wrote it down. A document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, planned `link.up` and nothing else — netcfgd brought somebody else's device up and called the network configured. It shared its remedy with the VLAN id, which is why one session did both. What is worth keeping from it is the measurement habit that found it: the finding came from asking what *else* would fall into the safe direction of the new comparisons, not from a test.
+- **A gate that has never seen its subject is not a gate.** The plan-idempotence check has run on every fixture for milestones, and not one of them had a hook in it — the single fixture that did called `plan` and `simulate` by hand. So the up hooks being emitted unconditionally, which made every converged plan non-empty, was invisible to the exact gate that exists to catch it. When a feature has one test, check whether that test goes through the harness the others do.
+- **The hash on a hook can only fail where the compile and the run are separated in time.** `ncfg apply` materialises the script microseconds before running it, so it is checking a hash of a file it just wrote; the daemon re-materialises whenever the config changes. What is left is a plan built from a *kernel* change against a document compiled earlier — drift, which is what §2.2 said the hash was for. Nothing had ever tested it, and the first attempt could not, twice, for these two reasons.
 - **A field that cannot disagree cannot be wrong.** The rfkill observation reports which switch the flags came from, and the first version filled that in from the phy name the *search started with* rather than from the entry it found — so a search that picked the wrong switch still reported the right name. Breaking the search on purpose left every test green. The fix is one line and the rule is general: a field whose job is to say where a value came from has to be read from there.
 - **`read_dir` order is the filesystem's, and a test that depends on it proves nothing.** Deleting the "is this the phy's own switch?" check left the unit test passing, because the fixture's two switches came back in whichever order the directory happened to hold them. Sorting made the failure deterministic — and made the real read deterministic too, which is worth having on its own.
 - **The config surface is a feature list nobody audits.** Four keys compiled and did nothing, and the way they were found was reading the DSL against the code rather than reading the roadmap — a question from outside ("what is missing for a laptop?") did what no gate does. Two of them were *silent*; the other two turned out to be compile errors, which is honest by accident and worth telling apart from the first kind. The `ethtool` block has named its own inert fields since it landed and has never confused anybody, which is the whole argument.

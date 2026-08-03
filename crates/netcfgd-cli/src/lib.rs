@@ -333,6 +333,14 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 			client::Answer::Journal(journal) => {
 				for record in &journal.records {
 					println!("{:?} {}", record.outcome, record.op);
+					// The record has carried this all along and this path dropped
+					// it, so a failure over the socket said `Failed hook.run` and
+					// nothing about why -- while the same failure through `ncfg
+					// apply` printed the reason. Found by a live test looking for a
+					// message that was already in the journal (0063).
+					if let Some(error) = &record.error {
+						println!("     {error}");
+					}
 				}
 				println!(
 					"confirm window open for {seconds}s -- run `ncfg confirm` to keep this, \
