@@ -990,6 +990,15 @@ pub struct Observed {
 	/// netcfgd existed is not netcfgd's to undo.
 	#[serde(default)]
 	pub privacy_applied: Vec<String>,
+	/// How many times netcfgd has started each backend without it staying up.
+	///
+	/// `(kind, interface, count)`, reset the moment the backend is observed
+	/// running. A daemon that dies as fast as it is started would otherwise be
+	/// started again on every reconcile forever -- measured at 181 starts in
+	/// twelve seconds on an interface set to `reconcile`, which is what made
+	/// this necessary rather than tidy. Decision 0079.
+	#[serde(default)]
+	pub backend_restarts: Vec<(BackendKind, String, u32)>,
 	/// Interfaces netcfgd wrote the `accept_ra` sysctl for.
 	///
 	/// The same record `privacy_applied` is, and for the same reason: an
@@ -1091,6 +1100,15 @@ impl Observed {
 			.iter()
 			.find(|applied| applied.scope == scope)
 			.map(|applied| &applied.policy)
+	}
+
+	/// How many times netcfgd has started this backend without it staying up.
+	#[must_use]
+	pub fn backend_restarts(&self, kind: BackendKind, interface: &str) -> u32 {
+		self.backend_restarts
+			.iter()
+			.find(|(recorded, name, _)| *recorded == kind && name == interface)
+			.map_or(0, |(_, _, count)| *count)
 	}
 
 	/// Whether a backend of this kind is running on an interface.

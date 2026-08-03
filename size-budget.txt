@@ -373,4 +373,12 @@ netcfgd
 # than after a chmod. Most of the cost is the report: which blocks refer to the
 # name, which is what turns a typo into a sentence instead of a backend failing
 # with "no such secret" an hour later.
-total 2206232
+# +4 KB for noticing a daemon that died on its own and restarting it -- and for
+# the counter that stops that becoming a start storm. A tunnel killed by the OOM
+# killer used to leave netcfgd reporting a converged network with nothing behind
+# it; now the observation checks the pid of every backend netcfgd holds one for,
+# and the planner starts what has gone. The five-start limit is the other half:
+# without it, an interface set to `reconcile` produced 181 starts in twelve
+# seconds for a daemon that lived half a second -- measured, on the change that
+# introduced it.
+total 2210328
