@@ -829,6 +829,13 @@ re-reads on `SIGHUP`, so nothing on the wire is disturbed.
 The question this project keeps finding new places to ask. Five kinds of answer
 now exist, and the shape of each is worth knowing before adding a sixth.
 
+**A supplicant is checked the same way, and that took a pid file**
+([0080](docs/decisions/0080-a-socket-outlives-the-process-that-bound-it.md)): it is
+reached through a control socket, and a socket outlives the process that bound it.
+The *start* path had the same bug — it treated the socket as proof of a running
+supplicant, so a killed one could not be replaced at all. hostapd is left out on
+purpose, because nothing here can start a real one.
+
 **And it stops trying after five**
 ([0079](docs/decisions/0079-netcfgd-stops-restarting-what-will-not-stay-up.md)),
 which is the defect the paragraph below introduced and the same session closed: a
@@ -1380,10 +1387,16 @@ match.
    0053 guessed at a backend netcfgd did not start, and the answer was a WireGuard
    device it creates itself; then the question turned out not to be about
    configuration at all, but about a pid. What is genuinely left:
-   - **a supplicant and an access point are not liveness-checked**, because
-     netcfgd reaches them only through a control socket and asking one is a round
-     trip in the reconcile loop. hostapd takes `-P`, so this is a decision waiting
-     rather than a thing that cannot be done;
+   - ~~**a supplicant and an access point are not liveness-checked**~~ — the
+     supplicant now is
+     ([0080](docs/decisions/0080-a-socket-outlives-the-process-that-bound-it.md)):
+     `-P` gives it a pid file, and that turned up a second defect hiding behind
+     the first — the *start* path also treated the socket as proof, so a plan that
+     had correctly decided to start one found the dead supplicant's socket and did
+     nothing. **hostapd is deliberately left out**: it takes `-P` and the same
+     three lines would work, and nothing here can run them — `ap.sh`'s hostapd
+     never starts on a dummy, and a real radio needs `hwsim.sh` and real root.
+     Code with no test is what this project removes rather than adds;
    - **a daemon that is alive and wedged still counts as running**, which is 0052's
      shape applied to behaviour rather than to configuration;
    - ~~**restarting is unconditional**~~ — **closed in the same session, because
