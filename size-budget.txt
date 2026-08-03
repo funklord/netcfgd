@@ -343,4 +343,10 @@ netcfgd
 # an address netcfgd did not install -- which is the only way netcfgd can know a
 # lease arrived, since it never sees DHCP. Most of the cost is the `/run` record
 # that makes the lease hook fire once per lease instead of once per reconcile.
-total 2152984
+# +8 KB for a lease's nameservers, which reached nothing before: both clients now
+# run a netcfgd-generated script that writes them into the interface report, and
+# 0049's existing gate delivers them to an interface that asked with `dns { }`. The
+# dhcpcd half also ends a fight nobody had noticed -- its own `20-resolv.conf` hook
+# was writing the file netcfgd's DNS mode owns. And a delivery with no servers in it
+# now says so instead of silently writing a resolver file that resolves nothing.
+total 2161176
