@@ -573,10 +573,16 @@
   "nat_conflicts": [
     "somebody-elses-table"
   ],
-  "lease_hooks": [
+  "hook_state": [
     {
       "interface": "eth0",
-      "address": "192.168.1.50/24"
+      "phase": "lease",
+      "value": "192.168.1.50/24"
+    },
+    {
+      "interface": "eth0",
+      "phase": "carrier",
+      "value": "up"
     }
   ],
   "hostname": "host.example",

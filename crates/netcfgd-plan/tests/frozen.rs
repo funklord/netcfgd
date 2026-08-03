@@ -399,7 +399,7 @@ fn every_op_sample() -> Vec<Op> {
 			iface: "eth0".to_owned(),
 			phase: HookPhase::PostUp,
 			path: "/run/netcfgd/hooks/eth0-post_up".to_owned(),
-			address: Some("192.168.1.50/24".to_owned()),
+			value: Some("192.168.1.50/24".to_owned()),
 		},
 		Op::CommitArm { window_seconds: 90 },
 		Op::CommitConfirm,
