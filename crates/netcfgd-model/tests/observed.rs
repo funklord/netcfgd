@@ -476,6 +476,7 @@ fn witness() -> Observed {
 		forwarding_applied: vec!["eth0".to_owned()],
 		privacy_applied: vec!["eth0".to_owned()],
 		accept_ra_applied: vec!["eth0".to_owned()],
+		backend_restarts: vec![(BackendKind::OpenVpn, "vpn0".to_owned(), 2)],
 		// Both phases that have a memory, so the witness carries a sample of each --
 		// one value that is an address and one that is a word.
 		hook_state: vec![

@@ -45,6 +45,12 @@ pub struct OwnedState {
 	pub routes: Vec<OwnedObject>,
 	/// Backends netcfgd started.
 	pub backends: Vec<netcfgd_model::ObservedBackend>,
+	/// `(kind, interface, count)`: starts of a backend that did not stay up.
+	///
+	/// Cleared the moment it is seen running, so a tunnel that has been up for a
+	/// week carries nothing from an incident last month. Decision 0079.
+	#[serde(default)]
+	pub backend_restarts: Vec<(netcfgd_model::BackendKind, String, u32)>,
 	/// DNS scopes netcfgd delivered.
 	pub dns: Vec<netcfgd_model::AppliedDns>,
 	/// Interfaces netcfgd turned IP forwarding on for.
@@ -283,6 +289,7 @@ impl OwnedState {
 			dns: self.dns.clone(),
 			forwarding: self.forwarding.clone(),
 			privacy: self.privacy.clone(),
+			backend_restarts: self.backend_restarts.clone(),
 			accept_ra: self.accept_ra.clone(),
 			hook_state: self.hook_state.clone(),
 			qdisc: self.qdisc.clone(),
@@ -292,6 +299,41 @@ impl OwnedState {
 			// and folded in by [`prior_state`].
 			delegations: Vec::new(),
 			reports: Vec::new(),
+		}
+	}
+
+	/// Fold in what an apply saw and did about backends that will not stay up.
+	///
+	/// Three rules, and the order of the first two matters when one apply both
+	/// sees a backend running and starts another:
+	///
+	/// - **seen running clears it.** A daemon that is alive has stayed up, so
+	///   whatever it did last week is not a reason to stop trying now;
+	/// - **a start counts.** "Running" in the record is netcfgd's memory of
+	///   having started it, which is the thing decision 0078 stopped trusting --
+	///   so this counts starts that did not lead to a live process;
+	/// - **a deliberate stop clears it.** The document stopped asking, so
+	///   whatever the daemon was doing before is no longer being attempted.
+	///
+	/// Decision 0079.
+	fn absorb_restarts(&mut self, effects: &Effects) {
+		for (kind, interface) in &effects.observed_running {
+			self.backend_restarts
+				.retain(|(recorded, name, _)| recorded != kind || name != interface);
+		}
+		for (kind, interface) in &effects.started_backends {
+			match self
+				.backend_restarts
+				.iter_mut()
+				.find(|(recorded, name, _)| recorded == kind && name == interface)
+			{
+				Some((_, _, count)) => *count += 1,
+				None => self.backend_restarts.push((*kind, interface.clone(), 1)),
+			}
+		}
+		for (kind, interface) in &effects.stopped_backends {
+			self.backend_restarts
+				.retain(|(recorded, name, _)| recorded != kind || name != interface);
 		}
 	}
 
@@ -385,6 +427,8 @@ impl OwnedState {
 				.iter()
 				.any(|(kind, iface)| *kind == backend.kind && iface == &backend.interface)
 		});
+		self.absorb_restarts(effects);
+
 		for (kind, interface) in &effects.started_backends {
 			if !self
 				.backends

@@ -225,6 +225,16 @@ fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Obs
 	}
 }
 
+/// How many times netcfgd starts a backend that will not stay up.
+///
+/// Five, which is enough for a daemon that is slow to settle and few enough that
+/// a flapping one stops within a second or two rather than filling a log. There
+/// is no time in it deliberately: a plan is pure, and a count of consecutive
+/// starts says the same thing about a daemon that dies instantly and one that
+/// dies after a minute -- the difference being that the second takes five
+/// minutes to reach the limit, which is the right shape. Decision 0079.
+const RESTART_LIMIT: u32 = 5;
+
 /// The hook phases this build actually runs.
 ///
 /// Seven of the eleven the model declares. The other five are recognised, written
@@ -2446,6 +2456,24 @@ impl Builder {
 		if observed.backend_running(kind, name) {
 			return Vec::new();
 		}
+		// A daemon that dies as fast as netcfgd starts it. Since 0078 the
+		// observation notices it is gone, and on an interface set to
+		// `reconcile` that produced 181 starts in twelve seconds -- measured,
+		// with a fake that lived for half a second. So netcfgd tries, and then
+		// stops trying and says so. Decision 0079.
+		let restarts = observed.backend_restarts(kind, name);
+		if restarts >= RESTART_LIMIT {
+			self.warn(
+				name,
+				format!(
+					"netcfgd has started the {kind:?} backend on {name} {restarts} times and \
+					 it has not stayed up; not starting it again. Whatever it says about why \
+					 is in /run/netcfgd, and the count clears the moment it is seen running \
+					 -- or when the document stops asking for it"
+				),
+			);
+			return Vec::new();
+		}
 		// Rule 3: a lease needs a live link, so this waits for link.up.
 		let mut deps = base.to_vec();
 		deps.extend(self.link_up_of(name));
@@ -4417,6 +4445,7 @@ fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
 		forwarding_applied: observed.forwarding_applied.clone(),
 		privacy_applied: observed.privacy_applied.clone(),
 		accept_ra_applied: observed.accept_ra_applied.clone(),
+		backend_restarts: observed.backend_restarts.clone(),
 		// Not filtered either, for the same reason: it records what a hook was
 		// told, which stays true whether or not the interface survives this plan.
 		hook_state: observed.hook_state.clone(),
