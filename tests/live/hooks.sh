@@ -271,6 +271,71 @@ ip addr add 192.168.77.9/24 dev leased0
 check "a changed lease fires it again" "$(grep -c '^lease ' "$log" || true)" "2"
 contains "with the new address" "$(tail -1 "$log")" "addr=192.168.77.9/24"
 
+# ---------------------------------------------------------------------------
+# The `carrier` hook, on a real carrier. A veth pair is the only device here whose
+# carrier can be made to come and go without hardware: the near end has carrier
+# exactly while the far end is up, which is a real `IFLA_CARRIER` transition through
+# the kernel rather than a flag netcfgd set itself.
+: > "$log"
+ip link add carr0 type veth peer name carr0p
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface carr0 {
+	veth   { peer = "carr0p" }
+	config = "10.7.7.1/24"
+	on carrier {
+	echo "carrier reason=\$NCFG_REASON iface=\$NCFG_IFACE addresses=\$(ip -br addr show carr0 | grep -c 10.7.7.1 || true)" >> $log
+	}
+}
+CONF
+
+# The far end down, so the near end has no carrier when netcfgd first looks.
+ip link set carr0p down
+"$ncfg" apply > "$work/apply-carrier.log" 2>&1 || {
+	cat "$work/apply-carrier.log" >&2
+	exit 1
+}
+check "the first observation runs the hook once" \
+	"$(grep -c '^carrier ' "$log" || true)" "1"
+contains "and tells it there is no carrier" "$(grep '^carrier ' "$log")" "reason=down"
+check "and it does not fire again on an unchanged cable" \
+	"$("$ncfg" apply >/dev/null 2>&1; grep -c '^carrier ' "$log" || true)" "1"
+
+# Plug it in. This is the transition an operator on a laptop notices, and the one no
+# other phase reports: `pre_up` ran before there was a cable and `post_up` after the
+# addressing, and neither fires when somebody plugs one in.
+#
+# The address is taken away first, so that the apply below has *both* the addressing
+# and the hook in one plan. Without that the address is already on the interface from
+# the previous apply, and the ordering claim below cannot fail however the hook is
+# emitted -- which is exactly what happened when this was written the obvious way.
+: > "$log"
+ip addr del 10.7.7.1/24 dev carr0
+ip link set carr0p up
+"$ncfg" apply > "$work/apply-carrier2.log" 2>&1 || {
+	cat "$work/apply-carrier2.log" >&2
+	exit 1
+}
+contains "the same apply adds the address back" "$(cat "$work/apply-carrier2.log")" \
+	"addr.add carr0"
+check "plugging in runs it"   "$(grep -c '^carrier ' "$log" || true)" "1"
+contains "with the direction" "$(grep '^carrier ' "$log")" "reason=up"
+# Gained runs after the addressing, so a script that connects somewhere can.
+check "and the address was there by then" \
+	"$(sed -n 's/.*addresses=//p' "$log")" "1"
+
+# Pull it out again, and the script still sees the address: lost fires before the
+# teardown that withdraws anything.
+: > "$log"
+ip link set carr0p down
+"$ncfg" apply > "$work/apply-carrier3.log" 2>&1 || {
+	cat "$work/apply-carrier3.log" >&2
+	exit 1
+}
+check "unplugging runs it"    "$(grep -c '^carrier ' "$log" || true)" "1"
+contains "with the direction" "$(grep '^carrier ' "$log")" "reason=down"
+check "and the address was still there when it ran" \
+	"$(sed -n 's/.*addresses=//p' "$log")" "1"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "hooks.sh: all checks passed"

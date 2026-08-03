@@ -39,8 +39,8 @@ pub struct Effects {
 	pub forwarding: Vec<(String, bool)>,
 	/// `(interface, enabled)` for each `use_tempaddr` sysctl written.
 	pub privacy: Vec<(String, bool)>,
-	/// `(interface, address)` for each `lease` hook that was run.
-	pub lease_hooks: Vec<(String, String)>,
+	/// `(interface, phase, value)` for each event hook that was run.
+	pub hook_state: Vec<(String, netcfgd_model::HookPhase, String)>,
 	/// `(interface, set)` for each root qdisc changed. `false` is a reset.
 	pub qdisc: Vec<(String, bool)>,
 	/// `(interface, set)` for each ingress redirect changed.
@@ -1167,7 +1167,7 @@ impl Executor for KernelExecutor {
 				iface,
 				phase,
 				path,
-				address,
+				value,
 			} => {
 				// The sha256 is not in the op, so it is looked up in the
 				// document the plan came from -- which the executor does not
@@ -1187,15 +1187,29 @@ impl Executor for KernelExecutor {
 					timeout: None,
 				};
 				let mut env = crate::hooks::HookEnv::for_interface(iface);
-				env.addr.clone_from(address);
-				// Recorded before the hook runs rather than after, and on purpose:
-				// a `lease` hook that failed and was retried on every reconcile
-				// would be a plan that never converges, which section 4 promises
-				// against. What went wrong is in the journal instead (0064).
-				if let (netcfgd_model::HookPhase::Lease, Some(address)) = (*phase, address) {
+				// One field on the op, and the phase says which variable a script
+				// should see it in: a `lease` script reads `NCFG_ADDR` because the
+				// value is an address, and a `carrier` script reads `NCFG_REASON`
+				// because the value is `up` or `down`. Putting both variables on
+				// both phases would tell a script to look in a place its own phase
+				// never fills.
+				match (*phase, value) {
+					(netcfgd_model::HookPhase::Lease, Some(value)) => {
+						env.addr = Some(value.clone());
+					}
+					(netcfgd_model::HookPhase::Carrier, Some(value)) => {
+						env.reason = Some(value.clone());
+					}
+					_ => {}
+				}
+				// Recorded before the hook runs rather than after, and on purpose: an
+				// event hook that failed and was retried on every reconcile would be
+				// a plan that never converges, which section 4 promises against. What
+				// went wrong is in the journal instead (0064).
+				if let Some(value) = value {
 					self.effects
-						.lease_hooks
-						.push((iface.clone(), address.clone()));
+						.hook_state
+						.push((iface.clone(), *phase, value.clone()));
 				}
 				match crate::hooks::run(&reference, &env) {
 					crate::hooks::Outcome::Ok => Ok(()),

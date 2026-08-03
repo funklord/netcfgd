@@ -458,23 +458,24 @@ fn simulate_attribute(op: &Op, observed: &mut Observed) {
 /// had grown past what the style allows.
 fn simulate_host(op: &Op, observed: &mut Observed) {
 	match op {
-		// A lease hook's record, without which the "once per lease" property cannot
+		// An event hook's record, without which the "once per event" property cannot
 		// be tested at all: the second plan would fire it again and `settle` would
 		// catch that as a non-empty plan -- which is what this models rather than
-		// hides. Every other hook leaves no observable state, which is why they fall
-		// through.
+		// hides. The lifecycle phases carry no value and leave no record, which is
+		// why they fall through.
 		Op::HookRun {
 			iface,
-			phase: netcfgd_model::HookPhase::Lease,
-			address: Some(address),
+			phase,
+			value: Some(value),
 			..
 		} => {
 			observed
-				.lease_hooks
-				.retain(|record| &record.interface != iface);
-			observed.lease_hooks.push(netcfgd_model::ObservedLease {
+				.hook_state
+				.retain(|record| &record.interface != iface || record.phase != *phase);
+			observed.hook_state.push(netcfgd_model::ObservedHookState {
 				interface: iface.clone(),
-				address: address.clone(),
+				phase: *phase,
+				value: value.clone(),
 			});
 		}
 		Op::HostnameSet { name } => observed.hostname = Some(name.clone()),
@@ -5348,6 +5349,100 @@ interface eth0 { config = "dhcp"; dns { } }
 	);
 }
 
+/// A carrier hook fires when the cable comes or goes, and where it belongs.
+///
+/// The ordering is the claim: gained goes *after* the addressing, because a script
+/// that reacts to a cable by connecting somewhere needs the network to work; lost
+/// goes early, before the teardown that withdraws the routes, so a script can stop
+/// something that is using them. Decision 0068.
+#[test]
+fn a_carrier_hook_fires_on_a_change_and_in_the_right_place() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"interface eth0 {\n\
+		 \tconfig = \"10.0.0.2/24\"\n\
+		 \ton carrier {\necho carrier\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+
+	// A cable, and netcfgd has never said anything about this interface: the first
+	// observation is told the current state, which is what `ifplugd -i` does.
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].carrier = true;
+	let plan = settle(&desired, &mut observed);
+	let hook = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::HookRun { .. }))
+		.expect("the first observation runs it");
+	assert_eq!(hook.reason.field, "carrier");
+	assert_eq!(hook.reason.desired, "up");
+	assert_eq!(hook.reason.observed, "<absent>");
+	assert!(
+		matches!(&hook.op, Op::HookRun { value: Some(value), .. } if value == "up"),
+		"the script is not told which way it went: {:?}",
+		hook.op
+	);
+	// Gained: after the addressing, so the network works by the time it runs. The
+	// *edge* as well as the position -- a plan is a DAG and a reader of
+	// `depends_on` has to get the same answer as a reader of the list. Emission
+	// order gives the position for free, so without this assertion deleting the
+	// dependency changes nothing any test can see.
+	let addressed = plan.actions[position(&plan, "addr.add")].id;
+	assert!(
+		position(&plan, "hook.run") > position(&plan, "addr.add"),
+		"a gained carrier ran before the address was there: {:?}",
+		names(&plan)
+	);
+	assert!(
+		hook.depends_on.contains(&addressed),
+		"a gained carrier does not wait for the addressing: {:?}",
+		hook.depends_on
+	);
+
+	// `settle` has asserted the second plan is empty, so it does not fire again on
+	// an unchanged cable. Now pull it.
+	observed.links[0].carrier = false;
+	let plan = settle(&desired, &mut observed);
+	let hook = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::HookRun { .. }))
+		.expect("losing the cable runs it");
+	assert_eq!(hook.reason.desired, "down");
+	assert_eq!(hook.reason.observed, "up");
+	// Lost: before anything is taken away. Teardown is the last thing in a plan, so
+	// this holds as long as the hook is emitted in the interface's own pass.
+	let withdrawn = plan
+		.actions
+		.iter()
+		.position(|action| matches!(action.op, Op::RouteDel { .. } | Op::AddrDel { .. }));
+	if let Some(withdrawn) = withdrawn {
+		assert!(
+			position(&plan, "hook.run") < withdrawn,
+			"a lost carrier ran after its interface had been stripped: {:?}",
+			names(&plan)
+		);
+	}
+}
+
+/// An interface with no carrier hook plans nothing, whatever the cable does.
+#[test]
+fn an_interface_with_no_carrier_hook_is_left_alone() {
+	let desired = document(r#"interface eth0 { config = "10.0.0.2/24" }"#);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].carrier = true;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"hook.run"),
+		"a hook ran for an interface that declares none: {:?}",
+		names(&plan)
+	);
+}
+
 /// A lease hook fires when the address arrives, and once.
 ///
 /// netcfgd never sees DHCP (0004), so the trigger is an address on the interface
@@ -5403,7 +5498,7 @@ fn a_lease_hook_fires_once_when_the_address_arrives() {
 	assert!(
 		matches!(
 			&action.op,
-			Op::HookRun { address: Some(address), .. } if address == "192.168.1.50/24"
+			Op::HookRun { value: Some(value), .. } if value == "192.168.1.50/24"
 		),
 		"the address the script gets is not the lease: {:?}",
 		action.op
@@ -5714,8 +5809,8 @@ fn a_hook_in_a_phase_nothing_fires_is_reported() {
 		"interface eth0 {\n\
 		 \tconfig = \"10.0.0.2/24\"\n\
 		 \tpost_up {\necho up\n}\n\
-		 \ton carrier {\necho carrier\n}\n\
 		 \ton roam {\necho roamed\n}\n\
+		 \ton portal {\necho portal\n}\n\
 		 }\n",
 	);
 	let desired = compile(&sources, &mut TestHooks).expect("compiles");
@@ -5731,13 +5826,11 @@ fn a_hook_in_a_phase_nothing_fires_is_reported() {
 	assert_eq!(
 		said.len(),
 		2,
-		"expected the `carrier` and the `roam` hook to be named and nothing else: {:?}",
+		"expected the `roam` and the `portal` hook to be named and nothing else: {:?}",
 		plan.warnings
 	);
-	assert!(said
-		.iter()
-		.any(|message| message.contains("`carrier` hook")));
 	assert!(said.iter().any(|message| message.contains("`roam` hook")));
+	assert!(said.iter().any(|message| message.contains("`portal` hook")));
 	// And the one that does fire is still planned, rather than warned about.
 	assert!(names(&plan).contains(&"hook.run"));
 }
