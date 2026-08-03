@@ -827,6 +827,7 @@ fn hooks_bracket_the_interface_lifecycle() {
 		"interface eth0 {\n\
 		 \tconfig = \"192.168.1.10/24\"\n\
 		 \tpre_up {\necho before\n}\n\
+		 \tup {\necho live\n}\n\
 		 \tpost_up {\necho after\n}\n\
 		 }\n",
 	);
@@ -848,16 +849,30 @@ fn hooks_bracket_the_interface_lifecycle() {
 		.filter(|(_, a)| a.op.name() == "hook.run")
 		.map(|(index, _)| index)
 		.collect();
-	assert_eq!(hooks.len(), 2);
+	assert_eq!(hooks.len(), 3, "three phases, three runs");
 
-	let up = &plan.actions[position(&plan, "link.up")];
+	let link_up = &plan.actions[position(&plan, "link.up")];
 	let addr = &plan.actions[position(&plan, "addr.add")];
 	let pre = &plan.actions[hooks[0]];
-	let post = &plan.actions[hooks[1]];
+	let live = &plan.actions[hooks[1]];
+	let post = &plan.actions[hooks[2]];
 
 	assert!(
-		up.depends_on.contains(&pre.id),
+		link_up.depends_on.contains(&pre.id),
 		"link.up must wait for pre_up"
+	);
+	// The middle one, which is the whole of what `up` means: after the link and
+	// before the addressing. Asserted as *edges* rather than as positions,
+	// because actions execute in list order and a check on position alone passes
+	// on emission order -- which is what made a `depends_on` edge decoration
+	// once already.
+	assert!(
+		live.depends_on.contains(&link_up.id),
+		"up must wait for link.up"
+	);
+	assert!(
+		addr.depends_on.contains(&live.id),
+		"the addressing must wait for up, or the ordering is a claim rather than a fact"
 	);
 	assert!(
 		post.depends_on.contains(&addr.id),

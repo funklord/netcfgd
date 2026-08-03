@@ -64,7 +64,13 @@ interface hooked0 {
 	config  = "10.5.0.1/24"
 	enabled = $1
 	pre_up {
-	echo "pre_up addresses=\$(ip -br addr show hooked0 | wc -w)" >> $log
+	echo "pre_up up=\$(ip -br link show hooked0 | grep -c UP || true)" >> $log
+	echo "pre_up addresses=\$(ip -br addr show hooked0 | grep -c 10.5.0.1 || true)" >> $log
+	}
+	up {
+	echo "up up=\$(ip -br link show hooked0 | grep -c UP || true)" >> $log
+	echo "up addresses=\$(ip -br addr show hooked0 | grep -c 10.5.0.1 || true)" >> $log
+	echo "up phase=\$NCFG_PHASE iface=\$NCFG_IFACE" >> $log
 	}
 	post_up {
 	echo "post_up addr=\$NCFG_ADDR iface=\$NCFG_IFACE phase=\$NCFG_PHASE" >> $log
@@ -93,7 +99,7 @@ fi
 
 # The materialised script, which is the thing the document only references.
 hooks=$(find "$work/run/hooks" -type f 2>/dev/null | wc -l)
-check "every hook is materialised under /run" "$hooks" "4"
+check "every hook is materialised under /run" "$hooks" "5"
 for file in "$work/run/hooks"/*; do
 	[ -x "$file" ] || {
 		echo "FAIL a materialised hook is not executable: $file"
@@ -102,8 +108,23 @@ for file in "$work/run/hooks"/*; do
 done
 
 # The up half ran, in order, and `post_up` saw the address it was waiting for.
-check "pre_up ran"  "$(grep -c '^pre_up ' "$log" || true)"  "1"
+# One line of the two it writes, so this counts runs rather than lines -- which
+# it did not when the hook grew a second `echo`.
+check "pre_up ran"  "$(grep -c '^pre_up up=' "$log" || true)"  "1"
+check "up ran"      "$(grep -c '^up phase=' "$log" || true)" "1"
 check "post_up ran" "$(grep -c '^post_up addr=' "$log" || true)" "1"
+# The three moments are distinguishable by what each hook could see, which is
+# what makes `up` a phase of its own rather than a second name for a neighbour:
+# the link is up where `pre_up` found it down, and nothing is addressed yet where
+# `post_up` finds the address. Read through netlink rather than /sys, because
+# `unshare -rn` keeps the host's sysfs mount and an interface in this namespace
+# is not in it -- /sys/class/net/hooked0 does not exist at all here.
+check "pre_up ran before the link came up" \
+	"$(sed -n 's/^pre_up up=//p' "$log")" "0"
+check "and up ran after it, with the link live" \
+	"$(sed -n 's/^up up=//p' "$log")" "1"
+check "but before anything was addressed" \
+	"$(sed -n 's/^up addresses=//p' "$log")" "0"
 contains() {
 	case "$2" in
 	*"$3"*) echo "ok   $1" ;;
@@ -136,7 +157,7 @@ check "down ran"      "$(grep -c '^down ' "$log" || true)"      "2"
 # emitted unconditionally, so this apply used to run `pre_up`, `down`, `post_down`
 # and `post_up` -- in that order, on an interface it was taking away.
 check "and the up hooks did not run on the way down" \
-	"$(grep -c '^pre_up \|^post_up ' "$log" || true)" "0"
+	"$(grep -c '^pre_up \|^up \|^post_up ' "$log" || true)" "0"
 check "post_down ran" "$(grep -c '^post_down ' "$log" || true)" "1"
 # The ordering claim, checked by what the hook could see rather than by the plan:
 # the address was still on the interface when `down` ran, and the link was still
