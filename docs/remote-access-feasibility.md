@@ -173,8 +173,22 @@ produce, and refuses to hand out a transmittable buffer while a tag is stale.
 
 That moves the risk. **The frame stops being hand-rolled**; what stays hand-rolled
 is the framing -- the chunking and reassembly below -- which situ says is not its
-job, in a comment in its own generated output. Everything in §5.1 still applies to
-that half and to no other. `gui/project.md` §6.1 has the detail.
+job today, in a comment in its own generated output. Everything in §5.1 still
+applies to that half and to no other.
+
+**And "today" is the operative word.** situ already carries codecs and transforms;
+encryption and plausibly chunking are expected to move into it over time, taking
+work off the implementor. So the hand-written half should be built to be deleted:
+the crypto bound as an extern codec rather than wrapped, the chunk header a schema
+struct with only the state machine in C, nothing above `wire/` aware that any of
+it is generated, and no hand-written check that restates something the schema
+could say. `gui/project.md` §§6.1-6.2 has the detail.
+
+Versioning is this repository's job and situ supplies the tools rather than a
+scheme: version as a *field*, `[since = N]` enforced append-only, `variant` where
+a revision re-lays the bytes, and a committed `wire` signature whose change is a
+change somebody reviews -- which is `docs/schema/` and `make schema-bless` in
+another language.
 
 ### 5.1 Payload size, which is the one nobody expects
 

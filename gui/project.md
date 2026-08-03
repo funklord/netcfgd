@@ -259,12 +259,53 @@ chacha20_poly1305 extern "ncfg_monocypher_aead";` -- so situ decides layout,
 coverage and gating, and Monocypher does the arithmetic.
 
 **The dependency is on a generator, not a library.** Generated C is checked in, so
-a person building netcfgd needs no situc. situ is also unpackaged -- no release,
-no version number, runs from a tree -- which makes committing its output the
-natural pinning mechanism, and the same one this repository already uses for
-`docs/schema/` witnesses.
+a person building netcfgd needs no situc.
+
+**Versioning the protocol is this repository's job, and situ hands over the
+tools for it rather than a scheme.** Its §19 is the model: *version is a field,
+not metadata.* `[since = N]` covers the case that is nearly all of them -- a
+format that only ever gained members at the end -- and it is *enforced* to be
+append-only rather than reviewed for, with every member keeping a static offset.
+Where a revision genuinely re-lays the bytes, a `variant` on the version field
+selects the layout and old revisions stay in the schema rather than being
+deleted. It also separates three things that get called "compatible": wire (can a
+new sender talk to an old receiver -- found out by deployed peers, silently), API
+(does calling code still compile -- found out by the build), and cost (does it
+still cost what it cost). `situc diff` answers the third and part of the second
+and says so; it is not a compatibility linter and does not claim to be.
+
+That is the same shape netcfgd already uses on its own surfaces. `situc wire`
+emits a byte-level contract to commit; a change to it is a change somebody
+reviews -- which is `docs/schema/` and `make schema-bless` in another language.
+**The envelope carries a version discriminant from the first commit**, and the
+growth path is `[since = N]` before it is anything else.
 
 **OPEN:** vendor situc, commit the generated sources, or both.
+
+### 6.2 The line between schema and hand-written code moves, and only one way
+
+situ already carries codecs and transforms, and it is expected to take over more
+of what an implementor writes -- encryption first, plausibly chunking after it.
+**Design for that**, because the cost of not doing so is not a rewrite later, it
+is a hand-written thing nobody dares delete.
+
+Four rules, all of them the same rule:
+
+- **Anything a schema could say, the schema says.** Bounds, canonicality,
+  coverage, gating, "this field must equal 1" -- never a hand-written check beside
+  the generated accessor that duplicates one. Two statements of one rule is how
+  they come to disagree, and here one of them would be the one nobody edits.
+- **The crypto is bound, not wrapped.** `impl chacha20_poly1305 extern
+  "ncfg_monocypher_aead";` and nothing else: a thin binding that satisfies the
+  codec contract. When situ grows a codec of its own, that is a schema edit and a
+  file deletion, not a design change.
+- **The framing state machine gets its own translation unit**, with the chunk
+  *header* already a schema struct. What stays hand-written is then the part that
+  decides when the bytes have all arrived -- and if situ later expresses that, the
+  file it replaces is one file.
+- **Nothing above `wire/` learns that any of this is generated.** `client/` sees a
+  request and a response. Where the bytes came from is `wire/`'s business, which
+  is what makes the line free to move without anything above it noticing.
 
 ## 7. Build
 
