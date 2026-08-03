@@ -648,6 +648,9 @@ Three techniques make that reachable without root or a clean machine:
 - **`pppoe-server` looks for its plugin at `/etc/ppp/plugins/rp-pppoe.so`,** and Debian ships it under `/usr/lib/pppd/<version>/`. The default therefore fails *inside the server's own forked pppd*, where a client sees a session that connects and then never starts IPCP; syslog is the only place that says why. `-g` names the path.
 - **dhcpcd cannot report a delegated prefix to a script**, and never could. `$new_delegated_dhcp6_prefix` is the addresses it derived from one, filled from `ap->delegating_prefix` in `dhcp6.c`, and only on an interface it delegated to. `$new_dhcp6_prefix` — which netcfgd's hook read for years — is not a dhcpcd variable at all.
 - **`kea-dhcp6` binds before duplicate address detection finishes and fails.** "Cannot assign requested address" on a link-local it can see with `ip addr`; the address is tentative for about a second after the link comes up. Anything starting a DHCPv6 server right after `ip link set up` has to wait for DAD.
+- **The outer `IFLA_LINK` is not where every kind takes its parent.** A VLAN and a macvlan read it there; a tunnel reads `IFLA_GRE_LINK` or `IFLA_IPTUN_LINK` and a VXLAN reads `IFLA_VXLAN_LINK`, both inside their own nest. netcfgd sent the outer one for all of them, so `parent = "base0"` on a tunnel or a VXLAN produced a device with no underlay at all and a successful apply ([0060](docs/decisions/0060-a-parent-is-one-word-and-two-attributes.md)). **A VXLAN is also the only kind that does not report its parent in the outer attribute**, so the reading half is split the same way the writing half is.
+- **A geneve tunnel has no underlay interface.** No attribute for one in its family, and `ip` offers no `dev` either, so a `parent` on one could only be dropped -- it is a compile error now.
+- **A VXLAN with no `port` in the document gets 8472, not 4789.** The kernel's default is the pre-standard port; `ip` defaults to the IANA one. Both are "whatever was chosen" as far as netcfgd is concerned, which is correct by the rules and is still a footgun: a host configured with netcfgd and one configured with `ip link add` will not talk unless the document says `port = 4789`. Not changed silently -- a default that differs from the kernel's belongs in a decision record, not in a patch.
 - **A tunnel change must carry the whole `INFO_DATA` nest, because GRE and the ip tunnels reset what it omits.** A request carrying only `IFLA_GRE_REMOTE` leaves the tunnel with no local address, no TTL and no key — `ipgre_netlink_parms` fills a zeroed struct from whatever arrived — and an `ip6tnl` loses its encapsulation limit, a field netcfgd does not even model. geneve and VXLAN are the opposite and keep what a request leaves out. So netcfgd sends the nest creation would build, and the two rules cost it nothing either way ([0058](docs/decisions/0058-a-change-carries-the-whole-nest.md)).
 - **The fallback tunnel devices refuse every change.** `gre0`, `gretap0`, `tunl0`, `sit0`, `ip6tnl0` and `ip6gre0` exist in every network namespace once their module is loaded, and `ip_tunnel_changelink` answers `EINVAL` for anything asked of one. An operator who names an interface after one gets a failing apply. Not special-cased: nothing in the dump marks a fallback device, only six names that are a module's convention.
 - **A GRE key of zero is a key, and the value cannot say so.** The kernel emits `IKEY` and `OKEY` for every GRE tunnel, zero included; the `GRE_KEY` bit in `IFLA_GRE_IFLAGS` is what says whether they mean anything. Reading the flag is what stops a document asking for `key = 0` from differing from itself on every reconcile.
@@ -670,7 +673,10 @@ Kept current deliberately: this is the section to read after a break, and the on
 
 **Read this first after a break, and rewrite it rather than appending to it.**
 Last rewritten after the session that **closed**
-[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s list:
+[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s list --
+and then found, while looking for the local reason to observe a parent, that a
+VXLAN's and a tunnel's parent had never reached the kernel at all
+([0060](docs/decisions/0060-a-parent-is-one-word-and-two-attributes.md)):
 every link kind's own settings are now compared against what the kernel holds,
 the VLAN last and by the only route the kernel allows — deleting the interface
 and making it again
@@ -874,9 +880,11 @@ it: a link netcfgd has no record of creating gets a sentence and is left alone. 
 guard refuses the whole sequence, delete and backend stop together, rather than
 half of it.
 
-**What is still silent**, so that nobody assumes otherwise: **a macvlan's
-parent**, which the kernel also accepts and ignores. Same answer, same remedy,
-and nothing has asked for it.
+**Nothing on that list is silent any more.** A macvlan's and a VLAN's parent were
+the last of it, and they are remade like a VLAN's id
+([0060](docs/decisions/0060-a-parent-is-one-word-and-two-attributes.md)) — while a
+VXLAN's and a tunnel's move in place, because a parent is one word in the document
+and two different attributes to the kernel.
 
 #### Explaining it
 
@@ -950,15 +958,15 @@ match.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **The shim's remaining device types, which are now unblocked rather than
-   forbidden.** `.Device.Vlan` wants an id and a parent, and `.Device.IPTunnel` a
-   local and a remote; the observation carries the id and both endpoints because
-   0058 and 0059 needed them for a local reason, which is the direction
-   constraint 6 requires and the road a bridge, a bond and a WireGuard tunnel all
-   took. **The parent is the piece still missing** for a VLAN, and it should be
-   added for a local reason too or not at all — a macvlan's parent being silently
-   ignored by the kernel is one, and is the last thing on 0057's list that nothing
-   compares.
+2. **The shim's remaining device types, which have everything they need now.**
+   `.Device.Vlan` wants an id and a parent and `.Device.IPTunnel` a local, a remote
+   and a parent; every one of those is in the observation, put there by 0058, 0059
+   and [0060](docs/decisions/0060-a-parent-is-one-word-and-two-attributes.md) for
+   local reasons — which is the direction constraint 6 requires and the road a
+   bridge, a bond and a WireGuard tunnel all took. **No model change is needed**,
+   which is the whole point of having done it in that order. Looking for the local
+   reason is also what found the parent defect below, so the order paid for itself
+   twice.
 
 3. **Nothing else on the "is it still what the document says?" question is
    open.** Daemons, kernel objects, secrets and unread files all have an answer,
@@ -985,6 +993,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **~~An interface that exists as the wrong kind is not recreated, and nothing says so.~~ Closed** ([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)), in the commit after the one that wrote it down. A document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, planned `link.up` and nothing else — netcfgd brought somebody else's device up and called the network configured. It shared its remedy with the VLAN id, which is why one session did both. What is worth keeping from it is the measurement habit that found it: the finding came from asking what *else* would fall into the safe direction of the new comparisons, not from a test.
+- **The place to look for a defect is the half nobody asked about.** The parent was being read for the shim's sake and the question was whether the model may grow a field. Asking instead "what does netcfgd currently *do* with a parent" found that two kinds never sent one to the kernel, in a code path that had been green for years -- the `parent` in the document, the `parent` in the plan and the successful apply all agreed, and the kernel had no underlay. Constraint 6's discipline of finding a local reason before adding a field for an adapter is what pointed at it, which is an argument for the constraint beyond the one it was written for.
 - **A break that hits two protections proves nothing about either.** Disabling the recreation pass's ownership check by replacing `if !link.ownership.may_remove() {` also disabled `teardown_links`', because the line is identical in both -- eight fixtures went red and none of them said which protection had gone. The re-run with a unique anchor failed exactly one. Section 9 already warns about a check that passes because of a *different* protection; this is the same disease in the break rather than in the check.
 - **A fake that leaves a field blank makes a loop look like convergence.** The fixture harness's simulated `link.create` produced an empty link with the right name, so a remade VLAN came back with no id at all -- and the second plan found nothing to compare and called that agreement. Every comparison 0057 to 0059 added was invisible to the idempotence gate for the same reason. The fake now fills in what the kernel would report about the device it just made, with the fields the document does *not* state deliberately left absent, because that is also what the kernel does.
 - **A reference tool can hide the kernel's behaviour by being helpful.** `ip link set tun0 type gre remote X` keeps the tunnel's key and local address, which looks like the kernel merging a partial update. It is not: `ip` reads the device and refills every field before it sends anything. Forty lines of python sending one raw attribute said the opposite, and the design turned on which answer was true. Section 9's advice is to prefer a reference tool over a fixture, and this is its limit — a reference tool answers "what does this command do", and sometimes the question is "what does the kernel do".

@@ -91,6 +91,15 @@ pub struct ObservedLink {
 	/// Bridge or bond this link is enslaved to.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub master: Option<String>,
+	/// The device this virtual link rides on, where it has one.
+	///
+	/// A VLAN's and a macvlan's parent, a tunnel's and a `VXLAN`'s underlay: one
+	/// field, because the document has one word for all four. What the kernel does
+	/// with a *changed* one is two answers, though -- a VXLAN and a tunnel move,
+	/// while a VLAN and a macvlan accept the request and ignore it, so the second
+	/// pair is corrected by remaking the interface (0059, 0060).
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub parent: Option<String>,
 	/// Which of the offloads netcfgd manages are currently on.
 	///
 	/// Kernel feature names, and only the ones the model can express -- a

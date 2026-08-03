@@ -9,6 +9,7 @@
       "mtu": 1500,
       "mac": "02:00:00:00:00:01",
       "master": "br0",
+      "parent": "eth0",
       "offloads": [
         "rx-checksum",
         "tx-checksum-ip-generic"
@@ -81,6 +82,7 @@
       "mtu": 1500,
       "mac": "02:00:00:00:00:01",
       "master": "br0",
+      "parent": "eth0",
       "offloads": [
         "rx-checksum",
         "tx-checksum-ip-generic"
@@ -153,6 +155,7 @@
       "mtu": 1500,
       "mac": "02:00:00:00:00:01",
       "master": "br0",
+      "parent": "eth0",
       "offloads": [
         "rx-checksum",
         "tx-checksum-ip-generic"

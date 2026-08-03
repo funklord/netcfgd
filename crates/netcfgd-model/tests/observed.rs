@@ -177,6 +177,7 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		mtu: 1500,
 		mac: Some("02:00:00:00:00:01".to_owned()),
 		master: Some("br0".to_owned()),
+		parent: Some("eth0".to_owned()),
 		offloads: vec![
 			"rx-checksum".to_owned(),
 			"tx-checksum-ip-generic".to_owned(),

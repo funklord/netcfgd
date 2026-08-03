@@ -153,6 +153,13 @@ fn observed_link(
 		master: link
 			.master
 			.and_then(|index| link_name(snapshot, index).map(ToOwned::to_owned)),
+		// A name rather than an index, for the reason a master is a name: the
+		// document names interfaces and an index is a number the kernel handed
+		// out. An index with no name in this snapshot is a device in another
+		// namespace, which reads as "no parent netcfgd can talk about".
+		parent: link
+			.parent
+			.and_then(|index| link_name(snapshot, index).map(ToOwned::to_owned)),
 		// The kernel has no protocol field for links, so this can only
 		// come from what netcfgd wrote down. A link nobody recorded is
 		// never deleted, which is the conservative direction.
@@ -419,6 +426,7 @@ mod tests {
 			mtu: 1500,
 			mac: None,
 			master: None,
+			parent: None,
 			ipv6_token: None,
 		}
 	}
