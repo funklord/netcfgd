@@ -81,6 +81,26 @@ impl BondMode {
 		}
 	}
 
+	/// The mode a kernel number means, where it means one netcfgd can express.
+	///
+	/// The inverse of [`BondMode::number`], and beside it so the two cannot
+	/// drift. `None` for a number this build has no name for, which is a bond
+	/// somebody else configured -- and reporting that as a mode netcfgd knows
+	/// would have the planner change it.
+	#[must_use]
+	pub fn from_number(number: u8) -> Option<Self> {
+		match number {
+			0 => Some(Self::BalanceRr),
+			1 => Some(Self::ActiveBackup),
+			2 => Some(Self::BalanceXor),
+			3 => Some(Self::Broadcast),
+			4 => Some(Self::Ieee8023ad),
+			5 => Some(Self::BalanceTlb),
+			6 => Some(Self::BalanceAlb),
+			_ => None,
+		}
+	}
+
 	/// The name as the config spells it.
 	#[must_use]
 	pub fn name(self) -> &'static str {

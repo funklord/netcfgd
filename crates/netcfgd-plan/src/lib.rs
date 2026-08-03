@@ -464,6 +464,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		// planning the same work twice cost a session once already.
 		builder.plan_wireguard(interface, observed);
 		builder.plan_bridge(interface, observed);
+		builder.plan_bond(interface, observed);
 	}
 	for interface in &desired.interfaces {
 		builder.plan_interface_contents(interface, observed);
@@ -1160,6 +1161,84 @@ impl Builder {
 				None,
 			);
 		}
+	}
+
+	/// Correct a bond whose own settings the document has moved.
+	///
+	/// The bridge's story in a second kind (0057), and the kernel was asked
+	/// rather than assumed: `ip link set bond0 type bond mode balance-rr` moves
+	/// a live bond, where the same shape of request on a VLAN succeeds and
+	/// changes nothing.
+	///
+	/// A mode netcfgd has no name for is not compared. That is a bond somebody
+	/// else configured with something this build cannot express, and correcting
+	/// it would mean overwriting a choice netcfgd cannot even describe.
+	///
+	/// **And a mode is only settable on a bond with no members.** The kernel
+	/// answers `ENOTEMPTY` otherwise, which the first version of this found by
+	/// failing an apply and then planning the same action again on the next
+	/// reconcile. `miimon` has no such rule and moves on a live bond.
+	fn plan_bond(&mut self, interface: &Interface, observed: &Observed) {
+		let InterfaceKind::Bond(bond) = &interface.kind else {
+			return;
+		};
+		let name = &interface.name;
+		let Some(running) = observed.link(name).and_then(|link| link.bond.clone()) else {
+			return;
+		};
+		let wanted = bond.mode.name();
+		let mode_differs = running.mode.as_deref().is_some_and(|mode| mode != wanted);
+		// The kernel takes a mode only on a bond with no members: with any, it
+		// answers ENOTEMPTY. Asked rather than assumed, and the first version
+		// of this planned the change anyway -- which failed the apply and then
+		// planned it again on the next reconcile, forever.
+		//
+		// So a bond that has members gets a sentence saying what to do instead
+		// of an action that cannot work. Not a refusal: the rest of the plan is
+		// fine, and a bond whose `miimon` also moved still gets that.
+		let enslaved = observed
+			.links
+			.iter()
+			.any(|link| link.master.as_deref() == Some(name.as_str()));
+		if mode_differs && enslaved {
+			self.warn(
+				name,
+				format!(
+					"the mode of {name} is {wanted} in the config and {} in the kernel, and the \
+					 kernel will not change it while the bond has members -- take them out, or \
+					 recreate the bond, or leave the mode alone",
+					running.mode.clone().unwrap_or_default()
+				),
+			);
+		}
+		let field = if mode_differs && !enslaved {
+			Some((
+				"bond.mode",
+				wanted.to_owned(),
+				running.mode.clone().unwrap_or_default(),
+			))
+		} else if bond.miimon.is_some() && bond.miimon != running.miimon {
+			Some((
+				"bond.miimon",
+				render_millis(bond.miimon),
+				render_millis(running.miimon),
+			))
+		} else {
+			None
+		};
+		let Some((field, desired, seen)) = field else {
+			return;
+		};
+		let gate = self.gate(name);
+		self.push(
+			Op::LinkSetBond {
+				name: name.clone(),
+				mode: field == "bond.mode",
+			},
+			Reason::differs(name, field, desired, seen),
+			gate,
+			None,
+		);
 	}
 
 	/// Correct a bridge whose own settings the document has moved.
@@ -3435,6 +3514,11 @@ fn render_peers(peers: &[ObservedWgPeer]) -> String {
 		.map(|peer| peer.public_key.render())
 		.collect::<Vec<_>>()
 		.join(" ")
+}
+
+/// Milliseconds, or `<absent>`.
+fn render_millis(value: Option<u32>) -> String {
+	value.map_or_else(|| "<absent>".to_owned(), |value| format!("{value}ms"))
 }
 
 /// Seconds, or `<absent>` where the document or the kernel says nothing.
