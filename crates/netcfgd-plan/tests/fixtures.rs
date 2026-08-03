@@ -44,6 +44,7 @@ fn link(name: &str) -> ObservedLink {
 		ownership: Ownership::Unknown,
 		private_key_loaded: false,
 		wireguard: None,
+		bridge: None,
 	}
 }
 
@@ -4630,5 +4631,83 @@ interface wg0 {
 			.iter()
 			.map(|action| (action.op.name(), action.reason.field.clone()))
 			.collect::<Vec<_>>()
+	);
+}
+
+/// A bridge whose settings the document moved is corrected.
+///
+/// Decision 0057. `stp` and `forward_delay` went over the wire inside
+/// `link.create` and were never sent again, so editing either planned nothing
+/// -- and a bridge's name encodes nothing, so unlike a VLAN there was no second
+/// signal to notice instead.
+#[test]
+fn an_edited_bridge_setting_is_planned() {
+	let desired = document(
+		r#"
+interface br0 {
+	bridge { stp = false; forward_delay = 20 }
+	config = "10.4.0.1/24"
+}
+"#,
+	);
+	let mut observed = observed_with(&["br0"]);
+	"bridge".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].bridge = Some(netcfgd_model::ObservedBridge {
+		stp: true,
+		forward_delay: Some(4),
+		hello_time: Some(2),
+		ageing_time: Some(300),
+		priority: Some(32_768),
+		vlan_filtering: false,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetBridge { .. }))
+		.expect("an edited bridge setting is corrected");
+	assert_eq!(action.reason.field, "bridge.stp");
+}
+
+/// A bridge that matches its document plans nothing, twice over.
+///
+/// The check that catches a comparison in the wrong units. The kernel counts
+/// hundredths of a second and the document counts seconds, so a reader that
+/// forgot to divide would make every bridge differ from itself by a factor of a
+/// hundred -- which is the same shape as the 40ms forward delay `links.sh`
+/// exists partly to have caught.
+#[test]
+fn a_bridge_matching_its_document_plans_nothing() {
+	let desired = document(
+		r#"
+interface br0 {
+	bridge { stp = true; forward_delay = 4 }
+	config = "10.4.0.1/24"
+}
+"#,
+	);
+	let mut observed = observed_with(&["br0"]);
+	"bridge".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].bridge = Some(netcfgd_model::ObservedBridge {
+		stp: true,
+		forward_delay: Some(4),
+		// What the document does not state is the kernel's, and comparing it
+		// would rebuild a bridge on every reconcile -- 0052's band rule.
+		hello_time: Some(2),
+		ageing_time: Some(300),
+		priority: Some(32_768),
+		vlan_filtering: false,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::LinkSetBridge { .. })),
+		"a bridge that matches its document was corrected"
 	);
 }

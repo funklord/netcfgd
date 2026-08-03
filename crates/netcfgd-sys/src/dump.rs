@@ -33,6 +33,13 @@ pub struct LinkRecord {
 	pub mac: Option<String>,
 	/// Index of the master, where enslaved.
 	pub master: Option<u32>,
+	/// A bridge's own settings, where this link is one.
+	///
+	/// From `IFLA_INFO_DATA` inside the `LINKINFO` nest -- the same place the
+	/// kind comes from, one attribute along. Read because a bridge configured
+	/// at creation and never compared is a bridge whose edited `stp` or
+	/// `forward_delay` does nothing, and the name of a bridge encodes neither.
+	pub bridge: Option<BridgeInfo>,
 	/// The IPv6 interface identifier set with `ip token`, if any.
 	///
 	/// Reported inside `IFLA_AF_SPEC`'s `AF_INET6` block. All-zero means no
@@ -184,6 +191,18 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		.and_then(|attr| attr.u8())
 		.is_none_or(|value| value != 0);
 
+	// Only for a bridge: every kind puts something different in this nest, and
+	// decoding one kind's numbering out of another's is how a VXLAN comes to
+	// report a forward delay.
+	let bridge = (kind == "bridge")
+		.then(|| {
+			attrs
+				.get(ifla::LINKINFO)
+				.and_then(|nest| Attrs::new(nest.value).get(IFLA_INFO_DATA))
+				.map(|data| bridge_info(data.value))
+		})
+		.flatten();
+
 	Some(LinkRecord {
 		index: u32::try_from(info.index).unwrap_or(0),
 		name,
@@ -193,8 +212,68 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		mtu,
 		mac,
 		master,
+		bridge,
 		ipv6_token,
 	})
+}
+
+/// What a bridge reports about itself.
+///
+/// In the units the kernel uses, which are hundredths of a second for the three
+/// timers. The conversion to seconds belongs where the conversion *to* the
+/// kernel already is, so that one place owns it -- a reader that divided here
+/// and a writer that multiplied there is how the same bridge comes to differ
+/// from itself by a factor of a hundred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BridgeInfo {
+	/// Whether spanning tree is on.
+	pub stp: bool,
+	/// Forward delay, in hundredths of a second.
+	pub forward_delay: Option<u32>,
+	/// Hello interval, in hundredths of a second.
+	pub hello_time: Option<u32>,
+	/// Address ageing time, in hundredths of a second.
+	pub ageing_time: Option<u32>,
+	/// Bridge priority.
+	pub priority: Option<u16>,
+	/// Whether the bridge is VLAN-aware.
+	pub vlan_filtering: bool,
+}
+
+/// `IFLA_INFO_DATA`, one along from the kind in the `LINKINFO` nest.
+const IFLA_INFO_DATA: u16 = 2;
+/// The bridge attributes read back, numbered as `if_link.h` numbers them.
+mod ifla_br {
+	pub(super) const FORWARD_DELAY: u16 = 1;
+	pub(super) const HELLO_TIME: u16 = 2;
+	pub(super) const AGEING_TIME: u16 = 4;
+	pub(super) const STP_STATE: u16 = 5;
+	pub(super) const PRIORITY: u16 = 6;
+	pub(super) const VLAN_FILTERING: u16 = 7;
+}
+
+/// Decode a bridge's `INFO_DATA`.
+fn bridge_info(data: &[u8]) -> BridgeInfo {
+	let attrs = Attrs::new(data);
+	BridgeInfo {
+		// The kernel reports the STP *state*, which is 0 for off and non-zero
+		// for a running protocol. A bool is what the document holds.
+		stp: attrs
+			.get(ifla_br::STP_STATE)
+			.and_then(|attr| attr.u32())
+			.is_some_and(|state| state != 0),
+		forward_delay: attrs.get(ifla_br::FORWARD_DELAY).and_then(|a| a.u32()),
+		hello_time: attrs.get(ifla_br::HELLO_TIME).and_then(|a| a.u32()),
+		ageing_time: attrs.get(ifla_br::AGEING_TIME).and_then(|a| a.u32()),
+		priority: attrs
+			.get(ifla_br::PRIORITY)
+			.and_then(|a| a.u32())
+			.and_then(|value| u16::try_from(value).ok()),
+		vlan_filtering: attrs
+			.get(ifla_br::VLAN_FILTERING)
+			.and_then(|attr| attr.u8())
+			.is_some_and(|value| value != 0),
+	}
 }
 
 /// Decode one `RTM_NEWADDR` payload.

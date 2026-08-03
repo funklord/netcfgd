@@ -193,6 +193,16 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		// function exists: a field with no sample is a field the witness cannot
 		// notice changing, which is how three socket messages went unpinned for
 		// a whole milestone.
+		// Every field again, for the reason the WireGuard block below carries
+		// every one of its own.
+		bridge: Some(netcfgd_model::ObservedBridge {
+			stp: true,
+			forward_delay: Some(4),
+			hello_time: Some(2),
+			ageing_time: Some(300),
+			priority: Some(32_768),
+			vlan_filtering: true,
+		}),
 		wireguard: Some(netcfgd_model::ObservedWireGuard {
 			public_key: Some(key(0x11)),
 			listen_port: Some(51820),

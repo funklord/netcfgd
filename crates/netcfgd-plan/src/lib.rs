@@ -463,6 +463,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		// runs later is the one a tunnel's dial lives in -- which is where
 		// planning the same work twice cost a session once already.
 		builder.plan_wireguard(interface, observed);
+		builder.plan_bridge(interface, observed);
 	}
 	for interface in &desired.interfaces {
 		builder.plan_interface_contents(interface, observed);
@@ -1159,6 +1160,66 @@ impl Builder {
 				None,
 			);
 		}
+	}
+
+	/// Correct a bridge whose own settings the document has moved.
+	///
+	/// The `WireGuard` gap (0054) in the kind whose name encodes nothing. A
+	/// bridge's `stp` and `forward_delay` are sent inside `link.create` and were
+	/// never sent again, so editing either planned nothing and changed nothing
+	/// -- and unlike a VLAN, whose id is usually in its name and so becomes a
+	/// different interface, a bridge gives no other signal at all.
+	///
+	/// Only fields the document states are compared, which is the rule 0052
+	/// arrived at with an access point's band: an absent `forward_delay` means
+	/// "whatever the kernel picked", and comparing that against the kernel's
+	/// answer would rebuild a bridge on every reconcile.
+	fn plan_bridge(&mut self, interface: &Interface, observed: &Observed) {
+		let InterfaceKind::Bridge(bridge) = &interface.kind else {
+			return;
+		};
+		let name = &interface.name;
+		let Some(running) = observed.link(name).and_then(|link| link.bridge) else {
+			return;
+		};
+		let differs =
+			|desired: Option<u32>, seen: Option<u32>| desired.is_some() && desired != seen;
+		let field = if bridge.stp != running.stp {
+			Some((
+				"bridge.stp",
+				bridge.stp.to_string(),
+				running.stp.to_string(),
+			))
+		} else if differs(bridge.forward_delay, running.forward_delay) {
+			Some((
+				"bridge.forward_delay",
+				render_seconds(bridge.forward_delay),
+				render_seconds(running.forward_delay),
+			))
+		} else if differs(bridge.hello_time, running.hello_time) {
+			Some((
+				"bridge.hello_time",
+				render_seconds(bridge.hello_time),
+				render_seconds(running.hello_time),
+			))
+		} else {
+			None
+		};
+		let Some((field, desired, seen)) = field else {
+			return;
+		};
+		let gate = self.gate(name);
+		self.push(
+			Op::LinkSetBridge { name: name.clone() },
+			Reason::differs(name, field, desired, seen),
+			gate,
+			// Reversible in principle and not offered: what the bridge had is
+			// in the observation, but the op carries no values -- the executor
+			// reads them from the document, which by then says the new thing.
+			// An inverse that re-applied the document would be a revert that
+			// changes nothing, which is worse than saying there is none.
+			None,
+		);
 	}
 
 	/// MTU, MAC and enslavement, all of which must precede rule 2's consumers.
@@ -3374,6 +3435,11 @@ fn render_peers(peers: &[ObservedWgPeer]) -> String {
 		.map(|peer| peer.public_key.render())
 		.collect::<Vec<_>>()
 		.join(" ")
+}
+
+/// Seconds, or `<absent>` where the document or the kernel says nothing.
+fn render_seconds(value: Option<u32>) -> String {
+	value.map_or_else(|| "<absent>".to_owned(), |value| format!("{value}s"))
 }
 
 fn render_option(value: Option<u16>) -> String {

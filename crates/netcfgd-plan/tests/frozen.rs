@@ -106,6 +106,7 @@ fn every_op() -> Vec<Op> {
 		Op::WifiSetRegdom { .. } => "wifi.set_regdom",
 		Op::AccessControlAdd { .. } => "access_control.add",
 		Op::AccessControlDel { .. } => "access_control.del",
+		Op::LinkSetBridge { .. } => "link.set_bridge",
 		Op::WgSetDevice { .. } => "wg.set_device",
 		Op::WgSetPeers { .. } => "wg.set_peers",
 		Op::DnsApply { .. } => "dns.apply",
@@ -148,6 +149,7 @@ fn every_op() -> Vec<Op> {
 		"link.create",
 		"link.delete",
 		"link.down",
+		"link.set_bridge",
 		"link.set_ipv6_token",
 		"link.set_mac",
 		"link.set_master",
@@ -282,6 +284,9 @@ fn every_op_sample() -> Vec<Op> {
 			iface: "wlan0".to_owned(),
 			list: AclPolicy::Allow,
 			station: "02:00:00:00:00:bb".to_owned(),
+		},
+		Op::LinkSetBridge {
+			name: "br0".to_owned(),
 		},
 		Op::WgSetDevice {
 			iface: "wg0".to_owned(),

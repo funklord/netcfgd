@@ -192,6 +192,16 @@ pub enum Op {
 		/// ISO 3166-1 alpha-2.
 		country: String,
 	},
+	/// Set a bridge's own settings on a bridge that already exists.
+	///
+	/// Separate from `link.create`, which carries them for a bridge being made.
+	/// The kernel takes them as one `RTM_NEWLINK` either way, and the executor
+	/// has always had one function for both -- what was missing was anything
+	/// that emitted this (decision 0057).
+	LinkSetBridge {
+		/// Interface name.
+		name: String,
+	},
 	/// Configure a `WireGuard` device.
 	WgSetDevice {
 		/// Interface name.
@@ -364,6 +374,7 @@ impl Op {
 			Self::WifiSetRegdom { .. } => "wifi.set_regdom",
 			Self::AccessControlAdd { .. } => "access_control.add",
 			Self::AccessControlDel { .. } => "access_control.del",
+			Self::LinkSetBridge { .. } => "link.set_bridge",
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
@@ -412,6 +423,10 @@ impl Op {
 			| Self::WifiAssociate { .. }
 			| Self::WgSetDevice { .. }
 			| Self::WgSetPeers { .. }
+			// Spanning tree converging is a bridge not forwarding for as long
+			// as the forward delay says, which on a live bridge is traffic
+			// stopping.
+			| Self::LinkSetBridge { .. }
 			// Removing a VLAN from a port stops traffic in it reaching that
 			// port, which is the same kind of interruption as taking an
 			// address away.
@@ -503,6 +518,7 @@ impl Op {
 			| Self::LinkUp { name }
 			| Self::LinkSetIpv6Token { name, .. }
 			| Self::LinkSetOffloads { name, .. }
+			| Self::LinkSetBridge { name }
 			| Self::LinkDown { name } => Some(name),
 			Self::BridgeVlanAdd { iface, .. }
 			| Self::BridgeVlanDel { iface, .. }
