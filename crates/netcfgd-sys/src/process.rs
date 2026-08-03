@@ -13,6 +13,40 @@
 //! are recycled.
 
 use std::io;
+use std::path::Path;
+
+/// The pid in a file, if the process it names is alive and is the one expected.
+///
+/// **A pid file outlives the process it names, and pids are recycled.** So the
+/// pid is only half an answer: the other half is `/proc/<pid>/cmdline`, read
+/// NUL-separated so that `marker` has to be a *whole argument* rather than a
+/// substring of one. `None` covers every way of not knowing -- no file, no
+/// number in it, no such process, or a process that is somebody else's.
+///
+/// The marker should be as specific as the caller can make it. A path netcfgd
+/// chose -- an options file, a management socket, a generated configuration --
+/// is unique to one daemon on one machine; an interface name is a short string
+/// an unrelated command line could contain, and is what to use only when there
+/// is nothing better.
+///
+/// One function because this rule was written four times: `pppd`'s pid, radvd's,
+/// the `DHCP` clients' and a tunnel's. Four copies of a rule is how two of them
+/// come to disagree about what counts as ownership -- and this one is a security
+/// property, not a convenience: it is what stands between netcfgd and signalling
+/// a process somebody else started.
+#[must_use]
+pub fn pid_of(path: &Path, marker: &str) -> Option<i32> {
+	let text = std::fs::read_to_string(path).ok()?;
+	let pid: i32 = text.trim().lines().next()?.trim().parse().ok()?;
+	if pid <= 0 {
+		return None;
+	}
+	let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+	cmdline
+		.split(|byte| *byte == 0)
+		.any(|argument| argument == marker.as_bytes())
+		.then_some(pid)
+}
 
 /// Ask a process to terminate.
 ///
