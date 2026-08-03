@@ -1858,20 +1858,10 @@ fn start_backend(
 	use netcfgd_model::BackendKind;
 	match kind {
 		BackendKind::Dhcp4 => {
-			// The metric matters as much as the address on a machine with two
-			// uplinks: the lease's default route has to lose to the wired one
-			// or win over the wifi, and the client is what installs it. This
-			// was a field in the model that reached nothing until carrier
-			// switching needed it.
+			// Where the metric goes, and why it is dhcpcd's alone, is on
+			// `dhcpcd_start_args`. It was a field in the model that reached
+			// nothing until carrier switching needed it.
 			let metric = metric.map(|value| value.to_string());
-			let mut dhcpcd = vec!["-b".to_owned(), "-4".to_owned()];
-			if let Some(metric) = &metric {
-				dhcpcd.push("-m".to_owned());
-				dhcpcd.push(metric.clone());
-				// busybox udhcpc has no metric option; its script does the
-				// routing. Saying so beats passing a flag it would reject.
-			}
-			dhcpcd.push(iface.to_owned());
 
 			// udhcpc needs a script and a pid file, and netcfgd used to pass
 			// neither: without `-s` the client obtains a lease and configures
@@ -1881,8 +1871,7 @@ fn start_backend(
 			// dhcpcd gets one too, for the nameservers and to stop its own hooks
 			// writing resolv.conf behind netcfgd's back (0066).
 			let hook = write_dhcpcd_script(iface)?;
-			dhcpcd.insert(0, "-c".to_owned());
-			dhcpcd.insert(1, hook.display().to_string());
+			let dhcpcd = dhcpcd_start_args(iface, metric.as_deref(), &hook.display().to_string());
 			let udhcpc = vec![
 				"-b".to_owned(),
 				"-i".to_owned(),
@@ -1932,6 +1921,52 @@ fn start_backend(
 			"the {other:?} backend is not implemented in this build"
 		)),
 	}
+}
+
+/// The family flag netcfgd runs dhcpcd with.
+///
+/// One constant because it is two decisions that have to be the same one: what
+/// dhcpcd does, and which pid file it does it under. See [`dhcpcd_stop_args`].
+const DHCPCD_FAMILY: &str = "-4";
+
+/// What netcfgd starts dhcpcd with.
+///
+/// `-4` because netcfgd owns IPv6 addressing itself -- a dhcpcd left to its own
+/// devices would also do `DHCPv6` and SLAAC on the interface, which is two
+/// things configuring one link.
+///
+/// The metric matters as much as the address on a machine with two uplinks: the
+/// lease's default route has to lose to the wired one or win over the wifi, and
+/// the client is what installs it. busybox udhcpc has no metric option -- its
+/// script does the routing -- so this is the one thing the two clients cannot do
+/// the same way.
+fn dhcpcd_start_args(iface: &str, metric: Option<&str>, hook: &str) -> Vec<String> {
+	let mut args = vec![
+		"-c".to_owned(),
+		hook.to_owned(),
+		"-b".to_owned(),
+		DHCPCD_FAMILY.to_owned(),
+	];
+	if let Some(metric) = metric {
+		args.push("-m".to_owned());
+		args.push(metric.to_owned());
+	}
+	args.push(iface.to_owned());
+	args
+}
+
+/// What stops it, which has to name the same family the start did.
+///
+/// **dhcpcd's pid file carries the family in its name.** A client started with
+/// `-4` writes `<rundir>/<iface>-4.pid`, and `dhcpcd -k <iface>` looks for
+/// `<iface>.pid`, finds nothing, prints "dhcpcd is not running" and exits 1 --
+/// which netcfgd ignored, because that is also what a machine with no dhcpcd at
+/// all says. So dropping `config = "dhcp"` from a document reported a stopped
+/// backend while a real dhcpcd kept renewing the lease and holding the address.
+/// Measured against dhcpcd 10.1.0 in `tests/live/dhcpcd.sh`, which is the first
+/// thing here to have run a real one. Decision 0070.
+fn dhcpcd_stop_args(iface: &str) -> Vec<String> {
+	vec![DHCPCD_FAMILY.to_owned(), "-k".to_owned(), iface.to_owned()]
 }
 
 /// Which `DHCPv6` client can serve what the document asked for.
@@ -2783,13 +2818,21 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 	use netcfgd_model::BackendKind;
 	match kind {
 		BackendKind::Dhcp4 => {
-			// Whichever client is running. `dhcpcd -k` stops a dhcpcd and does
+			// Whichever client is running. `dhcpcd -4 -k` stops a dhcpcd and does
 			// nothing to a udhcpc, which netcfgd used to leave running forever --
 			// there was no pid file to find it by. Now there is, and the pid is
 			// checked against `/proc/<pid>/cmdline` before anything is signalled,
 			// for the reason `pppd_pid` does it: a pid file outlives the process it
 			// names and pids are recycled. Decision 0065.
-			match Command::new("dhcpcd").args(["-k", iface]).status() {
+			//
+			// The status is deliberately not checked: "dhcpcd is not running" is
+			// exit 1, and that is the ordinary answer on every machine where the
+			// client is udhcpc. Which is why the missing `-4` was invisible --
+			// see `dhcpcd_stop_args` and decision 0070.
+			match Command::new("dhcpcd")
+				.args(dhcpcd_stop_args(iface))
+				.status()
+			{
 				Ok(_) => {}
 				Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
 				Err(error) => return Err(format!("could not stop dhcpcd on {iface}: {error}")),
@@ -2896,6 +2939,43 @@ mod tests {
 		assert_eq!(dhcp6_client(false, false, "wan0"), Ok("dhcpcd"));
 		assert_eq!(dhcp6_client(false, true, "wan0"), Ok("odhcp6c"));
 		assert_eq!(dhcp6_client(true, true, "wan0"), Ok("odhcp6c"));
+	}
+
+	/// Starting and stopping name the same family, because dhcpcd's pid file
+	/// carries it.
+	///
+	/// The two argument lists are the second-list problem this repository has
+	/// already been bitten by, and the answer is the one it settled on there: the
+	/// test iterates one list and asserts the other agrees. A `-4` added to the
+	/// start alone is a client netcfgd can no longer stop, which is what shipped
+	/// until a real dhcpcd was run. Decision 0070.
+	#[test]
+	fn a_client_is_stopped_the_way_it_was_started() {
+		let start =
+			super::dhcpcd_start_args("eth0", Some("512"), "/run/netcfgd/dhcpcd/eth0.script");
+		let stop = super::dhcpcd_stop_args("eth0");
+		let family: Vec<&String> = start
+			.iter()
+			.filter(|argument| matches!(argument.as_str(), "-4" | "-6"))
+			.collect();
+		assert_eq!(
+			family.len(),
+			1,
+			"the start names no family, or more than one: {start:?}"
+		);
+		assert!(
+			stop.contains(family[0]),
+			"the stop does not name {}, so it looks for the wrong pid file: {stop:?}",
+			family[0]
+		);
+		// And both name the interface, which is the other half of the pid file.
+		assert!(start.contains(&"eth0".to_owned()));
+		assert!(stop.contains(&"eth0".to_owned()));
+		// The metric reaches the client rather than being carried and dropped.
+		assert!(start.windows(2).any(|pair| pair == ["-m", "512"]));
+		assert!(super::dhcpcd_start_args("eth0", None, "/x")
+			.iter()
+			.all(|argument| argument != "-m"));
 	}
 }
 
