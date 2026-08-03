@@ -147,6 +147,23 @@ contains "and its monitoring interval" "$(detail bond0)"  "miimon 100"
 
 # The kernel counts forward delay in hundredths of a second and the config
 # counts it in seconds, because that is what every other tool uses. 4 -> 400.
+# A bond's monitoring interval moves on a live bond; its *mode* does not, and
+# the kernel says so with ENOTEMPTY rather than by ignoring it. The first
+# version of decision 0057's bond half planned the mode anyway, which failed the
+# apply and then planned the same thing again on the next reconcile -- and, in
+# the same message, stopped the interval being set at all.
+sed -i 's/mode = "active-backup"; miimon = 100/mode = "balance-rr"; miimon = 250/' \
+	"$work/etc/netcfgd.conf"
+bond_plan=$("$ncfg" plan 2>&1 || true)
+contains "an edited miimon is planned" "$bond_plan" "bond.miimon"
+contains "and the mode is explained rather than attempted" "$bond_plan" \
+	"will not change it while the bond has members"
+"$ncfg" apply > "$work/apply-bond.txt" 2>&1 || { cat "$work/apply-bond.txt" >&2; exit 1; }
+contains "the kernel took the interval" "$(detail bond0)" "miimon 250"
+contains "and kept the mode it will not change" "$(detail bond0)" "mode active-backup"
+contains "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
 contains "a bridge gets spanning tree" "$(detail br0)"    "stp_state 1"
 contains "and its forward delay, converted" "$(detail br0)" "forward_delay 400"
 
