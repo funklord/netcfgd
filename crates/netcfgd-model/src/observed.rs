@@ -236,6 +236,15 @@ pub struct ObservedWgPeer {
 	/// hand back a secret and not an accident to work around.
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub preshared_key: bool,
+	/// Whether the preshared key this peer holds is the one the store has now.
+	///
+	/// The peer-sized twin of [`ObservedWireGuard::key_matches`], and the same
+	/// digest comparison for the same reason: the kernel returns a preshared
+	/// key **zeroed**, so `preshared_key` above can only say whether there is
+	/// one. `None` where netcfgd has no record, where the secret will not
+	/// resolve, and for every peer that has no preshared key at all.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub preshared_matches: Option<bool>,
 	/// Where it is, as `host:port`, where it has an endpoint.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub endpoint: Option<String>,

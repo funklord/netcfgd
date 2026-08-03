@@ -85,6 +85,53 @@ fn read_wireguard_currency(
 		};
 		state.key_matches =
 			Some(netcfgd_model::hash::sha256_hex(&decoded_key(secret.expose())) == recorded.trim());
+		read_preset_currency(state, run_dir, &link.name, config, &resolver);
+	}
+}
+
+/// Whether each peer's preshared key is still the one the store has.
+///
+/// Keyed by public key, which is the only name the kernel and the document
+/// share. A peer with no record and a peer whose secret will not resolve are
+/// both left `None`: "netcfgd cannot tell" is not "it changed", and the second
+/// one would replace a whole peer list over an unreadable file.
+fn read_preset_currency(
+	state: &mut netcfgd_model::ObservedWireGuard,
+	run_dir: &Path,
+	iface: &str,
+	config: &netcfgd_model::interface::WireGuardConfig,
+	resolver: &netcfgd_secret::Resolver,
+) {
+	let Ok(recorded) =
+		fs::read_to_string(netcfgd_apply::kernel::preset_record_path(run_dir, iface))
+	else {
+		return;
+	};
+	for peer in &mut state.peers {
+		if !peer.preshared_key {
+			continue;
+		}
+		let rendered = peer.public_key.render();
+		let Some(digest) = recorded.lines().find_map(|line| {
+			line.split_once(' ')
+				.filter(|(key, _)| *key == rendered)
+				.map(|(_, digest)| digest.trim())
+		}) else {
+			continue;
+		};
+		let Some(reference) = config
+			.peers
+			.iter()
+			.find(|wanted| wanted.public_key == peer.public_key)
+			.and_then(|wanted| wanted.preshared_key.as_ref())
+		else {
+			continue;
+		};
+		let Ok(secret) = resolver.resolve(reference) else {
+			continue;
+		};
+		peer.preshared_matches =
+			Some(netcfgd_model::hash::sha256_hex(&decoded_key(secret.expose())) == digest);
 	}
 }
 
@@ -149,6 +196,9 @@ fn carried(state: &netcfgd_sys::wg::DeviceState) -> netcfgd_model::ObservedWireG
 		.map(|peer| netcfgd_model::ObservedWgPeer {
 			public_key: netcfgd_model::Key::from_bytes(peer.public_key),
 			preshared_key: peer.has_preshared_key,
+			// Filled in by `read_preset_currency`, which needs the document
+			// and the store; the netlink reply alone cannot answer it.
+			preshared_matches: None,
 			endpoint: peer.endpoint.map(|endpoint| endpoint.to_string()),
 			allowed_ips: {
 				let mut prefixes: Vec<String> = peer
