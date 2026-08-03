@@ -106,7 +106,7 @@ pub fn run(hook: &HookRef, env: &HookEnv) -> Outcome {
 	let mut command = Command::new(&hook.path);
 	command
 		.env("NCFG_IFACE", &env.iface)
-		.env("NCFG_PHASE", phase_name(hook.phase));
+		.env("NCFG_PHASE", hook.phase.name());
 	if let Some(reason) = &env.reason {
 		command.env("NCFG_REASON", reason);
 	}
@@ -132,24 +132,6 @@ fn fail(phase: HookPhase, message: String) -> Outcome {
 		Outcome::Vetoed(message)
 	} else {
 		Outcome::Noted(message)
-	}
-}
-
-/// The phase name a hook sees in `NCFG_PHASE`.
-#[must_use]
-pub fn phase_name(phase: HookPhase) -> &'static str {
-	match phase {
-		HookPhase::PreUp => "pre_up",
-		HookPhase::Up => "up",
-		HookPhase::PostUp => "post_up",
-		HookPhase::PreDown => "pre_down",
-		HookPhase::Down => "down",
-		HookPhase::PostDown => "post_down",
-		HookPhase::Carrier => "carrier",
-		HookPhase::Lease => "lease",
-		HookPhase::Roam => "roam",
-		HookPhase::Portal => "portal",
-		HookPhase::Drift => "drift",
 	}
 }
 

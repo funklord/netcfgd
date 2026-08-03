@@ -687,6 +687,7 @@ mod tests {
 				qdisc_ingress: false,
 				ingress_redirect: None,
 				forwarding: None,
+				privacy: None,
 				ownership: Ownership::Unknown,
 				private_key_loaded: false,
 				wireguard: None,

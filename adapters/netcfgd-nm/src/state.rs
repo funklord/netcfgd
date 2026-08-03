@@ -1056,6 +1056,7 @@ mod tests {
 			qdisc_ingress: false,
 			ingress_redirect: None,
 			forwarding: None,
+			privacy: None,
 			ownership: netcfgd_model::Ownership::Unknown,
 			private_key_loaded: false,
 			wireguard: None,
