@@ -401,14 +401,18 @@ pub enum Op {
 		phase: HookPhase,
 		/// Absolute path to the script.
 		path: String,
-		/// The address in play, where the phase has one.
+		/// What happened, for the phases that are events rather than lifecycle
+		/// points.
 		///
-		/// `NCFG_ADDR` in the script's environment. Set for a `lease`, whose whole
-		/// subject is an address that arrived; `None` everywhere else, because a
-		/// `pre_up` hook runs before there is one and a `down` hook can read what
-		/// is still on the interface itself.
+		/// A `lease`'s address, or a `carrier`'s `up` or `down`. The executor puts it
+		/// in the variable the phase's own vocabulary names -- `NCFG_ADDR` for one
+		/// and `NCFG_REASON` for the other -- and netcfgd records it, which is how an
+		/// event hook fires once per event instead of once per reconcile.
+		///
+		/// `None` for the lifecycle phases: a `pre_up` hook runs before there is an
+		/// address and a `down` hook can read what is still on the interface itself.
 		#[serde(skip_serializing_if = "Option::is_none", default)]
-		address: Option<String>,
+		value: Option<String>,
 	},
 	/// Start a commit-confirm window.
 	CommitArm {

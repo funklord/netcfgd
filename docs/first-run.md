@@ -240,11 +240,16 @@ takes the id of a `network` block, not an SSID from a scan. Adding a new
 network means editing the config, which needs the `admin` tier. `ncfg wifi
 scan` marks which networks in range you can actually join.
 
-**Five of the eleven hook phases run.** `pre_up`, `post_up`, `down`, `post_down`
-and `lease` fire; `up`, `pre_down`, `carrier`, `roam`, `portal` and `drift` are
-parsed, written into `/run/netcfgd/hooks/` and never executed. `ncfg plan` names
-each one it finds, so this is visible rather than silent -- but if your plan for a
-laptop involved a `carrier` hook, it does not work yet.
+**Six of the eleven hook phases run.** `pre_up`, `post_up`, `down`, `post_down`,
+`lease` and `carrier` fire; `up`, `pre_down`, `roam`, `portal` and `drift` are
+parsed, written into `/run/netcfgd/hooks/` and never executed. `ncfg plan` names each
+one it finds, so this is visible rather than silent.
+
+`on carrier` runs when a cable comes or goes, with `$NCFG_REASON` set to `up` or
+`down` -- and once when netcfgd first looks at the interface, so a script that
+configures something from the current state does not have to wait for a change. On a
+gain it runs after the addressing, so the network works by then; on a loss it runs
+before anything is withdrawn, so it can still stop whatever was using it.
 
 `on lease` fires when an address arrives that netcfgd did not install, which is how
 it notices a DHCP lease without seeing DHCP. `$NCFG_ADDR` carries it. It fires once
