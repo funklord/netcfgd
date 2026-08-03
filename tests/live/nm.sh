@@ -123,6 +123,15 @@ interface br0 {
 	config = "10.6.6.1/24"
 }
 
+# A VLAN, which is the second link kind to leave `Generic` on its own merits
+# (0077). The id and the parent are the two properties libnm asks for that
+# nothing else here has, and netcfgd observes both only because 0059 and 0060
+# needed them for the planner.
+interface tagged0 {
+	vlan { parent = "probe0"; id = 42 }
+	config = "10.42.0.1/24"
+}
+
 # A tunnel, for the one link kind that is not `Generic` to the shim. The
 # private key is written beside this file at run time; nothing here is a key.
 interface wg0 {
@@ -411,6 +420,44 @@ else
 			org.freedesktop.NetworkManager.Device DeviceType 2>/dev/null)" "u 29"
 fi
 
+# --------------------------------------------------------------------- vlan
+#
+# The same lesson the wireguard block above spells out, applied to the second
+# kind that has left `Generic`: read the properties, never the TYPE column,
+# because a generic device whose description is the word `vlan` renders
+# identically to a real one.
+
+if ! command -v busctl >/dev/null 2>&1; then
+	echo "nm.sh: skipping the vlan checks: no busctl to read the properties"
+else
+	vlan_path=$(busctl --user --address="$address" call \
+		org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+		org.freedesktop.NetworkManager GetDeviceByIpIface s tagged0 2>/dev/null |
+		awk '{print $2}' | tr -d '"')
+	vlanprop() {
+		busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$vlan_path" \
+			org.freedesktop.NetworkManager.Device.Vlan "$1" 2>/dev/null
+	}
+	check "the vlan is served as a device" \
+		"$(printf '%s' "$vlan_path" | grep -c '^/org/freedesktop/NetworkManager/Devices/' || true)" "1"
+	# The id the document chose, which cannot arrive by accident and is in no
+	# other property -- the same reasoning the listen port carries above.
+	check "and answers for the tag the document chose" "$(vlanprop VlanId)" "u 42"
+	# The parent as an object path, which is the property that needed 0060: a
+	# parent netcfgd never sent to the kernel could not be read back from it.
+	parent_path=$(busctl --user --address="$address" call \
+		org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+		org.freedesktop.NetworkManager GetDeviceByIpIface s probe0 2>/dev/null |
+		awk '{print $2}' | tr -d '"')
+	check "and points at its parent device, not at a name" \
+		"$(vlanprop Parent)" "o \"$parent_path\""
+	check "and says it is a vlan in the property clients switch on" \
+		"$(busctl --user --address="$address" get-property \
+			org.freedesktop.NetworkManager "$vlan_path" \
+			org.freedesktop.NetworkManager.Device DeviceType 2>/dev/null)" "u 11"
+fi
+
 # ----------------------------------------------------------------- wireless
 
 if [ -z "$fake" ]; then
@@ -501,9 +548,14 @@ else
 	# for one carries the peers and the private key; a bridge's carries neither,
 	# and an 802-3-ethernet profile for a device that is not an ethernet is
 	# already what a dummy gets here and has been since the first version.
+	# `tagged0` is in this list, and its *device* is a VLAN while its *profile*
+	# is the ordinary `802-3-ethernet` one every non-radio block gets. Those are
+	# two different questions: NM's `vlan` connection type carries an id and a
+	# parent in the connection, which is the same information from the other
+	# side and is a separate piece of work (0077).
 	check "every interface block is a profile" \
 		"$(connections | awk -F: '{print $1}' | LC_ALL=C sort | tr '\n' ' ')" \
-		"HomeFiber Prompted br0 port0 probe0 quiet0 "
+		"HomeFiber Prompted br0 port0 probe0 quiet0 tagged0 "
 	# Nor a tunnel's, for the same reason and one more: NM's WireGuard profile
 	# carries the peers and the private key, and this shim projects neither.
 	check "a wireguard interface block is not a profile either" \
