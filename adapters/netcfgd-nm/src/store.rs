@@ -336,8 +336,7 @@ mod tests {
 
 	#[test]
 	fn writing_is_atomic_and_leaves_no_temporary_behind() {
-		let directory = std::env::temp_dir().join(format!("ncfg-nm-store-{}", std::process::id()));
-		std::fs::create_dir_all(&directory).expect("a working directory");
+		let directory = netcfgd_testdir::TestDir::new("nm-store");
 		let path = directory.join("thing.conf");
 		write_atomically(&path, b"first\n", 0o644).expect("the first write");
 		write_atomically(&path, b"second\n", 0o644).expect("the second");
@@ -359,8 +358,7 @@ mod tests {
 	#[test]
 	fn a_secret_is_never_readable_by_anybody_else() {
 		use std::os::unix::fs::PermissionsExt as _;
-		let directory = std::env::temp_dir().join(format!("ncfg-nm-secret-{}", std::process::id()));
-		std::fs::create_dir_all(&directory).expect("a working directory");
+		let directory = netcfgd_testdir::TestDir::new("nm-secret");
 		let path = directory.join("credential");
 		write_atomically(&path, b"hunter2hunter2", 0o600).expect("the write");
 		let mode = std::fs::metadata(&path)

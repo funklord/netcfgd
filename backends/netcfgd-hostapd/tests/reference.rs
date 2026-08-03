@@ -66,8 +66,7 @@ fn psk(proto: PskProto) -> Security {
 /// `N errors found in configuration file` and one or more `Line N:` lines,
 /// which is the whole vocabulary this needs.
 fn complaints(program: &Path, name: &str, text: &str) -> Vec<String> {
-	let dir = std::env::temp_dir().join(format!("ncfg-hostapd-{}", std::process::id()));
-	std::fs::create_dir_all(&dir).expect("a working directory");
+	let dir = netcfgd_testdir::TestDir::new("hostapd");
 	let path = dir.join(format!("{name}.conf"));
 	std::fs::write(&path, text).expect("the configuration is written");
 
@@ -78,7 +77,6 @@ fn complaints(program: &Path, name: &str, text: &str) -> Vec<String> {
 	let said = String::from_utf8_lossy(&output.stdout).into_owned()
 		+ &String::from_utf8_lossy(&output.stderr);
 
-	let _ = std::fs::remove_file(&path);
 	said.lines()
 		.filter(|line| line.starts_with("Line ") || line.contains("errors found in configuration"))
 		.map(std::borrow::ToOwned::to_owned)

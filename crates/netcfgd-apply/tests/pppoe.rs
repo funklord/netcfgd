@@ -83,8 +83,7 @@ fn pppd_is_told_to_leave_routes_alone_and_to_ask_for_resolvers() {
 fn the_two_scripts_differ_where_the_environment_does_not() {
 	use std::process::Command;
 
-	let dir = std::env::temp_dir().join(format!("ncfg-ppp-{}", std::process::id()));
-	std::fs::create_dir_all(&dir).expect("a temporary directory");
+	let dir = netcfgd_testdir::TestDir::new("ppp");
 	let report = dir.join("ppp0");
 
 	let run = |going_up: bool| {
@@ -114,7 +113,6 @@ fn the_two_scripts_differ_where_the_environment_does_not() {
 	assert!(!up.contains("route="), "got:\n{up}");
 
 	let down = run(false);
-	let _ = std::fs::remove_dir_all(&dir);
 	assert!(
 		!down.contains("dns="),
 		"the session is gone and its resolvers with it:\n{down}"

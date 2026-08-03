@@ -9,13 +9,9 @@
 
 use netcfgd_host::contention::{contenders, describe};
 use std::fs;
-use std::path::PathBuf;
 
-fn scratch(name: &str) -> PathBuf {
-	let dir = std::env::temp_dir().join(format!("ncfg-cont-{name}-{}", std::process::id()));
-	let _ = fs::remove_dir_all(&dir);
-	fs::create_dir_all(&dir).expect("scratch");
-	dir
+fn scratch(name: &str) -> netcfgd_testdir::TestDir {
+	netcfgd_testdir::TestDir::new(&format!("cont-{name}"))
 }
 
 fn nm_device(root: &std::path::Path, index: u32, body: &str) {
