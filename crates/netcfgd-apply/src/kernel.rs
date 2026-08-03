@@ -1875,7 +1875,7 @@ fn start_backend(
 				DHCPCD_V4,
 				iface,
 				metric.as_deref(),
-				Some(&hook.display().to_string()),
+				&DhcpcdHooks::Replace(&hook.display().to_string()),
 			);
 			let udhcpc = vec![
 				"-b".to_owned(),
@@ -1936,6 +1936,31 @@ fn start_backend(
 const DHCPCD_V4: &str = "-4";
 const DHCPCD_V6: &str = "-6";
 
+/// dhcpcd's own hooks that write files netcfgd owns.
+///
+/// `20-resolv.conf` and `30-hostname`. The names are the ones `-C` takes, which
+/// matches `<name>`, `NN-<name>` or `NN-<name>.sh` -- read out of
+/// `dhcpcd-run-hooks` itself rather than guessed at from the manual page.
+const DHCPCD_SILENCED: [&str; 2] = ["resolv.conf", "hostname"];
+
+/// What netcfgd does about dhcpcd's own hooks, which is never "nothing".
+///
+/// "Nothing" was the `DHCPv6` branch for as long as it existed, and it meant a
+/// `DHCPv6` lease rewriting `/etc/resolv.conf` on a machine where netcfgd's DNS
+/// mode owns that file -- 0066's contention, alive on the other family. Making
+/// it a type is what stops a third caller doing the same thing again. Decision
+/// 0072.
+enum DhcpcdHooks<'a> {
+	/// Replace the hook directory with netcfgd's own script: `-c`. The `DHCPv4`
+	/// client, which also reports its lease's nameservers through it (0066).
+	Replace(&'a str),
+	/// Keep dhcpcd's hooks and silence the two that fight: `-C`. The `DHCPv6`
+	/// client, which has nothing to report through a script of netcfgd's -- the
+	/// interface report is one file per interface, and a second client writing
+	/// it would clobber the first client's nameservers on every renewal.
+	Silence,
+}
+
 /// What netcfgd starts dhcpcd with.
 ///
 /// One family at a time and never both, because netcfgd decides per address
@@ -1952,12 +1977,20 @@ fn dhcpcd_start_args(
 	family: &str,
 	iface: &str,
 	metric: Option<&str>,
-	hook: Option<&str>,
+	hooks: &DhcpcdHooks<'_>,
 ) -> Vec<String> {
 	let mut args = Vec::new();
-	if let Some(hook) = hook {
-		args.push("-c".to_owned());
-		args.push(hook.to_owned());
+	match hooks {
+		DhcpcdHooks::Replace(hook) => {
+			args.push("-c".to_owned());
+			args.push((*hook).to_owned());
+		}
+		DhcpcdHooks::Silence => {
+			for hook in DHCPCD_SILENCED {
+				args.push("-C".to_owned());
+				args.push(hook.to_owned());
+			}
+		}
 	}
 	args.push("-b".to_owned());
 	args.push(family.to_owned());
@@ -2049,14 +2082,15 @@ fn start_dhcp6(iface: &str, delegating: Option<&netcfgd_model::PdRequest>) -> Re
 			arguments.push(iface.to_owned());
 			run_client("odhcp6c", &arguments, iface)
 		}
-		// No hook: dhcpcd has nothing to report a prefix through, and 0050
-		// refuses the pairing that would want one. What it *does* still do here
-		// is write `/etc/resolv.conf` from a `DHCPv6` lease through its own
-		// hooks, which is 0066's contention unfixed on this side -- see the
-		// open question in decision 0071.
+		// No script of netcfgd's: dhcpcd has nothing to report a prefix
+		// through, and 0050 refuses the pairing that would want one. What it
+		// gets instead is `-C`, because a `DHCPv6` lease's own hooks rewrite
+		// `/etc/resolv.conf` -- measured against a real dnsmasq and a real
+		// dhcpcd, and 0066's contention on the family nobody had run.
+		// Decision 0072.
 		_ => run_client(
 			"dhcpcd",
-			&dhcpcd_start_args(DHCPCD_V6, iface, None, None),
+			&dhcpcd_start_args(DHCPCD_V6, iface, None, &DhcpcdHooks::Silence),
 			iface,
 		),
 	}
@@ -3025,7 +3059,7 @@ mod tests {
 				family,
 				"eth0",
 				Some("512"),
-				Some("/run/netcfgd/dhcpcd/eth0.script"),
+				&super::DhcpcdHooks::Replace("/run/netcfgd/dhcpcd/eth0.script"),
 			);
 			let stop = super::dhcpcd_stop_args(family, "eth0");
 			let named: Vec<&String> = start
@@ -3048,13 +3082,61 @@ mod tests {
 		}
 		// The metric reaches the client rather than being carried and dropped,
 		// and a document that named none passes no flag at all.
-		let ranked = super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", Some("512"), None);
+		let silent = super::DhcpcdHooks::Silence;
+		let ranked = super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", Some("512"), &silent);
 		assert!(ranked.windows(2).any(|pair| pair == ["-m", "512"]));
 		assert!(
-			super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", None, None)
+			super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", None, &silent)
 				.iter()
 				.all(|argument| argument != "-m")
 		);
+	}
+
+	/// dhcpcd's own hooks are either replaced or silenced, and never left alone.
+	///
+	/// "Left alone" is what the `DHCPv6` client had, and it meant a lease
+	/// rewriting `/etc/resolv.conf` on a machine where netcfgd's DNS mode owns
+	/// that file. The type makes it unrepresentable and this walks both arms, so
+	/// a third caller cannot quietly reintroduce it. Decision 0072.
+	#[test]
+	fn dhcpcds_own_hooks_are_never_left_alone() {
+		let replaced = super::dhcpcd_start_args(
+			super::DHCPCD_V4,
+			"eth0",
+			None,
+			&super::DhcpcdHooks::Replace("/run/netcfgd/dhcpcd/eth0.script"),
+		);
+		let silenced =
+			super::dhcpcd_start_args(super::DHCPCD_V6, "eth0", None, &super::DhcpcdHooks::Silence);
+
+		// Replacing the directory covers every hook, so naming one as well would
+		// say something the flag does not mean.
+		assert!(replaced
+			.windows(2)
+			.any(|pair| pair == ["-c", "/run/netcfgd/dhcpcd/eth0.script"]));
+		assert!(!replaced.iter().any(|argument| argument == "-C"));
+
+		// And silencing names each one. `resolv.conf` is the measured half --
+		// `tests/live/dhcpcd.sh` watches a real DHCPv6 lease rewrite that file
+		// without it -- and `hostname` is there because the other client's `-c`
+		// already silences the same hook, so the two families behave alike.
+		for hook in super::DHCPCD_SILENCED {
+			assert!(
+				silenced.windows(2).any(|pair| pair == ["-C", hook]),
+				"the DHCPv6 client leaves {hook} running: {silenced:?}"
+			);
+		}
+		assert!(!silenced.iter().any(|argument| argument == "-c"));
+
+		// Neither arm leaves dhcpcd's hooks entirely alone, which is the whole
+		// of what this is for.
+		for args in [&replaced, &silenced] {
+			assert!(
+				args.iter()
+					.any(|argument| argument == "-c" || argument == "-C"),
+				"dhcpcd's own hooks are left running: {args:?}"
+			);
+		}
 	}
 }
 

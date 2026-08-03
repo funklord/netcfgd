@@ -113,12 +113,15 @@ fi
 
 work=$(mktemp -d /tmp/ncfg-dhcpcd.XXXXXX)
 server=
+dnsmasq_pid=
 cleanup() {
 	# By the handle we were given, and before the namespace goes: a process
 	# outlives the namespace that held it, and `hwsim.sh` left a root daemon
 	# running for exactly this reason. dhcpcd is stopped the way netcfgd stops
 	# it, which is also the thing under test.
 	"$dhcpcd" -4 -k cli >/dev/null 2>&1 || true
+	"$dhcpcd" -6 -k cli >/dev/null 2>&1 || true
+	[ -n "$dnsmasq_pid" ] && kill "$dnsmasq_pid" 2>/dev/null
 	[ -n "$server" ] && kill "$server" 2>/dev/null
 	rm -rf "$work"
 }
@@ -430,6 +433,112 @@ if [ -e "$report" ]; then
 	failures=$((failures + 1))
 else
 	echo "ok   and the report went with it"
+fi
+
+# ------------------------------------------------------------------ DHCPv6
+
+# The other family, which nothing had run either -- and where netcfgd was doing
+# about dhcpcd's own hooks what it had been doing about `-k`: nothing at all. A
+# `DHCPv6` lease's `20-resolv.conf` rewrites /etc/resolv.conf, which is 0066's
+# contention on the side nobody had measured. Decision 0072.
+#
+# dnsmasq is the server: it is one package, it speaks stateful DHCPv6, and it
+# sends the router advertisement whose M flag is what makes a client ask at all.
+if ! command -v dnsmasq >/dev/null 2>&1; then
+	echo "dhcpcd.sh: no dnsmasq, so the DHCPv6 half is not run (apt install dnsmasq-base)"
+else
+	ip -6 addr add 2001:db8:44::1/64 dev srv nodad
+	# The client end needs its link-local to be past duplicate address detection
+	# before anything solicits, which is the same wait `delegation.sh` makes.
+	wait_for '[ "$(ip -6 -o addr show dev srv scope link | grep -c tentative)" = 0 ]' || true
+	dnsmasq --keep-in-foreground --log-facility="$work/dnsmasq.log" \
+		--pid-file="$work/dnsmasq.pid" --dhcp-leasefile="$work/dnsmasq.leases" \
+		--user=root --interface=srv --bind-interfaces --no-resolv --port=0 \
+		--dhcp-range=2001:db8:44::100,2001:db8:44::120,64,300 \
+		--dhcp-option=option6:dns-server,[2001:db8:44::53] \
+		--dhcp-option=option6:domain-search,v6.example \
+		--enable-ra --ra-param=srv,5,300 > "$work/dnsmasq.out" 2>&1 &
+	dnsmasq_pid=$!
+	sleep 1
+	hook_quarters=40
+
+	# The counter-proof again, on this family: dhcpcd's own hooks, and what they
+	# do to a file netcfgd's DNS backend owns.
+	printf 'nameserver 203.0.113.99\n# what was here before dhcpcd ran\n' > "$work/etc-resolv"
+	"$dhcpcd" -6 -b cli > "$work/stock6.log" 2>&1 || true
+	if wait_for 'grep -q 2001:db8:44::53 "$resolv"'; then
+		# How long the whole thing took when it was allowed to happen: client
+		# start, router solicitation, the DHCPv6 exchange and the hook. The
+		# assertion below is a negative one and has no event of its own to wait
+		# for, so it waits twice this -- which is a bound measured on this
+		# machine in this run rather than a sleep somebody guessed.
+		hook_quarters=$waited
+		echo "ok   a DHCPv6 lease's own hooks rewrite the resolver file too"
+	else
+		echo "FAIL a DHCPv6 lease's own hooks rewrite the resolver file too"
+		echo "       $resolv says: $(cat "$resolv")"
+		echo "       dnsmasq said:"
+		sed 's/^/       /' "$work/dnsmasq.log" 2>/dev/null | tail -5
+		failures=$((failures + 1))
+	fi
+	"$dhcpcd" -6 -k cli > /dev/null 2>&1 || true
+	wait_for '! ip -6 -br addr show cli | grep -q 2001:db8:44:' || true
+	printf 'nameserver 203.0.113.99\n# what was here before netcfgd ran\n' > "$work/etc-resolv"
+
+	# And now netcfgd's turn. `dhcp6` alone: no `dns { }` block, because there is
+	# nothing for netcfgd to deliver here -- the point is what dhcpcd must *not*
+	# do behind it.
+	cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface cli {
+	config = "dhcp6"
+}
+CONF
+	"$ncfg" apply > "$work/apply6.log" 2>&1 || {
+		cat "$work/apply6.log" >&2
+		exit 1
+	}
+	contains "netcfgd starts a DHCPv6 client" "$(cat "$work/apply6.log")" "backend.start cli"
+	if wait_for 'ip -6 -br addr show cli | grep -q 2001:db8:44:'; then
+		echo "ok   and a DHCPv6 lease reaches the interface"
+	else
+		echo "FAIL and a DHCPv6 lease reaches the interface"
+		echo "       cli has: $(ip -6 -br addr show cli)"
+		failures=$((failures + 1))
+	fi
+	# dhcpcd installs the address and calls its hooks afterwards, so the lease
+	# arriving does not mean a hook has finished -- and a check that something
+	# did *not* happen is satisfied by it not having happened *yet*. So this
+	# waits twice as long as the counter-proof above needed for the whole
+	# exchange, and only then asks.
+	sleep_quarters=$(( (hook_quarters * 2) + 8 ))
+	waited=0
+	while [ "$waited" -lt "$sleep_quarters" ]; do
+		waited=$((waited + 1))
+		sleep 0.25
+	done
+	missing "and dhcpcd left the resolver file alone this time" \
+		"$(cat "$resolv")" "2001:db8:44::53"
+	check "and the hostname with it" "$(hostname)" "localhost"
+
+	# Stopping it is 0071's arm, from the family that has two clients: there is
+	# no odhcp6c here, so this is the dhcpcd half of it.
+	v6pid=$(cat /run/dhcpcd/cli-6.pid 2>/dev/null || echo 0)
+	cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface cli {
+}
+CONF
+	"$ncfg" apply > "$work/apply6-stop.log" 2>&1 || {
+		cat "$work/apply6-stop.log" >&2
+		exit 1
+	}
+	if [ "$v6pid" -gt 0 ] && wait_for "! kill -0 $v6pid 2>/dev/null"; then
+		echo "ok   and dropping dhcp6 stops the client, which named its own pid file"
+	else
+		echo "FAIL and dropping dhcp6 stops the client, which named its own pid file"
+		echo "       pid $v6pid, and /run/dhcpcd holds $(ls /run/dhcpcd 2>&1)"
+		failures=$((failures + 1))
+	fi
+	kill "$dnsmasq_pid" 2>/dev/null || true
 fi
 
 echo
