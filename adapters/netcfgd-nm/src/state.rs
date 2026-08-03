@@ -870,6 +870,20 @@ impl State {
 
 	/// One link, as last observed.
 	#[must_use]
+	/// Every link the observation carries.
+	///
+	/// For the one question that is about the *relationship* between links
+	/// rather than about one of them: which devices are enslaved to a master.
+	/// The observation records `master` on each link, so the list a bridge
+	/// wants is that field read from the other end.
+	pub(crate) fn links(&self) -> Vec<ObservedLink> {
+		let inner = self
+			.inner
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		inner.observed.links.clone()
+	}
+
 	pub(crate) fn link(&self, interface: &str) -> Option<ObservedLink> {
 		let inner = self
 			.inner
