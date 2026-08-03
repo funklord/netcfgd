@@ -71,8 +71,10 @@ interface flip0 { kind = "dummy"; config = "null" }
 # Everything below came out of the pre-freeze format audit.
 interface mgmt-vrf { vrf { table = 100 }; config = "null" }
 interface base0    { kind = "dummy"; config = "10.7.0.1/24" }
+# A second parent, for the checks that move a virtual link from one to another.
+interface base1    { kind = "dummy"; config = "null" }
 interface mv0      { macvlan { parent = "base0"; mode = "bridge" }; config = "null" }
-interface gre1     { tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2"; key = 42 }; config = "null" }
+interface gre1     { tunnel { mode = "gre"; parent = "base0"; local = "10.7.0.1"; remote = "10.7.0.2"; key = 42 }; config = "null" }
 interface sit1     { tunnel { mode = "sit"; local = "10.7.0.1"; remote = "10.7.0.3"; ttl = 64 }; config = "null" }
 interface gnv0     { tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 }; config = "null" }
 
@@ -209,6 +211,11 @@ contains "and its id"                  "$(detail br0.42)" "id 42"
 contains "a vxlan gets its vni"        "$(detail vx100)"  "id 100"
 contains "and both endpoints"          "$(detail vx100)"  "remote 10.9.0.2 local 10.9.0.1"
 contains "and its port"                "$(detail vx100)"  "dstport 4789"
+# The underlay, which for a VXLAN alone is an attribute inside its own nest. It
+# was sent as the outer `IFLA_LINK` for as long as VXLANs have existed here and
+# did nothing at all: the document named a parent and the kernel routed the outer
+# packets itself. `ip` says it in one word, and nothing was reading that word.
+contains "and the underlay the document named" "$(detail vx100)" "dev br0"
 
 # Creating one end of a veth creates both, and the peer has no `interface`
 # block. The planner has to know it will appear or it is configured on the
@@ -237,6 +244,11 @@ contains "a macvlan gets its mode"     "$(detail mv0)"    "macvlan mode bridge"
 # them at 2 and 3, so sending one numbering to the other lands the local
 # address in a flags field.
 contains "a gre tunnel gets its endpoints" "$(detail gre1)" "remote 10.7.0.2 local 10.7.0.1"
+# The same defect in the same place: a tunnel's underlay is `IFLA_GRE_LINK` or
+# `IFLA_IPTUN_LINK` inside the nest, and the outer attribute netcfgd was sending
+# left the tunnel with no parent at all -- `gre1@NONE`. The kernel reports it
+# outside, which is why one word of the header is the check.
+contains "and the underlay the document named" "$(ip link show gre1)" "gre1@base0"
 # A key with no flag bit is silently ignored, and two ends with different keys
 # would then pass traffic as though neither had one.
 contains "and its key, which needs the flag" "$(detail gre1)" "ikey 0.0.0.42"
@@ -473,6 +485,41 @@ contains "and the kernel still has it, untouched" "$(detail hand-vlan)" "id 90"
 # Out of the way again, so the checks below see the document they expect.
 ip link del hand-vlan
 sed -i '/^interface hand-vlan {$/,/^}$/d' "$work/etc/netcfgd.conf"
+
+# A parent is one word in the document and two answers from the kernel. A VXLAN's
+# underlay is in its own nest and moves on a live device; a VLAN's is the outer
+# attribute, which the kernel accepts and ignores -- so that one is remade
+# (0060).
+sed -i '/vxlan/s/parent = "br0"/parent = "base0"/' "$work/etc/netcfgd.conf"
+under_plan=$("$ncfg" plan 2>&1 || true)
+contains "a moved vxlan underlay is set in place" "$under_plan" "link.set_vxlan"
+contains "and the reason names it"      "$under_plan" "vxlan.parent"
+missing "and the interface is not thrown away" "$under_plan" "link.delete vx100"
+"$ncfg" apply > "$work/apply-under.txt" 2>&1 || { cat "$work/apply-under.txt" >&2; exit 1; }
+contains "and the kernel moved it"     "$(detail vx100)" "dev base0"
+contains "and the next plan has nothing to do" 	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+sed -i '/work-net/,+1s/parent = "br0"/parent = "base0"/' "$work/etc/netcfgd.conf"
+vlan_parent=$("$ncfg" plan 2>&1 || true)
+contains "a moved vlan parent is remade" "$vlan_parent" "link.delete work-net"
+contains "and the reason is the parent" "$vlan_parent" "parent: base0 (was br0)"
+# The kernel's own answer, asked rather than remembered.
+refuses_silently() {
+	before=$(ip link show "$1" | head -1 | awk '{print $2}')
+	ip link set "$1" link "$2" 2>&1 | head -1
+	if [ "$before" = "$(ip link show "$1" | head -1 | awk '{print $2}')" ]; then
+		echo "ok   the kernel accepts a parent change on a $3 and ignores it ($before)"
+	else
+		echo "FAIL the kernel moved a $3's parent in place; a set would be the answer"
+		failures=$((failures + 1))
+	fi
+}
+refuses_silently work-net base0 vlan
+refuses_silently mv0 base1 macvlan
+"$ncfg" apply > "$work/apply-vparent.txt" 2>&1 || { cat "$work/apply-vparent.txt" >&2; exit 1; }
+contains "the remade vlan sits on the new parent" "$(ip link show work-net)" "work-net@base0"
+contains "and its address came back"    "$(ip -br addr show work-net)" "10.6.0.1/24"
+contains "and the next plan has nothing to do" 	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
 
 # One apply, not two. This is the property the veth peer nearly broke.
 second=$("$ncfg" apply 2>&1)

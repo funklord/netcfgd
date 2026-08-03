@@ -34,6 +34,7 @@ fn link(name: &str) -> ObservedLink {
 		mtu: 1500,
 		mac: None,
 		master: None,
+		parent: None,
 		offloads: Vec::new(),
 		ipv6_token: None,
 		qdisc: Some("noqueue".to_owned()),
@@ -5128,6 +5129,110 @@ interface work-net {
 		stopped < deleted && deleted < started,
 		"the client was not stopped before the interface went and started after \
 		 it came back: {:?}",
+		names(&plan)
+	);
+}
+
+/// A moved VLAN parent is remade; a moved VXLAN underlay is set in place.
+///
+/// One word in the document, two answers from the kernel, and this is the pair
+/// that says so: a VLAN's parent is the outer `IFLA_LINK`, which a live device
+/// accepts and ignores, while a VXLAN's is an attribute in its own nest that the
+/// kernel moves. Decision 0060.
+#[test]
+fn a_moved_vlan_parent_is_remade_and_a_vxlan_underlay_is_not() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface base1 { kind = "dummy"; config = "null" }
+interface work-net {
+	vlan { parent = "base1"; id = 42 }
+	config = "null"
+}
+interface vx100 {
+	vxlan { id = 100; parent = "base1"; remote = "10.9.0.2" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "base1", "work-net", "vx100"]);
+	for index in [2, 3] {
+		observed.links[index].up = true;
+		observed.links[index].ownership = Ownership::Ours;
+		observed.links[index].parent = Some("base0".to_owned());
+	}
+	"vlan".clone_into(&mut observed.links[2].kind);
+	observed.links[2].vlan = Some(netcfgd_model::ObservedVlan {
+		id: Some(42),
+		protocol: Some("dot1q".to_owned()),
+	});
+	"vxlan".clone_into(&mut observed.links[3].kind);
+	observed.links[3].vxlan = Some(netcfgd_model::ObservedVxlan {
+		id: Some(100),
+		local: None,
+		remote: Some("10.9.0.2".parse().expect("an address")),
+		port: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let deleted = plan
+		.actions
+		.iter()
+		.find(|action| matches!(&action.op, Op::LinkDelete { name } if name == "work-net"))
+		.expect("a moved vlan parent is remade");
+	assert_eq!(deleted.reason.field, "parent");
+	assert_eq!(deleted.reason.desired, "base1");
+	assert_eq!(deleted.reason.observed, "base0");
+
+	let set = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetVxlan { .. }))
+		.expect("a moved vxlan underlay is set");
+	assert_eq!(set.reason.field, "vxlan.parent");
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(&action.op, Op::LinkDelete { name } if name == "vx100")),
+		"a VXLAN whose underlay the kernel will move was deleted instead: {:?}",
+		names(&plan)
+	);
+}
+
+/// A parent the document does not name is not compared.
+///
+/// A tunnel with no `parent` sends its outer packets through the routing table,
+/// and the kernel picks the interface -- which it then reports. Comparing that
+/// against the document's silence would remake or reconfigure the tunnel on
+/// every reconcile.
+#[test]
+fn a_parent_the_document_does_not_name_is_not_compared() {
+	let desired = document(
+		r#"
+interface base0 { kind = "dummy"; config = "null" }
+interface tun-office {
+	tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "tun-office"]);
+	"gre".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+	observed.links[1].parent = Some("base0".to_owned());
+	observed.links[1].tunnel = Some(netcfgd_model::ObservedTunnel {
+		local: Some("10.7.0.1".parse().expect("an address")),
+		remote: Some("10.7.0.2".parse().expect("an address")),
+		ttl: None,
+		key: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"link.set_tunnel") && !names(&plan).contains(&"link.delete"),
+		"a parent the document never named was compared: {:?}",
 		names(&plan)
 	);
 }

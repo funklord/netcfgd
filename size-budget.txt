@@ -320,4 +320,10 @@ netcfgd
 # different kind was not noticed at all. What it bought is an edited id being
 # applied with everything on the interface put back, and the safety property
 # that goes with it: netcfgd will not throw away a link it did not create.
-total 2116120
+# +8 KB for a parent that reaches the kernel and is then compared. A VXLAN's
+# underlay and a tunnel's were being sent as the outer `IFLA_LINK`, which those
+# two kinds ignore -- so `parent = "base0"` produced a device with no underlay at
+# all and nothing said so. Both now go inside their own nest, the observation
+# reads one back, and a moved parent is corrected: in place for the two kinds the
+# kernel moves, and by remaking the interface for the two it does not.
+total 2124312
