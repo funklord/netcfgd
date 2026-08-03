@@ -76,6 +76,8 @@ pub struct KernelExecutor {
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
+	/// The bridge settings for each interface that is one.
+	bridges: Vec<(String, netcfgd_model::interface::BridgeConfig)>,
 	/// The `WireGuard` configuration for each interface that is one.
 	///
 	/// Held for the same reason `pppoe` and `dot1x` are: `wg.set_device` and
@@ -151,6 +153,7 @@ impl KernelExecutor {
 			dns_scopes: Vec::new(),
 			dot1x: Vec::new(),
 			wireguard: Vec::new(),
+			bridges: Vec::new(),
 			mac_policy: Vec::new(),
 			pppoe: Vec::new(),
 			delegating: Vec::new(),
@@ -202,6 +205,7 @@ impl KernelExecutor {
 			})
 			.collect();
 		self.wireguard = wireguard_configs(document);
+		self.bridges = bridge_configs(document);
 		self.networks.clone_from(&document.networks);
 		self.access_points.clone_from(&document.access_points);
 		self.preferences = document
@@ -569,11 +573,48 @@ impl KernelExecutor {
 		Ok(())
 	}
 
+	/// Send a bridge's own settings, whether it was just made or already was.
+	///
+	/// One function for both, which is what the comment above `link.create` has
+	/// claimed since bridges arrived: the kernel takes these as an
+	/// `RTM_NEWLINK` either way, so a second copy would be two paths that can
+	/// disagree about what a forward delay is. Until decision 0057 only one
+	/// caller existed, and an edited `stp` reached nothing.
+	fn apply_bridge_attrs(
+		&mut self,
+		name: &str,
+		bridge: &netcfgd_model::interface::BridgeConfig,
+	) -> Result<(), String> {
+		let index = self.index_of(name)?;
+		self.socket
+			.set_bridge_attrs(
+				index,
+				netcfgd_sys::ops::BridgeAttrs {
+					stp: bridge.stp,
+					forward_delay: bridge.forward_delay,
+					hello_time: bridge.hello_time,
+					ageing_time: bridge.ageing_time,
+					priority: bridge.priority,
+					vlan_filtering: bridge.vlan_filtering,
+				},
+			)
+			.map_err(|error| format!("could not set the attributes of {name}: {error}"))
+	}
+
 	/// The document's `WireGuard` configuration for one interface.
 	///
 	/// An executor built without a document has none of these, which is the
 	/// failure `make executor-policy` exists to prevent -- so this says what
 	/// happened rather than silently configuring a device with nothing.
+	/// The document's settings for one bridge.
+	fn bridge_config(&self, name: &str) -> Result<netcfgd_model::interface::BridgeConfig, String> {
+		self.bridges
+			.iter()
+			.find(|(bridge, _)| bridge == name)
+			.map(|(_, config)| config.clone())
+			.ok_or_else(|| format!("{name}: no bridge settings in the document being applied"))
+	}
+
 	fn wireguard_config(
 		&self,
 		iface: &str,
@@ -793,22 +834,8 @@ impl Executor for KernelExecutor {
 					self.configure_wireguard(name, config, WgParts::Whole)?;
 				}
 				if let InterfaceKind::Bridge(bridge) = &**kind {
-					let index = self.index_of(name)?;
-					self.socket
-						.set_bridge_attrs(
-							index,
-							netcfgd_sys::ops::BridgeAttrs {
-								stp: bridge.stp,
-								forward_delay: bridge.forward_delay,
-								hello_time: bridge.hello_time,
-								ageing_time: bridge.ageing_time,
-								priority: bridge.priority,
-								vlan_filtering: bridge.vlan_filtering,
-							},
-						)
-						.map_err(|error| {
-							format!("created {name} but could not set its attributes: {error}")
-						})?;
+					self.apply_bridge_attrs(name, bridge)
+						.map_err(|error| format!("created {name} but {error}"))?;
 				}
 				Ok(())
 			}
@@ -1309,6 +1336,10 @@ impl Executor for KernelExecutor {
 			// executor already holds the document it is applying. Putting a
 			// peer list in the plan would put public keys and every allowed
 			// prefix into `/run/netcfgd/plan.last.json` for no gain.
+			Op::LinkSetBridge { name } => {
+				let bridge = self.bridge_config(name)?;
+				self.apply_bridge_attrs(name, &bridge)
+			}
 			Op::WgSetDevice { iface, .. } => {
 				let config = self.wireguard_config(iface)?;
 				self.configure_wireguard(iface, &config, WgParts::DeviceOnly)
@@ -1395,6 +1426,22 @@ fn record_presets(run: &std::path::Path, iface: &str, presets: &[String]) {
 		let _ =
 			std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
 	}
+}
+
+/// Every interface that is a bridge, with its settings.
+fn bridge_configs(
+	document: &netcfgd_model::Document,
+) -> Vec<(String, netcfgd_model::interface::BridgeConfig)> {
+	document
+		.interfaces
+		.iter()
+		.filter_map(|interface| match &interface.kind {
+			netcfgd_model::InterfaceKind::Bridge(bridge) => {
+				Some((interface.name.clone(), bridge.clone()))
+			}
+			_ => None,
+		})
+		.collect()
 }
 
 /// Every interface that is a `WireGuard` device, with its configuration.

@@ -180,6 +180,18 @@ fn observed_link(
 		// `host::augment` for the same reason `forwarding` and `offloads` are.
 		private_key_loaded: false,
 		wireguard: None,
+		// Hundredths of a second on the wire, seconds in the model. The
+		// conversion is here, once, beside nothing else that converts -- the
+		// writer's half is in `netcfgd-sys`, and links.sh exists partly because
+		// a bridge once came up with a 40ms forward delay instead of 4s.
+		bridge: link.bridge.map(|bridge| netcfgd_model::ObservedBridge {
+			stp: bridge.stp,
+			forward_delay: bridge.forward_delay.map(|value| value / 100),
+			hello_time: bridge.hello_time.map(|value| value / 100),
+			ageing_time: bridge.ageing_time.map(|value| value / 100),
+			priority: bridge.priority,
+			vlan_filtering: bridge.vlan_filtering,
+		}),
 	}
 }
 
@@ -353,6 +365,7 @@ mod tests {
 
 	fn link(index: u32, name: &str) -> LinkRecord {
 		LinkRecord {
+			bridge: None,
 			index,
 			name: name.to_owned(),
 			kind: String::new(),
