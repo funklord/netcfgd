@@ -1,0 +1,42 @@
+# =============================================================================
+# gui/gui.pro -- qmake project for netcfgd-gui, the Qt Widgets client.
+#
+# Per gui/project.md: this speaks netcfgd's own control socket through
+# client/libncfg_client.a, the same bytes `ncfg` and the TUI speak -- not a
+# bespoke shim, and not Qt's own socket classes, which would put the framing
+# and the reader on this side of the seam where nothing else could reach them.
+#
+# No QtQuick and no QML, ever (gui/project.md sec 2, non-negotiable). Nothing
+# below asks for either; this comment is the tripwire for the next person
+# tempted to add `QT += quick`.
+#
+# Not wired into the repository's root Makefile yet -- deliberate, and the same
+# call fuzzypickles/gui makes. Build standalone through gui/Makefile, which
+# wraps this.
+# =============================================================================
+
+TEMPLATE = app
+TARGET = netcfgd-gui
+
+QT += widgets
+CONFIG += c++17
+CONFIG -= app_bundle
+
+CLIENT_DIR = $$PWD/../client
+CLIENT_LIB = $$CLIENT_DIR/libncfg_client.a
+
+INCLUDEPATH += $$CLIENT_DIR
+LIBS += $$CLIENT_LIB
+
+# qmake will not build it -- PRE_TARGETDEPS only requires it to exist, and
+# gui/Makefile is what builds it first.
+PRE_TARGETDEPS += $$CLIENT_LIB
+
+SOURCES += \
+	src/main.cpp \
+	src/main_window.cpp \
+	src/ncfg_connection.cpp
+
+HEADERS += \
+	src/main_window.h \
+	src/ncfg_connection.h

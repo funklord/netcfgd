@@ -10,3 +10,11 @@ fuzz/artifacts/
 # Local editor and tooling state. Nothing under these belongs in history.
 .vscode/
 .idea/
+
+# The C client and the GUI build in place, the way the sibling projects do.
+client/*.o
+client/*.a
+client/.build-flags
+client/tests/client_test
+gui/build/
+gui/build-*/
