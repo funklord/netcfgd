@@ -150,6 +150,29 @@ contains "and its monitoring interval" "$(detail bond0)"  "miimon 100"
 contains "a bridge gets spanning tree" "$(detail br0)"    "stp_state 1"
 contains "and its forward delay, converted" "$(detail br0)" "forward_delay 400"
 
+# And the conversion runs in both directions, which is what this pair is really
+# for. The observation reads the kernel's hundredths and the document counts
+# seconds; a reader that forgot to divide would make every bridge differ from
+# itself by a factor of a hundred, and the plan would rebuild it forever. A
+# fixture cannot see that -- it builds the observation in model units -- so the
+# only place it shows is here, on a plan that has to be empty.
+contains "a bridge that was just applied plans nothing" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+# Then the half decision 0057 added: editing a bridge's own settings used to
+# plan nothing at all, because they were sent inside `link.create` and never
+# again. A bridge's name encodes nothing, so there was no second signal.
+sed -i 's/bridge { stp = true; forward_delay = 4 }/bridge { stp = false; forward_delay = 20 }/' \
+	"$work/etc/netcfgd.conf"
+plan_text=$("$ncfg" plan 2>&1 || true)
+contains "an edited bridge setting is planned" "$plan_text" "link.set_bridge"
+contains "and the reason names the field that moved" "$plan_text" "bridge.stp"
+"$ncfg" apply > "$work/apply-bridge.txt" 2>&1 || { cat "$work/apply-bridge.txt" >&2; exit 1; }
+contains "and the kernel has it afterwards" "$(detail br0)" "stp_state 0"
+contains "and the delay, converted again" "$(detail br0)" "forward_delay 2000"
+contains "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
 # Big-endian on the wire. The kernel refuses the byte-swapped value, so getting
 # this wrong fails the apply -- checked by sending the wrong one.
 contains "a vlan gets the right tag protocol" "$(detail br0.42)" "protocol 802.1ad"

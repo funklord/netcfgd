@@ -296,4 +296,9 @@ netcfgd
 # there was nothing to do. Half of the cost is the observed model growing two
 # structs; the rest is the comparison and the two ops that were declared in the
 # taxonomy and had never been emitted.
-total 2071064
+# +8 KB for a bridge netcfgd can see and correct: the link dump reads back the
+# INFO_DATA nest a bridge reports about itself, and the planner compares it
+# against the document. What it bought is an edited `stp` or `forward_delay`
+# doing something -- before this they were sent inside `link.create` and never
+# again, and a bridge's name encodes nothing, so nothing anywhere said so.
+total 2079256
