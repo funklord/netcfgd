@@ -1093,8 +1093,19 @@ the contents left to the witness that owns them.
 
 #### What the gates have been worth lately
 
-Three sessions in a row have found more in the *tests* and in the measurements
+Several sessions in a row have found more in the *tests* and in the measurements
 than in the code, and the patterns are worth carrying rather than rediscovering.
+
+**The most productive question came from outside the roadmap.** "What is missing
+for this to be a daily driver on a Debian laptop?" found four config keys that
+compiled and did nothing, a DHCPv4 fallback that obtained a lease and configured
+nothing at all, netcfgd overwriting a working `/etc/resolv.conf` with an empty
+one, dhcpcd's own hooks fighting netcfgd for that same file, and up hooks running
+on every reconcile against the brief's own words. Not one of those was on any
+list, and no gate was red for any of them. **Ask what an operator hits, not what
+the milestone says next** — and when the answer is a list, take it one item at a
+time with a decision record each, because five of the nine items found a defect
+older than the work itself.
 
 **Asking the kernel beat reading the previous session's table.** 0057 wrote down
 seven measurements and told the next session to ask again; asking corrected two of
@@ -1106,12 +1117,20 @@ see. The session after it found its own defect the same way — not from a test,
 from asking what *else* would fall into the safe direction of a new comparison,
 which is how an interface existing as the wrong kind turned out to be invisible.
 
-**A gate can be blind because its input does not contain its subject.** Six
-instances across two sessions now. The newest is the sharpest: a live check that
-edited a geneve tunnel's *remote* passed with the protection against sending its
-VNI deliberately removed, because restating the VNI the kernel already has is
-accepted. Only editing both at once could see it. A check about a difference has
-to contain the difference.
+**A gate can be blind because its input does not contain its subject.** Past ten
+instances now, across four sessions, and the disguise changes every time. The
+plan-idempotence gate had never seen a document with a hook in it. A fixture
+asserted a hook ran *after* the addressing, which list order gives for free. A
+live carrier test plugged the cable in on an interface that already had its
+address, so the ordering could not fail either way. An rfkill field said where a
+value came from and was filled in from the variable the search *started* with. And
+no test had ever passed a global option before a positional one, which is why two
+copies of "which flags take a value" had drifted apart unnoticed. A check about a
+thing has to contain the thing, with a value that is not the default. Its mirror
+image turned up in the same run: `wifi add`'s rollback cannot be reached by *any*
+input, every invalid block being refused earlier by name, so only a patch that
+rendered the block without its closing brace could tell whether it worked. Where
+input cannot reach a check, a patch can, and until one has, it is a comment.
 
 **And the suite has been run as root**, in a privileged container, which is still
 the only way three of the scripts run at all. All three pass. Getting there found
