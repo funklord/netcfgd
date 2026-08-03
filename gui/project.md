@@ -322,9 +322,36 @@ Four rules, all of them the same rule:
 
 ## 8. Order of work
 
-1. **`client/` against the local socket, and the GUI on top of it.** Desktop only,
-   no crypto, no agent. Independently useful, and it proves the request vocabulary
-   and the models before anything carries them over a wire.
+1. ~~**`client/` against the local socket, and the GUI on top of it.**~~ **Started
+   2026-08-04.** `client/` holds the JSON reader and the connection, with the
+   library and its checks building clean under `-Wall -Wextra -Wconversion` and
+   under ASan and UBSan; `gui/` is a Qt Widgets window showing what netcfgd
+   observes, built through qmake behind a Makefile. It has been run headless
+   (`QT_QPA_PLATFORM=offscreen`) against a real daemon in a namespace.
+
+   Three things about it worth knowing before adding to it:
+
+   - **The test's fixture is the daemon's own witness.** `client/tests/` reads
+     every line of `docs/schema/socket.json`, so a protocol change turns this red
+     at build time rather than on somebody's laptop. It also found the third kind
+     of line on the first run: the witness pins `event` payloads *on their own*
+     as well as wrapped in `{"response":"event",...}`, because a monitor stream
+     carries them -- a client that knew only requests and responses would read a
+     stream and recognise nothing.
+   - **`client/Makefile` stamps the flags it built with**, and the objects depend
+     on the stamp. Without it, `make SANITIZE=1 test` leaves an archive that the
+     GUI then links against no sanitizer runtime, and the failure is forty lines
+     about `__asan_report_store1` with nothing saying why. That happened on the
+     first build.
+   - **UBSan found a real defect on the first headless run**: `memchr` on a null
+     buffer with zero length, which every implementation gets right and none is
+     required to. It is on the first read of every connection, so a sanitized
+     build of anything using this would have hit it eventually -- and "eventually"
+     is what a sanitizer is for.
+
+   What is not there yet: `monitor` (the stream, and the event kinds above),
+   `plan` and `apply`, and anything that writes. The window says so by being
+   read-only rather than by disabling buttons that do not exist.
 2. **`wire/` plus `agent/`, LAN only**, with the fuzzing standard from the first
    commit.
 3. **Android**, which by then is a kit and a transport choice rather than a port.
