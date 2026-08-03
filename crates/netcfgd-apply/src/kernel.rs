@@ -41,6 +41,13 @@ pub struct Effects {
 	pub privacy: Vec<(String, bool)>,
 	/// `(interface, value)` for each `accept_ra` sysctl written.
 	pub accept_ra: Vec<(String, u8)>,
+	/// The backends the observation this apply ran against found *running*.
+	///
+	/// Not something the apply did -- it is what it saw -- and it is here
+	/// because this is what already travels from the executor to the recorded
+	/// state. It is how a restart counter gets cleared: a backend seen alive has
+	/// stayed up, whatever it did last week. Decision 0079.
+	pub observed_running: Vec<(netcfgd_model::BackendKind, String)>,
 	/// `(interface, phase, value)` for each event hook that was run.
 	pub hook_state: Vec<(String, netcfgd_model::HookPhase, String)>,
 	/// `(interface, set)` for each root qdisc changed. `false` is a reset.
@@ -206,6 +213,7 @@ impl KernelExecutor {
 			.into_iter()
 			.map(|(scope, policy)| netcfgd_model::AppliedDns { scope, policy })
 			.collect();
+		self.effects.observed_running = running_backends(observed);
 		self.hook_hashes = document
 			.interfaces
 			.iter()
@@ -1938,6 +1946,23 @@ fn start_backend(
 			"the {other:?} backend is not implemented in this build"
 		)),
 	}
+}
+
+/// The backends an observation found running.
+///
+/// Carried into the effects so that the recorded restart counter can be cleared
+/// for anything that has stayed up -- see `netcfgd-host`'s `absorb` and decision
+/// 0079. A free function rather than a closure so that `with_context` stays
+/// inside the line limit, which is a thin reason and the honest one.
+fn running_backends(
+	observed: &netcfgd_model::Observed,
+) -> Vec<(netcfgd_model::BackendKind, String)> {
+	observed
+		.backends
+		.iter()
+		.filter(|backend| backend.running)
+		.map(|backend| (backend.kind, backend.interface.clone()))
+		.collect()
 }
 
 /// The family flags netcfgd runs dhcpcd with, one address family each.
