@@ -1161,7 +1161,12 @@ impl Executor for KernelExecutor {
 				self.effects.applied_dns.extend(delivered);
 				Ok(())
 			}
-			Op::HookRun { iface, phase, path } => {
+			Op::HookRun {
+				iface,
+				phase,
+				path,
+				address,
+			} => {
 				// The sha256 is not in the op, so it is looked up in the
 				// document the plan came from -- which the executor does not
 				// have. Until the op carries it (an additive change, M4),
@@ -1179,7 +1184,8 @@ impl Executor for KernelExecutor {
 					run_as: None,
 					timeout: None,
 				};
-				let env = crate::hooks::HookEnv::for_interface(iface);
+				let mut env = crate::hooks::HookEnv::for_interface(iface);
+				env.addr.clone_from(address);
 				match crate::hooks::run(&reference, &env) {
 					crate::hooks::Outcome::Ok => Ok(()),
 					// A pre_* veto stops the plan, which is section 5.2's

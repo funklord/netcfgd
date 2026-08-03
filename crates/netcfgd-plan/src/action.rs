@@ -401,6 +401,14 @@ pub enum Op {
 		phase: HookPhase,
 		/// Absolute path to the script.
 		path: String,
+		/// The address in play, where the phase has one.
+		///
+		/// `NCFG_ADDR` in the script's environment. Set for a `lease`, whose whole
+		/// subject is an address that arrived; `None` everywhere else, because a
+		/// `pre_up` hook runs before there is one and a `down` hook can read what
+		/// is still on the interface itself.
+		#[serde(skip_serializing_if = "Option::is_none", default)]
+		address: Option<String>,
 	},
 	/// Start a commit-confirm window.
 	CommitArm {
@@ -548,6 +556,22 @@ impl Op {
 			// deleting the wrong line from an allow list is doing by accident.
 			Self::AccessControlAdd { list, .. } => *list == AclPolicy::Deny,
 			Self::AccessControlDel { list, .. } => *list == AclPolicy::Allow,
+			// A hook is arbitrary shell and netcfgd cannot know what it does. What
+			// it does know is which transition the hook belongs to, and the down
+			// phases belong to one that takes the interface away -- so a guard has
+			// to refuse them with the `link.down` they bracket. Getting this wrong
+			// is worse than an unguarded interface: the script that unmounts the
+			// share runs, the guard keeps the interface up, and the operator is
+			// left with a working link and no mount. Found by a fixture asserting
+			// the pair, decision 0063.
+			//
+			// The up phases are not disruptive: they belong to bringing an
+			// interface *into* service, which a guard exists to protect rather than
+			// to prevent.
+			Self::HookRun { phase, .. } => matches!(
+				phase,
+				HookPhase::PreDown | HookPhase::Down | HookPhase::PostDown
+			),
 			Self::LinkCreate { .. }
 			| Self::LinkUp { .. }
 			| Self::AddrAdd { .. }
@@ -556,7 +580,6 @@ impl Op {
 			| Self::WifiSetProfiles { .. }
 			| Self::WifiSetRegdom { .. }
 			| Self::DnsApply { .. }
-			| Self::HookRun { .. }
 			| Self::CommitArm { .. }
 			| Self::CommitConfirm
 			| Self::BridgeVlanAdd { .. }

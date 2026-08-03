@@ -22,20 +22,43 @@ pub enum HookPhase {
 	/// Use [`HookPhase::PostUp`] for anything needing an addressed device.
 	///
 	/// This comment used to send the reader to [`HookPhase::Up`] and
-	/// [`HookPhase::Carrier`], **neither of which this build ever runs** -- only
-	/// `pre_up` and `post_up` fire. The other nine phases are recognised,
-	/// materialised into `/run/netcfgd/hooks/` and hashed, and never executed; a
-	/// plan says so per phase rather than leaving the script looking installed.
+	/// [`HookPhase::Carrier`], neither of which this build runs. Four phases fire
+	/// now -- `pre_up`, `post_up`, `down` and `post_down` -- and the other seven
+	/// are recognised, materialised into `/run/netcfgd/hooks/` and hashed, and
+	/// never executed; a plan says so per phase rather than leaving the script
+	/// looking installed.
+	///
+	/// **The up phases fire only when netcfgd is bringing the interface up.** They
+	/// used to be emitted unconditionally, which ran them on every apply of an
+	/// already-correct interface and on the apply that took a disabled one *down*
+	/// (0063).
 	PreUp,
 	/// As the link comes up.
 	Up,
 	/// After the last addressing action for the interface completes.
 	PostUp,
-	/// Before the link goes down.
+	/// Before the link goes down. **Recognised and not run by this build**, unlike
+	/// [`HookPhase::Down`], which is: the two would fire at the same point in a
+	/// plan, and a phase whose only distinction is "before the addresses go" needs
+	/// a teardown ordering netcfgd does not have yet. A plan says so (0063).
 	PreDown,
-	/// As the link goes down.
+	/// Immediately before the link goes down, while it still works.
+	///
+	/// Not "during", which is not a moment a plan has: this runs before the
+	/// `link.down` or the `link.delete` it belongs to, and the interface still has
+	/// its addresses and routes at that point -- teardown is the last thing in a
+	/// plan. That is what lets a `down` hook unmount a share or stop a service
+	/// that is using them.
+	///
+	/// A veto phase: a failure stops the apply, so the transition it brackets does
+	/// not happen. A guard on the interface refuses this hook along with the
+	/// transition, for the same reason -- a `down` script that runs when nothing
+	/// goes down has already unmounted the share (0063).
 	Down,
 	/// After the link is down.
+	///
+	/// Runs whether or not anything else in the plan succeeds after it, and is not
+	/// a veto phase: there is nothing left to stop.
 	PostDown,
 	/// Carrier gained or lost.
 	///
