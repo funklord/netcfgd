@@ -826,8 +826,20 @@ re-reads on `SIGHUP`, so nothing on the wire is disturbed.
 
 #### Is what is running still what the document says?
 
-The question this project keeps finding new places to ask. Four kinds of answer
-now exist, and the shape of each is worth knowing before adding a fifth.
+The question this project keeps finding new places to ask. Five kinds of answer
+now exist, and the shape of each is worth knowing before adding a sixth.
+
+**A daemon netcfgd started may simply be gone**, and until
+[0078](docs/decisions/0078-a-record-is-a-memory-and-a-process-is-a-fact.md)
+nothing looked: `running` came from netcfgd's own record in `/run`, so a tunnel
+killed by the OOM killer left a document saying it should be up, a machine where
+it was not, and a reconciler reporting convergence. The observation checks the pid
+now — for the backends netcfgd holds one for — and the planner restarts what has
+gone. **A kind with no handle is left alone**, which is `None` is not `false`
+deciding a design for the third session running: a `DHCPv4` client may be dhcpcd,
+whose pid file is in its own compiled run directory, and reading "no file" as "not
+running" would start a second dhcpcd beside a live one on every machine that uses
+one.
 
 **A daemon netcfgd started** is compared against the file netcfgd generated for
 it ([0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md),
@@ -884,7 +896,7 @@ WireGuard key is 32 octets of kernel randomness with no dictionary behind it. A
 memory and written down nowhere. Anyone reaching for the digest on a third secret
 has to make that argument again.
 
-Three rules hold across all four, and every one was paid for:
+Three rules hold across all five, and every one was paid for:
 
 - **The comparison goes where both halves already are.** A secret and an unread
   file cannot reach a pure planner, so those comparisons happen in the observer
@@ -1352,13 +1364,23 @@ match.
    - **Nothing reads `/dev/rfkill`'s event stream**, so a flipped switch is noticed
      on the next observation rather than as it happens.
 
-4. **Nothing else on the "is it still what the document says?" question is
-   open.** Daemons, kernel objects, secrets and unread files all have an answer,
-   and 0059 closed the last kind. The next thing of this shape, when it turns up,
-   is likely to be a backend netcfgd did *not* start — which
-   [0053](docs/decisions/0053-a-file-netcfgd-does-not-read-can-still-be-hashed.md)
-   guessed at once already and was wrong about, so it is a suspicion rather than a
-   plan.
+4. **The "is it still what the document says?" question has one open corner
+   left.** Daemons, kernel objects, secrets, unread files and now *whether the
+   process is there at all*
+   ([0078](docs/decisions/0078-a-record-is-a-memory-and-a-process-is-a-fact.md))
+   all have an answer. Twice this list has predicted the next one and been wrong —
+   0053 guessed at a backend netcfgd did not start, and the answer was a WireGuard
+   device it creates itself; then the question turned out not to be about
+   configuration at all, but about a pid. What is genuinely left:
+   - **a supplicant and an access point are not liveness-checked**, because
+     netcfgd reaches them only through a control socket and asking one is a round
+     trip in the reconcile loop. hostapd takes `-P`, so this is a decision waiting
+     rather than a thing that cannot be done;
+   - **a daemon that is alive and wedged still counts as running**, which is 0052's
+     shape applied to behaviour rather than to configuration;
+   - **restarting is unconditional** — a tunnel whose daemon exits immediately is
+     restarted on every reconcile forever, and a backoff needs state that needs a
+     home.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one.
 
@@ -1367,6 +1389,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
 - **A column that renders two things the same way cannot tell them apart, and neither can a check reading it.** `nmcli`'s TYPE column prints a *generic* device's `TypeDescription`, and netcfgd's type description is the kernel's link kind — so "the tunnel shows as `wireguard`" passed with the device-type mapping deliberately broken, because a generic device whose description is the word `wireguard` renders identically to a real one. The repair is to assert a value only the real thing can produce: a listen port the document chose, and the type as a *number* rather than as a rendered column.
 - **A script that skips on a missing package is a script whose failures nobody sees.** `tunnel.sh` had been red on every machine with openvpn installed since 0067 landed, and green everywhere else because it skips without the package -- so the suite said nothing. What it was asserting is that a pushed `dhcp-option DOMAIN` shows up as a *declined* comment in the report; 0067 made it a `search=` suffix, and neither the check nor the doc comment above the code followed. Both are the same disease in two media, and the second one is the reason to grep prose when behaviour changes. The bucket of scripts that skip on a package needs running *deliberately*, on a machine that has it, or it is a bucket of tests nobody is running.
+- **A record of what you started is a memory, and it ages.** `running: true` came out of `/run` and was never checked against the machine, so every "is it still what the document says?" answer this project had built compared *configuration* — a file, a kernel object, a secret — and none of them asked whether the process was there at all. A `kill -9` on a tunnel left netcfgd reporting a converged network with nothing behind it. The check is two file reads; the reason it took four decisions to get to is that the record reads exactly like an observation at the call site.
 - **"It has everything it needs" is a claim about the *other* side's interface, and only that side can settle it.** The shim's remaining device types were written down as ready because netcfgd observed the properties somebody had listed. Reading libnm's own accessors said four for a VLAN and thirteen for an IP tunnel, of which netcfgd answers eight — so one shipped and one is refused with the six missing names in a test. A capability list assembled from what you have, rather than from what the consumer asks for, is a list that will be wrong in the direction that flatters you.
 - **`/sys` in an `unshare -rn` test is the host's, and the interface under test is not in it.** A hook reading `/sys/class/net/<iface>/carrier` got "No such file or directory" for a device that plainly existed — sysfs is a mount, the mount is the machine's, and only netlink is namespace-correct without `unshare -m`. Every live script here that asks about a link uses `ip`, which is why this had never come up.
 - **A check that counts lines is not counting runs.** `grep -c '^pre_up '` said "the hook ran once" until the hook grew a second `echo`, and then said twice. Count one specific line — the transcript is a record of what happened, not of how often.

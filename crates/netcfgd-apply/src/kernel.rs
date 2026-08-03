@@ -466,27 +466,10 @@ impl KernelExecutor {
 		let options = options.to_string_lossy().into_owned();
 		for dir in ["/run", "/run/pppd", "/var/run", "/var/run/pppd"] {
 			let path = std::path::Path::new(dir).join(format!("{iface}.pid"));
-			let Ok(text) = std::fs::read_to_string(&path) else {
-				continue;
-			};
-			let Ok(pid) = text
-				.trim()
-				.lines()
-				.next()
-				.unwrap_or_default()
-				.parse::<i32>()
-			else {
-				continue;
-			};
-			// The ownership check. `cmdline` is NUL-separated, so the options
-			// path is a whole argument in it and cannot match by accident.
-			let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
-				continue;
-			};
-			if cmdline
-				.split(|byte| *byte == 0)
-				.any(|argument| argument == options.as_bytes())
-			{
+			// The options file netcfgd generated is the marker: a path netcfgd
+			// chose, unique to this session. The rule itself is in
+			// `netcfgd_sys::process::pid_of`.
+			if let Some(pid) = netcfgd_sys::process::pid_of(&path, &options) {
 				return Some((pid, path.display().to_string()));
 			}
 		}
@@ -2137,6 +2120,64 @@ fn client_pid_path(program: &str, iface: &str) -> Result<std::path::PathBuf, Str
 	Ok(dir.join(format!("{iface}.pid")))
 }
 
+/// Where a daemon netcfgd started records its pid, and what marks it as that
+/// daemon rather than something else with the same pid.
+///
+/// **In the crate that starts them**, because "how do I find this daemon" and
+/// "how do I start one" are the same knowledge and the second is here. The
+/// observer asks this to find out whether a backend netcfgd's records call
+/// running is actually still there ([`netcfgd_sys::process::pid_of`] does the
+/// checking); the stop paths ask the same question in their own words.
+///
+/// `None` means **netcfgd has no handle on this kind**, which is not the same as
+/// "it is not running" and must not be read as one:
+///
+/// - a `DHCPv4` client may be dhcpcd, whose pid file is in dhcpcd's own compiled
+///   run directory rather than anywhere netcfgd chose -- and where netcfgd runs
+///   udhcpc there *is* a file, so the same kind answers differently by machine;
+/// - a supplicant and an access point are reached through control sockets, and a
+///   socket that exists does not prove a process does. Asking one costs a round
+///   trip in the reconcile loop, which is the thing `acl.sh` measures a deadline
+///   for.
+///
+/// Decision 0078.
+#[must_use]
+pub fn backend_pid_file(
+	kind: netcfgd_model::BackendKind,
+	run: &std::path::Path,
+	iface: &str,
+) -> Option<(std::path::PathBuf, String)> {
+	use netcfgd_model::BackendKind;
+	match kind {
+		BackendKind::OpenVpn => {
+			let socket = netcfgd_openvpn::socket_path(run, iface);
+			Some((
+				netcfgd_openvpn::pid_path(run, iface),
+				socket.to_string_lossy().into_owned(),
+			))
+		}
+		BackendKind::RouterAdvert => {
+			let config = netcfgd_ra::config_path(run, iface);
+			Some((
+				netcfgd_ra::pid_path(run, iface),
+				config.to_string_lossy().into_owned(),
+			))
+		}
+		// The interface name is the weakest marker netcfgd uses and is what
+		// these two clients give it -- neither is invoked with a path netcfgd
+		// chose that ends up in its command line.
+		BackendKind::Dhcp4 => Some((
+			run.join("udhcpc").join(format!("{iface}.pid")),
+			iface.to_owned(),
+		)),
+		BackendKind::Dhcp6 => Some((
+			run.join("odhcp6c").join(format!("{iface}.pid")),
+			iface.to_owned(),
+		)),
+		_ => None,
+	}
+}
+
 /// Stop a client by the pid it was told to record.
 ///
 /// The pid is checked against `/proc/<pid>/cmdline` before anything is
@@ -2151,21 +2192,14 @@ fn client_pid_path(program: &str, iface: &str) -> Result<std::path::PathBuf, Str
 /// whether an ISP still believes the prefix is ours.
 fn stop_recorded_client(program: &str, iface: &str) -> Result<(), String> {
 	let path = run_dir_path().join(program).join(format!("{iface}.pid"));
-	let Some(pid) = std::fs::read_to_string(&path)
-		.ok()
-		.and_then(|text| text.trim().parse::<i32>().ok())
-	else {
-		return Ok(());
-	};
-	let ours = std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
-		cmdline
-			.split(|byte| *byte == 0)
-			.any(|argument| argument == iface.as_bytes())
-	});
-	if !ours {
+	// The interface name is the weakest marker netcfgd uses, and it is what
+	// there is: `udhcpc -i eth0` and `odhcp6c ... eth0` name nothing else that
+	// is netcfgd's. See `netcfgd_sys::process::pid_of`, which says why a path
+	// would be better where there is one.
+	let Some(pid) = netcfgd_sys::process::pid_of(&path, iface) else {
 		let _ = std::fs::remove_file(&path);
 		return Ok(());
-	}
+	};
 	netcfgd_sys::process::terminate(pid)
 		.map_err(|error| format!("could not stop {program} on {iface} (pid {pid}): {error}"))?;
 	let _ = std::fs::remove_file(&path);

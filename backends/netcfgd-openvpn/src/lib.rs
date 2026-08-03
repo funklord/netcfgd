@@ -584,22 +584,13 @@ pub fn stop(run: &Path, iface: &str, report: &Path) -> Result<(), String> {
 /// and is what "stopping one that is already stopped is not an error" means.
 fn stop_by_pid(run: &Path, iface: &str) -> Result<(), String> {
 	let path = pid_path(run, iface);
-	let Some(pid) = std::fs::read_to_string(&path)
-		.ok()
-		.and_then(|text| text.trim().parse::<i32>().ok())
-	else {
-		return Ok(());
-	};
 	let socket = socket_path(run, iface);
-	let ours = std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
-		cmdline
-			.split(|byte| *byte == 0)
-			.any(|argument| argument == socket.as_os_str().as_encoded_bytes())
-	});
-	if !ours {
+	let Some(pid) = netcfgd_sys::process::pid_of(&path, &socket.to_string_lossy()) else {
+		// No file, no number, no such process, or a process that is not this
+		// tunnel -- all of which mean there is nothing here to stop.
 		let _ = std::fs::remove_file(&path);
 		return Ok(());
-	}
+	};
 	netcfgd_sys::process::terminate(pid).map_err(|error| {
 		format!("could not stop the openvpn tunnel on {iface} (pid {pid}): {error}")
 	})?;
