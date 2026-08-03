@@ -892,13 +892,43 @@ was reachable by reading seven records end to end.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **VLAN, VXLAN, tunnel and veth are still `Generic` to the shim**, and the
-   reason is now a rule rather than a backlog: each of NM's interfaces for them
-   wants something netcfgd does not observe — a VLAN id, a parent, a tunnel's
-   local and remote. Getting them into the observation is a *core* question
-   about drift, worth asking on its own terms (an edited VLAN id is invisible
-   today, the way an edited listen port was), and answering it would let the
-   shim follow. Doing it the other way round is what constraint 6 forbids.
+2. **A link's kind-specific attributes are applied once and never compared**,
+   which is the WireGuard gap again in every other link kind. Measured, not
+   suspected:
+
+   ```
+   interface work-net { vlan { parent = "base0"; id = 42 } }   # apply
+   # edit the id to 43, under the same interface name
+   $ ncfg plan
+   nothing to do
+   $ ip -d link show work-net
+   vlan protocol 802.1Q id 42
+   ```
+
+   The same for a bridge's `stp` and `forward_delay`, a bond's `mode` and
+   `miimon`, a VXLAN's id and remote, a tunnel's local and remote. Everything
+   the kernel takes as `IFLA_INFO_DATA` goes over the wire inside
+   `Op::LinkCreate` and is never sent again — exactly what
+   [0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md)
+   found for a WireGuard device, in the six kinds it did not look at.
+
+   **The common case hides it.** A VLAN is usually named for its id, so editing
+   `base0.42` to `base0.43` is a different interface *name* and plans a create
+   and a delete, correctly. It is the operator who names a VLAN `work-net` — or
+   who edits a bridge, where the name never encodes anything — who gets
+   silence.
+
+   What it needs is the observation carrying each kind's parameters, which is a
+   real model addition and the reason this is a session rather than a patch.
+   The executor's half partly exists already: `set_bridge_attrs` is a separate
+   `RTM_NEWLINK` today precisely so the create path and the correct-an-existing
+   path cannot drift apart, and it is called from one of the two.
+
+   **The shim's remaining device types fall out of this and not the other way
+   round.** `.Device.Vlan` wants an id and a parent, `.Device.IPTunnel` a local
+   and a remote — the same values. Adding them to the model for the shim is
+   what constraint 6 forbids; adding them because an edited VLAN id is
+   invisible is a local justification, and the shim then follows for free.
 
 **The whole suite has now been run as root**, which is what the previous entry
 here asked for. All three root-only scripts pass: `delegation.sh` through
