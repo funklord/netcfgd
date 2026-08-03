@@ -69,6 +69,17 @@ contains() {
 		;;
 	esac
 }
+missing() {
+	case "$2" in
+	*"$3"*)
+		echo "FAIL $1"
+		echo "       expected NOT to contain: $3"
+		echo "       actual:                  $2"
+		failures=$((failures + 1))
+		;;
+	*) echo "ok   $1" ;;
+	esac
+}
 
 # The server side of the wire. netcfgd never touches `srv`.
 ip link add cli type veth peer name srv
@@ -82,6 +93,10 @@ interface srv
 option subnet 255.255.255.0
 option router 10.44.0.1
 option dns 10.44.0.53
+# A domain, so the report has one to get wrong: 0049 says a server may name
+# resolvers and not where queries go, so this must arrive as a comment and never as
+# a key. Without a server sending one, the check that says so has no subject.
+option domain lan.example
 option lease 600
 lease_file $work/udhcpd.leases
 pidfile $work/udhcpd.pid
@@ -90,14 +105,22 @@ EOF
 busybox udhcpd -f "$work/udhcpd.conf" > "$work/udhcpd.log" 2>&1 &
 server=$!
 
-# netcfgd's side. A static address beside the lease, deliberately: the generated
-# script's `deconfig` must remove what *it* added and leave this one alone, where a
-# stock udhcpc script flushes the interface and would take it with it.
+# netcfgd's side. Three deliberate things in six lines: a static address beside the
+# lease, so the generated script's `deconfig` has something it must *not* remove; a
+# DNS mode, so netcfgd owns the resolver file and an empty delivery would show; and
+# an empty `dns { }` block, which is how an operator says "use what this network
+# hands out" -- 0049's third row, and the reason the lease's servers are allowed to
+# be delivered at all.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
+global { dns { mode = "write_resolv_conf" } }
+
 interface cli {
 	config = "dhcp 10.44.9.9/24"
+	dns    { }
 }
 CONF
+export NCFG_RESOLV_CONF="$work/resolv.conf"
+printf 'nameserver 203.0.113.99\n# what was here before netcfgd ran\n' > "$work/resolv.conf"
 
 # busybox is one binary and Debian ships no `udhcpc` symlink beside it, so the name
 # netcfgd looks for first is not there. That is the second half of the defect: the
@@ -162,8 +185,45 @@ case "$lease_line" in
 	;;
 esac
 contains "and its own address as its own"                "$status" "10.44.9.9/24 [Ours]"
-contains "a second plan has nothing to do" \
+# The lease arrived *after* the first apply, so the DNS scope it feeds is work the
+# next apply has -- the same asynchrony the lease hook has (0064). This is that
+# apply, and what follows it is the state an operator ends up in.
+contains "the lease's nameservers are work for the next apply" \
+	"$("$ncfg" plan 2>&1)" "dns.apply cli"
+"$ncfg" apply > "$work/apply-dns.log" 2>&1 || {
+	cat "$work/apply-dns.log" >&2
+	exit 1
+}
+contains "and then there is nothing to do" \
 	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+# The nameservers, which are the whole of decision 0066. The client reports them
+# into the interface report and netcfgd delivers them because the interface asked
+# with `dns { }` -- so this is the report contract carrying a DHCP lease, which is
+# what it was shaped for.
+report=$work/run/reported/cli
+[ -r "$report" ] &&
+	echo "ok   the client wrote an interface report" ||
+	{
+		echo "FAIL the client wrote an interface report"
+		echo "       $report does not exist"
+		failures=$((failures + 1))
+	}
+contains "naming the lease's nameserver" "$(cat "$report" 2>/dev/null)" "dns=10.44.0.53"
+# The domain the server sent arrives as a comment and never as a key, which is
+# 0049: a server may name resolvers, and which names use them is the operator's to
+# write down.
+contains "with the server's domain as a comment" "$(cat "$report" 2>/dev/null)" \
+	"# the server also said: domain lan.example"
+missing "and never as a key"             "$(cat "$report" 2>/dev/null)" "domain=lan.example"
+# And nothing in the resolver file claims it either: a `search` line would be
+# netcfgd acting on a suffix the operator never wrote.
+missing "and the resolver file has no search line" "$(cat "$work/resolv.conf")" "search"
+
+resolver=$(cat "$work/resolv.conf")
+contains "the lease's nameserver reaches the resolver file" "$resolver" "nameserver 10.44.0.53"
+missing "and what was there before is gone, because netcfgd owns the file" \
+	"$resolver" "203.0.113.99"
 
 # The MTU and resolv.conf are the two things the script leaves alone, because the
 # document owns one and netcfgd's DNS backend owns the other. The server offers no
@@ -171,6 +231,33 @@ contains "a second plan has nothing to do" \
 # rather than anything a lease talked it into.
 check "the script left the MTU alone" \
 	"$(ip link show cli | grep -c 'mtu 1500')" "1"
+
+# The gate, from the other side. Drop the `dns { }` block and the lease's servers
+# are *not* delivered -- 0049 keeps that deliberate -- but the plan now says so
+# rather than leaving an operator with an empty resolver file and no explanation
+# (0066).
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+global { dns { mode = "write_resolv_conf" } }
+
+interface cli {
+	config = "dhcp 10.44.9.9/24"
+}
+CONF
+ungated=$("$ncfg" plan 2>&1 || true)
+contains "without a dns block the plan says the file will resolve nothing" \
+	"$ungated" "resolves nothing"
+contains "and names the interface whose lease offered servers" "$ungated" \
+	"a lease on cli offered nameservers"
+
+# Put it back, so the rest of the script runs against the configuration above.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+global { dns { mode = "write_resolv_conf" } }
+
+interface cli {
+	config = "dhcp 10.44.9.9/24"
+	dns    { }
+}
+CONF
 
 # Stopping it. `dhcpcd -k` does nothing to a udhcpc, so netcfgd used to leave the
 # client running forever with no pid file to find it by.

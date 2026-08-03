@@ -5197,6 +5197,74 @@ interface work-net {
 	);
 }
 
+/// A resolver file with nothing in it is not written silently.
+///
+/// The mode the first-run guide recommends, an interface on DHCP, and no `dns`
+/// block: netcfgd used to overwrite a working `/etc/resolv.conf` with a file
+/// containing one comment and no nameservers, while the plan said `dns.apply` and
+/// warned only that it could not be undone. Decision 0066.
+#[test]
+fn an_empty_resolver_delivery_says_so() {
+	let desired = document(
+		r#"
+global { dns { mode = "write_resolv_conf" } }
+interface eth0 { config = "dhcp" }
+"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+
+	let said = |plan: &Plan, text: &str| {
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains(text))
+	};
+
+	// With nothing reported, the message says the configuration names no server.
+	let first = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		said(&first, "resolves nothing"),
+		"an empty delivery was silent: {:?}",
+		first.warnings
+	);
+	assert!(said(
+		&first,
+		"nothing in the configuration names a nameserver"
+	));
+
+	// With a lease that offered some, it names the interface and the one-line fix --
+	// which is the case an operator on a laptop is actually in.
+	observed.reports.push(netcfgd_model::ObservedReport {
+		interface: "eth0".to_owned(),
+		addresses: Vec::new(),
+		gateways: Vec::new(),
+		nameservers: vec!["192.168.1.1".to_owned()],
+		routes: Vec::new(),
+	});
+	let offered = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		said(&offered, "a lease on eth0 offered nameservers"),
+		"the reported servers were not mentioned: {:?}",
+		offered.warnings
+	);
+	assert!(said(&offered, "add an empty `dns { }` block"));
+
+	// And once the interface asks, there is nothing to warn about: 0049's third row
+	// delivers the reported servers, so the file has one.
+	let asked = document(
+		r#"
+global { dns { mode = "write_resolv_conf" } }
+interface eth0 { config = "dhcp"; dns { } }
+"#,
+	);
+	let quiet = plan(&asked, &observed, &PlanOptions::default());
+	assert!(
+		!said(&quiet, "resolves nothing"),
+		"an interface that asked was still warned about: {:?}",
+		quiet.warnings
+	);
+}
+
 /// A lease hook fires when the address arrives, and once.
 ///
 /// netcfgd never sees DHCP (0004), so the trigger is an address on the interface

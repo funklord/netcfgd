@@ -1864,6 +1864,11 @@ fn start_backend(
 			// nothing at all, and without `-p` there is no way to stop it.
 			// Decision 0065.
 			let (script, pidfile) = write_udhcpc_script(iface)?;
+			// dhcpcd gets one too, for the nameservers and to stop its own hooks
+			// writing resolv.conf behind netcfgd's back (0066).
+			let hook = write_dhcpcd_script(iface)?;
+			dhcpcd.insert(0, "-c".to_owned());
+			dhcpcd.insert(1, hook.display().to_string());
 			let udhcpc = vec![
 				"-b".to_owned(),
 				"-i".to_owned(),
@@ -2047,6 +2052,29 @@ fn write_pd_hook(iface: &str) -> Result<std::path::PathBuf, String> {
 	Ok(path)
 }
 
+/// Write the hook script dhcpcd runs, and return its path.
+fn write_dhcpcd_script(iface: &str) -> Result<std::path::PathBuf, String> {
+	use std::io::Write;
+	use std::os::unix::fs::PermissionsExt;
+
+	let run = run_dir_path();
+	let dir = run.join("dhcpcd");
+	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+	let reported = run.join("reported");
+	std::fs::create_dir_all(&reported)
+		.map_err(|error| format!("{}: {error}", reported.display()))?;
+
+	let path = dir.join(format!("{iface}.script"));
+	let script = dhcpcd_script(iface, &reported.join(iface));
+	let mut file = std::fs::File::create(&path)
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	file.write_all(script.as_bytes())
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+		.map_err(|error| format!("cannot make {} executable: {error}", path.display()))?;
+	Ok(path)
+}
+
 /// Write the script udhcpc runs, and say where its pid file goes.
 ///
 /// Both under `/run/netcfgd/udhcpc/`, which is tmpfs and regenerated on every
@@ -2057,11 +2085,22 @@ fn write_udhcpc_script(iface: &str) -> Result<(std::path::PathBuf, std::path::Pa
 	use std::io::Write;
 	use std::os::unix::fs::PermissionsExt;
 
-	let dir = run_dir_path().join("udhcpc");
+	let run = run_dir_path();
+	let dir = run.join("udhcpc");
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+	// The report the script writes its nameservers into, which netcfgd reads back
+	// through the contract in `docs/interface-report.md` rather than through
+	// anything specific to DHCP.
+	let reported = run.join("reported");
+	std::fs::create_dir_all(&reported)
+		.map_err(|error| format!("{}: {error}", reported.display()))?;
 
 	let path = dir.join(format!("{iface}.script"));
-	let script = udhcpc_script(iface, &dir.join(format!("{iface}.address")));
+	let script = udhcpc_script(
+		iface,
+		&dir.join(format!("{iface}.address")),
+		&reported.join(iface),
+	);
 	let mut file = std::fs::File::create(&path)
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
 	file.write_all(script.as_bytes())
@@ -2288,6 +2327,83 @@ fn quote_ppp(value: &str) -> String {
 	out
 }
 
+/// The hook script dhcpcd runs, replacing its own.
+///
+/// dhcpcd configures the interface itself, so unlike udhcpc's this script does no
+/// addressing at all. What it is for is the half netcfgd cannot get any other way:
+/// **the nameservers the lease carried**, written into the interface report.
+///
+/// **And what it stops is a fight.** dhcpcd's own `20-resolv.conf` hook writes
+/// `/etc/resolv.conf`, directly or through `resolvconf` -- so on a machine where
+/// netcfgd's DNS mode owns that file, both were writing it and whichever ran last
+/// won. Passing `-c` replaces the whole hook directory, which ends the contention
+/// and is the reason this is not simply a file dropped in beside dhcpcd's own
+/// hooks. Decision 0066.
+///
+/// Two things dhcpcd's default hooks did that this deliberately does not:
+///
+/// - **Write `resolv.conf`**, per above.
+/// - **Set the hostname.** `30-hostname` sets it from the lease when the current
+///   one is blank or `localhost`. netcfgd refuses `hostname = "dhcp"` by name
+///   (0061) on the grounds that a machine's identity is not a remote server's to
+///   change, and leaving dhcpcd to do it anyway would have been that decision
+///   holding in the config and not in fact.
+///
+/// The variable names are dhcpcd's and were read out of its own
+/// `20-resolv.conf`, not remembered: `$new_domain_name_servers`,
+/// `$new_domain_name`, and `$reason` -- which is `BOUND`, `RENEW`, `REBIND`,
+/// `REBOOT` or `INFORM` for a lease and their `6` suffixed forms for `DHCPv6`,
+/// where the servers arrive in `$new_dhcp6_name_servers` instead. 0050 is the scar
+/// that makes this worth reading rather than assuming: `$new_dhcp6_prefix` is not
+/// a dhcpcd variable at all and netcfgd's hook read it for years.
+#[must_use]
+pub fn dhcpcd_script(iface: &str, report: &std::path::Path) -> String {
+	format!(
+		"#!/bin/sh\n\
+		 # Written by netcfgd for dhcpcd on {iface}. Regenerated on every apply.\n\
+		 #\n\
+		 # This replaces dhcpcd's own hook directory (-c), so nothing here writes\n\
+		 # /etc/resolv.conf -- netcfgd's DNS backend owns that file, and dhcpcd's\n\
+		 # 20-resolv.conf hook was writing it too. dhcpcd installs the address and\n\
+		 # the routes itself; this only reports what netcfgd cannot otherwise see.\n\
+		 set -u\n\
+		 report={report}\n\
+		 iface=${{interface:-{iface}}}\n\
+		 \n\
+		 servers=${{new_domain_name_servers:-}}\n\
+		 domain=${{new_domain_name:-}}\n\
+		 case \"${{reason:-}}\" in\n\
+		 *6)\n\
+		 \t# The DHCPv6 names for the same two things.\n\
+		 \tservers=${{new_dhcp6_name_servers:-}}\n\
+		 \tdomain=${{new_dhcp6_domain_search:-}}\n\
+		 \t;;\n\
+		 esac\n\
+		 \n\
+		 case \"${{reason:-}}\" in\n\
+		 BOUND*|RENEW*|REBIND*|REBOOT*|INFORM*)\n\
+		 \t{{\n\
+		 \t\tprintf '# %s, from a dhcpcd lease. Written by netcfgd.\\n' \"$iface\"\n\
+		 \t\tfor server in $servers; do\n\
+		 \t\t\tprintf 'dns=%s\\n' \"$server\"\n\
+		 \t\tdone\n\
+		 \t\t# A domain is a comment, not a key: decision 0049 says a server may\n\
+		 \t\t# name resolvers and not where queries go.\n\
+		 \t\t[ -n \"$domain\" ] &&\n\
+		 \t\t\tprintf '# the server also said: domain %s\\n' \"$domain\"\n\
+		 \t}} > \"$report.tmp\"\n\
+		 \tmv \"$report.tmp\" \"$report\"\n\
+		 \t;;\n\
+		 EXPIRE*|FAIL*|NAK*|STOP*|RELEASE*|NOCARRIER*)\n\
+		 \trm -f \"$report\"\n\
+		 \t;;\n\
+		 esac\n\
+		 exit 0\n",
+		iface = iface,
+		report = report.display()
+	)
+}
+
 /// The script busybox `udhcpc` runs when its lease changes.
 ///
 /// **udhcpc does nothing at all without one.** It has no built-in configuration
@@ -2320,7 +2436,7 @@ fn quote_ppp(value: &str) -> String {
 /// this uses the one `ip` takes. Measured against a real busybox 1.37 client and a
 /// real busybox `udhcpd`, which is also what `tests/live/dhcp.sh` does.
 #[must_use]
-pub fn udhcpc_script(iface: &str, state: &std::path::Path) -> String {
+pub fn udhcpc_script(iface: &str, state: &std::path::Path, report: &std::path::Path) -> String {
 	format!(
 		"#!/bin/sh\n\
 		 # Written by netcfgd for udhcpc on {iface}. Regenerated on every apply.\n\
@@ -2331,6 +2447,7 @@ pub fn udhcpc_script(iface: &str, state: &std::path::Path) -> String {
 		 # not resolv.conf, which netcfgd's DNS backend owns.\n\
 		 set -u\n\
 		 state={state}\n\
+		 report={report}\n\
 		 iface=${{interface:?udhcpc did not say which interface}}\n\
 		 \n\
 		 # What this script added last time, so `deconfig` removes exactly that and\n\
@@ -2343,6 +2460,28 @@ pub fn udhcpc_script(iface: &str, state: &std::path::Path) -> String {
 		 \tip -4 route del default dev \"$iface\" 2>/dev/null || true\n\
 		 \tip -4 addr del \"$held\" dev \"$iface\" 2>/dev/null || true\n\
 		 \trm -f \"$state\"\n\
+		 \trm -f \"$report\"\n\
+		 }}\n\
+		 \n\
+		 # What the server offered, for netcfgd to read: the nameservers, and the\n\
+		 # domain as a comment. docs/interface-report.md is the format and decision\n\
+		 # 0049 is why a domain is a comment -- a server may name resolvers, and\n\
+		 # which names use them is the operator's to write down.\n\
+		 #\n\
+		 # Written to a temporary and renamed, because netcfgd may read at any moment\n\
+		 # and a half-written file would be read as a shorter list rather than as an\n\
+		 # error. Rewritten rather than appended, so a renewal that dropped a server\n\
+		 # does not leave it behind.\n\
+		 report() {{\n\
+		 \t{{\n\
+		 \t\tprintf '# %s, from a DHCPv4 lease. Written by netcfgd.\\n' \"$iface\"\n\
+		 \t\tfor server in ${{dns:-}}; do\n\
+		 \t\t\tprintf 'dns=%s\\n' \"$server\"\n\
+		 \t\tdone\n\
+		 \t\t[ -n \"${{domain:-}}\" ] &&\n\
+		 \t\t\tprintf '# the server also said: domain %s\\n' \"$domain\"\n\
+		 \t}} > \"$report.tmp\"\n\
+		 \tmv \"$report.tmp\" \"$report\"\n\
 		 }}\n\
 		 \n\
 		 case \"${{1:-}}\" in\n\
@@ -2361,6 +2500,7 @@ pub fn udhcpc_script(iface: &str, state: &std::path::Path) -> String {
 		 \t\t\tip -4 route replace default via \"$gateway\" dev \"$iface\" && break\n\
 		 \t\tdone\n\
 		 \tfi\n\
+		 \treport\n\
 		 \t;;\n\
 		 deconfig|nak|leasefail)\n\
 		 \t# The lease is gone or was never obtained. `deconfig` also arrives once\n\
@@ -2371,7 +2511,8 @@ pub fn udhcpc_script(iface: &str, state: &std::path::Path) -> String {
 		 esac\n\
 		 exit 0\n",
 		iface = iface,
-		state = state.display()
+		state = state.display(),
+		report = report.display()
 	)
 }
 
@@ -2746,7 +2887,11 @@ mod udhcpc_tests {
 	/// only appears when a lease arrives on somebody's machine.
 	#[test]
 	fn the_script_parses_and_leaves_what_it_should_alone() {
-		let script = super::udhcpc_script("cli", std::path::Path::new("/run/x/cli.address"));
+		let script = super::udhcpc_script(
+			"cli",
+			std::path::Path::new("/run/x/cli.address"),
+			std::path::Path::new("/run/x/reported/cli"),
+		);
 		let dir = std::env::temp_dir().join(format!("ncfg-udhcpc-{}", std::process::id()));
 		std::fs::create_dir_all(&dir).expect("a directory");
 		let path = dir.join("script");
@@ -2785,6 +2930,60 @@ mod udhcpc_tests {
 			code.contains("${mask:?"),
 			"it does not insist on a prefix length"
 		);
+		// And the report, which is how a lease's nameservers reach netcfgd at all
+		// (0066). The domain is a comment rather than a key, because 0049 says a
+		// server may name resolvers and not where queries go.
+		assert!(code.contains("dns=%s"), "it reports no nameservers");
+		assert!(
+			!code.contains("domain=%s"),
+			"it reports a domain as a key: {code}"
+		);
+		let _ = std::fs::remove_dir_all(&dir);
+	}
+
+	/// dhcpcd's script, on the same terms and with one more thing to prove: it
+	/// configures nothing, because dhcpcd does that itself.
+	#[test]
+	fn the_dhcpcd_script_reports_and_configures_nothing() {
+		let script = super::dhcpcd_script("eth0", std::path::Path::new("/run/x/reported/eth0"));
+		let dir = std::env::temp_dir().join(format!("ncfg-dhcpcd-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).expect("a directory");
+		let path = dir.join("script");
+		std::fs::write(&path, &script).expect("written");
+		let checked = std::process::Command::new("sh")
+			.arg("-n")
+			.arg(&path)
+			.output()
+			.expect("sh runs");
+		assert!(
+			checked.status.success(),
+			"the generated script is not valid shell: {}",
+			String::from_utf8_lossy(&checked.stderr)
+		);
+		let code: String = script
+			.lines()
+			.filter(|line| !line.trim_start().starts_with('#'))
+			.collect::<Vec<&str>>()
+			.join("\n");
+		assert!(code.contains("dns=%s"), "it reports no nameservers");
+		assert!(
+			!code.contains("resolv.conf"),
+			"it writes resolv.conf: {code}"
+		);
+		// dhcpcd installs the address and the routes; a script that also did would
+		// be two things configuring one interface.
+		assert!(
+			!code.contains("ip -4 addr"),
+			"it configures an address: {code}"
+		);
+		assert!(
+			!code.contains("ip -4 route"),
+			"it configures a route: {code}"
+		);
+		assert!(!code.contains("hostname"), "it sets the hostname: {code}");
+		// The variable names are dhcpcd's own, read out of its `20-resolv.conf`.
+		assert!(code.contains("new_domain_name_servers"));
+		assert!(code.contains("new_dhcp6_name_servers"));
 		let _ = std::fs::remove_dir_all(&dir);
 	}
 }

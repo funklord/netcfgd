@@ -43,6 +43,7 @@ global {
 interface enp0s31f6 {
 	preference = 100
 	config     = "dhcp"
+	dns        { }
 }
 
 device wlp0s20f3 {
@@ -56,12 +57,19 @@ device wlp0s20f3 {
 interface wlp0s20f3 {
 	preference = 600
 	config     = "dhcp"
+	dns        { }
 }
 
 network "YourNetworkName" {
 	wifi { psk = "@secret:home" }
 }
 ```
+
+`dns { }` is not decoration. It is how you say "use the nameservers this network
+hands out": netcfgd owns `/etc/resolv.conf` in the mode above, and without that line
+the lease's servers are reported and not used -- deliberately, because a network you
+joined does not get to decide where your queries go unless you say so. `ncfg plan`
+tells you when a lease offered servers and nothing asked for them.
 
 `preference` is the whole switching feature: it becomes the route metric, so
 100 beats 600 and the cable wins, and it ties each interface's routes to its
@@ -247,10 +255,14 @@ A `down` hook runs *before* the interface goes and while it still has its
 addresses, which is what you want for unmounting something. If it fails, the
 interface stays up: the down phases can veto.
 
-**A DHCP lease gives you an address and a route, and no nameservers.** Neither
-client tells netcfgd about the ones it was offered, so DNS comes from your config.
-That is the one thing about DHCPv4 that is still missing -- it works with dhcpcd and
-with busybox `udhcpc` alike now, including on a machine that has only busybox.
+**A lease's `search` domain is not used.** Its nameservers are, through the
+`dns { }` block above. The domain the server sent is written into
+`/run/netcfgd/reported/<interface>` as a comment so you can see it, and netcfgd does
+not act on it: which names resolve where is yours to write down.
+
+**netcfgd replaces dhcpcd's hook scripts** while it manages an interface, which is
+what stops dhcpcd writing `resolv.conf` behind netcfgd's back. If you relied on
+dhcpcd's other hooks -- `ntp.conf`, `yp.conf` -- they no longer run.
 
 **Nothing manages `accept_ra`, and its default ignores router advertisements on a
 forwarding interface.** Not a laptop problem unless you turn on `forwarding` for a

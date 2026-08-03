@@ -3242,6 +3242,50 @@ impl Builder {
 		// `resolv.conf` with nothing in it.
 		let scopes = netcfgd_model::dns::scopes(desired, observed);
 
+		// A delivery with no servers anywhere overwrites a working `resolv.conf`
+		// with a file that resolves nothing, and said nothing about it: `ncfg plan`
+		// showed `dns.apply` and the machine's DNS was gone. Measured against a real
+		// resolver file, and the mode the first-run guide recommends is the one that
+		// does it (0066).
+		//
+		// Warned rather than refused: the operator asked for netcfgd to own the file,
+		// and leaving a stale one behind would be drift the config cannot describe.
+		// What the warning adds is the *reason*, which netcfgd knows and an operator
+		// staring at an empty file does not -- including a lease whose servers
+		// nothing asked for, which is the common case and has an answer in one line.
+		// `!is_empty()` first, and it is not defensive: `all` on an empty list is
+		// true, so without it every document that manages no DNS at all -- which is
+		// the default -- got told its resolver file would resolve nothing. Two
+		// existing fixtures caught that, both of them asserting no warnings.
+		if !scopes.is_empty()
+			&& scopes.iter().all(|(_, policy)| {
+				policy.servers.is_empty() && policy.mode != netcfgd_model::DnsMode::None
+			}) {
+			let offered: Vec<&str> = observed
+				.reports
+				.iter()
+				.filter(|report| !report.nameservers.is_empty())
+				.map(|report| report.interface.as_str())
+				.collect();
+			let remedy = if offered.is_empty() {
+				"nothing in the configuration names a nameserver".to_owned()
+			} else {
+				format!(
+					"a lease on {} offered nameservers and no interface asked for them -- \
+					 add an empty `dns {{ }}` block to that interface to use what the \
+					 network hands out",
+					offered.join(", ")
+				)
+			};
+			self.warnings.push(Warning {
+				message: format!(
+					"the DNS delivery has no servers in it, so it will write a resolver \
+					 file that resolves nothing: {remedy}"
+				),
+				interface: None,
+			});
+		}
+
 		for (scope, policy) in scopes {
 			let previous = observed.dns_for(&scope);
 			if previous == Some(&policy) {

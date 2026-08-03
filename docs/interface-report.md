@@ -3,8 +3,8 @@
 **Status: stable. This is a contract, not an implementation detail.**
 
 Something that is not netcfgd brings an interface up -- a modem helper connects a
-cellular bearer, `openvpn` negotiates a tunnel -- and writes down what the far
-end gave it. netcfgd reads that file and treats it the way it treats a lease. The
+cellular bearer, `openvpn` negotiates a tunnel, a DHCP client takes a lease -- and
+writes down what the far end gave it. netcfgd reads that file and treats it the way it treats a lease. The
 two halves do not otherwise know about each other -- no library, no socket, no
 bus.
 
@@ -33,6 +33,13 @@ writes.
 
 `/run/netcfgd` is netcfgd's run directory and moves with `$NCFG_RUN_DIR`, which a
 writer should honour so it can be tested somewhere other than `/run`.
+
+**netcfgd generates two writers of this file itself**: the scripts it hands
+`dhcpcd -c` and `udhcpc -s`, which report a lease's nameservers because netcfgd
+never sees the protocol
+([0066](decisions/0066-a-lease-reports-its-nameservers.md)). They are worth reading
+as worked examples -- they are the shortest writers there are, and each one reports
+exactly one key.
 
 ## What
 

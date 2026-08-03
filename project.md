@@ -932,6 +932,25 @@ device path out of `/sys`.
 
 #### DHCPv4, which nothing had ever driven
 
+**A lease's nameservers reach the resolver through the report contract**
+([0066](docs/decisions/0066-a-lease-reports-its-nameservers.md)). Both clients run a
+netcfgd-generated script that writes `dns=` into `/run/netcfgd/reported/<iface>`, and
+0049's existing gate delivers them to an interface that asked with an empty
+`dns { }` block. No new mechanism and no new gate: only the reporting half 0049 left
+for later, so a modem, a tunnel and a lease all arrive the same way.
+
+**It was worse than a missing feature.** With the mode the first-run guide
+recommends, netcfgd overwrote a working `/etc/resolv.conf` with a file containing one
+comment and no nameservers — measured — while the plan said `dns.apply` and warned
+only that it could not be undone. A delivery with no servers in it now says so, and
+where a report offered some, it names the interface and the one-line fix.
+
+**And dhcpcd had been fighting netcfgd for that file all along.** Its own
+`20-resolv.conf` hook writes `resolv.conf`, so on any machine where netcfgd's DNS
+mode owns it, both wrote and whichever ran last won. `-c` replaces dhcpcd's hook
+directory, which ends that — and stops `30-hostname` taking the hostname from a
+lease, which 0061 had refused in the config while dhcpcd did it anyway.
+
 **netcfgd generates the script busybox `udhcpc` needs**
 ([0065](docs/decisions/0065-udhcpc-needs-a-script-and-netcfgd-writes-it.md)). Before
 that it invoked the client with no `-s`, and busybox has no configuration step of
@@ -1062,12 +1081,16 @@ match.
    (0063), the `lease` hook (0064) and DHCPv4 with busybox (0065). What is left, and
    none of it is a schema question:
 
-   - **A DHCP lease's nameservers reach nothing.** Neither client tells netcfgd
-     about them, so `config = "dhcp"` gives an address and a route while DNS comes
-     from the document. The report contract already has a `dns` key and
-     [0049](docs/decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)
-     already has the gate; what it needs is dhcpcd's half, which means a hook script
-     somewhere under `/etc` and a decision about writing one.
+   - **A lease's `search` domain is still nowhere.** Its nameservers arrive now
+     ([0066](docs/decisions/0066-a-lease-reports-its-nameservers.md)); `search` is
+     suffix completion rather than query routing, so unlike `domains` it is not what
+     0049 refuses and could honestly be a report key — but that is a change to a
+     contract marked stable and wants its own decision.
+   - **dhcpcd's generated script has never been run by dhcpcd**, which is not
+     installed here. Its shape was read out of dhcpcd 10.1.0's own hooks and its
+     `-c` option out of the man page, and `sh -n` plus assertions cover the text;
+     the busybox half is driven end to end. A machine with the package would close
+     this in one run.
    - **Six hook phases still do not fire**: `up`, `pre_down`, `carrier`, `roam`,
      `portal` and `drift`. `carrier` is the one a laptop would notice.
    - **Joining a network needs an editor and root.** `ncfg wifi connect` takes the id
@@ -1103,6 +1126,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **~~An interface that exists as the wrong kind is not recreated, and nothing says so.~~ Closed** ([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)), in the commit after the one that wrote it down. A document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, planned `link.up` and nothing else — netcfgd brought somebody else's device up and called the network configured. It shared its remedy with the VLAN id, which is why one session did both. What is worth keeping from it is the measurement habit that found it: the finding came from asking what *else* would fall into the safe direction of the new comparisons, not from a test.
+- **`all` on an empty list is true, and that is a warning nobody asked for.** The check for "this DNS delivery has no servers" fired on every document that manages no DNS at all, because the scope list was empty and `all` said yes. Two existing fixtures caught it — both of them asserting that a converged plan warns about nothing, which is a cheap assertion to have in a lot of tests.
 - **A break that silently fails to apply reads exactly like a gate that works.** Two runs in this session proved nothing: one patch did not match the source and its script had no assertion, so it built the unmodified tree and reported "all checks passed"; another had its restore skipped by `set -e` and left the tree broken for the *next* break, which then failed for the wrong reason. A break script needs to assert that it changed something, and to restore whether or not the test passed — the same discipline as the gates it is checking.
 - **A gate that has never seen its subject is not a gate.** The plan-idempotence check has run on every fixture for milestones, and not one of them had a hook in it — the single fixture that did called `plan` and `simulate` by hand. So the up hooks being emitted unconditionally, which made every converged plan non-empty, was invisible to the exact gate that exists to catch it. When a feature has one test, check whether that test goes through the harness the others do.
 - **The hash on a hook can only fail where the compile and the run are separated in time.** `ncfg apply` materialises the script microseconds before running it, so it is checking a hash of a file it just wrote; the daemon re-materialises whenever the config changes. What is left is a plan built from a *kernel* change against a document compiled earlier — drift, which is what §2.2 said the hash was for. Nothing had ever tested it, and the first attempt could not, twice, for these two reasons.
