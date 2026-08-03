@@ -601,11 +601,8 @@
     {
       "id": 25,
       "op": {
-        "op": "wg_set_device",
-        "iface": "wg0",
-        "private_key_ref": "@secret:wg0",
-        "listen_port": 51820,
-        "fwmark": 1
+        "op": "link_set_macvlan",
+        "name": "mv0"
       },
       "reason": {
         "interface": "eth0",
@@ -617,29 +614,15 @@
         0
       ],
       "inverse": {
-        "op": "wg_set_device",
-        "iface": "wg0",
-        "private_key_ref": "@secret:wg0",
-        "listen_port": 51820,
-        "fwmark": 1
+        "op": "link_set_macvlan",
+        "name": "mv0"
       }
     },
     {
       "id": 26,
       "op": {
-        "op": "wg_set_peers",
-        "iface": "wg0",
-        "peers": [
-          {
-            "name": "office",
-            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
-            "endpoint": "vpn.example:51820",
-            "allowed_ips": [
-              "10.0.0.0/24"
-            ],
-            "keepalive": 25
-          }
-        ]
+        "op": "link_set_tunnel",
+        "name": "tun-office"
       },
       "reason": {
         "interface": "eth0",
@@ -651,39 +634,15 @@
         0
       ],
       "inverse": {
-        "op": "wg_set_peers",
-        "iface": "wg0",
-        "peers": [
-          {
-            "name": "office",
-            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
-            "endpoint": "vpn.example:51820",
-            "allowed_ips": [
-              "10.0.0.0/24"
-            ],
-            "keepalive": 25
-          }
-        ]
+        "op": "link_set_tunnel",
+        "name": "tun-office"
       }
     },
     {
       "id": 27,
       "op": {
-        "op": "dns_apply",
-        "scope": "globals",
-        "policy": {
-          "mode": "write_resolv_conf",
-          "servers": [
-            {
-              "addr": "9.9.9.9"
-            }
-          ],
-          "search": [
-            "example.com"
-          ],
-          "domains": [],
-          "options": []
-        }
+        "op": "link_set_vxlan",
+        "name": "vx0"
       },
       "reason": {
         "interface": "eth0",
@@ -695,34 +654,18 @@
         0
       ],
       "inverse": {
-        "op": "dns_apply",
-        "scope": "globals",
-        "policy": {
-          "mode": "write_resolv_conf",
-          "servers": [
-            {
-              "addr": "9.9.9.9"
-            }
-          ],
-          "search": [
-            "example.com"
-          ],
-          "domains": [],
-          "options": []
-        }
+        "op": "link_set_vxlan",
+        "name": "vx0"
       }
     },
     {
       "id": 28,
       "op": {
-        "op": "link_set_offloads",
-        "name": "eth0",
-        "features": [
-          [
-            "rx-checksum",
-            true
-          ]
-        ]
+        "op": "wg_set_device",
+        "iface": "wg0",
+        "private_key_ref": "@secret:wg0",
+        "listen_port": 51820,
+        "fwmark": 1
       },
       "reason": {
         "interface": "eth0",
@@ -734,22 +677,29 @@
         0
       ],
       "inverse": {
-        "op": "link_set_offloads",
-        "name": "eth0",
-        "features": [
-          [
-            "rx-checksum",
-            true
-          ]
-        ]
+        "op": "wg_set_device",
+        "iface": "wg0",
+        "private_key_ref": "@secret:wg0",
+        "listen_port": 51820,
+        "fwmark": 1
       }
     },
     {
       "id": 29,
       "op": {
-        "op": "link_set_ipv6_token",
-        "name": "eth0",
-        "token": "::5"
+        "op": "wg_set_peers",
+        "iface": "wg0",
+        "peers": [
+          {
+            "name": "office",
+            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+            "endpoint": "vpn.example:51820",
+            "allowed_ips": [
+              "10.0.0.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
       },
       "reason": {
         "interface": "eth0",
@@ -761,30 +711,38 @@
         0
       ],
       "inverse": {
-        "op": "link_set_ipv6_token",
-        "name": "eth0",
-        "token": "::5"
+        "op": "wg_set_peers",
+        "iface": "wg0",
+        "peers": [
+          {
+            "name": "office",
+            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+            "endpoint": "vpn.example:51820",
+            "allowed_ips": [
+              "10.0.0.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
       }
     },
     {
       "id": 30,
       "op": {
-        "op": "rule_add",
-        "rule": {
-          "id": "from-lan",
-          "priority": 100,
-          "family": "inet",
-          "from": "192.168.0.0/24",
-          "to": "10.0.0.0/8",
-          "iif": "eth0",
-          "oif": "eth1",
-          "fwmark": 3,
-          "fwmask": 65535,
-          "table": 200,
-          "action": "lookup",
-          "suppress_prefixlength": 0,
-          "l3mdev": true,
-          "invert": true
+        "op": "dns_apply",
+        "scope": "globals",
+        "policy": {
+          "mode": "write_resolv_conf",
+          "servers": [
+            {
+              "addr": "9.9.9.9"
+            }
+          ],
+          "search": [
+            "example.com"
+          ],
+          "domains": [],
+          "options": []
         }
       },
       "reason": {
@@ -797,45 +755,34 @@
         0
       ],
       "inverse": {
-        "op": "rule_add",
-        "rule": {
-          "id": "from-lan",
-          "priority": 100,
-          "family": "inet",
-          "from": "192.168.0.0/24",
-          "to": "10.0.0.0/8",
-          "iif": "eth0",
-          "oif": "eth1",
-          "fwmark": 3,
-          "fwmask": 65535,
-          "table": 200,
-          "action": "lookup",
-          "suppress_prefixlength": 0,
-          "l3mdev": true,
-          "invert": true
+        "op": "dns_apply",
+        "scope": "globals",
+        "policy": {
+          "mode": "write_resolv_conf",
+          "servers": [
+            {
+              "addr": "9.9.9.9"
+            }
+          ],
+          "search": [
+            "example.com"
+          ],
+          "domains": [],
+          "options": []
         }
       }
     },
     {
       "id": 31,
       "op": {
-        "op": "rule_del",
-        "rule": {
-          "id": "from-lan",
-          "priority": 100,
-          "family": "inet",
-          "from": "192.168.0.0/24",
-          "to": "10.0.0.0/8",
-          "iif": "eth0",
-          "oif": "eth1",
-          "fwmark": 3,
-          "fwmask": 65535,
-          "table": 200,
-          "action": "lookup",
-          "suppress_prefixlength": 0,
-          "l3mdev": true,
-          "invert": true
-        }
+        "op": "link_set_offloads",
+        "name": "eth0",
+        "features": [
+          [
+            "rx-checksum",
+            true
+          ]
+        ]
       },
       "reason": {
         "interface": "eth0",
@@ -847,33 +794,22 @@
         0
       ],
       "inverse": {
-        "op": "rule_del",
-        "rule": {
-          "id": "from-lan",
-          "priority": 100,
-          "family": "inet",
-          "from": "192.168.0.0/24",
-          "to": "10.0.0.0/8",
-          "iif": "eth0",
-          "oif": "eth1",
-          "fwmark": 3,
-          "fwmask": 65535,
-          "table": 200,
-          "action": "lookup",
-          "suppress_prefixlength": 0,
-          "l3mdev": true,
-          "invert": true
-        }
+        "op": "link_set_offloads",
+        "name": "eth0",
+        "features": [
+          [
+            "rx-checksum",
+            true
+          ]
+        ]
       }
     },
     {
       "id": 32,
       "op": {
-        "op": "qdisc_set",
-        "iface": "eth0",
-        "kind": "cake",
-        "bandwidth_bits": 20000000,
-        "ingress": true
+        "op": "link_set_ipv6_token",
+        "name": "eth0",
+        "token": "::5"
       },
       "reason": {
         "interface": "eth0",
@@ -885,18 +821,31 @@
         0
       ],
       "inverse": {
-        "op": "qdisc_set",
-        "iface": "eth0",
-        "kind": "cake",
-        "bandwidth_bits": 20000000,
-        "ingress": true
+        "op": "link_set_ipv6_token",
+        "name": "eth0",
+        "token": "::5"
       }
     },
     {
       "id": 33,
       "op": {
-        "op": "qdisc_reset",
-        "iface": "eth0"
+        "op": "rule_add",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
       },
       "reason": {
         "interface": "eth0",
@@ -908,16 +857,45 @@
         0
       ],
       "inverse": {
-        "op": "qdisc_reset",
-        "iface": "eth0"
+        "op": "rule_add",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
       }
     },
     {
       "id": 34,
       "op": {
-        "op": "ingress_redirect",
-        "iface": "eth0",
-        "target": "ifb-eth0"
+        "op": "rule_del",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
       },
       "reason": {
         "interface": "eth0",
@@ -929,16 +907,33 @@
         0
       ],
       "inverse": {
-        "op": "ingress_redirect",
-        "iface": "eth0",
-        "target": "ifb-eth0"
+        "op": "rule_del",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
       }
     },
     {
       "id": 35,
       "op": {
-        "op": "ingress_redirect_clear",
-        "iface": "eth0"
+        "op": "qdisc_set",
+        "iface": "eth0",
+        "kind": "cake",
+        "bandwidth_bits": 20000000,
+        "ingress": true
       },
       "reason": {
         "interface": "eth0",
@@ -950,16 +945,18 @@
         0
       ],
       "inverse": {
-        "op": "ingress_redirect_clear",
-        "iface": "eth0"
+        "op": "qdisc_set",
+        "iface": "eth0",
+        "kind": "cake",
+        "bandwidth_bits": 20000000,
+        "ingress": true
       }
     },
     {
       "id": 36,
       "op": {
-        "op": "sysctl_set_forwarding",
-        "iface": "eth0",
-        "enabled": true
+        "op": "qdisc_reset",
+        "iface": "eth0"
       },
       "reason": {
         "interface": "eth0",
@@ -971,18 +968,16 @@
         0
       ],
       "inverse": {
-        "op": "sysctl_set_forwarding",
-        "iface": "eth0",
-        "enabled": true
+        "op": "qdisc_reset",
+        "iface": "eth0"
       }
     },
     {
       "id": 37,
       "op": {
-        "op": "nat_replace",
-        "uplinks": [
-          "eth0"
-        ]
+        "op": "ingress_redirect",
+        "iface": "eth0",
+        "target": "ifb-eth0"
       },
       "reason": {
         "interface": "eth0",
@@ -994,19 +989,16 @@
         0
       ],
       "inverse": {
-        "op": "nat_replace",
-        "uplinks": [
-          "eth0"
-        ]
+        "op": "ingress_redirect",
+        "iface": "eth0",
+        "target": "ifb-eth0"
       }
     },
     {
       "id": 38,
       "op": {
-        "op": "hook_run",
-        "iface": "eth0",
-        "phase": "post_up",
-        "path": "/run/netcfgd/hooks/eth0-post_up"
+        "op": "ingress_redirect_clear",
+        "iface": "eth0"
       },
       "reason": {
         "interface": "eth0",
@@ -1018,15 +1010,83 @@
         0
       ],
       "inverse": {
-        "op": "hook_run",
-        "iface": "eth0",
-        "phase": "post_up",
-        "path": "/run/netcfgd/hooks/eth0-post_up"
+        "op": "ingress_redirect_clear",
+        "iface": "eth0"
       }
     },
     {
       "id": 39,
       "op": {
+        "op": "sysctl_set_forwarding",
+        "iface": "eth0",
+        "enabled": true
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "sysctl_set_forwarding",
+        "iface": "eth0",
+        "enabled": true
+      }
+    },
+    {
+      "id": 40,
+      "op": {
+        "op": "nat_replace",
+        "uplinks": [
+          "eth0"
+        ]
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "nat_replace",
+        "uplinks": [
+          "eth0"
+        ]
+      }
+    },
+    {
+      "id": 41,
+      "op": {
+        "op": "hook_run",
+        "iface": "eth0",
+        "phase": "post_up",
+        "path": "/run/netcfgd/hooks/eth0-post_up"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "hook_run",
+        "iface": "eth0",
+        "phase": "post_up",
+        "path": "/run/netcfgd/hooks/eth0-post_up"
+      }
+    },
+    {
+      "id": 42,
+      "op": {
         "op": "commit_arm",
         "window_seconds": 90
       },
@@ -1045,7 +1105,7 @@
       }
     },
     {
-      "id": 40,
+      "id": 43,
       "op": {
         "op": "commit_confirm"
       },
@@ -1063,7 +1123,7 @@
       }
     },
     {
-      "id": 41,
+      "id": 44,
       "op": {
         "op": "commit_revert",
         "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"

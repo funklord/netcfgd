@@ -227,6 +227,7 @@ fn tunnel_data(
 	remote: Option<std::net::IpAddr>,
 	ttl: Option<u8>,
 	key: Option<u32>,
+	changing: bool,
 ) {
 	// geneve numbers its attributes independently of the ip/gre
 	// family, so it cannot share the block below -- and using the
@@ -236,7 +237,15 @@ fn tunnel_data(
 		// A geneve tunnel needs a VNI; the model has no separate
 		// field for one, so the GRE key doubles as it. Named here
 		// because that reuse is not obvious from the config.
-		data.push_u32(IFLA_GENEVE_ID, key.unwrap_or(0));
+		//
+		// Left out on a change, because the kernel refuses a VNI that differs
+		// and refuses it as the whole message -- which would take the remote
+		// beside it down too. A geneve keeps what a change request leaves out
+		// (measured), so omitting it is not the same as clearing it, and the
+		// planner is what says the VNI has moved.
+		if !changing {
+			data.push_u32(IFLA_GENEVE_ID, key.unwrap_or(0));
+		}
 		if let Some(address) = remote {
 			data.push_ip(
 				if address.is_ipv6() {
@@ -286,7 +295,16 @@ fn tunnel_data(
 
 impl NewLink {
 	/// The `IFLA_INFO_DATA` nest for this kind, where it has one.
-	fn info_data(&self, name: &str) -> Option<AttrBuf> {
+	///
+	/// `changing` says whether this nest is for a device that already exists.
+	/// Three attributes come out when it is set, and every one was measured
+	/// rather than assumed: a VXLAN's `port`, which the kernel refuses **whether
+	/// or not the value differs** -- `vxlan_nl2conf` answers `EOPNOTSUPP` on the
+	/// attribute's presence, so a nest carrying it can never correct a remote --
+	/// and a VXLAN's `id` and a geneve tunnel's, which are refused when they
+	/// differ and would take the endpoint beside them down with them. Decision
+	/// 0058.
+	fn info_data(&self, name: &str, changing: bool) -> Option<AttrBuf> {
 		let mut data = AttrBuf::new();
 		match self {
 			Self::Bridge | Self::Dummy | Self::WireGuard | Self::Ifb => return None,
@@ -313,7 +331,15 @@ impl NewLink {
 				port,
 				..
 			} => {
-				data.push_u32(IFLA_VXLAN_ID, *id);
+				// Left out on a change, for the reason the port below is and
+				// with one difference: the kernel refuses a VNI only when the
+				// value differs, so restating the current one would work. It is
+				// omitted anyway, because a VXLAN keeps what a change request
+				// leaves out (measured) and because sending a value whose only
+				// acceptable form is "the same as now" says nothing.
+				if !changing {
+					data.push_u32(IFLA_VXLAN_ID, *id);
+				}
 				// The v4 and v6 attributes are different numbers, so the
 				// family decides which one is sent rather than the value being
 				// coerced into a single field.
@@ -337,7 +363,10 @@ impl NewLink {
 						*address,
 					);
 				}
-				if let Some(port) = port {
+				// Only when the device is being made. On a change the kernel
+				// refuses this attribute's presence outright, at any value, and
+				// takes the whole message down with it.
+				if let (Some(port), false) = (port, changing) {
 					// Big-endian, like every port number on the wire.
 					data.push(IFLA_VXLAN_PORT, &port.to_be_bytes());
 				}
@@ -351,7 +380,7 @@ impl NewLink {
 				ttl,
 				key,
 				..
-			} => tunnel_data(&mut data, kind, *local, *remote, *ttl, *key),
+			} => tunnel_data(&mut data, kind, *local, *remote, *ttl, *key, changing),
 			Self::Veth { peer } => {
 				// The peer's whole definition, not just its name: an
 				// `ifinfomsg` followed by its own attributes, nested inside
@@ -649,7 +678,7 @@ impl Netlink {
 	pub fn create_link(&mut self, name: &str, kind: &NewLink) -> io::Result<()> {
 		let mut info = AttrBuf::new();
 		info.push_str(ifla::INFO_KIND, kind.kind_name());
-		if let Some(data) = kind.info_data(name) {
+		if let Some(data) = kind.info_data(name, false) {
 			info.push(IFLA_INFO_DATA, data.as_bytes());
 		}
 
@@ -681,6 +710,53 @@ impl Netlink {
 			&body,
 			&attrs,
 		)?;
+		Ok(())
+	}
+
+	/// Re-send a kind's own settings to a device that already exists.
+	///
+	/// The same nest [`Netlink::create_link`] builds, through the same function,
+	/// which is the property decision 0057 insisted on for a bridge: two
+	/// encoders for one kind is how the create path and the correct-an-existing
+	/// path come to disagree about what the kind is.
+	///
+	/// **The whole nest, not the field that moved.** Measured, because the
+	/// families disagree: a request carrying only `IFLA_GRE_REMOTE` leaves a GRE
+	/// tunnel with no local address, no TTL and no key, since `ipgre_netlink_parms`
+	/// starts from a zeroed struct -- while a VXLAN and a geneve keep what the
+	/// request leaves out. `ip` hides this by reading the device and refilling
+	/// every field before it sends anything, so the obvious experiment says the
+	/// kernel merges when it does not. Sending everything makes the device match
+	/// what a freshly created one from the same document would be, under either
+	/// rule.
+	///
+	/// Not for a bridge or a bond: their settings are not part of [`NewLink`] --
+	/// a bridge takes none at creation -- and each has its own function above.
+	///
+	/// # Errors
+	///
+	/// Returns the errno the kernel replied with. `EINVAL` and `EOPNOTSUPP` are
+	/// the interesting ones: they mean the kernel will not take an attribute on a
+	/// device that exists, which the planner is meant to have said instead of
+	/// asking for.
+	pub fn set_link_kind(&mut self, index: u32, kind: &NewLink, name: &str) -> io::Result<()> {
+		let mut info = AttrBuf::new();
+		info.push_str(ifla::INFO_KIND, kind.kind_name());
+		if let Some(data) = kind.info_data(name, true) {
+			info.push(IFLA_INFO_DATA, data.as_bytes());
+		}
+
+		let mut outer = AttrBuf::new();
+		outer.push(ifla::LINKINFO, info.as_bytes());
+
+		let mut body = Vec::new();
+		wire::IfInfo {
+			index: i32::try_from(index).unwrap_or(0),
+			..wire::IfInfo::default()
+		}
+		.encode(&mut body);
+
+		self.request(msg_type::RTM_NEWLINK, ack_flags(), &body, &outer)?;
 		Ok(())
 	}
 

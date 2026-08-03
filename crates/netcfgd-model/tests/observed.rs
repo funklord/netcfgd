@@ -207,6 +207,21 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 			priority: Some(32_768),
 			vlan_filtering: true,
 		}),
+		macvlan: Some(netcfgd_model::ObservedMacvlan {
+			mode: Some("bridge".to_owned()),
+		}),
+		tunnel: Some(netcfgd_model::ObservedTunnel {
+			local: Some("192.0.2.1".parse().expect("an address")),
+			remote: Some("192.0.2.2".parse().expect("an address")),
+			ttl: Some(64),
+			key: Some(42),
+		}),
+		vxlan: Some(netcfgd_model::ObservedVxlan {
+			id: Some(100),
+			local: Some("192.0.2.1".parse().expect("an address")),
+			remote: Some("192.0.2.3".parse().expect("an address")),
+			port: Some(4789),
+		}),
 		wireguard: Some(netcfgd_model::ObservedWireGuard {
 			public_key: Some(key(0x11)),
 			listen_port: Some(51820),

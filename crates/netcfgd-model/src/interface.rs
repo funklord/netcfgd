@@ -282,6 +282,39 @@ impl MacvlanMode {
 			Self::Passthru => "passthru",
 		}
 	}
+
+	/// The number the kernel uses in `IFLA_MACVLAN_MODE`.
+	///
+	/// **Flags, not an enumeration**, which is easy to get wrong and fails
+	/// loudly: the kernel's validator accepts only these four and 16 for the
+	/// `source` mode netcfgd cannot express, so a 0 or a 3 is `EINVAL` rather
+	/// than a mode nobody meant.
+	#[must_use]
+	pub fn number(self) -> u32 {
+		match self {
+			Self::Private => 1,
+			Self::Vepa => 2,
+			Self::Bridge => 4,
+			Self::Passthru => 8,
+		}
+	}
+
+	/// The mode a kernel number means, where it means one netcfgd can express.
+	///
+	/// The inverse of [`MacvlanMode::number`] and beside it so the two cannot
+	/// drift, exactly as [`crate::BondMode::from_number`] is. `None` for 16 and
+	/// for anything else: that is a macvlan somebody else configured, and naming
+	/// it something netcfgd knows would have the planner correct it.
+	#[must_use]
+	pub fn from_number(number: u32) -> Option<Self> {
+		match number {
+			1 => Some(Self::Private),
+			2 => Some(Self::Vepa),
+			4 => Some(Self::Bridge),
+			8 => Some(Self::Passthru),
+			_ => None,
+		}
+	}
 }
 
 /// A macvlan: another MAC address on somebody else's NIC.

@@ -306,4 +306,11 @@ netcfgd
 # edited miimon being applied -- and an edited *mode* being explained instead,
 # because the kernel takes one only on a bond with no members and rejects the
 # whole message otherwise, interval included.
-total 2087448
+# +16 KB for the rest of the kinds 0057 named: a macvlan's mode, a tunnel's
+# endpoints and a VXLAN's. Three decoders rather than one, because GRE, the ip
+# tunnels and geneve number their attributes independently and reading one with
+# another's constants is how a VXLAN comes to report a forward delay. What it
+# bought is an edited endpoint moving at all, and -- for the three edits the
+# kernel refuses -- a sentence saying what to do instead of an apply that fails
+# and is planned again forever.
+total 2103832

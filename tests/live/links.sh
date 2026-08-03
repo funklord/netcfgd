@@ -233,6 +233,135 @@ contains "a sit tunnel uses the other numbering" "$(detail sit1)" "remote 10.7.0
 contains "and its ttl"                 "$(detail sit1)"   "ttl 64"
 contains "a geneve tunnel gets its vni" "$(detail gnv0)"  "geneve id 500"
 
+# ---------------------------------------------------------------------------
+# The rest of decision 0057's list, which is decision 0058: a macvlan's mode, a
+# tunnel's endpoints and a VXLAN's were all sent inside `link.create` and never
+# again, so editing any of them planned nothing at all.
+#
+# Every answer below was measured against a kernel before it was written, and no
+# two families agreed. Three of them refuse an edit outright, so netcfgd says
+# what is wrong instead of emitting an action that fails and is planned again on
+# the next reconcile.
+contains "the kinds 0058 compares plan nothing when just applied" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+# The kernel is asked rather than remembered. If it ever starts taking one of
+# these, the sentence netcfgd prints becomes a lie and this is what says so.
+refuses() {
+	label=$1
+	shift
+	if out=$("$@" 2>&1); then
+		echo "FAIL $label"
+		echo "       the kernel accepted: $*"
+		failures=$((failures + 1))
+	else
+		echo "ok   $label -- $out"
+	fi
+}
+
+# A macvlan's mode moves among private, vepa and bridge.
+sed -i '/macvlan/s/mode = "bridge"/mode = "vepa"/' "$work/etc/netcfgd.conf"
+mv_plan=$("$ncfg" plan 2>&1 || true)
+contains "an edited macvlan mode is planned" "$mv_plan" "link.set_macvlan"
+contains "and the reason names the field"    "$mv_plan" "macvlan.mode"
+"$ncfg" apply > "$work/apply-macvlan.txt" 2>&1 || { cat "$work/apply-macvlan.txt" >&2; exit 1; }
+contains "and the kernel has it afterwards" "$(detail mv0)" "macvlan mode vepa"
+contains "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+# ...and not into or out of passthru, which is the fourth mode and the one the
+# kernel refuses in both directions.
+sed -i '/macvlan/s/mode = "vepa"/mode = "passthru"/' "$work/etc/netcfgd.conf"
+mv_pass=$("$ncfg" plan 2>&1 || true)
+contains "a passthru edit is explained rather than attempted" "$mv_pass" \
+	"into or out of passthru"
+missing "and no action is planned for it" "$mv_pass" "link.set_macvlan"
+refuses "and the kernel does refuse it" ip link set mv0 type macvlan mode passthru
+sed -i '/macvlan/s/mode = "passthru"/mode = "vepa"/' "$work/etc/netcfgd.conf"
+
+# A GRE tunnel's endpoints move -- and the key has to survive the move. That is
+# the whole-nest rule: `ipgre_netlink_parms` starts from a zeroed struct, so a
+# request carrying only the remote leaves the tunnel with no local address, no
+# TTL and no key. `ip` hides this by reading the device and refilling every field
+# before it sends anything, which is why this is checked here and not with `ip`.
+sed -i '/gre1/s/remote = "10.7.0.2"/remote = "10.7.0.9"/' "$work/etc/netcfgd.conf"
+gre_plan=$("$ncfg" plan 2>&1 || true)
+contains "an edited tunnel endpoint is planned" "$gre_plan" "link.set_tunnel"
+contains "and the reason names the field"      "$gre_plan" "tunnel.remote"
+"$ncfg" apply > "$work/apply-gre.txt" 2>&1 || { cat "$work/apply-gre.txt" >&2; exit 1; }
+contains "and the kernel has the new endpoint" "$(detail gre1)" \
+	"remote 10.7.0.9 local 10.7.0.1"
+contains "and the key the request had to carry with it" "$(detail gre1)" "ikey 0.0.0.42"
+
+# The other numbering, which resets the same way: sit puts its endpoints where
+# GRE puts a flags word, so this is a second decoder and a second encoder.
+sed -i '/sit1/s/remote = "10.7.0.3"/remote = "10.7.0.8"/' "$work/etc/netcfgd.conf"
+sit_plan=$("$ncfg" plan 2>&1 || true)
+contains "an ip tunnel's endpoint is planned too" "$sit_plan" "link.set_tunnel"
+"$ncfg" apply > "$work/apply-sit.txt" 2>&1 || { cat "$work/apply-sit.txt" >&2; exit 1; }
+contains "and the kernel has it"       "$(detail sit1)" "remote 10.7.0.8 local 10.7.0.1"
+contains "with the ttl it was created with" "$(detail sit1)" "ttl 64"
+contains "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+# A geneve tunnel takes a remote and refuses a VNI, so the change netcfgd sends
+# leaves the VNI out -- which is what lets the remote beside it move at all.
+sed -i '/gnv0/s/remote = "10.7.0.4"/remote = "10.7.0.7"/' "$work/etc/netcfgd.conf"
+"$ncfg" apply > "$work/apply-geneve.txt" 2>&1 || { cat "$work/apply-geneve.txt" >&2; exit 1; }
+contains "a geneve remote moves"       "$(detail gnv0)" "remote 10.7.0.7"
+contains "and it keeps the vni the request left out" "$(detail gnv0)" "geneve id 500"
+
+# The VNI and the remote edited together, which is the case that says whether
+# the change nest really leaves the VNI out. Restating the VNI it already has is
+# accepted by the kernel, so a nest that carried it would pass every check above
+# and fail exactly here -- where the value in the document is a new one.
+sed -i '/gnv0/s/vni = 500/vni = 501/' "$work/etc/netcfgd.conf"
+sed -i '/gnv0/s/remote = "10.7.0.7"/remote = "10.7.0.5"/' "$work/etc/netcfgd.conf"
+gnv_plan=$("$ncfg" plan 2>&1 || true)
+contains "an edited vni is explained rather than attempted" "$gnv_plan" \
+	"will not change the VNI of a geneve tunnel"
+contains "and the remote beside it is still planned" "$gnv_plan" "link.set_tunnel"
+refuses "and the kernel does refuse the vni" ip link set gnv0 type geneve id 501
+"$ncfg" apply > "$work/apply-geneve2.txt" 2>&1 || { cat "$work/apply-geneve2.txt" >&2; exit 1; }
+contains "the remote moved anyway"     "$(detail gnv0)" "remote 10.7.0.5"
+contains "and the vni the kernel will not change is untouched" "$(detail gnv0)" \
+	"geneve id 500"
+sed -i '/gnv0/s/vni = 501/vni = 500/' "$work/etc/netcfgd.conf"
+
+# A VXLAN is the same shape with two refusals rather than one, and the second is
+# the surprise: the kernel refuses the port's *presence*, at the value it already
+# has. A change that carried the port could therefore never move an endpoint.
+sed -i '/vxlan/s/remote = "10.9.0.2"/remote = "10.9.0.9"/' "$work/etc/netcfgd.conf"
+vx_plan=$("$ncfg" plan 2>&1 || true)
+contains "an edited vxlan endpoint is planned" "$vx_plan" "link.set_vxlan"
+"$ncfg" apply > "$work/apply-vxlan.txt" 2>&1 || { cat "$work/apply-vxlan.txt" >&2; exit 1; }
+contains "and the kernel has it"       "$(detail vx100)" "remote 10.9.0.9 local 10.9.0.1"
+contains "and keeps the port the request left out" "$(detail vx100)" "dstport 4789"
+refuses "the kernel refuses the port even unchanged" \
+	ip link set vx100 type vxlan dstport 4789
+
+# All three edited at once, for the reason the geneve pair above is: the two the
+# kernel refuses have to be reported *and* leave the one it takes working.
+sed -i '/vxlan/s/id = 100/id = 101/' "$work/etc/netcfgd.conf"
+sed -i '/vxlan/s/port = 4789/port = 4790/' "$work/etc/netcfgd.conf"
+sed -i '/vxlan/s/remote = "10.9.0.9"/remote = "10.9.0.5"/' "$work/etc/netcfgd.conf"
+vx_refused=$("$ncfg" plan 2>&1 || true)
+contains "an edited vni is explained rather than attempted" "$vx_refused" \
+	"will not change the VNI of a VXLAN"
+contains "and so is an edited port" "$vx_refused" \
+	"will not change the destination port of a VXLAN"
+contains "and the endpoint beside them is still planned" "$vx_refused" "link.set_vxlan"
+refuses "and the kernel does refuse the vni" ip link set vx100 type vxlan id 101
+"$ncfg" apply > "$work/apply-vxlan2.txt" 2>&1 || { cat "$work/apply-vxlan2.txt" >&2; exit 1; }
+contains "the endpoint moved anyway"   "$(detail vx100)" "remote 10.9.0.5"
+contains "and the vni and port the kernel will not change are untouched" \
+	"$(detail vx100)" "id 100"
+contains "the port too"                "$(detail vx100)" "dstport 4789"
+sed -i '/vxlan/s/id = 101/id = 100/' "$work/etc/netcfgd.conf"
+sed -i '/vxlan/s/port = 4790/port = 4789/' "$work/etc/netcfgd.conf"
+contains "and the document that matches again plans nothing" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
 # The VLANs read back from the kernel, through netcfgd's own observation --
 # `bridge` is not installed everywhere and this is the path that matters.
 # Per interface, not across the whole host. The first version of this check

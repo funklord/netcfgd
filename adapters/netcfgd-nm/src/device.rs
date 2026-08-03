@@ -945,6 +945,9 @@ mod tests {
 			wireguard: None,
 			bond: None,
 			bridge: None,
+			macvlan: None,
+			tunnel: None,
+			vxlan: None,
 		}
 	}
 

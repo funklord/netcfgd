@@ -219,6 +219,34 @@ pub enum Op {
 		/// Interface name.
 		name: String,
 	},
+	/// Set a macvlan's mode on a macvlan that already exists.
+	///
+	/// Only among `private`, `vepa` and `bridge`. The kernel refuses either
+	/// direction between one of those and `passthru` -- `macvlan_changelink`
+	/// answers `EINVAL` -- so that edit gets a sentence from the planner and
+	/// never reaches here (decision 0058).
+	LinkSetMacvlan {
+		/// Interface name.
+		name: String,
+	},
+	/// Re-send a tunnel's endpoints to a tunnel that already exists.
+	///
+	/// Carries no values: the executor reads them from the document, and it sends
+	/// the whole nest rather than the field that moved, because the GRE and ip
+	/// tunnel families reset every attribute a request leaves out.
+	LinkSetTunnel {
+		/// Interface name.
+		name: String,
+	},
+	/// Set a `VXLAN`'s endpoints on a `VXLAN` that already exists.
+	///
+	/// The endpoints only. A changed `id` or `port` is refused by the kernel --
+	/// the port even at the value it already has -- and the planner says so
+	/// rather than emitting this (decision 0058).
+	LinkSetVxlan {
+		/// Interface name.
+		name: String,
+	},
 	/// Configure a `WireGuard` device.
 	WgSetDevice {
 		/// Interface name.
@@ -393,6 +421,9 @@ impl Op {
 			Self::AccessControlDel { .. } => "access_control.del",
 			Self::LinkSetBond { .. } => "link.set_bond",
 			Self::LinkSetBridge { .. } => "link.set_bridge",
+			Self::LinkSetMacvlan { .. } => "link.set_macvlan",
+			Self::LinkSetTunnel { .. } => "link.set_tunnel",
+			Self::LinkSetVxlan { .. } => "link.set_vxlan",
 			Self::WgSetDevice { .. } => "wg.set_device",
 			Self::WgSetPeers { .. } => "wg.set_peers",
 			Self::DnsApply { .. } => "dns.apply",
@@ -448,6 +479,15 @@ impl Op {
 			// Changing a bond's mode restarts how traffic is distributed
 			// across its members, which on a live bond is a pause.
 			| Self::LinkSetBond { .. }
+			// A macvlan's mode is how it sees the other macvlans on the same
+			// NIC, so changing it moves what can reach what -- and the kernel
+			// takes it on a live device, which is exactly when that matters.
+			| Self::LinkSetMacvlan { .. }
+			// Moving a tunnel's endpoint moves the far end: everything inside
+			// the tunnel stops until the other side agrees. The same for a
+			// VXLAN, whose remote is where the encapsulated frames go.
+			| Self::LinkSetTunnel { .. }
+			| Self::LinkSetVxlan { .. }
 			// Removing a VLAN from a port stops traffic in it reaching that
 			// port, which is the same kind of interruption as taking an
 			// address away.
@@ -541,6 +581,9 @@ impl Op {
 			| Self::LinkSetOffloads { name, .. }
 			| Self::LinkSetBridge { name }
 			| Self::LinkSetBond { name, .. }
+			| Self::LinkSetMacvlan { name }
+			| Self::LinkSetTunnel { name }
+			| Self::LinkSetVxlan { name }
 			| Self::LinkDown { name } => Some(name),
 			Self::BridgeVlanAdd { iface, .. }
 			| Self::BridgeVlanDel { iface, .. }

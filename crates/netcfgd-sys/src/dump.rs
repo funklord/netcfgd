@@ -46,6 +46,16 @@ pub struct LinkRecord {
 	/// at creation and never compared is a bridge whose edited `stp` or
 	/// `forward_delay` does nothing, and the name of a bridge encodes neither.
 	pub bridge: Option<BridgeInfo>,
+	/// A macvlan's own settings, where this link is one.
+	pub macvlan: Option<MacvlanInfo>,
+	/// A point-to-point tunnel's endpoints, where this link is one.
+	///
+	/// Three attribute families answer to this one struct -- GRE, the ip
+	/// tunnels and geneve -- and which one a kind belongs to is
+	/// [`tunnel_family`]'s answer rather than a guess from the name.
+	pub tunnel: Option<TunnelInfo>,
+	/// A `VXLAN`'s own settings, where this link is one.
+	pub vxlan: Option<VxlanInfo>,
 	/// The IPv6 interface identifier set with `ip token`, if any.
 	///
 	/// Reported inside `IFLA_AF_SPEC`'s `AF_INET6` block. All-zero means no
@@ -216,6 +226,14 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 				.map(|data| bridge_info(data.value))
 		})
 		.flatten();
+	let macvlan = (kind == "macvlan")
+		.then(|| info_data().map(|data| macvlan_info(data.value)))
+		.flatten();
+	let vxlan = (kind == "vxlan")
+		.then(|| info_data().map(|data| vxlan_info(data.value)))
+		.flatten();
+	let tunnel = tunnel_family(&kind)
+		.and_then(|family| info_data().map(|data| tunnel_info(family, data.value)));
 
 	Some(LinkRecord {
 		index: u32::try_from(info.index).unwrap_or(0),
@@ -228,6 +246,9 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		master,
 		bond,
 		bridge,
+		macvlan,
+		tunnel,
+		vxlan,
 		ipv6_token,
 	})
 }
@@ -317,6 +338,230 @@ fn bridge_info(data: &[u8]) -> BridgeInfo {
 			.and_then(|attr| attr.u8())
 			.is_some_and(|value| value != 0),
 	}
+}
+
+/// What a macvlan reports about itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MacvlanInfo {
+	/// The mode, as the kernel numbers them: 1, 2, 4, 8 and 16.
+	///
+	/// Flags rather than an enumeration, which is not obvious and matters: the
+	/// kernel's validator rejects any other value outright, so 0 for the first
+	/// mode and 3 for the fourth are `EINVAL` rather than a wrong mode. Kept as
+	/// the number here and named in `netcfgd-observe`, the way a bond's mode is.
+	pub mode: Option<u32>,
+}
+
+/// The macvlan attributes, numbered as `if_link.h` numbers them.
+mod ifla_macvlan {
+	pub(super) const MODE: u16 = 1;
+}
+
+/// Decode a macvlan's `INFO_DATA`.
+fn macvlan_info(data: &[u8]) -> MacvlanInfo {
+	let attrs = Attrs::new(data);
+	MacvlanInfo {
+		mode: attrs.get(ifla_macvlan::MODE).and_then(|attr| attr.u32()),
+	}
+}
+
+/// What a `VXLAN` reports about itself.
+///
+/// Only what netcfgd can set. Two of the four cannot be corrected once the
+/// device exists -- the kernel refuses a changed `id` and refuses the `port`
+/// even at the value it already has -- and they are read anyway, because the
+/// plan's job is to say that they differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct VxlanInfo {
+	/// The VXLAN network identifier.
+	pub id: Option<u32>,
+	/// Source address for the outer header.
+	pub local: Option<IpAddr>,
+	/// Remote unicast address, or the multicast group.
+	pub remote: Option<IpAddr>,
+	/// Destination UDP port.
+	pub port: Option<u16>,
+}
+
+/// The `VXLAN` attributes, numbered as `if_link.h` numbers them.
+///
+/// The v4 and v6 endpoints are different attributes rather than one attribute
+/// with two lengths, so both numbers are read and whichever arrived is the
+/// answer.
+mod ifla_vxlan {
+	pub(super) const ID: u16 = 1;
+	pub(super) const GROUP: u16 = 2;
+	pub(super) const LOCAL: u16 = 4;
+	pub(super) const PORT: u16 = 15;
+	pub(super) const GROUP6: u16 = 16;
+	pub(super) const LOCAL6: u16 = 17;
+}
+
+/// Decode a `VXLAN`'s `INFO_DATA`.
+fn vxlan_info(data: &[u8]) -> VxlanInfo {
+	let attrs = Attrs::new(data);
+	let either = |v4: u16, v6: u16| {
+		attrs
+			.get(v4)
+			.or_else(|| attrs.get(v6))
+			.and_then(|attr| attr.ip())
+			// An all-zero endpoint is how the kernel spells "none", and it
+			// reports one for a VXLAN that was given neither -- so it is read as
+			// absence rather than as the address 0.0.0.0, which the document
+			// cannot say and nothing would match.
+			.filter(|address| !address.is_unspecified())
+	};
+	VxlanInfo {
+		id: attrs.get(ifla_vxlan::ID).and_then(|attr| attr.u32()),
+		local: either(ifla_vxlan::LOCAL, ifla_vxlan::LOCAL6),
+		remote: either(ifla_vxlan::GROUP, ifla_vxlan::GROUP6),
+		// Big-endian, like every port number on the wire.
+		port: attrs
+			.get(ifla_vxlan::PORT)
+			.and_then(|attr| be_u16(attr.value)),
+	}
+}
+
+/// Which attribute numbering a tunnel kind's `INFO_DATA` uses.
+///
+/// Three families for seven kinds, and reading one with another's constants is
+/// how a tunnel comes to report somebody else's field: GRE puts its endpoints at
+/// 6 and 7 where an ip tunnel has them at 2 and 3, and geneve puts its VNI at 1
+/// where GRE has a flags word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TunnelFamily {
+	/// `IFLA_GRE_*`: gre, gretap and ip6gre.
+	Gre,
+	/// `IFLA_IPTUN_*`: ipip, sit and ip6tnl.
+	IpTunnel,
+	/// `IFLA_GENEVE_*`, numbered on its own.
+	Geneve,
+}
+
+/// Which family a kernel link kind belongs to, for the kinds netcfgd builds.
+///
+/// Matched exactly rather than by substring. The writing half asks whether the
+/// kind contains `gre`, which is safe there because it is only ever handed one
+/// of seven names netcfgd chose; here the string comes from the kernel and could
+/// be any link kind on the machine, and a kind this does not know is one nothing
+/// is compared for.
+#[must_use]
+pub fn tunnel_family(kind: &str) -> Option<TunnelFamily> {
+	match kind {
+		"gre" | "gretap" | "ip6gre" => Some(TunnelFamily::Gre),
+		"ipip" | "sit" | "ip6tnl" => Some(TunnelFamily::IpTunnel),
+		"geneve" => Some(TunnelFamily::Geneve),
+		_ => None,
+	}
+}
+
+/// What a point-to-point tunnel reports about itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TunnelInfo {
+	/// Local endpoint.
+	pub local: Option<IpAddr>,
+	/// Remote endpoint.
+	pub remote: Option<IpAddr>,
+	/// Outer TTL, where the kind has one. Zero means inherit.
+	pub ttl: Option<u8>,
+	/// The GRE key, or a geneve tunnel's VNI, which netcfgd spells the same way.
+	pub key: Option<u32>,
+}
+
+/// The GRE attributes, numbered as `if_link.h` numbers them.
+mod ifla_gre {
+	pub(super) const IFLAGS: u16 = 2;
+	pub(super) const IKEY: u16 = 4;
+	pub(super) const LOCAL: u16 = 6;
+	pub(super) const REMOTE: u16 = 7;
+	pub(super) const TTL: u16 = 8;
+}
+
+/// The ip tunnel attributes, which are numbered differently from GRE's.
+mod ifla_iptun {
+	pub(super) const LOCAL: u16 = 2;
+	pub(super) const REMOTE: u16 = 3;
+	pub(super) const TTL: u16 = 4;
+}
+
+/// The geneve attributes, numbered on their own again.
+mod ifla_geneve {
+	pub(super) const ID: u16 = 1;
+	pub(super) const REMOTE: u16 = 2;
+	pub(super) const TTL: u16 = 4;
+	pub(super) const REMOTE6: u16 = 7;
+}
+
+/// `GRE_KEY`, the flag bit that says the key field means anything.
+///
+/// The kernel emits `IKEY` and `OKEY` whether or not the tunnel has a key, so a
+/// zero there is ambiguous: it is either no key or the key `0`, which a document
+/// may legitimately ask for. The flag is what distinguishes them, and reading it
+/// is what keeps `key = 0` from differing from itself forever.
+const GRE_KEY_FLAG: u16 = 0x2000;
+
+/// Decode a tunnel's `INFO_DATA` with its own family's numbering.
+fn tunnel_info(family: TunnelFamily, data: &[u8]) -> TunnelInfo {
+	let attrs = Attrs::new(data);
+	// An unset endpoint comes back as all zeroes rather than as an absent
+	// attribute, and the document spells that `None`.
+	let address = |kind: u16| {
+		attrs
+			.get(kind)
+			.and_then(|attr| attr.ip())
+			.filter(|address| !address.is_unspecified())
+	};
+	match family {
+		TunnelFamily::Gre => TunnelInfo {
+			local: address(ifla_gre::LOCAL),
+			remote: address(ifla_gre::REMOTE),
+			ttl: attrs.get(ifla_gre::TTL).and_then(|attr| attr.u8()),
+			key: attrs
+				.get(ifla_gre::IFLAGS)
+				.and_then(|attr| be_u16(attr.value))
+				.is_some_and(|flags| flags & GRE_KEY_FLAG != 0)
+				.then(|| {
+					attrs
+						.get(ifla_gre::IKEY)
+						.and_then(|attr| be_u32(attr.value))
+				})
+				.flatten(),
+		},
+		TunnelFamily::IpTunnel => TunnelInfo {
+			local: address(ifla_iptun::LOCAL),
+			remote: address(ifla_iptun::REMOTE),
+			ttl: attrs.get(ifla_iptun::TTL).and_then(|attr| attr.u8()),
+			// No such thing on an ip tunnel. `None` is "nothing to compare",
+			// which is what the document's key means here too.
+			key: None,
+		},
+		TunnelFamily::Geneve => TunnelInfo {
+			// A geneve tunnel has no local endpoint netcfgd sets.
+			local: None,
+			remote: attrs
+				.get(ifla_geneve::REMOTE)
+				.or_else(|| attrs.get(ifla_geneve::REMOTE6))
+				.and_then(|attr| attr.ip())
+				.filter(|address| !address.is_unspecified()),
+			ttl: attrs.get(ifla_geneve::TTL).and_then(|attr| attr.u8()),
+			// The VNI, which netcfgd's model spells `key` because a geneve
+			// tunnel needs one and there is no separate field for it.
+			key: attrs.get(ifla_geneve::ID).and_then(|attr| attr.u32()),
+		},
+	}
+}
+
+/// A big-endian `u16` from an attribute's bytes.
+///
+/// Netlink is native-endian except where it carries something the wire defines,
+/// which is why a port and a GRE flags word need this and a mode does not.
+fn be_u16(value: &[u8]) -> Option<u16> {
+	value.get(..2)?.try_into().ok().map(u16::from_be_bytes)
+}
+
+/// A big-endian `u32`, for a GRE key.
+fn be_u32(value: &[u8]) -> Option<u32> {
+	value.get(..4)?.try_into().ok().map(u32::from_be_bytes)
 }
 
 /// Decode one `RTM_NEWADDR` payload.

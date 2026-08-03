@@ -648,6 +648,11 @@ Three techniques make that reachable without root or a clean machine:
 - **`pppoe-server` looks for its plugin at `/etc/ppp/plugins/rp-pppoe.so`,** and Debian ships it under `/usr/lib/pppd/<version>/`. The default therefore fails *inside the server's own forked pppd*, where a client sees a session that connects and then never starts IPCP; syslog is the only place that says why. `-g` names the path.
 - **dhcpcd cannot report a delegated prefix to a script**, and never could. `$new_delegated_dhcp6_prefix` is the addresses it derived from one, filled from `ap->delegating_prefix` in `dhcp6.c`, and only on an interface it delegated to. `$new_dhcp6_prefix` — which netcfgd's hook read for years — is not a dhcpcd variable at all.
 - **`kea-dhcp6` binds before duplicate address detection finishes and fails.** "Cannot assign requested address" on a link-local it can see with `ip addr`; the address is tentative for about a second after the link comes up. Anything starting a DHCPv6 server right after `ip link set up` has to wait for DAD.
+- **A tunnel change must carry the whole `INFO_DATA` nest, because GRE and the ip tunnels reset what it omits.** A request carrying only `IFLA_GRE_REMOTE` leaves the tunnel with no local address, no TTL and no key — `ipgre_netlink_parms` fills a zeroed struct from whatever arrived — and an `ip6tnl` loses its encapsulation limit, a field netcfgd does not even model. geneve and VXLAN are the opposite and keep what a request leaves out. So netcfgd sends the nest creation would build, and the two rules cost it nothing either way ([0058](docs/decisions/0058-a-change-carries-the-whole-nest.md)).
+- **The fallback tunnel devices refuse every change.** `gre0`, `gretap0`, `tunl0`, `sit0`, `ip6tnl0` and `ip6gre0` exist in every network namespace once their module is loaded, and `ip_tunnel_changelink` answers `EINVAL` for anything asked of one. An operator who names an interface after one gets a failing apply. Not special-cased: nothing in the dump marks a fallback device, only six names that are a module's convention.
+- **A GRE key of zero is a key, and the value cannot say so.** The kernel emits `IKEY` and `OKEY` for every GRE tunnel, zero included; the `GRE_KEY` bit in `IFLA_GRE_IFLAGS` is what says whether they mean anything. Reading the flag is what stops a document asking for `key = 0` from differing from itself on every reconcile.
+- **A macvlan cannot be moved into or out of `passthru`, and its parent cannot be moved at all.** `macvlan_changelink` refuses the `passthru` transition in either direction with `EINVAL`; an `IFLA_LINK` naming a different parent is accepted and silently ignored. The other three modes move freely on a live device.
+- **A VXLAN refuses its `port` on presence rather than on difference.** Restating the port it already has fails the whole message with `EOPNOTSUPP`, so a change built from creation's nest could never correct an endpoint. Its `id` is refused only when the value differs, and a group address in the other family is refused by name.
 - **iproute2 prints the same protocol tag in two bases.** A route shows `proto 110` and an address shows `proto 0x6e`. The obvious assertion fails on a perfectly correct address.
 - **`accept_ra=1` means "accept unless this interface forwards".** A host in an environment that starts with forwarding on ignores every router advertisement, and `ip addr` shows nothing that explains it. `accept_ra=2` is the other way to say it.
 - **A host fills in the bottom 64 bits of an advertised prefix itself**, so the address is `2001:db8:1234:0:...` and a grep for `2001:db8:1234::` matches nothing. `proto kernel_ra` is the kernel saying where an address came from, and is the thing worth asserting.
@@ -664,11 +669,13 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after the session that read 0047–0053 as a whole rather than
-adding to them — and then spent itself on what that reading pointed at, which was
-one question asked in four more places: **is what is running still what the
-document says?** What follows is organised by subject, not by the order it was
-built in.
+Last rewritten after the session that finished what
+[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md) started —
+comparing what a link kind carries against what the kernel holds — for a macvlan,
+the seven tunnel kinds and a VXLAN, leaving only the VLAN. It is another answer
+to the question the four sessions before it kept finding new places to ask: **is
+what is running still what the document says?** What follows is organised by
+subject, not by the order it was built in.
 
 **Milestones.** M1–M6 are done. M7's NetworkManager shim has tiers 1 and 2
 complete and tier 3 bounded rather than built — and **tier 3 bounds the shim,
@@ -789,15 +796,31 @@ which the plan says in those words.
 
 **A kernel object netcfgd configured** is compared against what the kernel
 reports ([0054](docs/decisions/0054-a-kernel-object-is-compared-like-a-daemon.md),
-[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)). This is
+[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md),
+[0058](docs/decisions/0058-a-change-carries-the-whole-nest.md)). This is
 where 0053 guessed wrong — it expected the next gap to be a backend netcfgd does
 not start, and it was a **WireGuard device**, which netcfgd creates itself.
 Everything that makes one a tunnel went over generic netlink inside
 `link.create` and never again, so an edited listen port did nothing and **a peer
 deleted from the config kept its access** while `ncfg apply` said there was
 nothing to do: a wrong answer shaped like a completed revocation. The same was
-true of every other link kind's own settings, and a bridge's and a bond's are
-closed now too.
+true of every other link kind's own settings; a bridge, a bond, a macvlan, all
+seven tunnel kinds and a VXLAN are closed now.
+
+**What a kind will take is per attribute, and asking is the only way to know.**
+Fourteen attributes across seven families answer four different ways — taken,
+refused loudly, refused *silently*, and taken only in some directions. A
+macvlan's mode moves among three of its four modes and is refused in either
+direction between one of those and `passthru`; a VXLAN refuses its `port`
+**whenever the request mentions it**, at the value it already has. So what
+netcfgd sends is the whole nest its own creation would build, minus exactly the
+attributes the kernel refuses on a device that exists — which is what leaves an
+edited endpoint applicable while the id beside it is only reported.
+
+**And the families disagree about what a request leaves out.** GRE and the ip
+tunnels **reset** every attribute a change omits; geneve and VXLAN keep them.
+That is why the nest goes whole rather than one field at a time, and it is a
+measurement `ip` actively hides — see the entry under "true and non-obvious".
 
 **A secret netcfgd loaded** is compared by *digest*
 ([0055](docs/decisions/0055-a-secret-can-be-hashed-too.md),
@@ -831,11 +854,12 @@ Three rules hold across all four, and every one was paid for:
   what *was* chosen rebuilds the thing on every reconcile. This mistake has now
   been made and caught three times.
 
-**What is still silent**, so that nobody assumes otherwise: a VLAN's id under a
-name that does not encode it, a VXLAN's id, a tunnel's endpoints, a macvlan's
-mode. The measurement and the reason each is a different job are in
-[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md), and the
-next entry under "Next" is that work.
+**What is still silent**, so that nobody assumes otherwise: **a VLAN's id and
+tag protocol** under a name that does not encode them, and **a macvlan's
+parent**. Both are the kernel's worst answer — accepted and ignored — so a set
+would report a change nobody made, and correcting a VLAN id means a delete and a
+create. That is the one job left on this list and it wants its own session
+([0058](docs/decisions/0058-a-change-carries-the-whole-nest.md)).
 
 #### Explaining it
 
@@ -869,31 +893,35 @@ stops the file compiling when a variant appears, and the payload-heavy socket
 responses carry an *empty* payload — enough to pin the tag and the framing, with
 the contents left to the witness that owns them.
 
-#### What this session's own gates were worth
+#### What the gates have been worth lately
 
-Two sessions in a row now have found more in the *tests* than in the code, and
-the pattern is worth carrying rather than rediscovering.
+Three sessions in a row have found more in the *tests* and in the measurements
+than in the code, and the patterns are worth carrying rather than rediscovering.
 
-**The suite was run as root for the first time since those tests were written**,
-in a privileged container. All three root-only scripts pass. Getting there found
-four defects, every one of them in the suite and three of them leaving a green
-run behind: a build recipe that does not build, a preflight that failed where it
+**Asking the kernel beat reading the previous session's table.** 0057 wrote down
+seven measurements and told the next session to ask again; asking corrected two of
+them and turned up the question nobody had asked at all — what happens to the
+attributes a change request leaves out. Two of the answers would have shipped as
+defects: a macvlan mode netcfgd would refuse to move, and a VXLAN whose endpoint
+could never be corrected because the nest carried a port the kernel refuses to
+see.
+
+**A gate can be blind because its input does not contain its subject.** Six
+instances across two sessions now. The newest is the sharpest: a live check that
+edited a geneve tunnel's *remote* passed with the protection against sending its
+VNI deliberately removed, because restating the VNI the kernel already has is
+accepted. Only editing both at once could see it. A check about a difference has
+to contain the difference.
+
+**And the suite has been run as root**, in a privileged container, which is still
+the only way three of the scripts run at all. All three pass. Getting there found
+four defects, every one in the suite and three of them leaving a green run
+behind: a build recipe that does not build, a preflight that failed where it
 should skip, its repair which then skipped where it should run, and `hwsim.sh`
-passing while leaving a root `netcfgd` and two supplicants alive.
-
-**Four checks in this session were correct and blind**, each in a different
-disguise — a peer with no endpoint, an `nmcli` column two devices render
-identically into, a zero nobody had written in a document, and a units
-conversion a pure test builds its input on the far side of. Section 9's rule is
-that a gate nobody has seen fail is not evidence; the neighbour of it is that a
-gate whose input does not contain its subject is not evidence either.
-
-**And the socket witness had the hole its own comment was about.** Its header
-said "every request, response and event" while the lists were plain `vec![]`s:
-`Request::ApStations`, `Response::ApStations` and `Response::Journal` were never
-in them, so `StationReport`, `StationEntry` and the journal's `Record` were
-pinned by nothing anywhere. All three lists now go through the exhaustive match
-the model's witness arrived at.
+passing while leaving a root `netcfgd` and two supplicants alive. The socket
+witness had the hole its own comment claimed to cover, too — three responses were
+pinned by nothing anywhere, and all three lists now go through an exhaustive
+match.
 
 ### Next, roughly in order
 
@@ -903,34 +931,32 @@ the model's witness arrived at.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is
    ([0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md)).
-2. **Finish comparing what a link kind carries** — the work
-   [0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md) started
-   and deliberately did not finish. A bridge and a bond are done; a macvlan's
-   mode, a tunnel's endpoints, a VXLAN's id and a VLAN's id are not, and they
-   are four different jobs rather than one:
+2. **The VLAN, which is the last of [0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s
+   list and the only one that is not the bridge's shape.** A macvlan, all seven
+   tunnel kinds and a VXLAN were done in
+   [0058](docs/decisions/0058-a-change-carries-the-whole-nest.md); a VLAN's `id`
+   and `protocol` are *accepted and ignored* by the kernel, so a set would report
+   a change nobody made. Correcting one means a delete and a create, which drops
+   the addresses and routes on the interface and interacts with the planner's
+   creation pass — the reason it was left last twice now. A macvlan's parent is
+   the same answer at a smaller size and rides along with it.
 
-   - **macvlan and tunnel** change in place, so they are the bridge's shape and
-     are the cheap ones. Each still needs its own `INFO_DATA` decoding — the
-     numbering is per kind, and reading one kind's attributes with another's
-     constants is how a VXLAN comes to report a forward delay — and its own
-     live test.
-   - **VXLAN's id** is refused with `Cannot change VNI`, so it wants the bond's
-     answer: a sentence saying what to do, not an action that cannot work.
-   - **VLAN's id** is *accepted and ignored*, so a set would report a change
-     nobody made. Correcting one means a delete and a create, which drops the
-     addresses on the interface and interacts with the planner's creation pass.
-     It is last for that reason, and it wants its own session.
-   - **veth** has nothing to compare: its `peer` is what creation means.
+   **The delete-and-create pass it needs has a second customer**: an interface
+   that exists as the *wrong kind* is not recreated either, and plans nothing but
+   a `link.up` — measured, and written down under "true and non-obvious". One
+   session should do both.
 
-   Ask the kernel before writing any of them. Seven attributes have been
-   measured and no two families answered alike; 0057 has the table.
+   Ask the kernel before writing it. Fourteen attributes have been measured
+   across seven families and they answer four different ways; 0058 has the table,
+   and it corrected two rows of 0057's by asking again.
 
 3. **The shim's remaining device types follow from that, not the reverse.**
-   `.Device.Vlan` wants an id and a parent, `.Device.IPTunnel` a local and a
-   remote — the same values. Adding them to the model *for the shim* is what
-   constraint 6 forbids; adding them because an edited VLAN id is invisible is a
-   local justification, and the shim then gets them for free. A bridge, a bond
-   and a WireGuard tunnel already went that way round.
+   `.Device.IPTunnel` wants a local and a remote, and the observation now carries
+   both — 0058 put them there for a local reason, so the shim gets them for free,
+   which is the direction constraint 6 requires. `.Device.Vlan` still wants an id
+   and a parent the observation does not carry, and it should get them from the
+   work above rather than from the shim asking. A bridge, a bond and a WireGuard
+   tunnel all went that way round.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one.
 
@@ -948,9 +974,12 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A record that defers something needs a forward pointer when the deferral is lifted.** 0050 has one to 0051 and it works; 0047 and 0048 deferred work the same session then did and had none, so a reader landing on 0047 from `docs/interface-report.md` — which links there — was told the rename had not happened. The body stays as written, because a decision is changed by superseding it; the `Status` line is where the pointer goes.
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
+- **An interface that exists as the wrong kind is not recreated, and nothing says so.** Measured while bounding this work: a document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, plans `link.up` and nothing else. The kind is observed and never compared. Everything 0057 and 0058 added degrades safely into it — a macvlan whose device is not a macvlan reports no macvlan settings, so nothing is compared and nothing is corrected — but the gap is its own defect, and it wants the same delete-and-create pass a VLAN id does. Which is one more reason those two belong in one session.
+- **A reference tool can hide the kernel's behaviour by being helpful.** `ip link set tun0 type gre remote X` keeps the tunnel's key and local address, which looks like the kernel merging a partial update. It is not: `ip` reads the device and refills every field before it sends anything. Forty lines of python sending one raw attribute said the opposite, and the design turned on which answer was true. Section 9's advice is to prefer a reference tool over a fixture, and this is its limit — a reference tool answers "what does this command do", and sometimes the question is "what does the kernel do".
+- **A guard whose condition is a comparison needs the case where both halves moved.** The geneve VNI is left out of a change nest because the kernel refuses a *changed* one — and restating the VNI it already has is accepted. So the first live test, which edited the remote alone, passed with the omission deliberately removed: the nest carried the VNI, at the value the kernel already had, and nothing failed. What made the gate real was editing the VNI *and* the remote in one go, which is also the only case an operator would notice. The neighbour of section 9's input-set rule: a check on a difference has to contain the difference.
 - **`make live` is where defects are found**, not `make check`. Nearly every real bug in the last several milestones came from a real kernel or a real reference tool, and several came from a test that had been passing for the wrong reason.
 - **`acl.sh` failed once, unreproduced, and the cause is a real property.** Two policy-change checks went red in one `make live` and have passed on every run since, including under deliberate load. They need netcfgd to have read a running access point's ACL, and that read has a one-second deadline *on purpose* -- a wedged hostapd must not stall the reconcile loop. A Python fake's first reply on a loaded machine can cost more than that, at which point netcfgd correctly converges nothing. The fix is a warm-up round trip before anything is measured, never a longer deadline: the deadline is the behaviour, and the same script measures it two checks later.
-- **`switch.sh` failed once, unreproduced.** The socket appearing does not mean the first apply has finished — the daemon binds before it converges — so the veth peers are not guaranteed to exist when a script that waited on the socket uses them. The window is real, smaller than a `fork`+`exec`, and has never been caught open. The wait added there is not claimed as the diagnosis; what it does is report the failure with the daemon log instead of a message about permissions.
+- **`switch.sh` has now failed twice, in two different ways, and neither reproduces.** The second was a five-second `settle_to` deadline expiring on `the wired uplink wins while it has carrier` during a full `make live`; seventeen standalone runs and a second full-suite run of the same binary passed. That is the shape `acl.sh`'s note already describes — a deadline that is generous on an idle machine and is not the behaviour under test — so the fix, if it returns, is a longer settle for the *test* and never a change to the daemon. The first was: the socket appearing does not mean the first apply has finished — the daemon binds before it converges — so the veth peers are not guaranteed to exist when a script that waited on the socket uses them. The window is real, smaller than a `fork`+`exec`, and has never been caught open. The wait added there is not claimed as the diagnosis; what it does is report the failure with the daemon log instead of a message about permissions.
 - **Size and RSS both ratchet, and RSS is noisy.** See §6. Raising either is a deliberate, reviewable edit with a line saying what it bought.
 - **An observation that asks another process needs its own deadline, and the deadline has to cover the connect.** Reading a running hostapd's ACL put a control-socket round trip in the reconcile loop, which runs on every netlink event. A hostapd that is *wedged* — alive, socket bound, not answering — held a single `ncfg plan` for 10.2 seconds; a one-second deadline brings it to 1.0. The first attempt shortened nothing, because `Client::connect` opens with a `PING` and a timeout set on the returned client never covers it. Measured both times rather than reasoned about, and `tests/live/acl.sh` now keeps it measured.
 - **Reading the daemon you are integrating with beats reading its documentation, and `apt-get source` is how.** Three separate design errors in 0041 came from believing the wpa_ctrl documentation and `strings` output; all three were settled in twenty minutes by reading `hostapd/ctrl_iface.c`. This is the third feature in a row where the source answered a question the documentation got wrong.

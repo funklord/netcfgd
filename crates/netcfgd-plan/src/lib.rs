@@ -465,6 +465,9 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		builder.plan_wireguard(interface, observed);
 		builder.plan_bridge(interface, observed);
 		builder.plan_bond(interface, observed);
+		builder.plan_macvlan(interface, observed);
+		builder.plan_tunnel(interface, observed);
+		builder.plan_vxlan(interface, observed);
 	}
 	for interface in &desired.interfaces {
 		builder.plan_interface_contents(interface, observed);
@@ -1297,6 +1300,223 @@ impl Builder {
 			// reads them from the document, which by then says the new thing.
 			// An inverse that re-applied the document would be a revert that
 			// changes nothing, which is worse than saying there is none.
+			None,
+		);
+	}
+
+	/// Correct a macvlan whose mode the document has moved.
+	///
+	/// One field with two answers in it, asked a value at a time (0058): the
+	/// kernel moves the mode freely among `private`, `vepa` and `bridge`, and
+	/// refuses either direction between one of those and `passthru` with
+	/// `EINVAL` -- `macvlan_changelink` calls that transition out by name. So the
+	/// refused edit gets a sentence, the way a bond's mode does on a bond with
+	/// members. The parent beside it is a third answer again and is not compared
+	/// at all: `IFLA_LINK` on a live macvlan is accepted and ignored.
+	///
+	/// A mode netcfgd has no word for is not compared. That is the `source` mode,
+	/// or something newer, on a macvlan somebody else configured.
+	fn plan_macvlan(&mut self, interface: &Interface, observed: &Observed) {
+		let InterfaceKind::Macvlan(macvlan) = &interface.kind else {
+			return;
+		};
+		let name = &interface.name;
+		let Some(seen) = observed
+			.link(name)
+			.and_then(|link| link.macvlan.clone())
+			.and_then(|macvlan| macvlan.mode)
+		else {
+			return;
+		};
+		let wanted = macvlan.mode.name();
+		if seen == wanted {
+			return;
+		}
+		if seen == "passthru" || wanted == "passthru" {
+			self.warn(
+				name,
+				format!(
+					"the mode of {name} is {wanted} in the config and {seen} in the kernel, and \
+					 the kernel will not move a macvlan into or out of passthru mode -- recreate \
+					 the interface, or leave the mode alone"
+				),
+			);
+			return;
+		}
+		let gate = self.gate(name);
+		self.push(
+			Op::LinkSetMacvlan { name: name.clone() },
+			Reason::differs(name, "macvlan.mode", wanted.to_owned(), seen),
+			gate,
+			None,
+		);
+	}
+
+	/// Correct a tunnel whose endpoints the document has moved.
+	///
+	/// Seven kinds across three attribute families, and what the kernel takes
+	/// differs by family rather than by field: an endpoint or a TTL moves on any
+	/// of them, while a **geneve tunnel's VNI cannot change at all**. netcfgd's
+	/// model spells that VNI `key`, so an edited `key` on a geneve gets a
+	/// sentence and an edited one on a GRE tunnel gets an action.
+	///
+	/// A geneve tunnel will also not have its remote replaced by an address of
+	/// the other family, which is the kernel refusing something no set could
+	/// achieve -- so that is a sentence too, and it returns rather than emitting
+	/// an action beside it: the remote is the thing that would be sent.
+	///
+	/// Only what the document states is compared (0052's rule, met again). A
+	/// tunnel with no `ttl` in its block means "whatever the kernel chose", and
+	/// comparing that against what it chose would rebuild the tunnel on every
+	/// reconcile.
+	fn plan_tunnel(&mut self, interface: &Interface, observed: &Observed) {
+		let InterfaceKind::Tunnel(tunnel) = &interface.kind else {
+			return;
+		};
+		let name = &interface.name;
+		let Some(running) = observed.link(name).and_then(|link| link.tunnel) else {
+			return;
+		};
+		let geneve = tunnel.mode == netcfgd_model::TunnelKind::Geneve;
+		// A geneve VNI is refused outright, so it is said rather than tried. The
+		// nest the executor sends leaves the VNI out on a change for exactly this
+		// reason, which is what lets a remote beside it still be corrected --
+		// 0057's lesson that a refused attribute takes its neighbours with it.
+		if geneve && stated_differs(tunnel.key, running.key) {
+			self.warn(
+				name,
+				format!(
+					"the geneve id of {name} is {} in the config and {} in the kernel, and the \
+					 kernel will not change the VNI of a geneve tunnel -- recreate the interface, \
+					 or leave the id alone",
+					render_u32(tunnel.key),
+					render_u32(running.key)
+				),
+			);
+		}
+		if geneve && family_differs(tunnel.remote, running.remote) {
+			self.warn(
+				name,
+				format!(
+					"the remote of {name} is {} in the config and {} in the kernel, and a geneve \
+					 tunnel cannot change which address family its remote is in -- recreate the \
+					 interface",
+					render_address(tunnel.remote),
+					render_address(running.remote)
+				),
+			);
+			return;
+		}
+		let field = if address_differs(tunnel.remote, running.remote) {
+			Some((
+				"tunnel.remote",
+				render_address(tunnel.remote),
+				render_address(running.remote),
+			))
+		} else if address_differs(tunnel.local, running.local) {
+			Some((
+				"tunnel.local",
+				render_address(tunnel.local),
+				render_address(running.local),
+			))
+		} else if stated_differs(tunnel.ttl, running.ttl) {
+			Some(("tunnel.ttl", render_u8(tunnel.ttl), render_u8(running.ttl)))
+		} else if !geneve && stated_differs(tunnel.key, running.key) {
+			Some((
+				"tunnel.key",
+				render_u32(tunnel.key),
+				render_u32(running.key),
+			))
+		} else {
+			None
+		};
+		let Some((field, desired, seen)) = field else {
+			return;
+		};
+		let gate = self.gate(name);
+		self.push(
+			Op::LinkSetTunnel { name: name.clone() },
+			Reason::differs(name, field, desired, seen),
+			gate,
+			None,
+		);
+	}
+
+	/// Correct a `VXLAN` whose endpoints the document has moved.
+	///
+	/// Two of its four settings cannot be corrected once the device exists, and
+	/// the second one is the surprise: the kernel refuses `IFLA_VXLAN_PORT`
+	/// **whenever it is present**, at any value, and a changed `id` when the
+	/// value differs. Both were measured (0058). So both get a sentence, and the
+	/// nest the executor sends omits them -- which is what leaves the endpoints
+	/// correctable rather than losing them to a refusal beside them.
+	fn plan_vxlan(&mut self, interface: &Interface, observed: &Observed) {
+		let InterfaceKind::Vxlan(vxlan) = &interface.kind else {
+			return;
+		};
+		let name = &interface.name;
+		let Some(running) = observed.link(name).and_then(|link| link.vxlan) else {
+			return;
+		};
+		if running.id.is_some_and(|id| id != vxlan.id) {
+			self.warn(
+				name,
+				format!(
+					"the vxlan id of {name} is {} in the config and {} in the kernel, and the \
+					 kernel will not change the VNI of a VXLAN -- recreate the interface, or \
+					 leave the id alone",
+					vxlan.id,
+					render_u32(running.id)
+				),
+			);
+		}
+		if stated_differs(vxlan.port, running.port) {
+			self.warn(
+				name,
+				format!(
+					"the port of {name} is {} in the config and {} in the kernel, and the kernel \
+					 will not change the destination port of a VXLAN -- recreate the interface, \
+					 or leave the port alone",
+					render_option(vxlan.port),
+					render_option(running.port)
+				),
+			);
+		}
+		if family_differs(vxlan.remote, running.remote) {
+			self.warn(
+				name,
+				format!(
+					"the remote of {name} is {} in the config and {} in the kernel, and a VXLAN \
+					 cannot change which address family its group is in -- recreate the interface",
+					render_address(vxlan.remote),
+					render_address(running.remote)
+				),
+			);
+			return;
+		}
+		let field = if address_differs(vxlan.remote, running.remote) {
+			Some((
+				"vxlan.remote",
+				render_address(vxlan.remote),
+				render_address(running.remote),
+			))
+		} else if address_differs(vxlan.local, running.local) {
+			Some((
+				"vxlan.local",
+				render_address(vxlan.local),
+				render_address(running.local),
+			))
+		} else {
+			None
+		};
+		let Some((field, desired, seen)) = field else {
+			return;
+		};
+		let gate = self.gate(name);
+		self.push(
+			Op::LinkSetVxlan { name: name.clone() },
+			Reason::differs(name, field, desired, seen),
+			gate,
 			None,
 		);
 	}
@@ -3528,6 +3748,52 @@ fn render_seconds(value: Option<u32>) -> String {
 
 fn render_option(value: Option<u16>) -> String {
 	value.map_or_else(|| "<absent>".to_owned(), |value| value.to_string())
+}
+
+/// An address, or `<absent>` where there is none.
+fn render_address(value: Option<std::net::IpAddr>) -> String {
+	value.map_or_else(|| "<absent>".to_owned(), |value| value.to_string())
+}
+
+fn render_u8(value: Option<u8>) -> String {
+	value.map_or_else(|| "<absent>".to_owned(), |value| value.to_string())
+}
+
+fn render_u32(value: Option<u32>) -> String {
+	value.map_or_else(|| "<absent>".to_owned(), |value| value.to_string())
+}
+
+/// Whether a value the document states differs from what is running.
+///
+/// A field the document says nothing about is not a difference, which is the
+/// rule 0052 arrived at with an access point's band and 0057 met again with a
+/// bridge's forward delay: an absent field means "whatever was chosen", and
+/// comparing it against what *was* chosen rebuilds the thing on every reconcile.
+fn stated_differs<T: PartialEq + Copy>(desired: Option<T>, seen: Option<T>) -> bool {
+	desired.is_some() && desired != seen
+}
+
+/// The same, for an endpoint.
+///
+/// Its own function only to say why it is the same: an endpoint the kernel does
+/// not have comes back as all zeroes rather than as an absent attribute, and the
+/// observer has already turned that into `None` -- so a document that names a
+/// remote where the kernel has none is a difference, and a document that names
+/// none is not.
+fn address_differs(desired: Option<std::net::IpAddr>, seen: Option<std::net::IpAddr>) -> bool {
+	stated_differs(desired, seen)
+}
+
+/// Whether both sides name an endpoint and they are in different families.
+///
+/// A geneve tunnel and a VXLAN both refuse this, and refuse it as the whole
+/// message -- so it has to be told apart from an ordinary endpoint change, which
+/// they take.
+fn family_differs(desired: Option<std::net::IpAddr>, seen: Option<std::net::IpAddr>) -> bool {
+	match (desired, seen) {
+		(Some(desired), Some(seen)) => desired.is_ipv6() != seen.is_ipv6(),
+		_ => false,
+	}
 }
 
 /// A reported destination in the one spelling netcfgd uses for it.

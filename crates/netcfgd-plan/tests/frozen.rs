@@ -113,6 +113,9 @@ fn every_op() -> Vec<Op> {
 		Op::AccessControlDel { .. } => "access_control.del",
 		Op::LinkSetBond { .. } => "link.set_bond",
 		Op::LinkSetBridge { .. } => "link.set_bridge",
+		Op::LinkSetMacvlan { .. } => "link.set_macvlan",
+		Op::LinkSetTunnel { .. } => "link.set_tunnel",
+		Op::LinkSetVxlan { .. } => "link.set_vxlan",
 		Op::WgSetDevice { .. } => "wg.set_device",
 		Op::WgSetPeers { .. } => "wg.set_peers",
 		Op::DnsApply { .. } => "dns.apply",
@@ -159,9 +162,12 @@ fn every_op() -> Vec<Op> {
 		"link.set_bridge",
 		"link.set_ipv6_token",
 		"link.set_mac",
+		"link.set_macvlan",
 		"link.set_master",
 		"link.set_mtu",
 		"link.set_offloads",
+		"link.set_tunnel",
+		"link.set_vxlan",
 		"link.unset_master",
 		"link.up",
 		"nat.replace",
@@ -298,6 +304,15 @@ fn every_op_sample() -> Vec<Op> {
 		},
 		Op::LinkSetBridge {
 			name: "br0".to_owned(),
+		},
+		Op::LinkSetMacvlan {
+			name: "mv0".to_owned(),
+		},
+		Op::LinkSetTunnel {
+			name: "tun-office".to_owned(),
+		},
+		Op::LinkSetVxlan {
+			name: "vx0".to_owned(),
 		},
 		Op::WgSetDevice {
 			iface: "wg0".to_owned(),

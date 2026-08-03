@@ -46,6 +46,9 @@ fn link(name: &str) -> ObservedLink {
 		wireguard: None,
 		bond: None,
 		bridge: None,
+		macvlan: None,
+		tunnel: None,
+		vxlan: None,
 	}
 }
 
@@ -4756,6 +4759,425 @@ interface bond0 {
 	assert!(
 		matches!(action.op, Op::LinkSetBond { mode: false, .. }),
 		"the mode rode along with an interval the kernel would then refuse"
+	);
+}
+
+/// A macvlan whose mode the document moved is corrected.
+///
+/// The kernel takes this on a live device -- asked one mode at a time, since it
+/// takes three of the four and refuses the fourth (decision 0058).
+#[test]
+fn an_edited_macvlan_mode_is_planned() {
+	let desired = document(
+		r#"
+interface mv0 {
+	macvlan { parent = "base0"; mode = "vepa" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["mv0", "base0"]);
+	"macvlan".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].macvlan = Some(netcfgd_model::ObservedMacvlan {
+		mode: Some("bridge".to_owned()),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetMacvlan { .. }))
+		.expect("an edited macvlan mode is corrected");
+	assert_eq!(action.reason.field, "macvlan.mode");
+	assert_eq!(action.reason.desired, "vepa");
+	assert_eq!(action.reason.observed, "bridge");
+}
+
+/// One that agrees with its document plans nothing.
+#[test]
+fn a_macvlan_matching_its_document_plans_nothing() {
+	let desired = document(
+		r#"
+interface mv0 {
+	macvlan { parent = "base0"; mode = "bridge" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["mv0", "base0"]);
+	"macvlan".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].macvlan = Some(netcfgd_model::ObservedMacvlan {
+		mode: Some("bridge".to_owned()),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::LinkSetMacvlan { .. })),
+		"a macvlan that matches its document was corrected"
+	);
+}
+
+/// `passthru` cannot be entered or left, so that edit is a sentence.
+///
+/// `macvlan_changelink` refuses the transition in either direction with `EINVAL`
+/// -- the one mode of the four that cannot move. Both directions are checked,
+/// because the kernel's condition is a comparison rather than a target: a check
+/// on one direction alone passes with the other half of the condition deleted.
+#[test]
+fn a_passthru_macvlan_is_told_why_its_mode_cannot_move() {
+	let leaving = document(
+		r#"
+interface mv0 {
+	macvlan { parent = "base0"; mode = "bridge" }
+	config = "null"
+}
+"#,
+	);
+	let entering = document(
+		r#"
+interface mv0 {
+	macvlan { parent = "base0"; mode = "passthru" }
+	config = "null"
+}
+"#,
+	);
+	for (desired, running) in [(&leaving, "passthru"), (&entering, "bridge")] {
+		let mut observed = observed_with(&["mv0", "base0"]);
+		"macvlan".clone_into(&mut observed.links[0].kind);
+		observed.links[0].up = true;
+		observed.links[0].macvlan = Some(netcfgd_model::ObservedMacvlan {
+			mode: Some(running.to_owned()),
+		});
+
+		let plan = plan(desired, &observed, &PlanOptions::default());
+		assert!(
+			plan.warnings
+				.iter()
+				.any(|warning| warning.message.contains("into or out of passthru")),
+			"nothing said why the mode is not being changed from {running}: {:?}",
+			plan.warnings
+		);
+		assert!(
+			!plan
+				.actions
+				.iter()
+				.any(|action| matches!(action.op, Op::LinkSetMacvlan { .. })),
+			"a mode the kernel refuses was planned anyway, from {running}"
+		);
+	}
+}
+
+/// A mode netcfgd has no word for is left alone.
+///
+/// The `source` mode, which this build cannot express. Correcting it would mean
+/// overwriting a choice netcfgd cannot describe -- the rule a bond's unknown mode
+/// already follows.
+#[test]
+fn a_macvlan_mode_netcfgd_cannot_name_is_left_alone() {
+	let desired = document(
+		r#"
+interface mv0 {
+	macvlan { parent = "base0"; mode = "bridge" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["mv0", "base0"]);
+	"macvlan".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].macvlan = Some(netcfgd_model::ObservedMacvlan { mode: None });
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::LinkSetMacvlan { .. })),
+		"a mode netcfgd has no name for was overwritten"
+	);
+}
+
+/// A tunnel whose endpoint the document moved is corrected.
+#[test]
+fn an_edited_tunnel_endpoint_is_planned() {
+	let desired = document(
+		r#"
+interface tun-office {
+	tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.9" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["tun-office"]);
+	"gre".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].tunnel = Some(netcfgd_model::ObservedTunnel {
+		local: Some("10.7.0.1".parse().expect("an address")),
+		remote: Some("10.7.0.2".parse().expect("an address")),
+		ttl: Some(64),
+		key: Some(42),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetTunnel { .. }))
+		.expect("an edited remote is corrected");
+	assert_eq!(action.reason.field, "tunnel.remote");
+	assert_eq!(action.reason.observed, "10.7.0.2");
+}
+
+/// One that agrees with its document plans nothing, with a TTL and a key the
+/// document does not state.
+///
+/// The input set is the point. A tunnel whose observation carries only the two
+/// fields the document names could not notice a comparison that treats an unstated
+/// `ttl` as a difference -- which would re-send the whole nest on every reconcile.
+#[test]
+fn a_tunnel_matching_its_document_plans_nothing() {
+	let desired = document(
+		r#"
+interface tun-office {
+	tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["tun-office"]);
+	"gre".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].tunnel = Some(netcfgd_model::ObservedTunnel {
+		local: Some("10.7.0.1".parse().expect("an address")),
+		remote: Some("10.7.0.2".parse().expect("an address")),
+		// Neither is in the document, so neither is compared.
+		ttl: Some(64),
+		key: Some(42),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::LinkSetTunnel { .. })),
+		"a tunnel that matches its document was corrected"
+	);
+}
+
+/// A geneve VNI gets a sentence, and the remote beside it still moves.
+///
+/// The kernel refuses a changed VNI as the whole message, so the nest the
+/// executor sends leaves the VNI out on a change -- which is what keeps a refused
+/// attribute from taking its neighbour with it (0057's rule, and the bond's
+/// shape).
+#[test]
+fn a_geneve_vni_is_told_why_it_cannot_move() {
+	let desired = document(
+		r#"
+interface gnv0 {
+	tunnel { mode = "geneve"; remote = "10.7.0.9"; vni = 501 }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["gnv0"]);
+	"geneve".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].tunnel = Some(netcfgd_model::ObservedTunnel {
+		local: None,
+		remote: Some("10.7.0.4".parse().expect("an address")),
+		ttl: None,
+		key: Some(500),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("VNI of a geneve tunnel")),
+		"nothing said why the VNI is not being changed: {:?}",
+		plan.warnings
+	);
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetTunnel { .. }))
+		.expect("the remote still moves");
+	assert_eq!(action.reason.field, "tunnel.remote");
+}
+
+/// A GRE key is not a VNI: the kernel takes it, so it is planned.
+///
+/// The same field of the same model type, with the opposite answer -- which is
+/// why the sentence above is conditional on the kind rather than on the field.
+#[test]
+fn an_edited_gre_key_is_planned() {
+	let desired = document(
+		r#"
+interface tun-office {
+	tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2"; key = 43 }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["tun-office"]);
+	"gre".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].tunnel = Some(netcfgd_model::ObservedTunnel {
+		local: Some("10.7.0.1".parse().expect("an address")),
+		remote: Some("10.7.0.2".parse().expect("an address")),
+		ttl: None,
+		key: Some(42),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetTunnel { .. }))
+		.expect("an edited key is corrected");
+	assert_eq!(action.reason.field, "tunnel.key");
+	assert!(
+		!plan
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("will not change")),
+		"a GRE key produced the geneve sentence: {:?}",
+		plan.warnings
+	);
+}
+
+/// A remote in the other family is refused whole, so nothing is attempted.
+///
+/// Reachable because the device is not always netcfgd's: a geneve somebody else
+/// built with a v6 remote, named in a document that asks for a v4 one, is a set
+/// the kernel rejects as an address-family change rather than as an endpoint
+/// change.
+#[test]
+fn a_geneve_remote_in_the_other_family_is_a_sentence() {
+	let desired = document(
+		r#"
+interface gnv0 {
+	tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["gnv0"]);
+	"geneve".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].tunnel = Some(netcfgd_model::ObservedTunnel {
+		local: None,
+		remote: Some("fd00::4".parse().expect("an address")),
+		ttl: None,
+		key: Some(500),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("address family its remote is in")),
+		"nothing said why the remote is not being changed: {:?}",
+		plan.warnings
+	);
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::LinkSetTunnel { .. })),
+		"a family change the kernel refuses was planned anyway"
+	);
+}
+
+/// A VXLAN's endpoints move; its id and its port get sentences.
+///
+/// Both refusals in one plan, because they are one edit an operator makes -- and
+/// the endpoint still has to move, which is the property that would be lost if
+/// the nest carried either of them.
+#[test]
+fn a_vxlan_id_and_port_are_told_why_they_cannot_move() {
+	let desired = document(
+		r#"
+interface vx0 {
+	vxlan { id = 101; local = "10.9.0.1"; remote = "10.9.0.9"; port = 4790 }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["vx0"]);
+	"vxlan".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].vxlan = Some(netcfgd_model::ObservedVxlan {
+		id: Some(100),
+		local: Some("10.9.0.1".parse().expect("an address")),
+		remote: Some("10.9.0.2".parse().expect("an address")),
+		port: Some(4789),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("VNI of a VXLAN")),
+		"nothing said why the id is not being changed: {:?}",
+		plan.warnings
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("destination port of a VXLAN")),
+		"nothing said why the port is not being changed: {:?}",
+		plan.warnings
+	);
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetVxlan { .. }))
+		.expect("the remote still moves");
+	assert_eq!(action.reason.field, "vxlan.remote");
+}
+
+/// One that agrees with its document plans nothing.
+#[test]
+fn a_vxlan_matching_its_document_plans_nothing() {
+	let desired = document(
+		r#"
+interface vx0 {
+	vxlan { id = 100; local = "10.9.0.1"; remote = "10.9.0.2" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["vx0"]);
+	"vxlan".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].vxlan = Some(netcfgd_model::ObservedVxlan {
+		id: Some(100),
+		local: Some("10.9.0.1".parse().expect("an address")),
+		remote: Some("10.9.0.2".parse().expect("an address")),
+		// Not in the document, so not compared -- the kernel chose 4789 itself.
+		port: Some(4789),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::LinkSetVxlan { .. })),
+		"a VXLAN that matches its document was corrected"
+	);
+	assert!(
+		plan.warnings.is_empty(),
+		"a VXLAN that matches its document produced a warning: {:?}",
+		plan.warnings
 	);
 }
 

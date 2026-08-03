@@ -33,6 +33,21 @@
         "priority": 32768,
         "vlan_filtering": true
       },
+      "macvlan": {
+        "mode": "bridge"
+      },
+      "tunnel": {
+        "local": "192.0.2.1",
+        "remote": "192.0.2.2",
+        "ttl": 64,
+        "key": 42
+      },
+      "vxlan": {
+        "id": 100,
+        "local": "192.0.2.1",
+        "remote": "192.0.2.3",
+        "port": 4789
+      },
       "wireguard": {
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
         "listen_port": 51820,
@@ -86,6 +101,21 @@
         "priority": 32768,
         "vlan_filtering": true
       },
+      "macvlan": {
+        "mode": "bridge"
+      },
+      "tunnel": {
+        "local": "192.0.2.1",
+        "remote": "192.0.2.2",
+        "ttl": 64,
+        "key": 42
+      },
+      "vxlan": {
+        "id": 100,
+        "local": "192.0.2.1",
+        "remote": "192.0.2.3",
+        "port": 4789
+      },
       "wireguard": {
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
         "listen_port": 51820,
@@ -138,6 +168,21 @@
         "ageing_time": 300,
         "priority": 32768,
         "vlan_filtering": true
+      },
+      "macvlan": {
+        "mode": "bridge"
+      },
+      "tunnel": {
+        "local": "192.0.2.1",
+        "remote": "192.0.2.2",
+        "ttl": 64,
+        "key": 42
+      },
+      "vxlan": {
+        "id": 100,
+        "local": "192.0.2.1",
+        "remote": "192.0.2.3",
+        "port": 4789
       },
       "wireguard": {
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
