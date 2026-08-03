@@ -1036,9 +1036,18 @@ impl Builder {
 			desired.is_some() && desired != seen
 		};
 		let rendered = |value: Option<String>| value.unwrap_or_else(|| "<absent>".to_owned());
-		let desired_port = config.listen_port.map(|port| port.to_string());
+		// Zero is the kernel's word for "none" and the observation says so by
+		// leaving the field absent -- so a document that spells the same thing
+		// as a zero has to arrive here the same way, or it differs from the
+		// kernel forever. `listen_port = 0` is how a config asks for an
+		// ephemeral port, and the kernel answers with the one it chose.
+		let stated = |value: Option<u16>| value.filter(|value| *value != 0);
+		let desired_port = stated(config.listen_port).map(|port| port.to_string());
 		let seen_port = running.listen_port.map(|port| port.to_string());
-		let desired_mark = config.fwmark.map(|mark| mark.to_string());
+		let desired_mark = config
+			.fwmark
+			.filter(|mark| *mark != 0)
+			.map(|mark| mark.to_string());
 		let seen_mark = running.fwmark.map(|mark| mark.to_string());
 		let field = if device_differs(desired_port.clone(), seen_port.clone()) {
 			Some((
@@ -1101,8 +1110,15 @@ impl Builder {
 			);
 		}
 
-		let desired_peers = wanted_peers(config);
-		if desired_peers != running.peers {
+		// Both sides through the same function, so that what participates in
+		// the comparison is decided once. The first version normalised only the
+		// document's side and left the observation's endpoint in place, which
+		// made every peer that has ever handshaken differ forever -- and the
+		// live test could not see it, because its peers have no endpoint and so
+		// agreed for the wrong reason.
+		let desired_peers = comparable(wanted_peers(config));
+		let running_peers = comparable(running.peers.clone());
+		if desired_peers != running_peers {
 			self.push(
 				Op::WgSetPeers {
 					iface: name.clone(),
@@ -1112,7 +1128,7 @@ impl Builder {
 					name,
 					"wireguard.peers",
 					render_peers(&desired_peers),
-					render_peers(&running.peers),
+					render_peers(&running_peers),
 				),
 				gate,
 				None,
@@ -3272,9 +3288,9 @@ fn wanted_peers(config: &netcfgd_model::interface::WireGuardConfig) -> Vec<Obser
 		.map(|peer| ObservedWgPeer {
 			public_key: peer.public_key,
 			preshared_key: peer.preshared_key.is_some(),
-			// Not compared: see `plan_wireguard`. Carried as `None` on both
-			// sides of the comparison rather than omitted from the type, so
-			// that the observation keeps reporting what the kernel says.
+			// Whatever is put here, `comparable` removes it from both sides.
+			// Spelled `None` rather than the document's endpoint so that a
+			// reader of this function is not told the endpoint matters.
 			endpoint: None,
 			allowed_ips: {
 				let mut prefixes: Vec<String> = peer
@@ -3286,11 +3302,32 @@ fn wanted_peers(config: &netcfgd_model::interface::WireGuardConfig) -> Vec<Obser
 				prefixes.sort();
 				prefixes
 			},
-			keepalive: peer.keepalive,
+			// The same zero, in the place the kernel spells it most often: a
+			// peer with no keepalive reports 0, and a document saying 0 means
+			// the same thing.
+			keepalive: peer.keepalive.filter(|seconds| *seconds != 0),
 		})
 		.collect();
 	peers.sort();
 	peers
+}
+
+/// A peer list with everything the comparison does not own removed.
+///
+/// One function for both sides. The endpoint is the field this exists for: a
+/// peer roams, the kernel rewrites the endpoint from the packets it receives,
+/// and the document's endpoint is where to look first rather than where a peer
+/// must stay -- so a comparison that included it would replace the peer list on
+/// every reconcile of a working tunnel. It is left in the *observation*, which
+/// is what `ncfg status` shows and what an operator wants to see.
+fn comparable(peers: Vec<ObservedWgPeer>) -> Vec<ObservedWgPeer> {
+	peers
+		.into_iter()
+		.map(|mut peer| {
+			peer.endpoint = None;
+			peer
+		})
+		.collect()
 }
 
 /// A peer list as a plan's reason renders it.
