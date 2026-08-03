@@ -689,6 +689,7 @@ mod tests {
 				ownership: Ownership::Unknown,
 				private_key_loaded: false,
 				wireguard: None,
+				bond: None,
 				bridge: None,
 			}],
 			addresses: vec![address],

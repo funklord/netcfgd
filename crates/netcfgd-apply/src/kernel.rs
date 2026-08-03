@@ -76,6 +76,8 @@ pub struct KernelExecutor {
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
+	/// The bond settings for each interface that is one.
+	bonds: Vec<(String, netcfgd_model::interface::BondConfig)>,
 	/// The bridge settings for each interface that is one.
 	bridges: Vec<(String, netcfgd_model::interface::BridgeConfig)>,
 	/// The `WireGuard` configuration for each interface that is one.
@@ -154,6 +156,7 @@ impl KernelExecutor {
 			dot1x: Vec::new(),
 			wireguard: Vec::new(),
 			bridges: Vec::new(),
+			bonds: Vec::new(),
 			mac_policy: Vec::new(),
 			pppoe: Vec::new(),
 			delegating: Vec::new(),
@@ -206,6 +209,7 @@ impl KernelExecutor {
 			.collect();
 		self.wireguard = wireguard_configs(document);
 		self.bridges = bridge_configs(document);
+		self.bonds = bond_configs(document);
 		self.networks.clone_from(&document.networks);
 		self.access_points.clone_from(&document.access_points);
 		self.preferences = document
@@ -606,6 +610,15 @@ impl KernelExecutor {
 	/// An executor built without a document has none of these, which is the
 	/// failure `make executor-policy` exists to prevent -- so this says what
 	/// happened rather than silently configuring a device with nothing.
+	/// The document's settings for one bond.
+	fn bond_config(&self, name: &str) -> Result<netcfgd_model::interface::BondConfig, String> {
+		self.bonds
+			.iter()
+			.find(|(bond, _)| bond == name)
+			.map(|(_, config)| config.clone())
+			.ok_or_else(|| format!("{name}: no bond settings in the document being applied"))
+	}
+
 	/// The document's settings for one bridge.
 	fn bridge_config(&self, name: &str) -> Result<netcfgd_model::interface::BridgeConfig, String> {
 		self.bridges
@@ -1336,6 +1349,20 @@ impl Executor for KernelExecutor {
 			// executor already holds the document it is applying. Putting a
 			// peer list in the plan would put public keys and every allowed
 			// prefix into `/run/netcfgd/plan.last.json` for no gain.
+			Op::LinkSetBond { name, mode } => {
+				let bond = self.bond_config(name)?;
+				let index = self.index_of(name)?;
+				self.socket
+					.set_bond_attrs(
+						index,
+						// Only where the plan says it is meant. A mode the
+						// kernel will not take fails the whole message, taking
+						// the monitoring interval with it.
+						mode.then(|| bond.mode.number()),
+						bond.miimon,
+					)
+					.map_err(|error| format!("could not set the attributes of {name}: {error}"))
+			}
 			Op::LinkSetBridge { name } => {
 				let bridge = self.bridge_config(name)?;
 				self.apply_bridge_attrs(name, &bridge)
@@ -1426,6 +1453,22 @@ fn record_presets(run: &std::path::Path, iface: &str, presets: &[String]) {
 		let _ =
 			std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
 	}
+}
+
+/// Every interface that is a bond, with its settings.
+fn bond_configs(
+	document: &netcfgd_model::Document,
+) -> Vec<(String, netcfgd_model::interface::BondConfig)> {
+	document
+		.interfaces
+		.iter()
+		.filter_map(|interface| match &interface.kind {
+			netcfgd_model::InterfaceKind::Bond(bond) => {
+				Some((interface.name.clone(), bond.clone()))
+			}
+			_ => None,
+		})
+		.collect()
 }
 
 /// Every interface that is a bridge, with its settings.

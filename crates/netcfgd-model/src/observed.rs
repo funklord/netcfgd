@@ -152,6 +152,14 @@ pub struct ObservedLink {
 	/// device that has been created and not yet configured.
 	#[serde(default)]
 	pub private_key_loaded: bool,
+	/// A bond's own settings, where this link is one.
+	///
+	/// The bridge's story in a second kind whose name encodes nothing (0057).
+	/// The kernel takes both of these on a bond that already exists -- checked
+	/// by asking it -- which is what makes correcting them a `link.set_bond`
+	/// rather than the delete and create a VLAN would need.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub bond: Option<ObservedBond>,
 	/// A bridge's own settings, where this link is one.
 	///
 	/// The same question 0054 asked of a `WireGuard` device, in the kind whose
@@ -177,6 +185,22 @@ pub struct ObservedLink {
 	/// has no field here for the same reason it has none there.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub wireguard: Option<ObservedWireGuard>,
+}
+
+/// A bond's own settings, as the kernel reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedBond {
+	/// The mode, as the document spells it.
+	///
+	/// Translated in the observer, so the planner compares a `balance-rr`
+	/// against a `balance-rr` rather than a number against a name -- the same
+	/// call decision 0052 made for an access point's band.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub mode: Option<String>,
+	/// Link monitoring interval in milliseconds.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub miimon: Option<u32>,
 }
 
 /// A bridge's own settings, as the kernel reports them.

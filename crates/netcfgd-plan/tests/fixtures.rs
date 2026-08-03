@@ -44,6 +44,7 @@ fn link(name: &str) -> ObservedLink {
 		ownership: Ownership::Unknown,
 		private_key_loaded: false,
 		wireguard: None,
+		bond: None,
 		bridge: None,
 	}
 }
@@ -4710,4 +4711,79 @@ interface br0 {
 			.any(|action| matches!(action.op, Op::LinkSetBridge { .. })),
 		"a bridge that matches its document was corrected"
 	);
+}
+
+/// A bond with members gets a sentence about its mode, not an action.
+///
+/// The kernel takes a mode only on a bond with none: with any, it answers
+/// `ENOTEMPTY` and rejects the whole message, monitoring interval included.
+/// Planning it anyway failed the apply and then planned the same thing again on
+/// the next reconcile, forever -- decision 0057.
+#[test]
+fn a_bond_with_members_is_told_why_its_mode_cannot_move() {
+	let desired = document(
+		r#"
+interface bond0 {
+	bond { members = "port0"; mode = "balance-rr"; miimon = 250 }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["bond0", "port0"]);
+	"bond".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].bond = Some(netcfgd_model::ObservedBond {
+		mode: Some("active-backup".to_owned()),
+		miimon: Some(100),
+	});
+	observed.links[1].master = Some("bond0".to_owned());
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("while the bond has members")),
+		"nothing said why the mode is not being changed: {:?}",
+		plan.warnings
+	);
+	// And the interval still moves, in a message that does not carry the mode.
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetBond { .. }))
+		.expect("the monitoring interval is still set");
+	assert_eq!(action.reason.field, "bond.miimon");
+	assert!(
+		matches!(action.op, Op::LinkSetBond { mode: false, .. }),
+		"the mode rode along with an interval the kernel would then refuse"
+	);
+}
+
+/// With no members, the mode is the kernel's to take and is planned.
+#[test]
+fn a_bond_with_no_members_has_its_mode_planned() {
+	let desired = document(
+		r#"
+interface bond0 {
+	bond { members = ""; mode = "balance-rr" }
+	config = "null"
+}
+"#,
+	);
+	let mut observed = observed_with(&["bond0"]);
+	"bond".clone_into(&mut observed.links[0].kind);
+	observed.links[0].up = true;
+	observed.links[0].bond = Some(netcfgd_model::ObservedBond {
+		mode: Some("active-backup".to_owned()),
+		miimon: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::LinkSetBond { .. }))
+		.expect("a bond with no members has its mode set");
+	assert_eq!(action.reason.field, "bond.mode");
+	assert!(matches!(action.op, Op::LinkSetBond { mode: true, .. }));
 }

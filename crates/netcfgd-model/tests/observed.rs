@@ -195,6 +195,10 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		// a whole milestone.
 		// Every field again, for the reason the WireGuard block below carries
 		// every one of its own.
+		bond: Some(netcfgd_model::ObservedBond {
+			mode: Some("active-backup".to_owned()),
+			miimon: Some(100),
+		}),
 		bridge: Some(netcfgd_model::ObservedBridge {
 			stp: true,
 			forward_delay: Some(4),

@@ -180,6 +180,16 @@ fn observed_link(
 		// `host::augment` for the same reason `forwarding` and `offloads` are.
 		private_key_loaded: false,
 		wireguard: None,
+		// The mode arrives as a number and is compared as a name, so the
+		// translation happens here -- once, where every other kernel-to-model
+		// conversion in this function is.
+		bond: link.bond.map(|bond| netcfgd_model::ObservedBond {
+			mode: bond
+				.mode
+				.and_then(netcfgd_model::BondMode::from_number)
+				.map(|mode| mode.name().to_owned()),
+			miimon: bond.miimon,
+		}),
 		// Hundredths of a second on the wire, seconds in the model. The
 		// conversion is here, once, beside nothing else that converts -- the
 		// writer's half is in `netcfgd-sys`, and links.sh exists partly because
@@ -365,6 +375,7 @@ mod tests {
 
 	fn link(index: u32, name: &str) -> LinkRecord {
 		LinkRecord {
+			bond: None,
 			bridge: None,
 			index,
 			name: name.to_owned(),

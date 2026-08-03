@@ -734,6 +734,50 @@ impl Netlink {
 		Ok(())
 	}
 
+	/// Set a bond's mode and monitoring interval on a bond that exists.
+	///
+	/// The kernel takes both on a live bond, which was asked rather than
+	/// assumed -- `ip link set bond0 type bond mode balance-rr` moves one, and
+	/// the same shape of request on a VLAN succeeds and changes nothing.
+	///
+	/// # Errors
+	///
+	/// Returns the errno the kernel replied with.
+	pub fn set_bond_attrs(
+		&mut self,
+		index: u32,
+		mode: Option<u8>,
+		miimon: Option<u32>,
+	) -> io::Result<()> {
+		let mut data = AttrBuf::new();
+		// Left out where the caller says so, because the kernel takes a mode
+		// only on a bond with no members and rejects the whole message
+		// otherwise -- monitoring interval included.
+		if let Some(mode) = mode {
+			data.push_u8(IFLA_BOND_MODE, mode);
+		}
+		if let Some(interval) = miimon {
+			data.push_u32(IFLA_BOND_MIIMON, interval);
+		}
+
+		let mut info = AttrBuf::new();
+		info.push_str(ifla::INFO_KIND, "bond");
+		info.push(IFLA_INFO_DATA, data.as_bytes());
+
+		let mut outer = AttrBuf::new();
+		outer.push(ifla::LINKINFO, info.as_bytes());
+
+		let mut body = Vec::new();
+		wire::IfInfo {
+			index: i32::try_from(index).unwrap_or(0),
+			..wire::IfInfo::default()
+		}
+		.encode(&mut body);
+
+		self.request(msg_type::RTM_NEWLINK, ack_flags(), &body, &outer)?;
+		Ok(())
+	}
+
 	/// Add or remove a VLAN on a bridge port, or on the bridge itself.
 	///
 	/// `on_self` picks which, and getting it backwards is the mistake this
