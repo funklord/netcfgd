@@ -51,7 +51,7 @@ pub(crate) fn has_sysfs_wireless(interface: &str) -> bool {
 
 /// Which flavour of device object one link becomes.
 ///
-/// There are five, and the reason there are five rather than a dozen was found
+/// There are seven, and the reason there are seven rather than a dozen was found
 /// by pointing a real `nmcli` at this: **libnm decides what a device is from
 /// the interfaces present on the object, not from the `DeviceType` property**.
 /// A device carrying only `org.freedesktop.NetworkManager.Device` is not a
@@ -82,6 +82,10 @@ pub(crate) enum Flavour {
 	Wired,
 	/// A `WireGuard` tunnel.
 	WireGuard,
+	/// A bridge.
+	Bridge,
+	/// A bond.
+	Bond,
 	/// Anything else netcfgd can create.
 	Generic,
 }
@@ -116,10 +120,19 @@ pub(crate) fn flavour_of(link: &ObservedLink, radio: bool) -> Flavour {
 	// contents and it is absent for a device netcfgd has created and not yet
 	// configured, so keying on it would move a device between types depending
 	// on how far an apply had got.
-	if link.kind == "wireguard" {
-		return Flavour::WireGuard;
+	// Three kinds have left `Generic`, and each left on the same terms: NM
+	// defines an interface for it and netcfgd can answer every property on that
+	// interface from what it already observes. A bridge and a bond want a
+	// hardware address, a carrier and a list of enslaved devices -- and the
+	// observation carries `master` on every link, which is that list read from
+	// the other end. Nothing in the core changed to make this possible, which
+	// is the test constraint 6 sets for an adapter wanting a concept.
+	match link.kind.as_str() {
+		"wireguard" => Flavour::WireGuard,
+		"bridge" => Flavour::Bridge,
+		"bond" => Flavour::Bond,
+		_ => Flavour::Generic,
 	}
-	Flavour::Generic
 }
 
 /// NM's device type for a netcfgd link.
@@ -135,6 +148,8 @@ pub(crate) fn type_of(link: &ObservedLink, radio: bool) -> u32 {
 		Flavour::Wireless => device_type::WIFI,
 		Flavour::Wired => device_type::ETHERNET,
 		Flavour::WireGuard => device_type::WIREGUARD,
+		Flavour::Bridge => device_type::BRIDGE,
+		Flavour::Bond => device_type::BOND,
 		Flavour::Generic => device_type::GENERIC,
 	}
 }
@@ -549,6 +564,122 @@ impl Generic {
 	}
 }
 
+/// What is enslaved to one master, as object paths.
+///
+/// Read from the other end: netcfgd observes `master` on each link, which is
+/// the kernel's own answer, and this inverts it. A device NM has not numbered
+/// yet is left out rather than given a guessed path -- a client that follows an
+/// object path expects to find something there.
+fn slaves_of(state: &State, master: &str) -> Vec<zbus::zvariant::OwnedObjectPath> {
+	let numbers = state.devices();
+	state
+		.links()
+		.into_iter()
+		.filter(|link| link.master.as_deref() == Some(master))
+		.filter_map(|link| {
+			numbers
+				.iter()
+				.find(|(name, _)| *name == link.name)
+				.map(|(_, number)| path_for(*number))
+		})
+		.collect()
+}
+
+/// The bridge half of a device.
+///
+/// Three properties, which is what NM defines for one, and every one of them is
+/// something netcfgd already observes. A bridge that claims the type and cannot
+/// list what is on it is the case the `Flavour` comment above warns about.
+pub(crate) struct Bridge {
+	state: Arc<State>,
+	interface: String,
+}
+
+impl Bridge {
+	/// A bridge interface for one device.
+	#[must_use]
+	pub(crate) fn new(state: Arc<State>, interface: String) -> Self {
+		Self { state, interface }
+	}
+}
+
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device.Bridge",
+	introspection_docs = false
+)]
+impl Bridge {
+	#[zbus(property)]
+	fn hw_address(&self) -> String {
+		self.state
+			.link(&self.interface)
+			.and_then(|link| link.mac)
+			.unwrap_or_default()
+			.to_uppercase()
+	}
+
+	/// Whether the bridge itself has carrier.
+	///
+	/// The kernel gives a bridge carrier when a port has it, so this is the
+	/// observation unchanged rather than something summed up here.
+	#[zbus(property)]
+	fn carrier(&self) -> bool {
+		self.state
+			.link(&self.interface)
+			.is_some_and(|link| link.carrier)
+	}
+
+	/// The devices enslaved to it.
+	#[zbus(property)]
+	fn slaves(&self) -> Vec<zbus::zvariant::OwnedObjectPath> {
+		slaves_of(&self.state, &self.interface)
+	}
+}
+
+/// The bond half of a device.
+///
+/// The same three properties as a bridge, and NM defines them on a separate
+/// interface rather than sharing one -- so this is a separate type saying the
+/// same things, which is what the wire wants.
+pub(crate) struct Bond {
+	state: Arc<State>,
+	interface: String,
+}
+
+impl Bond {
+	/// A bond interface for one device.
+	#[must_use]
+	pub(crate) fn new(state: Arc<State>, interface: String) -> Self {
+		Self { state, interface }
+	}
+}
+
+#[zbus::interface(
+	name = "org.freedesktop.NetworkManager.Device.Bond",
+	introspection_docs = false
+)]
+impl Bond {
+	#[zbus(property)]
+	fn hw_address(&self) -> String {
+		self.state
+			.link(&self.interface)
+			.and_then(|link| link.mac)
+			.unwrap_or_default()
+			.to_uppercase()
+	}
+
+	#[zbus(property)]
+	fn carrier(&self) -> bool {
+		self.state
+			.link(&self.interface)
+			.is_some_and(|link| link.carrier)
+	}
+
+	#[zbus(property)]
+	fn slaves(&self) -> Vec<zbus::zvariant::OwnedObjectPath> {
+		slaves_of(&self.state, &self.interface)
+	}
+}
+
 /// The `WireGuard` half of a device.
 ///
 /// Three properties, which is all NM defines for one. They are the device's
@@ -852,7 +983,7 @@ mod tests {
 	/// has never heard of -- `ifb` is one -- and they are not broken devices.
 	#[test]
 	fn everything_with_a_link_kind_is_generic_rather_than_unknown() {
-		for kind in ["bridge", "bond", "vlan", "gre", "ifb", "dummy"] {
+		for kind in ["vlan", "vxlan", "gre", "ifb", "dummy", "veth"] {
 			assert_eq!(
 				flavour_of(&link("x0", kind), false),
 				Flavour::Generic,
@@ -884,13 +1015,32 @@ mod tests {
 		);
 	}
 
+	/// A bridge and a bond are themselves, on the same terms `WireGuard` left on.
+	///
+	/// Every property NM defines for either is something netcfgd already
+	/// observes -- a hardware address, a carrier, and the enslaved devices,
+	/// which is the `master` field on every other link read from the other end.
+	/// Nothing in the core changed to make this possible, which is the test
+	/// constraint 6 sets for an adapter that wants a concept.
+	#[test]
+	fn a_bridge_and_a_bond_are_themselves() {
+		assert_eq!(flavour_of(&link("br0", "bridge"), false), Flavour::Bridge);
+		assert_eq!(type_of(&link("br0", "bridge"), false), 13);
+		assert_eq!(flavour_of(&link("bond0", "bond"), false), Flavour::Bond);
+		assert_eq!(type_of(&link("bond0", "bond"), false), 10);
+	}
+
 	/// The type and the interface are derived from one answer, because libnm
 	/// reads the interface list and `nmcli` prints the type, and a device that
 	/// says `bridge` while carrying `.Device.Generic` is a device those two
 	/// disagree about.
 	#[test]
 	fn the_type_number_always_agrees_with_the_flavour() {
-		for (kind, flavour, number) in [("bridge", Flavour::Generic, 14), ("", Flavour::Wired, 1)] {
+		for (kind, flavour, number) in [
+			("bridge", Flavour::Bridge, 13),
+			("dummy", Flavour::Generic, 14),
+			("", Flavour::Wired, 1),
+		] {
 			let link = link("probe0", kind);
 			assert_eq!(flavour_of(&link, false), flavour);
 			assert_eq!(type_of(&link, false), number);
