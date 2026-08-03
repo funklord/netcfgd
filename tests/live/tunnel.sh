@@ -109,6 +109,7 @@ route 10.9.0.0 255.255.255.0
 route 10.10.0.0 255.255.0.0 192.168.99.1
 dhcp-option DNS 10.0.0.53
 dhcp-option DOMAIN corp.example
+dhcp-option WINS 10.0.0.7
 ping-exit 60
 verb 3
 OVPN
@@ -202,11 +203,17 @@ check "with the same preference, so it can be ranked against another uplink" \
 # the operator's, in the document, and not a remote party's to push.
 check "the daemon's nameserver was reported" \
 	"$(grep -c '^dns=10.0.0.53$' "$report" 2>/dev/null || true)" "1"
-check "and the domain it pushed was not" \
+# And the domain it pushed arrives as a *suffix*, which is 0067 splitting 0049
+# in two: what to append to a bare name travels under the same gate as a
+# nameserver, and which names go through this tunnel does not travel at all.
+check "and the domain it pushed is a search suffix" \
+	"$(grep -c '^search=corp.example$' "$report" 2>/dev/null || true)" "1"
+check "and never a routing domain, which has no key" \
 	"$(grep -c '^domain' "$report" 2>/dev/null || true)" "0"
-# Declined, not hidden. Whoever reads this file can see what was suggested.
-check "though what it suggested is still visible in the file" \
-	"$(grep -c 'the server also said: dhcp-option DOMAIN corp.example' "$report" \
+# Declined, not hidden. Whoever reads this file can see what was suggested --
+# `WINS` is here to keep that branch under test now that `DOMAIN` has left it.
+check "and what netcfgd declines outright is still visible in the file" \
+	"$(grep -c 'the server also said: dhcp-option WINS 10.0.0.7' "$report" \
 		2>/dev/null || true)" "1"
 
 # And nothing was delivered, because the document never gave this link a scope.

@@ -69,7 +69,7 @@ mkdir -p "$work/etc" "$work/run" "$work/bin"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-export FAKE_OPENVPN_LOG="$work/openvpn.log"
+export FAKE_OPENVPN_LOG="${FAKE_OPENVPN_LOG:-$work/openvpn.log}"
 ncfg="$repo/target/debug/ncfg"
 
 failures=0
@@ -319,6 +319,50 @@ check "and an unknown key says where the rest belongs" \
 	"$(printf 'interface vpn0 { openvpn { config = "/x.ovpn"; remote = "vpn.example" } }\n' \
 	     > "$work/etc/netcfgd.conf"; \
 	   "$ncfg" plan 2>&1 | grep -c 'unknown openvpn key' || true)" "1"
+
+# ------------------------------------------- stopping one that is still starting
+
+# The window between the fork `--daemon` returns from and the bind its child
+# gets round to. Nothing is listening in it, and a stop that arrives there used
+# to report success and leave the daemon running -- `ok backend.stop vpn0`, then
+# `nothing to do` forever, with the tunnel still up. Decision 0074.
+#
+# `FAKE_OPENVPN_BIND_DELAY` opens that window on purpose. It is the *timing* that
+# is faked, not the protocol: on a loaded machine the same window is there and is
+# where this was first seen, in a run that left a daemon behind about every other
+# time.
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface vpn0 {
+	openvpn { config = "$work/etc/work.ovpn" }
+}
+CONF
+FAKE_OPENVPN_BIND_DELAY=3 "$ncfg" apply > "$work/slow-start.txt" 2>&1 || true
+check "the daemon wrote the pid netcfgd asked it for" \
+	"$([ -s "$work/run/openvpn/vpn0.pid" ] && echo yes || echo no)" "yes"
+slow=$(cat "$work/run/openvpn/vpn0.pid" 2>/dev/null || echo 0)
+check "and its socket is not there yet, which is the whole point" \
+	"$([ -S "$work/run/openvpn/vpn0.sock" ] && echo yes || echo no)" "no"
+
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface vpn0 { kind = "dummy"; config = "null" }
+CONF
+"$ncfg" apply > "$work/slow-stop.txt" 2>&1 || true
+waited=0
+while [ "$slow" -gt 0 ] && kill -0 "$slow" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+if [ "$slow" -gt 0 ] && ! kill -0 "$slow" 2>/dev/null; then
+	echo "ok   a daemon stopped before it could listen is stopped anyway"
+else
+	echo "FAIL a daemon stopped before it could listen is stopped anyway"
+	echo "       pid $slow is still running, and netcfgd said:"
+	sed 's/^/       /' "$work/slow-stop.txt"
+	failures=$((failures + 1))
+fi
+check "and the pid file goes with it" \
+	"$([ -e "$work/run/openvpn/vpn0.pid" ] && echo yes || echo no)" "no"
 
 echo
 if [ "$failures" -eq 0 ]; then

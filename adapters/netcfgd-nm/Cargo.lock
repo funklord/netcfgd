@@ -445,6 +445,7 @@ name = "netcfgd-openvpn"
 version = "0.0.0"
 dependencies = [
  "netcfgd-model",
+ "netcfgd-sys",
 ]
 
 [[package]]
