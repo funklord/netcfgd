@@ -333,4 +333,9 @@ netcfgd
 # needs a lease netcfgd never sees, and `portal_check` would need netcfgd to fetch
 # a hard-coded URL. The same pass caught nine hook phases that are recognised,
 # materialised, hashed and never run -- which read exactly like a working feature.
-total 2132504
+# +12 KB for rfkill: the observation reads whether an interface's radio is
+# switched off, `ncfg status` and `ncfg explain` say so, and a plan names the
+# remedy for the switch that did it. What it bought is the answer to "why will
+# this not associate" on a laptop, where the switch is one keystroke away at all
+# times and a blocked radio looks exactly like a network that is not there.
+total 2144792

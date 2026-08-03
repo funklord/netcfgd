@@ -20,6 +20,11 @@
       "qdisc_ingress": true,
       "ingress_redirect": "ifb-eth0",
       "forwarding": true,
+      "rfkill": {
+        "switch": "phy0",
+        "soft": true,
+        "hard": false
+      },
       "privacy": true,
       "ownership": "ours",
       "private_key_loaded": true,
@@ -94,6 +99,11 @@
       "qdisc_ingress": true,
       "ingress_redirect": "ifb-eth0",
       "forwarding": true,
+      "rfkill": {
+        "switch": "phy0",
+        "soft": true,
+        "hard": false
+      },
       "privacy": true,
       "ownership": "foreign",
       "private_key_loaded": true,
@@ -168,6 +178,11 @@
       "qdisc_ingress": true,
       "ingress_redirect": "ifb-eth0",
       "forwarding": true,
+      "rfkill": {
+        "switch": "phy0",
+        "soft": true,
+        "hard": false
+      },
       "privacy": true,
       "ownership": "unknown",
       "private_key_loaded": true,

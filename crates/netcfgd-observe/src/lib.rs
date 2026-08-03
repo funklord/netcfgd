@@ -181,6 +181,9 @@ fn observed_link(
 		// which is why `build` can stay pure.
 		forwarding: None,
 		privacy: None,
+		// `/sys`, so `host::augment` again -- and the one thing in the observation
+		// that is not netlink, a sysctl or a file netcfgd wrote itself.
+		rfkill: None,
 		ownership: if prior.created_links.contains(&link.name) {
 			Ownership::Ours
 		} else {

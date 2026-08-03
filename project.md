@@ -672,10 +672,13 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after the session that answered a question from outside — "what is
-missing to use this on a laptop?" — by reading the config surface instead of the
-feature list, and found four keys that compiled and did nothing
-([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)).
+Last rewritten after two sessions on the laptop list: four config keys that
+compiled and did nothing
+([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)),
+and then **rfkill** — a radio that is switched off used to look exactly like a
+network that would not associate
+([0062](docs/decisions/0062-a-blocked-radio-is-reported-and-not-unblocked.md)).
+That one also put the first real wifi hardware under test in this project, read-only.
 Before it, the session that **closed**
 [0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s list and
 found that a VXLAN's and a tunnel's parent had never reached the kernel at all
@@ -915,6 +918,28 @@ rather than looking like a feature: the model carries `mac`, `path`, `driver` an
 tries gets a compile error. Implementing it means reading a driver name and a
 device path out of `/sys`.
 
+#### The radio, and what netcfgd will not switch
+
+**A blocked radio is named, with the remedy for the switch that blocked it**
+([0062](docs/decisions/0062-a-blocked-radio-is-reported-and-not-unblocked.md)).
+`ncfg status` prints a line when the radio is off, `ncfg explain interface` says so
+before the addresses — a blocked radio has none — and a plan gives the remedy,
+which differs: a soft block clears with `rfkill unblock wifi` and a hard block is a
+physical switch nothing in software will move.
+
+**netcfgd will not unblock one.** It could — clearing a soft block is an 8-byte
+write to `/dev/rfkill`, no `unsafe` and no privilege beyond group `netdev` on
+Debian. It does not, because a soft block is somebody's deliberate act: the
+aeroplane switch, the function key, the desktop's toggle. A daemon that reads "wifi
+off" as a state to correct turns the radio back on in a cabin because a config file
+mentions a network. The same rule as `Ownership::may_remove`, applied to a switch.
+
+**A laptop has two `wlan` switches and only one of them is the card's.** The Dell
+this was measured on reports `dell-wifi` beside `phy0`; netcfgd reads the phy's own,
+because that is the one the driver obeys. Whether blocking the platform button
+propagates to the phy is **not measured** and is written down as unknown — finding
+out means switching off the radio of the machine running the test.
+
 #### Explaining it
 
 `ncfg explain` follows the indirections. An address the document named by
@@ -997,15 +1022,16 @@ match.
    reason is also what found the parent defect below, so the order paid for itself
    twice.
 
-3. **What a laptop still wants, in the order it will bite.** The four keys are
-   settled; these are the gaps behind them, and none is a schema question:
-   **rfkill** is not modelled at all, so the Fn-key wifi toggle is invisible and
-   `ncfg status` cannot explain a blocked radio; **the nine unfired hook phases**
+3. **What a laptop still wants, in the order it will bite.** The four keys and
+   rfkill are settled; these are the gaps behind them, and none is a schema
+   question: **the nine unfired hook phases**
    above, of which `down` and `lease` are the two an operator reaches for first;
    **joining a network needs an editor and root**, since `ncfg wifi connect` takes
    the id of a `network` block and there is no `ncfg wifi add` (the NM shim's write
-   path is the current answer); and **`accept_ra` is unmanaged**, which a router
-   asking for `slaac` on its WAN discovers the hard way.
+   path is the current answer); **`accept_ra` is unmanaged**, which a router asking
+   for `slaac` on its WAN discovers the hard way; and **nothing reads
+   `/dev/rfkill`'s event stream**, so a block is noticed on the next observation
+   rather than as it happens.
 
 4. **Nothing else on the "is it still what the document says?" question is
    open.** Daemons, kernel objects, secrets and unread files all have an answer,
@@ -1032,6 +1058,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **~~An interface that exists as the wrong kind is not recreated, and nothing says so.~~ Closed** ([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)), in the commit after the one that wrote it down. A document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, planned `link.up` and nothing else — netcfgd brought somebody else's device up and called the network configured. It shared its remedy with the VLAN id, which is why one session did both. What is worth keeping from it is the measurement habit that found it: the finding came from asking what *else* would fall into the safe direction of the new comparisons, not from a test.
+- **A field that cannot disagree cannot be wrong.** The rfkill observation reports which switch the flags came from, and the first version filled that in from the phy name the *search started with* rather than from the entry it found — so a search that picked the wrong switch still reported the right name. Breaking the search on purpose left every test green. The fix is one line and the rule is general: a field whose job is to say where a value came from has to be read from there.
+- **`read_dir` order is the filesystem's, and a test that depends on it proves nothing.** Deleting the "is this the phy's own switch?" check left the unit test passing, because the fixture's two switches came back in whichever order the directory happened to hold them. Sorting made the failure deterministic — and made the real read deterministic too, which is worth having on its own.
 - **The config surface is a feature list nobody audits.** Four keys compiled and did nothing, and the way they were found was reading the DSL against the code rather than reading the roadmap — a question from outside ("what is missing for a laptop?") did what no gate does. Two of them were *silent*; the other two turned out to be compile errors, which is honest by accident and worth telling apart from the first kind. The `ethtool` block has named its own inert fields since it landed and has never confused anybody, which is the whole argument.
 - **A doc comment can recommend a feature that does not exist.** `HookPhase::PreUp`'s documentation sent the reader to `Up` and `Carrier` for the things `pre_up` cannot do. Neither has ever been fired by anything. The same session found nine of eleven phases inert — parsed, materialised into `/run` with a hash, and never run, which is the most feature-shaped nothing in the tree.
 - **The place to look for a defect is the half nobody asked about.** The parent was being read for the shim's sake and the question was whether the model may grow a field. Asking instead "what does netcfgd currently *do* with a parent" found that two kinds never sent one to the kernel, in a code path that had been green for years -- the `parent` in the document, the `parent` in the plan and the successful apply all agreed, and the kernel had no underlay. Constraint 6's discipline of finding a local reason before adding a field for an adapter is what pointed at it, which is an argument for the constraint beyond the one it was written for.

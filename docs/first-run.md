@@ -246,9 +246,12 @@ interface stops and `ip addr` shows nothing that explains it.
 **No captive portal detection.** `portal_check` is recognised and does nothing,
 and says so in the plan. A hotel or a train needs a browser and patience.
 
-**Nothing knows about rfkill.** The hardware wifi switch is invisible to netcfgd:
-a blocked radio looks like a network that will not associate, and `ncfg explain`
-cannot tell you why.
+**A blocked radio is reported and not cleared.** `ncfg status` says `radio off`,
+`ncfg explain interface wlp0s20f3` says which switch and what to do, and a plan
+gives the remedy -- but netcfgd will not unblock one, on purpose: your function key
+turning the wifi off is you deciding, not drift to be corrected. `rfkill unblock
+wifi` is the other half. What it cannot see yet is the *moment* a switch flips: the
+block shows up on the next observation, a second or so later.
 
 **systemd-networkd detection is unverified.** The NetworkManager path was
 checked against a running NetworkManager. The networkd equivalent was written
