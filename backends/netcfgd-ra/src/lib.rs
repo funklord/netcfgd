@@ -300,18 +300,12 @@ pub fn stop(run: &Path, iface: &str) -> Result<(), String> {
 /// Whether netcfgd's own radvd is running on this interface, and its pid.
 #[must_use]
 pub fn running_pid(run: &Path, iface: &str) -> Option<i32> {
-	let text = std::fs::read_to_string(pid_path(run, iface)).ok()?;
-	let pid: i32 = text.trim().lines().next()?.parse().ok()?;
+	// The generated configuration is the marker: it is a path netcfgd chose, so
+	// it is unique to this daemon on this machine. The ownership rule itself
+	// lives in `netcfgd_sys::process::pid_of`, which is where it is written once
+	// rather than in each of the four places that needed it.
 	let config = config_path(run, iface);
-	let config = config.to_string_lossy().into_owned();
-	// NUL-separated, so the path is a whole argument and cannot match by
-	// accident. A pid file outlives the process it names and pids are recycled,
-	// which is the whole reason this check exists.
-	let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-	cmdline
-		.split(|byte| *byte == 0)
-		.any(|argument| argument == config.as_bytes())
-		.then_some(pid)
+	netcfgd_sys::process::pid_of(&pid_path(run, iface), &config.to_string_lossy())
 }
 
 /// The lines of a log that say what went wrong, for an error message.
