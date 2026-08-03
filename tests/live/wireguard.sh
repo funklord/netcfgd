@@ -207,6 +207,44 @@ check "and it is 64 hex characters" \
 check "readable by nobody else" \
 	"$(stat -c '%a' "$work/run/wireguard/wg0.key.sha256")" "600"
 
+# --------------------------------------------- rotate a peer's preshared key
+#
+# The same question one level down, and the one the peer-list comparison cannot
+# answer on its own: both sides say "this peer has a preshared key", because the
+# kernel returns one zeroed. So the record is per peer, keyed by the public key,
+# which is the only name the kernel and the document share.
+
+cat > "$work/etc/secrets/psk" <<PSK
+$(wg genpsk)
+PSK
+chmod 600 "$work/etc/secrets/psk"
+write_config 51821 "$(printf 'peer %s {\n\t\t\tpublic_key    = "%s"\n\t\t\tallowed_ips   = "10.0.0.0/24"\n\t\t\tendpoint      = "198.51.100.7:51820"\n\t\t\tpreshared_key = "@secret:psk"\n\t\t}' spare "$spare")"
+"$ncfg" apply > "$work/apply5.txt" 2>&1 || { cat "$work/apply5.txt" >&2; exit 1; }
+# `wg show ... preshared-keys` prints the value, not a placeholder, which makes
+# this the strongest assertion available anywhere in this script: the kernel is
+# holding exactly what the store holds, compared octet for octet by a tool that
+# is not netcfgd.
+check "the kernel holds the preshared key the store has" \
+	"$(wg show wg0 preshared-keys | awk '{print $2}')" "$(cat "$work/etc/secrets/psk")"
+check "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+
+wg genpsk > "$work/etc/secrets/psk"
+plan=$("$ncfg" plan 2>&1 || true)
+contains "a rotated preshared key is planned" "$plan" "wireguard.peers.preshared_key"
+contains "and the reason names which peer" "$plan" "$spare"
+check "and names no key while doing it" \
+	"$(printf '%s' "$plan" | grep -c "$(cat "$work/etc/secrets/psk")" || true)" "0"
+"$ncfg" apply > "$work/apply6.txt" 2>&1 || { cat "$work/apply6.txt" >&2; exit 1; }
+check "the kernel holds the new one afterwards" \
+	"$(wg show wg0 preshared-keys | awk '{print $2}')" "$(cat "$work/etc/secrets/psk")"
+check "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
+check "the record is digests, keyed by public key" \
+	"$(awk '{print $1}' "$work/run/wireguard/wg0.psk.sha256")" "$spare"
+check "and holds no key" \
+	"$(grep -c "$(cat "$work/etc/secrets/psk")" "$work/run/wireguard/wg0.psk.sha256" || true)" "0"
+
 # ------------------------------------------------- an unchanged device is quiet
 #
 # The check that would have caught a comparison that always differs -- which is
