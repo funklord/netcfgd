@@ -288,8 +288,30 @@ mod layering {
 	use std::fs;
 	use std::path::{Path, PathBuf};
 
+	/// A directory tree that takes itself away again.
+	///
+	/// The `Drop` rather than a line at the end of each test, because a test
+	/// that panics never reaches its last line and a leaked temporary directory
+	/// is invisible to every gate here. Five per run of the suite, and 1252 of
+	/// them had accumulated in `/tmp` before anybody counted.
+	struct Tree(PathBuf);
+
+	impl Drop for Tree {
+		fn drop(&mut self) {
+			let _ = fs::remove_dir_all(&self.0);
+		}
+	}
+
+	impl std::ops::Deref for Tree {
+		type Target = Path;
+
+		fn deref(&self) -> &Path {
+			&self.0
+		}
+	}
+
 	/// A directory tree, built from `relative path -> contents`.
-	fn tree(name: &str, files: &[(&str, &str)]) -> PathBuf {
+	fn tree(name: &str, files: &[(&str, &str)]) -> Tree {
 		let root = std::env::temp_dir().join(format!("ncfg-layer-{name}-{}", std::process::id()));
 		let _ = fs::remove_dir_all(&root);
 		for (path, contents) in files {
@@ -298,7 +320,7 @@ mod layering {
 			fs::write(full, contents).expect("write");
 		}
 		fs::create_dir_all(&root).expect("mkdir");
-		root
+		Tree(root)
 	}
 
 	fn names(sources: &netcfgd_compile::SourceMap) -> Vec<String> {
