@@ -2995,6 +2995,12 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 			// Terminated through its own control socket rather than by signal:
 			// the socket is the interface netcfgd already speaks, and killing
 			// a process by name would reach supplicants netcfgd did not start.
+			//
+			// Nothing listening is taken as nothing running, which is safe here
+			// because `wpa_supplicant -B` returns only after the control socket
+			// exists -- measured with the invocation above against a real one.
+			// openvpn's `--daemon` returns at the fork and needed a pid file
+			// for exactly that reason (0074).
 			let dir = ctrl_dir();
 			match netcfgd_supplicant::Client::connect(&dir, iface) {
 				Ok(client) => client

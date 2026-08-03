@@ -95,11 +95,24 @@ the stop arrives would pass the third check having tested nothing.
 
 ## What is still open
 
-**The same window exists for every daemon netcfgd starts and then talks to.**
-hostapd is the one to look at next: netcfgd reads its ACL over a control socket
-that has the same startup gap, and `acl.sh` already carries a note about a first
-reply that arrived late enough to lose a one-second deadline. Whether a stop there
-can miss in the same way has not been measured.
+**~~The same window exists for every daemon netcfgd starts and then talks to.~~
+Measured, and it does not.** The other two were checked with netcfgd's own
+invocations, against the real binaries:
+
+| daemon | how netcfgd backgrounds it | socket when the parent returns |
+|---|---|---|
+| openvpn 2.6.14 | `--daemon` | **absent** -- it forks first and sets up after |
+| hostapd 2.10 | `-B` | present |
+| wpa_supplicant 2.10 | `-B` | present |
+
+hostapd and wpa_supplicant complete their setup -- interface, control interface,
+everything -- *before* the parent exits, so "nothing is listening" really does
+mean "nothing is running" for those two, and the `stop` paths that treat it that
+way are sound. openvpn is the odd one out, and the difference is worth knowing
+before writing a fourth backend: `-B` is a promise about readiness in two of these
+daemons and not in the third, and only the daemon can tell you which.
+
+The relevant call sites now say so, so that nobody makes them symmetrical.
 
 **Nothing notices a daemon that died on its own.** Unchanged from 0071, and this
 decision makes it slightly sharper: netcfgd now has a pid for a tunnel, which is
