@@ -210,6 +210,62 @@ same of its parser and fuzzes it on both surfaces, mutation-validated, with the
 acceptance rate printed so it cannot silently fall to zero. **That standard
 applies here from the first commit**, not once it works.
 
+**And it is the half `situ` does not do**, which is the most useful thing to know
+about it -- see §6.1. Asked to generate this envelope it says so itself, in a
+comment in its own output:
+
+> No `envelope_required`: one of its members has no length this can compute.
+> Framing such a message is the layer below's job -- situ can say what the bytes
+> mean and not when they have all arrived.
+
+So `wire/` is two pieces with a seam between them: **the frame, which is a situ
+schema**, and **the framing, which is hand-written C and is where the risk went**.
+
+### 6.1 `situ` for the frame itself
+
+`../situ` is a sibling compiler for exactly this problem: a schema of a binary
+format in, accessors in C, C++, Rust and Python out, with a capability model that
+says what it *cannot* generate and why. Its README says the first real use case is
+compact encrypted protocols, and §14 of its `project.md` is a cryptographic model
+rather than an afterthought.
+
+**Tried rather than read about**, on 2026-08-04, from a clone -- the tree is under
+active work and must not be built in. The probe was an envelope with an uncovered
+version byte, an `authenticated { }` region carrying command, target host, sender,
+nonce, expiry and capability, a `sealed(chacha20_poly1305, nonce = nonce) { }`
+body, a 16-byte tag, and `require canonical(envelope)` plus
+`require verify_gated(envelope.sealed)`. It generated C that compiles clean under
+`-Wall -Wextra -std=c11`, and three things in that output are the reason to use
+it:
+
+- **The verify gate is a type.** The sealed interior is reachable only through a
+  `situ_envelope_sealed_t`, and the only thing that produces one is
+  `situ_envelope_sealed_open(view, verified, out)`, which returns `SITU_ERR_TAG`
+  when `verified` is false. Every interior accessor takes that type. In C that is
+  a discipline the compiler enforces rather than a proof -- the struct could be
+  hand-assembled -- but "parse before verify" stops being something a reviewer has
+  to catch.
+- **A stale tag cannot be transmitted.** Every setter for a covered field marks
+  the message dirty, and it will not yield a transmittable buffer until `finalize`
+  recomputes. Mutate a field and forget the MAC is a bug class, and it is handled
+  by construction.
+- **`gen-fuzz` emits the harness** and `wire` emits a reviewable byte-level
+  contract to commit and diff. The family's standard for a hand-rolled parser is
+  met by not hand-rolling the parser.
+
+**Monocypher and situ compose rather than compete.** A codec is declared with its
+properties and bound to an implementation the user supplies -- `impl
+chacha20_poly1305 extern "ncfg_monocypher_aead";` -- so situ decides layout,
+coverage and gating, and Monocypher does the arithmetic.
+
+**The dependency is on a generator, not a library.** Generated C is checked in, so
+a person building netcfgd needs no situc. situ is also unpackaged -- no release,
+no version number, runs from a tree -- which makes committing its output the
+natural pinning mechanism, and the same one this repository already uses for
+`docs/schema/` witnesses.
+
+**OPEN:** vendor situc, commit the generated sources, or both.
+
 ## 7. Build
 
 - `gui/gui.pro`, driven by `gui/Makefile`, out-of-source into `build/`.
@@ -218,9 +274,10 @@ applies here from the first commit**, not once it works.
 - `client/`, `wire/` and `agent/` are plain C with hand-written Makefiles in this
   repository's existing style — the root `Makefile` is the model for how flags and
   toolchain injection are threaded.
-- **OPEN:** whether these directories live at the repository root beside `crates/`
-  and `adapters/`, or under a `clients/` directory. The Rust workspace must not
-  gain them either way.
+- The four directories live at the **repository root**, beside `crates/`,
+  `backends/` and `adapters/`: `gui/`, `client/`, `wire/`, `agent/`. The Rust
+  workspace does not gain them -- `Cargo.toml`'s member list stays as it is, and
+  `make size` keeps measuring the Rust install alone.
 
 ## 8. Order of work
 
@@ -234,7 +291,6 @@ applies here from the first commit**, not once it works.
 
 ## 9. Questions to raise rather than answer alone
 
-- Where the directories live (§7).
 - Whether a remote `apply` may ever run without a confirm window (§5).
 - How a phone finds a host on the LAN (§6).
 - How pairing works the first time: the sibling has QR and camera code in its

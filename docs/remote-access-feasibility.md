@@ -161,6 +161,21 @@ Read from its `project.md` (§§1-9, 13) and its `core/` tree.
 None is a blocker; all four are work, and the third is a decision rather than a
 task.
 
+### 5.0 The frame itself, which is mostly solved already
+
+Written before `../situ` was looked at. It is a sibling compiler that takes a
+schema of a binary format and generates accessors in C, C++, Rust and Python,
+with `authenticated { }`, `sealed(codec, nonce = ref) { }` and `tag ... covers()`
+as first-class constructs -- its own §14 is a cryptographic model, not an
+afterthought. Tried from a clone on a netcfgd-shaped envelope: it generates C that
+compiles clean, gates the sealed interior behind a type only a verified open can
+produce, and refuses to hand out a transmittable buffer while a tag is stale.
+
+That moves the risk. **The frame stops being hand-rolled**; what stays hand-rolled
+is the framing -- the chunking and reassembly below -- which situ says is not its
+job, in a comment in its own generated output. Everything in §5.1 still applies to
+that half and to no other. `gui/project.md` §6.1 has the detail.
+
 ### 5.1 Payload size, which is the one nobody expects
 
 fuzzypickles's control channel is local, where a `SOCK_SEQPACKET` datagram can be
@@ -291,9 +306,15 @@ Answered on 2026-08-04, and carried into `gui/project.md`:
 4. **Makefiles and qmake only**, no CMake in this tree, even though a sibling
    uses it.
 
-Still open, and listed in `gui/project.md` §9: where the C directories live,
-whether a remote `apply` may run without a confirm window, LAN discovery, the
-first pairing, and whether the agent ships in netcfgd's own packages.
+5. **The four directories live at the repository root**, beside `crates/`,
+   `backends/` and `adapters/`: `gui/`, `client/`, `wire/`, `agent/`.
+6. **`situ` describes the frame**, with Monocypher bound to it as an extern
+   codec.
+
+Still open, and listed in `gui/project.md` §9: whether a remote `apply` may run
+without a confirm window, LAN discovery, the first pairing, whether the agent
+ships in netcfgd's own packages, and whether situc is vendored or its output
+committed.
 
 Whether this is M8 or a milestone of its own is also still open. It is not
 RESTCONF's replacement and M9 should stay where it is.
