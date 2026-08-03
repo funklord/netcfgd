@@ -672,10 +672,13 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after the session that **closed**
-[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s list --
-and then found, while looking for the local reason to observe a parent, that a
-VXLAN's and a tunnel's parent had never reached the kernel at all
+Last rewritten after the session that answered a question from outside — "what is
+missing to use this on a laptop?" — by reading the config surface instead of the
+feature list, and found four keys that compiled and did nothing
+([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)).
+Before it, the session that **closed**
+[0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s list and
+found that a VXLAN's and a tunnel's parent had never reached the kernel at all
 ([0060](docs/decisions/0060-a-parent-is-one-word-and-two-attributes.md)):
 every link kind's own settings are now compared against what the kernel holds,
 the VLAN last and by the only route the kernel allows — deleting the interface
@@ -886,6 +889,32 @@ the last of it, and they are remade like a VLAN's id
 VXLAN's and a tunnel's move in place, because a parent is one word in the document
 and two different attributes to the kernel.
 
+#### What the config says and what happens
+
+**A key that compiles does something, or the plan says it does not**
+([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)).
+The `ethtool` block has said which of its fields are inert since it landed, and
+that is why nobody has ever been confused by it. Four keys had no such sentence:
+two are now implemented (`slaac privacy prefer_temporary`, which writes
+`use_tempaddr` per interface, and `hostname = "name"`, which sets the running
+hostname), and two are reported with the reason (`hostname = "dhcp"` needs a lease
+netcfgd never sees; `portal_check` would need netcfgd to fetch a hard-coded URL,
+which is the operator's decision and not a default).
+
+**Nine of the eleven hook phases are recognised and never run.** Only `pre_up` and
+`post_up` fire. The rest are parsed, materialised into `/run/netcfgd/hooks/` and
+hashed into the document — a script on disk under the name the config gave it,
+which reads exactly like a feature. `PreUp`'s own documentation recommended two of
+them. A plan now names each one; implementing them is its own piece of work, with
+the ordering question a `down` hook raises against the teardown that removes the
+interface.
+
+**`Device.match` is unreachable from the config**, and that is now written down
+rather than looking like a feature: the model carries `mac`, `path`, `driver` and
+`name_glob`, and the language has no syntax for any of them, so an operator who
+tries gets a compile error. Implementing it means reading a driver name and a
+device path out of `/sys`.
+
 #### Explaining it
 
 `ncfg explain` follows the indirections. An address the document named by
@@ -968,7 +997,17 @@ match.
    reason is also what found the parent defect below, so the order paid for itself
    twice.
 
-3. **Nothing else on the "is it still what the document says?" question is
+3. **What a laptop still wants, in the order it will bite.** The four keys are
+   settled; these are the gaps behind them, and none is a schema question:
+   **rfkill** is not modelled at all, so the Fn-key wifi toggle is invisible and
+   `ncfg status` cannot explain a blocked radio; **the nine unfired hook phases**
+   above, of which `down` and `lease` are the two an operator reaches for first;
+   **joining a network needs an editor and root**, since `ncfg wifi connect` takes
+   the id of a `network` block and there is no `ncfg wifi add` (the NM shim's write
+   path is the current answer); and **`accept_ra` is unmanaged**, which a router
+   asking for `slaac` on its WAN discovers the hard way.
+
+4. **Nothing else on the "is it still what the document says?" question is
    open.** Daemons, kernel objects, secrets and unread files all have an answer,
    and 0059 closed the last kind. The next thing of this shape, when it turns up,
    is likely to be a backend netcfgd did *not* start — which
@@ -993,6 +1032,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **~~An interface that exists as the wrong kind is not recreated, and nothing says so.~~ Closed** ([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)), in the commit after the one that wrote it down. A document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, planned `link.up` and nothing else — netcfgd brought somebody else's device up and called the network configured. It shared its remedy with the VLAN id, which is why one session did both. What is worth keeping from it is the measurement habit that found it: the finding came from asking what *else* would fall into the safe direction of the new comparisons, not from a test.
+- **The config surface is a feature list nobody audits.** Four keys compiled and did nothing, and the way they were found was reading the DSL against the code rather than reading the roadmap — a question from outside ("what is missing for a laptop?") did what no gate does. Two of them were *silent*; the other two turned out to be compile errors, which is honest by accident and worth telling apart from the first kind. The `ethtool` block has named its own inert fields since it landed and has never confused anybody, which is the whole argument.
+- **A doc comment can recommend a feature that does not exist.** `HookPhase::PreUp`'s documentation sent the reader to `Up` and `Carrier` for the things `pre_up` cannot do. Neither has ever been fired by anything. The same session found nine of eleven phases inert — parsed, materialised into `/run` with a hash, and never run, which is the most feature-shaped nothing in the tree.
 - **The place to look for a defect is the half nobody asked about.** The parent was being read for the shim's sake and the question was whether the model may grow a field. Asking instead "what does netcfgd currently *do* with a parent" found that two kinds never sent one to the kernel, in a code path that had been green for years -- the `parent` in the document, the `parent` in the plan and the successful apply all agreed, and the kernel had no underlay. Constraint 6's discipline of finding a local reason before adding a field for an adapter is what pointed at it, which is an argument for the constraint beyond the one it was written for.
 - **A break that hits two protections proves nothing about either.** Disabling the recreation pass's ownership check by replacing `if !link.ownership.may_remove() {` also disabled `teardown_links`', because the line is identical in both -- eight fixtures went red and none of them said which protection had gone. The re-run with a unique anchor failed exactly one. Section 9 already warns about a check that passes because of a *different* protection; this is the same disease in the break rather than in the check.
 - **A fake that leaves a field blank makes a loop look like convergence.** The fixture harness's simulated `link.create` produced an empty link with the right name, so a remade VLAN came back with no id at all -- and the second plan found nothing to compare and called that agreement. Every comparison 0057 to 0059 added was invisible to the idempotence gate for the same reason. The fake now fills in what the kernel would report about the device it just made, with the fields the document does *not* state deliberately left absent, because that is also what the kernel does.

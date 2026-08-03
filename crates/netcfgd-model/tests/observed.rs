@@ -188,6 +188,7 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		qdisc_ingress: true,
 		ingress_redirect: Some("ifb-eth0".to_owned()),
 		forwarding: Some(true),
+		privacy: Some(true),
 		ownership,
 		private_key_loaded: true,
 		// Every field of the WireGuard state as well, for the reason this
@@ -463,6 +464,8 @@ fn witness() -> Observed {
 		qdisc_applied: vec!["eth0".to_owned()],
 		ingress_applied: vec!["eth0".to_owned()],
 		forwarding_applied: vec!["eth0".to_owned()],
+		privacy_applied: vec!["eth0".to_owned()],
+		hostname: Some("host.example".to_owned()),
 		nat: vec!["eth0".to_owned()],
 		nat_conflicts: vec!["somebody-elses-table".to_owned()],
 		address_proto_supported: true,

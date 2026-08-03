@@ -40,7 +40,7 @@ pub mod wifi;
 
 pub use address::{
 	derive_from_delegation, AddressSource, Delegated, Dhcp4, Dhcp6, PdRequest, PrefixRef, Reported,
-	Slaac, Static,
+	Slaac, SlaacPrivacy, Static,
 };
 pub use control::{Control, Principal, Tier};
 pub use device::{
