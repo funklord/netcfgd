@@ -646,6 +646,7 @@ Three techniques make that reachable without root or a clean machine:
 - **pppd hands the `ip-down` call the same environment as the `ip-up` call.** `IPLOCAL`, `DNS1` and `DNS2` all stay set; what it unsets is `OLDIPLOCAL` and `CONNECT_TIME`. A single script deciding "up or down?" from its environment cannot, which is why netcfgd generates two.
 - **The rp-pppoe plugin opens `/dev/ppp` when it is loaded**, part-way through pppd's option parsing. So an unprivileged pppd never reaches the options *after* the `plugin` line, and "no unrecognized option" on a whole options file is a check that passes because nothing was parsed. `tests/live/ppp.sh` checks netcfgd's own options with the plugin line removed, and names the plugin's own as the part it cannot reach.
 - **`pppoe-server` looks for its plugin at `/etc/ppp/plugins/rp-pppoe.so`,** and Debian ships it under `/usr/lib/pppd/<version>/`. The default therefore fails *inside the server's own forked pppd*, where a client sees a session that connects and then never starts IPCP; syslog is the only place that says why. `-g` names the path.
+- **dhcpcd's own hooks run for every family, and `-C` is how you silence one.** A `DHCPv6` lease's `20-resolv.conf` rewrites `/etc/resolv.conf` exactly as a `DHCPv4` one does — measured against a real dnsmasq — so a client netcfgd starts for `dhcp6` needs `-C resolv.conf` where the `dhcp` client gets `-c` ([0072](docs/decisions/0072-dhcpcds-own-hooks-are-replaced-or-silenced.md)). `-C <name>` matches `<name>`, `NN-<name>` and `NN-<name>.sh`, which is in `dhcpcd-run-hooks` and not in the manual page. `30-hostname` reads `$new_dhcp6_fqdn` too, so the hostname path exists on that family; option 39 is not in Debian's request list and nothing here could make it fire.
 - **dhcpcd's pid file carries the family it was started with, and `-k` has to name the same one.** A client started `-4` writes `<rundir>/<iface>-4.pid`; `dhcpcd -k <iface>` looks for `<iface>.pid`, prints "dhcpcd is not running" and exits 1 — which is also exactly what a machine whose client is udhcpc says, so netcfgd ignored the status and could not stop the client it prefers ([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)). Also: **dhcpcd will not run under `unshare -rn`.** It drops privileges to an unprivileged user and a namespace with one mapped uid has nobody to become, so a live test needs real root or `unshare --map-root-user --map-auto`, which wants `newuidmap` and a range in `/etc/subuid`.
 - **dhcpcd cannot report a delegated prefix to a script**, and never could. `$new_delegated_dhcp6_prefix` is the addresses it derived from one, filled from `ap->delegating_prefix` in `dhcp6.c`, and only on an interface it delegated to. `$new_dhcp6_prefix` — which netcfgd's hook read for years — is not a dhcpcd variable at all.
 - **`kea-dhcp6` binds before duplicate address detection finishes and fails.** "Cannot assign requested address" on a link-local it can see with `ip addr`; the address is tentative for about a second after the link comes up. Anything starting a DHCPv6 server right after `ip link set up` has to wait for DAD.
@@ -675,14 +676,18 @@ Kept current deliberately: this is the section to read after a break, and the on
 **Read this first after a break, and rewrite it rather than appending to it.**
 Last rewritten after ten pieces of work on the laptop list, every one of them
 started by asking what an operator would actually hit rather than what the roadmap
-said next. The tenth is the shortest to state and the worst that was found:
-**netcfgd could not stop a DHCP client**, and in two different ways. A dhcpcd,
-because the pid file carries the address family and the stop did not name it
-([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)); a
+said next. The tenth was one line on that list -- "the dhcpcd script has never been
+run by dhcpcd" -- and running it found three defects rather than the nothing a test
+gap usually finds. **netcfgd could not stop a DHCP client**, in two different ways:
+a dhcpcd, because the pid file carries the address family and the stop did not name
+it ([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)); a
 DHCPv6 client, because `stop_backend` had no arm for one at all
 ([0071](docs/decisions/0071-a-client-with-no-socket-is-stopped-by-the-pid-it-wrote.md)).
-Neither could have been caught by anything here, because nothing had ever run a
-real dhcpcd and the test that runs a real odhcp6c stopped it with `pkill`. Before
+And **a DHCPv6 lease rewrote `/etc/resolv.conf`** behind netcfgd, which is 0066's
+contention on the family nobody had run
+([0072](docs/decisions/0072-dhcpcds-own-hooks-are-replaced-or-silenced.md)).
+None of the three could have been caught by anything here: nothing had ever run a
+real dhcpcd, and the test that runs a real odhcp6c stopped it with `pkill`. Before
 them:
 four config keys that compiled and did nothing
 ([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)),
@@ -1042,6 +1047,16 @@ which is the path the hook's own comment described and nothing had run.
 file — the test doing by hand the two things netcfgd could not do, which is how it
 stayed hidden through every green run.
 
+**And dhcpcd was fighting netcfgd for `resolv.conf` on the other family too**
+([0072](docs/decisions/0072-dhcpcds-own-hooks-are-replaced-or-silenced.md)). 0066
+ended that contention for `DHCPv4` by replacing dhcpcd's hook directory; the
+`DHCPv6` client got nothing, so a `dhcp6` lease rewrote the file netcfgd owns —
+measured, against a real dnsmasq. It is silenced now rather than given netcfgd's
+script, and the reason is the report rather than dhcpcd: `/run/netcfgd/reported/`
+is one file per interface, written whole, so two clients on one interface would
+clobber each other's `dns=` lines on every renewal. What dhcpcd does about its own
+hooks is a type with two arms now, and no third one meaning "nothing".
+
 **The test runs dhcpcd once with its own hooks first**, which is what makes the rest
 of it mean anything: without `-c`, a lease sets the machine's hostname to
 `leased-name.lan.example` and rewrites `/etc/resolv.conf` — both measured, in a UTS
@@ -1229,12 +1244,16 @@ match.
      `delegation.sh`'s teardown used to be `pkill -f odhcp6c` and a truncated
      prefix file — the test doing the two things netcfgd could not — and is an edit
      to the document now.
-   - **dhcpcd's own hooks still write `/etc/resolv.conf` from a DHCPv6 lease**,
-     which is 0066's contention unfixed on the v6 side: the v6 start passes no
-     `-c`. The generated hook already carries the branch, asserted by a unit test
-     and never run. It is not only a missing flag — the interface report is one
-     file per interface and two clients on one interface would clobber each
-     other's `dns=` lines — so it wants its own decision (0071's open question).
+   - ~~**dhcpcd's own hooks still write `/etc/resolv.conf` from a DHCPv6 lease**~~
+     — **closed**
+     ([0072](docs/decisions/0072-dhcpcds-own-hooks-are-replaced-or-silenced.md)),
+     and measured before it was fixed: a real dnsmasq, a real `dhcpcd -6`, and
+     `nameserver 2001:db8:44::53` in the file netcfgd owns. The v6 client is
+     *silenced* (`-C resolv.conf -C hostname`) rather than given netcfgd's script,
+     because the report is one file per interface and two clients on one interface
+     would clobber each other's `dns=` lines on every renewal. What a v6 lease
+     says about names therefore still reaches nothing, which is now a stated gap
+     with a shape (a fragment directory) rather than an accident.
    - **Five hook phases still do not fire**: `up`, `pre_down`, `roam`, `portal` and
      `drift`. None of them is a laptop's now that `carrier` fires; `roam` is the next
      one worth having, and it wants the supplicant's event socket rather than an
@@ -1310,6 +1329,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A test that tidies up by hand is hiding whatever cannot tidy itself.** `delegation.sh` ended with `pkill -f odhcp6c` and `: > "$prefixes"`, then checked that netcfgd reacted correctly — to a world the test had arranged. Both of those lines were things netcfgd could not do, and one of them was a *failed apply*. The assertion after them was fine; the step before it was not netcfgd's. Where a teardown in a test is a command rather than a configuration change, ask what would happen if the operator did it the way the documentation says.
 - **The break that proves a gate can fail can prove the opposite instead.** Taking `-p` off odhcp6c's arguments left three of the new checks green: no pid file means the test reads `pid=0`, `/proc/0/cmdline` does not exist, so "is it still running?" answers no and "the pid file is gone" is true because there never was one. A missing input makes a *negative* check pass, every time, and it is the break rather than the test that says so. Read what a break turns green as carefully as what it turns red.
 - **`kill -0` is not "is it running".** A daemonised process is reparented to init, and an init that does not reap — a container whose pid 1 is `sleep infinity` — leaves a zombie that `kill -0` reports as alive. `/proc/<pid>/cmdline` is empty for a zombie, which makes it the honest question and the same one netcfgd's own ownership check asks.
+- **A negative check with no event of its own needs a bound somebody measured.** "dhcpcd did not write that file" is satisfied by "has not written it yet", and there is nothing to wait for, because the whole assertion is that nothing happens. The answer that works is to wait twice as long as the counter-proof needed for the same exchange *in the same run on the same machine* — which scales with a loaded machine, where a sleep somebody guessed does not. That is also the only kind of wait this repository has that cannot be tuned into passing.
 - **An exit status ignored for a good reason hides a defect of a different shape.** `dhcpcd -k` says "dhcpcd is not running" and exits 1, which is the ordinary answer on every machine whose client is udhcpc — so netcfgd could not check the status, and the *same* sentence appearing because the pid file's name was wrong was invisible. The two failures are indistinguishable from the outside, and only running the daemon showed which one was happening. Where a status is deliberately unchecked, the comment saying why is also the note saying what it can no longer catch.
 - **Breaking a gate to prove it fails needs the artefact rebuilt.** Restoring a file from a copy can leave it with an *older* mtime than the broken build, and cargo then keeps the broken artefact — so the "restored" run silently tests the break. It looked like a new test failing for no reason. `touch` after restoring, or the whole break-it-and-watch-it-go-red method reports on a binary nobody has.
 
