@@ -313,4 +313,11 @@ netcfgd
 # bought is an edited endpoint moving at all, and -- for the three edits the
 # kernel refuses -- a sentence saying what to do instead of an apply that fails
 # and is planned again forever.
-total 2103832
+# +12 KB for the last shape on that list: what the kernel accepts and ignores.
+# A VLAN's id and tag protocol are set at creation and `vlan_changelink` drops
+# them afterwards, so the only way to apply an edited id is to delete the
+# interface and make it again -- and an interface that existed as an entirely
+# different kind was not noticed at all. What it bought is an edited id being
+# applied with everything on the interface put back, and the safety property
+# that goes with it: netcfgd will not throw away a link it did not create.
+total 2116120

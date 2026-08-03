@@ -30,6 +30,30 @@ impl VlanProtocol {
 			Self::Dot1ad => 0x88a8,
 		}
 	}
+
+	/// The protocol an ethertype means, where it means one netcfgd can express.
+	///
+	/// The inverse of [`VlanProtocol::ethertype`] and beside it so the two
+	/// cannot drift, as [`crate::BondMode::from_number`] is. `None` for anything
+	/// else, which is a VLAN carrying a tag protocol this build has no word for
+	/// and is therefore not compared against.
+	#[must_use]
+	pub fn from_ethertype(ethertype: u16) -> Option<Self> {
+		match ethertype {
+			0x8100 => Some(Self::Dot1q),
+			0x88a8 => Some(Self::Dot1ad),
+			_ => None,
+		}
+	}
+
+	/// The name the config spells it with.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::Dot1q => "dot1q",
+			Self::Dot1ad => "dot1ad",
+		}
+	}
 }
 
 /// How a bond distributes traffic across its members.
