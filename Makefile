@@ -491,6 +491,11 @@ live:
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/privacy.sh"
+	@# Not under `unshare -rn`, and that is the point: a network namespace has
+	@# none of the machine's real interfaces, so the radio this reads would not be
+	@# there. It changes nothing -- `status` and `plan` only -- so running it
+	@# against the host is safe.
+	@NCFG_LIVE=1 sh tests/live/rfkill.sh
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/rules.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/qdisc.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ingress.sh"
