@@ -12,6 +12,10 @@ workspace = true
 
 [dependencies]
 netcfgd-model = { path = "../../crates/netcfgd-model" }
+# For `process::terminate`, which is the one thing a daemon that will not answer
+# its socket needs -- and the crate constraint 4 makes the only home for a libc
+# call. Decision 0074.
+netcfgd-sys   = { path = "../../crates/netcfgd-sys" }
 
 [dev-dependencies]
 netcfgd-testdir = { path = "../../crates/netcfgd-testdir" }

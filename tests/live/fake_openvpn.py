@@ -23,9 +23,10 @@ import os
 import socket
 import sys
 import threading
+import time
 
 
-def serve(path, log):
+def serve(path, log, pid_file=None):
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     if os.path.exists(path):
         os.unlink(path)
@@ -58,9 +59,12 @@ def serve(path, log):
                     conn.sendall(f"SUCCESS: signal {which} thrown\r\n".encode())
                     if which == "SIGTERM":
                         conn.close()
-                        # openvpn removes its own socket on the way out.
+                        # openvpn removes its own socket on the way out, and
+                        # its pid file with it.
                         if os.path.exists(path):
                             os.unlink(path)
+                        if pid_file and os.path.exists(pid_file):
+                            os.unlink(pid_file)
                         os._exit(0)
                 elif command == "state":
                     conn.sendall(b"1,CONNECTED,SUCCESS,10.8.0.2,,\r\nEND\r\n")
@@ -93,11 +97,30 @@ def main():
         print("fake_openvpn.py: netcfgd did not ask for a management socket")
         return 1
 
+    pid_file = None
+    for index, argument in enumerate(arguments):
+        if argument == "--writepid" and index + 1 < len(arguments):
+            pid_file = arguments[index + 1]
+
     # `--daemon` means the invocation returns and the process keeps going.
     if os.fork() != 0:
         return 0
     os.setsid()
-    serve(socket_path, log)
+    # The pid file is the child's, written before the socket is bound -- which
+    # is the order openvpn does it in (`possibly_become_daemon` then the
+    # management interface) and the whole reason netcfgd asks for one: between
+    # the fork above and the bind below there is nothing else to find this
+    # process by. Decision 0074.
+    if pid_file:
+        with open(pid_file, "w") as handle:
+            handle.write(f"{os.getpid()}\n")
+    # A machine under load takes a while to get from one to the other, and this
+    # is how a test asks for that window on purpose. Faking the *timing* rather
+    # than the protocol, which is the line this file has always drawn.
+    delay = os.environ.get("FAKE_OPENVPN_BIND_DELAY")
+    if delay:
+        time.sleep(float(delay))
+    serve(socket_path, log, pid_file)
     return 0
 
 
