@@ -85,6 +85,37 @@ flags and QoS maps and silently ignores the id. A planner that emitted a set for
 it would report a change that never happened -- worse than either of the above,
 because nothing fails.
 
+## What each kind answers, asked rather than assumed
+
+Every one of these was measured in a namespace, by setting the attribute and
+looking at what came back. **No two families answer the same way**, which is the
+finding: there is no rule to apply, only a kernel to ask.
+
+| kind | attribute | what the kernel does |
+|---|---|---|
+| bridge | `stp`, `forward_delay` | changes it |
+| bond | `miimon` | changes it |
+| bond | `mode` | **refuses** with `ENOTEMPTY` while it has members |
+| macvlan | `mode` | changes it |
+| tunnel (gre) | `remote`, `ttl` | changes it |
+| vxlan | `id` | **refuses** with `Cannot change VNI` |
+| vlan | `id` | **accepts and silently ignores** |
+
+Three shapes fall out, and a planner has to know which it is in:
+
+- **Settable.** Compare and emit a set. The bridge, the bond's `miimon`, a
+  macvlan's mode, a tunnel's endpoints.
+- **Refused, loudly.** A set fails the apply and the next reconcile plans it
+  again -- so the plan has to say what is wrong instead of trying. The bond's
+  mode with members; a VXLAN's id.
+- **Refused, silently.** The worst, because nothing fails: netcfgd would report
+  a change that never happened and go on reporting it. A VLAN's id.
+
+And one more thing the bond taught that applies to all of them: `RTM_NEWLINK` is
+a single message, so an attribute the kernel refuses stops the attributes beside
+it being set. Grouping a settable field with an unsettable one in one op is how
+a working change is lost to an impossible one.
+
 ## What is deliberately left
 
 VLAN, VXLAN, tunnel, macvlan and veth. Each needs its own `INFO_DATA`
@@ -92,6 +123,9 @@ decoding -- the numbering is per kind and decoding one kind's attributes with
 another's constants is how a VXLAN comes to report a forward delay -- and each
 wants its own live test against a real kernel. That is a session per two or
 three kinds, not a paragraph.
+
+A veth has nothing to compare: its `peer` is what creation means, and there is
+no attribute to edit.
 
 The bridge was first because it is the one with no second signal, and because
 its executor half already existed. The bond followed because it is the same

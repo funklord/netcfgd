@@ -926,12 +926,15 @@ was reachable by reading seven records end to end.
    Each remaining kind needs its own `INFO_DATA` decoding — the numbering is per
    kind, and decoding one kind's attributes with another's constants is how a
    VXLAN comes to report a forward delay — plus its own live test. **And each
-   needs the kernel asked what it will take**, because the three answers so far
-   are all different: a bridge takes its settings live, a bond takes `miimon`
-   live and refuses `mode` with `ENOTEMPTY` while it has members, and a VLAN id
-   **succeeds and changes nothing**. The VLAN is therefore not this shape at
-   all: correcting one means a delete and a create, which drops the addresses
-   on it and interacts with the planner's creation pass.
+   needs the kernel asked what it will take.** All seven attributes measured so
+   far answer in one of three ways and no two families agree — 0057 has the
+   table. A macvlan's mode and a tunnel's endpoints *change*, so they are the
+   bridge's shape and are the cheap ones to do next. A VXLAN's id is **refused**
+   with `Cannot change VNI`, so it wants the bond's sentence. A VLAN's id is
+   **accepted and ignored**, which is the one that would report a change nobody
+   made — it needs a delete and a create, which drops the addresses on the
+   interface and interacts with the planner's creation pass, and is the reason
+   it is last rather than first.
 
    **The shim's remaining device types fall out of this and not the other way
    round.** `.Device.Vlan` wants an id and a parent, `.Device.IPTunnel` a local
