@@ -202,6 +202,27 @@ fn observed_link(
 			priority: bridge.priority,
 			vlan_filtering: bridge.vlan_filtering,
 		}),
+		// A mode number to a mode name, in the one place the bond's is done, and
+		// for the same reason: the planner compares what the document says
+		// against a word rather than against 4.
+		macvlan: link.macvlan.map(|macvlan| netcfgd_model::ObservedMacvlan {
+			mode: macvlan
+				.mode
+				.and_then(netcfgd_model::MacvlanMode::from_number)
+				.map(|mode| mode.name().to_owned()),
+		}),
+		tunnel: link.tunnel.map(|tunnel| netcfgd_model::ObservedTunnel {
+			local: tunnel.local,
+			remote: tunnel.remote,
+			ttl: tunnel.ttl,
+			key: tunnel.key,
+		}),
+		vxlan: link.vxlan.map(|vxlan| netcfgd_model::ObservedVxlan {
+			id: vxlan.id,
+			local: vxlan.local,
+			remote: vxlan.remote,
+			port: vxlan.port,
+		}),
 	}
 }
 
@@ -377,6 +398,9 @@ mod tests {
 		LinkRecord {
 			bond: None,
 			bridge: None,
+			macvlan: None,
+			tunnel: None,
+			vxlan: None,
 			index,
 			name: name.to_owned(),
 			kind: String::new(),
