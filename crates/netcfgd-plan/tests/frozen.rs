@@ -79,7 +79,12 @@ fn rule() -> RoutingRule {
 /// - **The last loop checks the crate's own `Op::name` against this one**, so a
 ///   rename in the crate that nobody mirrored here fails rather than pinning a
 ///   spelling nothing renders.
+#[allow(clippy::too_many_lines)]
 fn every_op() -> Vec<Op> {
+	// Two lists of forty-odd names, which is what an exhaustive check of forty
+	// ops looks like. Splitting it to please a line count would put the match
+	// and the names it is checked against in different places, which is the one
+	// thing this function must not do.
 	let all = every_op_sample();
 
 	let name = |op: &Op| match op {
@@ -106,6 +111,7 @@ fn every_op() -> Vec<Op> {
 		Op::WifiSetRegdom { .. } => "wifi.set_regdom",
 		Op::AccessControlAdd { .. } => "access_control.add",
 		Op::AccessControlDel { .. } => "access_control.del",
+		Op::LinkSetBond { .. } => "link.set_bond",
 		Op::LinkSetBridge { .. } => "link.set_bridge",
 		Op::WgSetDevice { .. } => "wg.set_device",
 		Op::WgSetPeers { .. } => "wg.set_peers",
@@ -149,6 +155,7 @@ fn every_op() -> Vec<Op> {
 		"link.create",
 		"link.delete",
 		"link.down",
+		"link.set_bond",
 		"link.set_bridge",
 		"link.set_ipv6_token",
 		"link.set_mac",
@@ -284,6 +291,10 @@ fn every_op_sample() -> Vec<Op> {
 			iface: "wlan0".to_owned(),
 			list: AclPolicy::Allow,
 			station: "02:00:00:00:00:bb".to_owned(),
+		},
+		Op::LinkSetBond {
+			name: "bond0".to_owned(),
+			mode: true,
 		},
 		Op::LinkSetBridge {
 			name: "br0".to_owned(),
