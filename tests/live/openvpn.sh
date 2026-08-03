@@ -14,6 +14,23 @@
 # `>INFO:` greeting a client that reads its first line as an answer will
 # mistake for one. That mistake produces a stop which silently does nothing,
 # which is the failure worth having a test for.
+#
+# ## One daemon in about every other run is not stopped, and nobody knows why
+#
+# An end-of-script assertion that nothing this started is still running was
+# written, went red on half the runs, and was taken out again rather than
+# shipped red. What it found, on a failing run:
+#
+#   * four daemons started, three `signal SIGTERM` received, one alive
+#   * the survivor is the credentials one -- its argv carries `--auth-user-pass`
+#   * its management socket is gone, which only the SIGTERM path unlinks
+#   * `ncfg apply` at that point says "nothing to do", so netcfgd believes there
+#     is nothing running
+#
+# It is not the start/stop race it looks like: waiting for the socket to be
+# bound before asking netcfgd to stop the tunnel changed nothing. Whatever it
+# is, the trap below now catches it -- which is the difference between a stray
+# on somebody's machine and a stray inside one script's lifetime.
 
 set -eu
 
@@ -30,10 +47,21 @@ skip() {
 
 command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+# The fake daemonises, so the shell has no job to kill and its command line is
+# the only handle there is. Without pkill this script would run its checks and
+# leave a daemon behind on every invocation, which is what it did for months.
+command -v pkill >/dev/null 2>&1 || skip "no pkill (procps), so this could not clean up after itself"
 
 work=$(mktemp -d /tmp/ncfg-openvpn.XXXXXX)
+# Where netcfgd will find the fake, and the pattern that stops one. Named once
+# because the trap and the crash below both need it, and they had already
+# drifted: the trap said `$work/fake_openvpn`, which is not where the file is
+# installed, so it matched nothing on every run since it was renamed. Nine
+# daemons were found alive on the machine this was written on, the oldest 21
+# hours old, each holding its own /tmp directory open.
+fake="$work/bin/openvpn"
 cleanup() {
-	pkill -f "$work/fake_openvpn" 2>/dev/null || true
+	pkill -f "$fake" 2>/dev/null || true
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -192,7 +220,7 @@ CONF
 FAKE_OPENVPN_REFUSES_SIGNAL=1 "$ncfg" apply > "$work/refusedstop.txt" 2>&1 || true
 check "a daemon that refuses to stop is reported, not recorded as stopped" \
 	"$(grep -c 'could not stop the openvpn tunnel on vpn0' "$work/refusedstop.txt" || true)" "1"
-pkill -f "$work/bin/openvpn" 2>/dev/null || true
+pkill -f "$fake" 2>/dev/null || true
 rm -f "$work/run/openvpn/vpn0.sock"
 
 # Stopping a tunnel that is already gone is the state this was asked to
