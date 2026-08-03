@@ -317,6 +317,19 @@ pub enum Op {
 		/// Whether a temporary address is preferred for outgoing connections.
 		prefer_temporary: bool,
 	},
+	/// Make one interface act on router advertisements, or give it back.
+	///
+	/// `net.ipv6.conf.<iface>.accept_ra`, per interface for the reason the two
+	/// sysctls above are. netcfgd writes `2` where a document asks for SLAAC on
+	/// an interface whose advertisements the kernel would otherwise ignore, and
+	/// `1` -- the kernel's default -- to give back one it wrote. It never writes
+	/// `0`. Decision 0073.
+	SysctlSetAcceptRa {
+		/// Which interface.
+		iface: String,
+		/// The value to write: `2` to accept, `1` to hand it back.
+		value: u8,
+	},
 	/// Install a policy routing rule.
 	RuleAdd {
 		/// The rule.
@@ -475,6 +488,7 @@ impl Op {
 			Self::QdiscReset { .. } => "qdisc.reset",
 			Self::SysctlSetForwarding { .. } => "sysctl.set_forwarding",
 			Self::SysctlSetPrivacy { .. } => "sysctl.set_privacy",
+			Self::SysctlSetAcceptRa { .. } => "sysctl.set_accept_ra",
 			Self::HostnameSet { .. } => "hostname.set",
 			Self::NatReplace { .. } => "nat.replace",
 			Self::HookRun { .. } => "hook.run",
@@ -621,6 +635,10 @@ impl Op {
 			// a guard has no interruption to prevent -- unlike `addr.del`, which
 			// takes an address away.
 			| Self::SysctlSetPrivacy { .. }
+			// Making the kernel listen to advertisements adds an address; giving
+			// the interface back stops new ones arriving and takes nothing away
+			// that is already there. Neither cuts a connection.
+			| Self::SysctlSetAcceptRa { .. }
 			// Toggling an offload re-initialises the driver's transmit path on
 			// some hardware, which drops what is queued. That is a packet or
 			// two, not a lost session -- and a guard that blocked it would
@@ -663,6 +681,7 @@ impl Op {
 			| Self::WgSetPeers { iface, .. }
 			| Self::SysctlSetForwarding { iface, .. }
 			| Self::SysctlSetPrivacy { iface, .. }
+			| Self::SysctlSetAcceptRa { iface, .. }
 			| Self::QdiscSet { iface, .. }
 			| Self::QdiscReset { iface }
 			| Self::IngressRedirect { iface, .. }

@@ -162,6 +162,12 @@ pub struct ObservedLink {
 	/// container without `/proc/sys`. Nothing is written on one.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub privacy: Option<bool>,
+	/// Whether a router advertisement arriving here would be acted on.
+	///
+	/// `None` means the sysctl could not be read -- an IPv6-disabled kernel, or a
+	/// container without `/proc/sys`. Nothing is written on one.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub accept_ra: Option<ObservedAcceptRa>,
 	/// Whether netcfgd created this link.
 	///
 	/// Netlink has no protocol field for links, so unlike an address or a
@@ -328,6 +334,31 @@ pub struct ObservedRfkill {
 	/// cannot override. Nothing in software clears this.
 	#[serde(default)]
 	pub hard: bool,
+}
+
+/// What the kernel will do with a router advertisement on this interface.
+///
+/// Two fields because one of them is not enough to act on and the other is not
+/// enough to explain. `accept_ra=1` -- the kernel's default -- means "accept
+/// unless this interface forwards", so the same value is the working state on a
+/// laptop and the broken one on a router, and `ip addr` shows nothing either way.
+/// Decision 0073.
+///
+/// The reading of the two together is done in the observer, where both halves are
+/// already in hand, and only the answer travels -- the rule every comparison in
+/// this project has had to learn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedAcceptRa {
+	/// The sysctl itself: `0` never, `1` unless this interface forwards, `2`
+	/// always. netcfgd writes only `1` and `2`, and reports whatever it finds.
+	pub value: u8,
+	/// Whether an advertisement would actually be acted on, which is `value`
+	/// read against this interface's **IPv6** forwarding sysctl. The v4 one has
+	/// nothing to do with it, so this deliberately does not use
+	/// [`ObservedLink::forwarding`], which is only `Some(true)` when both
+	/// families forward.
+	pub effective: bool,
 }
 
 impl ObservedRfkill {
@@ -959,6 +990,13 @@ pub struct Observed {
 	/// netcfgd existed is not netcfgd's to undo.
 	#[serde(default)]
 	pub privacy_applied: Vec<String>,
+	/// Interfaces netcfgd wrote the `accept_ra` sysctl for.
+	///
+	/// The same record `privacy_applied` is, and for the same reason: an
+	/// interface that stops asking for SLAAC is put back only where netcfgd is
+	/// what changed it. Without it this would be a one-way door.
+	#[serde(default)]
+	pub accept_ra_applied: Vec<String>,
 	/// Interfaces netcfgd turned forwarding on for, sorted.
 	///
 	/// Recorded rather than inferred, because a sysctl carries no owner. An

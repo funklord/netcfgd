@@ -47,6 +47,8 @@ pub struct PriorState {
 	pub forwarding: Vec<String>,
 	/// Interfaces netcfgd turned temporary addresses on for.
 	pub privacy: Vec<String>,
+	/// Interfaces netcfgd wrote the `accept_ra` sysctl for.
+	pub accept_ra: Vec<String>,
 	/// What each event hook was last told, per interface and phase.
 	pub hook_state: Vec<netcfgd_model::ObservedHookState>,
 	/// Interfaces netcfgd set the root qdisc on.
@@ -183,6 +185,7 @@ fn observed_link(
 		// which is why `build` can stay pure.
 		forwarding: None,
 		privacy: None,
+		accept_ra: None,
 		// `/sys`, so `host::augment` again -- and the one thing in the observation
 		// that is not netlink, a sysctl or a file netcfgd wrote itself.
 		rfkill: None,
@@ -335,6 +338,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		nat_conflicts: Vec::new(),
 		forwarding_applied: prior.forwarding.clone(),
 		privacy_applied: prior.privacy.clone(),
+		accept_ra_applied: prior.accept_ra.clone(),
 		hook_state: prior.hook_state.clone(),
 		// Read in `host::augment` beside the sysctls, for the reason they are:
 		// `build` stays a pure function of a netlink snapshot.

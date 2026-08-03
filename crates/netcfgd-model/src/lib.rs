@@ -56,11 +56,11 @@ pub use interface::{
 };
 pub use key::Key;
 pub use observed::{
-	AppliedDns, BackendKind, Delegation, Observed, ObservedAccessControl, ObservedAccessPoint,
-	ObservedAddress, ObservedBackend, ObservedBond, ObservedBridge, ObservedBridgeVlan,
-	ObservedHookState, ObservedLink, ObservedMacvlan, ObservedPolicy, ObservedReport,
-	ObservedRfkill, ObservedRoute, ObservedRule, ObservedTunnel, ObservedVlan, ObservedVxlan,
-	ObservedWgPeer, ObservedWireGuard, Origin, Ownership, ReportedRoute,
+	AppliedDns, BackendKind, Delegation, Observed, ObservedAcceptRa, ObservedAccessControl,
+	ObservedAccessPoint, ObservedAddress, ObservedBackend, ObservedBond, ObservedBridge,
+	ObservedBridgeVlan, ObservedHookState, ObservedLink, ObservedMacvlan, ObservedPolicy,
+	ObservedReport, ObservedRfkill, ObservedRoute, ObservedRule, ObservedTunnel, ObservedVlan,
+	ObservedVxlan, ObservedWgPeer, ObservedWireGuard, Origin, Ownership, ReportedRoute,
 };
 pub use route::{Route, RouteScope};
 pub use rule::{RoutingRule, RuleAction, RuleFamily};

@@ -713,6 +713,7 @@ mod tests {
 				ingress_redirect: None,
 				forwarding: None,
 				privacy: None,
+				accept_ra: None,
 				rfkill: None,
 				ownership: Ownership::Unknown,
 				private_key_loaded: false,

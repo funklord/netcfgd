@@ -360,4 +360,10 @@ netcfgd
 # Most of the cost is the diagnostics: a refusal that names the file, the id and
 # the fix is worth more here than anywhere else, because the operator running this
 # has no network to look anything up with.
-total 2185752
+# +4 KB for `accept_ra`, which is one sysctl and the answer to a question that
+# cost an hour the first time it was asked here: `accept_ra` defaults to "accept
+# unless this interface forwards", so `config = "slaac"` on a router's WAN -- or in
+# a container, which usually forwards -- obtained no address at all while the apply
+# reported success. Most of the cost is the reading, which has to combine the
+# sysctl with the interface's IPv6 forwarding before either half means anything.
+total 2189848
