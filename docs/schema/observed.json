@@ -21,6 +21,14 @@
       "forwarding": true,
       "ownership": "ours",
       "private_key_loaded": true,
+      "bridge": {
+        "stp": true,
+        "forward_delay": 4,
+        "hello_time": 2,
+        "ageing_time": 300,
+        "priority": 32768,
+        "vlan_filtering": true
+      },
       "wireguard": {
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
         "listen_port": 51820,
@@ -62,6 +70,14 @@
       "forwarding": true,
       "ownership": "foreign",
       "private_key_loaded": true,
+      "bridge": {
+        "stp": true,
+        "forward_delay": 4,
+        "hello_time": 2,
+        "ageing_time": 300,
+        "priority": 32768,
+        "vlan_filtering": true
+      },
       "wireguard": {
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
         "listen_port": 51820,
@@ -103,6 +119,14 @@
       "forwarding": true,
       "ownership": "unknown",
       "private_key_loaded": true,
+      "bridge": {
+        "stp": true,
+        "forward_delay": 4,
+        "hello_time": 2,
+        "ageing_time": 300,
+        "priority": 32768,
+        "vlan_filtering": true
+      },
       "wireguard": {
         "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
         "listen_port": 51820,

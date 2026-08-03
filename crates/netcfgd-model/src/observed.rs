@@ -152,6 +152,18 @@ pub struct ObservedLink {
 	/// device that has been created and not yet configured.
 	#[serde(default)]
 	pub private_key_loaded: bool,
+	/// A bridge's own settings, where this link is one.
+	///
+	/// The same question 0054 asked of a `WireGuard` device, in the kind whose
+	/// name encodes nothing: `stp` and `forward_delay` are applied when the
+	/// link is created and were never compared again, so editing either did
+	/// nothing and said nothing.
+	///
+	/// In **seconds**, as the document spells them and as every tool and manual
+	/// page does. The kernel counts hundredths, and the conversion lives beside
+	/// the one that writes them.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub bridge: Option<ObservedBridge>,
 	/// What a `WireGuard` device actually holds, where this link is one.
 	///
 	/// The kernel reports all of this for free on the request that answers
@@ -165,6 +177,34 @@ pub struct ObservedLink {
 	/// has no field here for the same reason it has none there.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub wireguard: Option<ObservedWireGuard>,
+}
+
+/// A bridge's own settings, as the kernel reports them.
+///
+/// Only the ones netcfgd can set. A bridge has dozens of parameters and
+/// carrying all of them would put a page of kernel detail in `/run` to answer a
+/// question about six -- the same call `ObservedLink::offloads` already makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedBridge {
+	/// Whether spanning tree is running.
+	#[serde(default)]
+	pub stp: bool,
+	/// Forward delay in seconds.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub forward_delay: Option<u32>,
+	/// Hello interval in seconds.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub hello_time: Option<u32>,
+	/// Address ageing time in seconds.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ageing_time: Option<u32>,
+	/// Bridge priority.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub priority: Option<u16>,
+	/// Whether the bridge is VLAN-aware.
+	#[serde(default)]
+	pub vlan_filtering: bool,
 }
 
 /// What a `WireGuard` device holds, as the kernel reports it.
