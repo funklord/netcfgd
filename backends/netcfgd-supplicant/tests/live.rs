@@ -62,7 +62,7 @@ fn find_supplicant() -> Option<PathBuf> {
 /// drop.
 struct Supplicant {
 	child: Child,
-	dir: PathBuf,
+	dir: netcfgd_testdir::TestDir,
 	interface: String,
 }
 
@@ -71,9 +71,7 @@ impl Supplicant {
 	fn start() -> Result<Self, String> {
 		let binary = find_supplicant().ok_or("wpa_supplicant is not installed")?;
 
-		let dir = std::env::temp_dir().join(format!("ncfg-live-{}", std::process::id()));
-		let _ = fs::remove_dir_all(&dir);
-		fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+		let dir = netcfgd_testdir::TestDir::new("live");
 
 		// Loopback, so no interface has to be created and the test needs no
 		// `ip` command -- only the namespace privilege `wpa_supplicant` itself
@@ -123,7 +121,7 @@ impl Drop for Supplicant {
 	fn drop(&mut self) {
 		let _ = self.child.kill();
 		let _ = self.child.wait();
-		let _ = fs::remove_dir_all(&self.dir);
+		// The directory goes with `self.dir`, which removes itself.
 	}
 }
 
@@ -135,18 +133,13 @@ fn with_supplicant(body: impl FnOnce(&Supplicant)) {
 	}
 }
 
-fn secrets_with(passphrase: &str) -> (Resolver, PathBuf) {
+fn secrets_with(passphrase: &str) -> (Resolver, netcfgd_testdir::TestDir) {
 	use std::os::unix::fs::PermissionsExt;
-	let dir = std::env::temp_dir().join(format!(
-		"ncfg-live-secret-{}-{passphrase:x?}",
-		std::process::id()
-	));
-	let _ = fs::remove_dir_all(&dir);
-	fs::create_dir_all(&dir).expect("scratch");
+	let dir = netcfgd_testdir::TestDir::new("live-secret");
 	let path = dir.join("pass");
 	fs::write(&path, passphrase).expect("write");
 	fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("chmod");
-	(Resolver::with_secrets_dir(&dir), dir)
+	(Resolver::with_secrets_dir(&*dir), dir)
 }
 
 fn network(id: &str, ssid: &str, security: Security) -> WifiNetwork {
@@ -239,7 +232,9 @@ fn a_connection_leaves_nothing_behind() {
 fn every_security_mode_is_accepted_by_the_real_parser() {
 	with_supplicant(|supplicant| {
 		let client = supplicant.connect();
-		let (resolver, secrets) = secrets_with("hunter2hunter2");
+		// The guard is held for the length of the test: dropping it here would
+		// take the passphrase away before the supplicant is asked to read it.
+		let (resolver, _secrets) = secrets_with("hunter2hunter2");
 
 		clear_networks(&client).expect("REMOVE_NETWORK all");
 
@@ -269,8 +264,6 @@ fn every_security_mode_is_accepted_by_the_real_parser() {
 				"the supplicant decoded the hex SSID back to the name"
 			);
 		}
-
-		let _ = fs::remove_dir_all(&secrets);
 	});
 }
 

@@ -29,6 +29,9 @@ members = [
 	"backends/netcfgd-ra",
 	"crates/netcfgd-cli",
 	"crates/netcfgd-bin",
+	# Test scaffolding, and a dev dependency wherever it is used -- nothing links
+	# it into a binary, so it is in no tier and costs the size budget nothing.
+	"crates/netcfgd-testdir",
 ]
 
 [workspace.package]

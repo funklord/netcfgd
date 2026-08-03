@@ -220,9 +220,7 @@ fn a_hook_whose_content_changed_is_refused() {
 	use netcfgd_apply::hooks::{run, sha256_hex, HookEnv, Outcome};
 	use netcfgd_model::{HookPhase, HookRef};
 
-	let dir = std::env::temp_dir().join(format!("ncfg-hook-{}", std::process::id()));
-	let _ = std::fs::remove_dir_all(&dir);
-	std::fs::create_dir_all(&dir).expect("scratch");
+	let dir = netcfgd_testdir::TestDir::new("hook");
 	let path = dir.join("hook.sh");
 	std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write");
 	#[cfg(unix)]
@@ -253,8 +251,6 @@ fn a_hook_whose_content_changed_is_refused() {
 		}
 		other => panic!("a changed hook must not run: {other:?}"),
 	}
-
-	let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// And the same mismatch in a post phase is noted rather than fatal, because
