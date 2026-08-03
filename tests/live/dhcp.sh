@@ -37,7 +37,11 @@ busybox --list | grep -qx udhcpc || skip "this busybox has no udhcpc applet"
 work=$(mktemp -d /tmp/ncfg-dhcp.XXXXXX)
 server=
 cleanup() {
-	[ -n "$server" ] && kill "$server" 2>/dev/null
+	# `if` rather than `[ ... ] && kill`: under `set -e` an AND-list whose last
+	# command fails takes the function with it, and then `rm -rf` never runs.
+	# The server is alive at the end of this script, so it has never bitten
+	# here -- it bit `dhcpcd.sh`, which stops its own before exiting.
+	if [ -n "$server" ]; then kill "$server" 2>/dev/null || true; fi
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM

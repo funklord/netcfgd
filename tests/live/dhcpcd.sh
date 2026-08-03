@@ -121,8 +121,13 @@ cleanup() {
 	# it, which is also the thing under test.
 	"$dhcpcd" -4 -k cli >/dev/null 2>&1 || true
 	"$dhcpcd" -6 -k cli >/dev/null 2>&1 || true
-	[ -n "$dnsmasq_pid" ] && kill "$dnsmasq_pid" 2>/dev/null
-	[ -n "$server" ] && kill "$server" 2>/dev/null
+	# `if` rather than `[ ... ] && kill`, because under `set -e` an AND-list
+	# whose last command fails takes the whole function with it -- and a `kill`
+	# of a process that has already been stopped fails. That left the work
+	# directory behind on every run that got as far as stopping dnsmasq, which
+	# is how it was noticed: five of them in /tmp.
+	if [ -n "$dnsmasq_pid" ]; then kill "$dnsmasq_pid" 2>/dev/null || true; fi
+	if [ -n "$server" ]; then kill "$server" 2>/dev/null || true; fi
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
