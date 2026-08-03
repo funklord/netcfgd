@@ -1118,7 +1118,32 @@ impl Builder {
 		// agreed for the wrong reason.
 		let desired_peers = comparable(wanted_peers(config));
 		let running_peers = comparable(running.peers.clone());
-		if desired_peers != running_peers {
+		// A rotated preshared key is not a difference between the two lists --
+		// both say "this peer has one" -- so it is asked separately, and the
+		// answer is the observer's for the reason the private key's is
+		// (decisions 0055, 0056). What it produces is the same op: the kernel
+		// takes a peer list, so replacing one peer means sending the list.
+		let rotated = running
+			.peers
+			.iter()
+			.find(|peer| peer.preshared_matches == Some(false));
+		if let Some(peer) = rotated {
+			let key = peer.public_key.render();
+			self.push(
+				Op::WgSetPeers {
+					iface: name.clone(),
+					peers: config.peers.clone(),
+				},
+				Reason::differs(
+					name,
+					"wireguard.peers.preshared_key",
+					"the secret store's".to_owned(),
+					format!("the one {key} was given"),
+				),
+				gate.clone(),
+				None,
+			);
+		} else if desired_peers != running_peers {
 			self.push(
 				Op::WgSetPeers {
 					iface: name.clone(),
@@ -3288,6 +3313,10 @@ fn wanted_peers(config: &netcfgd_model::interface::WireGuardConfig) -> Vec<Obser
 		.map(|peer| ObservedWgPeer {
 			public_key: peer.public_key,
 			preshared_key: peer.preshared_key.is_some(),
+			// Whatever is put here, `comparable` removes it from both sides:
+			// the document cannot know it, and the answer is acted on
+			// separately below.
+			preshared_matches: None,
 			// Whatever is put here, `comparable` removes it from both sides.
 			// Spelled `None` rather than the document's endpoint so that a
 			// reader of this function is not told the endpoint matters.
@@ -3325,6 +3354,7 @@ fn comparable(peers: Vec<ObservedWgPeer>) -> Vec<ObservedWgPeer> {
 		.into_iter()
 		.map(|mut peer| {
 			peer.endpoint = None;
+			peer.preshared_matches = None;
 			peer
 		})
 		.collect()

@@ -2426,6 +2426,7 @@ fn wireguard_running(port: Option<u16>, peers: &[&str]) -> netcfgd_model::Observ
 				.map(|key| netcfgd_model::ObservedWgPeer {
 					public_key: netcfgd_model::Key::parse(key).expect("a test key parses"),
 					preshared_key: false,
+					preshared_matches: None,
 					endpoint: None,
 					allowed_ips: vec!["10.0.0.0/24".to_owned()],
 					keepalive: None,
@@ -2545,6 +2546,54 @@ fn a_key_that_could_not_be_checked_changes_nothing() {
 			.iter()
 			.any(|action| matches!(action.op, Op::WgSetDevice { .. })),
 		"an unanswered question rekeyed a tunnel"
+	);
+}
+
+/// A peer whose preshared key was rotated has its list replaced.
+///
+/// Not a difference between the two peer lists: both say the peer has a
+/// preshared key, because the kernel returns one zeroed. So the answer comes
+/// from the observer as a boolean and is acted on separately -- and it produces
+/// the same op, because the kernel takes a peer list rather than a peer.
+#[test]
+fn a_rotated_preshared_key_replaces_the_peer_list() {
+	let desired = wireguard_document("");
+	let mut observed = wireguard_observed(true);
+	let mut running = wireguard_running(None, &[HUB]);
+	running.peers[0].preshared_key = true;
+	running.peers[0].preshared_matches = Some(false);
+	observed.links[0].wireguard = Some(running);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let action = plan
+		.actions
+		.iter()
+		.find(|action| matches!(action.op, Op::WgSetPeers { .. }))
+		.expect("a rotated preshared key replaces the list");
+	assert_eq!(action.reason.field, "wireguard.peers.preshared_key");
+	assert!(
+		action.reason.observed.contains(HUB),
+		"the reason does not name the peer: {:?}",
+		action.reason
+	);
+}
+
+/// And `None` from that comparison changes nothing, once more.
+#[test]
+fn a_preshared_key_that_could_not_be_checked_changes_nothing() {
+	let desired = wireguard_document("");
+	let mut observed = wireguard_observed(true);
+	let mut running = wireguard_running(None, &[HUB]);
+	running.peers[0].preshared_matches = None;
+	observed.links[0].wireguard = Some(running);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.actions
+			.iter()
+			.any(|action| matches!(action.op, Op::WgSetPeers { .. })),
+		"an unanswered question replaced a peer list"
 	);
 }
 

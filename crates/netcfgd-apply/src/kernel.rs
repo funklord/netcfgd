@@ -616,6 +616,11 @@ impl KernelExecutor {
 		};
 
 		let mut peers = Vec::new();
+		// One line per peer that has a preshared key: its public key, which is
+		// how the observation finds it again, and a digest of the secret. The
+		// device's own key record and this one answer the same question about
+		// two different secrets (0055, 0056).
+		let mut presets: Vec<String> = Vec::new();
 		// Built only where they are meant, so a `wg.set_device` does not
 		// resolve a preshared key or a hostname it has no use for -- either of
 		// which can fail, and failing over something the op was not about is
@@ -642,6 +647,13 @@ impl KernelExecutor {
 				),
 				None => None,
 			};
+			if let Some(secret) = &preshared {
+				presets.push(format!(
+					"{} {}",
+					peer.public_key.render(),
+					netcfgd_model::hash::sha256_hex(secret)
+				));
+			}
 			peers.push(netcfgd_sys::wg::Peer {
 				public_key: *peer.public_key.as_bytes(),
 				preshared_key: preshared,
@@ -693,6 +705,12 @@ impl KernelExecutor {
 		// a record of a configuration that was refused is a record of nothing.
 		if let Some(private) = private {
 			record_key(&self.run_dir, name, &private);
+		}
+		// Only where the peer list was actually sent. A `wg.set_device` leaves
+		// the kernel's peers alone, so rewriting this record from an empty list
+		// would say every preshared key had gone.
+		if matches!(parts, WgParts::Whole | WgParts::Peers) {
+			record_presets(&self.run_dir, name, &presets);
 		}
 		Ok(())
 	}
@@ -1343,6 +1361,37 @@ fn record_key(run: &std::path::Path, iface: &str, private: &[u8; 32]) {
 	}
 	let digest = netcfgd_model::hash::sha256_hex(private);
 	if std::fs::write(&path, &digest).is_ok() {
+		let _ =
+			std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+	}
+}
+
+/// Where netcfgd records which preshared key each peer was given.
+#[must_use]
+pub fn preset_record_path(run: &std::path::Path, iface: &str) -> std::path::PathBuf {
+	run.join("wireguard").join(format!("{iface}.psk.sha256"))
+}
+
+/// Record the peers' preshared keys, as digests keyed by public key.
+///
+/// The same technique as [`record_key`] and the same argument for it: a
+/// preshared key is 32 octets a `wg genpsk` produced, so a digest is not a route
+/// back, and the alternative is a rotation that changes nothing. Keyed by the
+/// peer's public key because that is what both sides have -- the kernel has
+/// never heard the operator's label for a peer.
+///
+/// Written whole every time the peer list is sent, so a peer that lost its
+/// preshared key loses its line rather than keeping a stale one.
+fn record_presets(run: &std::path::Path, iface: &str, presets: &[String]) {
+	let path = preset_record_path(run, iface);
+	if let Some(parent) = path.parent() {
+		let _ = std::fs::create_dir_all(parent);
+	}
+	if presets.is_empty() {
+		let _ = std::fs::remove_file(&path);
+		return;
+	}
+	if std::fs::write(&path, presets.join("\n")).is_ok() {
 		let _ =
 			std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
 	}

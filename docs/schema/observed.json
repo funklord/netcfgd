@@ -30,6 +30,7 @@
           {
             "public_key": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
             "preshared_key": true,
+            "preshared_matches": false,
             "endpoint": "198.51.100.7:51820",
             "allowed_ips": [
               "10.0.0.0/24",
@@ -70,6 +71,7 @@
           {
             "public_key": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
             "preshared_key": true,
+            "preshared_matches": false,
             "endpoint": "198.51.100.7:51820",
             "allowed_ips": [
               "10.0.0.0/24",
@@ -110,6 +112,7 @@
           {
             "public_key": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
             "preshared_key": true,
+            "preshared_matches": false,
             "endpoint": "198.51.100.7:51820",
             "allowed_ips": [
               "10.0.0.0/24",
