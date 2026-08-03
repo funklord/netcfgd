@@ -49,6 +49,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	for link in &mut observed.links {
 		link.rfkill = rfkill(&sys, &link.name);
 	}
+	read_backend_liveness(observed, run_dir);
 	read_netfilter(observed);
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
@@ -578,6 +579,45 @@ fn accept_ra(root: &std::path::Path, name: &str) -> Option<netcfgd_model::Observ
 		value,
 		effective: value == 2 || (value == 1 && !forwards),
 	})
+}
+
+/// Whether the daemons netcfgd's records call running are actually still there.
+///
+/// **The record is a memory, not an observation.** `/run/netcfgd/state.json`
+/// says netcfgd started a tunnel; the tunnel's process may have been killed,
+/// crashed, or been taken down by an operator an hour ago, and nothing here
+/// noticed -- the planner asked `backend_running`, got `true` from the record,
+/// and had nothing to do. A document that says a tunnel should be up, and a
+/// machine where it is not, and a reconciler reporting convergence. Decision
+/// 0078.
+///
+/// **`None` from [`netcfgd_apply::backend_pid_file`] leaves the record alone**,
+/// and that is the rule the whole pass turns on: no handle means netcfgd cannot
+/// tell, which is not the same as "it is not running". Reading it as "not
+/// running" would start a second dhcpcd beside the first on every machine that
+/// uses one -- the case where netcfgd holds no pid file and the daemon is
+/// perfectly alive. `None` is not `false`, three sessions running.
+fn read_backend_liveness(observed: &mut Observed, run_dir: &Path) {
+	for backend in &mut observed.backends {
+		if !backend.running {
+			continue;
+		}
+		let Some((path, marker)) =
+			netcfgd_apply::backend_pid_file(backend.kind, run_dir, &backend.interface)
+		else {
+			continue;
+		};
+		// A pid file netcfgd's own directory does not have is the same "cannot
+		// tell": a daemon started before this build existed, or one whose file
+		// was cleaned away. Only a file that *is* there and names something
+		// which is not this daemon says it has gone.
+		if !path.exists() {
+			continue;
+		}
+		if netcfgd_sys::process::pid_of(&path, &marker).is_none() {
+			backend.running = false;
+		}
+	}
 }
 
 /// Every managed offload that is on, per interface.

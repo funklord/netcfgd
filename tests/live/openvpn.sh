@@ -364,6 +364,64 @@ fi
 check "and the pid file goes with it" \
 	"$([ -e "$work/run/openvpn/vpn0.pid" ] && echo yes || echo no)" "no"
 
+# ------------------------------------------------- a daemon that died on its own
+
+# The record in /run is a memory, not an observation: it said the tunnel was
+# running, and nothing asked the machine. So a daemon that crashed -- or was
+# killed, or lost a fight with the OOM killer -- left netcfgd reporting a
+# converged tunnel that was not there. Decision 0078.
+#
+# `kill` rather than a stop through the management socket, deliberately: what is
+# under test is netcfgd noticing something it did not do.
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface vpn0 {
+	openvpn { config = "$work/etc/work.ovpn" }
+}
+CONF
+"$ncfg" apply > "$work/revive-start.txt" 2>&1 || true
+waited=0
+while [ ! -s "$work/run/openvpn/vpn0.pid" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+died=$(cat "$work/run/openvpn/vpn0.pid" 2>/dev/null || echo 0)
+check "the tunnel is up and netcfgd has nothing to do" \
+	"$("$ncfg" plan 2>&1 | grep -c 'nothing to do' || true)" "1"
+
+kill -9 "$died" 2>/dev/null || true
+waited=0
+while kill -0 "$died" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+# The pid file is still there -- openvpn removes it on the way out and a `kill
+# -9` gives it no way out, which is exactly the state this has to read
+# correctly rather than trust.
+check "the pid file outlived the process, which is why it is checked" \
+	"$([ -s "$work/run/openvpn/vpn0.pid" ] && echo yes || echo no)" "yes"
+check "netcfgd notices the tunnel is gone" \
+	"$("$ncfg" plan 2>&1 | grep -c 'backend.start vpn0' || true)" "1"
+"$ncfg" apply > "$work/revive.txt" 2>&1 || true
+waited=0
+while [ ! -S "$work/run/openvpn/vpn0.sock" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+revived=$(cat "$work/run/openvpn/vpn0.pid" 2>/dev/null || echo 0)
+if [ "$revived" -gt 0 ] && [ "$revived" != "$died" ] && kill -0 "$revived" 2>/dev/null; then
+	echo "ok   and starts it again"
+else
+	echo "FAIL and starts it again"
+	echo "       was $died, now $revived, and netcfgd said:"
+	sed 's/^/       /' "$work/revive.txt"
+	failures=$((failures + 1))
+fi
+check "and then there is nothing to do again" \
+	"$("$ncfg" plan 2>&1 | grep -c 'nothing to do' || true)" "1"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "openvpn.sh: all checks passed"
