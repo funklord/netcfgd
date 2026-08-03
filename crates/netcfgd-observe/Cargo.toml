@@ -21,3 +21,6 @@ netcfgd-apply   = { path = "../netcfgd-apply" }
 netcfgd-openvpn = { path = "../../backends/netcfgd-openvpn" }
 netcfgd-ra      = { path = "../../backends/netcfgd-ra" }
 netcfgd-hostapd = { path = "../../backends/netcfgd-hostapd" }
+
+[dev-dependencies]
+netcfgd-testdir = { path = "../netcfgd-testdir" }

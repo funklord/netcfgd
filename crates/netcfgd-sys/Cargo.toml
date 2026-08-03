@@ -29,6 +29,7 @@ undocumented_unsafe_blocks = "warn"
 libc = "0.2"
 
 [dev-dependencies]
+netcfgd-testdir = { path = "../netcfgd-testdir" }
 libc = "0.2"
 
 [features]

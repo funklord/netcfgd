@@ -645,8 +645,8 @@ mod tests {
 	/// was written on -- and a reader that took the first `wlan` entry it found
 	/// would report the button's state for the card, which on a machine with two
 	/// cards is somebody else's radio.
-	fn sysfs(soft: &str, hard: &str) -> tempdir::TempDir {
-		let dir = tempdir::TempDir::new("ncfg-rfkill");
+	fn sysfs(soft: &str, hard: &str) -> netcfgd_testdir::TestDir {
+		let dir = netcfgd_testdir::TestDir::new("rfkill");
 		let write = |path: PathBuf, value: &str| {
 			fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
 			fs::write(path, value).expect("a file");
@@ -703,7 +703,7 @@ mod tests {
 	/// must report nothing rather than a radio that appears to be working.
 	#[test]
 	fn a_switch_with_no_flags_reports_nothing() {
-		let dir = tempdir::TempDir::new("ncfg-rfkill-partial");
+		let dir = netcfgd_testdir::TestDir::new("rfkill-partial");
 		let root = dir.path().to_owned();
 		let write = |path: PathBuf, value: &str| {
 			fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
@@ -718,45 +718,10 @@ mod tests {
 	/// A kernel with no rfkill at all, which is not the same as a clear switch.
 	#[test]
 	fn a_kernel_without_rfkill_reports_nothing() {
-		let dir = tempdir::TempDir::new("ncfg-rfkill-none");
+		let dir = netcfgd_testdir::TestDir::new("rfkill-none");
 		let path = dir.path().join("class/net/wlan0/phy80211/name");
 		fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
 		fs::write(path, "phy0\n").expect("a file");
 		assert!(rfkill(dir.path(), "wlan0").is_none());
-	}
-
-	/// A directory that removes itself, with no dependency to do it.
-	mod tempdir {
-		use std::path::{Path, PathBuf};
-
-		pub(super) struct TempDir(PathBuf);
-
-		impl TempDir {
-			pub(super) fn new(tag: &str) -> Self {
-				// A counter as well as the process id, because the tag is *not*
-				// enough: cargo runs these tests in parallel threads of one
-				// process, and three of them ask for the same tree. The first
-				// version wiped one test's fixture from under another and failed
-				// whichever lost the race.
-				static NEXT: std::sync::atomic::AtomicUsize =
-					std::sync::atomic::AtomicUsize::new(0);
-				let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-				let path =
-					std::env::temp_dir().join(format!("{tag}-{}-{unique}", std::process::id()));
-				let _ = std::fs::remove_dir_all(&path);
-				std::fs::create_dir_all(&path).expect("a temporary directory");
-				Self(path)
-			}
-
-			pub(super) fn path(&self) -> &Path {
-				&self.0
-			}
-		}
-
-		impl Drop for TempDir {
-			fn drop(&mut self) {
-				let _ = std::fs::remove_dir_all(&self.0);
-			}
-		}
 	}
 }

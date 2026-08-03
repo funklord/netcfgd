@@ -652,8 +652,7 @@ mod tests {
 	#[test]
 	fn the_script_parses() {
 		let script = report_script("vpn0", Path::new("/run/netcfgd/reported/vpn0"));
-		let dir = std::env::temp_dir().join(format!("ncfg-script-{}", std::process::id()));
-		std::fs::create_dir_all(&dir).expect("a temporary directory");
+		let dir = netcfgd_testdir::TestDir::new("script");
 		let path = dir.join("report.sh");
 		std::fs::write(&path, &script).expect("write");
 
@@ -662,7 +661,6 @@ mod tests {
 			.arg(&path)
 			.status()
 			.expect("run sh -n");
-		let _ = std::fs::remove_dir_all(&dir);
 		assert!(
 			status.success(),
 			"the generated script does not parse:\n{script}"
@@ -678,8 +676,7 @@ mod tests {
 	/// mask conversion without a tunnel.
 	#[test]
 	fn it_writes_what_openvpn_put_in_its_environment() {
-		let dir = std::env::temp_dir().join(format!("ncfg-report-{}", std::process::id()));
-		std::fs::create_dir_all(&dir).expect("a temporary directory");
+		let dir = netcfgd_testdir::TestDir::new("report");
 		let report = dir.join("vpn0");
 		let path = dir.join("report.sh");
 		std::fs::write(&path, report_script("vpn0", &report)).expect("write");
@@ -718,7 +715,6 @@ mod tests {
 		assert!(status.success());
 
 		let written = std::fs::read_to_string(&report).expect("a report");
-		let _ = std::fs::remove_dir_all(&dir);
 		let routes: Vec<&str> = written
 			.lines()
 			.filter(|line| line.starts_with("route="))
@@ -773,8 +769,7 @@ mod tests {
 	/// "nobody is watching".
 	#[test]
 	fn the_down_call_empties_it() {
-		let dir = std::env::temp_dir().join(format!("ncfg-down-{}", std::process::id()));
-		std::fs::create_dir_all(&dir).expect("a temporary directory");
+		let dir = netcfgd_testdir::TestDir::new("down");
 		let report = dir.join("vpn0");
 		std::fs::write(&report, "route=10.0.0.0/8 via 10.8.0.1\n").expect("a stale report");
 		let path = dir.join("report.sh");
@@ -788,7 +783,6 @@ mod tests {
 		assert!(status.success());
 
 		let written = std::fs::read_to_string(&report).expect("a report");
-		let _ = std::fs::remove_dir_all(&dir);
 		assert_eq!(
 			written, "",
 			"a down call leaves an empty report, not a gone one"

@@ -22,3 +22,6 @@ netcfgd-openvpn    = { path = "../../backends/netcfgd-openvpn" }
 netcfgd-ra         = { path = "../../backends/netcfgd-ra" }
 serde.workspace      = true
 serde_json.workspace = true
+
+[dev-dependencies]
+netcfgd-testdir = { path = "../netcfgd-testdir" }

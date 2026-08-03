@@ -574,14 +574,8 @@ mod tests {
 	/// A counter as well as the process id: cargo runs these in parallel
 	/// threads of one process, and a shared path is one test wiping another's
 	/// fixture from under it.
-	fn fixture(tag: &str) -> (PathBuf, Options) {
-		static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-		let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-		let root = std::env::temp_dir().join(format!(
-			"ncfg-wifi-add-{tag}-{}-{unique}",
-			std::process::id()
-		));
-		let _ = std::fs::remove_dir_all(&root);
+	fn fixture(tag: &str) -> (netcfgd_testdir::TestDir, Options) {
+		let root = netcfgd_testdir::TestDir::new(&format!("wifi-add-{tag}"));
 		std::fs::create_dir_all(root.join("etc/conf.d")).expect("a config directory");
 		std::fs::create_dir_all(root.join("run")).expect("a run directory");
 		std::fs::write(

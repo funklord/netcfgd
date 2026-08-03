@@ -14,3 +14,6 @@ workspace = true
 netcfgd-model      = { path = "../../crates/netcfgd-model" }
 netcfgd-secret     = { path = "../../crates/netcfgd-secret" }
 netcfgd-supplicant = { path = "../netcfgd-supplicant" }
+
+[dev-dependencies]
+netcfgd-testdir = { path = "../../crates/netcfgd-testdir" }

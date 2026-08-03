@@ -15,20 +15,13 @@ use netcfgd_supplicant::protocol::{
 };
 use netcfgd_supplicant::Unsupported;
 use std::fs;
-use std::path::PathBuf;
 
-/// Tests run in parallel in one process, so the directory has to be unique
-/// per call rather than per name -- otherwise one test's cleanup removes
-/// another's secret, and the failure looks like a resolver bug.
-static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-fn scratch(name: &str) -> PathBuf {
-	let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-	let dir =
-		std::env::temp_dir().join(format!("ncfg-supp-{name}-{}-{serial}", std::process::id()));
-	let _ = fs::remove_dir_all(&dir);
-	fs::create_dir_all(&dir).expect("scratch");
-	dir
+/// Tests run in parallel in one process, so the directory has to be unique per
+/// call rather than per name -- otherwise one test's cleanup removes another's
+/// secret, and the failure looks like a resolver bug. The counter that did that
+/// here now lives in `netcfgd-testdir`, along with the guard that removes it.
+fn scratch(name: &str) -> netcfgd_testdir::TestDir {
+	netcfgd_testdir::TestDir::new(&format!("supp-{name}"))
 }
 
 #[cfg(unix)]
@@ -56,11 +49,11 @@ fn network(ssid: &str, security: Security) -> WifiNetwork {
 	}
 }
 
-fn psk(passphrase: &str, proto: PskProto) -> (Resolver, Security, PathBuf) {
+fn psk(passphrase: &str, proto: PskProto) -> (Resolver, Security, netcfgd_testdir::TestDir) {
 	let dir = scratch("psk");
 	write_secret(&dir, "pass", passphrase);
 	(
-		Resolver::with_secrets_dir(&dir),
+		Resolver::with_secrets_dir(&*dir),
 		Security::Psk(PskConfig {
 			passphrase: SecretRef {
 				provider: SecretProvider::File,
@@ -432,7 +425,7 @@ fn a_secret_setting_redacts_itself() {
 fn eap_settings_quote_and_redact_the_identity() {
 	let dir = scratch("eap");
 	write_secret(&dir, "password", "corporate");
-	let resolver = Resolver::with_secrets_dir(&dir);
+	let resolver = Resolver::with_secrets_dir(&*dir);
 
 	let eap = Security::Eap(EapConfig {
 		method: EapMethod::Peap,

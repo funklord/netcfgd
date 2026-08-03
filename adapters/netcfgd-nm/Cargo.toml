@@ -81,3 +81,8 @@ unused_self = "allow"
 # deserialises it off the wire; there is no borrowed form for it to take. Same
 # shape as the lint above: right about the function, wrong about the situation.
 needless_pass_by_value = "allow"
+
+# Test scaffolding from the core tree. A dev dependency, so it is not in the
+# shim's runtime graph and `make nm-containment` is unaffected.
+[dev-dependencies]
+netcfgd-testdir = { path = "../../crates/netcfgd-testdir" }

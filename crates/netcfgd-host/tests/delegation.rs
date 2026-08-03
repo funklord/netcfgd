@@ -7,11 +7,9 @@
 
 use netcfgd_host::state::read_delegations;
 use std::fs;
-use std::path::PathBuf;
 
-fn scratch(name: &str) -> PathBuf {
-	let dir = std::env::temp_dir().join(format!("ncfg-pd-{name}-{}", std::process::id()));
-	let _ = fs::remove_dir_all(&dir);
+fn scratch(name: &str) -> netcfgd_testdir::TestDir {
+	let dir = netcfgd_testdir::TestDir::new(&format!("pd-{name}"));
 	fs::create_dir_all(dir.join("prefixes")).expect("scratch");
 	dir
 }
@@ -138,6 +136,8 @@ fn a_renewal_replaces_rather_than_appends() {
 /// error -- constraint 2 says the filesystem reflects use.
 #[test]
 fn no_directory_means_no_delegations() {
+	// Deliberately not a `TestDir`: what is under test is a directory that is
+	// not there, and a guard that made one would be testing the opposite.
 	let dir = std::env::temp_dir().join(format!("ncfg-pd-absent-{}", std::process::id()));
 	let _ = fs::remove_dir_all(&dir);
 	assert!(read_delegations(&dir).is_empty());

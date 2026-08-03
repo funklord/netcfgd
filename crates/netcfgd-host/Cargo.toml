@@ -19,3 +19,6 @@ netcfgd-plan    = { path = "../netcfgd-plan" }
 netcfgd-proto   = { path = "../netcfgd-proto" }
 serde.workspace      = true
 serde_json.workspace = true
+
+[dev-dependencies]
+netcfgd-testdir = { path = "../netcfgd-testdir" }

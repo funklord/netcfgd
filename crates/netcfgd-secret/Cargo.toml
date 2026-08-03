@@ -12,3 +12,6 @@ workspace = true
 
 [dependencies]
 netcfgd-model = { path = "../netcfgd-model" }
+
+[dev-dependencies]
+netcfgd-testdir = { path = "../netcfgd-testdir" }
