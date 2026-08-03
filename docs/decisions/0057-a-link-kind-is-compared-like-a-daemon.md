@@ -1,6 +1,7 @@
 # 0057: A link kind is compared like a daemon
 
-Status: accepted; the bridge is done and the other kinds are named, not built
+Status: accepted; the bridge and the bond are done, the other kinds are named,
+not built
 Date: 2026-08-03
 Milestone: [0054](0054-a-kernel-object-is-compared-like-a-daemon.md) again, in the kinds it did not look at
 
@@ -61,16 +62,43 @@ time.
 and the document counts seconds. `netcfgd-sys` multiplies on the way out and the
 observer divides on the way in, and neither does anything else.
 
+## The bond, and the two things it taught
+
+Done here as well, and it is the bridge's shape with one difference that had to
+be measured rather than reasoned about.
+
+**A bond's mode is settable only on a bond with no members.** The kernel answers
+`ENOTEMPTY` otherwise. The first version planned it anyway: the apply failed, and
+the next reconcile planned the same action again, forever. So a bond that has
+members gets a *sentence* -- what the config says, what the kernel has, and the
+three ways out -- rather than an action that cannot work.
+
+**And a refused attribute takes its neighbours with it.** `RTM_NEWLINK` is one
+message: a mode the kernel will not take fails the whole request, so the
+`miimon` beside it was not set either. That is why `link.set_bond` carries a
+`mode` flag saying whether the mode is part of it. The planner knows which case
+it is in; the executor should not have to ask.
+
+`ip link set ... type vlan id 43` was measured at the same time and behaves a
+third way again: it **succeeds and changes nothing**. `vlan_changelink` handles
+flags and QoS maps and silently ignores the id. A planner that emitted a set for
+it would report a change that never happened -- worse than either of the above,
+because nothing fails.
+
 ## What is deliberately left
 
-VLAN, VXLAN, bond, tunnel, macvlan and veth. Each needs its own `INFO_DATA`
+VLAN, VXLAN, tunnel, macvlan and veth. Each needs its own `INFO_DATA`
 decoding -- the numbering is per kind and decoding one kind's attributes with
 another's constants is how a VXLAN comes to report a forward delay -- and each
 wants its own live test against a real kernel. That is a session per two or
 three kinds, not a paragraph.
 
-The bridge is first because it is the one with no second signal, and because its
-executor half already existed.
+The bridge was first because it is the one with no second signal, and because
+its executor half already existed. The bond followed because it is the same
+shape. **The VLAN is not the same shape**: its id cannot be set at all, so
+correcting one means deleting and recreating the interface -- which interacts
+with the planner's creation pass, drops the addresses and routes on it, and
+wants its own careful session rather than a paragraph at the end of this one.
 
 ## Consequences
 
