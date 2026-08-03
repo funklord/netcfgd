@@ -1,6 +1,8 @@
 # 0064: A lease is an address netcfgd did not install
 
-Status: accepted
+Status: accepted. The udhcpc defect named at the end was fixed by
+[0065](0065-udhcpc-needs-a-script-and-netcfgd-writes-it.md), which also made this
+hook's trigger work for a busybox client rather than only for dhcpcd.
 Date: 2026-08-03
 Milestone: the other hook [0061](0061-a-key-that-compiles-does-something-or-says-it-does-not.md) named
 

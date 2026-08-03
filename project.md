@@ -672,13 +672,16 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after two sessions on the laptop list: four config keys that
-compiled and did nothing
+Last rewritten after four sessions on the laptop list, all of them started by asking
+what an operator would actually hit: four config keys that compiled and did nothing
 ([0061](docs/decisions/0061-a-key-that-compiles-does-something-or-says-it-does-not.md)),
-and then **rfkill** — a radio that is switched off used to look exactly like a
-network that would not associate
-([0062](docs/decisions/0062-a-blocked-radio-is-reported-and-not-unblocked.md)).
-That one also put the first real wifi hardware under test in this project, read-only.
+**rfkill** — a radio that is switched off looked exactly like a network that would
+not associate, and checking it put the first real wifi hardware under test here
+([0062](docs/decisions/0062-a-blocked-radio-is-reported-and-not-unblocked.md)) — the
+**`down` and `lease` hooks** (0063, 0064), and **DHCPv4 with busybox**, which had
+never worked at all
+([0065](docs/decisions/0065-udhcpc-needs-a-script-and-netcfgd-writes-it.md)).
+Every one of the four found a defect older than the work itself.
 Before it, the session that **closed**
 [0057](docs/decisions/0057-a-link-kind-is-compared-like-a-daemon.md)'s list and
 found that a VXLAN's and a tunnel's parent had never reached the kernel at all
@@ -927,6 +930,29 @@ rather than looking like a feature: the model carries `mac`, `path`, `driver` an
 tries gets a compile error. Implementing it means reading a driver name and a
 device path out of `/sys`.
 
+#### DHCPv4, which nothing had ever driven
+
+**netcfgd generates the script busybox `udhcpc` needs**
+([0065](docs/decisions/0065-udhcpc-needs-a-script-and-netcfgd-writes-it.md)). Before
+that it invoked the client with no `-s`, and busybox has no configuration step of
+its own — so on a machine with busybox and no dhcpcd, `config = "dhcp"` obtained a
+lease and configured nothing while the plan reported success. Two more halves of the
+same defect: the client could not be *found* on Debian, which packages busybox as one
+binary with no `udhcpc` symlink, and it could not be *stopped*, because `dhcpcd -k`
+does nothing to a udhcpc and there was no pid file to find one by.
+
+The script does what dhcpcd does and no more — the address and the default route,
+untagged, so the lease is the client's under either client and the `lease` hook needs
+no case for both. It leaves the MTU alone (the document owns it), leaves
+`resolv.conf` alone (netcfgd's DNS backend owns it), and removes **only the address
+it added**, where a stock `deconfig` flushes the interface and would take a static
+address with it.
+
+**All three survived because nothing in the suite had ever driven a v4 client.**
+`tests/live/dhcp.sh` now does: `busybox udhcpd` on the far end of a veth pair, a real
+DISCOVER/OFFER/REQUEST/ACK, and netcfgd's own script putting the address on. It needs
+no package a machine with busybox does not already have.
+
 #### The radio, and what netcfgd will not switch
 
 **A blocked radio is named, with the remedy for the switch that blocked it**
@@ -1031,18 +1057,26 @@ match.
    reason is also what found the parent defect below, so the order paid for itself
    twice.
 
-3. **What a laptop still wants, in the order it will bite.** The four keys, rfkill
-   and the down hooks are settled; these are the gaps behind them, and none is a
-   schema question: **the `lease` hook** — the other one an operator reaches for,
-   and the one that needs netcfgd to notice a lease it did not install; **the six
-   remaining unfired phases**
-   above, of which `down` and `lease` are the two an operator reaches for first;
-   **joining a network needs an editor and root**, since `ncfg wifi connect` takes
-   the id of a `network` block and there is no `ncfg wifi add` (the NM shim's write
-   path is the current answer); **`accept_ra` is unmanaged**, which a router asking
-   for `slaac` on its WAN discovers the hard way; and **nothing reads
-   `/dev/rfkill`'s event stream**, so a block is noticed on the next observation
-   rather than as it happens.
+3. **What a laptop still wants, in the order it will bite.** Settled so far: the
+   four inert config keys (0061), rfkill (0062), the `down` and `post_down` hooks
+   (0063), the `lease` hook (0064) and DHCPv4 with busybox (0065). What is left, and
+   none of it is a schema question:
+
+   - **A DHCP lease's nameservers reach nothing.** Neither client tells netcfgd
+     about them, so `config = "dhcp"` gives an address and a route while DNS comes
+     from the document. The report contract already has a `dns` key and
+     [0049](docs/decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)
+     already has the gate; what it needs is dhcpcd's half, which means a hook script
+     somewhere under `/etc` and a decision about writing one.
+   - **Six hook phases still do not fire**: `up`, `pre_down`, `carrier`, `roam`,
+     `portal` and `drift`. `carrier` is the one a laptop would notice.
+   - **Joining a network needs an editor and root.** `ncfg wifi connect` takes the id
+     of a `network` block and there is no `ncfg wifi add`; the NM shim's write path is
+     the current answer.
+   - **`accept_ra` is unmanaged**, which a router asking for `slaac` on its WAN
+     discovers the hard way.
+   - **Nothing reads `/dev/rfkill`'s event stream**, so a flipped switch is noticed
+     on the next observation rather than as it happens.
 
 4. **Nothing else on the "is it still what the document says?" question is
    open.** Daemons, kernel objects, secrets and unread files all have an answer,
@@ -1069,6 +1103,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A witness built on an exhaustive match catches an addition by failing to compile, and the assertion beside it does something else.** Two of these witnesses claimed the assertion caught "an arm written with no sample added"; it does not, because neither the sample list nor the expected-name list would mention the new name and the two would agree. Tried it, then corrected the comments — and then, a session later, found the same false claim still standing in two *inline* comments in the file the correction was made in, because "all three" had counted the doc comments and stopped. What the assertion catches is a sample that went away or a name that moved, and nothing in Rust can enumerate a variant without a value of it — so the gap is stated where it is rather than assumed away. Overstating a gate is the same disease as not having one: both leave somebody trusting a check that is not running, and a correction is worth grepping for rather than counting.
 - **A real daemon in a namespace is reachable more often than it looks.** OpenVPN's static-key point-to-point mode has no handshake, so a tunnel is up the moment the `tun` device opens — no server, no certificates, no second process. That is what made every claim about `--route-up`'s environment measurable rather than inferred, and `unshare -rn` plus `/dev/net/tun` is all it needs. The trick reached further than expected: a veth pair *is* an ethernet segment, so `pppoe-server` on one end and netcfgd's `pppd` on the other is a real PPPoE session, and the whole of DSL is testable without a DSL line. What that needs beyond the tunnel case is real root, which a privileged container supplies as well as `sudo` does. **Reach for this before writing another fake** — the session found an unimplemented hang-up on its first run, and no fake would have.
 - **~~An interface that exists as the wrong kind is not recreated, and nothing says so.~~ Closed** ([0059](docs/decisions/0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)), in the commit after the one that wrote it down. A document declaring `mixup` as a macvlan, against a `mixup` that already exists as a dummy, planned `link.up` and nothing else — netcfgd brought somebody else's device up and called the network configured. It shared its remedy with the VLAN id, which is why one session did both. What is worth keeping from it is the measurement habit that found it: the finding came from asking what *else* would fall into the safe direction of the new comparisons, not from a test.
+- **A break that silently fails to apply reads exactly like a gate that works.** Two runs in this session proved nothing: one patch did not match the source and its script had no assertion, so it built the unmodified tree and reported "all checks passed"; another had its restore skipped by `set -e` and left the tree broken for the *next* break, which then failed for the wrong reason. A break script needs to assert that it changed something, and to restore whether or not the test passed — the same discipline as the gates it is checking.
 - **A gate that has never seen its subject is not a gate.** The plan-idempotence check has run on every fixture for milestones, and not one of them had a hook in it — the single fixture that did called `plan` and `simulate` by hand. So the up hooks being emitted unconditionally, which made every converged plan non-empty, was invisible to the exact gate that exists to catch it. When a feature has one test, check whether that test goes through the harness the others do.
 - **The hash on a hook can only fail where the compile and the run are separated in time.** `ncfg apply` materialises the script microseconds before running it, so it is checking a hash of a file it just wrote; the daemon re-materialises whenever the config changes. What is left is a plan built from a *kernel* change against a document compiled earlier — drift, which is what §2.2 said the hash was for. Nothing had ever tested it, and the first attempt could not, twice, for these two reasons.
 - **A field that cannot disagree cannot be wrong.** The rfkill observation reports which switch the flags came from, and the first version filled that in from the phy name the *search started with* rather than from the entry it found — so a search that picked the wrong switch still reported the right name. Breaking the search on purpose left every test green. The fix is one line and the rule is general: a field whose job is to say where a value came from has to be read from there.

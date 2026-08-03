@@ -1851,7 +1851,6 @@ fn start_backend(
 			// switching needed it.
 			let metric = metric.map(|value| value.to_string());
 			let mut dhcpcd = vec!["-b".to_owned(), "-4".to_owned()];
-			let udhcpc = vec!["-b".to_owned(), "-i".to_owned(), iface.to_owned()];
 			if let Some(metric) = &metric {
 				dhcpcd.push("-m".to_owned());
 				dhcpcd.push(metric.clone());
@@ -1860,7 +1859,35 @@ fn start_backend(
 			}
 			dhcpcd.push(iface.to_owned());
 
-			for (program, args) in [("dhcpcd", dhcpcd), ("udhcpc", udhcpc)] {
+			// udhcpc needs a script and a pid file, and netcfgd used to pass
+			// neither: without `-s` the client obtains a lease and configures
+			// nothing at all, and without `-p` there is no way to stop it.
+			// Decision 0065.
+			let (script, pidfile) = write_udhcpc_script(iface)?;
+			let udhcpc = vec![
+				"-b".to_owned(),
+				"-i".to_owned(),
+				iface.to_owned(),
+				"-s".to_owned(),
+				script.display().to_string(),
+				"-p".to_owned(),
+				pidfile.display().to_string(),
+				// Release the lease on the way out, which is also what makes the
+				// script run `deconfig` on a `SIGTERM`. Without it a stopped client
+				// leaves its address on the interface -- measured -- where `dhcpcd
+				// -k` takes it away, and two clients that disagree about what
+				// stopping means is two behaviours for one `backend.stop`.
+				"-R".to_owned(),
+			];
+
+			// Three candidates, not two. Debian packages busybox as one binary with
+			// no `udhcpc` symlink beside it, so a machine that has the client at all
+			// often cannot be found by that name -- which made the fallback
+			// unreachable exactly where it was most likely to be wanted.
+			let busybox: Vec<String> = std::iter::once("udhcpc".to_owned())
+				.chain(udhcpc.iter().cloned())
+				.collect();
+			for (program, args) in [("dhcpcd", dhcpcd), ("udhcpc", udhcpc), ("busybox", busybox)] {
 				match Command::new(program).args(&args).status() {
 					Ok(status) if status.success() => return Ok(()),
 					Ok(status) => return Err(format!("{program} on {iface} exited with {status}")),
@@ -1870,7 +1897,7 @@ fn start_backend(
 				}
 			}
 			Err(format!(
-				"no DHCPv4 client found for {iface}; install dhcpcd or busybox udhcpc"
+				"no DHCPv4 client found for {iface}; install dhcpcd, udhcpc or busybox"
 			))
 		}
 		BackendKind::Dhcp6 => Err(format!(
@@ -2018,6 +2045,31 @@ fn write_pd_hook(iface: &str) -> Result<std::path::PathBuf, String> {
 	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
 		.map_err(|error| format!("cannot make {} executable: {error}", path.display()))?;
 	Ok(path)
+}
+
+/// Write the script udhcpc runs, and say where its pid file goes.
+///
+/// Both under `/run/netcfgd/udhcpc/`, which is tmpfs and regenerated on every
+/// apply -- the script has no state of its own beyond the one address it records,
+/// which lives beside it so that a `deconfig` after a netcfgd restart still knows
+/// what to take away.
+fn write_udhcpc_script(iface: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+	use std::io::Write;
+	use std::os::unix::fs::PermissionsExt;
+
+	let dir = run_dir_path().join("udhcpc");
+	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+
+	let path = dir.join(format!("{iface}.script"));
+	let script = udhcpc_script(iface, &dir.join(format!("{iface}.address")));
+	let mut file = std::fs::File::create(&path)
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	file.write_all(script.as_bytes())
+		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+		.map_err(|error| format!("cannot make {} executable: {error}", path.display()))?;
+
+	Ok((path, dir.join(format!("{iface}.pid"))))
 }
 
 /// Write pppd's options file.
@@ -2234,6 +2286,93 @@ fn quote_ppp(value: &str) -> String {
 	}
 	out.push('"');
 	out
+}
+
+/// The script busybox `udhcpc` runs when its lease changes.
+///
+/// **udhcpc does nothing at all without one.** It has no built-in configuration
+/// step: it obtains a lease, runs `$1` of the script with the lease in the
+/// environment, and that script is what puts the address on the interface. netcfgd
+/// invoked it with no `-s` for as long as the udhcpc fallback has existed, and
+/// Debian ships no `/usr/share/udhcpc/default.script` to fall back on -- so on a
+/// machine with busybox and no dhcpcd, `config = "dhcp"` got a lease and configured
+/// nothing. Decision 0065.
+///
+/// **What it does is what dhcpcd does, and no more.** The address and the default
+/// route, untagged, so the lease belongs to the client exactly as dhcpcd's does
+/// (0004) and netcfgd treats both the same way -- including the `lease` hook, which
+/// fires off an address netcfgd did not install (0064) and therefore needs no case
+/// for either client.
+///
+/// Three things it deliberately leaves alone:
+///
+/// - **The MTU**, which the document owns. A lease that lowered it would have
+///   netcfgd fighting its own `mtu` field on every renewal.
+/// - **`/etc/resolv.conf`**, which netcfgd's DNS backends own. A client writing it
+///   behind netcfgd's back is the contention this project exists to avoid; what to
+///   do with a lease's nameservers is one decision for both clients and is not
+///   this one.
+/// - **Every address it did not add itself.** `deconfig` in a stock script flushes
+///   the interface, which would delete a static address netcfgd had installed
+///   beside the lease. This one records what it added and removes exactly that.
+///
+/// `$mask` is a prefix length and `$subnet` is the dotted form; both arrive, and
+/// this uses the one `ip` takes. Measured against a real busybox 1.37 client and a
+/// real busybox `udhcpd`, which is also what `tests/live/dhcp.sh` does.
+#[must_use]
+pub fn udhcpc_script(iface: &str, state: &std::path::Path) -> String {
+	format!(
+		"#!/bin/sh\n\
+		 # Written by netcfgd for udhcpc on {iface}. Regenerated on every apply.\n\
+		 #\n\
+		 # udhcpc has no configuration step of its own: without a script it obtains a\n\
+		 # lease and does nothing with it. This installs the address and the default\n\
+		 # route and touches nothing else -- not the MTU, which the config owns, and\n\
+		 # not resolv.conf, which netcfgd's DNS backend owns.\n\
+		 set -u\n\
+		 state={state}\n\
+		 iface=${{interface:?udhcpc did not say which interface}}\n\
+		 \n\
+		 # What this script added last time, so `deconfig` removes exactly that and\n\
+		 # leaves any address netcfgd itself put on the interface alone.\n\
+		 held=\n\
+		 [ -r \"$state\" ] && held=$(cat \"$state\")\n\
+		 \n\
+		 withdraw() {{\n\
+		 \t[ -n \"$held\" ] || return 0\n\
+		 \tip -4 route del default dev \"$iface\" 2>/dev/null || true\n\
+		 \tip -4 addr del \"$held\" dev \"$iface\" 2>/dev/null || true\n\
+		 \trm -f \"$state\"\n\
+		 }}\n\
+		 \n\
+		 case \"${{1:-}}\" in\n\
+		 bound|renew)\n\
+		 \t: \"${{ip:?udhcpc reported no address}}\"\n\
+		 \t# A prefix length, which is `$mask`. `$subnet` carries the same thing in\n\
+		 \t# dotted form and `ip` will not take it, so an old client that sets only\n\
+		 \t# `subnet` is refused by name rather than guessed at.\n\
+		 \t: \"${{mask:?this udhcpc does not set \\$mask; netcfgd needs a prefix length}}\"\n\
+		 \tnew=\"$ip/$mask\"\n\
+		 \t[ \"$new\" = \"$held\" ] || withdraw\n\
+		 \tip -4 addr replace \"$new\" dev \"$iface\"\n\
+		 \tprintf '%s' \"$new\" > \"$state\"\n\
+		 \tif [ -n \"${{router:-}}\" ]; then\n\
+		 \t\tfor gateway in $router; do\n\
+		 \t\t\tip -4 route replace default via \"$gateway\" dev \"$iface\" && break\n\
+		 \t\tdone\n\
+		 \tfi\n\
+		 \t;;\n\
+		 deconfig|nak|leasefail)\n\
+		 \t# The lease is gone or was never obtained. `deconfig` also arrives once\n\
+		 \t# before the first lease, when there is nothing recorded and this is a\n\
+		 \t# no-op.\n\
+		 \twithdraw\n\
+		 \t;;\n\
+		 esac\n\
+		 exit 0\n",
+		iface = iface,
+		state = state.display()
+	)
 }
 
 /// The script's text.
@@ -2481,11 +2620,42 @@ fn supplicant_binary() -> Option<std::path::PathBuf> {
 fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), String> {
 	use netcfgd_model::BackendKind;
 	match kind {
-		BackendKind::Dhcp4 => match Command::new("dhcpcd").args(["-k", iface]).status() {
-			Ok(_) => Ok(()),
-			Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-			Err(error) => Err(format!("could not stop dhcpcd on {iface}: {error}")),
-		},
+		BackendKind::Dhcp4 => {
+			// Whichever client is running. `dhcpcd -k` stops a dhcpcd and does
+			// nothing to a udhcpc, which netcfgd used to leave running forever --
+			// there was no pid file to find it by. Now there is, and the pid is
+			// checked against `/proc/<pid>/cmdline` before anything is signalled,
+			// for the reason `pppd_pid` does it: a pid file outlives the process it
+			// names and pids are recycled. Decision 0065.
+			match Command::new("dhcpcd").args(["-k", iface]).status() {
+				Ok(_) => {}
+				Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+				Err(error) => return Err(format!("could not stop dhcpcd on {iface}: {error}")),
+			}
+			let path = run_dir_path().join("udhcpc").join(format!("{iface}.pid"));
+			let Some(pid) = std::fs::read_to_string(&path)
+				.ok()
+				.and_then(|text| text.trim().parse::<i32>().ok())
+			else {
+				return Ok(());
+			};
+			let ours = std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
+				cmdline
+					.split(|byte| *byte == 0)
+					.any(|argument| argument == iface.as_bytes())
+			});
+			if !ours {
+				// A stale pid file, or a pid that has been recycled by something
+				// else. Removing the file is the whole of the correct action.
+				let _ = std::fs::remove_file(&path);
+				return Ok(());
+			}
+			netcfgd_sys::process::terminate(pid).map_err(|error| {
+				format!("could not stop udhcpc on {iface} (pid {pid}): {error}")
+			})?;
+			let _ = std::fs::remove_file(&path);
+			Ok(())
+		}
 		BackendKind::Supplicant => {
 			// Terminated through its own control socket rather than by signal:
 			// the socket is the interface netcfgd already speaks, and killing
@@ -2564,5 +2734,57 @@ mod tests {
 		assert_eq!(dhcp6_client(false, false, "wan0"), Ok("dhcpcd"));
 		assert_eq!(dhcp6_client(false, true, "wan0"), Ok("odhcp6c"));
 		assert_eq!(dhcp6_client(true, true, "wan0"), Ok("odhcp6c"));
+	}
+}
+
+#[cfg(test)]
+mod udhcpc_tests {
+	/// The generated script is valid shell, and says what it will not touch.
+	///
+	/// `sh -n` rather than an eyeball: this is a shell script written from Rust
+	/// through two levels of escaping, and the failure mode is a syntax error that
+	/// only appears when a lease arrives on somebody's machine.
+	#[test]
+	fn the_script_parses_and_leaves_what_it_should_alone() {
+		let script = super::udhcpc_script("cli", std::path::Path::new("/run/x/cli.address"));
+		let dir = std::env::temp_dir().join(format!("ncfg-udhcpc-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).expect("a directory");
+		let path = dir.join("script");
+		std::fs::write(&path, &script).expect("written");
+		let checked = std::process::Command::new("sh")
+			.arg("-n")
+			.arg(&path)
+			.output()
+			.expect("sh runs");
+		assert!(
+			checked.status.success(),
+			"the generated script is not valid shell: {}",
+			String::from_utf8_lossy(&checked.stderr)
+		);
+		// The three things it must not do. Asserted on the *code* rather than on the
+		// text, because the script's own comments say it leaves resolv.conf and the
+		// MTU alone -- a check that could not tell a comment from a command would
+		// pass for the wrong reason, or fail for one.
+		let code: String = script
+			.lines()
+			.filter(|line| !line.trim_start().starts_with('#'))
+			.collect::<Vec<&str>>()
+			.join("\n");
+		assert!(
+			!code.contains("resolv.conf"),
+			"it writes resolv.conf: {code}"
+		);
+		assert!(!code.contains("mtu"), "it sets an MTU: {code}");
+		assert!(!code.contains("flush"), "it flushes addresses: {code}");
+		// And the two it must: the address, and a default route via the lease's
+		// router. Both by the variable names busybox actually sets, measured against
+		// a real client rather than taken from a manual page.
+		assert!(code.contains("addr replace \"$new\""));
+		assert!(code.contains("route replace default via"));
+		assert!(
+			code.contains("${mask:?"),
+			"it does not insist on a prefix length"
+		);
+		let _ = std::fs::remove_dir_all(&dir);
 	}
 }
