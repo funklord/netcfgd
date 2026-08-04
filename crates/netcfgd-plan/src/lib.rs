@@ -793,10 +793,6 @@ impl Builder {
 		}
 		self.actions.push(Action {
 			id,
-			// Before `op` moves, and the only place in the planner that
-			// needs to remember: every action a plan carries comes
-			// through here.
-			op_name: op.name().to_owned(),
 			op,
 			reason,
 			depends_on,

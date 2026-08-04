@@ -521,19 +521,18 @@ static int staged_open(struct staged *staged, const char *what, const char *answ
  * today, but the model says "not reversible" for both spellings and a check
  * that only knew one would pass against a daemon that changed its mind.
  * The third also carries a reason with no interface, which is what a host-wide
- * action -- nat_replace, hostname_set -- looks like.
+ * action -- nat.replace, hostname.set -- looks like.
  */
 static const char plan_response[] =
 	"{\"response\":\"plan\",\"actions\":["
-	"{\"id\":0,\"op\":{\"op\":\"bridge_vlan_add\",\"name\":\"br0\",\"vid\":7},"
-	"\"op_name\":\"bridge.vlan.add\","
+	"{\"id\":0,\"op\":{\"op\":\"bridge.vlan.add\",\"name\":\"br0\",\"vid\":7},"
 	"\"reason\":{\"interface\":\"eth0\",\"field\":\"addressing[0]\","
 	"\"desired\":\"192.168.1.10/24\",\"observed\":\"<absent>\"},\"depends_on\":[],"
-	"\"inverse\":{\"op\":\"bridge_vlan_del\",\"name\":\"br0\",\"vid\":7}},"
-	"{\"id\":45,\"op\":{\"op\":\"commit_arm\",\"window_seconds\":90},"
+	"\"inverse\":{\"op\":\"bridge.vlan.del\",\"name\":\"br0\",\"vid\":7}},"
+	"{\"id\":45,\"op\":{\"op\":\"commit.arm\",\"window_seconds\":90},"
 	"\"reason\":{\"interface\":\"eth0\",\"field\":\"confirm\",\"desired\":\"90\","
 	"\"observed\":\"<absent>\"},\"depends_on\":[0],\"inverse\":null},"
-	"{\"id\":43,\"op\":{\"op\":\"nat_replace\",\"uplinks\":[\"eth0\"]},"
+	"{\"id\":43,\"op\":{\"op\":\"nat.replace\",\"uplinks\":[\"eth0\"]},"
 	"\"reason\":{\"field\":\"nat\",\"desired\":\"eth0\",\"observed\":\"<absent>\"},"
 	"\"depends_on\":[0]}"
 	"],\"warnings\":[{\"message\":\"slaac is accepted but not yet applied by this build\","
@@ -566,22 +565,17 @@ static void a_plan_becomes_a_model(void)
 
 	if (plan.action_count == 3u) {
 		/* The op is a tagged object in the wire shape and a name in the
-		 * model, which is the one conversion a screen cannot do for
-		 * itself without knowing all forty-seven variants.
+		 * model, and since 0083 the tag is the name -- so this is a read
+		 * rather than a translation, and no client carries a table of
+		 * forty-seven strings that netcfgd would then be free to change.
 		 *
-		 * `bridge_vlan_add` on purpose. The tag and the name differ by
-		 * more than a separator for exactly three ops, so a client that
-		 * guessed -- swap the first underscore for a dot -- would produce
-		 * `bridge.vlan_add` and be right about the other forty-four. This
-		 * is the one that catches the guess. */
-		equals("an op is the short name the daemon sends beside it", plan.actions[0].op,
+		 * `bridge.vlan.add` on purpose. It is one of the three whose old
+		 * tag differed from its name by more than a separator, so a client
+		 * still guessing from `bridge_vlan_add` would say `bridge.vlan_add`
+		 * and be right about the other forty-four. */
+		equals("an op is the name the wire calls it", plan.actions[0].op,
 		       "bridge.vlan.add");
-		/* The other two carry no `op_name`, which is what a daemon older
-		 * than that field looks like. The tag is not the right word, but
-		 * an empty op column would be worse: a plan that will not say
-		 * what it is about to do is not a plan. */
-		equals("and falls back to the tag where an older daemon sent none",
-		       plan.actions[1].op, "commit_arm");
+		equals("and every op reads the same way", plan.actions[1].op, "commit.arm");
 		ok("an id survives", plan.actions[0].id == 0 && plan.actions[1].id == 45, NULL);
 
 		/* The reason is the half that matters: an action without it is

@@ -426,7 +426,6 @@ fn witness() -> Plan {
 			// The inverse on every action rather than one: it is an `Option`,
 			// and a field that is absent in the sample pins nothing.
 			inverse: Some(op.clone()),
-			op_name: op.name().to_owned(),
 			op,
 			reason: Reason {
 				interface: Some("eth0".to_owned()),
@@ -520,6 +519,36 @@ fn first_difference(expected: &str, actual: &str) -> (usize, String, String) {
 
 /// The witness has to survive a round trip, or it is pinning a format nothing
 /// can read.
+/// An op's wire tag is its name, for every op there is.
+///
+/// The tag used to be serde's `snake_case` of the variant and the name was
+/// `Op::name()`, so one operation had two spellings and only a client outside
+/// this workspace could see both at once (0082). Renaming the tags to the names
+/// fixes that and replaces it with a subtler risk: two lists of forty-seven
+/// strings, one in `#[serde(rename)]` attributes and one in `name()`, free to
+/// disagree the next time somebody adds an op and copies the wrong neighbour.
+///
+/// This is what stops them. It is not a spot check -- `every_op()` is the
+/// exhaustive sample the witness is built from, and a new variant that reaches
+/// neither list fails the assertion above it before it reaches this one.
+#[test]
+fn every_op_serialises_as_the_name_it_reports() {
+	for op in every_op() {
+		let value = serde_json::to_value(&op).expect("an op serialises");
+		let tag = value
+			.get("op")
+			.and_then(serde_json::Value::as_str)
+			.unwrap_or_else(|| panic!("an op serialises with its tag: {op:?}"));
+
+		assert_eq!(
+			tag,
+			op.name(),
+			"the wire calls this `{tag}` and everything else calls it `{}`",
+			op.name()
+		);
+	}
+}
+
 #[test]
 fn the_plan_witness_round_trips() {
 	let plan = witness();

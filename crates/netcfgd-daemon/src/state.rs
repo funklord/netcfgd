@@ -466,7 +466,6 @@ mod tests {
 	fn action(id: u32, interface: &str, depends_on: Vec<u32>) -> Action {
 		Action {
 			id,
-			op_name: "link.up".to_owned(),
 			op: Op::LinkUp {
 				name: interface.to_owned(),
 			},
