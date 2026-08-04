@@ -66,7 +66,7 @@ pub use route::{Route, RouteScope};
 pub use rule::{RoutingRule, RuleAction, RuleFamily};
 pub use secret::{SecretProvider, SecretRef};
 pub use security::{EapConfig, EapMethod, Security};
-pub use wifi::{Ssid, WifiNetwork};
+pub use wifi::{RoamPolicy, Ssid, WifiNetwork};
 
 use serde::{Deserialize, Serialize};
 
