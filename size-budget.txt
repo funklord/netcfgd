@@ -381,4 +381,40 @@ netcfgd
 # without it, an interface set to `reconcile` produced 181 starts in twelve
 # seconds for a daemon that lived half a second -- measured, on the change that
 # introduced it.
-total 2210328
+# +52 KB across the twenty-eight commits since the entry above, measured by
+# building the release binary at six points along that range rather than
+# attributed by guess:
+#
+#   d2db524  2210328   the last figure this file recorded
+#   1a6f5dc  2210328   +0   noticing a dead supplicant by its pid file
+#   8e561f8  2218520   +8   the drift hook, `ncfg reload`, one name per op
+#   62204bd  2234904   +16  a wedged daemon's `answering`, a v6 lease's
+#                           nameservers, enterprise networks from the CLI,
+#                           and a station roaming to the loudest AP
+#   09b4372  2251288   +16  naming a network by its access points, the roam
+#                           hook and its watcher, control tiers, rfkill events
+#   871ca25  2263576   +12  the commit-confirm window a document asks for,
+#                           and the captive-portal probe
+#   HEAD     2263576   +0   everything since
+#
+# The last row is the one worth reading. Five changes land in it -- the
+# `pre_down` teardown ordering, the dangling-dependency fix, asking a
+# supplicant whether it answers, two package formats, and the zombie check --
+# and the gate cannot see any of them. The linker pads to 4 KB pages, which
+# this file already knew from the TUI entry; a step smaller than a page is
+# invisible here, and several small steps can hide inside one until they
+# cross.
+#
+# Which is how this drifted at all. It was never one feature that overspent:
+# it was 2.41% accumulated four kilobytes at a time, against a 3% tolerance
+# that exists for compiler noise. Thirteen kilobytes of that tolerance were
+# left, so the next real feature would have failed this gate for exactly the
+# wrong reason -- which is the sentence at the top of this file, happening.
+#
+# Recorded at the measured size, as every entry above it is.
+#
+# +4 KB on top of that for `NCFG_OPENVPN`: three lines in the backend's binary
+# lookup, which is a page. It is here rather than folded into the row above
+# because it is not a feature -- it is what it cost to make `openvpn.sh` test
+# netcfgd on a machine that has openvpn installed (0101).
+total 2267672

@@ -46,7 +46,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 # The same search order netcfgd uses. A test that found hostapd somewhere
 # netcfgd does not look would pass while netcfgd reported it missing.
-hostapd=$(find_hostapd) || skip "hostapd is not installed (apt install hostapd)"
+hostapd=$(find_hostapd) || skip "hostapd is not installed (apt install hostapd | apk add hostapd)"
 
 work=$(mktemp -d /tmp/ncfg-ap.XXXXXX)
 cleanup() { rm -rf "$work"; }
