@@ -65,6 +65,15 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
 	plan = new ncfg_plan_view(nullptr, this);
 	layout->addWidget(plan, 3);
 
+	/* Between the plan and the confirm window, because it is read in that
+	 * order: what will happen, what the daemon refuses, then how long you get
+	 * to change your mind. Hidden when the plan has nothing refused, so an
+	 * ordinary apply is the same dialog it was. */
+	consent_box = new QGroupBox(QStringLiteral("What the daemon refuses"), this);
+	consent_layout = new QVBoxLayout(consent_box);
+	consent_box->setVisible(false);
+	layout->addWidget(consent_box);
+
 	auto *window_box = new QGroupBox(QStringLiteral("Confirm window"), this);
 	auto *window_layout = new QHBoxLayout(window_box);
 	arm_window = new QCheckBox(
@@ -144,18 +153,83 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
 	}
 	plan->show_plan(fetched);
 
-	if (fetched.blocked()) {
-		say(QStringLiteral("The daemon refuses part of this plan. Apply is not offered: "
-				   "the `what to do` column above is the daemon's own remedy, "
-				   "and this client cannot send it."));
-		return;
-	}
-	if (fetched.actions.isEmpty()) {
+	build_consent(fetched);
+
+	/* A refusal usually means *no* actions: the guard stops the ones it
+	 * covers, and a plan whose only content is a refusal has an empty action
+	 * list. So "nothing to do" cannot be read off the actions alone -- doing
+	 * that disabled Apply on exactly the plan consent exists for, which is
+	 * what the headless probe found on its first run. */
+	if (fetched.actions.isEmpty() && !fetched.blocked() && fetched.stranded.isEmpty()) {
 		say(QStringLiteral("Nothing to do -- the machine matches the configuration."));
 		return;
 	}
 	apply_button->setEnabled(true);
-	say(QStringLiteral("Review the plan above. Nothing is sent until Apply."));
+	if (fetched.blocked()) {
+		say(QStringLiteral("The daemon refuses part of this plan. Tick what you agree "
+				   "to below -- each one covers exactly the interface it "
+				   "names -- or apply without it and the refused actions "
+				   "will not run."));
+	} else {
+		say(QStringLiteral("Review the plan above. Nothing is sent until Apply."));
+	}
+}
+
+/*
+ * One checkbox per thing the daemon refused, each naming what it covers.
+ *
+ * Never one box marked "override refusals". `ncfg` spells these
+ * `--allow-disruption IFACE` and `--strand-credentials DEV`, repeatable and
+ * "deliberately not a blanket --force", and a single control would be that
+ * blanket with a friendlier label. The two lists are kept apart for the reason
+ * the daemon keeps them apart: an operator who accepted an outage on one
+ * interface has not agreed to leave a private key on another.
+ *
+ * Unticked by default, and nothing here pre-selects: the refusal is the daemon
+ * saying no, and a dialog that arrived with the override already ticked would
+ * be answering on the operator's behalf.
+ */
+void ncfg_apply_dialog::build_consent(const ncfg_plan_data &fetched)
+{
+	if (fetched.refusals.isEmpty() && fetched.stranded.isEmpty()) {
+		return;
+	}
+	consent_box->setVisible(true);
+
+	struct group {
+		const QList<ncfg_note_row> *rows;
+		const char                 *verb;
+		QStringList                *into;
+	};
+	const group groups[] = {
+		{ &fetched.refusals, "disrupt", &agreed.disrupt },
+		{ &fetched.stranded, "leave the credential on", &agreed.strand },
+	};
+
+	for (const group &g : groups) {
+		for (const ncfg_note_row &note : *g.rows) {
+			if (note.interface.isEmpty()) {
+				continue;
+			}
+			/* The daemon's own remedy is the label's second half, so
+			 * that ticking this and running the command it names are
+			 * visibly the same act. */
+			auto *box = new QCheckBox(
+				QStringLiteral("%1 %2 -- %3")
+					.arg(QString::fromLatin1(g.verb), note.interface,
+					     note.consent.isEmpty() ? note.message : note.consent),
+				consent_box);
+			QStringList *into = g.into;
+			const QString name = note.interface;
+			connect(box, &QCheckBox::toggled, this, [into, name](bool on) {
+				into->removeAll(name);
+				if (on) {
+					into->append(name);
+				}
+			});
+			consent_layout->addWidget(box);
+		}
+	}
 }
 
 void ncfg_apply_dialog::say(const QString &text)
@@ -177,7 +251,7 @@ void ncfg_apply_dialog::run_apply()
 
 	QList<ncfg_record_row> records;
 	QString error;
-	if (!connection->apply(seconds, &records, &error)) {
+	if (!connection->apply(seconds, agreed, &records, &error)) {
 		/* The daemon's own sentence, unedited. It names the tier or the
 		 * override that would have been needed, and that is the only
 		 * part of it that tells the operator what to do next. */
