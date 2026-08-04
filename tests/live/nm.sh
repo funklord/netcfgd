@@ -1023,6 +1023,15 @@ PYEOF
 			echo "       nmcli returned without the expected message. It said:"
 			printf '%s\n' "$cancel_out" | sed 's/^/       /'
 			echo "       agent log: $(tr '\n' ' ' < "$work/agent-cancel.log" 2>/dev/null)"
+			echo "       $(grep 'last agent asked' "$work/nm.log" 2>/dev/null | tail -1)"
+			# The shim's own account, which is where the answer is. `nm.log` is
+			# the file it writes to; naming any other one prints nothing at
+			# exactly the moment it is wanted.
+			echo "       --- the shim said (last 20 lines) ---"
+			tail -20 "$work/nm.log" 2>/dev/null | sed 's/^/       /'
+			echo "       --- end ---"
+			echo "       NCFG_NM_TRACE=1 adds a checkpoint ring inside the shim,"
+			echo "       dumped by its watchdog when a handler stalls (0107)"
 			echo "       if the agent log stops at \`registered\`, the shim never"
 			echo "       asked it -- see docs/decisions/0106"
 			failures=$((failures + 1))

@@ -86,10 +86,23 @@ def main():
     manager = dbus.Interface(
         bus.get_object(NM_NAME, MANAGER_PATH), MANAGER_INTERFACE
     )
-    manager.Register("org.netcfgd.test-agent")
-    print("registered", flush=True)
-
     loop = GLib.MainLoop()
+
+    # Register from inside the running loop, not before it.
+    #
+    # `Register` tells the shim this agent can be asked and the printed line
+    # tells the test the same thing, and neither was true yet: dbus-python
+    # dispatches incoming calls from the GLib main context, and nothing iterated
+    # it until `loop.run()`. An idle callback runs on the loop's first
+    # iteration, so by the time anybody is told this agent is available, it is.
+    #
+    # **This was investigated as the cause of the intermittent cancelled-prompt
+    # failure and was not it** -- the failure survived the change, and the real
+    # cause was the shim asking *nmcli's* agent, which cannot answer while it
+    # waits for the activation reply (0107). Kept anyway: announcing readiness
+    # before being able to answer is wrong on its own terms, and this is where
+    # the next person will look.
+    GLib.idle_add(announce)
     try:
         loop.run()
     except KeyboardInterrupt:
