@@ -117,6 +117,21 @@ if [ -z "${NCFG_DHCPCD_NS:-}" ]; then
 	NCFG_DHCPCD_NS=1
 	export NCFG_DHCPCD_NS
 	if [ "$(id -u)" = 0 ]; then
+		# Root -- but possibly root inside somebody else's user namespace. A
+		# plain `unshare -rn` writes `deny` to /proc/self/setgroups, which is
+		# what an unprivileged gid mapping costs, and dhcpcd's privilege
+		# drop then fails with "failed to change group-id". Nesting another
+		# `--net` below would change nothing about that.
+		#
+		# A skip rather than a failure, because the caller is wrong and not the
+		# code: the Makefile runs this script bare for exactly this reason, and
+		# it is the only place that knowledge was written down. It cost a
+		# session -- a sweep that wrapped every live script in `unshare -rn`
+		# alike got "the client did not start" out of this one and read it as a broken
+		# feature, which it was not.
+		if [ "$(cat /proc/self/setgroups 2>/dev/null)" = deny ]; then
+			skip "this script makes its own namespace and has been run inside one that forbids setgroups (a plain \`unshare -rn\`), where dhcpcd cannot drop privileges -- run it bare, as the Makefile does"
+		fi
 		# Real root: no user namespace at all, so dhcpcd's own user exists and
 		# privilege separation works the way it does on a real machine.
 		exec unshare --mount --uts --net -- sh "$0" "$@"
