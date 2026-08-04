@@ -237,10 +237,19 @@ const RESTART_LIMIT: u32 = 5;
 
 /// The hook phases this build actually runs.
 ///
-/// Seven of the eleven the model declares. The other five are recognised, written
-/// into `/run/netcfgd/hooks/`, hashed and carried in the document -- and never
-/// executed, which reads exactly like a working feature: the file is there, the
-/// plan mentions nothing, and the script never runs.
+/// The phases a *plan* fires. Not the phases that run.
+///
+/// `drift` runs and is deliberately not here: it fires from the daemon at
+/// detection rather than as an action, because drift under `report` produces no
+/// apply at all and a planned `HookRun` would be the one policy whose whole
+/// purpose is "tell me" telling nobody. It is listed as fired below, where the
+/// warning is, because the question an operator is asking there is "will my
+/// script run", not "will it be in a plan".
+///
+/// The rest are recognised, written into `/run/netcfgd/hooks/`, hashed and
+/// carried in the document -- and never executed, which reads exactly like a
+/// working feature: the file is there, the plan mentions nothing, and the script
+/// never runs.
 ///
 /// Named here rather than hidden in a filter so that the warning below and the
 /// planner cannot disagree about which ones.
@@ -254,6 +263,13 @@ const FIRED_PHASES: &[HookPhase] = &[
 	HookPhase::Carrier,
 ];
 
+/// Phases that run without being planned, for the warning's sake.
+///
+/// A count is not kept anywhere: the comment above this list carried one and
+/// said "the other five" when it was four, for two commits after the number
+/// moved. The lists are the count.
+const UNPLANNED_PHASES: &[HookPhase] = &[HookPhase::Drift];
+
 /// Say which hooks the document declares that nothing will run.
 ///
 /// Per phase and per interface rather than one blanket sentence, for the reason
@@ -263,7 +279,10 @@ fn warn_unfired_hooks(builder: &mut Builder, desired: &Document) {
 	for interface in &desired.interfaces {
 		let mut said: Vec<HookPhase> = Vec::new();
 		for hook in &interface.hooks {
-			if FIRED_PHASES.contains(&hook.phase) || said.contains(&hook.phase) {
+			if FIRED_PHASES.contains(&hook.phase)
+				|| UNPLANNED_PHASES.contains(&hook.phase)
+				|| said.contains(&hook.phase)
+			{
 				continue;
 			}
 			said.push(hook.phase);
@@ -281,6 +300,7 @@ fn warn_unfired_hooks(builder: &mut Builder, desired: &Document) {
 					// is warning about.
 					FIRED_PHASES
 						.iter()
+						.chain(UNPLANNED_PHASES)
 						.map(|phase| format!("`{}`", phase.name()))
 						.collect::<Vec<String>>()
 						.join(", ")

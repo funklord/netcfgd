@@ -210,9 +210,16 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		}
 		if kernel_changed || config_changed {
 			state.reobserve();
-			for event in state.detect_drift() {
-				server::broadcast(&mut subscribers, &event);
+			let drift = state.detect_drift();
+			for event in &drift {
+				server::broadcast(&mut subscribers, event);
 			}
+			// Before the reconcile, so a `drift` script sees the machine as it
+			// drifted rather than as netcfgd has just put it back. That is the
+			// only ordering that makes the hook worth having under
+			// `reconcile`, where the window between the two is milliseconds.
+			let told = state.run_drift_hooks(&drift);
+			remember_drift(&state, &told);
 			reconcile_drift(&mut state, &mut subscribers);
 		}
 
@@ -342,6 +349,33 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 			summary: format!("applied {} actions", journal.done()),
 		},
 	);
+}
+
+/// Record what the `drift` phase has been told, so it is told once.
+///
+/// Through the same `/run` record the `carrier` and `lease` phases use, and
+/// through that alone. The first version wrote it into the in-memory
+/// observation as well, with a comment saying why that was necessary; breaking
+/// the line changed nothing, because `reobserve` reads this record back and
+/// runs before every drift check. Breaking *this* write turns one hook run into
+/// seven. The comment was the kind of claim that outlives its reason, so the
+/// line went rather than the claim.
+fn remember_drift(state: &State, told: &[(String, String)]) {
+	if told.is_empty() {
+		return;
+	}
+	let mut owned = run_state::read_owned(&state.paths.run);
+	for (interface, summary) in told {
+		owned.hook_state.retain(|record| {
+			&record.interface != interface || record.phase != netcfgd_model::HookPhase::Drift
+		});
+		owned.hook_state.push(netcfgd_model::ObservedHookState {
+			interface: interface.clone(),
+			phase: netcfgd_model::HookPhase::Drift,
+			value: summary.clone(),
+		});
+	}
+	let _ = run_state::write_owned(&state.paths.run, &owned);
 }
 
 /// Put back what drifted, but only on interfaces whose policy says to.

@@ -1411,13 +1411,24 @@ match.
      would clobber each other's `dns=` lines on every renewal. What a v6 lease
      says about names therefore still reaches nothing, which is now a stated gap
      with a shape (a fragment directory) rather than an accident.
-   - **Four hook phases still do not fire**: `pre_down`, `roam`, `portal` and
-     `drift`. `up` was the fifth and now fires
+   - **Three hook phases still do not fire**: `pre_down`, `roam` and `portal`.
+     `drift` was the fourth and now fires
+     ([0084](docs/decisions/0084-the-drift-hook-fires-where-nothing-is-applied.md)),
+     and it is the only one of the eleven that is **not a plan action**: under
+     `on_drift = "report"` netcfgd applies nothing, so a planned hook would never
+     run and the policy whose entire purpose is "tell me, do not touch it" would
+     tell nobody. It fires from the daemon at detection, once per drift rather
+     than once per netlink event — measured, because without that guard three
+     unrelated link add/deletes turn one hook run into seven.
+     `up` was the fifth and fires
      ([0076](docs/decisions/0076-the-up-hook-is-the-moment-a-link-is-live-and-bare.md)):
-     it is the one moment where the link is live and nothing is addressed, which is
-     what `pre_up` cannot see and `post_up` is too late for. `roam` is the next one
-     worth having, and it wants the supplicant's event socket rather than an
-     observation.
+     the one moment where the link is live and nothing is addressed, which is
+     what `pre_up` cannot see and `post_up` is too late for. Of what is left,
+     `roam` is the next one worth having, and it wants the supplicant's event
+     socket rather than an observation; `pre_down` is deferred with a reason
+     (it and `down` fire at the same point until there is a teardown ordering);
+     and `portal` wants captive-portal detection, which does not exist anywhere
+     in the tree.
    - ~~**`ncfg secret set NAME` does not exist**~~ — **closed**
      ([0075](docs/decisions/0075-a-secret-is-stored-by-a-command-that-never-shows-it.md)).
      The value is never an argument, never echoed, and the file is 0600 from the
@@ -1477,6 +1488,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **An explanation of why a line is load-bearing, above a line that is not, is a gate that cannot fail.** The drift record was written to `/run` *and* into the in-memory observation, with a comment saying the second was necessary because the next check comes before the next `reobserve`. Breaking it changed nothing — `reobserve` reads the record back and does run first. The comment was wrong and confident, and the only reason anybody found out is that every part of the change was broken on purpose, including the parts that looked obviously right. The line went rather than the comment.
 - **A break that correctly passes is a finding, not a failed break.** Renaming an op on the wire left the TUI's plan-pane test green, and that is right: the pane draws what the daemon sends, so pane and test moved together. "One operation has one name" is a different question and it fails one layer down, in `netcfgd-plan`. A break that does not fire is worth understanding before it is worth fixing -- the answer is either a blind gate or a gate whose subject is somewhere else, and the two look identical until you say which.
 - **A fixture written from a second reading of the type repeats the first reading's mistake.** The wifi pane read `entries` where the daemon sends `access_points`, and the test written to stop that happening again was itself written from `ScanReport` rather than from the witness. It could not have caught the bug it was named after. Where a test exists because a field name was got wrong, the fixture has to come from the wire, not from a fresh look at the struct.
 - **Two witnesses can both be necessary and neither sufficient.** `socket.json` pins the `status` and `plan` envelopes with every list empty; `observed.json` and `plan.json` hold the content with no envelope. A test wanting a realistic answer has to compose them -- which is a guess about the protocol unless something checks it, so the composition is asserted against the pinned envelope member by member. Worth knowing before writing the fourth witness.
