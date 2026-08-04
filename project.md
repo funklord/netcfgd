@@ -1465,7 +1465,17 @@ match.
      `DhcpcdHooks`: with the v6 client given a script, nothing constructs
      `Silence`, so every dhcpcd netcfgd starts gets `-c` and there is no argument
      for one that does not.
-   - **Three hook phases still do not fire**: `pre_down`, `roam` and `portal`.
+   - **Two hook phases still do not fire**: `pre_down` and `portal`. `roam` was
+     the third and now fires
+     ([0091](docs/decisions/0091-a-roam-is-something-the-supplicant-tells-netcfgd.md)),
+     from a watcher thread attached to each radio's control socket. **Push, not
+     poll, and that was worth re-checking rather than inheriting**: netcfgd asks
+     a station nothing during an observation, so the alternative meant a
+     `STATUS` round trip per radio on every netlink event — and it could still
+     miss a station that moved and moved back between two of them. Unlike
+     `drift` it is *not* de-duplicated: drift is a condition that persists and a
+     roam is a thing that happened, so a station that moved back and forth
+     moved twice.
      `drift` was the fourth and now fires
      ([0084](docs/decisions/0084-the-drift-hook-fires-where-nothing-is-applied.md)),
      and it is the only one of the eleven that is **not a plan action**: under
@@ -1478,11 +1488,10 @@ match.
      ([0076](docs/decisions/0076-the-up-hook-is-the-moment-a-link-is-live-and-bare.md)):
      the one moment where the link is live and nothing is addressed, which is
      what `pre_up` cannot see and `post_up` is too late for. Of what is left,
-     `roam` is the next one worth having, and it wants the supplicant's event
-     socket rather than an observation; `pre_down` is deferred with a reason
-     (it and `down` fire at the same point until there is a teardown ordering);
-     and `portal` wants captive-portal detection, which does not exist anywhere
-     in the tree.
+     `pre_down` is deferred with a reason (it and `down` fire at the same point
+     until there is a teardown ordering), and `portal` wants captive-portal
+     detection, which does not exist anywhere in the tree — so the phase is a
+     place to put a script rather than a feature.
    - ~~**`ncfg secret set NAME` does not exist**~~ — **closed**
      ([0075](docs/decisions/0075-a-secret-is-stored-by-a-command-that-never-shows-it.md)).
      The value is never an argument, never echoed, and the file is 0600 from the
@@ -1565,6 +1574,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
 - **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
 - **"Is there anything to do?" cannot be read off the action list once a refusal can be consented to.** A guard refusal usually means the plan has *no* actions -- the guard stops the ones it covers -- so a plan whose only content is a refusal has an empty action list. The GUI read "nothing to do" off that and disabled Apply on exactly the plan consent exists for (0088). Found by a headless probe that ticks a box and clicks a button; the headless run that already existed proves the window opens, which is a different claim entirely. **When a screen gains a way to act on something, re-check every emptiness test near it.**
 - **A break that does not compile is not a break, and a harness grepping for `FAILED` calls it a pass.** §9 already warns that a break which silently fails to *apply* reads like a gate that works. This is the same disease one step later: the patch applied, `cargo test` failed to build, no line said `FAILED`, and the sweep reported the gate holding. A break harness has to treat a build failure as "not a break" — and the same run found the gap the break was aimed at, which is that a refusal was tested by calling the function that makes it rather than the command that reaches it. **A refusal nobody reaches is not a refusal.**

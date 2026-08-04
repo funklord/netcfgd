@@ -88,6 +88,40 @@ impl Event {
 	pub fn name(&self) -> &str {
 		self.text.split_whitespace().next().unwrap_or("")
 	}
+
+	/// The access point a `CTRL-EVENT-CONNECTED` says was joined.
+	///
+	/// The format is `wpa_supplicant`'s own, read out of the binary rather than
+	/// from documentation, which does not give it:
+	///
+	/// ```text
+	/// CTRL-EVENT-CONNECTED - Connection to %02x:...:%02x completed [id=%d id_str=%s%s]
+	/// ```
+	///
+	/// So the address is the fifth word. Positional rather than pattern-matched
+	/// on "Connection to", because that phrase is prose and the shape around it
+	/// is what the format string fixes -- and a reader keyed on the prose would
+	/// break on a translation that never comes while missing a reordering that
+	/// might.
+	///
+	/// `None` for every other event, including a connect that did not name an
+	/// address: a caller comparing addresses must not be handed an empty one,
+	/// which would read as "moved to nowhere".
+	#[must_use]
+	pub fn connected_bssid(&self) -> Option<&str> {
+		if self.name() != "CTRL-EVENT-CONNECTED" {
+			return None;
+		}
+		let bssid = self.text.split_whitespace().nth(4)?;
+		// Shape-checked, because the fifth word being an address is the whole
+		// assumption: six hex pairs separated by colons.
+		let looks_right = bssid.len() == 17
+			&& bssid.split(':').count() == 6
+			&& bssid
+				.split(':')
+				.all(|pair| pair.len() == 2 && pair.chars().all(|c| c.is_ascii_hexdigit()));
+		looks_right.then_some(bssid)
+	}
 }
 
 /// Decode `wpa_supplicant`'s escaping of a text field.
