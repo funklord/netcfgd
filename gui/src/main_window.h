@@ -24,6 +24,7 @@
 
 class QLabel;
 class QTabWidget;
+class QTimer;
 
 class ncfg_connection;
 class ncfg_devices_view;
@@ -51,8 +52,17 @@ private slots:
 	void note(const QString &summary);
 	void tab_changed();
 
+	/* An event says the machine moved. Restarts the settle timer rather than
+	 * refreshing, so a burst of events costs one look. */
+	void moved();
+
 private:
 	ncfg_connection   *connection;
+	/* Single-shot, restarted on every event, so the refresh happens once the
+	 * events stop rather than once per event. Not a poll: it never fires
+	 * unless something arrived, which is the difference between this and
+	 * asking the daemon on a schedule. */
+	QTimer            *settle;
 	QTabWidget        *tabs;
 	ncfg_devices_view *devices;
 	ncfg_plan_view    *plan;

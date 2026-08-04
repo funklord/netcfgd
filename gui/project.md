@@ -391,10 +391,18 @@ Four rules, all of them the same rule:
    enabled -- being refused produces a sentence naming what was needed, and a
    greyed-out button produces silence.
 
+   ~~The monitor stream does not refresh the other two tabs.~~ **Done**: an
+   event that means the machine or the document moved restarts a single-shot
+   timer, and the tab in front of the operator is re-asked once the events stop.
+   **A debounce is not a poll** -- it never fires unless something arrived, which
+   is the distinction the events pane's "no timer" rule was about; the daemon's
+   own loop collapses a burst into one pass for the same reason. `confirm_armed`
+   is deliberately not in the list: a window opening changes nothing yet.
+   Switching tabs re-asks too, or a pane that went stale while another was
+   showing stays stale until the next event.
+
    What is left: `globals.confirm_default` is unreachable, so the dialog offers
-   60s to match `ncfg tui`; and the monitor stream does not refresh the other two
-   tabs, which is the obvious use of `observed`/`drift`/`reloaded` and wants a
-   coalescing rule before it wants code.
+   60s to match `ncfg tui`.
 2. **`wire/` plus `agent/`, LAN only**, with the fuzzing standard from the first
    commit.
 3. **Android**, which by then is a kit and a transport choice rather than a port.

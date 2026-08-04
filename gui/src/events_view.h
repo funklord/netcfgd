@@ -39,6 +39,15 @@ public slots:
 signals:
 	void reported(const QString &summary);
 
+	/* An event arrived that means the machine or the document moved, so
+	 * anything drawn from either is now describing the past.
+	 *
+	 * Emitted per event and deliberately not throttled here: this view knows
+	 * what happened and the window knows what it costs to look again, and
+	 * putting the rate limit in the emitter would make every future consumer
+	 * inherit one view's guess about it. */
+	void moved();
+
 private slots:
 	void arrived(const ncfg_event_row &event);
 	void ended(const QString &reason);
