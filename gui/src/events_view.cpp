@@ -71,6 +71,24 @@ void ncfg_events_view::refresh()
 
 void ncfg_events_view::arrived(const ncfg_event_row &event)
 {
+	/*
+	 * Which events mean something else on screen is now wrong.
+	 *
+	 * `observed` is the kernel reporting a change, `drift` is the machine
+	 * having stopped matching the document, `reloaded` is the document itself
+	 * moving, and `confirm_resolved` is a window closing -- which either kept
+	 * a change or reverted one, and both change what a table should say.
+	 *
+	 * `confirm_armed` is the one that does not: it says a window opened, and
+	 * nothing about the machine has happened yet. Refreshing on it would be
+	 * harmless and it is left out anyway, because a list of "things that
+	 * changed the machine" containing something that did not is a list the
+	 * next reader has to re-derive.
+	 */
+	if (event.kind != QLatin1String("confirm_armed")) {
+		emit moved();
+	}
+
 	QString line = event.kind.leftJustified(kind_width, QLatin1Char(' '));
 
 	if (!event.interface.isEmpty()) {
