@@ -42,6 +42,18 @@ impl HookEnv {
 		self.reason = Some(reason.into());
 		self
 	}
+
+	/// One more variable, for a phase that carries more than a reason.
+	///
+	/// The named fields above are the ones several phases share. A phase with
+	/// something of its own -- `drift` says what netcfgd is going to do about it,
+	/// which no other phase has to answer -- puts it here rather than growing a
+	/// field that every other phase would leave empty.
+	#[must_use]
+	pub fn with(mut self, key: &str, value: impl Into<String>) -> Self {
+		self.extra.insert(key.to_owned(), value.into());
+		self
+	}
 }
 
 /// Whether a failure in this phase stops what is going on.
