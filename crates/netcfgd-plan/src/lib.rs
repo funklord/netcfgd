@@ -275,10 +275,12 @@ const RESTART_LIMIT: u32 = 5;
 /// an operator is asking there is "will my script run", not "will it be in a
 /// plan".
 ///
-/// The rest are recognised, written into `/run/netcfgd/hooks/`, hashed and
-/// carried in the document -- and never executed, which reads exactly like a
-/// working feature: the file is there, the plan mentions nothing, and the script
-/// never runs.
+/// Nothing is left out any more. Every phase the model declares runs, which was
+/// not true from M1 until 0096 -- nine of the eleven were parsed, materialised
+/// into `/run/netcfgd/hooks/`, hashed into the document and never executed,
+/// which reads exactly like a working feature: the file is there, the plan
+/// mentions nothing, and the script never runs. The warning below stays,
+/// because a list that is complete today is not one that stays complete.
 ///
 /// Named here rather than hidden in a filter so that the warning below and the
 /// planner cannot disagree about which ones.
@@ -286,6 +288,7 @@ const FIRED_PHASES: &[HookPhase] = &[
 	HookPhase::PreUp,
 	HookPhase::Up,
 	HookPhase::PostUp,
+	HookPhase::PreDown,
 	HookPhase::Down,
 	HookPhase::PostDown,
 	HookPhase::Lease,
@@ -2078,6 +2081,64 @@ impl Builder {
 	}
 
 	/// Hooks, link state, addressing and routes.
+	/// Take an interface down, in the order the phases describe.
+	///
+	///   `pre_down`   the interface still works: addresses, routes, all of it.
+	///                This is where a script that needs the network goes --
+	///                unmounting a share, telling a peer.
+	///   `addr.del`   what netcfgd installed, removed explicitly.
+	///   `down`       the link is still up and the addresses are gone.
+	///   `link.down`
+	///   `post_down`  nothing is left to stop.
+	///
+	/// The middle step is what makes the two phases different moments rather
+	/// than the same one, which is what 0063 said this needed and 0096 built.
+	/// It is also a fix in its own right: `link.down` flushes IPv6 and **leaves
+	/// IPv4 behind** -- measured on a real kernel -- so a disabled interface
+	/// kept a stale address that netcfgd still recorded as its own.
+	fn plan_disable(&mut self, interface: &Interface, observed: &Observed, base: &[u32]) {
+		let name = &interface.name;
+		let mut deps = base.to_vec();
+		deps.extend(self.plan_hooks(interface, HookPhase::PreDown, base));
+
+		let mut withdrawn = deps.clone();
+		for address in observed
+			.addresses
+			.iter()
+			.filter(|address| address.interface == *name && address.ownership.may_remove())
+		{
+			let id = self.push(
+				Op::AddrDel {
+					iface: name.clone(),
+					addr: address.address.clone(),
+				},
+				Reason::unwanted(name, "enabled", address.address.clone()),
+				deps.clone(),
+				Some(Op::AddrAdd {
+					iface: name.clone(),
+					addr: address.address.clone(),
+					preferred_lifetime: None,
+					valid_lifetime: None,
+				}),
+			);
+			if id != u32::MAX {
+				withdrawn.push(id);
+			}
+		}
+
+		let mut before_down = withdrawn.clone();
+		before_down.extend(self.plan_hooks(interface, HookPhase::Down, &withdrawn));
+		let id = self.push(
+			Op::LinkDown { name: name.clone() },
+			Reason::differs(name, "enabled", "false", "true"),
+			before_down,
+			Some(Op::LinkUp { name: name.clone() }),
+		);
+		if id != u32::MAX {
+			self.plan_hooks(interface, HookPhase::PostDown, &[id]);
+		}
+	}
+
 	fn plan_interface_contents(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let link = observed.link(name);
@@ -2163,23 +2224,7 @@ impl Builder {
 			}
 			base.extend(self.plan_hooks(interface, HookPhase::Up, &after_up));
 		} else if !interface.enabled && link.is_some_and(|link| link.up) {
-			// `down` before the interface goes, `post_down` after it. Both are
-			// emitted here rather than in the teardown pass, and the reason is
-			// worth stating: teardown runs *last* in a plan, so at the moment
-			// this fires the interface still has its addresses and routes -- which
-			// is what makes a `down` hook able to unmount a share or stop a
-			// service that is using them. Decision 0063.
-			let mut deps = base.clone();
-			deps.extend(self.plan_hooks(interface, HookPhase::Down, &base));
-			let id = self.push(
-				Op::LinkDown { name: name.clone() },
-				Reason::differs(name, "enabled", "false", "true"),
-				deps,
-				Some(Op::LinkUp { name: name.clone() }),
-			);
-			if id != u32::MAX {
-				self.plan_hooks(interface, HookPhase::PostDown, &[id]);
-			}
+			self.plan_disable(interface, observed, &base);
 		}
 
 		// 802.1X comes before addressing, not after. A port that has not
