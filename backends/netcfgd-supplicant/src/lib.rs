@@ -24,6 +24,53 @@ pub use protocol::{Event, NetworkEntry, Reply, ScanResult};
 use netcfgd_model::WifiNetwork;
 use netcfgd_secret::Resolver;
 use std::io;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// Where the control sockets are.
+///
+/// Overridable so a test can point at a directory that is not the real one: a
+/// network namespace is not a mount namespace, so without this a test would
+/// share `/run/wpa_supplicant` with whatever the host is running.
+///
+/// One function rather than the three byte-identical copies this replaces, in
+/// `netcfgd-apply`, `netcfgd-daemon` and the daemon's wifi commands. Three
+/// copies of a path and an environment variable is three chances for them to
+/// stop agreeing, and the crate that owns `DEFAULT_CTRL_DIR` is where the
+/// question belongs.
+#[must_use]
+pub fn ctrl_dir() -> PathBuf {
+	std::env::var_os("NCFG_WPA_CTRL_DIR")
+		.map_or_else(|| PathBuf::from(DEFAULT_CTRL_DIR), PathBuf::from)
+}
+
+/// How long an observation waits for a supplicant to say `PONG`.
+///
+/// The same one second, for the same reason, as the deadline on hostapd's
+/// access-control read: this runs in the reconcile loop -- on every netlink
+/// event -- so a supplicant that is alive with its socket bound and not
+/// answering would otherwise hold the loop for the full ten seconds per radio,
+/// every time. Ten seconds is what a wedged one was measured at.
+///
+/// Being wrong in the impatient direction costs an observation that says
+/// netcfgd could not ask, which is a warning the operator can act on. Being
+/// wrong in the other direction stalls the daemon.
+const IMPATIENT: Duration = Duration::from_secs(1);
+
+/// Does the supplicant on `interface` answer its control socket?
+///
+/// A question about the *process*, not about wifi: a supplicant that has bound
+/// its socket and stopped answering looks, from every other angle netcfgd has,
+/// exactly like one that is working and has not associated yet.
+///
+/// `false` covers "the socket is gone" as well as "it did not answer in time",
+/// and deliberately: netcfgd asks this only of a supplicant it believes is
+/// running, and a running process whose socket has vanished is not in a state
+/// anything should be configured against.
+#[must_use]
+pub fn answers(dir: &Path, interface: &str) -> bool {
+	Client::connect_within(dir, interface, IMPATIENT).is_ok()
+}
 
 /// Remove every network the supplicant currently holds.
 ///
