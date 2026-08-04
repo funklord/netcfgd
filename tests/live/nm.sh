@@ -968,15 +968,67 @@ PYEOF
 		python3 "$repo/tests/live/fake_agent.py" --cancel refused \
 			> "$work/agent-cancel.log" 2>&1 &
 		cancel_agent=$!
+		# `Register` is a synchronous D-Bus call, so the agent prints this only
+		# after the shim has taken it -- the signal is sound and there is no
+		# window between the two. What was not sound is giving up on it
+		# silently: this loop used to `break` after ten seconds and run the
+		# activation anyway, which turns "the agent never started" into
+		# "netcfgd did not report a cancelled prompt". Say which one it is.
 		waited=0
 		until grep -q registered "$work/agent-cancel.log" 2>/dev/null; do
 			waited=$((waited + 1))
-			[ "$waited" -gt 100 ] && break
+			if [ "$waited" -gt 100 ]; then
+				echo "FAIL the cancelling agent registered"
+				echo "       it never printed \`registered\`; it said:"
+				sed 's/^/       /' "$work/agent-cancel.log" 2>/dev/null
+				failures=$((failures + 1))
+				break
+			fi
 			sleep 0.1
 		done
-		check "a cancelled prompt is reported as such" \
-			"$(timeout 25 nmcli connection up Prompted ifname radio0 2>&1 |
-				grep -c 'did not supply a passphrase' || true)" "1"
+		# The timeout is a guard against hanging, not a deadline under test --
+		# but when it fires the output is empty and the check below reports
+		# `expected 1, actual 0`, which reads as netcfgd saying the wrong thing
+		# rather than as nmcli having been killed. 124 is what `timeout` exits
+		# with, and it gets its own sentence.
+		# `|| cancel_status=$?`, never a bare assignment: `set -e` is on and
+		# this activation is *expected* to fail -- the agent cancels. A bare
+		# assignment therefore aborts the script at this line, which is how the
+		# first version of this change ended the run mid-way with no summary and
+		# every later check unrun. The same shape caught `ppp.sh` earlier in the
+		# same session; "0 failed" and "all checks passed" are not the same
+		# sentence.
+		cancel_status=0
+		# 60 rather than 25, because 25 is the number GDBus uses for its own
+		# default method timeout -- so the old guard and nmcli's reply timeout
+		# were the same value, racing. Whichever fired first decided what the
+		# failure looked like, and the guard firing first hid nmcli's own
+		# output, which is the thing worth reading.
+		cancel_out=$(timeout 60 nmcli connection up Prompted ifname radio0 2>&1) ||
+			cancel_status=$?
+		if [ "$cancel_status" -eq 124 ]; then
+			echo "FAIL a cancelled prompt is reported as such"
+			echo "       nmcli did not return within 60s and was killed, so this"
+			echo "       says nothing about what netcfgd reported"
+			failures=$((failures + 1))
+		elif ! printf '%s' "$cancel_out" | grep -q 'did not supply a passphrase'; then
+			# Known intermittent, roughly one run in five, and **the shim's**
+			# rather than this script's: `ActivateConnection` occasionally
+			# returns nothing for GDBus's full 25-second default timeout, the
+			# agent is never asked for a secret at all -- its log stops at
+			# `registered` -- and nmcli exits having printed only its version
+			# warning. Raising the timeout does not help, because the reply
+			# never comes; it is a stall, not slowness.
+			echo "FAIL a cancelled prompt is reported as such"
+			echo "       nmcli returned without the expected message. It said:"
+			printf '%s\n' "$cancel_out" | sed 's/^/       /'
+			echo "       agent log: $(tr '\n' ' ' < "$work/agent-cancel.log" 2>/dev/null)"
+			echo "       if the agent log stops at \`registered\`, the shim never"
+			echo "       asked it -- see docs/decisions/0106"
+			failures=$((failures + 1))
+		else
+			echo "ok   a cancelled prompt is reported as such"
+		fi
 		check "and writes no credential" \
 			"$([ -f "$work/etc/secrets/Prompted" ] && echo yes || echo no)" "no"
 		kill "$cancel_agent" 2>/dev/null
