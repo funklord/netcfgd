@@ -102,7 +102,7 @@ find_in_sbin() {
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built (cargo build --workspace)"
-dhcpcd=$(find_in_sbin dhcpcd) || skip "dhcpcd is not installed (apt install dhcpcd-base)"
+dhcpcd=$(find_in_sbin dhcpcd) || skip "dhcpcd is not installed (apt install dhcpcd-base | apk add dhcpcd)"
 command -v busybox >/dev/null 2>&1 || skip "no busybox, which is the server here"
 command -v hostname >/dev/null 2>&1 || skip "no hostname(1), which is how the counter-proof is measured"
 busybox --list | grep -qx udhcpd || skip "this busybox has no udhcpd applet"
@@ -122,7 +122,7 @@ if [ -z "${NCFG_DHCPCD_NS:-}" ]; then
 		exec unshare --mount --uts --net -- sh "$0" "$@"
 	fi
 	command -v newuidmap >/dev/null 2>&1 ||
-		skip "dhcpcd drops privileges and an unprivileged namespace needs newuidmap (apt install uidmap)"
+		skip "dhcpcd drops privileges and an unprivileged namespace needs newuidmap (apt install uidmap | apk add shadow-uidmap)"
 	# Probed rather than exec'd straight into: a machine with no subordinate uids
 	# in /etc/subuid should get the reason, not `unshare: write failed`.
 	unshare --map-root-user --map-auto --mount --uts --net true 2>/dev/null ||
@@ -471,7 +471,7 @@ fi
 # dnsmasq is the server: it is one package, it speaks stateful DHCPv6, and it
 # sends the router advertisement whose M flag is what makes a client ask at all.
 if ! command -v dnsmasq >/dev/null 2>&1; then
-	echo "dhcpcd.sh: no dnsmasq, so the DHCPv6 half is not run (apt install dnsmasq-base)"
+	echo "dhcpcd.sh: no dnsmasq, so the DHCPv6 half is not run (apt install dnsmasq-base | apk add dnsmasq)"
 else
 	ip -6 addr add 2001:db8:44::1/64 dev srv nodad
 	# The client end needs its link-local to be past duplicate address detection
