@@ -147,6 +147,14 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		.map_err(|error| format!("could not bind {}: {error}", socket_path.display()))?;
 	spawn_kernel_watcher(&commands);
 	spawn_roam_watcher(&commands, supplicant_ctrl_dir());
+	spawn_rfkill_watcher(
+		&commands,
+		// Overridable for the reason the supplicant's directory is: a network
+		// namespace is not a device namespace, and a test that could not move
+		// this would be reading the machine's own switches.
+		std::env::var_os("NCFG_RFKILL_DEV")
+			.map_or_else(|| PathBuf::from("/dev/rfkill"), PathBuf::from),
+	);
 	let mechanism = spawn_config_watcher(&commands, &paths, options.poll_config);
 
 	eprintln!(
@@ -396,6 +404,50 @@ fn authorized(
 		Ok(()) => answer(state, request, subscribers, Some(commands), &granted),
 		Err(message) => Response::error(message),
 	}
+}
+
+/// Watch `/dev/rfkill` so a flipped switch is noticed as it happens.
+///
+/// 0062 made netcfgd report a blocked radio; this is what makes the report
+/// prompt. An observation runs on a netlink event or on the loop's five-second
+/// backstop, and a kill switch produces neither reliably -- *blocking* a radio
+/// usually takes the interface down and shows up on netlink, but *unblocking*
+/// one produces nothing until something else happens, so the machine could sit
+/// with a working radio and a plan still saying it was off.
+///
+/// It reports `KernelChanged` rather than a command of its own. What changed is
+/// something an observation reads, so the answer is the one netlink already
+/// gets: look again. A second command would mean a second path through the loop
+/// doing the same thing.
+///
+/// Opening the device replays one `ADD` per existing switch, so the first few
+/// wake the loop for a state it already has. That is a handful of reobservations
+/// at startup and it is the honest cost of not having to ask `/sys` whether
+/// anything changed while netcfgd was not running.
+///
+/// A machine with no radio has no `/dev/rfkill`; the thread ends and says
+/// nothing, because "this laptop has no wifi" is not a warning.
+fn spawn_rfkill_watcher(commands: &Sender<Command>, device: PathBuf) {
+	let commands = commands.clone();
+	let _ = std::thread::Builder::new()
+		.name("rfkill".to_owned())
+		.spawn(move || {
+			let Ok(mut rfkill) = netcfgd_sys::rfkill::Rfkill::open(&device) else {
+				return;
+			};
+			loop {
+				match rfkill.next_event() {
+					Ok(Some(_)) => {
+						if commands.send(Command::KernelChanged).is_err() {
+							return;
+						}
+					}
+					// The device went away, or cannot be read. Either way there
+					// is nothing to watch and nothing to retry against.
+					Ok(None) | Err(_) => return,
+				}
+			}
+		});
 }
 
 /// Where `wpa_supplicant`'s control sockets are.

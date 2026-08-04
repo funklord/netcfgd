@@ -29,6 +29,7 @@ pub mod ops;
 pub mod peer;
 pub mod process;
 pub mod qdisc;
+pub mod rfkill;
 pub mod rule;
 pub mod signals;
 pub mod socket;

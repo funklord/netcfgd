@@ -515,6 +515,10 @@ live:
 	@# there. It changes nothing -- `status` and `plan` only -- so running it
 	@# against the host is safe.
 	@NCFG_LIVE=1 sh tests/live/rfkill.sh
+	@# And the event stream, against a fifo rather than the real device: the
+	@# write path on /dev/rfkill blocks every radio on the machine, and rfkill
+	@# is not namespaced, so `unshare -rn` would be no protection.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/rfkill_stream.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/rules.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/qdisc.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ingress.sh"
