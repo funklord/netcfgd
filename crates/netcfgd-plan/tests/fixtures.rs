@@ -5879,7 +5879,6 @@ fn a_hook_in_a_phase_nothing_fires_is_reported() {
 		 \tconfig = \"10.0.0.2/24\"\n\
 		 \tpost_up {\necho up\n}\n\
 		 \tpre_down {\necho going\n}\n\
-		 \ton portal {\necho portal\n}\n\
 		 }\n",
 	);
 	let desired = compile(&sources, &mut TestHooks).expect("compiles");
@@ -5894,38 +5893,43 @@ fn a_hook_in_a_phase_nothing_fires_is_reported() {
 		.collect();
 	assert_eq!(
 		said.len(),
-		2,
-		"expected the `pre_down` and the `portal` hook to be named and nothing else: {:?}",
+		1,
+		"expected the `pre_down` hook to be named and nothing else: {:?}",
 		plan.warnings
 	);
-	// `roam` used to be one of these and fires now (0091), so the example
-	// moved to a phase that still does not: `pre_down` is deferred with a
-	// reason (0063) and `portal` has no detection anywhere in the tree.
+	// `roam` used to be one of these and fires since 0091; `portal` was the
+	// other and fires since 0095. `pre_down` is what is left, deferred with a
+	// reason rather than unbuilt (0063): it and `down` fire at the same point
+	// in a plan until there is a teardown ordering.
 	assert!(said
 		.iter()
 		.any(|message| message.contains("`pre_down` hook")));
-	assert!(said.iter().any(|message| message.contains("`portal` hook")));
 	// And the one that does fire is still planned, rather than warned about.
 	assert!(names(&plan).contains(&"hook.run"));
 }
 
-/// `portal_check` says what it does not do.
+/// `portal_check` takes a URL, and an `https` one is refused with the reason.
+///
+/// It was a boolean that compiled and did nothing, warned about by the plan
+/// since 0061. It is an operator's URL now (0095) and the plan says nothing,
+/// because there is nothing left to say.
 #[test]
-fn a_portal_check_is_reported_rather_than_dropped() {
+fn a_portal_check_is_a_url_and_not_a_warning() {
 	let desired = document(
 		r#"
-device wlan0 { wifi { portal_check = true } }
+device wlan0 { wifi { portal_check = "http://example.com/generate_204" } }
 interface wlan0 { config = "dhcp" }
 "#,
 	);
 	let observed = observed_with(&["wlan0"]);
-
 	let plan = plan(&desired, &observed, &PlanOptions::default());
+
 	assert!(
-		plan.warnings
+		!plan
+			.warnings
 			.iter()
-			.any(|warning| warning.message.contains("netcfgd probes nothing")),
-		"nothing said the key was not applied: {:?}",
+			.any(|warning| warning.message.contains("portal_check")),
+		"portal_check is implemented and still warned about: {:?}",
 		plan.warnings
 	);
 }

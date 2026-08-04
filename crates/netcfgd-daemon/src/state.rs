@@ -342,7 +342,11 @@ impl State {
 	}
 
 	/// What a phase was last told about an interface.
-	fn last_told(observed: &Observed, interface: &str, phase: HookPhase) -> Option<String> {
+	pub(crate) fn last_told(
+		observed: &Observed,
+		interface: &str,
+		phase: HookPhase,
+	) -> Option<String> {
 		observed
 			.hook_state
 			.iter()

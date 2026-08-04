@@ -674,7 +674,7 @@ device wlan0 {
 	wifi {
 		backend      = "wpa_supplicant"
 		autoconnect  = true
-		portal_check = true
+		portal_check = "http://example.com/generate_204"
 		regdom       = "SE"
 		powersave    = "off"
 	}
@@ -2130,4 +2130,54 @@ fn several_access_points_may_be_roamed_between() {
 fn a_discovered_name_with_no_access_points_is_refused() {
 	let message = errors(r#"network "Nowhere" { ssid = "@bssid"; wifi { psk = "@secret:n" } }"#);
 	assert!(message.contains("lists none"), "got: {message}");
+}
+
+/// `portal_check` is an operator's URL, and `https` is refused with the reason.
+///
+/// 0061 refused a boolean with an address inside netcfgd and named the shape a
+/// probe would take; 0095 built that shape. The `https` refusal is the half
+/// worth a test: a portal detects by *intercepting* a request, which is exactly
+/// what TLS prevents, so an `https` probe reports no portal on the networks it
+/// was written for -- accepted and quietly useless.
+#[test]
+fn a_portal_check_is_an_http_url() {
+	let document =
+		build_ok(r#"device wlan0 { wifi { portal_check = "http://example.com/generate_204" } }"#);
+	assert_eq!(
+		document.devices[0]
+			.wifi
+			.as_ref()
+			.expect("a wifi policy")
+			.portal_check
+			.as_deref(),
+		Some("http://example.com/generate_204")
+	);
+
+	let message = errors(r#"device wlan0 { wifi { portal_check = "https://example.com/x" } }"#);
+	assert!(message.contains("cannot use `https`"), "got: {message}");
+	// And the reason, not just the refusal: an operator told "no https" without
+	// being told why will reasonably think netcfgd is being lazy.
+	assert!(message.contains("intercepts the request"), "got: {message}");
+
+	for bad in ["ftp://example.com/x", "example.com/x", "http:///x"] {
+		let message = errors(&format!(
+			r#"device wlan0 {{ wifi {{ portal_check = "{bad}" }} }}"#
+		));
+		assert!(
+			message.contains("is not an `http://` URL") || message.contains("names no host"),
+			"{bad}: {message}"
+		);
+	}
+}
+
+/// A device that does not ask gets no probe and no default.
+#[test]
+fn a_device_that_names_no_url_is_not_probed() {
+	let document = build_ok("device wlan0 { wifi { } }");
+	assert!(document.devices[0]
+		.wifi
+		.as_ref()
+		.expect("a wifi policy")
+		.portal_check
+		.is_none());
 }

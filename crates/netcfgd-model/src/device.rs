@@ -59,8 +59,24 @@ pub struct WifiDevicePolicy {
 	pub backend: WifiBackend,
 	/// Whether to connect to known networks without being asked.
 	pub autoconnect: bool,
-	/// Whether to probe for a captive portal after association.
-	pub portal_check: bool,
+	/// The URL to fetch to find out whether something is intercepting traffic.
+	///
+	/// **The operator's URL, never netcfgd's.** 0061 refused a boolean with a
+	/// default inside netcfgd, and the reason has not changed: a network daemon
+	/// that reaches out to a fixed address to decide whether the internet works
+	/// is a third party learning when this machine joins a network, and that is
+	/// the wrong default however carefully the address is chosen. `None` -- the
+	/// ordinary case -- probes nothing at all.
+	///
+	/// **`http://` only, and that is not a limitation.** A captive portal works
+	/// by intercepting a request and answering it with something else, which
+	/// TLS exists to prevent: over `https` a portal produces a certificate
+	/// error rather than a redirect, and a check that cannot be intercepted
+	/// cannot detect interception. Every implementation of this does it in
+	/// clear for the same reason. An `https` URL is refused with that sentence
+	/// rather than accepted and quietly useless (0095).
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub portal_check: Option<String>,
 	/// Regulatory domain, ISO 3166-1 alpha-2.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub regdom: Option<String>,
@@ -85,7 +101,7 @@ impl Default for WifiDevicePolicy {
 		Self {
 			backend: WifiBackend::Auto,
 			autoconnect: true,
-			portal_check: false,
+			portal_check: None,
 			regdom: None,
 			powersave: Powersave::Default,
 			mac_policy: MacPolicy::Permanent,

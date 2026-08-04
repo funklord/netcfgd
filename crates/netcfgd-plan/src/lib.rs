@@ -265,10 +265,12 @@ const RESTART_LIMIT: u32 = 5;
 ///
 /// The phases a *plan* fires. Not the phases that run.
 ///
-/// `drift` and `roam` run and are deliberately not here. Neither is something a
-/// plan does: drift under `report` produces no apply at all, and a station
-/// moving to a louder access point on the same network is `wpa_supplicant`'s
-/// decision, which netcfgd learns about afterwards. Both fire from the daemon.
+/// `drift`, `roam` and `portal` run and are deliberately not here. None is
+/// something a plan does: drift under `report` produces no apply at all, a
+/// station moving to a louder access point is `wpa_supplicant`'s decision, and
+/// a portal probe is a question rather than a change -- as an action it would
+/// run on every apply and no plan would ever converge. All three fire from the
+/// daemon.
 /// They are listed as fired below, where the warning is, because the question
 /// an operator is asking there is "will my script run", not "will it be in a
 /// plan".
@@ -295,7 +297,7 @@ const FIRED_PHASES: &[HookPhase] = &[
 /// A count is not kept anywhere: the comment above this list carried one and
 /// said "the other five" when it was four, for two commits after the number
 /// moved. The lists are the count.
-const UNPLANNED_PHASES: &[HookPhase] = &[HookPhase::Drift, HookPhase::Roam];
+const UNPLANNED_PHASES: &[HookPhase] = &[HookPhase::Drift, HookPhase::Roam, HookPhase::Portal];
 
 /// Say which hooks the document declares that nothing will run.
 ///
@@ -423,26 +425,11 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_eap_without_ca(builder, desired);
 	warn_access_points(builder, desired);
 	warn_unfired_hooks(builder, desired);
-	// A radio asking for something this build does not do. `portal_check` is the
-	// one that would otherwise look like a feature: a laptop on a hotel network
-	// gets an address, no route to anywhere, and a config that said to check.
-	for device in &desired.devices {
-		let Some(wifi) = &device.wifi else {
-			continue;
-		};
-		if wifi.portal_check {
-			builder.warnings.push(Warning {
-				message: format!(
-					"`portal_check` on {} is recognised and not applied: netcfgd probes \
-					 nothing, because a network daemon that fetches a hard-coded URL to \
-					 decide whether the internet works is a decision for the operator \
-					 rather than a default. Decision 0061 has the shape a probe would take",
-					device.name
-				),
-				interface: Some(device.name.clone()),
-			});
-		}
-	}
+	// `portal_check` was here, as "recognised and not applied", from 0061 until
+	// 0095 gave it the shape 0061 specified: an operator's URL rather than a
+	// boolean with a default inside netcfgd. It is probed by the daemon when an
+	// interface becomes addressed, not planned -- a probe is not a change, and
+	// an action that ran on every apply would make no plan ever converge.
 	for interface in &desired.interfaces {
 		// The offloads are applied; the rest of the `ethtool` block is not, and
 		// says so field by field rather than as one blanket sentence -- an

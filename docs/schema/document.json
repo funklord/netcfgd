@@ -58,7 +58,7 @@
       "wifi": {
         "backend": "wpa_supplicant",
         "autoconnect": true,
-        "portal_check": true,
+        "portal_check": "http://example.com/generate_204",
         "regdom": "SE",
         "powersave": "off",
         "mac_policy": "per_network",

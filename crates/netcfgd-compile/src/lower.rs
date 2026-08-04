@@ -1063,8 +1063,18 @@ fn lower_wifi_device(block: &Block, diags: &mut Diagnostics) -> WifiDevicePolicy
 					}
 				}
 				"portal_check" => {
-					if let Some(flag) = as_bool(&assignment.value, diags) {
-						policy.portal_check = flag;
+					// A URL and not a boolean, which is 0061's decision: netcfgd
+					// has no address of its own to fetch, and a default would be
+					// a third party told when this machine joins a network.
+					if let Some(url) = as_string(&assignment.value, diags) {
+						match portal_url(&url) {
+							Ok(()) => policy.portal_check = Some(url),
+							Err(why) => {
+								diags.push(Diagnostic::new(assignment.span, why).with_help(
+									"`portal_check = \"http://example.com/generate_204\"`",
+								));
+							}
+						}
 					}
 				}
 				"regdom" => {
@@ -1218,6 +1228,35 @@ fn lower_network_key(network: &mut WifiNetwork, assignment: &Assignment, diags: 
 /// `@` is the DSL's existing mark for a value resolved elsewhere, as in
 /// `@secret:NAME`.
 const SSID_FROM_BSSID: &str = "@bssid";
+
+/// Whether a URL is one netcfgd can probe with.
+///
+/// **`http://` only.** A captive portal works by intercepting a request and
+/// answering it with something else, which is what TLS exists to stop: over
+/// `https` an interception is a certificate error rather than a redirect, so a
+/// check that cannot be intercepted cannot detect interception. Refused with
+/// that sentence rather than accepted and quietly useless -- an `https` probe
+/// would report "no portal" on precisely the networks it was written for.
+fn portal_url(url: &str) -> Result<(), String> {
+	if url.starts_with("https://") {
+		return Err(
+			"a captive portal check cannot use `https`: a portal intercepts the request \
+			 and answers it, which TLS prevents -- so an `https` probe reports no portal \
+			 on exactly the networks it is for"
+				.to_owned(),
+		);
+	}
+	let Some(rest) = url.strip_prefix("http://") else {
+		return Err(format!("`{url}` is not an `http://` URL"));
+	};
+	// A host at least. Everything past the first `/` is the path, which may be
+	// empty -- `http://example.com` is a request for `/`.
+	let host = rest.split('/').next().unwrap_or("");
+	if host.is_empty() {
+		return Err(format!("`{url}` names no host to fetch from"));
+	}
+	Ok(())
+}
 
 /// A `network` block: an SSID profile, not bound to a device.
 fn lower_network(

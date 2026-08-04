@@ -309,8 +309,14 @@ forwarding interface.** Not a laptop problem unless you turn on `forwarding` for
 container bridge or a VM host, at which point IPv6 autoconfiguration on that
 interface stops and `ip addr` shows nothing that explains it.
 
-**No captive portal detection.** `portal_check` is recognised and does nothing,
-and says so in the plan. A hotel or a train needs a browser and patience.
+**Captive portal detection needs a URL you choose.** `portal_check` takes an
+`http://` URL and netcfgd has no default for it: a daemon that reaches out to a
+fixed host to decide whether the internet works is a third party being told when
+this machine joins a network. Give it one -- yours, or a `generate_204` endpoint
+you trust -- and netcfgd fetches it once when the interface becomes addressed
+and runs the interface's `on portal { }` hook if something else answers. Never
+`https`: a portal works by intercepting the request, which is exactly what TLS
+prevents, so an `https` probe reports no portal on the networks it is for.
 
 **A blocked radio is reported and not cleared.** `ncfg status` says `radio off`,
 `ncfg explain interface wlp0s20f3` says which switch and what to do, and a plan

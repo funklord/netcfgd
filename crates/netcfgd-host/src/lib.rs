@@ -17,6 +17,7 @@ pub mod confirm;
 pub mod contention;
 pub mod explain;
 pub mod hooks;
+pub mod portal;
 pub mod state;
 
 pub use config::load;
