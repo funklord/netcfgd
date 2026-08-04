@@ -815,3 +815,9 @@ clean:
 		find "$(DIST)" -type f -print | sed 's/^/clean: removing /'; \
 		rm -rf "$(DIST)"; \
 	fi
+
+# The shared style gate: one tool, copied verbatim from
+# ~/.claude/tools/style_gate.py into every private project. It refuses to
+# run against a collapsed file list, so a pass means it actually looked.
+style:
+	python3 tools/style_gate.py check

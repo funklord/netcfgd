@@ -28,7 +28,7 @@
 struct ncfg_client {
 	int    fd;
 	char   path[108]; /* sun_path is 108 on Linux, so a longer one cannot be
-			   * connected to anyway and is refused when it is set */
+	           * connected to anyway and is refused when it is set */
 	char  *buffer;    /* what has been read and not yet consumed */
 	size_t length;
 	size_t capacity;
@@ -80,7 +80,7 @@ static int connect_socket(const char *socket_path, char *err, size_t err_size)
 	address.sun_family = AF_UNIX;
 	if (strlen(socket_path) >= sizeof(address.sun_path)) {
 		set_error(err, err_size, "the socket path is longer than a unix socket allows: %s",
-			  socket_path);
+		      socket_path);
 		return -1;
 	}
 	strcpy(address.sun_path, socket_path);
@@ -96,7 +96,7 @@ static int connect_socket(const char *socket_path, char *err, size_t err_size)
 		 * answer is nearly always that netcfgd is not running or that
 		 * this client is looking in the wrong run directory. */
 		set_error(err, err_size, "cannot reach netcfgd at %s: %s. Is the daemon running?",
-			  socket_path, strerror(errno));
+		      socket_path, strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -179,7 +179,7 @@ static char *read_line(ncfg_client_t *client, size_t *length_out, char *err, siz
 		 * found, in the first headless run of the GUI against a real
 		 * daemon. */
 		char *newline = client->length ? memchr(client->buffer, '\n', client->length)
-					       : NULL;
+		                   : NULL;
 		if (newline) {
 			size_t line_length = (size_t)(newline - client->buffer);
 			char *line = malloc(line_length + 1u);
@@ -192,7 +192,7 @@ static char *read_line(ncfg_client_t *client, size_t *length_out, char *err, siz
 
 			size_t consumed = line_length + 1u;
 			memmove(client->buffer, client->buffer + consumed,
-				client->length - consumed);
+			    client->length - consumed);
 			client->length -= consumed;
 			*length_out = line_length;
 			return line;
@@ -200,8 +200,8 @@ static char *read_line(ncfg_client_t *client, size_t *length_out, char *err, siz
 
 		if (client->length >= NCFG_LINE_MAX) {
 			set_error(err, err_size,
-				  "netcfgd sent more than %u bytes with no end of line",
-				  NCFG_LINE_MAX);
+			      "netcfgd sent more than %u bytes with no end of line",
+			      NCFG_LINE_MAX);
 			return NULL;
 		}
 		if (client->length == client->capacity) {
@@ -215,7 +215,7 @@ static char *read_line(ncfg_client_t *client, size_t *length_out, char *err, siz
 			client->capacity = next;
 		}
 		ssize_t got = read(client->fd, client->buffer + client->length,
-				   client->capacity - client->length);
+		           client->capacity - client->length);
 		if (got < 0) {
 			if (errno == EINTR) {
 				continue;
@@ -225,7 +225,7 @@ static char *read_line(ncfg_client_t *client, size_t *length_out, char *err, siz
 		}
 		if (got == 0) {
 			set_error(err, err_size,
-				  "netcfgd closed the connection without answering");
+			      "netcfgd closed the connection without answering");
 			return NULL;
 		}
 		client->length += (size_t)got;
@@ -233,7 +233,7 @@ static char *read_line(ncfg_client_t *client, size_t *length_out, char *err, siz
 }
 
 ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
-				     char *err, size_t err_size)
+                     char *err, size_t err_size)
 {
 	if (err && err_size) {
 		err[0] = '\0';
@@ -265,11 +265,11 @@ ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
 
 	char parse_error[NCFG_ERROR_MAX];
 	ncfg_json_doc_t *doc = ncfg_json_parse(line, line_length, parse_error,
-					       sizeof(parse_error));
+	                       sizeof(parse_error));
 	free(line);
 	if (!doc) {
 		set_error(err, err_size, "netcfgd sent something this cannot read: %s",
-			  parse_error);
+		      parse_error);
 		return NULL;
 	}
 	return doc;
@@ -481,7 +481,7 @@ static char *join_addresses(const ncfg_json_doc_t *doc, uint32_t addresses, cons
 			continue;
 		}
 		address = ncfg_json_string(doc, ncfg_json_member(doc, entry, "address"),
-					   &address_length);
+		               &address_length);
 		if (!address || !address_length) {
 			continue;
 		}
@@ -601,7 +601,7 @@ typedef struct {
 } note_names_t;
 
 static int convert_notes(const ncfg_json_doc_t *doc, uint32_t array, const note_names_t *names,
-			 ncfg_note_t **items_out, size_t *count_out, char *err, size_t err_size)
+             ncfg_note_t **items_out, size_t *count_out, char *err, size_t err_size)
 {
 	uint32_t count = ncfg_json_count(doc, array);
 
@@ -642,7 +642,7 @@ static int convert_notes(const ncfg_json_doc_t *doc, uint32_t array, const note_
 }
 
 static int convert_actions(const ncfg_json_doc_t *doc, ncfg_plan_t *out, char *err,
-			   size_t err_size)
+               size_t err_size)
 {
 	uint32_t root = ncfg_json_root(doc);
 	uint32_t actions = ncfg_json_member(doc, root, "actions");
@@ -681,7 +681,7 @@ static int convert_actions(const ncfg_json_doc_t *doc, ncfg_plan_t *out, char *e
 		 * of the two spellings would quietly promise an undo it cannot
 		 * do -- which is the one mistake a confirm window must not make. */
 		item->reversible = inverse != NCFG_JSON_NONE &&
-				   ncfg_json_type(doc, inverse) != NCFG_JSON_NULL;
+		           ncfg_json_type(doc, inverse) != NCFG_JSON_NULL;
 		if (!item->op || !item->interface || !item->field || !item->desired ||
 		    !item->observed) {
 			set_error(err, err_size, "out of memory");
@@ -722,18 +722,18 @@ static int convert_plan(const ncfg_json_doc_t *doc, ncfg_plan_t *out, char *err,
 {
 	static const note_names_t warning_names = { "message", "interface", NULL, NULL, NULL };
 	static const note_names_t refusal_names = { "op", "interface", "guard", NULL,
-						    "override_with" };
+		                    "override_with" };
 	static const note_names_t stranded_names = { "credential", "interface", "irrevocable",
-						     "remove_with", "consent_with" };
+		                     "remove_with", "consent_with" };
 	uint32_t root = ncfg_json_root(doc);
 
 	if (!convert_actions(doc, out, err, err_size) ||
 	    !convert_notes(doc, ncfg_json_member(doc, root, "warnings"), &warning_names,
-			   &out->warnings, &out->warning_count, err, err_size) ||
+	           &out->warnings, &out->warning_count, err, err_size) ||
 	    !convert_notes(doc, ncfg_json_member(doc, root, "refusals"), &refusal_names,
-			   &out->refusals, &out->refusal_count, err, err_size) ||
+	           &out->refusals, &out->refusal_count, err, err_size) ||
 	    !convert_notes(doc, ncfg_json_member(doc, root, "stranded"), &stranded_names,
-			   &out->stranded, &out->stranded_count, err, err_size)) {
+	           &out->stranded, &out->stranded_count, err, err_size)) {
 		ncfg_plan_free(out);
 		return 0;
 	}
@@ -741,7 +741,7 @@ static int convert_plan(const ncfg_json_doc_t *doc, ncfg_plan_t *out, char *err,
 }
 
 static int convert_journal(const ncfg_json_doc_t *doc, ncfg_journal_t *out, char *err,
-			   size_t err_size)
+               size_t err_size)
 {
 	uint32_t root = ncfg_json_root(doc);
 	uint32_t records = ncfg_json_member(doc, root, "records");
@@ -807,7 +807,7 @@ int ncfg_client_confirm_default(ncfg_client_t *client, unsigned *out, char *err,
 	*out = 0;
 
 	ncfg_json_doc_t *doc =
-		ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	    ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
 	if (!doc) {
 		return 0;
 	}
@@ -917,7 +917,7 @@ int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size
  * than a truncated request: half a consent list is consent to the wrong things.
  */
 static int append_consent(char *out, size_t out_size, size_t *at, const char *name,
-			  const char *const *values, size_t count)
+              const char *const *values, size_t count)
 {
 	if (!count) {
 		return 1;
@@ -953,8 +953,8 @@ static int append_consent(char *out, size_t out_size, size_t *at, const char *na
 }
 
 int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds,
-		      const ncfg_consent_t *consent, ncfg_journal_t *out, char *err,
-		      size_t err_size)
+              const ncfg_consent_t *consent, ncfg_journal_t *out, char *err,
+              size_t err_size)
 {
 	/* Not NCFG_LINE_MAX: that bounds what may be *read* from a socket, and a
 	 * megabyte of it on the stack is a way to fall off the end of one. An
@@ -974,9 +974,9 @@ int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds,
 	 * seconds, which arms and expires. Two spellings of "no" where one of
 	 * them reverts the change is not a thing to leave to a reader. */
 	int written = confirm_seconds
-			      ? snprintf(request, sizeof(request),
-					 "{\"request\":\"apply\",\"confirm\":%u", confirm_seconds)
-			      : snprintf(request, sizeof(request), "{\"request\":\"apply\"");
+	              ? snprintf(request, sizeof(request),
+	                 "{\"request\":\"apply\",\"confirm\":%u", confirm_seconds)
+	              : snprintf(request, sizeof(request), "{\"request\":\"apply\"");
 	if (written < 0 || (size_t)written >= sizeof(request)) {
 		set_error(err, err_size, "cannot build the request");
 		return 0;
@@ -988,9 +988,9 @@ int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds,
 	 * an outage on one interface has not agreed to leave a key on another. */
 	if (consent
 	    && (!append_consent(request, sizeof(request), &at, "allow_disruption", consent->disrupt,
-				consent->disrupt_count)
-		|| !append_consent(request, sizeof(request), &at, "strand_credentials",
-				   consent->strand, consent->strand_count))) {
+	            consent->disrupt_count)
+	    || !append_consent(request, sizeof(request), &at, "strand_credentials",
+	               consent->strand, consent->strand_count))) {
 		set_error(err, err_size, "that is more consent than one request can carry");
 		return 0;
 	}
@@ -1029,9 +1029,9 @@ static int simple_request(ncfg_client_t *client, const char *request, char *err,
 	if (took_refusal(doc, err, err_size)) {
 		done = 0;
 	} else if (!ncfg_json_string_equals(doc, ncfg_json_member(doc, ncfg_json_root(doc),
-								  "response"), "ok")) {
+	                              "response"), "ok")) {
 		set_error(err, err_size, "netcfgd answered %s with something other than ok",
-			  request);
+		      request);
 		done = 0;
 	}
 	ncfg_json_free(doc);
@@ -1053,7 +1053,7 @@ int ncfg_client_revert(ncfg_client_t *client, char *err, size_t err_size)
 struct ncfg_monitor {
 	int    fd;
 	char  *buffer; /* what has arrived and not yet been given out, partial
-			* lines included */
+	        * lines included */
 	size_t length;
 	size_t capacity;
 };
@@ -1080,7 +1080,7 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 	static const char request[] = "{\"request\":\"monitor\"}\n";
 	if (!write_all(fd, request, sizeof(request) - 1u)) {
 		set_error(err, err_size, "cannot subscribe to netcfgd at %s: %s", socket_path,
-			  strerror(errno));
+		      strerror(errno));
 		close(fd);
 		return NULL;
 	}
@@ -1092,7 +1092,7 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 		 * its event loop on a blocking descriptor would freeze the whole
 		 * window the first time the daemon went quiet mid-line. */
 		set_error(err, err_size, "cannot make the monitor stream non-blocking: %s",
-			  strerror(errno));
+		      strerror(errno));
 		close(fd);
 		return NULL;
 	}
@@ -1137,13 +1137,13 @@ int ncfg_monitor_fd(const ncfg_monitor_t *monitor)
  * than thirty duplicated lines.
  */
 static char *monitor_line(ncfg_monitor_t *monitor, size_t *length_out, int *waiting, char *err,
-			  size_t err_size)
+              size_t err_size)
 {
 	*waiting = 0;
 	for (;;) {
 		char *newline = monitor->length
-					? memchr(monitor->buffer, '\n', monitor->length)
-					: NULL;
+		            ? memchr(monitor->buffer, '\n', monitor->length)
+		            : NULL;
 		if (newline) {
 			size_t line_length = (size_t)(newline - monitor->buffer);
 			char *line = dup_text(monitor->buffer, line_length);
@@ -1153,7 +1153,7 @@ static char *monitor_line(ncfg_monitor_t *monitor, size_t *length_out, int *wait
 			}
 			size_t consumed = line_length + 1u;
 			memmove(monitor->buffer, monitor->buffer + consumed,
-				monitor->length - consumed);
+			    monitor->length - consumed);
 			monitor->length -= consumed;
 			*length_out = line_length;
 			return line;
@@ -1161,8 +1161,8 @@ static char *monitor_line(ncfg_monitor_t *monitor, size_t *length_out, int *wait
 
 		if (monitor->length >= NCFG_LINE_MAX) {
 			set_error(err, err_size,
-				  "netcfgd sent more than %u bytes of event with no end of line",
-				  NCFG_LINE_MAX);
+			      "netcfgd sent more than %u bytes of event with no end of line",
+			      NCFG_LINE_MAX);
 			return NULL;
 		}
 		if (monitor->length == monitor->capacity) {
@@ -1176,7 +1176,7 @@ static char *monitor_line(ncfg_monitor_t *monitor, size_t *length_out, int *wait
 			monitor->capacity = next;
 		}
 		ssize_t got = read(monitor->fd, monitor->buffer + monitor->length,
-				   monitor->capacity - monitor->length);
+		           monitor->capacity - monitor->length);
 		if (got < 0) {
 			if (errno == EINTR) {
 				continue;
@@ -1189,7 +1189,7 @@ static char *monitor_line(ncfg_monitor_t *monitor, size_t *length_out, int *wait
 				return NULL;
 			}
 			set_error(err, err_size, "cannot read the monitor stream: %s",
-				  strerror(errno));
+			      strerror(errno));
 			return NULL;
 		}
 		if (got == 0) {
@@ -1211,7 +1211,7 @@ static char *monitor_line(ncfg_monitor_t *monitor, size_t *length_out, int *wait
  * the daemon's source.
  */
 static int convert_event(const ncfg_json_doc_t *doc, const char *raw, size_t raw_length,
-			 ncfg_event_t *out)
+             ncfg_event_t *out)
 {
 	uint32_t root = ncfg_json_root(doc);
 	char composed[160];
@@ -1232,19 +1232,19 @@ static int convert_event(const ncfg_json_doc_t *doc, const char *raw, size_t raw
 			out->summary = member_text(doc, root, "diagnostics");
 		} else {
 			out->summary = dup_string(
-				ncfg_json_bool(doc, ncfg_json_member(doc, root, "ok"), 0)
-					? "the configuration was reloaded"
-					: "the configuration did not compile");
+			    ncfg_json_bool(doc, ncfg_json_member(doc, root, "ok"), 0)
+			        ? "the configuration was reloaded"
+			        : "the configuration did not compile");
 		}
 	} else if (strcmp(out->kind, "confirm_armed") == 0) {
 		snprintf(composed, sizeof(composed), "a confirm window is open for %lld seconds",
-			 (long long)ncfg_json_int(doc, ncfg_json_member(doc, root, "seconds"), 0));
+		     (long long)ncfg_json_int(doc, ncfg_json_member(doc, root, "seconds"), 0));
 		out->summary = dup_string(composed);
 	} else if (strcmp(out->kind, "confirm_resolved") == 0) {
 		out->summary = dup_string(
-			ncfg_json_bool(doc, ncfg_json_member(doc, root, "confirmed"), 0)
-				? "the change was confirmed"
-				: "the change was reverted");
+		    ncfg_json_bool(doc, ncfg_json_member(doc, root, "confirmed"), 0)
+		        ? "the change was confirmed"
+		        : "the change was reverted");
 	} else {
 		/* A kind this build has never heard of still becomes an event
 		 * with its line in `raw`, rather than being dropped. An event
@@ -1280,13 +1280,13 @@ int ncfg_monitor_next(ncfg_monitor_t *monitor, ncfg_event_t *out, char *err, siz
 
 	char parse_error[NCFG_ERROR_MAX];
 	ncfg_json_doc_t *doc = ncfg_json_parse(line, line_length, parse_error,
-					       sizeof(parse_error));
+	                       sizeof(parse_error));
 	if (!doc) {
 		/* Not skipped. A stream that sends a line this cannot read is one
 		 * this cannot follow, and carrying on would mean a pane that
 		 * looks live while it has stopped understanding the daemon. */
 		set_error(err, err_size, "netcfgd sent an event this cannot read: %s",
-			  parse_error);
+		      parse_error);
 		free(line);
 		return -1;
 	}

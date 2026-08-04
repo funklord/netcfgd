@@ -87,7 +87,7 @@ bool ncfg_connection::open(const QString &socket_path, QString *error)
 	char message[NCFG_ERROR_MAX];
 
 	client = ncfg_client_open(requested.isEmpty() ? nullptr : requested.constData(), message,
-				  sizeof(message));
+	              sizeof(message));
 	if (!client) {
 		if (error) {
 			*error = QString::fromUtf8(message);
@@ -206,7 +206,7 @@ bool ncfg_connection::plan(ncfg_plan_data *out, QString *error)
 }
 
 bool ncfg_connection::apply(unsigned confirm_seconds, const ncfg_consent_rows &consent,
-			    QList<ncfg_record_row> *out, QString *error)
+                QList<ncfg_record_row> *out, QString *error)
 {
 	if (!out) {
 		return false;
@@ -253,7 +253,7 @@ bool ncfg_connection::apply(unsigned confirm_seconds, const ncfg_consent_rows &c
 	};
 
 	if (!ncfg_client_apply(client, confirm_seconds, consent.isEmpty() ? nullptr : &given,
-			       &journal, message, sizeof(message))) {
+	               &journal, message, sizeof(message))) {
 		if (error) {
 			*error = QString::fromUtf8(message);
 		}

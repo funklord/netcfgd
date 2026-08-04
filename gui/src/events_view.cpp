@@ -31,7 +31,7 @@ constexpr int kind_width = 17;
 } /* namespace */
 
 ncfg_events_view::ncfg_events_view(ncfg_connection *connection, QWidget *parent)
-	: QWidget(parent), connection(connection)
+    : QWidget(parent), connection(connection)
 {
 	auto *layout = new QVBoxLayout(this);
 

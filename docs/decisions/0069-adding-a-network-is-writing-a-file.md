@@ -118,7 +118,7 @@ networks would be a fine joke and a useless tool.
 **Three argument parsers, two of them wrong.** `parse_options` walked the
 arguments knowing which flags take a value; a separate `positional` helper walked
 them again with its *own* list of the same thing; and `explain` did neither,
-taking arguments up to the first `--`. The lists had already drifted -- 
+taking arguments up to the first `--`. The lists had already drifted --
 `--factory-dir` and `--strand-credentials` were missing from the helper's -- so
 `ncfg wifi --factory-dir /some/dir scan` read the directory as a subcommand, and
 `ncfg explain --json interface eth0` found no subject at all. One walk now returns
