@@ -89,7 +89,12 @@ static void reader_accepts_the_witness(const char *path)
 		ncfg_json_doc_t *doc = ncfg_json_parse(line, length, err, sizeof(err));
 		if (!doc) {
 			if (!refused) {
-				snprintf(first_refusal, sizeof(first_refusal), "%s: %.120s",
+				/* Both halves are bounded, and the message's bound is
+				 * what leaves room for the line: err is allowed to
+				 * fill the whole buffer on its own, and then the
+				 * ": " that says which line it was about is what
+				 * gets cut. */
+				snprintf(first_refusal, sizeof(first_refusal), "%.320s: %.120s",
 					 err, line);
 			}
 			refused++;
@@ -304,12 +309,16 @@ static void fake_daemon(int fd)
 
 static void connection_reads_lines_however_they_arrive(void)
 {
-	char path[128];
+	/* Sized from sun_path rather than from a round number: a path longer
+	 * than that cannot be connected to by anybody, so a buffer that could
+	 * hold one only makes the truncation harder to see. */
+	struct sockaddr_un address;
+	char path[sizeof(address.sun_path)];
+
 	snprintf(path, sizeof(path), "/tmp/ncfg-client-test-%d.sock", (int)getpid());
 	unlink(path);
 
 	int listener = socket(AF_UNIX, SOCK_STREAM, 0);
-	struct sockaddr_un address;
 	memset(&address, 0, sizeof(address));
 	address.sun_family = AF_UNIX;
 	snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
@@ -398,6 +407,620 @@ static void a_refusal_is_an_answer_not_a_failure(void)
 	ncfg_json_free(doc);
 }
 
+/* ------------------------------------------------------------------ models
+ *
+ * The fixtures below are copied out of docs/schema/plan.json and
+ * docs/schema/socket.json rather than written to suit the code -- same reason
+ * as the witness above, and the same failure mode if they were not: a plan
+ * fixture invented here would agree with this implementation about a shape
+ * neither of them had checked with the daemon.
+ *
+ * THE DAEMON IS STAGED, NOT FORKED
+ *   These tests listen, connect, accept and write the answers into the socket
+ *   before anything asks for them. The connection already has a check that an
+ *   answer arriving early is kept, so leaning on that here costs nothing and
+ *   buys determinism -- and the monitor check, which has to assert that
+ *   *nothing* complete has arrived yet, cannot be sharing a stopwatch with a
+ *   child process and still mean anything.
+ */
+
+static int listen_somewhere(char *path, size_t path_size)
+{
+	static int serial;
+	struct sockaddr_un address;
+
+	snprintf(path, path_size, "/tmp/ncfg-client-test-%d-%d.sock", (int)getpid(), ++serial);
+	unlink(path);
+
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
+
+	int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (listener < 0) {
+		return -1;
+	}
+	if (bind(listener, (struct sockaddr *)&address, sizeof(address)) < 0 ||
+	    listen(listener, 1) < 0) {
+		close(listener);
+		return -1;
+	}
+	return listener;
+}
+
+static void send_bytes(int fd, const char *text)
+{
+	if (write(fd, text, strlen(text)) < 0) {
+		printf("       (the test's own write failed: %s)\n", strerror(errno));
+	}
+}
+
+/* What the client put on the wire, as a C string. Nothing here ever blocks:
+ * every request checked this way was written before its answer was read. */
+static const char *received(int fd, char *out, size_t out_size)
+{
+	ssize_t got = read(fd, out, out_size - 1u);
+
+	out[got > 0 ? (size_t)got : 0u] = '\0';
+	return out;
+}
+
+struct staged {
+	char           path[128];
+	int            listener;
+	int            server;
+	ncfg_client_t *client;
+};
+
+static void staged_close(struct staged *staged)
+{
+	ncfg_client_close(staged->client);
+	if (staged->server >= 0) {
+		close(staged->server);
+	}
+	if (staged->listener >= 0) {
+		close(staged->listener);
+	}
+	unlink(staged->path);
+	memset(staged, 0, sizeof(*staged));
+}
+
+static int staged_open(struct staged *staged, const char *what, const char *answers)
+{
+	char err[NCFG_ERROR_MAX];
+
+	memset(staged, 0, sizeof(*staged));
+	staged->server = -1;
+	staged->listener = listen_somewhere(staged->path, sizeof(staged->path));
+	if (staged->listener < 0) {
+		ok(what, 0, strerror(errno));
+		return 0;
+	}
+	staged->client = ncfg_client_open(staged->path, err, sizeof(err));
+	if (!staged->client) {
+		ok(what, 0, err);
+		staged_close(staged);
+		return 0;
+	}
+	staged->server = accept(staged->listener, NULL, NULL);
+	if (staged->server < 0) {
+		ok(what, 0, strerror(errno));
+		staged_close(staged);
+		return 0;
+	}
+	send_bytes(staged->server, answers);
+	ok(what, 1, NULL);
+	return 1;
+}
+
+/*
+ * A plan, in the shapes docs/schema/plan.json pins.
+ *
+ * Three actions on purpose: one with an inverse, one whose inverse is an
+ * explicit null, and one with no inverse member at all. netcfgd omits the field
+ * today, but the model says "not reversible" for both spellings and a check
+ * that only knew one would pass against a daemon that changed its mind.
+ * The third also carries a reason with no interface, which is what a host-wide
+ * action -- nat_replace, hostname_set -- looks like.
+ */
+static const char plan_response[] =
+	"{\"response\":\"plan\",\"actions\":["
+	"{\"id\":0,\"op\":{\"op\":\"bridge_vlan_add\",\"name\":\"br0\",\"vid\":7},"
+	"\"op_name\":\"bridge.vlan.add\","
+	"\"reason\":{\"interface\":\"eth0\",\"field\":\"addressing[0]\","
+	"\"desired\":\"192.168.1.10/24\",\"observed\":\"<absent>\"},\"depends_on\":[],"
+	"\"inverse\":{\"op\":\"bridge_vlan_del\",\"name\":\"br0\",\"vid\":7}},"
+	"{\"id\":45,\"op\":{\"op\":\"commit_arm\",\"window_seconds\":90},"
+	"\"reason\":{\"interface\":\"eth0\",\"field\":\"confirm\",\"desired\":\"90\","
+	"\"observed\":\"<absent>\"},\"depends_on\":[0],\"inverse\":null},"
+	"{\"id\":43,\"op\":{\"op\":\"nat_replace\",\"uplinks\":[\"eth0\"]},"
+	"\"reason\":{\"field\":\"nat\",\"desired\":\"eth0\",\"observed\":\"<absent>\"},"
+	"\"depends_on\":[0]}"
+	"],\"warnings\":[{\"message\":\"slaac is accepted but not yet applied by this build\","
+	"\"interface\":\"eth0\"}],"
+	"\"refusals\":[{\"interface\":\"eth0\",\"op\":\"link.down\","
+	"\"guard\":\"the office runs on this\",\"reason\":{\"interface\":\"eth0\","
+	"\"field\":\"enabled\",\"desired\":\"false\",\"observed\":\"true\"},"
+	"\"override_with\":\"ncfg apply --allow-disruption eth0\"}],"
+	"\"stranded\":[{\"interface\":\"wg0\",\"credential\":\"the WireGuard private key\","
+	"\"irrevocable\":\"only every peer's administrator can revoke it\","
+	"\"remove_with\":\"on_unmanage = \\\"clear\\\"\","
+	"\"consent_with\":\"ncfg apply --strand-credentials wg0\"}]}\n";
+
+static void a_plan_becomes_a_model(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_plan_t plan;
+
+	if (!staged_open(&staged, "a plan answer can be staged", plan_response)) {
+		return;
+	}
+	if (!ncfg_client_plan_of(staged.client, &plan, err, sizeof(err))) {
+		ok("a plan converts to a model", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("a plan converts to a model", 1, NULL);
+	ok("with every action in it", plan.action_count == 3u, NULL);
+
+	if (plan.action_count == 3u) {
+		/* The op is a tagged object in the wire shape and a name in the
+		 * model, which is the one conversion a screen cannot do for
+		 * itself without knowing all forty-seven variants.
+		 *
+		 * `bridge_vlan_add` on purpose. The tag and the name differ by
+		 * more than a separator for exactly three ops, so a client that
+		 * guessed -- swap the first underscore for a dot -- would produce
+		 * `bridge.vlan_add` and be right about the other forty-four. This
+		 * is the one that catches the guess. */
+		equals("an op is the short name the daemon sends beside it", plan.actions[0].op,
+		       "bridge.vlan.add");
+		/* The other two carry no `op_name`, which is what a daemon older
+		 * than that field looks like. The tag is not the right word, but
+		 * an empty op column would be worse: a plan that will not say
+		 * what it is about to do is not a plan. */
+		equals("and falls back to the tag where an older daemon sent none",
+		       plan.actions[1].op, "commit_arm");
+		ok("an id survives", plan.actions[0].id == 0 && plan.actions[1].id == 45, NULL);
+
+		/* The reason is the half that matters: an action without it is
+		 * the black box netcfgd exists not to be. */
+		equals("a reason's interface reaches the model", plan.actions[0].interface,
+		       "eth0");
+		equals("and its field", plan.actions[0].field, "addressing[0]");
+		equals("and what was wanted", plan.actions[0].desired, "192.168.1.10/24");
+		equals("and what is there instead", plan.actions[0].observed, "<absent>");
+
+		ok("an action with an inverse is reversible", plan.actions[0].reversible == 1,
+		   NULL);
+		ok("an action whose inverse is null is not", plan.actions[1].reversible == 0,
+		   NULL);
+		ok("and neither is one with no inverse at all", plan.actions[2].reversible == 0,
+		   NULL);
+		equals("an action the planner gave no interface names none",
+		       plan.actions[2].interface, "");
+	}
+
+	ok("the warning is there", plan.warning_count == 1u, NULL);
+	if (plan.warning_count == 1u) {
+		equals("and says what it says", plan.warnings[0].message,
+		       "slaac is accepted but not yet applied by this build");
+		equals("and which interface it is about", plan.warnings[0].interface, "eth0");
+		equals("and a plain warning has nothing to pass", plan.warnings[0].consent, "");
+		equals("and nothing to change either", plan.warnings[0].remedy, "");
+		equals("and no reason, being a sentence and not a dropped action",
+		       plan.warnings[0].field, "");
+	}
+
+	ok("the refusal is there", plan.refusal_count == 1u, NULL);
+	if (plan.refusal_count == 1u) {
+		equals("and names the op it dropped", plan.refusals[0].message, "link.down");
+		equals("and quotes the guard", plan.refusals[0].detail, "the office runs on this");
+		/* Verbatim, because a refusal the operator cannot act on is just
+		 * a complaint. */
+		equals("and the exact command that consents to it", plan.refusals[0].consent,
+		       "ncfg apply --allow-disruption eth0");
+		equals("and nothing to change, a guard being a decision and not a typo",
+		       plan.refusals[0].remedy, "");
+		/* Constraint 7 in the place it matters most. A refusal that cannot
+		 * say what the action would have been leaves an operator told no
+		 * with no way to judge whether the no is right. */
+		equals("and what the refused action would have been", plan.refusals[0].field,
+		       "enabled");
+		equals("and what it wanted to make it", plan.refusals[0].desired, "false");
+		equals("and what it found instead", plan.refusals[0].observed, "true");
+	}
+
+	ok("the stranded credential is there", plan.stranded_count == 1u, NULL);
+	if (plan.stranded_count == 1u) {
+		equals("and names what is being left behind", plan.stranded[0].message,
+		       "the WireGuard private key");
+		equals("and on what", plan.stranded[0].interface, "wg0");
+		equals("and why it cannot be taken back", plan.stranded[0].detail,
+		       "only every peer's administrator can revoke it");
+		equals("and how to mean it", plan.stranded[0].consent,
+		       "ncfg apply --strand-credentials wg0");
+		/* Both, and this is the one the first draft dropped: consent tells
+		 * an operator how to walk away from a key, and only this tells them
+		 * how to stop leaving it behind. `ncfg` prints this one first for
+		 * the same reason. */
+		equals("and how to not have to", plan.stranded[0].remedy,
+		       "on_unmanage = \"clear\"");
+	}
+
+	ncfg_plan_free(&plan);
+	/* Twice, because the error paths inside the conversion free a plan the
+	 * caller will free again, and "it depends" is not a rule anybody keeps. */
+	ncfg_plan_free(&plan);
+	ok("and freeing a plan twice leaves it zeroed",
+	   plan.actions == NULL && plan.action_count == 0u && plan.refusals == NULL, NULL);
+	staged_close(&staged);
+}
+
+static const char status_response[] =
+	"{\"response\":\"status\",\"links\":["
+	"{\"name\":\"eth0\",\"kind\":\"\",\"up\":true,\"carrier\":false,\"mtu\":1500,"
+	"\"mac\":\"02:00:00:00:00:01\"},"
+	"{\"name\":\"br0\",\"kind\":\"bridge\",\"up\":true,\"carrier\":true,\"mtu\":9000}],"
+	"\"addresses\":[{\"interface\":\"eth0\",\"address\":\"192.0.2.1/24\"},"
+	"{\"interface\":\"br0\",\"address\":\"10.0.0.1/24\"},"
+	"{\"interface\":\"eth0\",\"address\":\"fe80::1/64\"}]}\n";
+
+static void a_status_becomes_links(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_links_t links;
+
+	if (!staged_open(&staged, "a status answer can be staged", status_response)) {
+		return;
+	}
+	if (!ncfg_client_links(staged.client, &links, err, sizeof(err))) {
+		ok("a status converts to links", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("a status converts to links", 1, NULL);
+	ok("one row per link", links.count == 2u, NULL);
+
+	if (links.count == 2u) {
+		/* The addresses arrive as their own flat list keyed by
+		 * interface, and joining them is the one thing in this
+		 * conversion that two frontends would have done differently. */
+		equals("every address of an interface is gathered, in the daemon's order",
+		       links.items[0].addresses, "192.0.2.1/24, fe80::1/64");
+		equals("and only that interface's", links.items[1].addresses, "10.0.0.1/24");
+		/* An empty kind is what the kernel says about a real NIC, and it
+		 * stays empty: `eth0` is a convention, not a fact. */
+		equals("a real NIC keeps its empty kind", links.items[0].kind, "");
+		equals("and a virtual link its own", links.items[1].kind, "bridge");
+		/* Up and carrier are separate answers: no cable is not the same
+		 * state as not configured. */
+		ok("up and carrier are two answers",
+		   links.items[0].up == 1 && links.items[0].carrier == 0, NULL);
+		equals("a link with no mac gets an empty string rather than a null",
+		       links.items[1].mac, "");
+		ok("the mtu comes through", links.items[1].mtu == 9000, NULL);
+	}
+	ncfg_links_free(&links);
+	staged_close(&staged);
+}
+
+static const char journal_response[] =
+	"{\"response\":\"journal\",\"records\":["
+	"{\"id\":1,\"op\":\"addr.add\",\"interface\":\"eth0\","
+	"\"reason\":{\"interface\":\"eth0\",\"field\":\"addressing[0]\","
+	"\"desired\":\"192.0.2.1/24\",\"observed\":\"<absent>\"},\"outcome\":\"done\"},"
+	"{\"id\":2,\"op\":\"link.up\",\"interface\":\"eth0\","
+	"\"reason\":{\"interface\":\"eth0\",\"field\":\"enabled\",\"desired\":\"true\","
+	"\"observed\":\"false\"},\"outcome\":\"failed\","
+	"\"error\":\"the kernel refused: Operation not permitted\"}]}\n";
+
+static void an_apply_becomes_a_journal(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[256];
+	ncfg_journal_t journal;
+
+	/* Three answers for three requests, queued in the order they are asked
+	 * for. */
+	char answers[4096];
+	snprintf(answers, sizeof(answers), "%s{\"response\":\"ok\"}\n%s", journal_response,
+		 journal_response);
+	if (!staged_open(&staged, "an apply answer can be staged", answers)) {
+		return;
+	}
+
+	if (!ncfg_client_apply(staged.client, 90, &journal, err, sizeof(err))) {
+		ok("an apply converts to a journal", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("an apply converts to a journal", 1, NULL);
+	equals("and the confirm window goes out the way the daemon spells it",
+	       received(staged.server, sent, sizeof(sent)),
+	       "{\"request\":\"apply\",\"confirm\":90}\n");
+	ok("one record per action", journal.count == 2u, NULL);
+	if (journal.count == 2u) {
+		ok("an id survives", journal.items[0].id == 1 && journal.items[1].id == 2, NULL);
+		/* The op is a bare name here and an object in a plan; both read
+		 * the same, so a screen showing the two lists side by side does
+		 * not have a gap in one of them. */
+		equals("an op reads the same as it does in a plan", journal.items[0].op,
+		       "addr.add");
+		equals("the outcome is the daemon's own word", journal.items[0].outcome, "done");
+		equals("a record that went fine has no detail", journal.items[0].detail, "");
+		equals("and a failure carries what the kernel said", journal.items[1].detail,
+		       "the kernel refused: Operation not permitted");
+		equals("with the daemon's word for it", journal.items[1].outcome, "failed");
+	}
+	ncfg_journal_free(&journal);
+
+	ok("a confirm is answered", ncfg_client_confirm(staged.client, err, sizeof(err)) == 1, err);
+	equals("and asks for exactly that", received(staged.server, sent, sizeof(sent)),
+	       "{\"request\":\"confirm\"}\n");
+
+	/* No window means the field is left out rather than sent as zero: a
+	 * window of zero seconds is one that arms and expires, which is not what
+	 * "do not arm one" means. */
+	if (ncfg_client_apply(staged.client, 0, &journal, err, sizeof(err))) {
+		equals("an apply with no window does not mention confirm at all",
+		       received(staged.server, sent, sizeof(sent)), "{\"request\":\"apply\"}\n");
+		ncfg_journal_free(&journal);
+	} else {
+		ok("an apply with no window is still an apply", 0, err);
+	}
+	staged_close(&staged);
+}
+
+static void a_daemon_refusal_is_a_zero_and_its_own_message(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_plan_t plan;
+	ncfg_journal_t journal;
+
+	static const char refusal[] =
+		"{\"response\":\"error\",\"message\":\"the admin tier is root's\"}\n"
+		"{\"response\":\"error\",\"message\":\"the admin tier is root's\"}\n";
+
+	if (!staged_open(&staged, "a refusal can be staged", refusal)) {
+		return;
+	}
+	/* The daemon's sentence and not one of this library's: a refusal names
+	 * the tier that would have been needed, and replacing it would throw
+	 * away the half that says what to do about it. */
+	ok("a refused plan is a zero, not a failure to reach anything",
+	   ncfg_client_plan_of(staged.client, &plan, err, sizeof(err)) == 0, NULL);
+	equals("and err holds the daemon's own words", err, "the admin tier is root's");
+	ok("and the model is left empty rather than half filled in",
+	   plan.actions == NULL && plan.action_count == 0u, NULL);
+
+	ok("the same for an apply",
+	   ncfg_client_apply(staged.client, 0, &journal, err, sizeof(err)) == 0, NULL);
+	equals("with the same message", err, "the admin tier is root's");
+	staged_close(&staged);
+}
+
+/* ----------------------------------------------------------------- monitor */
+
+static void the_monitor_hands_over_one_event_at_a_time(void)
+{
+	char path[128];
+	char err[NCFG_ERROR_MAX];
+	char sent[256];
+	ncfg_event_t event;
+
+	int listener = listen_somewhere(path, sizeof(path));
+	if (listener < 0) {
+		ok("a socket to monitor can be made", 0, strerror(errno));
+		return;
+	}
+	ncfg_monitor_t *monitor = ncfg_monitor_open(path, err, sizeof(err));
+	if (!monitor) {
+		ok("a monitor connects", 0, err);
+		close(listener);
+		unlink(path);
+		return;
+	}
+	ok("a monitor connects", 1, NULL);
+
+	int server = accept(listener, NULL, NULL);
+	if (server < 0) {
+		ok("and the daemon side accepts it", 0, strerror(errno));
+		ncfg_monitor_close(monitor);
+		close(listener);
+		unlink(path);
+		return;
+	}
+	equals("and asks for a stream", received(server, sent, sizeof(sent)),
+	       "{\"request\":\"monitor\"}\n");
+	ok("and offers a descriptor an event loop can watch", ncfg_monitor_fd(monitor) >= 0, NULL);
+
+	/* Two events in one write and the front half of a third: what a daemon
+	 * that emitted a burst and then began another line looks like. */
+	send_bytes(server,
+		   "{\"response\":\"event\",\"event\":\"observed\","
+		   "\"summary\":\"eth0 gained an address\"}\n"
+		   "{\"response\":\"event\",\"event\":\"drift\",\"interface\":\"eth0\","
+		   "\"summary\":\"an address we installed is gone\",\"action\":\"reconciled\"}\n");
+	send_bytes(server, "{\"response\":\"event\",\"event\":\"confirm_armed\",\"sec");
+
+	int got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
+	ok("the first event arrives", got == 1, err);
+	if (got == 1) {
+		equals("with the daemon's own kind", event.kind, "observed");
+		equals("and its own sentence", event.summary, "eth0 gained an address");
+		ok("and the whole line, for a pane that wants everything",
+		   strstr(event.raw, "\"response\":\"event\"") != NULL, event.raw);
+		equals("and an event about no interface says so with an empty string",
+		       event.interface, "");
+		ncfg_event_free(&event);
+	}
+
+	got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
+	ok("the second is not lost to the read that fetched the first", got == 1, err);
+	if (got == 1) {
+		equals("and is the other one", event.kind, "drift");
+		equals("with the interface it is about", event.interface, "eth0");
+		equals("and the daemon's summary rather than one of ours", event.summary,
+		       "an address we installed is gone");
+		ncfg_event_free(&event);
+	}
+
+	/* The ordinary answer, and the one a UI must not treat as trouble: a
+	 * monitor that returned -1 here would put an error in a pane every time
+	 * the daemon paused mid-line. */
+	got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
+	ok("half an event is nothing yet rather than an error", got == 0, err);
+	ok("and says nothing, since there is nothing wrong", err[0] == '\0', err);
+
+	send_bytes(server, "onds\":90}\n");
+	got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
+	ok("and the half that was kept completes the line", got == 1, err);
+	if (got == 1) {
+		equals("into the event it was", event.kind, "confirm_armed");
+		/* Composed, because this event carries a number and nothing a
+		 * pane could draw. Every kind that has words of its own keeps
+		 * them. */
+		equals("with a summary made for an event that has none of its own",
+		       event.summary, "a confirm window is open for 90 seconds");
+		ncfg_event_free(&event);
+	}
+
+	/* The other two kinds that carry no summary. A reload that failed has
+	 * the compiler's diagnostics, which are words netcfgd already chose --
+	 * so they are used rather than summarised into "reload failed", which
+	 * is the sentence that sends somebody to the log to find out which
+	 * line. */
+	send_bytes(server,
+		   "{\"response\":\"event\",\"event\":\"reloaded\",\"ok\":false,"
+		   "\"diagnostics\":\"netcfgd.conf:3: unknown key\"}\n"
+		   "{\"response\":\"event\",\"event\":\"confirm_resolved\","
+		   "\"confirmed\":false}\n");
+
+	got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
+	ok("a failed reload arrives", got == 1, err);
+	if (got == 1) {
+		equals("and shows the compiler's own diagnostics", event.summary,
+		       "netcfgd.conf:3: unknown key");
+		ncfg_event_free(&event);
+	}
+
+	got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
+	ok("a resolved confirm window arrives", got == 1, err);
+	if (got == 1) {
+		/* Confirmed and reverted are the two things that window can end
+		 * as, and a pane that said "resolved" for both would be telling
+		 * an operator nothing at the one moment they are watching. */
+		equals("and says which way it went", event.summary, "the change was reverted");
+		ncfg_event_free(&event);
+	}
+
+	/* A monitor that silently stopped would leave a pane looking merely
+	 * quiet, which is the failure the header names. */
+	close(server);
+	got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
+	ok("a stream that ends says so rather than going quiet", got == -1, NULL);
+	ok("and names what happened", err[0] != '\0', NULL);
+
+	ncfg_monitor_close(monitor);
+	close(listener);
+	unlink(path);
+}
+
+/*
+ * The stream's other first line: a refusal.
+ *
+ * netcfgd answers `monitor` by saying nothing and streaming, so the only line
+ * it ever writes for a client it will not serve is the refusal itself, and then
+ * it closes. That makes this the ordinary experience of an unprivileged desktop
+ * user opening the events pane -- not an edge case -- and the two ways to get
+ * it wrong both end with a pane that lies: parse the refusal as an event and it
+ * is drawn as a line of network activity, or notice only the close and report
+ * "the stream ended" instead of the sentence naming the tier (0013) that would
+ * have been needed.
+ */
+static void a_refused_stream_says_which_tier_it_wanted(void)
+{
+	char path[128];
+	char err[NCFG_ERROR_MAX];
+	char sent[256];
+	ncfg_event_t event;
+
+	int listener = listen_somewhere(path, sizeof(path));
+	if (listener < 0) {
+		ok("a socket to refuse on can be made", 0, strerror(errno));
+		return;
+	}
+	ncfg_monitor_t *monitor = ncfg_monitor_open(path, err, sizeof(err));
+	if (!monitor) {
+		/* Opening still succeeds: the tier check happens on the daemon's
+		 * side after the request, so there is nothing to refuse yet. */
+		ok("a monitor connects before it is refused", 0, err);
+		close(listener);
+		unlink(path);
+		return;
+	}
+	ok("a monitor connects before it is refused", 1, NULL);
+
+	int server = accept(listener, NULL, NULL);
+	if (server < 0) {
+		ok("and the daemon side accepts it", 0, strerror(errno));
+		ncfg_monitor_close(monitor);
+		close(listener);
+		unlink(path);
+		return;
+	}
+	(void)received(server, sent, sizeof(sent));
+
+	send_bytes(server, "{\"response\":\"error\",\"message\":\"monitor needs the observe "
+			   "tier; you are in none of its groups\"}\n");
+	close(server);
+
+	int got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
+	ok("a refusal is a failure of the stream, not an event on it", got == -1, NULL);
+	equals("and arrives as the daemon's own sentence", err,
+	       "monitor needs the observe tier; you are in none of its groups");
+
+	ncfg_monitor_close(monitor);
+	close(listener);
+	unlink(path);
+}
+
+static void freeing_what_was_never_filled_in_is_nothing(void)
+{
+	ncfg_links_t links;
+	ncfg_plan_t plan;
+	ncfg_journal_t journal;
+	ncfg_event_t event;
+
+	memset(&links, 0, sizeof(links));
+	memset(&plan, 0, sizeof(plan));
+	memset(&journal, 0, sizeof(journal));
+	memset(&event, 0, sizeof(event));
+
+	/* A caller that never made the request still has one of these on its
+	 * stack, and the error paths inside the library free structs they only
+	 * half filled. Both end up here. */
+	ncfg_links_free(&links);
+	ncfg_plan_free(&plan);
+	ncfg_journal_free(&journal);
+	ncfg_event_free(&event);
+	ncfg_links_free(NULL);
+	ncfg_plan_free(NULL);
+	ncfg_journal_free(NULL);
+	ncfg_event_free(NULL);
+
+	ok("freeing a model that was never filled in is nothing",
+	   links.items == NULL && links.count == 0u && plan.actions == NULL &&
+		   plan.warnings == NULL && plan.stranded_count == 0u &&
+		   journal.items == NULL && event.kind == NULL && event.raw == NULL,
+	   NULL);
+}
+
 int main(int argc, char **argv)
 {
 	const char *witness = (argc > 1) ? argv[1] : "../docs/schema/socket.json";
@@ -409,6 +1032,13 @@ int main(int argc, char **argv)
 	quoting_escapes_what_it_must();
 	connection_reads_lines_however_they_arrive();
 	a_refusal_is_an_answer_not_a_failure();
+	a_plan_becomes_a_model();
+	a_status_becomes_links();
+	an_apply_becomes_a_journal();
+	a_daemon_refusal_is_a_zero_and_its_own_message();
+	the_monitor_hands_over_one_event_at_a_time();
+	a_refused_stream_says_which_tier_it_wanted();
+	freeing_what_was_never_filled_in_is_nothing();
 
 	printf("\n");
 	if (failures) {

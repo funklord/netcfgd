@@ -1,26 +1,34 @@
 /*
- * main_window.h -- the one window there is so far.
+ * main_window.h -- the one window there is, and its three tabs.
  *
- * The first screen is the devices table, and that is not an arbitrary choice:
- * "what is this machine's network doing" is the question `ncfg status` and the
- * TUI's first pane both answer, and a client that could not answer it would be
- * a client nobody opens.
+ * WHY THESE THREE
+ *   They are `ncfg`'s three answers. What is the machine doing (`status`), what
+ *   would change and why (`plan`), and what has happened since you looked
+ *   (`monitor`). The TUI's panes are the same three for the same reason, and a
+ *   client that had only the first would be a client that can watch but never
+ *   understand.
  *
- * Two things are on screen from the first commit because gui/project.md sec 4
- * says they must never be inferable rather than visible: **which machine this
- * is**, and what the daemon said when it refused. The second one matters more
- * than it looks -- 0013's tiers mean an unprivileged client is told no, and a
- * window that showed an empty table for that would be a client that lies.
+ * WHAT IS ON SCREEN NO MATTER WHICH TAB
+ *   **Which machine this is**, and **what the daemon said when it refused**.
+ *   gui/project.md sec 4 says the first must never be inferable rather than
+ *   visible, and the second matters more than it looks -- 0013's tiers mean an
+ *   unprivileged client is told no, and a window that showed an empty table for
+ *   that would be a client that lies.
  */
 #ifndef NCFG_MAIN_WINDOW_H
 #define NCFG_MAIN_WINDOW_H
 
+#include <QHash>
 #include <QMainWindow>
+#include <QString>
 
 class QLabel;
-class QTableWidget;
+class QTabWidget;
 
 class ncfg_connection;
+class ncfg_devices_view;
+class ncfg_events_view;
+class ncfg_plan_view;
 
 class ncfg_main_window : public QMainWindow {
 	Q_OBJECT
@@ -29,13 +37,33 @@ public:
 	explicit ncfg_main_window(ncfg_connection *connection, QWidget *parent = nullptr);
 
 public slots:
+	/* Re-asks the tab in front of the operator. Refreshing all three would
+	 * mean two extra round trips for a pane nobody is looking at, and the
+	 * events pane has nothing to re-ask in the first place -- it is fed. */
 	void refresh();
 
+	/* Everything, after something changed the machine. */
+	void reload();
+
+	void open_apply();
+
+private slots:
+	void note(const QString &summary);
+	void tab_changed();
+
 private:
-	ncfg_connection *connection;
-	QTableWidget    *table;
-	QLabel          *where;
-	QLabel          *status;
+	ncfg_connection   *connection;
+	QTabWidget        *tabs;
+	ncfg_devices_view *devices;
+	ncfg_plan_view    *plan;
+	ncfg_events_view  *events;
+	QLabel            *where;
+	QLabel            *status;
+
+	/* One remembered line per tab. Without it, switching tabs leaves the
+	 * status bar describing the pane the operator just left, which is the
+	 * kind of small lie that costs somebody an hour. */
+	QHash<QWidget *, QString> summaries;
 };
 
 #endif /* NCFG_MAIN_WINDOW_H */

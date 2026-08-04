@@ -1,29 +1,28 @@
 /*
  * ncfg_connection.cpp -- the conversion described in ncfg_connection.h.
+ *
+ * Everything here is the same three lines: ask the C layer, turn its structs
+ * into Qt types, free them. There is no walking of JSON in this file and there
+ * must not be one again -- the models are below the seam (gui/project.md sec 3)
+ * and the reason they moved is that three more screens would have made the
+ * walking the pattern.
  */
 #include "ncfg_connection.h"
 
-#include <QHash>
-
 namespace {
 
-/* A counted JSON string into a QString. UTF-8 because the reader below the
- * seam has already unescaped into it, surrogate pairs included -- so this is a
- * decode of known-good bytes rather than a place that has to be careful. */
-QString to_qstring(const ncfg_json_doc_t *doc, uint32_t node)
+/*
+ * A C string from the model structs into a QString.
+ *
+ * UTF-8 because the reader below the seam has already unescaped into it,
+ * surrogate pairs included -- so this is a decode of known-good bytes rather
+ * than a place that has to be careful. NULL becomes empty rather than
+ * asserting: a field the daemon did not send is a field a screen leaves blank,
+ * and crashing a client over it would be the worse answer.
+ */
+QString from_c(const char *text)
 {
-	size_t length = 0;
-	const char *text = ncfg_json_string(doc, node, &length);
-
-	if (!text) {
-		return QString();
-	}
-	return QString::fromUtf8(text, static_cast<int>(length));
-}
-
-QString member_string(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
-{
-	return to_qstring(doc, ncfg_json_member(doc, object, name));
+	return text ? QString::fromUtf8(text) : QString();
 }
 
 /*
@@ -33,19 +32,42 @@ QString member_string(const ncfg_json_doc_t *doc, uint32_t object, const char *n
  * whole of "no cable" versus "not configured" -- 0011 and the shim's device
  * states both turn on it, so flattening them into "up" here would throw away
  * the distinction an operator most needs at a glance.
+ *
+ * The flattening happens on this side of the seam and not below it because
+ * "down" and "no cable" are words for a person to read. client/ keeps the two
+ * booleans, which is the fact; this picks the word, which is presentation.
  */
-QString state_of(const ncfg_json_doc_t *doc, uint32_t link)
+QString state_of(const ncfg_link_t &link)
 {
-	const bool up = ncfg_json_bool(doc, ncfg_json_member(doc, link, "up"), false);
-	const bool carrier = ncfg_json_bool(doc, ncfg_json_member(doc, link, "carrier"), true);
-
-	if (!up) {
+	if (!link.up) {
 		return QStringLiteral("down");
 	}
-	if (!carrier) {
+	if (!link.carrier) {
 		return QStringLiteral("no cable");
 	}
 	return QStringLiteral("up");
+}
+
+ncfg_note_row note_of(const ncfg_note_t &note)
+{
+	ncfg_note_row row;
+
+	row.message = from_c(note.message);
+	row.interface = from_c(note.interface);
+	row.detail = from_c(note.detail);
+	row.remedy = from_c(note.remedy);
+	row.consent = from_c(note.consent);
+	row.field = from_c(note.field);
+	row.desired = from_c(note.desired);
+	row.observed = from_c(note.observed);
+	return row;
+}
+
+void notes_into(const ncfg_note_t *items, size_t count, QList<ncfg_note_row> *out)
+{
+	for (size_t i = 0; i < count; i++) {
+		out->append(note_of(items[i]));
+	}
 }
 
 } /* namespace */
@@ -104,65 +126,159 @@ bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 		return false;
 	}
 
+	ncfg_links_t links = {};
 	char message[NCFG_ERROR_MAX];
-	ncfg_json_doc_t *doc = ncfg_client_status(client, message, sizeof(message));
-	if (!doc) {
+
+	if (!ncfg_client_links(client, &links, message, sizeof(message))) {
 		if (error) {
 			*error = QString::fromUtf8(message);
 		}
 		return false;
 	}
 
-	/* A refusal is the daemon answering. The tiers in 0013 mean an
-	 * unprivileged client can be told no, and the message says which tier --
-	 * so it is shown rather than replaced with something of this program's
-	 * own invention. */
-	size_t refusal_length = 0;
-	if (const char *refusal = ncfg_client_error_message(doc, &refusal_length)) {
-		if (error) {
-			*error = QString::fromUtf8(refusal, static_cast<int>(refusal_length));
-		}
-		ncfg_json_free(doc);
-		return false;
-	}
-
-	const uint32_t root = ncfg_json_root(doc);
-	const uint32_t links_node = ncfg_json_member(doc, root, "links");
-	const uint32_t addresses_node = ncfg_json_member(doc, root, "addresses");
-
-	/* Addresses arrive as their own list keyed by interface, because that is
-	 * what the observation is -- one flat list, sorted. Gathering them per
-	 * interface here rather than in the table keeps the widget a view of
-	 * rows and nothing else. */
-	QHash<QString, QStringList> by_interface;
-	for (uint32_t i = 0; i < ncfg_json_count(doc, addresses_node); i++) {
-		const uint32_t entry = ncfg_json_at(doc, addresses_node, i);
-		const QString interface = member_string(doc, entry, "interface");
-		const QString address = member_string(doc, entry, "address");
-		if (!interface.isEmpty() && !address.isEmpty()) {
-			by_interface[interface].append(address);
-		}
-	}
-
-	for (uint32_t i = 0; i < ncfg_json_count(doc, links_node); i++) {
-		const uint32_t link = ncfg_json_at(doc, links_node, i);
+	for (size_t i = 0; i < links.count; i++) {
+		const ncfg_link_t &link = links.items[i];
 		ncfg_link_row row;
 
-		row.name = member_string(doc, link, "name");
+		row.name = from_c(link.name);
 		/* An empty kind is what the kernel reports for a real NIC, and
 		 * the shim already learned not to guess from the name -- `eth0`
 		 * is a convention, not a fact. */
-		row.kind = member_string(doc, link, "kind");
+		row.kind = from_c(link.kind);
 		if (row.kind.isEmpty()) {
 			row.kind = QStringLiteral("device");
 		}
-		row.state = state_of(doc, link);
-		row.mac = member_string(doc, link, "mac");
-		row.mtu = static_cast<int>(ncfg_json_int(doc, ncfg_json_member(doc, link, "mtu"), 0));
-		row.addresses = by_interface.value(row.name).join(QStringLiteral(", "));
+		row.state = state_of(link);
+		row.mac = from_c(link.mac);
+		row.addresses = from_c(link.addresses);
+		row.mtu = link.mtu;
 		out->append(row);
 	}
 
-	ncfg_json_free(doc);
+	ncfg_links_free(&links);
+	return true;
+}
+
+bool ncfg_connection::plan(ncfg_plan_data *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	*out = ncfg_plan_data();
+
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_plan_t plan = {};
+	char message[NCFG_ERROR_MAX];
+
+	if (!ncfg_client_plan_of(client, &plan, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < plan.action_count; i++) {
+		const ncfg_action_t &action = plan.actions[i];
+		ncfg_action_row row;
+
+		row.id = action.id;
+		row.op = from_c(action.op);
+		row.interface = from_c(action.interface);
+		row.field = from_c(action.field);
+		row.desired = from_c(action.desired);
+		row.observed = from_c(action.observed);
+		row.reversible = action.reversible != 0;
+		out->actions.append(row);
+	}
+
+	notes_into(plan.warnings, plan.warning_count, &out->warnings);
+	notes_into(plan.refusals, plan.refusal_count, &out->refusals);
+	notes_into(plan.stranded, plan.stranded_count, &out->stranded);
+
+	ncfg_plan_free(&plan);
+	return true;
+}
+
+bool ncfg_connection::apply(unsigned confirm_seconds, QList<ncfg_record_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_journal_t journal = {};
+	char message[NCFG_ERROR_MAX];
+
+	if (!ncfg_client_apply(client, confirm_seconds, &journal, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < journal.count; i++) {
+		const ncfg_record_t &record = journal.items[i];
+		ncfg_record_row row;
+
+		row.id = record.id;
+		row.op = from_c(record.op);
+		row.interface = from_c(record.interface);
+		row.outcome = from_c(record.outcome);
+		row.detail = from_c(record.detail);
+		out->append(row);
+	}
+
+	ncfg_journal_free(&journal);
+	return true;
+}
+
+bool ncfg_connection::confirm(QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_confirm(client, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
+bool ncfg_connection::revert(QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_revert(client, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
 	return true;
 }
