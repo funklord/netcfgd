@@ -523,6 +523,16 @@ size:
 # is a bug rather than a preference.
 footprint:
 	@$(CARGO) build --quiet
+	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
+	@# `ncfg` is a symlink cargo cannot make, and nothing else in `check`
+	@# creates the debug one -- `size` makes the release one. So after a
+	@# `make clean` this ran a binary that was not there, `|| true` swallowed
+	@# it, and the gate reported "/run does not match" for an empty /run. The
+	@# check was pointing at the wrong thing entirely, which is why the
+	@# missing binary is now its own sentence.
+	@[ -x ./target/debug/ncfg ] || { \
+		echo "footprint: ./target/debug/ncfg is missing, so this would check nothing"; \
+		exit 1; }
 	@work=$$(mktemp -d); \
 	cp -r tests/footprint/etc "$$work/etc"; \
 	mkdir -p "$$work/run"; \
@@ -766,6 +776,23 @@ deny:
 				echo "deny: cargo-audit not installed, skipping"; } ) || exit 1; \
 	done
 
+# `clean` removes what it names. `dist/` is the one directory cleared wholesale,
+# and only because the build creates it: `deb` and `apk-source` make it, nothing
+# else writes there, and it is disposable by construction.
+#
+# The guard is not decoration. `DIST` is settable, and an unset or mistyped one
+# turns `rm -rf $(DIST)` into a command that deletes something else entirely --
+# which is exactly how a clean target eats a source tree. So the path is checked
+# for being non-empty and relative before anything is removed, and the packages
+# are listed rather than swept silently.
 clean:
 	$(CARGO) clean
-	rm -rf $(DIST)
+	@case "$(DIST)" in \
+	"") echo "clean: DIST is empty, refusing to remove anything"; exit 1 ;; \
+	/*) echo "clean: DIST is absolute ($(DIST)), refusing"; exit 1 ;; \
+	*..*) echo "clean: DIST escapes the tree ($(DIST)), refusing"; exit 1 ;; \
+	esac; \
+	if [ -d "$(DIST)" ]; then \
+		find "$(DIST)" -type f -print | sed 's/^/clean: removing /'; \
+		rm -rf "$(DIST)"; \
+	fi
