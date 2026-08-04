@@ -374,9 +374,18 @@ Action {
   id         : u32
   op         : Op
   reason     : Reason        // which desired field differs from which observed field
-  depends_on : [u32]
+  depends_on : [u32]         // ids earlier in the list; see the invariant below
   inverse    : Op?           // None => irreversible; plan warns loudly
 }
+
+**`depends_on` has one structural invariant: an action may only depend on an
+action that exists and comes before it.** Execution follows the list, so a
+correct plan satisfies it by construction and a violation is silent — the
+planner declines to emit some actions (`u32::MAX`), and five internal
+accumulators collect ids without asking whether they are real
+([0097](docs/decisions/0097-a-refused-action-is-not-something-to-wait-for.md)).
+Every fixture in `netcfgd-plan` is checked against it, because the defect is
+wherever the next edge is added rather than where the last one was.
 
 Reason {
   interface : string?
@@ -1459,9 +1468,8 @@ match.
    nameservers and search suffixes (0066, 0067), the `carrier` hook (0068) and
    joining a network without an editor (0069), an enterprise network from the
    command line (0087) and the rfkill event stream (0093). **What is left is two
-   hook phases, both deferred with a reason rather than unbuilt** — everything
-   else on this list is closed, and nine of the fifteen items found a defect
-   older than the work itself:
+   nothing** — every item on this list is closed, and ten of the fifteen found a
+   defect older than the work itself:
 
    - ~~**dhcpcd's generated script has never been run by dhcpcd**~~ — **closed**
      ([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)),
@@ -1626,6 +1634,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A sentinel return value is a guard at every call site, and call sites do not all remember.** `push` returns `u32::MAX` for an action it declines to emit, under a comment saying nothing downstream can depend on it. Six of thirteen sites checked; seven fed the sentinel into one of five accumulators that all end up as somebody's `depends_on`, and two of those are reachable from a nine-line config — a guarded bridge member left the bridge's `link.up` and `addr.add` waiting on action **4294967295**. Downstream, `restrict` dropped both and said `needs action 4294967295, which belongs to another interface`, a sentence with two false claims in it. **Where the same check must happen at every call site, put it where the value is minted** — and treat a comment asserting a property as a claim to verify, not a statement of fact.
+- **"Who reads this field?" is worth asking of anything the schema pins.** `depends_on` is in `plan.json`, in every client, and in 29 fixture assertions — and the *executor* does not read it: actions run in list order and stop at the first failure. One code path acts on it. A field can be pinned, documented, asserted on and structurally load-bearing in exactly one place nobody was looking at, which is where its defect will be. The question came out of a break that correctly passed, not out of a gate.
 - **`ip link set dev down` flushes IPv6 and leaves IPv4 behind, so "the kernel cleans up" is true in one family and not the other.** netcfgd's whole plan for disabling an interface was `link.down`, which looks complete on a v6 machine and leaves a stale `10.x` address on a v4 one — an address netcfgd had installed and still recorded as its own, with nothing left to remove it. The asymmetry is real kernel behaviour and it was found by running the command and looking, while going to build something else entirely. **Where the kernel tidies up after you, check that it does so in every family**, or the daemon's idea of what it owns depends on which one the operator wrote.
 - **An ordering assertion that reads positions in a list is not testing the dependency that produces them.** Actions execute in list order, so a fixture checking that `down` comes after `addr.del` passes on emission order alone — deleting the `depends_on` edge changes no position and no assertion can see it. The break that removed the edge came back **green** on a test written specifically for the ordering. §9 already says an unasserted edge is decoration; the lesson the break added is that a *positional* assertion looks exactly like an assertion on the edge and is not one. Assert the edge by name: this action's `depends_on` contains that action's id, and the phase before it does not.
 - **Every interface that is up has a link-local, so "has an address" is true from the moment the link exists.** The portal check fires on an interface *becoming* addressed, and the first version asked whether it had any address at all -- which `fe80::` makes true immediately and permanently. The feature therefore fired once, at startup, and never again on any real machine, and it survived its first live run because the first probe is the one that works. **A transition test needs a condition that can actually go back**, and connectivity is not "has an address": it is having one that could reach something.

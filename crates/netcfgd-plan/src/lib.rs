@@ -885,7 +885,29 @@ impl Builder {
 		true
 	}
 
-	fn push(&mut self, op: Op, reason: Reason, depends_on: Vec<u32>, inverse: Option<Op>) -> u32 {
+	fn push(
+		&mut self,
+		op: Op,
+		reason: Reason,
+		mut depends_on: Vec<u32>,
+		inverse: Option<Op>,
+	) -> u32 {
+		// A refused or unmanaged action is not emitted and its id is `u32::MAX`,
+		// which callers accumulate into `gates`, `added`, `link_up`,
+		// `enslavements` and `stopped` -- five lists that all end up here as
+		// somebody's `depends_on`. Every one of them could carry the sentinel
+		// into a plan, and two of them did: guarding a bridge member made the
+		// bridge's `link.up` and `addr.add` depend on action 4294967295 (0097).
+		//
+		// Dropped rather than guarded at each of the thirteen call sites,
+		// because a site added later would not know to ask -- the same reasoning
+		// as the unmanaged check below, and the same reason it lives here.
+		//
+		// Dropping is what the edge *means*: an action that was not emitted is
+		// not something to wait for, so the dependency is vacuous rather than
+		// unsatisfied. The refusal beside it is what says why.
+		depends_on.retain(|id| *id != u32::MAX);
+
 		// `managed = false` means netcfgd never touches the device -- including
 		// not tearing down what it configured before the flag was set, which is
 		// what "no further operation" was decided to mean. Dropped here rather
