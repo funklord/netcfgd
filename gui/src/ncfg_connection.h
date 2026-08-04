@@ -25,6 +25,7 @@
 #define NCFG_CONNECTION_H
 
 #include <QList>
+#include <QStringList>
 #include <QObject>
 #include <QString>
 
@@ -117,6 +118,23 @@ struct ncfg_event_row {
 	QString raw;
 };
 
+/* What the operator has agreed to, beyond the plan itself.
+ *
+ * Two lists and never one switch, because the daemon asks two questions: an
+ * operator who accepted a brief outage on one interface has not agreed to leave
+ * a private key on another. `ncfg` spells them `--allow-disruption IFACE` and
+ * `--strand-credentials DEV`, both repeatable and "deliberately not a blanket
+ * --force" -- and a single checkbox marked "override refusals" would be exactly
+ * the blanket that wording rules out.
+ *
+ * Each entry names the one interface or device the operator ticked. */
+struct ncfg_consent_rows {
+	QStringList disrupt;
+	QStringList strand;
+
+	bool isEmpty() const { return disrupt.isEmpty() && strand.isEmpty(); }
+};
+
 class ncfg_connection : public QObject {
 	Q_OBJECT
 
@@ -157,8 +175,14 @@ public:
 	 * header gives: a change can cut off the person making it, and neither
 	 * "always arm one" nor "never arm one" is right for every apply. The
 	 * screen asks, and passes the answer through.
+	 *
+	 * `consent` is the same shape of argument and for a stronger version of
+	 * the same reason: the plan says what is refused and this says which of
+	 * those the person at the screen agreed to, and the two must not be one
+	 * value. An empty one is the ordinary apply.
 	 */
-	bool apply(unsigned confirm_seconds, QList<ncfg_record_row> *out, QString *error);
+	bool apply(unsigned confirm_seconds, const ncfg_consent_rows &consent,
+		   QList<ncfg_record_row> *out, QString *error);
 	bool confirm(QString *error);
 	bool revert(QString *error);
 

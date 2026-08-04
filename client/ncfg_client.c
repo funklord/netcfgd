@@ -832,10 +832,63 @@ int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size
 	return done;
 }
 
-int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds, ncfg_journal_t *out,
-		      char *err, size_t err_size)
+/*
+ * `"name":["a","b"]`, appended, or nothing at all for an empty list.
+ *
+ * Absent rather than `[]` because the daemon defaults both to empty and an
+ * empty array says the same thing at more length -- and because a request that
+ * carries consent keys on every apply makes "did the operator agree to
+ * something" invisible in a packet capture and in the daemon's log.
+ *
+ * Returns 0 if it would not fit, which the caller turns into a refusal rather
+ * than a truncated request: half a consent list is consent to the wrong things.
+ */
+static int append_consent(char *out, size_t out_size, size_t *at, const char *name,
+			  const char *const *values, size_t count)
 {
-	char request[64];
+	if (!count) {
+		return 1;
+	}
+	int written = snprintf(out + *at, out_size - *at, ",\"%s\":[", name);
+	if (written < 0 || (size_t)written >= out_size - *at) {
+		return 0;
+	}
+	*at += (size_t)written;
+
+	for (size_t i = 0; i < count; i++) {
+		if (i) {
+			if (*at + 1 >= out_size) {
+				return 0;
+			}
+			out[(*at)++] = ',';
+		}
+		/* Quoted, never interpolated. An interface name is not guaranteed
+		 * to be a bare word, and a name with a quote in it would produce a
+		 * request that consents to something else. */
+		size_t span = ncfg_client_quote(values[i], out + *at, out_size - *at);
+		if (!span) {
+			return 0;
+		}
+		*at += span;
+	}
+	if (*at + 2 >= out_size) {
+		return 0;
+	}
+	out[(*at)++] = ']';
+	out[*at] = '\0';
+	return 1;
+}
+
+int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds,
+		      const ncfg_consent_t *consent, ncfg_journal_t *out, char *err,
+		      size_t err_size)
+{
+	/* Not NCFG_LINE_MAX: that bounds what may be *read* from a socket, and a
+	 * megabyte of it on the stack is a way to fall off the end of one. An
+	 * interface name is at most 15 characters, so this holds several hundred
+	 * of them -- past any machine's interface count, and still a bound. */
+	char request[8192];
+	size_t at = 0;
 
 	if (!out) {
 		set_error(err, err_size, "no result to fill in");
@@ -846,18 +899,34 @@ int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds, ncfg_jour
 	/* No window means the field is left out, not sent as zero: `confirm` is
 	 * an option on the daemon's side and `"confirm":0` is a window of no
 	 * seconds, which arms and expires. Two spellings of "no" where one of
-	 * them reverts the change is not a thing to leave to a reader.
-	 *
-	 * allow_disruption and strand_credentials are never sent. They are
-	 * consent, the header has no parameter for them, and a library that
-	 * defaulted them to anything would be consenting on the operator's
-	 * behalf to the two things netcfgd stops for. */
-	if (confirm_seconds) {
-		snprintf(request, sizeof(request), "{\"request\":\"apply\",\"confirm\":%u}",
-			 confirm_seconds);
-	} else {
-		snprintf(request, sizeof(request), "{\"request\":\"apply\"}");
+	 * them reverts the change is not a thing to leave to a reader. */
+	int written = confirm_seconds
+			      ? snprintf(request, sizeof(request),
+					 "{\"request\":\"apply\",\"confirm\":%u", confirm_seconds)
+			      : snprintf(request, sizeof(request), "{\"request\":\"apply\"");
+	if (written < 0 || (size_t)written >= sizeof(request)) {
+		set_error(err, err_size, "cannot build the request");
+		return 0;
 	}
+	at = (size_t)written;
+
+	/* Two lists and never one flag: they consent to different things, and
+	 * 0087's neighbour argument applies here too -- an operator who accepted
+	 * an outage on one interface has not agreed to leave a key on another. */
+	if (consent
+	    && (!append_consent(request, sizeof(request), &at, "allow_disruption", consent->disrupt,
+				consent->disrupt_count)
+		|| !append_consent(request, sizeof(request), &at, "strand_credentials",
+				   consent->strand, consent->strand_count))) {
+		set_error(err, err_size, "that is more consent than one request can carry");
+		return 0;
+	}
+	if (at + 2 > sizeof(request)) {
+		set_error(err, err_size, "cannot build the request");
+		return 0;
+	}
+	request[at++] = '}';
+	request[at] = '\0';
 
 	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
 	if (!doc) {

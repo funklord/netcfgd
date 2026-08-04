@@ -373,10 +373,17 @@ Four rules, all of them the same rule:
      how to stop leaving it behind. `ncfg` prints the config change first for that
      reason.
 
-   What is not there yet: **consent**. `ncfg_client_apply` takes only a confirm
-   window, while the wire's `apply` carries `allow_disruption` and
-   `strand_credentials` -- so a refusal is an absolute stop in this client and the
-   remedy is shown as something to run elsewhere. Also **nothing asks the operator's
+   ~~What is not there yet: **consent**.~~ **Done**
+   ([0088](../docs/decisions/0088-consent-is-a-tick-per-refusal-never-a-switch.md)):
+   a checkbox per refused thing, each naming the one interface or device it
+   covers, and never a single "override refusals" switch -- both wire flags are
+   repeatable and "deliberately not a blanket --force", and one control would be
+   that blanket with a friendlier label. Nothing is pre-ticked. A headless probe
+   that ticks a box and clicks Apply found the bug on its first run: **a guard
+   refusal usually means the plan has no actions**, so reading "nothing to do"
+   off the action list disabled Apply on exactly the plan consent exists for.
+
+   What is not there yet: **nothing asks the operator's
    tier** (§4 wants a connection holding `observe` not to offer an apply that will
    be refused), and `globals.confirm_default` is unreachable, so the dialog offers
    60s to match `ncfg tui`. The monitor stream does not refresh the other two tabs,

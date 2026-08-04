@@ -288,7 +288,11 @@ void ncfg_plan_view::report()
 		/* Said in the summary and not only in the table, because this is
 		 * the line a person reads when they are deciding whether to open
 		 * the apply dialog at all. */
-		summary += QStringLiteral(" -- apply is blocked until the refusals are resolved");
+		/* Not "blocked": since 0088 a client can consent to a refusal, so
+		 * the accurate sentence is that these will not run unless somebody
+		 * agrees to them -- and a screen saying "blocked" beside a checkbox
+		 * that unblocks it is a screen arguing with itself. */
+		summary += QStringLiteral(" -- these do not run unless consented to");
 	}
 
 	headline->setText(summary);

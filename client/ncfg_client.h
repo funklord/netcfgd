@@ -246,6 +246,25 @@ int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_
 int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size_t err_size);
 
 /*
+ * What an operator has agreed to, beyond the plan itself.
+ *
+ * Two lists and never a flag, which is netcfgd's own shape: `ncfg` spells these
+ * `--allow-disruption IFACE` and `--strand-credentials DEV`, both repeatable and
+ * "deliberately not a blanket --force". They consent to different things and a
+ * client that ran them together would be offering one decision where the daemon
+ * asks two -- an operator who accepted a brief outage on one interface has not
+ * agreed to leave a private key on another.
+ *
+ * Empty is the ordinary case: a plan with no refusals needs neither.
+ */
+typedef struct {
+	const char *const *disrupt; /* interfaces a guard is refusing */
+	size_t             disrupt_count;
+	const char *const *strand; /* devices whose credential would be left behind */
+	size_t             strand_count;
+} ncfg_consent_t;
+
+/*
  * Apply, with a confirm window in seconds or 0 for none.
  *
  * The window is a parameter and not a default because it is a decision: a
@@ -253,9 +272,17 @@ int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size
  * and a client that always armed one would make an operator confirm every
  * trivial apply -- while one that never did would let a bad change lock
  * somebody out of their own router. The screen asks.
+ *
+ * `consent` may be NULL, which means none was given and is what a plan with no
+ * refusals passes. It is a separate argument rather than a field on the plan
+ * because it is the operator's answer and not the daemon's question: the plan
+ * says what is refused, and this says which of those the person at the screen
+ * has agreed to. Sending back a mutated plan would blur which of the two said
+ * what.
  */
-int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds, ncfg_journal_t *out,
-		      char *err, size_t err_size);
+int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds,
+		      const ncfg_consent_t *consent, ncfg_journal_t *out, char *err,
+		      size_t err_size);
 int ncfg_client_confirm(ncfg_client_t *client, char *err, size_t err_size);
 int ncfg_client_revert(ncfg_client_t *client, char *err, size_t err_size);
 

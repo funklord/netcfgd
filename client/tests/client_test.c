@@ -727,7 +727,7 @@ static void an_apply_becomes_a_journal(void)
 		return;
 	}
 
-	if (!ncfg_client_apply(staged.client, 90, &journal, err, sizeof(err))) {
+	if (!ncfg_client_apply(staged.client, 90, NULL, &journal, err, sizeof(err))) {
 		ok("an apply converts to a journal", 0, err);
 		staged_close(&staged);
 		return;
@@ -759,7 +759,7 @@ static void an_apply_becomes_a_journal(void)
 	/* No window means the field is left out rather than sent as zero: a
 	 * window of zero seconds is one that arms and expires, which is not what
 	 * "do not arm one" means. */
-	if (ncfg_client_apply(staged.client, 0, &journal, err, sizeof(err))) {
+	if (ncfg_client_apply(staged.client, 0, NULL, &journal, err, sizeof(err))) {
 		equals("an apply with no window does not mention confirm at all",
 		       received(staged.server, sent, sizeof(sent)), "{\"request\":\"apply\"}\n");
 		ncfg_journal_free(&journal);
@@ -793,7 +793,7 @@ static void a_daemon_refusal_is_a_zero_and_its_own_message(void)
 	   plan.actions == NULL && plan.action_count == 0u, NULL);
 
 	ok("the same for an apply",
-	   ncfg_client_apply(staged.client, 0, &journal, err, sizeof(err)) == 0, NULL);
+	   ncfg_client_apply(staged.client, 0, NULL, &journal, err, sizeof(err)) == 0, NULL);
 	equals("with the same message", err, "the admin tier is root's");
 	staged_close(&staged);
 }
@@ -926,6 +926,74 @@ static void the_monitor_hands_over_one_event_at_a_time(void)
 }
 
 /*
+ * Consent goes out as the daemon spells it, or not at all.
+ *
+ * The exact bytes, because this is the one request where being wrong is worse
+ * than failing: a client that put an interface in the wrong list would have the
+ * operator agreeing to leave a private key behind when they agreed to a brief
+ * outage, and the daemon would do it. Two lists and never one flag, which is
+ * `ncfg`'s own shape -- "deliberately not a blanket --force".
+ */
+static void consent_goes_out_the_way_the_daemon_spells_it(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[512];
+	ncfg_journal_t journal;
+
+	char answers[4096];
+	snprintf(answers, sizeof(answers), "%s%s%s", journal_response, journal_response,
+		 journal_response);
+	if (!staged_open(&staged, "an apply with consent can be staged", answers)) {
+		return;
+	}
+
+	const char *const disrupt[] = { "eth0", "wlan0" };
+	const char *const strand[] = { "wg0" };
+
+	/* Both lists, and a window, in the order the witness pins them. */
+	ncfg_consent_t both = { disrupt, 2u, strand, 1u };
+	if (ncfg_client_apply(staged.client, 90, &both, &journal, err, sizeof(err))) {
+		equals("both consent lists reach the daemon",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"apply\",\"confirm\":90,"
+		       "\"allow_disruption\":[\"eth0\",\"wlan0\"],"
+		       "\"strand_credentials\":[\"wg0\"]}\n");
+		ncfg_journal_free(&journal);
+	} else {
+		ok("both consent lists reach the daemon", 0, err);
+	}
+
+	/* One list alone leaves the other out entirely rather than sending an
+	 * empty array: absent and empty mean the same thing to the daemon, and
+	 * only one of them makes "did somebody consent to anything" answerable by
+	 * looking at the request. */
+	ncfg_consent_t one = { NULL, 0u, strand, 1u };
+	if (ncfg_client_apply(staged.client, 0, &one, &journal, err, sizeof(err))) {
+		equals("a list nobody filled in is not mentioned",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"apply\",\"strand_credentials\":[\"wg0\"]}\n");
+		ncfg_journal_free(&journal);
+	} else {
+		ok("a list nobody filled in is not mentioned", 0, err);
+	}
+
+	/* An interface name is not guaranteed to be a bare word. Interpolated,
+	 * this one would end the string and consent to something else. */
+	const char *const odd[] = { "we\"ird" };
+	ncfg_consent_t quoted = { odd, 1u, NULL, 0u };
+	if (ncfg_client_apply(staged.client, 0, &quoted, &journal, err, sizeof(err))) {
+		equals("and a name with a quote in it is escaped rather than interpolated",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"apply\",\"allow_disruption\":[\"we\\\"ird\"]}\n");
+		ncfg_journal_free(&journal);
+	} else {
+		ok("and a name with a quote in it is escaped rather than interpolated", 0, err);
+	}
+	staged_close(&staged);
+}
+
+/*
  * The stream's other first line: a refusal.
  *
  * netcfgd answers `monitor` by saying nothing and streaming, so the only line
@@ -1030,6 +1098,7 @@ int main(int argc, char **argv)
 	a_status_becomes_links();
 	an_apply_becomes_a_journal();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
+	consent_goes_out_the_way_the_daemon_spells_it();
 	the_monitor_hands_over_one_event_at_a_time();
 	a_refused_stream_says_which_tier_it_wanted();
 	freeing_what_was_never_filled_in_is_nothing();
