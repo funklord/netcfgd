@@ -229,6 +229,34 @@ typedef struct {
 	char *raw;
 } ncfg_event_t;
 
+/*
+ * What this connection may do, asked once.
+ *
+ * Three independent answers and not a level: netcfgd's tiers are three group
+ * memberships, and a machine may grant `admin` to a group somebody is in while
+ * `wifi` goes to one they are not. A client that treated them as a ladder would
+ * offer something the daemon refuses.
+ *
+ * Why a screen needs this at all: without it the only way to learn what an
+ * operator may do is to try it and read the refusal, so a window offers an
+ * apply button and the first thing that happens when it is pressed is a no.
+ * gui/project.md sec 4 asks for the opposite.
+ */
+typedef struct {
+	int observe;
+	int wifi;
+	int admin;
+} ncfg_tiers_t;
+
+/*
+ * Ask the daemon what this connection holds.
+ *
+ * Returns 1 on success. On failure `out` is left with nothing granted, which is
+ * the safe direction: a client that could not ask should offer less rather than
+ * more.
+ */
+int ncfg_client_tiers(ncfg_client_t *client, ncfg_tiers_t *out, char *err, size_t err_size);
+
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_plan_free(ncfg_plan_t *plan);
 void ncfg_journal_free(ncfg_journal_t *journal);

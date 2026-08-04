@@ -60,6 +60,31 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(apply_button, &QPushButton::clicked, this, &ncfg_main_window::open_apply);
 	tools->addWidget(apply_button);
 
+	/*
+	 * Do not offer what will be refused. gui/project.md sec 4 asks for exactly
+	 * this: a connection holding `observe` should not have an apply button
+	 * whose first effect is a refusal.
+	 *
+	 * Asked once, at startup, because it cannot change for a connection -- the
+	 * peer credentials are fixed when the socket is opened, and re-asking would
+	 * suggest otherwise.
+	 *
+	 * A daemon that answers nothing leaves the button enabled. That is the safe
+	 * direction here and it is worth saying why, because the instinct is the
+	 * other one: being refused produces a sentence naming the tier that was
+	 * needed, which the window shows, and a disabled button produces silence.
+	 * Guessing "not allowed" against an older daemon would make this client
+	 * useless on it.
+	 */
+	const ncfg_tiers_t held = connection->tiers();
+	const bool asked = held.observe || held.wifi || held.admin;
+	if (asked && !held.admin) {
+		apply_button->setEnabled(false);
+		apply_button->setToolTip(QStringLiteral(
+			"This connection does not hold the `admin` control tier, so netcfgd "
+			"would refuse an apply from it."));
+	}
+
 	status = new QLabel(this);
 	statusBar()->addWidget(status);
 
