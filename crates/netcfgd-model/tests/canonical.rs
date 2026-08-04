@@ -62,7 +62,7 @@ fn server(addr: &str) -> DnsServer {
 fn wifi(id: &str) -> WifiNetwork {
 	WifiNetwork {
 		id: id.to_owned(),
-		ssid: Ssid::new(id.as_bytes().to_vec()).expect("short enough"),
+		ssid: Some(Ssid::new(id.as_bytes().to_vec()).expect("short enough")),
 		hidden: false,
 		security: Security::Psk(PskConfig {
 			passphrase: SecretRef {
@@ -74,7 +74,7 @@ fn wifi(id: &str) -> WifiNetwork {
 		priority: 0,
 		autoconnect: true,
 		metered: false,
-		bssid_pin: None,
+		bssid: Vec::new(),
 		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
@@ -488,12 +488,19 @@ fn a_non_utf8_ssid_round_trips() {
 
 	let mut doc = Document::default();
 	let mut network = wifi("odd");
-	network.ssid = ssid;
+	network.ssid = Some(ssid);
 	doc.networks.push(network);
 
 	let json = doc.to_json_canonical().expect("valid");
 	let back = Document::from_json(&json).expect("round trips");
-	assert_eq!(back.networks[0].ssid.as_bytes(), raw.as_slice());
+	assert_eq!(
+		back.networks[0]
+			.ssid
+			.as_ref()
+			.expect("a stated ssid")
+			.as_bytes(),
+		raw.as_slice()
+	);
 }
 
 /// Two spellings of one SSID would break the byte-identical guarantee, so

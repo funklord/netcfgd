@@ -77,12 +77,29 @@ pub(crate) fn check_backend(document: Option<&Document>, interface: &str) -> Res
 	}
 }
 
-/// Find the `network` block whose SSID matches, for labelling a scan.
-fn configured_for<'a>(document: Option<&'a Document>, ssid: &Ssid) -> Option<&'a WifiNetwork> {
-	document?
-		.networks
-		.iter()
-		.find(|network| network.ssid == *ssid)
+/// Find the `network` block this scan result belongs to, for labelling a scan.
+///
+/// By SSID, and by BSSID for a network that has no SSID to match on -- one that
+/// names access points instead and learns the name from them. Without the
+/// second, exactly the networks whose whole point is being identified by
+/// address would show as unconfigured in a scan, which is the list an operator
+/// checks to see whether netcfgd knows about what it can see.
+fn configured_for<'a>(
+	document: Option<&'a Document>,
+	ssid: &Ssid,
+	bssid: &str,
+) -> Option<&'a WifiNetwork> {
+	document?.networks.iter().find(|network| {
+		network.ssid.as_ref().map_or_else(
+			|| {
+				network
+					.bssid
+					.iter()
+					.any(|listed| listed.eq_ignore_ascii_case(bssid))
+			},
+			|stated| stated == ssid,
+		)
+	})
 }
 
 /// The name as text, where it happens to be text.
@@ -123,7 +140,8 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 			secured: result.is_secured(),
 			ssid: result.ssid.to_hex(),
 			name: name_of(&result.ssid),
-			configured: configured_for(document, &result.ssid).map(|network| network.id.clone()),
+			configured: configured_for(document, &result.ssid, &result.bssid)
+				.map(|network| network.id.clone()),
 			bssid: result.bssid,
 			frequency: result.frequency,
 			signal: result.signal,
@@ -166,9 +184,14 @@ pub(crate) fn status(document: Option<&Document>, interface: &str) -> Response {
 		ssid: ssid.as_ref().map(Ssid::to_hex),
 		name: ssid.as_ref().and_then(name_of),
 		bssid: status_field(&status, "bssid").map(std::borrow::ToOwned::to_owned),
+		// The associated BSSID is the second half: a network identified by
+		// address rather than by name is exactly the one whose SSID cannot
+		// answer "which of my networks is this?".
 		network: ssid
 			.as_ref()
-			.and_then(|ssid| configured_for(document, ssid))
+			.and_then(|ssid| {
+				configured_for(document, ssid, status_field(&status, "bssid").unwrap_or(""))
+			})
 			.map(|network| network.id.clone()),
 	}))
 }
@@ -226,10 +249,15 @@ pub(crate) fn connect_to(
 		Ok(body) => parse_network_list(&body),
 		Err(error) => return Response::error(format!("cannot list networks: {error}")),
 	};
-	let existing = listed
-		.iter()
-		.find(|entry| entry.ssid == network.ssid)
-		.map(|entry| entry.id);
+	// Matched by name, and only where the document states one. A network whose
+	// name is learned from a scan has nothing to compare here, so it is always
+	// added afresh rather than matched against something with a different name.
+	let existing = network.ssid.as_ref().and_then(|ssid| {
+		listed
+			.iter()
+			.find(|entry| entry.ssid == *ssid)
+			.map(|entry| entry.id)
+	});
 
 	let id = if let Some(id) = existing {
 		id
