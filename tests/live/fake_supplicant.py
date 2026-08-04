@@ -22,6 +22,7 @@ Speaks the same unix datagram protocol wpa_supplicant does: a client binds its
 own address, sends a command, and gets one reply.
 """
 
+import atexit
 import os
 import socket
 import sys
@@ -102,11 +103,35 @@ def answer(command):
     return "FAIL\n"
 
 
+def _unlink(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         print(__doc__.strip().splitlines()[-3], file=sys.stderr)
         return 2
     ctrl_dir, interface = sys.argv[1], sys.argv[2]
+    # An optional pid file, because since 0080 a control socket does not prove a
+    # supplicant is running and netcfgd is right about that: it asks whether the
+    # pid file at $run/supplicant/<iface>.pid names a live process *whose own
+    # command line contains that path*. A fake offering only a socket is one
+    # netcfgd correctly decides is not there -- so it starts a real
+    # wpa_supplicant, which binds this same socket path and answers scans from a
+    # radio that does not exist. Every wireless check downstream then reads
+    # blank, which is what nm.sh did for as long as 0080 has been in the tree.
+    #
+    # Passing the path as an argument is what makes the marker match; writing
+    # the file is what makes the pid real. Both are needed and neither alone.
+    pidfile = sys.argv[3] if len(sys.argv) == 4 else None
+    if pidfile:
+        os.makedirs(os.path.dirname(pidfile), exist_ok=True)
+        with open(pidfile, "w") as handle:
+            handle.write(f"{os.getpid()}\n")
+        atexit.register(lambda: _unlink(pidfile))
     os.makedirs(ctrl_dir, exist_ok=True)
     path = os.path.join(ctrl_dir, interface)
     if os.path.exists(path):

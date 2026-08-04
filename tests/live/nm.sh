@@ -181,7 +181,8 @@ CONF
 # what proves the protocol parsing; this proves the translation.
 fake=
 if command -v python3 >/dev/null 2>&1; then
-	python3 "$repo/tests/live/fake_supplicant.py" "$work/ctrl" radio0 > "$work/fake.log" 2>&1 &
+	python3 "$repo/tests/live/fake_supplicant.py" "$work/ctrl" radio0 \
+		"$work/run/supplicant/radio0.pid" > "$work/fake.log" 2>&1 &
 	fake=$!
 	waited=0
 	while [ ! -e "$work/ctrl/radio0" ]; do
