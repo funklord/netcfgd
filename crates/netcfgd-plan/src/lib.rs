@@ -311,6 +311,51 @@ fn warn_unfired_hooks(builder: &mut Builder, desired: &Document) {
 	}
 }
 
+/// A daemon that is there and is not answering.
+///
+/// The last corner of "is what is running still what the document says?"
+/// (0085). `running` says a process exists -- 0078 made that a fact rather than
+/// a memory -- and a process existing is not a daemon doing its job. A wedged
+/// hostapd holds its pid and its socket, serves nobody, and until this was
+/// written netcfgd reported a converged network over the top of it.
+///
+/// A warning and **not a refusal, and not a restart**. netcfgd cannot tell a
+/// wedged daemon from a slow answer on a loaded machine: the round trip behind
+/// this has a one-second deadline on purpose, so that a wedged daemon cannot
+/// stall the reconcile loop, and `tests/live/acl.sh` has already seen a healthy
+/// fake miss it under load. Acting on that reading would kill working access
+/// points on busy machines, which is a worse failure than the one being
+/// reported. The operator is told; the operator decides.
+///
+/// `answering: None` says nothing, because it means netcfgd could not ask.
+fn warn_wedged_backends(builder: &mut Builder, observed: &Observed) {
+	for backend in &observed.backends {
+		if !backend.running || backend.answering != Some(false) {
+			continue;
+		}
+		// Two arms rather than a table of every kind's name. `BackendKind` has
+		// no `name()` and giving it one would be a second list of strings
+		// beside serde's, which is the thing 0083 just finished removing. The
+		// fallback is not a guess: nothing but the access point's round trip
+		// sets this field, so `backend` is accurate for anything that ever
+		// reaches it before its own sentence is written.
+		let what = match backend.kind {
+			BackendKind::AccessPoint => "access point",
+			_ => "backend",
+		};
+		builder.warnings.push(Warning {
+			message: format!(
+				"the {what} on {} is running and did not answer its control \
+				 socket. netcfgd cannot configure it while it is like this, and \
+				 does not restart it: a busy machine can miss the deadline too. \
+				 Check it, and restart it yourself if it is wedged",
+				backend.interface
+			),
+			interface: Some(backend.interface.clone()),
+		});
+	}
+}
+
 fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_access_points(builder, desired);
 	warn_unfired_hooks(builder, desired);
@@ -568,6 +613,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// radio and whether there are networks to join, and reading those while
 	// they were still empty made one of its three warnings unreachable.
 	warn_unapplied(&mut builder, desired);
+	warn_wedged_backends(&mut builder, observed);
 	warn_unmanaged(&mut builder, desired);
 	warn_blocked_radios(&mut builder, desired, observed);
 

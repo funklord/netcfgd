@@ -403,6 +403,7 @@
       "kind": "access_point",
       "interface": "wlan0",
       "running": true,
+      "answering": true,
       "access_control": {
         "policy": "unset",
         "denied": [
@@ -417,6 +418,7 @@
       "kind": "access_point",
       "interface": "wlan1",
       "running": true,
+      "answering": true,
       "access_control": {
         "policy": {
           "set": "deny"
@@ -433,6 +435,7 @@
       "kind": "access_point",
       "interface": "wlan2",
       "running": true,
+      "answering": true,
       "access_control": {
         "policy": {
           "set": "allow"
@@ -449,6 +452,7 @@
       "kind": "access_point",
       "interface": "wlan3",
       "running": true,
+      "answering": true,
       "access_control": {
         "policy": "unknown",
         "denied": [
@@ -458,6 +462,12 @@
           "02:00:00:00:00:bb"
         ]
       }
+    },
+    {
+      "kind": "access_point",
+      "interface": "wedged0",
+      "running": true,
+      "answering": false
     },
     {
       "kind": "router_advert",

@@ -439,6 +439,7 @@ impl OwnedState {
 					kind: *kind,
 					interface: interface.clone(),
 					running: true,
+					answering: None,
 					access_control: None,
 					started_with: None,
 					secret_matches: None,

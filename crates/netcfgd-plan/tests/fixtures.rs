@@ -338,6 +338,7 @@ fn started_backend(
 		kind,
 		interface: iface.to_owned(),
 		running: true,
+		answering: None,
 		access_control: started_access_control(kind, iface, desired),
 		started_with: access_point.map(|point| netcfgd_model::ObservedAccessPoint {
 			ssid: point.ssid.clone(),
@@ -997,6 +998,7 @@ fn a_lease_address_is_left_to_its_backend() {
 		kind: BackendKind::Dhcp4,
 		interface: "eth0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -1029,6 +1031,7 @@ fn removing_dhcp_stops_the_backend() {
 		kind: BackendKind::Dhcp4,
 		interface: "eth0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -1394,6 +1397,7 @@ fn removing_dot1x_stops_the_supplicant() {
 		kind: BackendKind::Supplicant,
 		interface: "eth0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -1581,6 +1585,7 @@ fn a_running_tunnel_is_left_alone() {
 		kind: BackendKind::OpenVpn,
 		interface: "vpn0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -1607,6 +1612,7 @@ fn a_tunnel_stops_when_its_block_goes() {
 		kind: BackendKind::OpenVpn,
 		interface: "vpn0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -2033,6 +2039,7 @@ access_point "after" {
 		kind: netcfgd_model::BackendKind::AccessPoint,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"before".to_vec()).expect("an ssid"),
@@ -2071,6 +2078,7 @@ fn an_edited_ovpn_restarts_the_tunnel() {
 		kind: netcfgd_model::BackendKind::OpenVpn,
 		interface: "vpn0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -2102,6 +2110,7 @@ fn a_tunnel_whose_file_is_unchanged_or_unreadable_is_left_alone() {
 			kind: netcfgd_model::BackendKind::OpenVpn,
 			interface: "vpn0".to_owned(),
 			running: true,
+			answering: None,
 			access_control: None,
 			started_with: None,
 			secret_matches: None,
@@ -2138,6 +2147,7 @@ access_point "home" {
 		kind: netcfgd_model::BackendKind::AccessPoint,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		// The identity is unchanged; only the secret moved.
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
@@ -2177,6 +2187,7 @@ access_point "home" {
 		kind: netcfgd_model::BackendKind::AccessPoint,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
@@ -2212,6 +2223,7 @@ access_point "home" {
 		kind: netcfgd_model::BackendKind::AccessPoint,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
@@ -2260,6 +2272,7 @@ interface lan0 {
 		kind: netcfgd_model::BackendKind::RouterAdvert,
 		interface: "lan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -2306,6 +2319,7 @@ interface lan0 {
 		kind: netcfgd_model::BackendKind::RouterAdvert,
 		interface: "lan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -2989,6 +3003,7 @@ interface wg0 {
 		kind: BackendKind::Supplicant,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -3050,6 +3065,7 @@ fn running_access_point(
 		kind: BackendKind::AccessPoint,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: Some(netcfgd_model::ObservedAccessControl {
 			policy,
 			denied: owned(denied),
@@ -3264,6 +3280,7 @@ fn an_unreachable_access_point_is_not_converged_against() {
 		kind: BackendKind::AccessPoint,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -3299,6 +3316,7 @@ fn an_access_point_stops_when_its_block_goes() {
 		kind: BackendKind::AccessPoint,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -3393,6 +3411,7 @@ interface wlan0 { config = "null" }
 		kind: BackendKind::Supplicant,
 		interface: "wlan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -3926,6 +3945,7 @@ interface ppp0 {
 		kind: BackendKind::Pppoe,
 		interface: "ppp0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -6867,4 +6887,91 @@ interface bond0 {
 		.expect("a bond with no members has its mode set");
 	assert_eq!(action.reason.field, "bond.mode");
 	assert!(matches!(action.op, Op::LinkSetBond { mode: true, .. }));
+}
+
+/// A daemon that is there and is not answering is named, and only that one.
+///
+/// The last corner of "is what is running still what the document says?"
+/// (0085). Three states and only one of them is a warning, which is the whole
+/// point: `None` means netcfgd could not ask, and reading that as trouble would
+/// put a warning on every dhcpcd on every machine.
+#[test]
+fn a_wedged_daemon_is_named_and_a_silent_one_is_not() {
+	let desired = access_point_document(None);
+
+	for (answering, expected) in [
+		(Some(false), true),
+		// It answered. Nothing to say.
+		(Some(true), false),
+		// netcfgd could not ask -- no control socket, or nothing tried. Not
+		// the same as "it did not answer", and the difference is the reason
+		// this field is an `Option` at all.
+		(None, false),
+	] {
+		let mut observed = observed_with(&["wlan0"]);
+		observed.backends.push(netcfgd_model::ObservedBackend {
+			kind: netcfgd_model::BackendKind::AccessPoint,
+			interface: "wlan0".to_owned(),
+			running: true,
+			answering,
+			access_control: None,
+			started_with: None,
+			secret_matches: None,
+			config_matches: None,
+			advertised: Vec::new(),
+		});
+
+		let plan = plan(&desired, &observed, &PlanOptions::default());
+		let said = plan.warnings.iter().any(|warning| {
+			warning
+				.message
+				.contains("did not answer its control socket")
+		});
+		assert_eq!(
+			said, expected,
+			"answering={answering:?} said={said}: {:?}",
+			plan.warnings
+		);
+		// And it is a warning, never a refusal: netcfgd cannot tell a wedged
+		// daemon from a slow one, so it must not be a thing that stops an
+		// apply.
+		assert!(
+			plan.refusals.is_empty(),
+			"a daemon that did not answer refused something: {:?}",
+			plan.refusals
+		);
+	}
+}
+
+/// A daemon netcfgd's record calls stopped says nothing, whatever it answered.
+///
+/// `running: false` with a stale `answering` is reachable: the liveness pass
+/// clears `running` when the pid has gone, and it runs after the round trip
+/// that set the other field. A warning about a daemon netcfgd already knows is
+/// not there would be noise on exactly the machine that has a real problem.
+#[test]
+fn a_daemon_that_is_not_running_is_not_called_wedged() {
+	let desired = access_point_document(None);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: false,
+		answering: Some(false),
+		access_control: None,
+		started_with: None,
+		secret_matches: None,
+		config_matches: None,
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("did not answer")),
+		"a stopped daemon was reported as wedged: {:?}",
+		plan.warnings
+	);
 }

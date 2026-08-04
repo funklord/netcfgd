@@ -1473,8 +1473,19 @@ match.
      three lines would work, and nothing here can run them — `ap.sh`'s hostapd
      never starts on a dummy, and a real radio needs `hwsim.sh` and real root.
      Code with no test is what this project removes rather than adds;
-   - **a daemon that is alive and wedged still counts as running**, which is 0052's
-     shape applied to behaviour rather than to configuration;
+   - ~~**a daemon that is alive and wedged still counts as running**~~ — **closed**
+     ([0085](docs/decisions/0085-a-daemon-that-does-not-answer-is-not-running-well.md)),
+     and it was not a missing check. netcfgd has asked hostapd for its station
+     lists on every observation since 0052, under a one-second deadline, and
+     **threw the failed round trip away** — the answer was computed every time
+     and `running: true` went on the socket over the top of it. `answering` is
+     an `Option<bool>` beside `running`, separate for 0078's reason: one is a
+     fact about a process and the other is a fact about behaviour. It is a
+     warning and deliberately **not a restart** — netcfgd cannot tell a wedged
+     daemon from a slow one, and `acl.sh` has already seen a *healthy* fake miss
+     that deadline under load, so acting on the reading would take working
+     access points off the air on busy machines. Only access points answer it,
+     because only access points are asked anything;
    - ~~**restarting is unconditional**~~ — **closed in the same session, because
      it was a live defect rather than a future concern**
      ([0079](docs/decisions/0079-netcfgd-stops-restarting-what-will-not-stay-up.md)).
@@ -1488,6 +1499,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A question already being asked, whose answer is discarded, looks exactly like a question nobody asks.** Section 10 carried "a daemon that is alive and wedged still counts as running" as work needing a new check. There was no new check: netcfgd had been asking hostapd something on every observation since 0052, under a deadline, and the failure branch was a `continue` with a comment explaining — correctly — why saying nothing about the *list* is honest. It was silent about the *daemon*, and nothing distinguished the two. The whole change is two assignments. Before building a check, grep for the round trip that would already have the answer.
 - **An explanation of why a line is load-bearing, above a line that is not, is a gate that cannot fail.** The drift record was written to `/run` *and* into the in-memory observation, with a comment saying the second was necessary because the next check comes before the next `reobserve`. Breaking it changed nothing — `reobserve` reads the record back and does run first. The comment was wrong and confident, and the only reason anybody found out is that every part of the change was broken on purpose, including the parts that looked obviously right. The line went rather than the comment.
 - **A break that correctly passes is a finding, not a failed break.** Renaming an op on the wire left the TUI's plan-pane test green, and that is right: the pane draws what the daemon sends, so pane and test moved together. "One operation has one name" is a different question and it fails one layer down, in `netcfgd-plan`. A break that does not fire is worth understanding before it is worth fixing -- the answer is either a blind gate or a gate whose subject is somewhere else, and the two look identical until you say which.
 - **A fixture written from a second reading of the type repeats the first reading's mistake.** The wifi pane read `entries` where the daemon sends `access_points`, and the test written to stop that happening again was itself written from `ScanReport` rather than from the witness. It could not have caught the bug it was named after. Where a test exists because a field name was got wrong, the fixture has to come from the wire, not from a fresh look at the struct.

@@ -366,6 +366,36 @@ printf 'wpa_passphrase=%s\n' "$passphrase" >> "$work/run/hostapd/ap0.conf"
 check "an access point already running what the document says is left alone" \
 	"$(grep -cE 'backend\.(stop|start)' "$work/identity2.txt" || true)" "0"
 
+# ------------------------------------------------- alive, and not answering
+
+# The state 0085 is about, and the reason it needed a flag on the fake rather
+# than a second one: the process is there, the pid file is right, the socket
+# takes a datagram, and no reply ever comes. A dead hostapd is a different
+# thing and netcfgd already noticed that one (0078).
+start_fake --wedged
+seed_run_state deny
+write_config '	access_control { deny = ["aa:bb:cc:dd:ee:ff"] }'
+
+"$ncfg" status --json > "$work/wedged.json" 2>&1 || true
+check "a daemon that does not answer is observed as not answering" \
+	"$(grep -c '"answering": *false' "$work/wedged.json" || true)" "1"
+# The half that would otherwise be a guess. `access_control` absent is what
+# says netcfgd did not read a list -- converging against a list it could not
+# read is the thing read_access_control refuses to do.
+check "and its list is absent rather than empty" \
+	"$(grep -c '"access_control"' "$work/wedged.json" || true)" "0"
+
+"$ncfg" plan > "$work/wedged.txt" 2>&1 || true
+check "the operator is told, in a sentence naming the interface" \
+	"$(grep -c 'ap0 is running and did not answer' "$work/wedged.txt" || true)" "1"
+# Not a restart, and this is the check that keeps it that way. netcfgd cannot
+# tell a wedged daemon from a slow one -- the deadline above is a second, and
+# this same script records having seen a healthy fake miss it under load. A
+# netcfgd that restarted on that reading would take down working access points
+# on busy machines.
+check "and nothing is stopped or started on the strength of it" \
+	"$(grep -cE 'backend\.(stop|start)' "$work/wedged.txt" || true)" "0"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "acl.sh: all checks passed"

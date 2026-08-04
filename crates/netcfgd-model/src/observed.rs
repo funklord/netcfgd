@@ -776,6 +776,25 @@ pub struct ObservedBackend {
 	pub interface: String,
 	/// Whether it is running.
 	pub running: bool,
+	/// Whether it answered when netcfgd last asked it something.
+	///
+	/// A different question from `running`, and kept separate for the reason
+	/// 0078 exists: `running` is now a fact about a *process* -- something is
+	/// there under that pid -- and a process being there is not the same as a
+	/// daemon doing its job. A wedged hostapd holds its socket, holds its pid,
+	/// serves nobody, and answers `running: true` to every question netcfgd had
+	/// until this field.
+	///
+	/// **`None` is not `false`**, the same rule the liveness pass turns on.
+	/// `None` means netcfgd cannot ask: the kind has no control socket, or it is
+	/// not running, or nothing tried. Reading that as "not answering" would put
+	/// a warning on every dhcpcd on every machine.
+	///
+	/// Absent when it serialises, so the `/run` record of what netcfgd started
+	/// is byte-for-byte what it was before this field existed, and a file
+	/// written by an older netcfgd still parses.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub answering: Option<bool>,
 	/// What a running access point's access control lists actually hold.
 	///
 	/// Only ever present for [`BackendKind::AccessPoint`], and only while it is
