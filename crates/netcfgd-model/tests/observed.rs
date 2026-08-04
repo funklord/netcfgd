@@ -378,6 +378,7 @@ fn backends(observed: &mut Observed) {
 			kind,
 			interface: "eth0".to_owned(),
 			running: true,
+			answering: None,
 			access_control: None,
 			started_with: None,
 			secret_matches: None,
@@ -390,6 +391,10 @@ fn backends(observed: &mut Observed) {
 			kind: BackendKind::AccessPoint,
 			interface: format!("wlan{index}"),
 			running: true,
+			// The kind the field is real for: the ACL read below is the round
+			// trip that answers it, so a sample with a list and no verdict
+			// would pin a shape netcfgd never produces.
+			answering: Some(true),
 			access_control: Some(ObservedAccessControl {
 				policy,
 				denied: vec!["02:00:00:00:00:aa".to_owned()],
@@ -401,12 +406,28 @@ fn backends(observed: &mut Observed) {
 			advertised: Vec::new(),
 		});
 	}
+	// The shape 0085 is about: the process is there and it is not answering.
+	// `access_control` is `None` beside it on purpose -- the failed round trip
+	// is *why* there is no list, and a sample carrying both a verdict of `false`
+	// and a list would pin a combination netcfgd cannot produce.
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::AccessPoint,
+		interface: "wedged0".to_owned(),
+		running: true,
+		answering: Some(false),
+		access_control: None,
+		started_with: None,
+		secret_matches: None,
+		config_matches: None,
+		advertised: Vec::new(),
+	});
 	// The one backend that carries what it was last given, which is how a
 	// renumbered delegation is noticed at all.
 	observed.backends.push(ObservedBackend {
 		kind: BackendKind::RouterAdvert,
 		interface: "lan0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -423,6 +444,7 @@ fn backends(observed: &mut Observed) {
 		kind: BackendKind::OpenVpn,
 		interface: "vpn0".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: None,
 		secret_matches: None,
@@ -433,6 +455,7 @@ fn backends(observed: &mut Observed) {
 		kind: BackendKind::AccessPoint,
 		interface: "wlan9".to_owned(),
 		running: true,
+		answering: None,
 		access_control: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
