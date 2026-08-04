@@ -34,9 +34,30 @@ writes.
 `/run/netcfgd` is netcfgd's run directory and moves with `$NCFG_RUN_DIR`, which a
 writer should honour so it can be tested somewhere other than `/run`.
 
-**netcfgd generates two writers of this file itself**: the scripts it hands
-`dhcpcd -c` and `udhcpc -s`, which report a lease's nameservers because netcfgd
-never sees the protocol
+**Write this file. It is yours.** One file, one interface, one writer -- because
+the thing writing it is the thing that brought the interface up.
+
+There is a second place, and it exists for netcfgd rather than for you:
+
+```
+/run/netcfgd/reported.d/<interface>/<source>
+```
+
+netcfgd reads every fragment there together with the single file above, after it
+and in name order. It is where netcfgd's *own* generated writers go when there
+can be more than one of them on an interface -- a dual-stack link has a `DHCPv4`
+client and a `DHCPv6` client, both with nameservers to report, and one file means
+the second overwrites the first on every renewal
+([0086](decisions/0086-two-clients-on-one-interface-need-two-files.md)).
+
+A helper may write there too, if it genuinely has more than one source for one
+interface. Nothing stops it and netcfgd will merge it. If you have one source --
+and a modem, a tunnel and a PPP link each have one -- the single file is simpler
+and is what the rest of this document describes.
+
+**netcfgd generates three writers itself**: the scripts it hands `dhcpcd -c`
+(one per family) and `udhcpc -s`, which report a lease's nameservers because
+netcfgd never sees the protocol
 ([0066](decisions/0066-a-lease-reports-its-nameservers.md)). They are worth reading
 as worked examples -- they are the shortest writers there are, and each one reports
 exactly one key.

@@ -525,6 +525,70 @@ CONF
 		"$(cat "$resolv")" "2001:db8:44::53"
 	check "and the hostname with it" "$(hostname)" "localhost"
 
+	# 0086. Silencing the v6 client's hooks (0072) stopped it fighting over
+	# /etc/resolv.conf and cost the lease its nameservers on the way: nothing
+	# carried them, so a v6-only network resolved nothing at all. The client
+	# has a script of netcfgd's now, reporting into a fragment of its own
+	# rather than into the one file the v4 client already owns.
+	fragment=$work/run/reported.d/cli/dhcpcd6
+	if wait_for '[ -f "$fragment" ]'; then
+		echo "ok   the DHCPv6 client reports through a fragment of its own"
+	else
+		echo "FAIL the DHCPv6 client reports through a fragment of its own"
+		echo "       $work/run/reported.d holds: $(ls -R "$work/run/reported.d" 2>&1)"
+		failures=$((failures + 1))
+	fi
+	check "which carries the lease's nameserver" \
+		"$(sed -n 's/^dns=//p' "$fragment" 2>/dev/null | tr '\n' ' ')" \
+		"2001:db8:44::53 "
+	# A suffix to complete a bare name with, never a routing domain (0049, 0067).
+	check "and its search suffix" \
+		"$(sed -n 's/^search=//p' "$fragment" 2>/dev/null | tr '\n' ' ')" \
+		"v6.example "
+	# It reaches the observation, which is what anything downstream reads.
+	"$ncfg" status --json > "$work/status6.json" 2>&1 || true
+	contains "and it reaches the observation" \
+		"$(cat "$work/status6.json")" "2001:db8:44::53"
+
+	# And netcfgd does not deliver them on this document's say-so, which is the
+	# half that makes the two decisions agree rather than trade places. The
+	# second gate in the reporting contract wants the addressing to come from
+	# the report or the interface to have a `dns` block, and `dhcp6` alone is
+	# neither. 0072 stopped dhcpcd writing the resolver file; 0086 must not
+	# start writing it in dhcpcd's place.
+	#
+	# `$work/resolv.conf` and not `$resolv`: that one is the system file the
+	# counter-proofs above watch dhcpcd rewrite, and asserting a v6 nameserver
+	# is absent from it would pass whatever netcfgd did.
+	missing "and netcfgd does not deliver them unasked" \
+		"$(cat "$work/resolv.conf" 2>/dev/null)" "2001:db8:44::53"
+
+	# With a `dns` block it does, which is the whole point of carrying them.
+	cat > "$work/etc/netcfgd.conf" <<'CONF'
+global { dns { dns_mode = "write_resolv_conf" } }
+interface cli {
+	config = "dhcp6"
+	dns    = "2001:db8:44::53"
+}
+CONF
+	"$ncfg" apply > "$work/apply6-dns.log" 2>&1 || true
+	if wait_for 'grep -q 2001:db8:44::53 "$work/resolv.conf"'; then
+		echo "ok   and a document that asks for it gets the lease's resolver"
+	else
+		echo "FAIL and a document that asks for it gets the lease's resolver"
+		echo "       $work/resolv.conf says: $(cat "$work/resolv.conf" 2>/dev/null)"
+		echo "       apply said:"
+		sed 's/^/       /' "$work/apply6-dns.log"
+		failures=$((failures + 1))
+	fi
+	printf 'nameserver 203.0.113.99\n' > "$work/etc-resolv"
+	cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface cli {
+	config = "dhcp6"
+}
+CONF
+	"$ncfg" apply > "$work/apply6-dns-off.log" 2>&1 || true
+
 	# Stopping it is 0071's arm, from the family that has two clients: there is
 	# no odhcp6c here, so this is the dhcpcd half of it.
 	v6pid=$(cat /run/dhcpcd/cli-6.pid 2>/dev/null || echo 0)

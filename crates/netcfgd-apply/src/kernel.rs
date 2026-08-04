@@ -1890,12 +1890,12 @@ fn start_backend(
 			let (script, pidfile) = write_udhcpc_script(iface)?;
 			// dhcpcd gets one too, for the nameservers and to stop its own hooks
 			// writing resolv.conf behind netcfgd's back (0066).
-			let hook = write_dhcpcd_script(iface)?;
+			let hook = write_dhcpcd_script(iface, None)?;
 			let dhcpcd = dhcpcd_start_args(
 				DHCPCD_V4,
 				iface,
 				metric.as_deref(),
-				&DhcpcdHooks::Replace(&hook.display().to_string()),
+				&hook.display().to_string(),
 			);
 			let udhcpc = vec![
 				"-b".to_owned(),
@@ -1973,30 +1973,11 @@ fn running_backends(
 const DHCPCD_V4: &str = "-4";
 const DHCPCD_V6: &str = "-6";
 
-/// dhcpcd's own hooks that write files netcfgd owns.
+/// What the `DHCPv6` client's report fragment is called.
 ///
-/// `20-resolv.conf` and `30-hostname`. The names are the ones `-C` takes, which
-/// matches `<name>`, `NN-<name>` or `NN-<name>.sh` -- read out of
-/// `dhcpcd-run-hooks` itself rather than guessed at from the manual page.
-const DHCPCD_SILENCED: [&str; 2] = ["resolv.conf", "hostname"];
-
-/// What netcfgd does about dhcpcd's own hooks, which is never "nothing".
-///
-/// "Nothing" was the `DHCPv6` branch for as long as it existed, and it meant a
-/// `DHCPv6` lease rewriting `/etc/resolv.conf` on a machine where netcfgd's DNS
-/// mode owns that file -- 0066's contention, alive on the other family. Making
-/// it a type is what stops a third caller doing the same thing again. Decision
-/// 0072.
-enum DhcpcdHooks<'a> {
-	/// Replace the hook directory with netcfgd's own script: `-c`. The `DHCPv4`
-	/// client, which also reports its lease's nameservers through it (0066).
-	Replace(&'a str),
-	/// Keep dhcpcd's hooks and silence the two that fight: `-C`. The `DHCPv6`
-	/// client, which has nothing to report through a script of netcfgd's -- the
-	/// interface report is one file per interface, and a second client writing
-	/// it would clobber the first client's nameservers on every renewal.
-	Silence,
-}
+/// Sorts after the `DHCPv4` client's single file, which is what puts a v4
+/// lease's nameservers before a v6 lease's without anything having to say so.
+const REPORT_DHCPCD6: &str = "dhcpcd6";
 
 /// What netcfgd starts dhcpcd with.
 ///
@@ -2010,25 +1991,17 @@ enum DhcpcdHooks<'a> {
 /// the client is what installs it. busybox udhcpc has no metric option -- its
 /// script does the routing -- so this is the one thing the two `DHCPv4` clients
 /// cannot do the same way.
-fn dhcpcd_start_args(
-	family: &str,
-	iface: &str,
-	metric: Option<&str>,
-	hooks: &DhcpcdHooks<'_>,
-) -> Vec<String> {
-	let mut args = Vec::new();
-	match hooks {
-		DhcpcdHooks::Replace(hook) => {
-			args.push("-c".to_owned());
-			args.push((*hook).to_owned());
-		}
-		DhcpcdHooks::Silence => {
-			for hook in DHCPCD_SILENCED {
-				args.push("-C".to_owned());
-				args.push(hook.to_owned());
-			}
-		}
-	}
+/// **Every dhcpcd netcfgd starts gets `-c`**, which replaces the hook directory
+/// outright. There is no argument for the client that does not, which is the
+/// point: "leave dhcpcd's own hooks alone" meant a lease rewriting
+/// `/etc/resolv.conf` on a machine where netcfgd's DNS mode owns that file
+/// (0072), and it was the `DHCPv6` branch for as long as that branch existed.
+/// 0072 made it a two-armed type so a third caller could not pick "nothing";
+/// 0086 gave the v6 client a script of its own, so there is no second arm left
+/// and the parameter is a path rather than a choice. Unrepresentable beats
+/// documented.
+fn dhcpcd_start_args(family: &str, iface: &str, metric: Option<&str>, hook: &str) -> Vec<String> {
+	let mut args = vec!["-c".to_owned(), hook.to_owned()];
 	args.push("-b".to_owned());
 	args.push(family.to_owned());
 	if let Some(metric) = metric {
@@ -2119,17 +2092,26 @@ fn start_dhcp6(iface: &str, delegating: Option<&netcfgd_model::PdRequest>) -> Re
 			arguments.push(iface.to_owned());
 			run_client("odhcp6c", &arguments, iface)
 		}
-		// No script of netcfgd's: dhcpcd has nothing to report a prefix
-		// through, and 0050 refuses the pairing that would want one. What it
-		// gets instead is `-C`, because a `DHCPv6` lease's own hooks rewrite
-		// `/etc/resolv.conf` -- measured against a real dnsmasq and a real
-		// dhcpcd, and 0066's contention on the family nobody had run.
-		// Decision 0072.
-		_ => run_client(
-			"dhcpcd",
-			&dhcpcd_start_args(DHCPCD_V6, iface, None, &DhcpcdHooks::Silence),
-			iface,
-		),
+		// A script of netcfgd's, reporting into a fragment of its own.
+		//
+		// 0072 gave this `-C` instead, silencing dhcpcd's `resolv.conf` and
+		// `hostname` hooks so a `DHCPv6` lease could not rewrite the file
+		// netcfgd's DNS backend owns. That was right about the contention and
+		// it cost the lease its nameservers: nothing carried them, so a v6-only
+		// network resolved nothing. The reason it could not have a script was
+		// that the report is one file per interface and the `DHCPv4` client is
+		// already writing it. It is not, any more (0086).
+		//
+		// Still no prefix through it: dhcpcd has nothing to report one with,
+		// and 0050 refuses the pairing that would want it.
+		_ => {
+			let hook = write_dhcpcd_script(iface, Some(REPORT_DHCPCD6))?;
+			run_client(
+				"dhcpcd",
+				&dhcpcd_start_args(DHCPCD_V6, iface, None, &hook.display().to_string()),
+				iface,
+			)
+		}
 	}
 }
 
@@ -2304,19 +2286,38 @@ fn write_pd_hook(iface: &str) -> Result<std::path::PathBuf, String> {
 }
 
 /// Write the hook script dhcpcd runs, and return its path.
-fn write_dhcpcd_script(iface: &str) -> Result<std::path::PathBuf, String> {
+///
+/// `source` is `None` for the `DHCPv4` client, which reports through the single
+/// file the contract documents and has done since 0066, and `Some(name)` for any
+/// other client on the same interface -- which reports through a fragment,
+/// because two writers on one file is what silenced the `DHCPv6` client's
+/// nameservers for a milestone (0086).
+fn write_dhcpcd_script(iface: &str, source: Option<&str>) -> Result<std::path::PathBuf, String> {
 	use std::io::Write;
 	use std::os::unix::fs::PermissionsExt;
 
 	let run = run_dir_path();
 	let dir = run.join("dhcpcd");
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
-	let reported = run.join("reported");
-	std::fs::create_dir_all(&reported)
-		.map_err(|error| format!("{}: {error}", reported.display()))?;
 
-	let path = dir.join(format!("{iface}.script"));
-	let script = dhcpcd_script(iface, &reported.join(iface));
+	// Where it reports, and under what name. The single file is the interface's
+	// own and the fragment is the client's, which is the whole of 0086 in two
+	// lines.
+	let (parent, name) = match source {
+		Some(source) => (report_fragment_dir(&run, iface), source),
+		None => (report_dir(&run), iface),
+	};
+	std::fs::create_dir_all(&parent).map_err(|error| format!("{}: {error}", parent.display()))?;
+	let report = parent.join(name);
+
+	// The script is named for the client too, not the interface alone: a
+	// dual-stack interface has two, and one name would mean the second apply
+	// overwriting the first client's script while it was running.
+	let path = match source {
+		Some(source) => dir.join(format!("{iface}-{source}.script")),
+		None => dir.join(format!("{iface}.script")),
+	};
+	let script = dhcpcd_script(iface, &report);
 	let mut file = std::fs::File::create(&path)
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
 	file.write_all(script.as_bytes())
@@ -2863,6 +2864,42 @@ pub fn report_path(run_dir: &std::path::Path, iface: &str) -> std::path::PathBuf
 	report_dir(run_dir).join(iface)
 }
 
+/// Where netcfgd's own writers report, one file each.
+///
+/// `/run/netcfgd/reported.d/<interface>/<source>`, read together with the single
+/// file above and after it.
+///
+/// **The single file is the contract** (`docs/interface-report.md`) and stays
+/// exactly what it was: one file, one interface, written by something that is
+/// not netcfgd. It has one writer by construction, because the thing writing it
+/// is the thing that brought the interface up.
+///
+/// netcfgd starting *two* clients on one interface is what breaks that, and it
+/// is not hypothetical: a dual-stack interface gets a `DHCPv4` client and a
+/// `DHCPv6` client, both with nameservers to report, and one file means the
+/// second clobbers the first on every renewal. 0072 chose to silence the v6
+/// client rather than let that happen, which cost every `DHCPv6` lease its
+/// nameservers -- a v6-only network resolving nothing. This is the directory
+/// that decision named and did not build.
+///
+/// A separate tree rather than `reported/<iface>.d`, because an interface may
+/// have a dot in its name: `eth0.d` is a legal VLAN interface, and its report
+/// would be indistinguishable from a fragment directory belonging to `eth0`.
+#[must_use]
+pub fn report_fragment_dir(run_dir: &std::path::Path, iface: &str) -> std::path::PathBuf {
+	run_dir.join("reported.d").join(iface)
+}
+
+/// One fragment, named for what writes it.
+#[must_use]
+pub fn report_fragment_path(
+	run_dir: &std::path::Path,
+	iface: &str,
+	source: &str,
+) -> std::path::PathBuf {
+	report_fragment_dir(run_dir, iface).join(source)
+}
+
 /// Where `/run` is, for code that has no executor to hand.
 fn run_dir_path() -> std::path::PathBuf {
 	std::env::var_os("NCFG_RUN_DIR").map_or_else(
@@ -3190,7 +3227,7 @@ mod tests {
 				family,
 				"eth0",
 				Some("512"),
-				&super::DhcpcdHooks::Replace("/run/netcfgd/dhcpcd/eth0.script"),
+				"/run/netcfgd/dhcpcd/eth0.script",
 			);
 			let stop = super::dhcpcd_stop_args(family, "eth0");
 			let named: Vec<&String> = start
@@ -3213,59 +3250,40 @@ mod tests {
 		}
 		// The metric reaches the client rather than being carried and dropped,
 		// and a document that named none passes no flag at all.
-		let silent = super::DhcpcdHooks::Silence;
-		let ranked = super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", Some("512"), &silent);
+		let hook = "/run/netcfgd/dhcpcd/eth0.script";
+		let ranked = super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", Some("512"), hook);
 		assert!(ranked.windows(2).any(|pair| pair == ["-m", "512"]));
 		assert!(
-			super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", None, &silent)
+			super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", None, hook)
 				.iter()
 				.all(|argument| argument != "-m")
 		);
 	}
 
-	/// dhcpcd's own hooks are either replaced or silenced, and never left alone.
+	/// Every dhcpcd netcfgd starts has its hooks replaced, both families.
 	///
 	/// "Left alone" is what the `DHCPv6` client had, and it meant a lease
 	/// rewriting `/etc/resolv.conf` on a machine where netcfgd's DNS mode owns
-	/// that file. The type makes it unrepresentable and this walks both arms, so
-	/// a third caller cannot quietly reintroduce it. Decision 0072.
+	/// that file (0072). That was fixed by silencing two hooks by name; 0086
+	/// gave the v6 client a script of its own instead, which replaces the whole
+	/// directory and is strictly the stronger thing -- so this walks both
+	/// families and asserts each gets `-c`, where it used to walk two arms of a
+	/// type.
 	#[test]
 	fn dhcpcds_own_hooks_are_never_left_alone() {
-		let replaced = super::dhcpcd_start_args(
-			super::DHCPCD_V4,
-			"eth0",
-			None,
-			&super::DhcpcdHooks::Replace("/run/netcfgd/dhcpcd/eth0.script"),
-		);
-		let silenced =
-			super::dhcpcd_start_args(super::DHCPCD_V6, "eth0", None, &super::DhcpcdHooks::Silence);
+		for family in [super::DHCPCD_V4, super::DHCPCD_V6] {
+			let hook = format!("/run/netcfgd/dhcpcd/eth0-{family}.script");
+			let args = super::dhcpcd_start_args(family, "eth0", None, &hook);
 
-		// Replacing the directory covers every hook, so naming one as well would
-		// say something the flag does not mean.
-		assert!(replaced
-			.windows(2)
-			.any(|pair| pair == ["-c", "/run/netcfgd/dhcpcd/eth0.script"]));
-		assert!(!replaced.iter().any(|argument| argument == "-C"));
-
-		// And silencing names each one. `resolv.conf` is the measured half --
-		// `tests/live/dhcpcd.sh` watches a real DHCPv6 lease rewrite that file
-		// without it -- and `hostname` is there because the other client's `-c`
-		// already silences the same hook, so the two families behave alike.
-		for hook in super::DHCPCD_SILENCED {
 			assert!(
-				silenced.windows(2).any(|pair| pair == ["-C", hook]),
-				"the DHCPv6 client leaves {hook} running: {silenced:?}"
+				args.windows(2).any(|pair| pair == ["-c", hook.as_str()]),
+				"{family} does not replace dhcpcd's hooks: {args:?}"
 			);
-		}
-		assert!(!silenced.iter().any(|argument| argument == "-c"));
-
-		// Neither arm leaves dhcpcd's hooks entirely alone, which is the whole
-		// of what this is for.
-		for args in [&replaced, &silenced] {
+			// Replacing the directory covers every hook, so naming one as well
+			// would say something the flag does not mean.
 			assert!(
-				args.iter()
-					.any(|argument| argument == "-c" || argument == "-C"),
-				"dhcpcd's own hooks are left running: {args:?}"
+				!args.iter().any(|argument| argument == "-C"),
+				"{family} both replaces and silences: {args:?}"
 			);
 		}
 	}
