@@ -257,6 +257,21 @@ typedef struct {
  */
 int ncfg_client_tiers(ncfg_client_t *client, ncfg_tiers_t *out, char *err, size_t err_size);
 
+/*
+ * The machine's own commit-confirm window, in seconds, or 0 if it names none.
+ *
+ * `global { confirm = N }` in the configuration. A client that hardcoded a
+ * default would disagree with `ncfg apply` on the same machine about how long
+ * an operator has to confirm -- two clients, two answers, one question, which
+ * is the shape this project keeps having to undo.
+ *
+ * Read out of the compiled document, which is the only place it is. That is a
+ * large answer for one number and it is asked once, when a dialog opens.
+ *
+ * Returns 1 on success, including when the machine names none.
+ */
+int ncfg_client_confirm_default(ncfg_client_t *client, unsigned *out, char *err, size_t err_size);
+
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_plan_free(ncfg_plan_t *plan);
 void ncfg_journal_free(ncfg_journal_t *journal);
