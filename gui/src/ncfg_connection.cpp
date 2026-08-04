@@ -205,7 +205,8 @@ bool ncfg_connection::plan(ncfg_plan_data *out, QString *error)
 	return true;
 }
 
-bool ncfg_connection::apply(unsigned confirm_seconds, QList<ncfg_record_row> *out, QString *error)
+bool ncfg_connection::apply(unsigned confirm_seconds, const ncfg_consent_rows &consent,
+			    QList<ncfg_record_row> *out, QString *error)
 {
 	if (!out) {
 		return false;
@@ -222,7 +223,37 @@ bool ncfg_connection::apply(unsigned confirm_seconds, QList<ncfg_record_row> *ou
 	ncfg_journal_t journal = {};
 	char message[NCFG_ERROR_MAX];
 
-	if (!ncfg_client_apply(client, confirm_seconds, &journal, message, sizeof(message))) {
+	/* The Qt strings have to outlive the call, so the byte arrays are held
+	 * here and only pointers into them go into the C struct. Building the
+	 * pointer array from temporaries would hand the C layer memory that had
+	 * already gone -- and the failure would be an operator consenting to a
+	 * name nobody typed. */
+	QList<QByteArray> disrupt_bytes;
+	QList<QByteArray> strand_bytes;
+	QList<const char *> disrupt;
+	QList<const char *> strand;
+	for (const QString &name : consent.disrupt) {
+		disrupt_bytes.append(name.toUtf8());
+	}
+	for (const QString &name : consent.strand) {
+		strand_bytes.append(name.toUtf8());
+	}
+	for (const QByteArray &name : disrupt_bytes) {
+		disrupt.append(name.constData());
+	}
+	for (const QByteArray &name : strand_bytes) {
+		strand.append(name.constData());
+	}
+
+	const ncfg_consent_t given = {
+		disrupt.isEmpty() ? nullptr : disrupt.constData(),
+		static_cast<size_t>(disrupt.size()),
+		strand.isEmpty() ? nullptr : strand.constData(),
+		static_cast<size_t>(strand.size()),
+	};
+
+	if (!ncfg_client_apply(client, confirm_seconds, consent.isEmpty() ? nullptr : &given,
+			       &journal, message, sizeof(message))) {
 		if (error) {
 			*error = QString::fromUtf8(message);
 		}
