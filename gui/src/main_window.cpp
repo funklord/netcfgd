@@ -13,6 +13,7 @@
 #include <QPushButton>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -85,6 +86,14 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 			"would refuse an apply from it."));
 	}
 
+	/* Long enough that a bring-up settles into one refresh, short enough that
+	 * a table is not visibly behind the events list beside it. */
+	settle = new QTimer(this);
+	settle->setSingleShot(true);
+	settle->setInterval(400);
+	connect(settle, &QTimer::timeout, this, &ncfg_main_window::refresh);
+	connect(events, &ncfg_events_view::moved, this, &ncfg_main_window::moved);
+
 	status = new QLabel(this);
 	statusBar()->addWidget(status);
 
@@ -154,4 +163,18 @@ void ncfg_main_window::note(const QString &summary)
 void ncfg_main_window::tab_changed()
 {
 	status->setText(summaries.value(tabs->currentWidget()));
+	/* And ask again for the tab now in front of the operator. Without this a
+	 * pane that went stale while another was showing stays stale until the
+	 * next event, and "the tab I am looking at is current" is the property
+	 * worth having. */
+	refresh();
+}
+
+void ncfg_main_window::moved()
+{
+	/* Restarted, not started: a link coming up produces a run of events, and
+	 * refreshing per event would make the client's cost scale with the
+	 * kernel's chattiness -- which is the reason the daemon's own loop
+	 * collapses a burst into one pass. */
+	settle->start();
 }
