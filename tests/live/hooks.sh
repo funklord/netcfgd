@@ -76,6 +76,10 @@ interface hooked0 {
 	echo "post_up addr=\$NCFG_ADDR iface=\$NCFG_IFACE phase=\$NCFG_PHASE" >> $log
 	echo "post_up addresses=\$(ip -br addr show hooked0 | grep -c 10.5.0.1 || true)" >> $log
 	}
+	pre_down {
+	echo "pre_down addresses=\$(ip -br addr show hooked0 | grep -c 10.5.0.1 || true)" >> $log
+	echo "pre_down up=\$(ip -br link show hooked0 | grep -c UP || true)" >> $log
+	}
 	down {
 	echo "down addresses=\$(ip -br addr show hooked0 | grep -c 10.5.0.1 || true)" >> $log
 	echo "down up=\$(ip -br link show hooked0 | grep -c UP || true)" >> $log
@@ -99,7 +103,7 @@ fi
 
 # The materialised script, which is the thing the document only references.
 hooks=$(find "$work/run/hooks" -type f 2>/dev/null | wc -l)
-check "every hook is materialised under /run" "$hooks" "5"
+check "every hook is materialised under /run" "$hooks" "6"
 for file in "$work/run/hooks"/*; do
 	[ -x "$file" ] || {
 		echo "FAIL a materialised hook is not executable: $file"
@@ -158,17 +162,32 @@ check "down ran"      "$(grep -c '^down ' "$log" || true)"      "2"
 # and `post_up` -- in that order, on an interface it was taking away.
 check "and the up hooks did not run on the way down" \
 	"$(grep -c '^pre_up \|^up \|^post_up ' "$log" || true)" "0"
+check "pre_down ran" "$(grep -c '^pre_down up=' "$log" || true)" "1"
 check "post_down ran" "$(grep -c '^post_down ' "$log" || true)" "1"
-# The ordering claim, checked by what the hook could see rather than by the plan:
-# the address was still on the interface when `down` ran, and the link was still
-# up. That is the property that makes a `down` hook useful, and it holds because
-# teardown is the last thing in a plan.
-check "the address was still there when down ran" \
-	"$(sed -n 's/^down addresses=//p' "$log")" "1"
+# The ordering claim, checked by what each hook could *see* rather than by the
+# plan. Teardown is three moments now (0096), and this is what tells them apart:
+#
+#   pre_down   address there, link up   -- the network still works
+#   down       address gone, link up    -- nothing is reachable over it
+#   post_down  link down
+#
+# Until 0096 the first two were one moment and `down` was where `pre_down` is
+# here, because netcfgd never removed the addresses at all -- `link.down` flushes
+# IPv6 and leaves IPv4 behind, so a disabled interface kept a stale address.
+check "the address was still there when pre_down ran" \
+	"$(sed -n 's/^pre_down addresses=//p' "$log")" "1"
 check "and the link was still up" \
+	"$(sed -n 's/^pre_down up=//p' "$log")" "1"
+check "the address was gone by the time down ran" \
+	"$(sed -n 's/^down addresses=//p' "$log")" "0"
+check "and the link was still up then" \
 	"$(sed -n 's/^down up=//p' "$log")" "1"
 check "while post_down saw it down" \
 	"$(sed -n 's/^post_down up=//p' "$log")" "0"
+# And the address is gone from the machine afterwards, which is the half that is
+# a fix rather than an ordering: the kernel would have left the IPv4 one behind.
+check "the disabled interface carries no address of ours" \
+	"$(ip -br addr show hooked0 2>/dev/null | grep -c 10.5.0.1 || true)" "0"
 
 # A hook whose file has changed since the compile is not run, and that is a
 # failure of the phase rather than a silent skip. `down` is a veto phase, so the

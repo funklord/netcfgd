@@ -51,18 +51,33 @@ pub enum HookPhase {
 	Up,
 	/// After the last addressing action for the interface completes.
 	PostUp,
-	/// Before the link goes down. **Recognised and not run by this build**, unlike
-	/// [`HookPhase::Down`], which is: the two would fire at the same point in a
-	/// plan, and a phase whose only distinction is "before the addresses go" needs
-	/// a teardown ordering netcfgd does not have yet. A plan says so (0063).
+	/// Before anything about the interface is taken away.
+	///
+	/// The interface still works here -- addresses, routes, all of it -- which
+	/// makes this the phase for a script that needs the network on its way out:
+	/// unmounting a share, telling a peer, deregistering from something.
+	///
+	/// **This is where `down` used to be.** Until 0096 teardown was a single
+	/// `link.down` with nothing before it, so `down` fired while the addresses
+	/// were still there and this phase had no moment of its own to occupy
+	/// (0063). Now netcfgd removes what it installed first, and the two are
+	/// different points: a `down` hook that needs the network belongs here.
+	///
+	/// A veto phase: a failure stops the apply, so the interface does not go
+	/// down.
 	PreDown,
-	/// Immediately before the link goes down, while it still works.
+	/// Immediately before the link goes down, once its addresses are gone.
 	///
 	/// Not "during", which is not a moment a plan has: this runs before the
-	/// `link.down` or the `link.delete` it belongs to, and the interface still has
-	/// its addresses and routes at that point -- teardown is the last thing in a
-	/// plan. That is what lets a `down` hook unmount a share or stop a service
-	/// that is using them.
+	/// `link.down` or the `link.delete` it belongs to, and **after** netcfgd has
+	/// removed the addresses and routes it installed (0096). So the link is
+	/// still up and the driver still answers, and nothing can be reached over
+	/// it any more.
+	///
+	/// A script that needs the network is [`HookPhase::PreDown`], which is
+	/// where this phase used to sit: before 0096 there was nothing between the
+	/// two, so `down` fired with the addresses still present and its
+	/// documentation said so.
 	///
 	/// A veto phase: a failure stops the apply, so the transition it brackets does
 	/// not happen. A guard on the interface refuses this hook along with the

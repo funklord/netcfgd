@@ -274,10 +274,18 @@ somewhere new means adding it to the config first, which is what `ncfg wifi add`
 is for (see below). `ncfg wifi scan` marks which networks in range you can
 actually join.
 
-**Six of the eleven hook phases run.** `pre_up`, `post_up`, `down`, `post_down`,
-`lease` and `carrier` fire; `up`, `pre_down`, `roam`, `portal` and `drift` are
-parsed, written into `/run/netcfgd/hooks/` and never executed. `ncfg plan` names each
-one it finds, so this is visible rather than silent.
+**All eleven hook phases run.** `pre_up`, `up`, `post_up`, `pre_down`, `down`
+and `post_down` are the six a plan fires as it brings an interface up or takes
+it down; `carrier`, `lease`, `roam`, `portal` and `drift` fire on something the
+machine noticed rather than something netcfgd planned. `ncfg plan` names each one
+it finds, and warns about any phase this build does not fire -- which is now
+none, and stays honest if a phase is ever added without being wired up.
+
+Taking an interface down is five moments, not one: `pre_down` runs while the
+interface still works (addresses, routes, all of it -- this is where a script
+that needs the network goes), then netcfgd removes the addresses it installed,
+then `down` runs with the link still up and the addresses gone, then the link
+goes down, then `post_down`.
 
 `on carrier` runs when a cable comes or goes, with `$NCFG_REASON` set to `up` or
 `down` -- and once when netcfgd first looks at the interface, so a script that
