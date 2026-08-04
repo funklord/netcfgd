@@ -11,7 +11,7 @@ use netcfgd_model::{
 	AppliedDns, BackendKind, Document, HookPhase, Observed, ObservedAddress, ObservedBackend,
 	ObservedLink, ObservedRoute, Origin, Ownership,
 };
-use netcfgd_plan::{plan, Op, Plan, PlanOptions};
+use netcfgd_plan::{plan as plan_unchecked, Op, Plan, PlanOptions};
 
 /// Compile fixture text into a document.
 fn document(text: &str) -> Document {
@@ -640,6 +640,41 @@ fn simulate(plan: &Plan, observed: &mut Observed, desired: &Document) {
 
 /// Plan, apply, re-plan. Returns the first plan, and asserts the second is
 /// empty.
+/// `netcfgd_plan::plan`, with the plan's own structural invariant checked.
+///
+/// Every fixture in this file goes through here, so the invariant is asserted
+/// roughly two hundred times rather than once: **an action may only depend on
+/// an action that exists and comes before it.**
+///
+/// It is a wrapper rather than a test because the failure it was written for
+/// was not visible from any single fixture. A refused action's id is
+/// `u32::MAX`, five accumulators inside the planner collect ids without asking
+/// whether they are real, and all five feed somebody's `depends_on` -- so the
+/// defect is wherever the next edge is added, not where the last one was
+/// (0097).
+fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> Plan {
+	let plan = plan_unchecked(desired, observed, options);
+
+	let mut seen: Vec<u32> = Vec::new();
+	for action in &plan.actions {
+		for id in &action.depends_on {
+			assert!(
+				seen.contains(id),
+				"{} (id {}) depends on action {id}, which is not earlier in the plan; \
+				 the plan holds {:?}",
+				action.op.name(),
+				action.id,
+				plan.actions
+					.iter()
+					.map(|earlier| (earlier.id, earlier.op.name()))
+					.collect::<Vec<_>>()
+			);
+		}
+		seen.push(action.id);
+	}
+	plan
+}
+
 fn settle(desired: &Document, observed: &mut Observed) -> Plan {
 	let first = plan(desired, observed, &PlanOptions::default());
 	simulate(&first, observed, desired);
@@ -7285,4 +7320,69 @@ fn taking_an_interface_down_leaves_somebody_elses_address_alone() {
 		names(&plan)
 	);
 	assert!(names(&plan).contains(&"link.down"), "{:?}", names(&plan));
+}
+
+/// A refused action is not something to wait for.
+///
+/// `push` returns `u32::MAX` for an action it does not emit, and five
+/// accumulators inside the planner collect ids without asking whether they are
+/// real. Guarding a bridge member refuses the enslavement -- and the master's
+/// `link.up` and `addr.add`, which wait for it by rule 2, were left depending
+/// on action 4294967295 (0097).
+///
+/// Downstream that was not cosmetic: `restrict`, which is how drift is
+/// reconciled on one interface, drops an action whose dependency it did not
+/// keep. So a machine with a guarded bridge member reconciled the bridge to
+/// nothing and said `link.up on br0 needs action 4294967295, which belongs to
+/// another interface` -- a sentence with two false claims in it.
+#[test]
+fn a_refused_action_is_not_something_to_wait_for() {
+	let desired = document(
+		r#"
+		interface br0 {
+			bridge { members = "eth0" }
+			config = "10.0.0.1/24"
+		}
+		interface eth0 {
+			master = "br0"
+			guard  = "nfs root"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+
+	// Not `settle`: the enslavement is refused, so this plan never converges --
+	// which is the point of a guard and is what the refusal says.
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+
+	assert_eq!(
+		plan.refusals
+			.iter()
+			.map(|r| r.op.as_str())
+			.collect::<Vec<_>>(),
+		vec!["link.set_master"],
+		"the guard should refuse the enslavement and nothing else"
+	);
+
+	// The wrapper above asserts the invariant for every fixture; this says it
+	// explicitly for the one case that broke it, so the test is legible without
+	// knowing the wrapper exists.
+	let ids: Vec<u32> = plan.actions.iter().map(|action| action.id).collect();
+	for action in &plan.actions {
+		for id in &action.depends_on {
+			assert!(
+				ids.contains(id),
+				"{} depends on action {id}, which does not exist",
+				action.op.name()
+			);
+		}
+	}
+
+	// And the bridge is still brought into service. The guard is on `eth0`;
+	// refusing to enslave a member is not a reason to leave the master bare,
+	// and a fix that dropped the master's actions along with the edge would
+	// pass every assertion above.
+	assert!(names(&plan).contains(&"addr.add"), "{:?}", names(&plan));
+	assert!(names(&plan).contains(&"link.up"), "{:?}", names(&plan));
 }
