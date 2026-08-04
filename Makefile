@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check build test fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment
+.PHONY: deb apk apk-source apk-container all check build test fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -33,7 +33,7 @@ ncfg-link:
 # is the one gate that fails if an adapter's dependencies have leaked into the
 # core -- which is the kind of thing that is trivial to prevent and miserable to
 # unpick later.
-check: fmt ascii shell clippy unsafe-policy executor-policy nm-containment packaging test size footprint rss adapters
+check: style fmt ascii shell clippy unsafe-policy executor-policy nm-containment packaging test size footprint rss adapters
 
 # Each adapter, built and checked with the same bar as the core.
 #
@@ -819,5 +819,30 @@ clean:
 # The shared style gate: one tool, copied verbatim from
 # ~/.claude/tools/style_gate.py into every private project. It refuses to
 # run against a collapsed file list, so a pass means it actually looked.
-style:
+style: style-source style-docs
+
+style-source:
 	python3 tools/style_gate.py check
+
+# project.md is authoritative, so it is held to the tree: a heading
+# that appears twice means whichever one you find, the other is the
+# one with the answer.
+style-docs:
+	python3 tools/style_gate.py docs
+
+# The clean ladder, matching the sibling projects: `clean` removes build
+# products, `veryclean` adds the build directories themselves, `distclean`
+# adds editor and tool droppings. Each names what it removes.
+veryclean: clean
+	$(CARGO) clean
+	rm -rf target
+
+distclean: veryclean
+	find . -name '*~' -o -name '*.swp' -o -name '*.orig' | xargs -r rm -f
+	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+
+# The counterpart to install: named targets only, no sweeps.
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/ncfg
+	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
+	rm -f $(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf
