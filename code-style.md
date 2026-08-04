@@ -1,11 +1,28 @@
+<!-- The three rules and their detail are copied from
+     ~/.claude/guidelines/code-style.md -- the source. Keep in sync; fix
+     drift the moment you notice it. -->
+
 # code-style.md
 
 Code style for this project. Applies to every crate in the workspace — the
 pure core (`netcfgd-model`, `netcfgd-compile`, `netcfgd-plan`), the crates
 that touch the kernel (`netcfgd-sys`, `netcfgd-observe`,
 `netcfgd-apply`), the binaries (`netcfgd`, `ncfg`), the backends and the
-adapters alike. `project.md` §9 states the rules in brief and points here
+adapters alike — **and to `client/` in C and `gui/` in C++**, which are not
+crates and are not exempt. Those two are where several of the rules below
+actually bite, because Rust supplies for free what C and C++ do not. `project.md` §9 states the rules in brief and points here
 for the detail; where the two ever disagree, project.md wins.
+
+**Above both sits the global source**, `~/.claude/guidelines/code-style.md`,
+which applies to every private project. Where this file or `project.md`
+disagrees with it, that is **drift to fix, not a local override**. A genuine
+divergence needs a technical reason and is raised rather than decided in
+passing -- and when a conflict between the three actually comes up, stop and
+ask instead of picking a winner.
+
+Everything specific to Rust and to this project -- section 2's `rustfmt`
+verdict and sections 4 through 8 -- is this project's own, and is not in
+the source.
 
 Vendored or generated sources are exempt — they keep whatever their
 generator or upstream produces. Nothing is vendored yet; when something is,
@@ -48,6 +65,31 @@ lints do not cover is the part that matters:
   planner returns is `Plan`, not `PlanStruct` or `PlanResult`;
   `netcfgd_plan::Plan` already reads correctly at the call site, and
   stuttering only shows up once someone imports it.
+
+### Prefixes, and visibility
+
+Prefixes keep this project's symbols from colliding with a library's, so
+they follow **visibility** rather than a mechanical rule:
+
+- **Anything with more than small visibility carries the project prefix** --
+  the public API, and anything a linker or importer outside its own module
+  can reach.
+- **Module-private symbols are left unprefixed**, so that the absence of a
+  prefix reads as "this does not leave the module."
+
+Rust settles the middle case by itself: `pub` and the module tree decide what
+escapes, and the crate name is already the prefix at every call site. **C and
+C++ do not**, which is why this section exists now that `client/` and `gui/`
+are here. A symbol that is internal by intent but still reaches the linker --
+cross-file within a library, not `static`, not part of the API -- is not
+private for this purpose. Prefix it. `client/` already does: everything it
+exports is `ncfg_client_*` or `ncfg_json_*`, and `gui/` names its own types
+`ncfg_apply_dialog` and the like.
+
+**A deliberate parallel copy of a function in two libraries needs a distinct
+name**, not the same name in both on the assumption that nothing will ever
+link both sides. That assumption fails later, at a call site that changed
+nothing, and names files you did not touch.
 
 ## 2. Indentation and alignment
 
@@ -102,6 +144,30 @@ newline_style = "Unix"
 Run both before committing. If `hard_tabs` is ever dropped from the config,
 the whole tree converts to spaces on the next format and the diff will bury
 whatever change it rode in on — treat that file as load-bearing.
+
+### Settled exceptions to the tab rule
+
+Divergence needs a technical reason. These are accepted and need no
+discussion: **Makefile recipe lines** (`make` requires a literal tab, so they
+are compliant by construction), **YAML** (the spec forbids tabs for
+indentation outright — use spaces), **Markdown** (list continuation and code
+fences are space-indented by specification), **Go** (`gofmt` emits tabs
+natively), and **vendored, generated or attic sources**, which keep whatever
+their upstream or generator produced.
+
+### No formatter for `client/` and `gui/`
+
+`clang-format` is **not run here, not even ad hoc on a single file**, for the
+reason the sibling C projects recorded: it rewrites tabs to spaces
+unconditionally and cannot be configured out of it. That is a configuration
+gap, which is disqualifying rather than something to work around — the
+failure mode is a silent conversion of files that were already correct,
+found later as a reverted commit rather than as an error.
+
+This is the same evaluation `rustfmt` passed and it fails: the rule has to
+survive the tool, and here it does not.
+
+Naming and filename rules are review items, not automated ones.
 
 ## 3. Filenames
 
