@@ -236,20 +236,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			reconcile_drift(&mut state, &mut subscribers);
 		}
 
-		for (request, peer, reply) in requests {
-			let policy = state
-				.desired
-				.as_ref()
-				.map(|document| document.globals.control.clone())
-				.unwrap_or_default();
-			let response = match authorize::check(&policy, &peer, &request) {
-				Ok(()) => answer(&mut state, &request, &mut subscribers, Some(&commands)),
-				Err(message) => Response::error(message),
-			};
-			// A client that hung up between asking and being answered is
-			// ordinary, not an error.
-			let _ = reply.send(response);
-		}
+		serve_requests(&mut state, requests, &mut subscribers, &commands);
 	}
 
 	Ok(ExitCode::SUCCESS)
@@ -362,6 +349,53 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 			summary: format!("applied {} actions", journal.done()),
 		},
 	);
+}
+
+/// Answer everything that arrived this pass.
+///
+/// The policy is re-read per request rather than once per pass, because a
+/// reload earlier in the same pass may have changed it -- and a request
+/// authorised against the configuration that was replaced a moment ago is a
+/// permission check on a document nobody is running.
+fn serve_requests(
+	state: &mut State,
+	requests: Vec<(Request, netcfgd_sys::peer::Peer, SyncSender<Response>)>,
+	subscribers: &mut Vec<SyncSender<Event>>,
+	commands: &Sender<Command>,
+) {
+	for (request, peer, reply) in requests {
+		let policy = state
+			.desired
+			.as_ref()
+			.map(|document| document.globals.control.clone())
+			.unwrap_or_default();
+		let response = authorized(state, &policy, &peer, &request, subscribers, commands);
+		// A client that hung up between asking and being answered is ordinary,
+		// not an error.
+		let _ = reply.send(response);
+	}
+}
+
+/// Check the peer, then answer.
+///
+/// Split out of the loop because the loop was over its line budget and this is
+/// the part that reads as one thought: what may this connection do, and given
+/// that, what does it get told. The tiers are worked out whether or not the
+/// request is allowed, because `hello` reports them and `hello` is the request
+/// somebody with no permissions can still make.
+fn authorized(
+	state: &mut State,
+	policy: &netcfgd_model::Control,
+	peer: &netcfgd_sys::peer::Peer,
+	request: &Request,
+	subscribers: &mut Vec<SyncSender<Event>>,
+	commands: &Sender<Command>,
+) -> Response {
+	let granted = authorize::granted(policy, peer);
+	match authorize::check(policy, peer, request) {
+		Ok(()) => answer(state, request, subscribers, Some(commands), &granted),
+		Err(message) => Response::error(message),
+	}
 }
 
 /// Where `wpa_supplicant`'s control sockets are.
@@ -535,11 +569,16 @@ fn answer(
 	request: &Request,
 	subscribers: &mut Vec<SyncSender<Event>>,
 	timers: Option<&Sender<Command>>,
+	// What the connection asking may do. Computed by the caller, which is where
+	// the peer credentials are: passing them further in would put the socket's
+	// business into a dispatcher that is otherwise about state.
+	granted: &[netcfgd_model::Tier],
 ) -> Response {
 	match request {
 		Request::Hello => Response::Hello {
 			protocol: netcfgd_proto::PROTOCOL_VERSION,
 			schema: netcfgd_model::SCHEMA_VERSION,
+			tiers: granted.to_vec(),
 		},
 		Request::Status => Response::Status(Box::new(state.observed.clone())),
 		Request::Show => match &state.desired {

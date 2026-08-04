@@ -926,6 +926,53 @@ static void the_monitor_hands_over_one_event_at_a_time(void)
 }
 
 /*
+ * What this connection may do, read off the handshake.
+ *
+ * Three independent answers and not a level. netcfgd's tiers are three group
+ * memberships, and a machine may grant `admin` to a group somebody is in while
+ * `wifi` goes to one they are not -- so a client that filled in everything
+ * "below" the highest would offer something the daemon refuses.
+ */
+static void the_handshake_says_what_this_connection_may_do(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_tiers_t tiers;
+
+	/* Deliberately not a prefix: observe and admin, and no wifi. */
+	const char *answers =
+		"{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},"
+		"\"schema\":{\"major\":1,\"minor\":0},\"tiers\":[\"observe\",\"admin\"]}\n"
+		"{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},"
+		"\"schema\":{\"major\":1,\"minor\":0}}\n"
+		"{\"response\":\"error\",\"message\":\"go away\"}\n";
+	if (!staged_open(&staged, "a handshake can be staged", answers)) {
+		return;
+	}
+
+	ok("the tiers are read", ncfg_client_tiers(staged.client, &tiers, err, sizeof(err)) == 1,
+	   err);
+	ok("and a tier the daemon named is held", tiers.observe == 1 && tiers.admin == 1, NULL);
+	ok("and one it did not name is not, whatever its neighbours say",
+	   tiers.wifi == 0, NULL);
+
+	/* A daemon older than the field. Reported as success with nothing set, so
+	 * the caller decides -- greying out every button against a daemon that
+	 * would have answered is as wrong as offering everything. */
+	ok("a daemon that says nothing is not a failure",
+	   ncfg_client_tiers(staged.client, &tiers, err, sizeof(err)) == 1, err);
+	ok("and grants nothing of its own accord",
+	   tiers.observe == 0 && tiers.wifi == 0 && tiers.admin == 0, NULL);
+
+	/* And a refusal is a failure, with nothing granted. */
+	ok("a refused handshake is a failure",
+	   ncfg_client_tiers(staged.client, &tiers, err, sizeof(err)) == 0, NULL);
+	ok("and grants nothing", tiers.observe == 0 && tiers.wifi == 0 && tiers.admin == 0,
+	   NULL);
+	staged_close(&staged);
+}
+
+/*
  * Consent goes out as the daemon spells it, or not at all.
  *
  * The exact bytes, because this is the one request where being wrong is worse
@@ -1098,6 +1145,7 @@ int main(int argc, char **argv)
 	a_status_becomes_links();
 	an_apply_becomes_a_journal();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
+	the_handshake_says_what_this_connection_may_do();
 	consent_goes_out_the_way_the_daemon_spells_it();
 	the_monitor_hands_over_one_event_at_a_time();
 	a_refused_stream_says_which_tier_it_wanted();

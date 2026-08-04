@@ -276,6 +276,19 @@ bool ncfg_connection::apply(unsigned confirm_seconds, const ncfg_consent_rows &c
 	return true;
 }
 
+ncfg_tiers_t ncfg_connection::tiers()
+{
+	ncfg_tiers_t held = {};
+	char message[NCFG_ERROR_MAX];
+
+	if (!client || !ncfg_client_tiers(client, &held, message, sizeof(message))) {
+		// Nothing granted, which the caller reads as "could not tell" rather
+		// than as "not allowed" -- see the header.
+		return ncfg_tiers_t{};
+	}
+	return held;
+}
+
 bool ncfg_connection::confirm(QString *error)
 {
 	if (!client) {

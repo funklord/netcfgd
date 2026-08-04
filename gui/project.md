@@ -383,12 +383,18 @@ Four rules, all of them the same rule:
    refusal usually means the plan has no actions**, so reading "nothing to do"
    off the action list disabled Apply on exactly the plan consent exists for.
 
-   What is not there yet: **nothing asks the operator's
-   tier** (§4 wants a connection holding `observe` not to offer an apply that will
-   be refused), and `globals.confirm_default` is unreachable, so the dialog offers
-   60s to match `ncfg tui`. The monitor stream does not refresh the other two tabs,
-   which is the obvious use of `observed`/`drift`/`reloaded` and wants a coalescing
-   rule before it wants code.
+   ~~What is not there yet: **nothing asks the operator's tier**~~ **Done**
+   ([0092](../docs/decisions/0092-a-client-is-told-what-it-may-do.md)): `hello`
+   reports the tiers a connection satisfies, three independent answers and not
+   a level, and the Apply button is disabled with the reason in its tooltip
+   where `admin` is absent. A daemon too old to answer leaves the button
+   enabled -- being refused produces a sentence naming what was needed, and a
+   greyed-out button produces silence.
+
+   What is left: `globals.confirm_default` is unreachable, so the dialog offers
+   60s to match `ncfg tui`; and the monitor stream does not refresh the other two
+   tabs, which is the obvious use of `observed`/`drift`/`reloaded` and wants a
+   coalescing rule before it wants code.
 2. **`wire/` plus `agent/`, LAN only**, with the fuzzing standard from the first
    commit.
 3. **Android**, which by then is a kit and a transport choice rather than a port.

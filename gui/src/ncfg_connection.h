@@ -183,6 +183,21 @@ public:
 	 */
 	bool apply(unsigned confirm_seconds, const ncfg_consent_rows &consent,
 		   QList<ncfg_record_row> *out, QString *error);
+	/*
+	 * What this connection may do, asked once at the handshake.
+	 *
+	 * Three independent answers rather than a level: netcfgd's tiers are three
+	 * group memberships, and a machine may grant `admin` to a group the
+	 * operator is in while `wifi` goes to one they are not.
+	 *
+	 * A daemon that does not answer -- one older than the field -- grants
+	 * nothing here, and the caller decides what to make of that. This window
+	 * treats "could not tell" as permitted: the daemon refusing produces a
+	 * sentence naming the tier that was needed, and a greyed-out button
+	 * produces nothing at all.
+	 */
+	ncfg_tiers_t tiers();
+
 	bool confirm(QString *error);
 	bool revert(QString *error);
 

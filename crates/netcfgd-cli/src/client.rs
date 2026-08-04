@@ -276,6 +276,7 @@ mod tests {
 			&Response::Hello {
 				protocol: netcfgd_proto::PROTOCOL_VERSION,
 				schema: netcfgd_model::SCHEMA_VERSION,
+				tiers: Vec::new(),
 			},
 		)
 		.expect("writes");

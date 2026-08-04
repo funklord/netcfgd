@@ -150,6 +150,19 @@ pub enum Response {
 		protocol: Version,
 		/// The document schema this build speaks.
 		schema: Version,
+		/// Which control tiers *this* connection satisfies.
+		///
+		/// The daemon already works this out for every request it answers; this
+		/// is the same answer, given once and before anything is attempted.
+		/// Without it a client can only learn what it may do by doing it and
+		/// being refused -- so a window offers an apply button to somebody
+		/// holding `observe`, and the first thing that happens when they press
+		/// it is a refusal (0092).
+		///
+		/// Peer-specific, not machine-specific: two connections from different
+		/// users get different answers, which is the whole point of asking.
+		#[serde(default)]
+		tiers: Vec<netcfgd_model::Tier>,
 	},
 	/// The observed state.
 	Status(Box<Observed>),

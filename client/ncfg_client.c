@@ -798,6 +798,49 @@ static int took_refusal(const ncfg_json_doc_t *doc, char *err, size_t err_size)
 	return 1;
 }
 
+int ncfg_client_tiers(ncfg_client_t *client, ncfg_tiers_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_hello(client, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	/* Absent means a daemon older than this field, and nothing granted is the
+	 * wrong answer for that -- it would grey out every button against a daemon
+	 * that would have answered. Everything granted is the wrong answer too.
+	 * So: absent is reported as success with nothing set, and the caller that
+	 * cares says which it wants. The GUI treats "could not tell" as permitted,
+	 * because the daemon refusing is a sentence the operator can read and a
+	 * disabled button is not. */
+	uint32_t tiers = ncfg_json_member(doc, ncfg_json_root(doc), "tiers");
+	for (uint32_t i = 0; i < ncfg_json_count(doc, tiers); i++) {
+		size_t length = 0;
+		const char *name = ncfg_json_string(doc, ncfg_json_at(doc, tiers, i), &length);
+		if (!name) {
+			continue;
+		}
+		if (length == 7u && !memcmp(name, "observe", 7)) {
+			out->observe = 1;
+		} else if (length == 4u && !memcmp(name, "wifi", 4)) {
+			out->wifi = 1;
+		} else if (length == 5u && !memcmp(name, "admin", 5)) {
+			out->admin = 1;
+		}
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_t err_size)
 {
 	if (!out) {

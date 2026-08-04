@@ -212,6 +212,11 @@ fn every_response_sample() -> Vec<Response> {
 		Response::Hello {
 			protocol: netcfgd_proto::PROTOCOL_VERSION,
 			schema: netcfgd_model::SCHEMA_VERSION,
+			// Two rather than all three, and not in the order the enum
+			// declares them: the tiers are three separate group memberships
+			// and not a ladder, so a sample holding a prefix of them would
+			// pin a shape that happens to look like one.
+			tiers: vec![netcfgd_model::Tier::Observe, netcfgd_model::Tier::Admin],
 		},
 		Response::Explanation(Box::new(Explanation {
 			subject: "eth0".to_owned(),
@@ -445,8 +450,12 @@ fn the_handshake_reports_both_versions() {
 	let hello = Response::Hello {
 		protocol: netcfgd_proto::PROTOCOL_VERSION,
 		schema: netcfgd_model::SCHEMA_VERSION,
+		tiers: vec![netcfgd_model::Tier::Observe],
 	};
 	let text = serde_json::to_string(&hello).expect("serialises");
 	assert!(text.contains("\"protocol\""), "got: {text}");
+	// And what this connection may do, which is the third thing a client needs
+	// before it draws anything (0092).
+	assert!(text.contains("\"tiers\""), "got: {text}");
 	assert!(text.contains("\"schema\""), "got: {text}");
 }
