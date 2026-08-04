@@ -42,6 +42,7 @@ fn network(ssid: &str, security: Security) -> WifiNetwork {
 		autoconnect: true,
 		metered: false,
 		bssid_pin: None,
+		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,
@@ -539,4 +540,74 @@ fn the_mac_policy_is_always_sent() {
 			"{policy:?} should send mac_addr {expected}: {rendered:?}"
 		);
 	}
+}
+
+/// Roaming reaches `wpa_supplicant` as the module it understands.
+///
+/// The oldest thing wifi does: an ESS is several access points sharing one
+/// SSID, and a station moves to whichever it hears best. `wpa_supplicant` does
+/// that itself -- "roaming within an ESS", in its own configuration's words --
+/// but only while a `bgscan` module is asking it to look. netcfgd set none, so
+/// a laptop re-selected only after the link had already gone, which is roaming
+/// by first losing the network.
+#[test]
+fn a_roaming_network_asks_the_supplicant_to_keep_looking() {
+	let dir = scratch("roam");
+	write_secret(&dir, "pass", "passphrase123");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+	let mut wanted = network(
+		"Corridor",
+		Security::Psk(PskConfig {
+			passphrase: SecretRef {
+				provider: SecretProvider::File,
+				name: "pass".to_owned(),
+			},
+			proto: PskProto::Wpa2Wpa3,
+		}),
+	);
+	wanted.roam = Some(netcfgd_model::RoamPolicy {
+		signal: -68,
+		interval: 20,
+		slow_interval: 240,
+	});
+
+	let lines = rendered(&wanted, &resolver);
+	// The order is the module's own: short interval, threshold, long interval.
+	// Getting the first two the wrong way round is a station that scans every
+	// -68 seconds above a 20 dBm signal, which is a plausible-looking string
+	// and no roaming at all.
+	assert!(
+		lines
+			.iter()
+			.any(|line| line.ends_with("bgscan \"simple:20:-68:240\"")),
+		"the roam policy did not reach the supplicant: {lines:?}"
+	);
+}
+
+/// And a network that did not ask for it says nothing at all.
+///
+/// `wpa_supplicant`'s default is to look only after the link is gone, and a
+/// background scan costs airtime and interrupts traffic -- so a router with a
+/// radio, or anything that never moves, must not be made to pay for it.
+#[test]
+fn a_network_that_does_not_roam_carries_no_bgscan() {
+	let dir = scratch("noroam");
+	write_secret(&dir, "pass", "passphrase123");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+	let wanted = network(
+		"Fixed",
+		Security::Psk(PskConfig {
+			passphrase: SecretRef {
+				provider: SecretProvider::File,
+				name: "pass".to_owned(),
+			},
+			proto: PskProto::Wpa2Wpa3,
+		}),
+	);
+
+	let lines = rendered(&wanted, &resolver);
+	assert!(
+		!lines.iter().any(|line| line.starts_with("bgscan")),
+		"a network that does not roam was given a background scan: {lines:?}"
+	);
 }
