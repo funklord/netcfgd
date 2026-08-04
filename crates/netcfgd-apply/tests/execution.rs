@@ -30,6 +30,7 @@ fn action(id: u32, op: Op) -> Action {
 	Action {
 		id,
 		reason: Reason::absent("eth0", "test", "value"),
+		op_name: op.name().to_owned(),
 		op,
 		depends_on: Vec::new(),
 		inverse: None,

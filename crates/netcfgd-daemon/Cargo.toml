@@ -26,3 +26,6 @@ netcfgd-secret  = { path = "../netcfgd-secret" }
 netcfgd-supplicant = { path = "../../backends/netcfgd-supplicant" }
 netcfgd-hostapd    = { path = "../../backends/netcfgd-hostapd" }
 serde_json.workspace = true
+
+[dev-dependencies]
+netcfgd-testdir = { path = "../netcfgd-testdir" }

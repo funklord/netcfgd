@@ -80,8 +80,8 @@ pub(crate) fn ask(socket: &Path, request: &Request) -> Result<Answer, String> {
 	let stream = UnixStream::connect(socket).map_err(|error| {
 		format!(
 			"cannot reach the daemon at {}: {error}\n\
-			 this command needs netcfgd running, because the window has to \
-			 outlive `ncfg`",
+			 this command is answered by netcfgd, so the daemon has to be \
+			 running",
 			socket.display()
 		)
 	})?;

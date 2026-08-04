@@ -56,6 +56,10 @@ usage:
   ncfg monitor [options]   stream events until interrupted (needs netcfgd)
   ncfg confirm [options]   keep a change made under a confirm window
   ncfg revert [options]    undo it now rather than at expiry
+  ncfg reload [options]    re-read the config directory now, and say here
+                           whether it compiled. netcfgd notices an edit by
+                           itself; this is for when the answer belongs in your
+                           terminal rather than in the log
   ncfg reset [--yes]       discard the writable config, leaving the factory
                            defaults. Prints what it would remove unless --yes
 
@@ -159,6 +163,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"tui" => tui::run(&options),
 		#[cfg(not(feature = "tui"))]
 		"tui" => Err("this build has no TUI; it was compiled without the `tui` feature".to_owned()),
+		"reload" => command_reload(&options),
 		"reset" => command_reset(&options),
 		"confirm" => command_confirm(&options, &netcfgd_proto::Request::Confirm),
 		"revert" => command_confirm(&options, &netcfgd_proto::Request::Revert),
@@ -909,6 +914,37 @@ fn command_monitor(options: &Options) -> Result<ExitCode, String> {
 	client::stream(&client::socket_path(&run_dir), options.json)
 }
 
+/// Re-read the config, and say here whether it compiled.
+///
+/// Not how a change takes effect -- the daemon watches the directory and
+/// reloads by itself, and that stays the normal path. This is how the person
+/// who made the change *finds out*. Without it the diagnostics for a config
+/// that does not compile go to the daemon's log and the editor is told
+/// nothing, which is the shape of every "I edited it and nothing happened".
+///
+/// It also answers the case where the watch is not watching what the operator
+/// thinks it is: a file replaced through a bind mount, or a config directory on
+/// a filesystem that does not report changes. Asking is then the only way to
+/// know, and before this the protocol had a `reload` that no shipped client
+/// could send.
+fn command_reload(options: &Options) -> Result<ExitCode, String> {
+	let run_dir = state::resolve_dir(options.run_dir.as_deref());
+	let request = netcfgd_proto::Request::Reload;
+	match client::ask(&client::socket_path(&run_dir), &request)? {
+		client::Answer::Ok => {
+			println!("reloaded; the configuration compiles");
+			Ok(ExitCode::SUCCESS)
+		}
+		// The daemon's own diagnostics, which name a file and a line. A
+		// config that does not compile leaves the last good state in effect
+		// (design section 17), so this is a report and not a failed change --
+		// but it exits non-zero, because the file on disk is not what is
+		// running and a script must not read that as success.
+		client::Answer::Error { message } => Err(message),
+		other => Err(format!("the daemon sent {}", other.describe())),
+	}
+}
+
 /// Confirm or revert, both of which are the daemon's to do.
 fn command_confirm(
 	options: &Options,
@@ -1248,6 +1284,45 @@ mod tests {
 	fn split(arguments: &[&str]) -> (super::Options, Vec<String>) {
 		let owned: Vec<String> = arguments.iter().map(|a| (*a).to_owned()).collect();
 		parse_options(&owned).expect("it parses")
+	}
+
+	/// Every command the help text offers has an arm to dispatch it.
+	///
+	/// `reload` drifted the other way for a whole milestone: the request was in
+	/// the protocol, in `docs/schema/socket.json` and in the authorisation
+	/// table, and no shipped client could send it. Nothing was red, because
+	/// nothing compared the two lists.
+	///
+	/// This catches the half that can be caught without running commands that
+	/// want a daemon: a name in the help that dispatches to `unknown command`.
+	/// The other half -- a request the protocol defines and the CLI never
+	/// offers -- is what the reader below the seam is for, and is why
+	/// `client/tests` parses the witness rather than a fixture.
+	#[test]
+	fn every_command_in_the_help_text_is_dispatched() {
+		let source = include_str!("lib.rs");
+		let mut checked = 0;
+		for line in super::USAGE.lines() {
+			let Some(rest) = line.trim_start().strip_prefix("ncfg ") else {
+				continue;
+			};
+			let name = rest.split_whitespace().next().unwrap_or_default();
+			// Only the command lines. The options block wraps continuation
+			// text under the same indent, and none of it starts with `ncfg `.
+			if name.is_empty() || !name.chars().all(|c| c.is_ascii_lowercase()) {
+				continue;
+			}
+			assert!(
+				source.contains(&format!("\"{name}\" =>")),
+				"`ncfg {name}` is offered by the help text with nothing to dispatch it"
+			);
+			checked += 1;
+		}
+		assert!(
+			checked > 10,
+			"the help text was reformatted out from under this test: it found \
+			 {checked} commands, and there are more than that"
+		);
 	}
 
 	/// The regression the one-pass parse fixes. Every option that takes a value

@@ -426,6 +426,7 @@ fn witness() -> Plan {
 			// The inverse on every action rather than one: it is an `Option`,
 			// and a field that is absent in the sample pins nothing.
 			inverse: Some(op.clone()),
+			op_name: op.name().to_owned(),
 			op,
 			reason: Reason {
 				interface: Some("eth0".to_owned()),

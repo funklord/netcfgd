@@ -9,6 +9,7 @@
           "kind": "dummy"
         }
       },
+      "op_name": "link.create",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -32,6 +33,7 @@
         "op": "link_delete",
         "name": "br0"
       },
+      "op_name": "link.delete",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -53,6 +55,7 @@
         "name": "eth0",
         "mtu": 9000
       },
+      "op_name": "link.set_mtu",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -75,6 +78,7 @@
         "name": "eth0",
         "mac": "02:00:00:00:00:01"
       },
+      "op_name": "link.set_mac",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -97,6 +101,7 @@
         "name": "eth0",
         "master": "br0"
       },
+      "op_name": "link.set_master",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -118,6 +123,7 @@
         "op": "link_unset_master",
         "name": "eth0"
       },
+      "op_name": "link.unset_master",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -138,6 +144,7 @@
         "op": "link_up",
         "name": "eth0"
       },
+      "op_name": "link.up",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -158,6 +165,7 @@
         "op": "link_down",
         "name": "eth0"
       },
+      "op_name": "link.down",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -181,6 +189,7 @@
         "preferred_lifetime": 3600,
         "valid_lifetime": 7200
       },
+      "op_name": "addr.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -205,6 +214,7 @@
         "iface": "eth0",
         "addr": "192.168.1.10/24"
       },
+      "op_name": "addr.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -236,6 +246,7 @@
           "proto": 110
         }
       },
+      "op_name": "route.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -276,6 +287,7 @@
           "proto": 110
         }
       },
+      "op_name": "route.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -307,6 +319,7 @@
         "kind": "dhcp4",
         "iface": "eth0"
       },
+      "op_name": "backend.start",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -329,6 +342,7 @@
         "kind": "open_vpn",
         "iface": "vpn0"
       },
+      "op_name": "backend.stop",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -351,6 +365,7 @@
         "kind": "supplicant",
         "iface": "wlan0"
       },
+      "op_name": "backend.reload",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -376,6 +391,7 @@
         "untagged": true,
         "on_self": false
       },
+      "op_name": "bridge.vlan.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -402,6 +418,7 @@
         "vid": 10,
         "on_self": true
       },
+      "op_name": "bridge.vlan.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -427,6 +444,7 @@
           "home"
         ]
       },
+      "op_name": "wifi.set_profiles",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -451,6 +469,7 @@
         "device": "wlan0",
         "network_id": "home"
       },
+      "op_name": "wifi.associate",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -472,6 +491,7 @@
         "op": "wifi_disassociate",
         "device": "wlan0"
       },
+      "op_name": "wifi.disassociate",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -493,6 +513,7 @@
         "device": "wlan0",
         "country": "SE"
       },
+      "op_name": "wifi.set_regdom",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -516,6 +537,7 @@
         "list": "deny",
         "station": "02:00:00:00:00:aa"
       },
+      "op_name": "access_control.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -540,6 +562,7 @@
         "list": "allow",
         "station": "02:00:00:00:00:bb"
       },
+      "op_name": "access_control.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -563,6 +586,7 @@
         "name": "bond0",
         "mode": true
       },
+      "op_name": "link.set_bond",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -584,6 +608,7 @@
         "op": "link_set_bridge",
         "name": "br0"
       },
+      "op_name": "link.set_bridge",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -604,6 +629,7 @@
         "op": "link_set_macvlan",
         "name": "mv0"
       },
+      "op_name": "link.set_macvlan",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -624,6 +650,7 @@
         "op": "link_set_tunnel",
         "name": "tun-office"
       },
+      "op_name": "link.set_tunnel",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -644,6 +671,7 @@
         "op": "link_set_vxlan",
         "name": "vx0"
       },
+      "op_name": "link.set_vxlan",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -667,6 +695,7 @@
         "listen_port": 51820,
         "fwmark": 1
       },
+      "op_name": "wg.set_device",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -701,6 +730,7 @@
           }
         ]
       },
+      "op_name": "wg.set_peers",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -745,6 +775,7 @@
           "options": []
         }
       },
+      "op_name": "dns.apply",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -784,6 +815,7 @@
           ]
         ]
       },
+      "op_name": "link.set_offloads",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -811,6 +843,7 @@
         "name": "eth0",
         "token": "::5"
       },
+      "op_name": "link.set_ipv6_token",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -847,6 +880,7 @@
           "invert": true
         }
       },
+      "op_name": "rule.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -897,6 +931,7 @@
           "invert": true
         }
       },
+      "op_name": "rule.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -935,6 +970,7 @@
         "bandwidth_bits": 20000000,
         "ingress": true
       },
+      "op_name": "qdisc.set",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -958,6 +994,7 @@
         "op": "qdisc_reset",
         "iface": "eth0"
       },
+      "op_name": "qdisc.reset",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -979,6 +1016,7 @@
         "iface": "eth0",
         "target": "ifb-eth0"
       },
+      "op_name": "ingress.redirect",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1000,6 +1038,7 @@
         "op": "ingress_redirect_clear",
         "iface": "eth0"
       },
+      "op_name": "ingress.redirect.clear",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1021,6 +1060,7 @@
         "iface": "eth0",
         "enabled": true
       },
+      "op_name": "sysctl.set_forwarding",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1043,6 +1083,7 @@
         "iface": "eth0",
         "prefer_temporary": true
       },
+      "op_name": "sysctl.set_privacy",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1065,6 +1106,7 @@
         "iface": "eth0",
         "value": 2
       },
+      "op_name": "sysctl.set_accept_ra",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1086,6 +1128,7 @@
         "op": "hostname_set",
         "name": "host.example"
       },
+      "op_name": "hostname.set",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1108,6 +1151,7 @@
           "eth0"
         ]
       },
+      "op_name": "nat.replace",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1133,6 +1177,7 @@
         "path": "/run/netcfgd/hooks/eth0-post_up",
         "value": "192.168.1.50/24"
       },
+      "op_name": "hook.run",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1156,6 +1201,7 @@
         "op": "commit_arm",
         "window_seconds": 90
       },
+      "op_name": "commit.arm",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1175,6 +1221,7 @@
       "op": {
         "op": "commit_confirm"
       },
+      "op_name": "commit.confirm",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1194,6 +1241,7 @@
         "op": "commit_revert",
         "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "op_name": "commit.revert",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",

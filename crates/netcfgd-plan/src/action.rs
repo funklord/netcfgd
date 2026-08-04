@@ -786,6 +786,21 @@ pub struct Action {
 	pub id: u32,
 	/// What to do.
 	pub op: Op,
+	/// The op's short name, the one everything else already prints.
+	///
+	/// Redundant with `op`'s serde tag, and deliberately so. The tag is the
+	/// `snake_case` of the variant (`bridge_vlan_add`); the name is what `ncfg
+	/// plan` prints, what the TUI shows and what every journal record stores
+	/// (`bridge.vlan.add`). Three of forty-seven differ by more than a
+	/// separator, so no client can derive one from the other -- and the first
+	/// second implementation of this protocol duly showed `link_create` in its
+	/// plan and `link.create` in the journal beside it, for the same operation.
+	///
+	/// Sent rather than left to each client to tabulate, because a table of
+	/// forty-seven names copied into every client is forty-seven chances for
+	/// one of them to disagree with this one.
+	#[serde(default)]
+	pub op_name: String,
 	/// Why this is here.
 	pub reason: Reason,
 	/// Actions that must complete first.

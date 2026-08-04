@@ -9,7 +9,7 @@ use netcfgd_apply::{apply, Executor, Journal};
 use netcfgd_host::{config, confirm, hooks::RunHooks, state as run_state};
 use netcfgd_model::{Document, DriftPolicy, Observed};
 use netcfgd_plan::{plan, Plan, PlanOptions};
-use netcfgd_proto::Event;
+use netcfgd_proto::{Event, Response};
 use std::path::PathBuf;
 
 /// Where the daemon reads and writes.
@@ -41,6 +41,29 @@ pub(crate) struct State {
 	/// straight back. A hash rather than a flag so that *fixing* the config
 	/// clears it automatically: a different document is a different answer.
 	pub(crate) rejected: Option<String>,
+}
+
+/// What a `reload` request answers, given the event that reload produced.
+///
+/// Here rather than at the socket because the event is the only complete
+/// account of a reload, and reading anything else gets a different answer.
+/// `State::diagnostics` is the tempting one and it is wrong twice over: a
+/// configuration a revert rejected is refused without recording diagnostics at
+/// all, and where an earlier reload failed to compile the field still holds
+/// *that* failure's text. One reload, one answer, and the subscribers and the
+/// asker are told the same thing.
+pub(crate) fn reload_answer(event: &Event) -> Response {
+	match event {
+		Event::Reloaded {
+			ok: false,
+			diagnostics,
+		} => Response::error(
+			diagnostics
+				.clone()
+				.unwrap_or_else(|| "the configuration was not adopted".to_owned()),
+		),
+		_ => Response::Ok,
+	}
 }
 
 impl State {
@@ -343,10 +366,107 @@ pub(crate) fn restrict(plan: &Plan, interfaces: &[String]) -> (Plan, Vec<String>
 mod tests {
 	use super::*;
 	use netcfgd_plan::{Action, Op, Reason};
+	use netcfgd_testdir::TestDir;
+	use std::path::Path;
+
+	/// A state over a config directory, without touching the kernel.
+	///
+	/// `State::new` also observes, which would make these tests depend on
+	/// whatever interfaces the machine running them happens to have.
+	fn state_over(config: &Path, run: &Path, text: &str) -> State {
+		std::fs::write(config.join("netcfgd.conf"), text).expect("config written");
+		State {
+			paths: Paths {
+				factory: config.to_path_buf(),
+				config: config.to_path_buf(),
+				run: run.to_path_buf(),
+			},
+			desired: None,
+			diagnostics: None,
+			observed: Observed::default(),
+			rejected: None,
+		}
+	}
+
+	/// The three ways a reload ends, and the one answer each gets.
+	///
+	/// Straightforward except for the middle one, which is the whole reason
+	/// this function exists -- see below.
+	#[test]
+	fn a_reload_answers_what_its_event_said() {
+		assert!(matches!(
+			reload_answer(&Event::Reloaded {
+				ok: true,
+				diagnostics: None
+			}),
+			Response::Ok
+		));
+		let refused = reload_answer(&Event::Reloaded {
+			ok: false,
+			diagnostics: None,
+		});
+		assert!(
+			matches!(refused, Response::Error { .. }),
+			"a reload that did not happen must not answer ok: {refused:?}"
+		);
+		let broken = reload_answer(&Event::Reloaded {
+			ok: false,
+			diagnostics: Some("netcfgd.conf:3: unknown key".to_owned()),
+		});
+		match broken {
+			Response::Error { message } => assert!(
+				message.contains("netcfgd.conf:3"),
+				"the daemon's diagnostics name a file and a line, and are \
+				 passed through rather than summarised: {message}"
+			),
+			other => panic!("a config that does not compile must not answer ok: {other:?}"),
+		}
+	}
+
+	/// A configuration a revert rejected is refused -- and the refusal lives
+	/// **only** in the event.
+	///
+	/// This is what `reload_answer` exists for. The socket handler used to
+	/// answer from `state.diagnostics`, which this leaves untouched, so an
+	/// operator asking netcfgd to re-read a configuration it was refusing was
+	/// told it had compiled. `ncfg reload` is the first shipped client that
+	/// can send the request at all, so the wrong answer would have arrived
+	/// with the command.
+	#[test]
+	fn a_rejected_configuration_refuses_without_setting_diagnostics() {
+		let config = TestDir::new("reload-rejected-config");
+		let run = TestDir::new("reload-rejected-run");
+		let mut state = state_over(&config, &run, "interface eth0 { kind = \"dummy\" }\n");
+
+		assert!(
+			matches!(state.reload(), Event::Reloaded { ok: true, .. }),
+			"the fixture has to compile, or the second half proves nothing"
+		);
+
+		// What a revert does, and the only thing about it that matters here.
+		state.rejected = state.desired.as_ref().map(confirm::document_hash);
+
+		let event = state.reload();
+		assert!(
+			matches!(event, Event::Reloaded { ok: false, .. }),
+			"the same document a revert rejected must not be adopted: {event:?}"
+		);
+		assert!(
+			state.diagnostics.is_none(),
+			"the disagreement this test is here to pin: the refusal is in the \
+			 event and nowhere else, so anything reading the state sees a \
+			 daemon with nothing wrong"
+		);
+		assert!(
+			matches!(reload_answer(&event), Response::Error { .. }),
+			"so the answer has to come from the event"
+		);
+	}
 
 	fn action(id: u32, interface: &str, depends_on: Vec<u32>) -> Action {
 		Action {
 			id,
+			op_name: "link.up".to_owned(),
 			op: Op::LinkUp {
 				name: interface.to_owned(),
 			},
