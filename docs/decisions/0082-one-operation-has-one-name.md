@@ -73,18 +73,20 @@ the future is only half the problem.
 Additive: 48 lines in `docs/schema/plan.json`, no field changed or removed. A
 **minor** bump.
 
-## What was rejected
+## What was rejected, and then taken
 
 **Renaming the tags themselves**, so that `#[serde(rename = "link.create")]`
 makes the wire carry one name and only one. Better design -- redundancy is what
-went wrong here, and this adds more of it -- and not taken now for two reasons.
+went wrong here, and this adds more of it -- and not taken here for two reasons.
 It is a breaking change to a pinned surface, and it is the kind of change whose
 value is judged by whoever maintains the protocol rather than by whoever noticed
 the symptom. `op_name` does not foreclose it: the day the tags become the names,
-the field is deleted and clients that read it keep working through the fallback
-below.
+the field is deleted and clients that read it keep working.
 
-Recorded as open, deliberately, rather than done quietly.
+That day was the next one. See [0083](0083-the-tag-is-the-name.md), which does
+it and deletes `op_name` again. This decision stands as the record of the
+diagnosis rather than of the repair -- and of the fact that the repair was
+somebody's to authorise.
 
 ## The gate
 
