@@ -196,13 +196,6 @@ sent. Parsers and the model treat those as bytes and must not assume
 otherwise. The two rules do not conflict: one governs the repository, the
 other governs the wire.
 
-## 5. Line length
-
-Soft 100 columns, and `max_width` is set to match so `rustfmt` agrees. Do
-not sacrifice clarity to it — a 104-column line that reads as one thought
-beats a wrapped one that does not. Commit message bodies wrap at 72, which
-is a different limit for a different reason (`git log` indents them).
-
 ## 6. Modules and comments
 
 Every module opens with a `//!` doc comment stating its single
@@ -236,33 +229,20 @@ without one does not merit review time.
 
 ## 8. Commit messages
 
-Modelled on the sibling projects, because the history there has turned out
-to be worth reading a year later.
+Precise and short. What changed and why, in as few words as do the job.
 
-- **Subject line: capitalised, imperative, no trailing period,** 72 columns
-  or fewer. "Derive the pacer's rate from the link table", not "fix stuff"
-  and not "feat(plan): ...". No conventional-commit prefixes, no type tags,
-  no ticket numbers, no emoji.
-- **Body: prose, wrapped at 72,** explaining *why* the change is right and
-  what was learned making it — a wrong turn taken and reverted, a test that
-  passed for the wrong reason, a number that turned out to be guessed.
-  Bullet lists are fine inside it; a body that is *only* a bullet list of
-  what changed is not, since `git diff` already says that.
 - **The message ends at its real content.** No trailers, no sign-offs, no
-  tooling or assistant attribution (`Co-Authored-By:` lines for anything
-  that is not a person, `Generated with ...` footers, and the like). The
-  author field carries the attribution git needs.
-- **No docs-only commits.** Documentation changes ride along with the code
-  commit they describe. Folding an accumulated session's findings back into
-  `project.md` is the standing exception, and reads as its own commit.
+  tooling or assistant attribution.
+- **No docs-only commits.** Documentation rides along with the code commit
+  it describes; folding an accumulated session's findings back into
+  `project.md` is the standing exception.
 - **Nothing under `/run` or `target/` is ever committed,** and neither is
-  anything containing real secret material — not in fixtures, not in test
-  data, not "temporarily". §2 makes the desired-state document
-  secret-free by construction; the repository holds to the same rule.
+  anything containing real secret material -- not in fixtures, not in test
+  data, not "temporarily".
 
-Changing any of the above is a convention change: raise it rather than
-adjusting the default in passing.
-
+There is deliberately no subject format, column limit or body shape here.
+Those were stated once, were never asked for, and produced commit bodies
+averaging tens of lines across every sibling project.
 ## See also
 
 - **`project.md` §9** — working in this repo: build and CI conventions, and
