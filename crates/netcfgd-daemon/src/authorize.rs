@@ -105,6 +105,23 @@ pub(crate) fn check(control: &Control, peer: &Peer, request: &Request) -> Result
 	}
 }
 
+/// Every tier this peer satisfies.
+///
+/// The same question `check` asks per request, asked once for all three. A
+/// client is told what it may do rather than finding out by being refused --
+/// which is the only way it could have found out before (0092).
+///
+/// Not "the highest tier": the tiers are three separate group memberships, not
+/// a ladder. A machine may grant `admin` to a group somebody is in and `wifi`
+/// to one they are not, and reporting a maximum would say they can do something
+/// they cannot.
+pub(crate) fn granted(control: &Control, peer: &Peer) -> Vec<Tier> {
+	[Tier::Observe, Tier::Wifi, Tier::Admin]
+		.into_iter()
+		.filter(|tier| satisfies(peer, control.principal(*tier)))
+		.collect()
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -184,6 +201,67 @@ mod tests {
 
 	/// The case decision 0013 exists for, end to end: a laptop user joins
 	/// wireless networks and cannot touch anything else. Two lines of config.
+	/// What a connection is told it may do is what it may do.
+	///
+	/// The whole value of answering this in `hello` is that a client stops
+	/// having to find out by being refused (0092), so the answer has to agree
+	/// with `check` for every tier -- a list that said more would put a button
+	/// on a screen that fails when pressed, and one that said less would hide a
+	/// thing the operator is allowed to do.
+	#[test]
+	fn what_a_peer_is_told_it_may_do_is_what_check_allows() {
+		let control = Control {
+			observe: Principal::Any,
+			wifi: Principal::Root,
+			admin: Principal::Root,
+		};
+
+		for (who, peer) in [
+			("an ordinary user", peer(1000, 1000, &[])),
+			("root", peer(0, 0, &[])),
+		] {
+			let told = granted(&control, &peer);
+			for tier in [Tier::Observe, Tier::Wifi, Tier::Admin] {
+				// One request per tier, taken through the same `check` a real
+				// request goes through rather than through `satisfies` again --
+				// two answers to "may I" is the thing this is here to prevent.
+				let request = match tier {
+					Tier::Observe => Request::Status,
+					Tier::Wifi => Request::WifiScan {
+						interface: "wlan0".to_owned(),
+					},
+					Tier::Admin => Request::Reload,
+				};
+				assert_eq!(
+					told.contains(&tier),
+					check(&control, &peer, &request).is_ok(),
+					"{who} was told the wrong thing about {tier:?}: {told:?}"
+				);
+			}
+		}
+	}
+
+	/// The tiers are three memberships, not a ladder.
+	///
+	/// A machine may grant `admin` to a group somebody is in and `wifi` to one
+	/// they are not. Reporting a highest tier, or filling in the ones below it,
+	/// would tell them they can do something they cannot.
+	#[test]
+	fn the_tiers_are_not_a_ladder() {
+		let control = Control {
+			observe: Principal::Any,
+			// Nobody in this test is in a group, so this is the tier that is
+			// out of reach while the one "above" it is not.
+			wifi: Principal::Group("netdev".to_owned()),
+			admin: Principal::Any,
+		};
+		let told = granted(&control, &peer(1000, 1000, &[]));
+
+		assert!(told.contains(&Tier::Observe), "{told:?}");
+		assert!(told.contains(&Tier::Admin), "{told:?}");
+		assert!(!told.contains(&Tier::Wifi), "{told:?}");
+	}
+
 	#[test]
 	fn the_desktop_case_works_as_advertised() {
 		let control = Control {
