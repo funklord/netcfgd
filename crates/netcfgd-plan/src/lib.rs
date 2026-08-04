@@ -365,14 +365,15 @@ fn warn_wedged_backends(builder: &mut Builder, observed: &Observed) {
 		if !backend.running || backend.answering != Some(false) {
 			continue;
 		}
-		// Two arms rather than a table of every kind's name. `BackendKind` has
-		// no `name()` and giving it one would be a second list of strings
+		// Named arms rather than a table of every kind's name. `BackendKind`
+		// has no `name()` and giving it one would be a second list of strings
 		// beside serde's, which is the thing 0083 just finished removing. The
-		// fallback is not a guess: nothing but the access point's round trip
-		// sets this field, so `backend` is accurate for anything that ever
-		// reaches it before its own sentence is written.
+		// fallback is not a guess: only a round trip sets this field, and each
+		// kind that gains one gains its noun here in the same change -- the
+		// supplicant did (0098).
 		let what = match backend.kind {
 			BackendKind::AccessPoint => "access point",
+			BackendKind::Supplicant => "supplicant",
 			_ => "backend",
 		};
 		builder.warnings.push(Warning {

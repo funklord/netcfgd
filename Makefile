@@ -411,34 +411,37 @@ footprint:
 	[ $$fail -eq 0 ] && echo "footprint: ok"; \
 	exit $$fail
 
-# section 10.4: under 4 MB resident. What is measured here is
-# the full-tier daemon, so the number is a ratchet like the size one rather
-# than the tier target -- see size-budget.txt for why that distinction exists.
-# Measured at 5400 KB when this was written. The headroom is deliberate:
-# resident size varies with allocator behaviour and page reclaim in a way
-# binary size does not, so a limit set at the measurement would fail on noise.
-# A genuine regression -- holding every observed snapshot, say -- clears this
-# easily.
+# section 10.4: under 4 MB resident. What is measured here is the full-tier
+# daemon, so the number is a ratchet like the size one rather than the tier
+# target -- see size-budget.txt for why that distinction exists.
 #
-# Raised from 8192 when the station list went in, because the headroom the
-# paragraph above asks for had quietly been spent. Five runs of the *same*
-# binary spanned 7464..7736 KB before that change and 7588..8168 after: a
-# ~600 KB noise band on an identical binary, with peaks landing 24 KB under
-# the old limit. That is a gate about to fail on noise rather than on a
-# regression, which is worse than no gate -- a red build nobody can act on
-# teaches people to re-run it.
+# **The release binary, which is what ships.** This measured the debug one
+# until 0098, and that made the gate sensitive to something it is not about:
+# adding an *unused* dependency edge to a crate moved the debug figure by
+# ~190 KB, on a binary whose release build was byte-for-byte the same size.
+# Measured A/B interleaved, six runs each -- debug 9011 vs 9199 KB for the
+# unused edge alone, release 4307 vs 4315, which is no difference at all. A
+# 51 MB debug binary's resident set is dominated by metadata layout, and the
+# design target was never about that.
 #
-# So this is set from the observed peak plus a full noise band, and the
-# measurement is written down so the next person can tell drift from spread.
-# The feature itself accounts for about 250 KB of the mean; the rest is that
-# nothing has re-measured this since it read 5400.
-RSS_LIMIT_KB ?= 9216
+# `size` already builds release and runs before this in `check`, so measuring
+# what ships costs nothing.
+#
+# The headroom is deliberate: resident size varies with allocator behaviour
+# and page reclaim in a way binary size does not, so a limit set at the
+# measurement fails on noise. Observed 4208..4384 KB over twelve runs; this is
+# the peak plus a noise band of the width the debug measurement showed.
+#
+# Note for section 10.4: the shipped daemon is ~4.3 MB, which is *over* the
+# 4 MB the design section states. The debug measurement had been hiding that
+# behind a number twice as large and a limit set to fit it.
+RSS_LIMIT_KB ?= 4608
 
 rss:
-	@$(CARGO) build --quiet
+	@$(CARGO) build --release --quiet
 	@work=$$(mktemp -d); \
 	cp -r tests/footprint/etc "$$work/etc"; mkdir -p "$$work/run"; \
-	./target/debug/netcfgd --config-dir "$$work/etc" --run-dir "$$work/run" \
+	./target/release/netcfgd --config-dir "$$work/etc" --run-dir "$$work/run" \
 		--no-apply-on-start >/dev/null 2>&1 & \
 	pid=$$!; \
 	sleep 2; \
@@ -506,6 +509,10 @@ live:
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"
+	@# A supplicant that has bound its socket and stopped answering. Both what
+	@# netcfgd says about it and how long it takes to say it -- the round trip
+	@# is in the reconcile loop.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wedged.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dhcp.sh"
 	@# The other client, and the one netcfgd prefers. Neither under NCFG_LIVE
 	@# nor under unshare: dhcpcd is a package, and it drops privileges to a user
