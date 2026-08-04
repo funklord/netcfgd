@@ -1,0 +1,15 @@
+# Configuration for tools/style_gate.py -- see code-style.md.
+# Nothing here changes the rules; it says which files in THIS tree they
+# apply to, and how small the file list may get before a pass is a lie.
+
+# Migration only: the columns a level occupied before this tree was
+# converted. Checking never reads it -- a tab carries the level and the
+# viewer decides how wide it looks.
+indent_width = 4
+
+# Below this the gate fails instead of passing. Deliberately under the
+# real count: it catches a collapsed file list, it does not police a
+# number, so adding files never requires touching it.
+floor = 120
+
+ascii_only = true
