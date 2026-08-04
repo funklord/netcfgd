@@ -798,6 +798,36 @@ static int took_refusal(const ncfg_json_doc_t *doc, char *err, size_t err_size)
 	return 1;
 }
 
+int ncfg_client_confirm_default(ncfg_client_t *client, unsigned *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	*out = 0;
+
+	ncfg_json_doc_t *doc =
+		ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	/* Absent is the ordinary case and not a failure: most machines name no
+	 * default, and the caller's own is right for them. */
+	uint32_t globals = ncfg_json_member(doc, ncfg_json_root(doc), "globals");
+	uint32_t seconds = ncfg_json_member(doc, globals, "confirm_default");
+	long long value = ncfg_json_int(doc, seconds, 0);
+	if (value > 0 && value <= 86400) {
+		*out = (unsigned)value;
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 int ncfg_client_tiers(ncfg_client_t *client, ncfg_tiers_t *out, char *err, size_t err_size)
 {
 	if (!out) {

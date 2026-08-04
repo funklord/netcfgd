@@ -87,7 +87,12 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
 	window_layout->addWidget(arm_window);
 	window_seconds = new QSpinBox(window_box);
 	window_seconds->setRange(1, 3600);
-	window_seconds->setValue(default_window_seconds);
+	/* The machine's number where it has one, and this dialog's only where it
+	 * does not. `global { confirm = N }` is what an operator wrote to say how
+	 * long they want on this machine, and a client that ignored it would offer
+	 * a different window from the one `ncfg apply` arms on the same box. */
+	const unsigned machines = connection->confirm_default();
+	window_seconds->setValue(machines > 0 ? static_cast<int>(machines) : default_window_seconds);
 	window_seconds->setSuffix(QStringLiteral(" s"));
 	window_layout->addWidget(window_seconds);
 	window_layout->addStretch(1);
