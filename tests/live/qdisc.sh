@@ -179,7 +179,33 @@ check "the kernel default comes back" "$(qdisc_of veth0)" "noqueue"
 # ownership record this would reset every interface whose config is silent
 # about queueing, which is most of them.
 if [ -n "$tc" ]; then
-	"$tc" qdisc replace dev veth0 root cake bandwidth 30mbit
+	# Establish the precondition rather than assume it. A daemon is running and
+	# it watches the configuration directory, so the `write_config` above began
+	# a reconcile of its own alongside the explicit `apply` -- and that pass is
+	# entitled to reset the qdisc, because when it was planned netcfgd still
+	# owned the cake it had set. If it lands *after* the line below, it wipes
+	# the foreign qdisc this check is about and the check reports that netcfgd
+	# reset somebody else's queueing. It does not; it finished its own work
+	# late.
+	#
+	# Seen once, in a full `make live` inside a container, and not reproducible
+	# standalone in twelve consecutive runs on two machines -- which is the same
+	# shape as `acl.sh`'s one unreproduced failure, and gets the same treatment:
+	# the race is real, so the setup waits for it rather than the deadline being
+	# widened. Retrying the assignment is what makes it deterministic; a sleep
+	# would only make it likely.
+	waited=0
+	while :; do
+		"$tc" qdisc replace dev veth0 root cake bandwidth 30mbit
+		sleep 0.3
+		[ "$(qdisc_of veth0)" = "cake" ] && break
+		waited=$((waited + 1))
+		if [ "$waited" -gt 20 ]; then
+			echo "FAIL could not put a foreign qdisc in place to test with"
+			failures=$((failures + 1))
+			break
+		fi
+	done
 	apply "an apply that says nothing about queueing"
 	check "somebody else's qdisc is left alone" "$(qdisc_of veth0)" "cake"
 else
