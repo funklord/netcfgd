@@ -1284,6 +1284,24 @@ names are refused: two networks, and one passphrase cannot be right for both.
 
 The `roam` hook still does not fire (0084).
 
+#### What a client may do, asked once
+
+`hello` reports the control tiers a connection satisfies
+([0092](docs/decisions/0092-a-client-is-told-what-it-may-do.md)). Before it, the
+only way for a client to learn what an operator was allowed to do was to try it
+and read the refusal — so a window offered an apply button whose first effect was
+a no, which is what `gui/project.md` §4 asks against.
+
+**Three independent answers, not a level.** 0013's tiers are group memberships:
+a machine may grant `admin` to a group somebody is in and `wifi` to one they are
+not, so reporting a maximum would claim a permission they do not have. The gate
+is that `granted` agrees with `check` for every tier and every peer — two
+answers to "may I" is exactly what this would otherwise create.
+
+A daemon too old to answer grants nothing, and the GUI reads that as *permitted*
+rather than as denied. Stated in the code, because the instinct is the other way:
+being refused explains itself and a greyed-out button does not.
+
 #### Explaining it
 
 `ncfg explain` follows the indirections. An address the document named by
@@ -1574,6 +1592,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
 - **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
 - **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
 - **"Is there anything to do?" cannot be read off the action list once a refusal can be consented to.** A guard refusal usually means the plan has *no* actions -- the guard stops the ones it covers -- so a plan whose only content is a refusal has an empty action list. The GUI read "nothing to do" off that and disabled Apply on exactly the plan consent exists for (0088). Found by a headless probe that ticks a box and clicks a button; the headless run that already existed proves the window opens, which is a different claim entirely. **When a screen gains a way to act on something, re-check every emptiness test near it.**
