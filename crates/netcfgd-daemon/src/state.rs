@@ -7,7 +7,7 @@
 
 use netcfgd_apply::{apply, Executor, Journal};
 use netcfgd_host::{config, confirm, hooks::RunHooks, state as run_state};
-use netcfgd_model::{Document, DriftPolicy, Observed};
+use netcfgd_model::{Document, DriftPolicy, HookPhase, Observed};
 use netcfgd_plan::{plan, Plan, PlanOptions};
 use netcfgd_proto::{Event, Response};
 use std::path::PathBuf;
@@ -266,6 +266,88 @@ impl State {
 		}
 
 		events
+	}
+
+	/// Run the `drift` hooks for drift that has just been noticed.
+	///
+	/// **Not through the plan**, which every other phase goes through, and the
+	/// reason is the phase's whole point. Drift under `report` produces no apply
+	/// at all -- that is what `report` means -- so a `HookRun` action would be
+	/// planned and never executed, and the one policy whose entire purpose is
+	/// "tell me, do not touch it" would be the one where nothing told anybody.
+	/// The hook *is* the telling.
+	///
+	/// Fires when drift **appears**, not while it persists. Under `report` the
+	/// drift is still there on the next netlink event and the one after it, so
+	/// firing on presence would run the script on every observation for as long
+	/// as the operator left it alone -- 0079's restart storm in a different
+	/// costume, and worse, because this one runs somebody else's code. The last
+	/// summary a phase was told is already recorded per interface for the
+	/// `carrier` and `lease` hooks, and the same record answers it here.
+	///
+	/// Never a veto. There is nothing to stop: the drift has happened, and
+	/// whether netcfgd is about to reconcile it is not this script's to decide.
+	pub(crate) fn run_drift_hooks(&self, events: &[Event]) -> Vec<(String, String)> {
+		let Some(desired) = self.desired.as_ref() else {
+			return Vec::new();
+		};
+		let mut told = Vec::new();
+
+		for event in events {
+			let Event::Drift {
+				interface: name,
+				summary,
+				action,
+			} = event
+			else {
+				continue;
+			};
+			let Some(interface) = desired.interfaces.iter().find(|i| &i.name == name) else {
+				continue;
+			};
+			// What the script is told is what changed, not what netcfgd did
+			// about it -- so a hook that has already seen this drift is quiet
+			// even if the policy moved underneath it.
+			if Self::last_told(&self.observed, name, HookPhase::Drift).as_deref()
+				== Some(summary.as_str())
+			{
+				continue;
+			}
+
+			for hook in interface
+				.hooks
+				.iter()
+				.filter(|hook| hook.phase == HookPhase::Drift)
+			{
+				let env = netcfgd_apply::hooks::HookEnv::for_interface(name)
+					.because(summary.clone())
+					.with("NCFG_ACTION", action.clone());
+				match netcfgd_apply::hooks::run(hook, &env) {
+					netcfgd_apply::hooks::Outcome::Ok => {}
+					netcfgd_apply::hooks::Outcome::Vetoed(message)
+					| netcfgd_apply::hooks::Outcome::Noted(message) => {
+						eprintln!("netcfgd: {message}");
+					}
+				}
+			}
+			// Recorded whether or not the script succeeded, and whether or not
+			// the interface declared one. A hook that failed and was retried on
+			// every observation is the storm this exists to avoid (0064 made the
+			// same call for `lease`), and recording it for an interface with no
+			// hook costs one line in `/run` and keeps the answer to "has this
+			// drift been seen" independent of whether anybody was listening.
+			told.push((name.clone(), summary.clone()));
+		}
+		told
+	}
+
+	/// What a phase was last told about an interface.
+	fn last_told(observed: &Observed, interface: &str, phase: HookPhase) -> Option<String> {
+		observed
+			.hook_state
+			.iter()
+			.find(|record| record.interface == interface && record.phase == phase)
+			.map(|record| record.value.clone())
 	}
 
 	/// The interfaces whose drift policy says to put things back.
