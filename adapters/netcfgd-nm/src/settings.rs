@@ -316,13 +316,25 @@ pub(crate) fn settings_of(profile: &Profile) -> Dict {
 	match profile {
 		Profile::Network(network) => {
 			let mut wireless = Group::new();
-			wireless.insert("ssid".to_owned(), octets(network.ssid.as_bytes().to_vec()));
+			// NetworkManager's `802-11-wireless` requires an SSID, and a
+			// network that names access points instead has not been given one
+			// yet -- netcfgd reads it off a scan at apply time. Projecting an
+			// empty one would describe a profile that matches anything, so the
+			// name is left out and the rest of the profile still carries the
+			// addresses it is restricted to. Constraint 6's direction: the shim
+			// reports what netcfgd has, and does not invent what it does not.
+			if let Some(ssid) = &network.ssid {
+				wireless.insert("ssid".to_owned(), octets(ssid.as_bytes().to_vec()));
+			}
 			wireless.insert("mode".to_owned(), text("infrastructure"));
 			if network.hidden {
 				wireless.insert("hidden".to_owned(), flag(true));
 			}
-			if let Some(bssid) = &network.bssid_pin {
-				wireless.insert("bssid".to_owned(), text(bssid.clone()));
+			// One address is NM's `bssid`, which pins. A list has no
+			// equivalent -- NM has no "any of these" -- so it is not projected
+			// rather than projected as a pin on whichever happened to be first.
+			if let [only] = network.bssid.as_slice() {
+				wireless.insert("bssid".to_owned(), text(only.clone()));
 			}
 			if key_management(&network.security).is_some() {
 				wireless.insert("security".to_owned(), text("802-11-wireless-security"));
@@ -948,13 +960,13 @@ mod tests {
 	fn network(id: &str, security: Security) -> Profile {
 		Profile::Network(Box::new(WifiNetwork {
 			id: id.to_owned(),
-			ssid: Ssid::new(id.as_bytes().to_vec()).expect("a valid ssid"),
+			ssid: Some(Ssid::new(id.as_bytes().to_vec()).expect("a valid ssid")),
 			hidden: false,
 			security,
 			priority: 0,
 			autoconnect: true,
 			metered: false,
-			bssid_pin: None,
+			bssid: Vec::new(),
 			roam: None,
 			addressing: vec![AddressSource::Dhcp4(
 				netcfgd_model::address::Dhcp4::default(),

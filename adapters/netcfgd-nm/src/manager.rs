@@ -133,7 +133,7 @@ impl Manager {
 	) -> zbus::fdo::Result<OwnedObjectPath> {
 		// The access point to prefer, which netcfgd's socket has no argument
 		// for: `ncfg wifi connect` names a `network` block and lets the
-		// supplicant choose the BSS. Pinning one is a `bssid_pin` in the
+		// supplicant choose the BSS. Pinning one is a `bssid` in the
 		// configuration, which is where it belongs.
 		let _ = specific_object;
 		let identity = self

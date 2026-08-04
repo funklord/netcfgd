@@ -721,12 +721,22 @@ network "Phone Hotspot" {
 	assert_eq!(ids, ["HomeFiber", "Office", "Phone Hotspot"]);
 
 	let home = &document.networks[0];
-	assert_eq!(home.ssid.as_bytes(), b"HomeFiber");
+	assert_eq!(
+		home.ssid.as_ref().expect("a stated ssid").as_bytes(),
+		b"HomeFiber"
+	);
 	assert_eq!(home.priority, 30);
 	assert!(matches!(home.security, netcfgd_model::Security::Psk(_)));
 
 	// A space in an SSID is ordinary and must survive being a block label.
-	assert_eq!(document.networks[2].ssid.as_bytes(), b"Phone Hotspot");
+	assert_eq!(
+		document.networks[2]
+			.ssid
+			.as_ref()
+			.expect("a stated ssid")
+			.as_bytes(),
+		b"Phone Hotspot"
+	);
 	assert!(document.networks[2].metered);
 }
 
@@ -813,7 +823,14 @@ fn the_wpa_generation_defaults_to_transitional() {
 #[test]
 fn a_non_text_ssid_can_be_given_as_hex() {
 	let document = build_ok(r#"network "the odd one" { ssid = "ff0080"; wifi { open = true } }"#);
-	assert_eq!(document.networks[0].ssid.as_bytes(), &[0xff, 0x00, 0x80]);
+	assert_eq!(
+		document.networks[0]
+			.ssid
+			.as_ref()
+			.expect("a stated ssid")
+			.as_bytes(),
+		&[0xff, 0x00, 0x80]
+	);
 	// The label stays the handle, so the network still has one readable name.
 	assert_eq!(document.networks[0].id, "the odd one");
 }
@@ -2062,4 +2079,55 @@ fn a_short_interval_longer_than_the_long_one_is_refused() {
 		r#"network "C" { wifi { psk = "@secret:c"; roam { interval = 600; slow_interval = 60 } } }"#,
 	);
 	assert!(message.contains("cannot be longer"), "got: {message}");
+}
+
+/// A network can name access points instead of a name.
+///
+/// "The one in the lobby", by address. netcfgd reads what it is called off a
+/// scan before configuring the supplicant, because WPA derives its key from the
+/// passphrase *and* the SSID -- so the name has to be learned, not skipped
+/// (0090).
+#[test]
+fn a_network_can_be_named_by_its_access_points() {
+	let document = build_ok(
+		"network \"Lobby\" {\n\tbssid = \"aa:bb:cc:dd:ee:ff\"\n\tssid = \"@bssid\"\n\twifi { psk = \"@secret:l\" }\n}",
+	);
+	let network = &document.networks[0];
+	assert!(network.ssid.is_none(), "the name should not be stated");
+	assert_eq!(network.bssid, ["aa:bb:cc:dd:ee:ff"]);
+	// The label is still the id, so the network has one readable handle.
+	assert_eq!(network.id, "Lobby");
+}
+
+/// And it can name several, which is a choice among them rather than a pin.
+#[test]
+fn a_network_can_list_several_access_points() {
+	let document = build_ok(
+		"network \"Site\" {\n\tbssid = [\"aa:bb:cc:dd:ee:ff\", \"11:22:33:44:55:66\"]\n\tssid = \"@bssid\"\n\twifi { psk = \"@secret:s\" }\n}",
+	);
+	assert_eq!(
+		document.networks[0].bssid,
+		["aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"]
+	);
+}
+
+/// A list composes with roaming; a single pin does not.
+///
+/// "Any of these, whichever is loudest" is exactly what an operator who listed
+/// their site's access points wants, and it is the one case where naming
+/// addresses and roaming are not contradictory.
+#[test]
+fn several_access_points_may_be_roamed_between() {
+	let document = build_ok(
+		"network \"Site\" {\n\tbssid = [\"aa:bb:cc:dd:ee:ff\", \"11:22:33:44:55:66\"]\n\twifi { psk = \"@secret:s\"; roam { } }\n}",
+	);
+	assert!(document.networks[0].roam.is_some());
+	assert_eq!(document.networks[0].bssid.len(), 2);
+}
+
+/// A name that has to be read off a scan needs somewhere to read it from.
+#[test]
+fn a_discovered_name_with_no_access_points_is_refused() {
+	let message = errors(r#"network "Nowhere" { ssid = "@bssid"; wifi { psk = "@secret:n" } }"#);
+	assert!(message.contains("lists none"), "got: {message}");
 }

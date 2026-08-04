@@ -914,13 +914,13 @@ fn lower_access_control(block: &Block, diags: &mut Diagnostics) -> Option<Access
 fn station_placeholder() -> WifiNetwork {
 	WifiNetwork {
 		id: String::new(),
-		ssid: Ssid::new(Vec::new()).unwrap_or_else(|_| unreachable!("empty is valid")),
+		ssid: None,
 		hidden: false,
 		security: Security::Open,
 		priority: 0,
 		autoconnect: true,
 		metered: false,
-		bssid_pin: None,
+		bssid: Vec::new(),
 		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
@@ -1163,18 +1163,45 @@ fn lower_network_key(network: &mut WifiNetwork, assignment: &Assignment, diags: 
 			// label stays the id, so the network still has one readable
 			// handle.
 			if let Some(text) = as_string(&assignment.value, diags) {
-				match Ssid::from_hex(&text) {
-					Ok(ssid) => network.ssid = ssid,
-					Err(error) => diags.push(Diagnostic::new(
-						assignment.span,
-						format!("`{text}` is not a usable ssid: {error}"),
-					)),
+				if text == SSID_FROM_BSSID {
+					// "I do not know what it is called; ask the access
+					// points." Spelled with the `@` the DSL already uses for a
+					// value resolved elsewhere, and required rather than
+					// inferred from `bssid` alone -- a network's label is its
+					// SSID by default, and quietly changing what that means
+					// for anything carrying a `bssid` would silently re-point
+					// configurations that work today.
+					network.ssid = None;
+				} else {
+					match Ssid::from_hex(&text) {
+						Ok(ssid) => network.ssid = Some(ssid),
+						Err(error) => diags.push(Diagnostic::new(
+							assignment.span,
+							format!("`{text}` is not a usable ssid: {error}"),
+						)),
+					}
 				}
 			}
 		}
 		"bssid" => {
-			if let Some(text) = as_string(&assignment.value, diags) {
-				network.bssid_pin = Some(text);
+			// One or several. A single access point is a pin and a list is a
+			// choice among them, and both are ordinary ways to describe a
+			// site -- so the key takes either rather than making an operator
+			// with two access points write a different key.
+			match &assignment.value.node {
+				Value::List(items) => {
+					network.bssid.clear();
+					for item in items {
+						if let Some(text) = as_string(item, diags) {
+							network.bssid.push(text);
+						}
+					}
+				}
+				_ => {
+					if let Some(text) = as_string(&assignment.value, diags) {
+						network.bssid = vec![text];
+					}
+				}
 			}
 		}
 		other => diags.push(Diagnostic::new(
@@ -1183,6 +1210,14 @@ fn lower_network_key(network: &mut WifiNetwork, assignment: &Assignment, diags: 
 		)),
 	}
 }
+
+/// What an operator writes when the network's name is not theirs to state.
+///
+/// `ssid = "@bssid"`: the SSID is whatever the access points listed in `bssid`
+/// are advertising, read off a scan before the supplicant is configured. The
+/// `@` is the DSL's existing mark for a value resolved elsewhere, as in
+/// `@secret:NAME`.
+const SSID_FROM_BSSID: &str = "@bssid";
 
 /// A `network` block: an SSID profile, not bound to a device.
 fn lower_network(
@@ -1195,9 +1230,10 @@ fn lower_network(
 	// The label is the SSID as written, and it is also the id. That is not a
 	// shortcut: an SSID is what the operator recognises, and giving a network
 	// a separate handle would mean two names for one thing in every
-	// diagnostic. A profile for a name that is not text uses `ssid` below.
+	// diagnostic. A profile for a name that is not text uses `ssid` below, and
+	// one whose name is not the operator's to state uses `ssid = "@bssid"`.
 	let ssid = match Ssid::new(label.as_bytes().to_vec()) {
-		Ok(ssid) => ssid,
+		Ok(ssid) => Some(ssid),
 		Err(error) => {
 			diags.push(Diagnostic::new(
 				block.span,
@@ -1215,7 +1251,7 @@ fn lower_network(
 		priority: 0,
 		autoconnect: true,
 		metered: false,
-		bssid_pin: None,
+		bssid: Vec::new(),
 		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
@@ -1266,26 +1302,7 @@ fn lower_network(
 		}
 	}
 
-	// A pinned network has nowhere to roam: "use this access point" and "use
-	// whichever of them is loudest" are two different requests, and
-	// wpa_supplicant given both scans in the background for a better BSSID it
-	// is then forbidden to associate with.
-	//
-	// Checked here rather than inside the `wifi` block, because `bssid` is a
-	// network key and `roam` is a wifi one -- so a document that wrote the
-	// `wifi` block first would have been checked before the pin was read, and
-	// the contradiction would have been caught or missed depending on the
-	// order somebody typed two lines in.
-	if network.roam.is_some() && network.bssid_pin.is_some() {
-		diags.push(
-			Diagnostic::new(
-				block.span,
-				format!(
-					"`{label}` is pinned to one access point and also asked to roam between them"
-				),
-			)
-			.with_help("drop `bssid` to roam, or drop `roam` to stay pinned"),
-		);
+	if !network_names_itself(&network, block, &label, diags) {
 		return None;
 	}
 
@@ -1307,6 +1324,58 @@ fn lower_network(
 	}
 
 	Some(network)
+}
+
+/// How a network says which access points it means, checked once the whole
+/// block is known.
+///
+/// Both of these compare a network key (`bssid`) with a `wifi` one (`roam`) or
+/// with the label, so neither can be checked inside the inner block: a document
+/// that wrote `wifi { }` first would be checked before the pin was read, and the
+/// contradiction would be caught or missed depending on which of two lines
+/// somebody typed first.
+fn network_names_itself(
+	network: &WifiNetwork,
+	block: &Block,
+	label: &str,
+	diags: &mut Diagnostics,
+) -> bool {
+	// A pin has nowhere to roam. A *list* does -- roaming among a named set is
+	// exactly what an operator who listed their site's access points wants.
+	if network.roam.is_some() && network.bssid.len() == 1 {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!(
+					"`{label}` is pinned to one access point and also asked to roam between them"
+				),
+			)
+			.with_help(
+				"drop `bssid` to roam anywhere, list more than one to roam among them, \
+				 or drop `roam` to stay pinned",
+			),
+		);
+		return false;
+	}
+
+	// A name read off a scan needs somewhere to read it from. With neither a
+	// name nor an access point the network identifies nothing at all -- and
+	// `wpa_supplicant`'s wildcard, which matches any SSID, is documented as
+	// working for plaintext access points only, because WPA derives its key
+	// from the passphrase *and* the name.
+	if network.ssid.is_none() && network.bssid.is_empty() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!(
+					"`{label}` asks for its name to come from its access points and lists none"
+				),
+			)
+			.with_help("add `bssid = \"aa:bb:cc:dd:ee:ff\"`, or a list of them"),
+		);
+		return false;
+	}
+	true
 }
 
 /// The keys a network's `wifi` block can carry, before they become a
@@ -1537,13 +1606,13 @@ fn lower_dot1x_key(keys: &mut WifiKeys, assignment: &Assignment, diags: &mut Dia
 			// this arm touch it.
 			let mut unused = WifiNetwork {
 				id: String::new(),
-				ssid: Ssid::new(Vec::new()).unwrap_or_else(|_| unreachable!("empty is valid")),
+				ssid: None,
 				hidden: false,
 				security: Security::Open,
 				priority: 0,
 				autoconnect: true,
 				metered: false,
-				bssid_pin: None,
+				bssid: Vec::new(),
 				roam: None,
 				addressing: Vec::new(),
 				routes: Vec::new(),

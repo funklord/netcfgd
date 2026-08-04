@@ -1264,11 +1264,25 @@ it looks: netcfgd writes no config file for a station, it sends `SET_NETWORK`.
 A key the file parser takes is not necessarily one the socket takes, and the
 failure would be roaming silently off with the daemon reporting success.
 
-**Still missing, and named rather than implied:** an access point identified
-*only* by BSSID. `wpa_supplicant`'s `ssid` is mandatory in a network block and
-`bssid` only narrows one, so "join this MAC, whatever it calls itself" cannot be
-passed through — netcfgd would have to scan, find that BSSID and learn its SSID
-first. And the `roam` hook still does not fire (0084).
+~~**Still missing:** an access point identified *only* by BSSID.~~ **Done**
+([0090](docs/decisions/0090-a-network-may-be-named-by-its-access-points.md)).
+`bssid` takes one address or a list: **one pins, several choose**, which are
+different keys to `wpa_supplicant` (`bssid` refuses everything else,
+`bssid_accept` limits selection and picks by signal) and rendering a list as a
+pin would join one and never move. That also corrects 0089 by half — a *pin*
+contradicts a roam policy, a *list* does not, and "any of these, whichever is
+loudest" is exactly what an operator who listed their site wants.
+
+`ssid = "@bssid"` says the name is not the operator's to state, and netcfgd
+reads it off `SCAN_RESULTS` before configuring. **That is arithmetic, not
+convenience**: `wpa_supplicant`'s wildcard-SSID example is annotated "plaintext
+APs only", because WPA derives its key from the passphrase *and* the SSID. No
+`SCAN` is issued — a scan costs seconds and interrupts traffic, and this runs
+inside an apply — so an access point that is not in the last results is reported
+as unseen, with its address in the message. Addresses that advertise different
+names are refused: two networks, and one passphrase cannot be right for both.
+
+The `roam` hook still does not fire (0084).
 
 #### Explaining it
 
@@ -1551,6 +1565,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
 - **"Is there anything to do?" cannot be read off the action list once a refusal can be consented to.** A guard refusal usually means the plan has *no* actions -- the guard stops the ones it covers -- so a plan whose only content is a refusal has an empty action list. The GUI read "nothing to do" off that and disabled Apply on exactly the plan consent exists for (0088). Found by a headless probe that ticks a box and clicks a button; the headless run that already existed proves the window opens, which is a different claim entirely. **When a screen gains a way to act on something, re-check every emptiness test near it.**
 - **A break that does not compile is not a break, and a harness grepping for `FAILED` calls it a pass.** §9 already warns that a break which silently fails to *apply* reads like a gate that works. This is the same disease one step later: the patch applied, `cargo test` failed to build, no line said `FAILED`, and the sweep reported the gate holding. A break harness has to treat a build failure as "not a break" — and the same run found the gap the break was aimed at, which is that a refusal was tested by calling the function that makes it rather than the command that reaches it. **A refusal nobody reaches is not a refusal.**
 - **A comment can be exactly wrong about the code it sits on, and the code can contradict a decision record.** `// Not an error, because plenty of real deployments pin nothing` sat above a `Diagnostic` in a compiler whose only severity is fatal — so an EAP network that pinned no CA did not compile, which 0017 had rejected in as many words and 0008's model contradicted with `ca_cert : string?`. Three places agreed and the code was the fourth. Nothing was red, because no gate reads prose and no gate compares code against decisions. When a comment states a *property* ("not an error", "this is only advisory"), check that the mechanism has that property at all.

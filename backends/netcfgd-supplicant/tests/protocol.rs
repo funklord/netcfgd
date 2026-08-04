@@ -35,13 +35,13 @@ fn write_secret(dir: &std::path::Path, name: &str, body: &str) {
 fn network(ssid: &str, security: Security) -> WifiNetwork {
 	WifiNetwork {
 		id: "test".to_owned(),
-		ssid: Ssid::new(ssid.as_bytes().to_vec()).expect("ssid"),
+		ssid: Some(Ssid::new(ssid.as_bytes().to_vec()).expect("ssid")),
 		hidden: false,
 		security,
 		priority: 0,
 		autoconnect: true,
 		metered: false,
-		bssid_pin: None,
+		bssid: Vec::new(),
 		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
@@ -348,7 +348,7 @@ fn a_bssid_is_validated_rather_than_quoted() {
 	let resolver = Resolver::default();
 	let mut pinned = network("home", Security::Open);
 
-	pinned.bssid_pin = Some("00:11:22:33:44:55".to_owned());
+	pinned.bssid = vec!["00:11:22:33:44:55".to_owned()];
 	assert!(
 		rendered(&pinned, &resolver).contains(&"SET_NETWORK 0 bssid 00:11:22:33:44:55".to_owned())
 	);
@@ -360,7 +360,7 @@ fn a_bssid_is_validated_rather_than_quoted() {
 		"00:11:22:33:44:55:66",
 		"gg:11:22:33:44:55",
 	] {
-		pinned.bssid_pin = Some(hostile.to_owned());
+		pinned.bssid = vec![hostile.to_owned()];
 		let error = settings(&pinned, MacPolicy::Permanent, &resolver).expect_err("refused");
 		assert!(
 			matches!(
@@ -610,4 +610,170 @@ fn a_network_that_does_not_roam_carries_no_bgscan() {
 		!lines.iter().any(|line| line.starts_with("bgscan")),
 		"a network that does not roam was given a background scan: {lines:?}"
 	);
+}
+
+/// One access point pins; several are a choice among them.
+///
+/// `wpa_supplicant` spells those differently and the difference is the whole
+/// feature: `bssid` refuses every other access point, `bssid_accept` limits
+/// selection to the set and picks among them by signal. Rendering a list as a
+/// pin would join one of them and never move (0090).
+#[test]
+fn one_access_point_pins_and_several_are_a_choice() {
+	let dir = scratch("bssid-list");
+	write_secret(&dir, "pass", "passphrase123");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+	let security = Security::Psk(PskConfig {
+		passphrase: SecretRef {
+			provider: SecretProvider::File,
+			name: "pass".to_owned(),
+		},
+		proto: PskProto::Wpa2Wpa3,
+	});
+
+	let mut one = network("Site", security.clone());
+	one.bssid = vec!["aa:bb:cc:dd:ee:ff".to_owned()];
+	let lines = rendered(&one, &resolver);
+	assert!(
+		lines
+			.iter()
+			.any(|line| line.ends_with("bssid aa:bb:cc:dd:ee:ff")),
+		"one access point should pin: {lines:?}"
+	);
+	assert!(
+		!lines.iter().any(|line| line.contains("bssid_accept")),
+		"one access point should not be a list: {lines:?}"
+	);
+
+	let mut several = network("Site", security);
+	several.bssid = vec![
+		"aa:bb:cc:dd:ee:ff".to_owned(),
+		"11:22:33:44:55:66".to_owned(),
+	];
+	let lines = rendered(&several, &resolver);
+	// Masked, because that is the form wpa_supplicant parses, and every bit
+	// set is one specific address.
+	assert!(
+		lines.iter().any(|line| line.ends_with(
+			"bssid_accept aa:bb:cc:dd:ee:ff/ff:ff:ff:ff:ff:ff 11:22:33:44:55:66/ff:ff:ff:ff:ff:ff"
+		)),
+		"several access points should be a choice: {lines:?}"
+	);
+	assert!(
+		!lines.iter().any(|line| line.contains(" bssid ")),
+		"several access points should not pin one: {lines:?}"
+	);
+}
+
+/// A network whose name was never resolved is refused rather than sent.
+///
+/// Sending it would mean an empty SSID, which associates with anything. The
+/// caller skipped a step and says so.
+#[test]
+fn a_network_with_no_resolved_name_is_refused() {
+	let dir = scratch("unresolved");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+	let mut wanted = network("ignored", Security::Owe);
+	wanted.ssid = None;
+	wanted.bssid = vec!["aa:bb:cc:dd:ee:ff".to_owned()];
+
+	let error = settings(&wanted, MacPolicy::Permanent, &resolver)
+		.expect_err("an unresolved network is not sendable");
+	assert!(
+		error.to_string().contains("never read off a scan"),
+		"got: {error}"
+	);
+}
+
+/// A network named by address learns what it is called from a scan.
+///
+/// WPA derives its key from the passphrase *and* the SSID, so the name has to
+/// be read before anything can be sent -- `wpa_supplicant`'s wildcard, which
+/// matches any name, is documented as working for plaintext access points only,
+/// and for that reason. Decision 0090.
+#[test]
+fn a_network_named_by_address_learns_its_name() {
+	let seen = netcfgd_supplicant::protocol::parse_scan_results(
+		"bssid / frequency / signal level / flags / ssid\n\
+		 aa:bb:cc:dd:ee:ff\t2412\t-40\t[WPA2-PSK-CCMP][ESS]\tlobby\n\
+		 11:22:33:44:55:66\t2437\t-60\t[WPA2-PSK-CCMP][ESS]\tlobby\n\
+		 99:99:99:99:99:99\t2462\t-70\t[ESS]\tsomeone-else\n",
+	);
+
+	let mut wanted = network("ignored", Security::Owe);
+	wanted.ssid = None;
+	// Upper case on purpose: an address an operator typed and one a driver
+	// reported differ in case often enough that comparing them exactly is a
+	// bug waiting for a capital letter.
+	wanted.bssid = vec!["AA:BB:CC:DD:EE:FF".to_owned()];
+
+	let learned = netcfgd_supplicant::pick_ssid(&wanted, &seen).expect("the name is readable");
+	assert_eq!(learned.as_bytes(), b"lobby");
+
+	// Several that agree is the ordinary site: one network, two radios.
+	wanted.bssid = vec![
+		"aa:bb:cc:dd:ee:ff".to_owned(),
+		"11:22:33:44:55:66".to_owned(),
+	];
+	let learned = netcfgd_supplicant::pick_ssid(&wanted, &seen).expect("they agree");
+	assert_eq!(learned.as_bytes(), b"lobby");
+
+	// One in range and one not is still answerable: the absent one says
+	// nothing, rather than making the whole network unreachable.
+	wanted.bssid = vec![
+		"aa:bb:cc:dd:ee:ff".to_owned(),
+		"de:ad:be:ef:00:00".to_owned(),
+	];
+	let learned = netcfgd_supplicant::pick_ssid(&wanted, &seen).expect("one of them is in range");
+	assert_eq!(learned.as_bytes(), b"lobby");
+}
+
+/// None of them in range is a failure that names the addresses.
+///
+/// "Network not found", about a network identified by address, is not a
+/// sentence anybody can act on.
+#[test]
+fn an_absent_access_point_is_reported_with_its_address() {
+	let seen = netcfgd_supplicant::protocol::parse_scan_results(
+		"bssid / frequency / signal level / flags / ssid\n\
+		 99:99:99:99:99:99\t2462\t-70\t[ESS]\tsomeone-else\n",
+	);
+	let mut wanted = network("ignored", Security::Owe);
+	// The helper's first argument is the SSID; the *id* is what the message
+	// names, because that is the handle in the operator's config file.
+	wanted.id = "Lobby".to_owned();
+	wanted.ssid = None;
+	wanted.bssid = vec!["aa:bb:cc:dd:ee:ff".to_owned()];
+
+	let error = netcfgd_supplicant::pick_ssid(&wanted, &seen).expect_err("it is not in range");
+	let message = error.to_string();
+	assert!(message.contains("aa:bb:cc:dd:ee:ff"), "got: {message}");
+	assert!(message.contains("Lobby"), "got: {message}");
+}
+
+/// Access points advertising different names are different networks.
+///
+/// One passphrase cannot be right for both -- WPA's key is derived per SSID --
+/// so picking either would be netcfgd choosing for the operator.
+#[test]
+fn access_points_on_different_networks_are_refused() {
+	let seen = netcfgd_supplicant::protocol::parse_scan_results(
+		"bssid / frequency / signal level / flags / ssid\n\
+		 aa:bb:cc:dd:ee:ff\t2412\t-40\t[WPA2-PSK-CCMP][ESS]\tlobby\n\
+		 11:22:33:44:55:66\t2437\t-60\t[WPA2-PSK-CCMP][ESS]\twarehouse\n",
+	);
+	let mut wanted = network("ignored", Security::Owe);
+	wanted.id = "Site".to_owned();
+	wanted.ssid = None;
+	wanted.bssid = vec![
+		"aa:bb:cc:dd:ee:ff".to_owned(),
+		"11:22:33:44:55:66".to_owned(),
+	];
+
+	let error = netcfgd_supplicant::pick_ssid(&wanted, &seen).expect_err("they disagree");
+	let message = error.to_string();
+	assert!(message.contains("different networks"), "got: {message}");
+	// Both addresses and both names, so the operator can see which is which.
+	assert!(message.contains("aa:bb:cc:dd:ee:ff"), "got: {message}");
+	assert!(message.contains("11:22:33:44:55:66"), "got: {message}");
 }
