@@ -554,13 +554,13 @@ fn every_network() -> Vec<WifiNetwork> {
 		.into_iter()
 		.map(|(name, security)| WifiNetwork {
 			id: format!("n-{name}"),
-			ssid: Ssid::new(name.as_bytes().to_vec()).expect("an ssid"),
+			ssid: Some(Ssid::new(name.as_bytes().to_vec()).expect("an ssid")),
 			hidden: true,
 			security,
 			priority: 30,
 			autoconnect: true,
 			metered: true,
-			bssid_pin: Some("00:11:22:33:44:55".to_owned()),
+			bssid: vec!["00:11:22:33:44:55".to_owned()],
 			roam: None,
 			addressing: every_address_source(),
 			routes: Vec::new(),
@@ -575,13 +575,13 @@ fn every_network() -> Vec<WifiNetwork> {
 	// would pin a document nothing can produce.
 	networks.push(WifiNetwork {
 		id: "n-roaming".to_owned(),
-		ssid: Ssid::new(b"roaming".to_vec()).expect("an ssid"),
+		ssid: Some(Ssid::new(b"roaming".to_vec()).expect("an ssid")),
 		hidden: false,
 		security: Security::Owe,
 		priority: 10,
 		autoconnect: true,
 		metered: false,
-		bssid_pin: None,
+		bssid: Vec::new(),
 		roam: Some(netcfgd_model::RoamPolicy {
 			signal: -68,
 			interval: 20,

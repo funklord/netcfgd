@@ -66,6 +66,14 @@ impl Setting {
 /// Something about the network `wpa_supplicant` cannot be asked to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unsupported {
+	/// A network whose SSID was never resolved.
+	///
+	/// A document may name access points instead of an SSID, and something has
+	/// to have read the name off a scan before this point. Reaching here with
+	/// `None` is a caller that skipped that step, not an operator mistake --
+	/// so it says so rather than inventing an empty SSID, which would
+	/// associate with anything.
+	UnresolvedSsid,
 	/// A passphrase containing a character that would end the command.
 	PassphraseNotSendable,
 	/// A passphrase outside WPA's 8..=63 character range.
@@ -88,6 +96,10 @@ pub enum Unsupported {
 impl std::fmt::Display for Unsupported {
 	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
+			Self::UnresolvedSsid => formatter.write_str(
+				"this network names access points instead of an SSID, and the name was \
+				 never read off a scan",
+			),
 			Self::PassphraseNotSendable => formatter.write_str(
 				"the passphrase contains a newline or NUL, which the control protocol cannot carry",
 			),
@@ -160,7 +172,12 @@ pub fn settings(
 	policy: MacPolicy,
 	resolver: &Resolver,
 ) -> Result<Vec<Setting>, Box<dyn std::error::Error>> {
-	let mut out = vec![Setting::plain("ssid", ssid_argument(&network.ssid))];
+	// The SSID has to be known by now. A document may leave it out and name
+	// access points instead, and `add_network` resolves it from a scan before
+	// getting here -- because WPA derives its key from the passphrase *and* the
+	// SSID, so there is nothing to send without one.
+	let ssid = network.ssid.as_ref().ok_or(Unsupported::UnresolvedSsid)?;
+	let mut out = vec![Setting::plain("ssid", ssid_argument(ssid))];
 
 	// Sent always, including for `Permanent`. Leaving it unset would inherit
 	// whatever the supplicant's global happens to be, which on a distribution
@@ -175,13 +192,32 @@ pub fn settings(
 		out.push(Setting::plain("scan_ssid", "1"));
 	}
 
-	if let Some(bssid) = &network.bssid_pin {
+	for bssid in &network.bssid {
 		if !is_bssid(bssid) {
 			return Err(Box::new(Unsupported::MalformedBssid {
 				given: bssid.clone(),
 			}));
 		}
-		out.push(Setting::plain("bssid", bssid.clone()));
+	}
+	match network.bssid.as_slice() {
+		[] => {}
+		// One is a pin: `bssid` refuses every other access point outright.
+		[only] => out.push(Setting::plain("bssid", only.clone())),
+		// Several is a choice. `bssid_accept` limits selection to the set and
+		// lets the supplicant pick among them by signal, which is what "any of
+		// these, whichever is best" means -- and it composes with a roam
+		// policy, where a pin does not.
+		//
+		// Space separated, each with an exact mask: the masked form is what
+		// `wpa_supplicant` parses, and every-bit-set is one specific address.
+		several => out.push(Setting::plain(
+			"bssid_accept",
+			several
+				.iter()
+				.map(|bssid| format!("{bssid}/ff:ff:ff:ff:ff:ff"))
+				.collect::<Vec<String>>()
+				.join(" "),
+		)),
 	}
 
 	if let Some(roam) = &network.roam {

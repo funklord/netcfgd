@@ -145,13 +145,13 @@ fn secrets_with(passphrase: &str) -> (Resolver, netcfgd_testdir::TestDir) {
 fn network(id: &str, ssid: &str, security: Security) -> WifiNetwork {
 	WifiNetwork {
 		id: id.to_owned(),
-		ssid: Ssid::new(ssid.as_bytes().to_vec()).expect("ssid"),
+		ssid: Some(Ssid::new(ssid.as_bytes().to_vec()).expect("ssid")),
 		hidden: false,
 		security,
 		priority: 0,
 		autoconnect: true,
 		metered: false,
-		bssid_pin: None,
+		bssid: Vec::new(),
 		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
@@ -450,6 +450,42 @@ fn a_real_supplicant_accepts_a_bgscan_over_the_control_socket() {
 		assert!(
 			stored.contains("simple:20:-68:240"),
 			"wpa_supplicant took the bgscan and did not keep it: {stored:?}"
+		);
+	});
+}
+
+/// A real `wpa_supplicant` accepts a *list* of acceptable access points.
+///
+/// `bssid` pins one; `bssid_accept` limits selection to a set and lets the
+/// supplicant pick among them, which is what "join whichever of these is in
+/// range" needs. Same question as the bgscan one and for the same reason: the
+/// config parser and `SET_NETWORK` are different tables, and a key accepted in
+/// a file and rejected on the socket would silently widen the selection to
+/// every access point on the network.
+#[test]
+fn a_real_supplicant_accepts_a_list_of_access_points() {
+	with_supplicant(|supplicant| {
+		let client = supplicant.connect();
+		let id = client.ask("ADD_NETWORK").expect("ADD_NETWORK");
+		let id = id.trim();
+		client
+			.command(&format!("SET_NETWORK {id} ssid \"lobby\""))
+			.expect("the ssid is accepted");
+
+		// Space separated, each with a mask. An exact address is /ff:ff:ff:ff:ff:ff.
+		client
+			.command(&format!(
+				"SET_NETWORK {id} bssid_accept \
+				 aa:bb:cc:dd:ee:ff/ff:ff:ff:ff:ff:ff 11:22:33:44:55:66/ff:ff:ff:ff:ff:ff"
+			))
+			.expect("wpa_supplicant refused a list of access points");
+
+		let stored = client
+			.ask(&format!("GET_NETWORK {id} bssid_accept"))
+			.expect("GET_NETWORK bssid_accept");
+		assert!(
+			stored.contains("aa:bb:cc:dd:ee:ff") && stored.contains("11:22:33:44:55:66"),
+			"wpa_supplicant took the list and did not keep it: {stored:?}"
 		);
 	});
 }
