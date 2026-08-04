@@ -1408,9 +1408,19 @@ match.
      `nameserver 2001:db8:44::53` in the file netcfgd owns. The v6 client is
      *silenced* (`-C resolv.conf -C hostname`) rather than given netcfgd's script,
      because the report is one file per interface and two clients on one interface
-     would clobber each other's `dns=` lines on every renewal. What a v6 lease
-     says about names therefore still reaches nothing, which is now a stated gap
-     with a shape (a fragment directory) rather than an accident.
+     would clobber each other's `dns=` lines on every renewal. ~~What a v6 lease
+     says about names therefore still reaches nothing~~ — **closed**
+     ([0086](docs/decisions/0086-two-clients-on-one-interface-need-two-files.md)),
+     and the fragment directory that record named is what it took. `reported/` is
+     still one file per interface and still the documented contract, with one
+     writer by construction; `reported.d/<interface>/<source>` is where netcfgd's
+     *own* generated writers go, because netcfgd starting a second client on one
+     interface is a situation only netcfgd creates. **A v6-only network resolved
+     nothing at all** until this — dnsmasq sent it, dhcpcd received it, and the
+     hook that would have used it was the one 0072 silenced. It also deleted
+     `DhcpcdHooks`: with the v6 client given a script, nothing constructs
+     `Silence`, so every dhcpcd netcfgd starts gets `-c` and there is no argument
+     for one that does not.
    - **Three hook phases still do not fire**: `pre_down`, `roam` and `portal`.
      `drift` was the fourth and now fires
      ([0084](docs/decisions/0084-the-drift-hook-fires-where-nothing-is-applied.md)),
@@ -1499,6 +1509,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A negative assertion against the wrong file passes whatever the code does.** Two live checks in this session were written against the *system* `/etc/resolv.conf`, where netcfgd writes `$NCFG_RUN_DIR`'s copy. The positive one failed honestly and was found in a minute; the negative one — "netcfgd does not write this nameserver" — passed, and would have passed for a netcfgd that wrote it enthusiastically to its own file. A check that something did **not** happen is only as good as its aim, and it gives no sign when the aim is wrong. Both now name netcfgd's file with a comment saying why.
+- **A stated gap with a shape is still a gap.** 0072 ended with "which is now a stated gap with a shape (a fragment directory) rather than an accident", and that sentence is accurate and reads like closure. What it was describing is a machine on a v6-only network resolving nothing. The same tone problem 0078's note had, and worth the same treatment: when a record names the fix, the fix is a piece of work, not a footnote.
 - **A question already being asked, whose answer is discarded, looks exactly like a question nobody asks.** Section 10 carried "a daemon that is alive and wedged still counts as running" as work needing a new check. There was no new check: netcfgd had been asking hostapd something on every observation since 0052, under a deadline, and the failure branch was a `continue` with a comment explaining — correctly — why saying nothing about the *list* is honest. It was silent about the *daemon*, and nothing distinguished the two. The whole change is two assignments. Before building a check, grep for the round trip that would already have the answer.
 - **An explanation of why a line is load-bearing, above a line that is not, is a gate that cannot fail.** The drift record was written to `/run` *and* into the in-memory observation, with a comment saying the second was necessary because the next check comes before the next `reobserve`. Breaking it changed nothing — `reobserve` reads the record back and does run first. The comment was wrong and confident, and the only reason anybody found out is that every part of the change was broken on purpose, including the parts that looked obviously right. The line went rather than the comment.
 - **A break that correctly passes is a finding, not a failed break.** Renaming an op on the wire left the TUI's plan-pane test green, and that is right: the pane draws what the daemon sends, so pane and test moved together. "One operation has one name" is a different question and it fails one layer down, in `netcfgd-plan`. A break that does not fire is worth understanding before it is worth fixing -- the answer is either a blind gate or a gate whose subject is somewhere else, and the two look identical until you say which.

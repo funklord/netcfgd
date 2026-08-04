@@ -9,6 +9,7 @@ use netcfgd_apply::Journal;
 use netcfgd_model::{Document, Observed, Origin};
 use netcfgd_observe::PriorState;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -142,6 +143,17 @@ pub fn report_dir(run_dir: &Path) -> PathBuf {
 
 /// Read every report that has been written.
 ///
+/// Two places, one answer. `reported/<interface>` is the single file the
+/// contract documents, written by something that is not netcfgd;
+/// `reported.d/<interface>/<source>` is one file per writer, which is what
+/// netcfgd's own clients use because a dual-stack interface has two of them
+/// (0086).
+///
+/// The single file comes first and the fragments follow in name order, so a
+/// `DHCPv4` lease's nameservers precede a `DHCPv6` lease's -- `dhcpcd4` before
+/// `dhcpcd6` -- and the order is the same on every machine and every boot rather
+/// than the filesystem's.
+///
 /// A missing directory means nothing is reporting, which is the state of every
 /// machine with no modem and no tunnel. Unreadable and malformed files are
 /// skipped rather than failing the observation, for the reason the rest of this
@@ -149,19 +161,49 @@ pub fn report_dir(run_dir: &Path) -> PathBuf {
 /// machine because one file is bad is worse than observing the rest of it.
 #[must_use]
 pub fn read_reports(run_dir: &Path) -> Vec<netcfgd_model::ObservedReport> {
-	let Ok(entries) = fs::read_dir(report_dir(run_dir)) else {
-		return Vec::new();
-	};
-	let mut out: Vec<netcfgd_model::ObservedReport> = entries
-		.flatten()
-		.filter_map(|entry| {
-			let interface = entry.file_name().to_str()?.to_owned();
-			let body = fs::read_to_string(entry.path()).ok()?;
-			Some(parse_report(&interface, &body))
-		})
-		.collect();
-	out.sort_by(|a, b| a.interface.cmp(&b.interface));
-	out
+	// Interface -> the bodies to parse as one, in the order they apply.
+	let mut bodies: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+	if let Ok(entries) = fs::read_dir(report_dir(run_dir)) {
+		for entry in entries.flatten() {
+			let Some(interface) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+				continue;
+			};
+			// A directory here is not a report. Nothing puts one there today,
+			// and `read_to_string` would fail anyway -- said out loud because
+			// the fragment tree deliberately lives somewhere else.
+			let Ok(body) = fs::read_to_string(entry.path()) else {
+				continue;
+			};
+			bodies.entry(interface).or_default().push(body);
+		}
+	}
+
+	if let Ok(interfaces) = fs::read_dir(run_dir.join("reported.d")) {
+		for entry in interfaces.flatten() {
+			let Some(interface) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+				continue;
+			};
+			let Ok(fragments) = fs::read_dir(entry.path()) else {
+				continue;
+			};
+			// Sorted, because `read_dir` order is the filesystem's and a
+			// nameserver list that changed order between boots would look like
+			// a change to anything comparing it.
+			let mut paths: Vec<_> = fragments.flatten().map(|f| f.path()).collect();
+			paths.sort();
+			for path in paths {
+				if let Ok(body) = fs::read_to_string(path) {
+					bodies.entry(interface.clone()).or_default().push(body);
+				}
+			}
+		}
+	}
+
+	bodies
+		.into_iter()
+		.map(|(interface, bodies)| parse_report(&interface, &bodies.join("\n")))
+		.collect()
 }
 
 /// One report, parsed.
@@ -759,5 +801,84 @@ mod tests {
 	fn a_missing_directory_is_a_machine_with_nothing_reporting() {
 		let empty = Path::new("/nonexistent/netcfgd-test-run-dir");
 		assert!(read_reports(empty).is_empty());
+	}
+
+	/// Two clients on one interface, and neither loses its nameservers.
+	///
+	/// The whole of 0086. Before it there was one file per interface, a
+	/// `DHCPv4` client already writing it, and a `DHCPv6` client that was
+	/// therefore given no way to report at all -- so a v6-only network resolved
+	/// nothing and a dual-stack one resolved only what v4 said.
+	#[test]
+	fn a_second_client_on_one_interface_does_not_displace_the_first() {
+		let dir = netcfgd_testdir::TestDir::new("report-fragments");
+		fs::create_dir_all(dir.join("reported")).expect("made");
+		fs::create_dir_all(dir.join("reported.d").join("wan0")).expect("made");
+
+		fs::write(
+			dir.join("reported").join("wan0"),
+			"address=192.0.2.10/24\ndns=8.8.8.8\n",
+		)
+		.expect("written");
+		fs::write(
+			dir.join("reported.d").join("wan0").join("dhcpcd6"),
+			"dns=2001:4860:4860::8888\nsearch=example.net\n",
+		)
+		.expect("written");
+
+		let reports = read_reports(&dir);
+		assert_eq!(reports.len(), 1, "one interface, one report: {reports:?}");
+		// The single file first, then the fragments in name order. A v4 lease's
+		// resolvers before a v6 lease's, deterministically, rather than in
+		// whatever order the filesystem hands them over.
+		assert_eq!(
+			reports[0].nameservers,
+			["8.8.8.8", "2001:4860:4860::8888"],
+			"a client's nameservers were lost or reordered"
+		);
+		// And everything else merges too, rather than the last writer winning.
+		assert_eq!(reports[0].addresses.len(), 1);
+		assert_eq!(reports[0].search, ["example.net"]);
+	}
+
+	/// Fragments are read in name order, whatever order the directory holds.
+	///
+	/// `read_dir` is the filesystem's order. A nameserver list that came back
+	/// differently between boots would make a plan differ from the last one for
+	/// a reason nobody could see -- the same failure the repeats test above
+	/// guards inside one file.
+	#[test]
+	fn fragments_are_read_in_a_stable_order() {
+		let dir = netcfgd_testdir::TestDir::new("report-fragment-order");
+		let fragments = dir.join("reported.d").join("wan0");
+		fs::create_dir_all(&fragments).expect("made");
+
+		// Written in the order that is not the answer.
+		fs::write(fragments.join("zzz"), "dns=3.3.3.3\n").expect("written");
+		fs::write(fragments.join("aaa"), "dns=1.1.1.1\n").expect("written");
+		fs::write(fragments.join("mmm"), "dns=2.2.2.2\n").expect("written");
+
+		let reports = read_reports(&dir);
+		assert_eq!(reports.len(), 1);
+		assert_eq!(reports[0].nameservers, ["1.1.1.1", "2.2.2.2", "3.3.3.3"]);
+	}
+
+	/// An interface with only fragments is still an interface.
+	///
+	/// A v6-only network has no `DHCPv4` client, so nothing writes the single
+	/// file -- and a reader that walked `reported/` and then decorated what it
+	/// found would report nothing at all for exactly the machine this decision
+	/// is about.
+	#[test]
+	fn an_interface_with_only_fragments_is_reported() {
+		let dir = netcfgd_testdir::TestDir::new("report-fragments-only");
+		let fragments = dir.join("reported.d").join("wan0");
+		fs::create_dir_all(&fragments).expect("made");
+		fs::write(fragments.join("dhcpcd6"), "dns=2001:db8::53\n").expect("written");
+
+		let reports = read_reports(&dir);
+		assert_eq!(reports.len(), 1, "{reports:?}");
+		assert_eq!(reports[0].interface, "wan0");
+		assert_eq!(reports[0].nameservers, ["2001:db8::53"]);
 	}
 }
