@@ -88,6 +88,21 @@ if [ -z "${NCFG_SLAAC_NS:-}" ]; then
 	NCFG_SLAAC_NS=1
 	export NCFG_SLAAC_NS
 	if [ "$(id -u)" = 0 ]; then
+		# Root -- but possibly root inside somebody else's user namespace. A
+		# plain `unshare -rn` writes `deny` to /proc/self/setgroups, which is
+		# what an unprivileged gid mapping costs, and dnsmasq's privilege
+		# drop then fails with "failed to change group-id". Nesting another
+		# `--net` below would change nothing about that.
+		#
+		# A skip rather than a failure, because the caller is wrong and not the
+		# code: the Makefile runs this script bare for exactly this reason, and
+		# it is the only place that knowledge was written down. It cost a
+		# session -- a sweep that wrapped every live script in `unshare -rn`
+		# alike got "the router did not start" out of this one and read it as a broken
+		# feature, which it was not.
+		if [ "$(cat /proc/self/setgroups 2>/dev/null)" = deny ]; then
+			skip "this script makes its own namespace and has been run inside one that forbids setgroups (a plain \`unshare -rn\`), where dnsmasq cannot drop privileges -- run it bare, as the Makefile does"
+		fi
 		exec unshare --net -- sh "$0" "$@"
 	fi
 	command -v newuidmap >/dev/null 2>&1 ||
