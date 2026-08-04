@@ -1,28 +1,21 @@
 /*
- * main_window.cpp -- the devices table, and the two things beside it.
+ * main_window.cpp -- the three tabs, and the two things beside them.
  */
 #include "main_window.h"
 
+#include "apply_dialog.h"
+#include "devices_view.h"
+#include "events_view.h"
 #include "ncfg_connection.h"
+#include "plan_view.h"
 
-#include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
 #include <QStatusBar>
-#include <QTableWidget>
+#include <QTabWidget>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QWidget>
-
-namespace {
-
-/* The columns, in the order an operator reads them: what it is called, what it
- * is, whether it is working, and what it has. The MAC is last because it is the
- * one nobody looks at first. */
-const char *const column_titles[] = { "interface", "kind", "state", "addresses", "mtu", "mac" };
-constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(column_titles[0]));
-
-} /* namespace */
 
 ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	: QMainWindow(parent), connection(connection)
@@ -34,25 +27,25 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 
 	/* Which machine this is, on screen and not in a menu. A client that can
 	 * configure a router across the room must never leave the operator
-	 * unsure whose network they are about to change. */
+	 * unsure whose network they are about to change. Above the tabs, so it
+	 * is true of every one of them. */
 	where = new QLabel(central);
 	where->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	layout->addWidget(where);
 
-	table = new QTableWidget(0, column_count, central);
-	QStringList headers;
-	for (int i = 0; i < column_count; i++) {
-		headers << QString::fromLatin1(column_titles[i]);
-	}
-	table->setHorizontalHeaderLabels(headers);
-	table->verticalHeader()->setVisible(false);
-	table->setSelectionBehavior(QAbstractItemView::SelectRows);
-	/* Read-only, and that is a statement rather than a shortcut: this client
-	 * has no write path yet, and a table that looked editable would promise
-	 * one. */
-	table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-	table->horizontalHeader()->setStretchLastSection(true);
-	layout->addWidget(table);
+	tabs = new QTabWidget(central);
+	devices = new ncfg_devices_view(connection, tabs);
+	plan = new ncfg_plan_view(connection, tabs);
+	events = new ncfg_events_view(connection, tabs);
+	tabs->addTab(devices, QStringLiteral("devices"));
+	tabs->addTab(plan, QStringLiteral("plan"));
+	tabs->addTab(events, QStringLiteral("events"));
+	layout->addWidget(tabs);
+
+	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
+	connect(plan, &ncfg_plan_view::reported, this, &ncfg_main_window::note);
+	connect(events, &ncfg_events_view::reported, this, &ncfg_main_window::note);
+	connect(tabs, &QTabWidget::currentChanged, this, &ncfg_main_window::tab_changed);
 
 	setCentralWidget(central);
 
@@ -60,48 +53,80 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	auto *refresh_button = new QPushButton(QStringLiteral("Refresh"), tools);
 	connect(refresh_button, &QPushButton::clicked, this, &ncfg_main_window::refresh);
 	tools->addWidget(refresh_button);
+	/* The button says "Apply..." with the ellipsis the platform uses for "this
+	 * opens something first", because that is the promise: it shows the plan
+	 * and applies nothing until somebody has read it. */
+	auto *apply_button = new QPushButton(QStringLiteral("Apply..."), tools);
+	connect(apply_button, &QPushButton::clicked, this, &ncfg_main_window::open_apply);
+	tools->addWidget(apply_button);
 
 	status = new QLabel(this);
 	statusBar()->addWidget(status);
 
-	resize(760, 420);
-	refresh();
+	resize(880, 560);
+
+	where->setText(QStringLiteral("netcfgd at %1").arg(connection->where()));
+	devices->refresh();
+	plan->refresh();
+	/* Subscribed from the start rather than when the tab is first opened: an
+	 * event that arrived while somebody was looking at the devices table is
+	 * exactly the one they will want to find when they go looking for why it
+	 * changed. */
+	events->refresh();
+	tab_changed();
 }
 
 void ncfg_main_window::refresh()
 {
 	where->setText(QStringLiteral("netcfgd at %1").arg(connection->where()));
 
-	QList<ncfg_link_row> rows;
-	QString error;
-	if (!connection->links(&rows, &error)) {
-		/* The daemon's own words. A refusal names the tier that would
-		 * have been needed (0013), and replacing that with "could not
-		 * load" would throw away the one sentence that says what to do
-		 * about it. */
-		status->setText(error);
-		table->setRowCount(0);
+	QWidget *current = tabs->currentWidget();
+	if (current == devices) {
+		devices->refresh();
+	} else if (current == plan) {
+		plan->refresh();
+	} else if (current == events) {
+		events->refresh();
+	}
+}
+
+void ncfg_main_window::reload()
+{
+	devices->refresh();
+	plan->refresh();
+	tab_changed();
+}
+
+void ncfg_main_window::open_apply()
+{
+	ncfg_apply_dialog dialog(connection, this);
+
+	/* Both tables describe the machine before the apply, and a confirm or a
+	 * revert changes it again -- so this is connected rather than done once
+	 * after exec(), which would leave the window stale for as long as the
+	 * dialog stayed open. */
+	connect(&dialog, &ncfg_apply_dialog::changed, this, &ncfg_main_window::reload);
+	dialog.exec();
+}
+
+void ncfg_main_window::note(const QString &summary)
+{
+	auto *from = qobject_cast<QWidget *>(sender());
+
+	if (!from) {
 		return;
 	}
+	summaries.insert(from, summary);
 
-	table->setRowCount(rows.size());
-	for (int row = 0; row < rows.size(); row++) {
-		const ncfg_link_row &link = rows.at(row);
-		const QString cells[column_count] = {
-			link.name,
-			link.kind,
-			link.state,
-			link.addresses,
-			link.mtu ? QString::number(link.mtu) : QString(),
-			link.mac,
-		};
-		for (int column = 0; column < column_count; column++) {
-			table->setItem(row, column, new QTableWidgetItem(cells[column]));
-		}
+	/* Only the tab in front of the operator gets the status bar. The events
+	 * pane reports on every event that arrives, and without this it would
+	 * overwrite the devices count seconds after anybody read it. */
+	if (from == tabs->currentWidget()) {
+		status->setText(summary);
 	}
-	table->resizeColumnsToContents();
-	table->horizontalHeader()->setStretchLastSection(true);
+}
 
-	status->setText(rows.isEmpty() ? QStringLiteral("no interfaces reported")
-				       : QStringLiteral("%1 interfaces").arg(rows.size()));
+void ncfg_main_window::tab_changed()
+{
+	status->setText(summaries.value(tabs->currentWidget()));
 }

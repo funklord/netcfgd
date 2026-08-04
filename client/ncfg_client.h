@@ -99,6 +99,203 @@ ncfg_json_doc_t *ncfg_client_plan(ncfg_client_t *client, char *err, size_t err_s
  */
 const char *ncfg_client_error_message(const ncfg_json_doc_t *doc, size_t *length_out);
 
+/* ------------------------------------------------------------------ models
+ *
+ * The shapes a screen draws, in C.
+ *
+ * gui/project.md sec 3 puts "the models behind interfaces/wifi/plan" below the
+ * seam, and the first commit put the link conversion above it by mistake --
+ * corrected here rather than left as a precedent, because three more screens
+ * would have made it the pattern.
+ *
+ * Each is a flat array the caller frees with one call. Strings are owned by the
+ * result and NUL-terminated: a widget wants a C string, and counted strings
+ * were the reader's business rather than a screen's.
+ */
+
+/* One interface, as `status` reports it. */
+typedef struct {
+	char *name;
+	char *kind;      /* the kernel's link kind; "" for a real NIC */
+	char *mac;
+	char *addresses; /* comma-separated, already ordered by the daemon */
+	int   mtu;
+	int   up;
+	int   carrier;   /* up and carrier are separate answers: no cable is not
+			  * the same state as not configured */
+} ncfg_link_t;
+
+typedef struct {
+	ncfg_link_t *items;
+	size_t       count;
+} ncfg_links_t;
+
+/*
+ * One action in a plan.
+ *
+ * The reason is the half that matters. netcfgd's whole product claim is that
+ * it is not a black box (project.md constraint 7), and an action without its
+ * reason is exactly the black box -- so `field`, `desired` and `observed` are
+ * carried through to the screen rather than summarised into a verb.
+ */
+typedef struct {
+	long long id;
+	char     *op;        /* "addr.add", "link.up", ... */
+	char     *interface; /* "" where the op names none */
+	char     *field;
+	char     *desired;
+	char     *observed;
+	int       reversible; /* an action with no inverse is one a confirm
+			       * window cannot undo, and the plan says so loudly */
+} ncfg_action_t;
+
+/*
+ * A warning, a refusal or a stranded credential: three lists that all read as
+ * "something the operator has to know", differing in how hard they stop the
+ * apply.
+ *
+ * The two remedies are two, and not one, on purpose. `remedy` is the change
+ * that makes the situation not arise -- `on_unmanage = "clear"` for a key
+ * netcfgd is about to walk away from -- and `consent` is the flag that
+ * proceeds anyway. `ncfg` prints them in that order deliberately, so that the
+ * flag does not read as the fix, and flattening them into one field loses
+ * whichever the client did not pick. The first draft of this struct did, and
+ * kept the flag.
+ *
+ * The reason is here for the same argument that put it on an action: constraint
+ * 7 says netcfgd is not a black box, and a refusal that cannot say what the
+ * action would have been is the black box in the one place an operator is
+ * already being told no. Empty where the note has no reason, which is every
+ * warning and every stranded credential.
+ */
+typedef struct {
+	char *message;
+	char *interface;
+	char *detail;  /* the guard's words or the credential's; empty for a
+			* plain warning */
+	char *remedy;  /* the change that makes it not happen; empty where there
+			* is none, which is every refusal */
+	char *consent; /* what to pass to proceed anyway; empty where nothing
+			* will */
+	char *field;
+	char *desired;
+	char *observed;
+} ncfg_note_t;
+
+typedef struct {
+	ncfg_action_t *actions;
+	size_t         action_count;
+	ncfg_note_t   *warnings;
+	size_t         warning_count;
+	ncfg_note_t   *refusals;
+	size_t         refusal_count;
+	ncfg_note_t   *stranded;
+	size_t         stranded_count;
+} ncfg_plan_t;
+
+/* One line of what an apply did. `outcome` is the daemon's own word -- "done",
+ * "failed", "skipped" -- because a client that renamed them would make two
+ * vocabularies for one thing. */
+typedef struct {
+	long long id;
+	char     *op;
+	char     *interface;
+	char     *outcome;
+	char     *detail;
+} ncfg_record_t;
+
+typedef struct {
+	ncfg_record_t *items;
+	size_t         count;
+} ncfg_journal_t;
+
+/*
+ * One event from a monitor stream.
+ *
+ * `kind` is the daemon's own: observed, reloaded, drift, confirm_armed,
+ * confirm_resolved. The witness pins these payloads on their own as well as
+ * wrapped in `{"response":"event",...}`, which is how the reader's test found
+ * that a stream carries a third kind of line.
+ *
+ * `summary` is what to put on a line in a pane. `raw` is the whole event as it
+ * arrived, for a pane that wants to show everything -- kept because an event
+ * netcfgd grows a field for should not become invisible to a client built
+ * before it.
+ */
+typedef struct {
+	char *kind;
+	char *interface;
+	char *summary;
+	char *raw;
+} ncfg_event_t;
+
+void ncfg_links_free(ncfg_links_t *links);
+void ncfg_plan_free(ncfg_plan_t *plan);
+void ncfg_journal_free(ncfg_journal_t *journal);
+void ncfg_event_free(ncfg_event_t *event);
+
+/*
+ * The three requests the models above are for.
+ *
+ * Each returns 1 on success. On a refusal from the daemon they return 0 with
+ * `err` holding the daemon's own message -- a refusal names the tier that would
+ * have been needed (0013), and replacing it with a message of this library's
+ * own would throw away the sentence that says what to do about it.
+ */
+int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_t err_size);
+int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size_t err_size);
+
+/*
+ * Apply, with a confirm window in seconds or 0 for none.
+ *
+ * The window is a parameter and not a default because it is a decision: a
+ * change that cuts off the person making it is what commit-confirm exists for,
+ * and a client that always armed one would make an operator confirm every
+ * trivial apply -- while one that never did would let a bad change lock
+ * somebody out of their own router. The screen asks.
+ */
+int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds, ncfg_journal_t *out,
+		      char *err, size_t err_size);
+int ncfg_client_confirm(ncfg_client_t *client, char *err, size_t err_size);
+int ncfg_client_revert(ncfg_client_t *client, char *err, size_t err_size);
+
+/* ----------------------------------------------------------------- monitor
+ *
+ * A stream, on a connection of its own.
+ *
+ * `monitor` turns a connection into a stream and it never goes back, so it
+ * cannot share the one requests use -- the daemon reads requests from a
+ * connection in a loop until this arrives, and after it the connection only
+ * carries events.
+ *
+ * The file descriptor is exposed because a UI has an event loop already and
+ * this library must not own one: Qt watches the descriptor and calls
+ * ncfg_monitor_next when it is readable, and an ncurses client would put it in
+ * its own poll set. A library that ran its own thread here would be a library
+ * that decides how the program is structured.
+ */
+typedef struct ncfg_monitor ncfg_monitor_t;
+
+ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err_size);
+void ncfg_monitor_close(ncfg_monitor_t *monitor);
+
+/* Watchable, and never written to by the caller. */
+int ncfg_monitor_fd(const ncfg_monitor_t *monitor);
+
+/*
+ * The next event, if a whole one has arrived.
+ *
+ * Returns 1 and fills `out` for an event, 0 when the descriptor has no
+ * complete line waiting (which is the ordinary answer and not an error), and
+ * -1 with `err` when the stream is gone -- which a UI shows rather than
+ * hides, since a monitor that silently stopped would leave a pane looking
+ * merely quiet.
+ *
+ * Never blocks. The descriptor is non-blocking and a partial line is kept for
+ * the next call.
+ */
+int ncfg_monitor_next(ncfg_monitor_t *monitor, ncfg_event_t *out, char *err, size_t err_size);
+
 /*
  * Escape a string into a JSON string literal, quotes included.
  *

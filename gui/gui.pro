@@ -33,10 +33,20 @@ LIBS += $$CLIENT_LIB
 PRE_TARGETDEPS += $$CLIENT_LIB
 
 SOURCES += \
+	src/apply_dialog.cpp \
+	src/devices_view.cpp \
+	src/events_view.cpp \
 	src/main.cpp \
 	src/main_window.cpp \
-	src/ncfg_connection.cpp
+	src/monitor_stream.cpp \
+	src/ncfg_connection.cpp \
+	src/plan_view.cpp
 
 HEADERS += \
+	src/apply_dialog.h \
+	src/devices_view.h \
+	src/events_view.h \
 	src/main_window.h \
-	src/ncfg_connection.h
+	src/monitor_stream.h \
+	src/ncfg_connection.h \
+	src/plan_view.h
