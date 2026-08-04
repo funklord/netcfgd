@@ -90,6 +90,12 @@ class Session:
             os.environ,
             NCFG_CONFIG_DIR=f"{self.work}/etc",
             NCFG_RUN_DIR=f"{self.work}/run",
+            # The terminal is this test's, not the caller's: it drives a pty it
+            # opened and decodes xterm's sequences by hand further down. TERM is
+            # unset in a container and in most CI runners, and ncurses then
+            # cannot initialise at all -- fourteen checks red for a reason that
+            # has nothing to do with netcfgd.
+            TERM="xterm",
         )
         self.daemon = subprocess.Popen(
             [NETCFGD], env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
@@ -270,6 +276,25 @@ def main():
     for binary in (NCFG, NETCFGD):
         if not os.access(binary, os.X_OK):
             skip(f"{os.path.basename(binary)} is not built")
+
+    # The panes below expect netcfgd to have created two dummy interfaces, which
+    # needs CAP_NET_ADMIN in a namespace of its own -- the Makefile runs this
+    # under `unshare -rn` for that reason. Run without it, netcfgd creates
+    # nothing, every device check fails, and the output reads as a broken TUI:
+    # "the device pane draws the interface: expected True, actual False", four
+    # times, with nothing pointing at the invocation. Ask the question directly
+    # instead, so the answer names the cause.
+    probe = subprocess.run(
+        ["ip", "link", "add", "ncfgtui0", "type", "dummy"],
+        capture_output=True,
+    )
+    if probe.returncode != 0:
+        skip(
+            "cannot create a dummy interface, so netcfgd would configure "
+            "nothing and every pane would draw empty -- run under `unshare -rn`, "
+            "as the Makefile does"
+        )
+    subprocess.run(["ip", "link", "del", "ncfgtui0"], capture_output=True)
 
     session = Session()
     try:
