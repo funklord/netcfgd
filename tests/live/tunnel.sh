@@ -57,11 +57,18 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 openvpn=$(find_openvpn) || skip "openvpn is not installed (apt install openvpn | apk add openvpn)"
 [ -c /dev/net/tun ] || skip "no /dev/net/tun, so no tunnel can be opened"
+command -v openssl >/dev/null 2>&1 \
+	|| skip "no openssl (apt install openssl | apk add openssl), needed for the peer's keys"
 
 work=$(mktemp -d /tmp/ncfg-tunnel.XXXXXX)
+peer=
 cleanup() {
 	"$repo/target/debug/ncfg" apply > /dev/null 2>&1 || true
 	pkill -f "netcfgd-vpn0" 2>/dev/null || true
+	if [ -n "$peer" ]; then
+		kill "$peer" 2>/dev/null || true
+		wait "$peer" 2>/dev/null || true
+	fi
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -88,23 +95,79 @@ check() {
 
 ip link set lo up
 
+# A real far end, and TLS rather than a static key.
+#
+# This used `secret` -- a pre-shared static key -- because that brings a tunnel
+# up with **no peer at all**, which is the cheapest way to reach the moment
+# netcfgd cares about. openvpn 2.7 refuses to start on such a configuration
+# ("No tls-client or tls-server option in configuration detected") and 2.8
+# removes the mode outright, so on Alpine, which already ships 2.7, this script
+# failed 18 checks. `allow-deprecated-insecure-static-crypto` would buy time and
+# nothing else: 2.6 rejects the option as unrecognised, so it cannot even be
+# written once for both, and 2.8 takes the feature regardless.
+#
+# So there is a peer now. Peer-to-peer TLS, not client/server: `tls-client` with
+# an explicit `ifconfig` keeps the addressing and every `route` and
+# `dhcp-option` line exactly where they were, so what this script asserts about
+# *netcfgd* is unchanged. Verified identical on 2.6.14 and 2.7.5.
+#
+# Two self-signed certificates and `peer-fingerprint`, which is openvpn's own
+# documented setup without a PKI -- no CA, no `dh`, nothing to expire in a way
+# that fails a year from now, since they are minted per run.
+for side in peer client; do
+	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+		-keyout "$work/etc/$side.key" -out "$work/etc/$side.crt" \
+		-days 2 -nodes -subj "/CN=$side" >/dev/null 2>&1 \
+		|| skip "this openssl will not mint an EC certificate"
+done
+fingerprint() {
+	openssl x509 -fingerprint -sha256 -noout -in "$1" | sed 's/.*=//'
+}
+
+cat > "$work/etc/peer.ovpn" <<OVPN
+dev tunpeer
+dev-type tun
+tls-server
+dh none
+proto udp
+port 11940
+local 127.0.0.1
+# Deliberately *not* 10.8.0.2/10.8.0.1, which would be the matching half of the
+# client's point-to-point pair. Both ends live in one network namespace here, so
+# the client's peer address would then also be a local address -- and the kernel
+# refuses a route whose gateway is one of its own, with EINVAL. That is what
+# `route.add 10.9.0.0/24 via 10.8.0.2` failed with on the first attempt at this,
+# and it is an artefact of the test's topology rather than anything netcfgd does.
+#
+# Nothing is sent through the tunnel: this script checks what openvpn reports and
+# what netcfgd then installs. So the far end only has to complete a TLS handshake
+# over loopback, which does not care that the two tun devices disagree about
+# addressing.
+ifconfig 10.7.0.2 10.7.0.1
+cert $work/etc/peer.crt
+key $work/etc/peer.key
+peer-fingerprint $(fingerprint "$work/etc/client.crt")
+data-ciphers AES-256-GCM
+keepalive 1 20
+verb 3
+OVPN
+"$openvpn" --config "$work/etc/peer.ovpn" --log "$work/peer.log" &
+peer=$!
+
 # The operator's file, which netcfgd hands over unread (decision 0046). Its
 # routes stand in for what a server pushes; openvpn puts both in the same
 # option list and the script sees no difference.
-#
-# BF-CBC is openvpn 2.6's static-key default and OpenSSL 3 has dropped it, so
-# the cipher has to be named or the daemon exits before it opens the device.
-"$openvpn" --genkey secret "$work/etc/static.key" >/dev/null 2>&1 \
-	|| skip "this openvpn will not generate a static key"
 cat > "$work/etc/work.ovpn" <<OVPN
 dev-type tun
+tls-client
 ifconfig 10.8.0.1 10.8.0.2
-secret $work/etc/static.key
+cert $work/etc/client.crt
+key $work/etc/client.key
+peer-fingerprint $(fingerprint "$work/etc/peer.crt")
 remote 127.0.0.1
-port 1194
+port 11940
 nobind
-cipher AES-256-CBC
-data-ciphers AES-256-GCM:AES-256-CBC
+data-ciphers AES-256-GCM
 route 10.9.0.0 255.255.255.0
 route 10.10.0.0 255.255.0.0 192.168.99.1
 dhcp-option DNS 10.0.0.53
