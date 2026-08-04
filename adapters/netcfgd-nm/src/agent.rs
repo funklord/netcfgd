@@ -165,14 +165,36 @@ fn sender_of(header: &zbus::message::Header<'_>) -> zbus::fdo::Result<String> {
 pub(crate) async fn ask_for_passphrase(
 	connection: &zbus::Connection,
 	state: &Arc<State>,
+	asker: Option<&str>,
 	settings: &crate::settings::Dict,
 	profile_path: &zbus::zvariant::OwnedObjectPath,
 ) -> Result<Option<String>, String> {
+	crate::trace::mark("ask: creating the bus proxy");
 	let bus = zbus::fdo::DBusProxy::new(connection)
 		.await
 		.map_err(|error| format!("cannot reach the bus: {error}"))?;
 
+	crate::trace::mark("ask: bus proxy ready");
 	for name in state.agents().names() {
+		// **Never the caller.** A secret is asked for from inside
+		// `ActivateConnection`, before it returns -- so a client that
+		// registered an agent of its own and then activated a profile is
+		// sitting on a blocking call waiting for this very reply, and cannot
+		// answer a question. nmcli does exactly that: it registers a secret
+		// agent for `connection up`, and the shim asking it produced a
+		// circular wait that unwound at GDBus's twenty-five-second default,
+		// intermittently, depending on which agent came first out of the list.
+		//
+		// Real NetworkManager does not have this problem because it returns the
+		// active-connection path first and asks for secrets during the
+		// asynchronous activation that follows; the caller is free by then.
+		// Until the shim's activation is asynchronous too, the caller is the
+		// one party that provably cannot answer, and skipping it costs nothing:
+		// any other registered agent is still asked (0107).
+		if asker.is_some_and(|asker| asker == name.as_str()) {
+			crate::trace::mark("ask: skipping the caller's own agent");
+			continue;
+		}
 		let Ok(bus_name) = zbus::names::BusName::try_from(name.clone()) else {
 			continue;
 		};
@@ -180,17 +202,23 @@ pub(crate) async fn ask_for_passphrase(
 		// watches NameOwnerChanged for this, and asking the bus at the moment
 		// it matters gets the same answer with no signal plumbing and no
 		// window where a stale entry is believed.
-		if !matches!(bus.name_has_owner(bus_name.clone()).await, Ok(true)) {
+		crate::trace::mark("ask: calling NameHasOwner");
+		let owned = bus.name_has_owner(bus_name.clone()).await;
+		crate::trace::mark("ask: NameHasOwner returned");
+		if !matches!(owned, Ok(true)) {
 			state.agents().unregister(&name);
 			continue;
 		}
 
+		crate::trace::mark("ask: building the agent proxy");
 		let proxy = zbus::Proxy::new(connection, bus_name, AGENT_PATH, AGENT_INTERFACE)
 			.await
 			.map_err(|error| format!("cannot reach the secret agent `{name}`: {error}"))?;
 
 		// The flags say a person is waiting, which is what lets the agent put
 		// a dialog on the screen instead of failing quietly.
+		crate::trace::asking(name.as_str());
+		crate::trace::mark("ask: calling GetSecrets");
 		let answer: Result<crate::settings::Dict, _> = proxy
 			.call(
 				"GetSecrets",
@@ -203,6 +231,7 @@ pub(crate) async fn ask_for_passphrase(
 				),
 			)
 			.await;
+		crate::trace::mark("ask: GetSecrets returned");
 
 		let returned = answer.map_err(|error| {
 			// A user pressing cancel is a D-Bus error from the agent, and it

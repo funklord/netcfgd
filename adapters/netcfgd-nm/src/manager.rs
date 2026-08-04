@@ -72,10 +72,18 @@ impl Manager {
 			.map(|profile| crate::settings::settings_of(&profile))
 			.unwrap_or_default();
 
-		let Some(passphrase) =
-			crate::agent::ask_for_passphrase(bus, &self.state, &settings, profile_path)
-				.await
-				.map_err(zbus::fdo::Error::Failed)?
+		// Who asked, so the agent search can skip them: the caller is blocked on
+		// this very method returning and cannot answer a question.
+		let asker = header.sender().map(ToString::to_string);
+		let Some(passphrase) = crate::agent::ask_for_passphrase(
+			bus,
+			&self.state,
+			asker.as_deref(),
+			&settings,
+			profile_path,
+		)
+		.await
+		.map_err(zbus::fdo::Error::Failed)?
 		else {
 			// Nobody to ask. netcfgd's own message about the missing secret is
 			// better than one about agents, so this says nothing and lets the
@@ -136,6 +144,7 @@ impl Manager {
 		// supplicant choose the BSS. Pinning one is a `bssid` in the
 		// configuration, which is where it belongs.
 		let _ = specific_object;
+		crate::trace::enter("activate: entered");
 		let identity = self
 			.state
 			.profiles()
@@ -164,14 +173,20 @@ impl Manager {
 		// before connecting rather than after failing keeps the trigger
 		// deterministic: no error string is parsed, and the provider is
 		// consulted rather than guessed at.
+		crate::trace::mark("activate: profile and device resolved");
 		if let Some(name) = self.state.missing_secret(&identity) {
-			self.supply_secret(bus, &header, &identity, &name, &connection)
-				.await?;
+			crate::trace::mark("activate: secret is missing, asking an agent");
+			let asked = self
+				.supply_secret(bus, &header, &identity, &name, &connection)
+				.await;
+			crate::trace::mark("activate: agent question answered");
+			asked?;
 		}
 
-		self.state
-			.activate(&identity, &interface)
-			.map_err(zbus::fdo::Error::Failed)?;
+		crate::trace::mark("activate: asking netcfgd to activate");
+		let activated = self.state.activate(&identity, &interface);
+		crate::trace::leave("activate: netcfgd answered");
+		activated.map_err(zbus::fdo::Error::Failed)?;
 
 		// The path of the activation this produced. netcfgd applies
 		// asynchronously, so the object may not exist for another moment --
