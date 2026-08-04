@@ -1,0 +1,39 @@
+# Contributor: @MAINTAINER@
+# Maintainer: @MAINTAINER@
+#
+# netcfgd for Alpine. Generated from packaging/alpine/APKBUILD.in by `make apk`,
+# which fills in the version and the maintainer rather than committing either.
+#
+# Nothing here is Alpine-specific except the init script and the dependency
+# names: `make install` puts the two binaries and the configuration directory
+# in place, and `make install-openrc` adds the one init file this machine runs.
+# That split is decision-level -- installing a systemd unit on a machine
+# without systemd is litter.
+pkgname=netcfgd
+pkgver=@PKGVER@
+pkgrel=0
+pkgdesc="Network configuration daemon that states what it will do"
+url="https://github.com/netcfgd/netcfgd"
+arch="all"
+license="MIT OR Apache-2.0"
+# ncurses for the TUI, which is a default-on feature of the one binary.
+depends="ncurses-libs"
+makedepends="cargo make ncurses-dev"
+# No -doc and no -openrc subpackage: the init script is four lines of shell and
+# splitting it out would mean a machine that installed netcfgd and got no way
+# to run it. The default subpackages that would apply here are empty anyway.
+subpackages=""
+source="$pkgname-$pkgver.tar.gz"
+builddir="$srcdir/$pkgname-$pkgver"
+options="!check"
+
+build() {
+	# `--locked` because a package built from a different dependency set than
+	# the tree was tested with is not the thing that was tested.
+	cargo build --release --workspace --locked
+}
+
+package() {
+	make install DESTDIR="$pkgdir" PREFIX=/usr SYSCONFDIR=/etc
+	make install-openrc DESTDIR="$pkgdir" SYSCONFDIR=/etc
+}

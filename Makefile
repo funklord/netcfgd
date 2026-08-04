@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all check build test fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment
+.PHONY: deb apk apk-source apk-container all check build test fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -247,6 +247,118 @@ install-procd:
 	install -d $(DESTDIR)$(SYSCONFDIR)/init.d
 	install -m 0755 packaging/procd/netcfgd $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
 
+# ---------------------------------------------------------------- packages
+#
+# Two package formats, because netcfgd's two documented init systems live on
+# two distributions: Debian runs systemd, Alpine runs OpenRC. Each package
+# ships the init glue for the machine it targets and no other -- the same rule
+# `install` follows, and for the same reason.
+#
+# **Installing either one configures nothing and starts nothing.** The unit or
+# init script is installed and left disabled. A network daemon that took over
+# on `apt install` could take a machine off the network before its operator had
+# written a line, and this project's whole shape is that it says what it will
+# do before doing it.
+#
+# The version is the crate's, plus enough of the git history to sort: a package
+# built from a later commit must upgrade one built from an earlier, or an
+# evaluation cannot install twice.
+PKG_NAME    ?= netcfgd
+PKG_VERSION ?= $(shell sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+GIT_COUNT   := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
+GIT_SHA     := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# Two spellings of one version, because the two formats disagree about what a
+# pre-release looks like. Debian takes `~`, which sorts *before* the release it
+# is heading for, and accepts the commit hash. Alpine's grammar takes neither:
+# a version is digits and dots with a `_git` suffix, so the hash cannot go in
+# it. Both increase with the commit count, which is what an evaluator needs --
+# a package built from a later commit must upgrade one built from an earlier.
+DEB_VERSION ?= $(PKG_VERSION)~git$(GIT_COUNT).$(GIT_SHA)
+APK_VERSION ?= $(PKG_VERSION)_git$(GIT_COUNT)
+# Not committed anywhere: a maintainer field belongs to whoever built the
+# package, and a name baked into a template is wrong for everybody else.
+MAINTAINER  ?= $(shell git config user.name 2>/dev/null || echo netcfgd) <$(shell git config user.email 2>/dev/null || echo netcfgd@localhost)>
+DIST        ?= dist
+
+# `Depends` is derived, never guessed: the binary links ncurses behind a
+# default-on feature, and a hand-written list would be wrong the first time
+# that changed. dpkg-shlibdeps reads the ELF and gives versioned dependencies.
+deb:
+	@command -v dpkg-deb >/dev/null 2>&1 || { echo "deb: dpkg-deb is not installed"; exit 1; }
+	@arch=$$(dpkg-architecture -qDEB_HOST_ARCH 2>/dev/null || dpkg --print-architecture); \
+	root=$$(mktemp -d); \
+	trap 'rm -rf "$$root"' EXIT INT TERM; \
+	$(MAKE) --no-print-directory install DESTDIR="$$root" >/dev/null; \
+	$(MAKE) --no-print-directory install-systemd DESTDIR="$$root" >/dev/null; \
+	install -d "$$root/usr/share/doc/$(PKG_NAME)"; \
+	install -m 0644 packaging/debian/copyright "$$root/usr/share/doc/$(PKG_NAME)/copyright"; \
+	install -m 0644 packaging/systemd/netcfgd-exclusive.conf \
+		"$$root/usr/share/doc/$(PKG_NAME)/netcfgd-exclusive.conf"; \
+	install -d "$$root/DEBIAN"; \
+	for script in postinst prerm postrm; do \
+		install -m 0755 "packaging/debian/$$script" "$$root/DEBIAN/$$script"; \
+	done; \
+	shlib=$$(mktemp -d); \
+	mkdir -p "$$shlib/debian"; \
+	printf 'Source: $(PKG_NAME)\n\nPackage: $(PKG_NAME)\nArchitecture: any\n' \
+		> "$$shlib/debian/control"; \
+	depends=$$(cd "$$shlib" && dpkg-shlibdeps -O --ignore-missing-info \
+		"$$root/usr/sbin/netcfgd" 2>/dev/null | sed 's/^shlibs:Depends=//'); \
+	rm -rf "$$shlib"; \
+	if [ -z "$$depends" ]; then echo "deb: could not derive Depends"; exit 1; fi; \
+	sed -e "s|@VERSION@|$(DEB_VERSION)|" -e "s|@ARCH@|$$arch|" \
+	    -e "s|@DEPENDS@|$$depends|" -e "s|@MAINTAINER@|$(MAINTAINER)|" \
+		packaging/debian/control.in > "$$root/DEBIAN/control"; \
+	mkdir -p $(DIST); \
+	out="$(DIST)/$(PKG_NAME)_$(DEB_VERSION)_$$arch.deb"; \
+	fakeroot dpkg-deb --build "$$root" "$$out" >/dev/null; \
+	printf 'deb: %s\n' "$$out"; \
+	dpkg-deb --field "$$out" Package Version Architecture Depends \
+		| sed 's/^/deb:   /'
+
+# Alpine. `abuild` is not packaged for Debian, so the container recipe is the
+# path that works from a desk here -- and it is the same one `make live`'s
+# root-only scripts document. Everything else is the same tarball and the same
+# APKBUILD.
+apk:
+	@command -v abuild >/dev/null 2>&1 || { \
+		echo "apk: abuild is not installed. It is Alpine's own tool and is not"; \
+		echo "apk:   packaged for Debian. Build it where it lives:"; \
+		echo "apk:     make apk-container"; \
+		exit 1; }
+	@$(MAKE) --no-print-directory apk-source
+	@cd $(DIST) && abuild -F -P "$$PWD" checksum && abuild -F -P "$$PWD" -r
+
+# Alpine's toolchain, in Alpine. Same tarball, same APKBUILD, `abuild` doing the
+# work -- so what this produces is a real package built by the distribution's
+# own tool, not something this repo approximated. The container is how the
+# root-only live scripts are run too; it is the established answer here to "the
+# machine at hand is not the machine that matters".
+#
+# `git archive HEAD` is the source, so uncommitted work is not in the package.
+# That is deliberate: a package built from a dirty tree is not reproducible from
+# anything.
+APK_IMAGE ?= alpine:latest
+apk-container:
+	@$(MAKE) --no-print-directory apk-source
+	@docker run --rm -v "$$PWD/$(DIST)":/dist \
+		-v "$$PWD/packaging/alpine":/build:ro -w /dist \
+		$(APK_IMAGE) sh /build/build-in-container.sh
+	@ls -l $(DIST)/*.apk 2>/dev/null | sed 's/^/apk-container: /' || \
+		{ echo "apk-container: no package was produced"; exit 1; }
+
+# The tarball an APKBUILD builds from, plus the APKBUILD with its two blanks
+# filled in. Separate so it can be inspected, and so the container target and a
+# real Alpine machine share one definition.
+apk-source:
+	@mkdir -p $(DIST)
+	@git archive --format=tar --prefix=$(PKG_NAME)-$(APK_VERSION)/ HEAD \
+		| gzip -n > $(DIST)/$(PKG_NAME)-$(APK_VERSION).tar.gz
+	@sed -e "s|@PKGVER@|$(APK_VERSION)|" -e "s|@MAINTAINER@|$(MAINTAINER)|" \
+		packaging/alpine/APKBUILD.in > $(DIST)/APKBUILD
+	@printf 'apk-source: %s and %s\n' "$(DIST)/APKBUILD" \
+		"$(DIST)/$(PKG_NAME)-$(APK_VERSION).tar.gz"
+
 # M4 froze the document schema and the socket API. The freeze is enforced by
 # two witnesses under docs/schema/: one document with every field and variant
 # populated, and one of every socket message. Any change to either wire form
@@ -283,14 +395,27 @@ schema-bless:
 # No backticks anywhere in this recipe. The first version put one in a message
 # and make handed it to the shell, which ran the install target it was warning
 # about.
+# The tokens the `deb` and `apk-source` recipes substitute. Listed here so the
+# gate below can say when a template grows a placeholder nothing fills in --
+# an unsubstituted @VERSION@ ships a package versioned literally "@VERSION@",
+# which dpkg accepts and which sorts below every real version.
+FILLED = @VERSION@ @ARCH@ @DEPENDS@ @MAINTAINER@ @PKGVER@
+
 packaging:
 	@fail=0; \
+	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
 		echo "packaging: no Exec lines found -- the extraction below is checking nothing"; \
 		exit 1; \
 	fi; \
-	for script in packaging/openrc/netcfgd packaging/procd/netcfgd; do \
+	for script in packaging/openrc/netcfgd packaging/procd/netcfgd \
+			packaging/debian/postinst packaging/debian/prerm \
+			packaging/debian/postrm packaging/alpine/build-in-container.sh; do \
 		sh -n "$$script" || { echo "packaging: $$script does not parse"; fail=1; }; \
+	done; \
+	for script in packaging/debian/postinst packaging/debian/prerm \
+			packaging/debian/postrm; do \
+		[ -x "$$script" ] || { echo "packaging: $$script is not executable, so dpkg would not run it"; fail=1; }; \
 	done; \
 	if command -v systemd-analyze >/dev/null 2>&1; then \
 		out=$$(systemd-analyze verify packaging/systemd/netcfgd.service 2>&1 \
@@ -310,6 +435,15 @@ packaging:
 		*) echo "packaging: $$path is named by an init script and never installed"; \
 		   fail=1 ;; \
 		esac; \
+	done; \
+	for template in packaging/debian/control.in packaging/alpine/APKBUILD.in; do \
+		for token in $$(grep -o '@[A-Z]*@' "$$template" | sort -u); do \
+			case " $$FILLED " in \
+			*" $$token "*) ;; \
+			*) echo "packaging: $$template uses $$token, which no recipe substitutes"; \
+			   fail=1 ;; \
+			esac; \
+		done; \
 	done; \
 	[ $$fail -eq 0 ] && echo "packaging: ok"; \
 	exit $$fail
@@ -634,3 +768,4 @@ deny:
 
 clean:
 	$(CARGO) clean
+	rm -rf $(DIST)
