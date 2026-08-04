@@ -552,21 +552,24 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 /*
  * The name of an op, whichever shape it arrived in.
  *
- * A plan's op is a tagged object -- {"op":"link_create","name":"br0"} -- and a
+ * A plan's op is a tagged object -- {"op":"link.create","name":"br0"} -- and a
  * journal's is the bare name. One helper rather than two conversions, because
  * the two lists are the same actions before and after, and a screen that showed
  * one name in the plan and another in the journal would look broken in a way
  * nobody would attribute to this.
  *
- * Which is what it did. The tagged object's `op` is serde's snake_case of the
- * variant and the journal's is netcfgd's short name, and they are not the same
- * word: `link_create` against `link.create`, and `bridge_vlan_add` against
- * `bridge.vlan.add`, where even replacing the first underscore would give the
- * wrong answer. So an action's name is taken from the `op_name` the daemon now
- * sends beside the op -- decision 0082 -- and the tag is the fallback for a
- * daemon older than that field. Nothing here tabulates the forty-seven names;
- * that table belongs to netcfgd and a copy of it here would be a copy that
- * drifts.
+ * Which is what it did, until 0083. The tag used to be serde's snake_case of
+ * the variant while the journal carried netcfgd's short name, and they were not
+ * the same word: `link_create` against `link.create`, and `bridge_vlan_add`
+ * against `bridge.vlan.add`, where even replacing the first underscore gives
+ * the wrong answer. The tags are now the names, so reading the tag is reading
+ * the name and this helper is the whole of it. Nothing here tabulates the
+ * forty-seven; that table belongs to netcfgd and a copy of it here would be a
+ * copy that drifts.
+ *
+ * A daemon older than 0083 sends the old tags, and this reports them as it
+ * finds them. `link_create` in an op column is wrong and readable; an empty
+ * column, which is what insisting on the new spelling would give, is neither.
  */
 static char *op_name(const ncfg_json_doc_t *doc, uint32_t op)
 {
@@ -661,14 +664,8 @@ static int convert_actions(const ncfg_json_doc_t *doc, ncfg_plan_t *out, char *e
 		uint32_t inverse = ncfg_json_member(doc, action, "inverse");
 		ncfg_action_t *item = &out->actions[i];
 
-		uint32_t named = ncfg_json_member(doc, action, "op_name");
-
 		item->id = (long long)ncfg_json_int(doc, ncfg_json_member(doc, action, "id"), 0);
-		/* The daemon's own short name where it sent one, and the op's tag
-		 * where it did not. See op_name: the two are different words, and
-		 * the tag is only close enough to look right. */
-		item->op = named != NCFG_JSON_NONE ? op_name(doc, named)
-						  : op_name(doc, ncfg_json_member(doc, action, "op"));
+		item->op = op_name(doc, ncfg_json_member(doc, action, "op"));
 		/* Every one of these comes out of `reason` and not out of the op:
 		 * the op payload names its subject differently for each of forty
 		 * variants (`name`, `iface`, `device`), while the reason carries
