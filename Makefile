@@ -555,9 +555,27 @@ footprint:
 	[ $$fail -eq 0 ] && echo "footprint: ok"; \
 	exit $$fail
 
-# section 10.4: under 4 MB resident. What is measured here is the full-tier
-# daemon, so the number is a ratchet like the size one rather than the tier
-# target -- see size-budget.txt for why that distinction exists.
+# A ratchet on a measurement, exactly like the size gate, and for the same
+# reason: design section 10.4's "< 4 MB RSS steady-state" is written **for
+# nano**, and decision 0021 dropped the nano tier. What is built today is the
+# full tier -- every feature compiled in. size-budget.txt has carried that
+# distinction for binary size since M5; this gate did not, and cited the 4 MB
+# as though netcfgd were failing a requirement (0104).
+#
+# It is not, on either reading. Measured on the platform the size posture
+# targets -- musl, which is what the apk ships -- the daemon peaks at ~2.9 MB
+# with ~205 kB of it anonymous. The glibc figure below is larger because glibc
+# is larger: a bigger libc mapping, and allocator arenas worth ~300 kB more.
+#
+#   glibc, Debian    VmHWM ~4210 kB   RssAnon ~520 kB   Pss ~2465 kB
+#   musl,  Alpine    VmHWM ~2920 kB   RssAnon ~205 kB   Pss ~2530 kB
+#
+# **RssAnon is what netcfgd allocated**; the rest is text, most of it shared
+# with every other process on the machine, which is why Pss is little more than
+# half of VmHWM. The gate still pins VmHWM -- it is the pessimistic number and
+# the one that ratchets honestly -- but it prints the other two, because a
+# figure that moves when the C library changes underneath it should not be the
+# only thing anybody reads.
 #
 # **The release binary, which is what ships.** This measured the debug one
 # until 0098, and that made the gate sensitive to something it is not about:
@@ -575,10 +593,7 @@ footprint:
 # and page reclaim in a way binary size does not, so a limit set at the
 # measurement fails on noise. Observed 4208..4384 KB over twelve runs; this is
 # the peak plus a noise band of the width the debug measurement showed.
-#
-# Note for section 10.4: the shipped daemon is ~4.3 MB, which is *over* the
-# 4 MB the design section states. The debug measurement had been hiding that
-# behind a number twice as large and a limit set to fit it.
+
 RSS_LIMIT_KB ?= 4608
 
 rss:
@@ -590,10 +605,14 @@ rss:
 	pid=$$!; \
 	sleep 2; \
 	peak=$$(awk '/VmHWM/ {print $$2}' /proc/$$pid/status 2>/dev/null); \
+	anon=$$(awk '/RssAnon/ {print $$2}' /proc/$$pid/status 2>/dev/null); \
+	pss=$$(awk '/^Pss:/ {print $$2}' /proc/$$pid/smaps_rollup 2>/dev/null); \
 	kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
 	rm -rf "$$work"; \
 	if [ -z "$$peak" ]; then echo "rss: could not measure"; exit 1; fi; \
 	printf 'rss: netcfgd peak %s KB of %s limit\n' "$$peak" "$(RSS_LIMIT_KB)"; \
+	printf 'rss:   of which %s KB is netcfgd'"'"'s own; %s KB is this process'"'"' share\n' \
+		"$${anon:-?}" "$${pss:-?}"; \
 	if [ "$$peak" -gt "$(RSS_LIMIT_KB)" ]; then echo "rss: over limit"; exit 1; fi
 
 # section 6 wants a cargo-fuzz target per parser, and there are three:
