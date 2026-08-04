@@ -32,6 +32,7 @@ mod manager;
 mod settings;
 mod state;
 mod store;
+mod trace;
 
 use state::State;
 use std::sync::Arc;
@@ -127,6 +128,9 @@ fn serve(session: bool) -> Result<(), String> {
 
 	publish(&connection, &state, &changes)?;
 	state.refresh_associations();
+	// Off unless NCFG_NM_TRACE is set; see the module for what it is for.
+	trace::spawn_watchdog();
+
 	publish_profiles(&connection, &state, &profiles)?;
 	publish_active(&connection, &state)?;
 	claim_name(&connection)?;
