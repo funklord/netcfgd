@@ -15,6 +15,7 @@ mod state;
 mod wifi;
 
 use netcfgd_host::state as run_state;
+use netcfgd_model::HookPhase;
 use netcfgd_plan::PlanOptions;
 use netcfgd_proto::{Event, Request, Response, DEFAULT_SOCKET};
 use netcfgd_sys::socket::groups;
@@ -241,6 +242,9 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			// `reconcile`, where the window between the two is milliseconds.
 			let told = state.run_drift_hooks(&drift);
 			remember_drift(&state, &told);
+			// After the drift hooks and before the reconcile, for the same
+			// reason: a script sees the machine as the change left it.
+			remember_told(&state, HookPhase::Portal, &run_portal_checks(&state));
 			reconcile_drift(&mut state, &mut subscribers);
 		}
 
@@ -462,6 +466,102 @@ fn supplicant_ctrl_dir() -> PathBuf {
 	)
 }
 
+/// Probe for a captive portal on an interface that has just become addressed.
+///
+/// **Not a plan action.** A probe is not a change, so an action would run on
+/// every apply and no plan would ever converge -- section 4's promise. It is
+/// also not something an observation can answer: netcfgd has to *ask*, which is
+/// I/O, and doing it on every netlink event would be a request to somebody
+/// else's server every time a cable moved.
+///
+/// So it fires on a transition: the interface has an address now and did not
+/// when this last looked. That is when a portal appears, and it is once per
+/// joining rather than once per event -- the same record `carrier` and `lease`
+/// use, for the reason 0084 gives.
+///
+/// Only where the operator gave a URL. No URL, no probe, on every machine that
+/// did not ask (0061, 0095).
+///
+/// Returns what it told each interface, for the caller to record.
+fn run_portal_checks(state: &State) -> Vec<(String, String)> {
+	let Some(desired) = state.desired.as_ref() else {
+		return Vec::new();
+	};
+	let mut told = Vec::new();
+
+	for device in &desired.devices {
+		let Some(url) = device
+			.wifi
+			.as_ref()
+			.and_then(|wifi| wifi.portal_check.as_ref())
+		else {
+			continue;
+		};
+		// The addresses netcfgd can see on the device's own interface. A portal
+		// hands out a perfectly ordinary lease, so "addressed" is exactly the
+		// moment the machine looks configured and may not be.
+		let addressed = state.observed.addresses.iter().any(|address| {
+			address.interface == device.name && netcfgd_host::portal::is_routable(&address.address)
+		});
+		let was = State::last_told(&state.observed, &device.name, HookPhase::Portal);
+
+		// Nothing to do while it stays as it was. The record holds "addressed"
+		// or "bare" rather than the verdict, because what this fires on is the
+		// transition and not what the transition turned out to mean.
+		let now = if addressed { "addressed" } else { "bare" };
+		if was.as_deref() == Some(now) {
+			continue;
+		}
+		told.push((device.name.clone(), now.to_owned()));
+		if !addressed {
+			continue;
+		}
+
+		let verdict = netcfgd_host::portal::probe(url, 204);
+		let detail = match &verdict {
+			// Nothing in the way. Said to the log and to nobody else: a hook
+			// that ran on every successful join would be a hook nobody keeps.
+			netcfgd_host::portal::Verdict::Clear => continue,
+			netcfgd_host::portal::Verdict::Portal { detail } => {
+				eprintln!(
+					"netcfgd: {} looks like a captive portal: {detail}",
+					device.name
+				);
+				detail.clone()
+			}
+			// Something else is wrong -- no route, no resolver, nothing
+			// listening. Reported and *not* called a portal: a portal is a
+			// thing that replies, and saying "captive portal" about a network
+			// with no route sends the operator to a login page that is not
+			// there.
+			netcfgd_host::portal::Verdict::Unreachable { detail } => {
+				eprintln!("netcfgd: {} could not be checked: {detail}", device.name);
+				continue;
+			}
+		};
+
+		for interface in desired.interfaces.iter().filter(|i| i.name == device.name) {
+			for hook in interface
+				.hooks
+				.iter()
+				.filter(|hook| hook.phase == HookPhase::Portal)
+			{
+				let env = netcfgd_apply::hooks::HookEnv::for_interface(&device.name)
+					.because(format!("a captive portal answered: {detail}"))
+					.with("NCFG_URL", url.clone());
+				match netcfgd_apply::hooks::run(hook, &env) {
+					netcfgd_apply::hooks::Outcome::Ok => {}
+					netcfgd_apply::hooks::Outcome::Vetoed(message)
+					| netcfgd_apply::hooks::Outcome::Noted(message) => {
+						eprintln!("netcfgd: {message}");
+					}
+				}
+			}
+		}
+	}
+	told
+}
+
 /// Run the `roam` hooks for an interface that has just moved.
 ///
 /// **No de-duplication, unlike `drift`.** That one fires on a condition which
@@ -507,18 +607,29 @@ fn run_roam_hooks(state: &State, interface: &str, bssid: &str) {
 /// seven. The comment was the kind of claim that outlives its reason, so the
 /// line went rather than the claim.
 fn remember_drift(state: &State, told: &[(String, String)]) {
+	remember_told(state, netcfgd_model::HookPhase::Drift, told);
+}
+
+/// Record what a phase was last told about each interface.
+///
+/// One record per interface and phase, which is what makes "fire on the change"
+/// possible for `drift` and for `portal` without either keeping state of its
+/// own. Written to `/run` and nowhere else: `reobserve` reads it back and runs
+/// before every check, which is the whole of why an in-memory copy was removed
+/// from here rather than kept (0084).
+fn remember_told(state: &State, phase: netcfgd_model::HookPhase, told: &[(String, String)]) {
 	if told.is_empty() {
 		return;
 	}
 	let mut owned = run_state::read_owned(&state.paths.run);
-	for (interface, summary) in told {
-		owned.hook_state.retain(|record| {
-			&record.interface != interface || record.phase != netcfgd_model::HookPhase::Drift
-		});
+	for (interface, value) in told {
+		owned
+			.hook_state
+			.retain(|record| &record.interface != interface || record.phase != phase);
 		owned.hook_state.push(netcfgd_model::ObservedHookState {
 			interface: interface.clone(),
-			phase: netcfgd_model::HookPhase::Drift,
-			value: summary.clone(),
+			phase,
+			value: value.clone(),
 		});
 	}
 	let _ = run_state::write_owned(&state.paths.run, &owned);
