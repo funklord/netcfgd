@@ -1446,8 +1446,11 @@ match.
    four inert config keys (0061), rfkill (0062), the `down` and `post_down` hooks
    (0063), the `lease` hook (0064), DHCPv4 with busybox (0065), a lease's
    nameservers and search suffixes (0066, 0067), the `carrier` hook (0068) and
-   joining a network without an editor (0069). What is left, and none of it is a
-   schema question:
+   joining a network without an editor (0069), an enterprise network from the
+   command line (0087) and the rfkill event stream (0093). **What is left is two
+   hook phases, both deferred with a reason rather than unbuilt** — everything
+   else on this list is closed, and nine of the fifteen items found a defect
+   older than the work itself:
 
    - ~~**dhcpcd's generated script has never been run by dhcpcd**~~ — **closed**
      ([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)),
@@ -1545,8 +1548,17 @@ match.
      writes `2` where an advertisement would otherwise be ignored, nowhere else,
      and hands it back only where it wrote it. `tests/live/slaac.sh` drives a real
      advertisement from a real dnsmasq.
-   - **Nothing reads `/dev/rfkill`'s event stream**, so a flipped switch is noticed
-     on the next observation rather than as it happens.
+   - ~~**Nothing reads `/dev/rfkill`'s event stream**~~ — **closed**
+     ([0093](docs/decisions/0093-a-switch-being-flipped-is-not-something-to-wait-for.md)),
+     and this was the last item on the laptop list. *Blocking* a radio usually
+     takes the interface down, so netlink reported it; **unblocking** one
+     produced nothing at all until something else happened, so a machine could
+     sit with a working radio and a plan still saying it was off. A watcher
+     reports `KernelChanged` — the same answer netlink gets, because what
+     changed is something an observation already reads. Read-only
+     structurally: the write path on that device blocks every radio, and not
+     opening for writing is how 0062's "report, do not overrule" stays a
+     property of the code.
 
 4. **The "is it still what the document says?" question has one open corner
    left.** Daemons, kernel objects, secrets, unread files and now *whether the
@@ -1592,6 +1604,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **"Read what you know and ignore the rest" describes a record, not a stream, and the difference is a shift bug on a newer kernel.** `/dev/rfkill`'s header says the record may grow, which reads as an invitation to buffer bytes and cut them every eight. It is not: the kernel dequeues **one event per read** and copies as much of it as you asked for, so a generous buffer gets exactly one record and the surplus of a longer one belongs to that read. The stream reading would have kept the ninth byte and shifted every following event — visible only on kernels newer than the one it was written against. Opening the device and printing what came back settled it in a minute; the header could not have.
 - **A probe that reads the first widget of a kind reads whichever was constructed first, which is rarely the one meant.** A headless check asked whether the devices table had caught up and read `findChildren<QTableWidget*>().first()` -- which is the *plan* pane's notes table, built earlier and empty on a converged machine. It reported "the window did not change" for a window that had changed correctly, and the obvious next move would have been to debug working code. Select a widget by something only it has: a header, an object name, a title.
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
 - **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
