@@ -489,3 +489,64 @@ fn a_real_supplicant_accepts_a_list_of_access_points() {
 		);
 	});
 }
+
+/// A real `wpa_supplicant` sends events to an attached connection and to no
+/// other.
+///
+/// `ATTACH` is per connection, and the difference is the whole of whether the
+/// roam watcher sees anything at all (0091). Without it the thread would poll
+/// forever on a socket that only ever answers commands -- a silent no-op, and
+/// exactly the shape of failure nothing else here would catch.
+///
+/// **What this proves and what it does not.** It proves the plumbing: a
+/// connection that attaches is sent unsolicited traffic, one that does not is
+/// not, and the reader tells the two apart. It does *not* produce a
+/// `CTRL-EVENT-CONNECTED`, which needs an association and therefore a radio --
+/// decision 0014's standing limit, said here rather than implied. The shape of
+/// that event is pinned in `tests/protocol.rs` against `wpa_supplicant`'s own
+/// format string, read out of the binary.
+///
+/// `LEVEL 0` is needed to provoke anything on the `wired` driver: the default
+/// level carries `MSG_INFO` and above, which is where `CONNECTED` lives, and
+/// this driver emits none of those with no radio to associate with. The
+/// production watcher does not set a level and does not need to.
+#[test]
+fn events_arrive_only_on_an_attached_connection() {
+	with_supplicant(|supplicant| {
+		let listener = supplicant.connect();
+		let quiet = supplicant.connect();
+
+		listener.attach().expect("ATTACH");
+		listener
+			.ask("LEVEL 0")
+			.expect("the debug level is settable");
+		// Something the wired driver will comment on.
+		let _ = listener.ask("SCAN");
+
+		let mut seen = None;
+		for _ in 0..40 {
+			if let Some(event) = listener
+				.next_event(std::time::Duration::from_millis(250))
+				.expect("the socket works")
+			{
+				seen = Some(event);
+				break;
+			}
+		}
+		assert!(
+			seen.is_some(),
+			"an attached connection was sent nothing at all"
+		);
+
+		// And the connection that did not ask gets nothing, which is what makes
+		// the request path safe to leave as it is: it drops events while
+		// waiting for a reply, and only an attached connection has any.
+		assert!(
+			quiet
+				.next_event(std::time::Duration::from_millis(500))
+				.expect("the socket works")
+				.is_none(),
+			"an unattached connection was sent an event"
+		);
+	});
+}

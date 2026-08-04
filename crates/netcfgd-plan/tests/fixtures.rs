@@ -5878,7 +5878,7 @@ fn a_hook_in_a_phase_nothing_fires_is_reported() {
 		"interface eth0 {\n\
 		 \tconfig = \"10.0.0.2/24\"\n\
 		 \tpost_up {\necho up\n}\n\
-		 \ton roam {\necho roamed\n}\n\
+		 \tpre_down {\necho going\n}\n\
 		 \ton portal {\necho portal\n}\n\
 		 }\n",
 	);
@@ -5895,10 +5895,15 @@ fn a_hook_in_a_phase_nothing_fires_is_reported() {
 	assert_eq!(
 		said.len(),
 		2,
-		"expected the `roam` and the `portal` hook to be named and nothing else: {:?}",
+		"expected the `pre_down` and the `portal` hook to be named and nothing else: {:?}",
 		plan.warnings
 	);
-	assert!(said.iter().any(|message| message.contains("`roam` hook")));
+	// `roam` used to be one of these and fires now (0091), so the example
+	// moved to a phase that still does not: `pre_down` is deferred with a
+	// reason (0063) and `portal` has no detection anywhere in the tree.
+	assert!(said
+		.iter()
+		.any(|message| message.contains("`pre_down` hook")));
 	assert!(said.iter().any(|message| message.contains("`portal` hook")));
 	// And the one that does fire is still planned, rather than warned about.
 	assert!(names(&plan).contains(&"hook.run"));
