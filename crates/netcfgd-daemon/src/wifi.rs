@@ -19,23 +19,11 @@ use netcfgd_supplicant::protocol::{
 	parse_network_list, parse_scan_results, parse_status, status_field,
 };
 use netcfgd_supplicant::{add_network, Client};
-use std::path::{Path, PathBuf};
-
-/// Where the control sockets live, overridable for testing.
-///
-/// The same shape as `NCFG_RESOLV_CONF`: a test needs somewhere that is not
-/// the real one, and a network namespace does not give it a separate mount
-/// namespace.
-fn ctrl_dir() -> PathBuf {
-	std::env::var_os("NCFG_WPA_CTRL_DIR").map_or_else(
-		|| PathBuf::from(netcfgd_supplicant::DEFAULT_CTRL_DIR),
-		PathBuf::from,
-	)
-}
+use std::path::Path;
 
 /// Open a control socket, or explain why not in terms of what to do.
 fn connect(interface: &str) -> Result<Client, String> {
-	let dir = ctrl_dir();
+	let dir = netcfgd_supplicant::ctrl_dir();
 	Client::connect(&dir, interface).map_err(|error| {
 		format!(
 			"cannot reach the supplicant for `{interface}`: {error}. netcfgd starts \

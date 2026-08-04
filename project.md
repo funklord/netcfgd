@@ -1599,7 +1599,17 @@ match.
    device it creates itself; then the question turned out not to be about
    configuration at all, but about a pid. What is genuinely left:
    - ~~**a supplicant and an access point are not liveness-checked**~~ — the
-     supplicant now is
+     supplicant is, in both senses: alive
+     ([0080](docs/decisions/0080-a-socket-outlives-the-process-that-bound-it.md))
+     and **answering**
+     ([0098](docs/decisions/0098-a-supplicant-that-bound-its-socket-and-stopped-answering.md)).
+     0085 recorded the second as "a real piece of work rather than a line", and
+     re-measuring rather than believing that is what closed it: `connect_within`
+     already pings inside the connect with the deadline as a parameter, and
+     `netcfgd-observe` already depends on a backend crate for exactly this shape
+     of question. A wedged supplicant has a live pid, a socket on disk, and looks
+     from every other angle exactly like one that has not associated yet. The
+     first half
      ([0080](docs/decisions/0080-a-socket-outlives-the-process-that-bound-it.md)):
      `-P` gives it a pid file, and that turned up a second defect hiding behind
      the first — the *start* path also treated the socket as proof, so a plan that
@@ -1619,8 +1629,11 @@ match.
      warning and deliberately **not a restart** — netcfgd cannot tell a wedged
      daemon from a slow one, and `acl.sh` has already seen a *healthy* fake miss
      that deadline under load, so acting on the reading would take working
-     access points off the air on busy machines. Only access points answer it,
-     because only access points are asked anything;
+     access points off the air on busy machines. Supplicants answer it too
+     ([0098](docs/decisions/0098-a-supplicant-that-bound-its-socket-and-stopped-answering.md)),
+     and each kind that gains a round trip gains its own noun in the warning in
+     the same change — "the backend on wlan0" is the least useful true thing
+     available on a machine running both;
    - ~~**restarting is unconditional**~~ — **closed in the same session, because
      it was a live defect rather than a future concern**
      ([0079](docs/decisions/0079-netcfgd-stops-restarting-what-will-not-stay-up.md)).
@@ -1634,6 +1647,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A footprint gate on a debug binary measures debug metadata, not the footprint.** `make rss` pinned `target/debug/netcfgd`, where an *unused* dependency edge added to a crate moved peak RSS by ~190 KB — while the release build stayed byte-for-byte the same size and its RSS did not move at all (4307 vs 4315 KB). A 51 MB debug binary's resident set is dominated by layout. It measures the release binary now, which `size` already builds. Two lessons and the second is bigger: an A/B run in two batches drifts by as much as the effect, so **interleave the measurements**; and the honest number the debug figure had been hiding is that the shipped daemon is ~4.3 MB resident against section 10.4's stated 4 MB.
+- **A guard whose removal changes no output is not tested by the output.** The observation asks only a supplicant its record says is running; deleting that guard fails nothing, because the planner skips a stopped backend whatever the field holds. The cost is invisible and real — a round trip per pass to a process netcfgd believes is gone, which a socket outliving its process could even answer. The live check was named "is not asked, and not named" and verified the second half only. Where a guard exists to stop *work* rather than to change an answer, the gate has to look at the work: it counts the requests that reached the other process now.
 - **A sentinel return value is a guard at every call site, and call sites do not all remember.** `push` returns `u32::MAX` for an action it declines to emit, under a comment saying nothing downstream can depend on it. Six of thirteen sites checked; seven fed the sentinel into one of five accumulators that all end up as somebody's `depends_on`, and two of those are reachable from a nine-line config — a guarded bridge member left the bridge's `link.up` and `addr.add` waiting on action **4294967295**. Downstream, `restrict` dropped both and said `needs action 4294967295, which belongs to another interface`, a sentence with two false claims in it. **Where the same check must happen at every call site, put it where the value is minted** — and treat a comment asserting a property as a claim to verify, not a statement of fact.
 - **"Who reads this field?" is worth asking of anything the schema pins.** `depends_on` is in `plan.json`, in every client, and in 29 fixture assertions — and the *executor* does not read it: actions run in list order and stop at the first failure. One code path acts on it. A field can be pinned, documented, asserted on and structurally load-bearing in exactly one place nobody was looking at, which is where its defect will be. The question came out of a break that correctly passed, not out of a gate.
 - **`ip link set dev down` flushes IPv6 and leaves IPv4 behind, so "the kernel cleans up" is true in one family and not the other.** netcfgd's whole plan for disabling an interface was `link.down`, which looks complete on a v6 machine and leaves a stale `10.x` address on a v4 one — an address netcfgd had installed and still recorded as its own, with nothing left to remove it. The asymmetry is real kernel behaviour and it was found by running the command and looking, while going to build something else entirely. **Where the kernel tidies up after you, check that it does so in every family**, or the daemon's idea of what it owns depends on which one the operator wrote.
