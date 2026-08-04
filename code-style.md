@@ -231,6 +231,15 @@ without one does not merit review time.
 
 Precise and short. What changed and why, in as few words as do the job.
 
+The subject carries the crate or adapter it touches, first and followed by a
+colon, then a word from the shared set saying what the change does:
+
+    netcfgd-plan: fix the ordering edge for a renamed link
+    nm: rework the containment check as one pass
+
+`git log --grep '^netcfgd-plan:'` then answers what has happened to the
+planner without a path list, and keeps answering after files move.
+
 - **The message ends at its real content.** No trailers, no sign-offs, no
   tooling or assistant attribution.
 - **No docs-only commits.** Documentation rides along with the code commit
