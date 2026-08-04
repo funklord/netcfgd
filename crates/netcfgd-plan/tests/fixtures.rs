@@ -6975,3 +6975,65 @@ fn a_daemon_that_is_not_running_is_not_called_wedged() {
 		plan.warnings
 	);
 }
+
+/// An EAP network that pins no CA is warned about, and not refused.
+///
+/// The refusal used to live in the compiler, where every diagnostic is fatal,
+/// so netcfgd could not configure a network that pins nothing -- which 0017 had
+/// already rejected in as many words. Both halves are asserted here, because
+/// only saying it and only allowing it are each half a decision (0087).
+#[test]
+fn an_eap_network_with_no_ca_certificate_is_warned_about_and_still_planned() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { } }
+network "Corp" { wifi { eap = "ttls"; identity = "d"; password = "@secret:c" } }
+interface wlan0 { config = "dhcp" }
+"#,
+	);
+	let observed = observed_with(&["wlan0"]);
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("trust any server that answers")),
+		"nothing said the network pins no CA: {:?}",
+		plan.warnings
+	);
+	// And the radio is still configured, which is the half a refusal took away.
+	// `backend.start` rather than `wifi.set_profiles`: the supplicant is handed
+	// its profiles as it starts, and asserting the op this fixture does not
+	// produce would have been a check about the plan's shape rather than about
+	// the network being usable.
+	assert!(
+		names(&plan).contains(&"backend.start"),
+		"a network with no CA stopped the radio being configured: {:?}",
+		names(&plan)
+	);
+	assert!(plan.refusals.is_empty(), "{:?}", plan.refusals);
+}
+
+/// And one that pins a CA says nothing.
+#[test]
+fn an_eap_network_with_a_ca_certificate_is_not_warned_about() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { } }
+network "Corp" {
+	wifi { eap = "ttls"; identity = "d"; password = "@secret:c"; ca_cert = "/ca.pem" }
+}
+interface wlan0 { config = "dhcp" }
+"#,
+	);
+	let observed = observed_with(&["wlan0"]);
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("trust any server")),
+		"a network that pins a CA was warned about anyway: {:?}",
+		plan.warnings
+	);
+}

@@ -767,15 +767,26 @@ fn a_network_with_no_security_block_must_say_so() {
 	assert_eq!(document.networks[0].security, netcfgd_model::Security::Open);
 }
 
-/// An EAP network with no CA certificate authenticates to any server that
-/// answers. Plenty of real deployments pin nothing, so this is said rather
-/// than refused -- but it is said.
+/// An EAP network with no CA certificate **compiles**.
+///
+/// It authenticates to any server that answers, which is worth saying and is
+/// said -- as a plan warning, by `netcfgd-plan` (0087). It used to be said here,
+/// by pushing a `Diagnostic`, and the only severity this compiler has is fatal:
+/// so a network that pins nothing did not compile, which is precisely what 0017
+/// rejected. The comment above the code even said "not an error".
+///
+/// Plenty of real deployments pin nothing. A tool that refuses one on security
+/// grounds nobody asked it for is replaced by a tool that works, and then it
+/// protects nothing at all.
 #[test]
-fn eap_without_a_ca_certificate_is_reported() {
-	let message = errors(
+fn eap_without_a_ca_certificate_still_compiles() {
+	let document = build_ok(
 		r#"network "Corp" { wifi { eap = "ttls"; identity = "d"; password = "@secret:c" } }"#,
 	);
-	assert!(message.contains("trust any server"), "got: {message}");
+	let netcfgd_model::Security::Eap(eap) = &document.networks[0].security else {
+		panic!("expected an eap network");
+	};
+	assert!(eap.ca_cert.is_none());
 }
 
 /// WPA3 has to be expressible, and the default has to be the transitional mode

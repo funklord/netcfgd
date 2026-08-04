@@ -1463,20 +1463,15 @@ fn build_security(keys: WifiKeys, block: &Block, diags: &mut Diagnostics) -> Opt
 			));
 			return None;
 		};
-		if keys.ca_cert.is_none() {
-			// Not an error, because plenty of real deployments pin nothing and
-			// refusing would make netcfgd unusable on them. But an EAP network
-			// with no CA certificate will authenticate to any server that
-			// answers, which is the whole attack -- so it is said out loud
-			// rather than left for somebody to notice.
-			diags.push(
-				Diagnostic::new(
-					block.span,
-					"this EAP network has no `ca_cert`, so it will trust any server that answers",
-				)
-				.with_help("set `ca_cert` to the issuer's certificate; see docs/decisions/0008"),
-			);
-		}
+		// No `ca_cert` check here, and that is a correction rather than an
+		// omission. There used to be one, with a comment saying "not an error,
+		// because plenty of real deployments pin nothing" -- above a
+		// `Diagnostic`, which is the only severity this compiler has. So the
+		// network did not compile, which is exactly what 0017 rejected: netcfgd
+		// refusing a deployment other tools configure fine is how it gets
+		// replaced by one of them. It is a plan warning now (0087), where the
+		// planner's warnings already live and where saying it out loud does not
+		// also mean refusing to run.
 		return Some(Security::Eap(EapConfig {
 			method,
 			identity,

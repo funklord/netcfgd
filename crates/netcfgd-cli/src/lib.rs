@@ -38,8 +38,11 @@ usage:
                              clients    [IFACE]  who is on the access point
                              add SSID            remember a network: writes
                                                  conf.d/wifi-ID.conf and asks
-                                                 for the passphrase, or reads
-                                                 it from standard input
+                                                 for the credential, or reads
+                                                 it from standard input. See
+                                                 the flags below, including
+                                                 --eap for a campus or
+                                                 corporate network
                              connect ID [IFACE]  join a configured network
                              disconnect [IFACE]  leave it, keeping the config
                            IFACE may be omitted when the config describes one
@@ -90,6 +93,20 @@ options for `wifi add`:
   --wpa2, --wpa3           pin one generation; the default negotiates both
   --hidden                 the SSID is not broadcast, so probe for it
   --priority N             higher wins when several are in range
+
+options for `wifi add` on an enterprise network (802.1X):
+  --eap METHOD             peap, ttls, tls or pwd. What is asked for at the
+                           prompt follows from it: a password for the first
+                           three, the private key for tls
+  --identity NAME          who you are to the authentication server, often
+                           with a realm: you@example.ac.uk
+  --anonymous-identity N   who you are outside the tunnel, which is all the
+                           radio sees. eduroam suggests anonymous@realm
+  --ca-cert PATH           the certificate the server is checked against.
+                           Without it the machine will trust any server that
+                           answers, and the compiler says so
+  --client-cert PATH       the certificate presented, for --eap tls
+  --phase2 NAME            the inner method, such as mschapv2
 
 exit codes:
   0  the desired state was reached, or already held
@@ -234,6 +251,30 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 			"--wpa2" => options.wifi.proto = Some("wpa2"),
 			"--wpa3" => options.wifi.proto = Some("wpa3"),
 			"--hidden" => options.wifi.hidden = true,
+			"--eap" => {
+				let value = take_value("--eap")?;
+				options.wifi.eap = Some(match value.as_str() {
+					"peap" => "peap",
+					"ttls" => "ttls",
+					"tls" => "tls",
+					"pwd" => "pwd",
+					// Named here as well as in the compiler, because this is
+					// the one an operator sees first and "unknown wifi key" an
+					// hour later is not the same sentence.
+					other => {
+						return Err(format!(
+							"`{other}` is not an EAP method: one of peap, ttls, tls, pwd"
+						))
+					}
+				});
+			}
+			"--identity" => options.wifi.identity = Some(take_value("--identity")?),
+			"--anonymous-identity" => {
+				options.wifi.anonymous_identity = Some(take_value("--anonymous-identity")?);
+			}
+			"--ca-cert" => options.wifi.ca_cert = Some(take_value("--ca-cert")?),
+			"--client-cert" => options.wifi.client_cert = Some(take_value("--client-cert")?),
+			"--phase2" => options.wifi.phase2 = Some(take_value("--phase2")?),
 			// There is no daemon yet, so oneshot is the only mode there is.
 			// Accepting the flag now means the command line does not change
 			// when the daemon lands in M2.
@@ -1331,19 +1372,33 @@ mod tests {
 	/// list the subcommands used.
 	#[test]
 	fn a_value_is_never_mistaken_for_a_subcommand() {
-		for option in [
-			"--config-dir",
-			"--factory-dir",
-			"--run-dir",
-			"--allow-disruption",
-			"--strand-credentials",
-			"--id",
+		// Paired with a value each option actually accepts, because two of
+		// them check what they are given -- and a test that fed every flag the
+		// word `value` would be asserting the parse *and* the validation, and
+		// would go red for the second while claiming the first.
+		for (option, value) in [
+			("--config-dir", "value"),
+			("--factory-dir", "value"),
+			("--run-dir", "value"),
+			("--allow-disruption", "value"),
+			("--strand-credentials", "value"),
+			("--id", "value"),
+			// The enterprise flags. Every one takes a value that can look like
+			// a subcommand -- an identity is a word, a phase2 name is
+			// `mschapv2`, a certificate is a path -- which is exactly the shape
+			// that broke `wifi add` before the parse became one pass.
+			("--eap", "peap"),
+			("--identity", "value"),
+			("--anonymous-identity", "value"),
+			("--ca-cert", "value"),
+			("--client-cert", "value"),
+			("--phase2", "value"),
 		] {
-			let (_, positional) = split(&[option, "value", "scan"]);
+			let (_, positional) = split(&[option, value, "scan"]);
 			assert_eq!(
 				positional,
 				vec!["scan".to_owned()],
-				"`{option} value` left its value behind as a positional"
+				"`{option} {value}` left its value behind as a positional"
 			);
 		}
 		let (_, positional) = split(&["--confirm-within", "30", "scan"]);
