@@ -7386,3 +7386,52 @@ fn a_refused_action_is_not_something_to_wait_for() {
 	assert!(names(&plan).contains(&"addr.add"), "{:?}", names(&plan));
 	assert!(names(&plan).contains(&"link.up"), "{:?}", names(&plan));
 }
+
+/// Each kind that can be wedged is called by its own name.
+///
+/// 0085's warning had two arms and a fallback, and the fallback was correct
+/// only because nothing but the access point's round trip set the field.
+/// The supplicant's does now (0098), so an operator reading "the backend on
+/// wlan0 is running and did not answer" would be told the least useful true
+/// thing available -- on a machine that may be running both.
+#[test]
+fn a_wedged_supplicant_is_called_a_supplicant() {
+	let desired = document(
+		r#"
+		interface wlan0 {
+			config = "dhcp"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::Supplicant,
+		interface: "wlan0".to_owned(),
+		running: true,
+		answering: Some(false),
+		access_control: None,
+		started_with: None,
+		secret_matches: None,
+		config_matches: None,
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let wedged: Vec<&str> = plan
+		.warnings
+		.iter()
+		.filter(|warning| {
+			warning
+				.message
+				.contains("did not answer its control socket")
+		})
+		.map(|warning| warning.message.as_str())
+		.collect();
+
+	assert_eq!(wedged.len(), 1, "{:?}", plan.warnings);
+	assert!(
+		wedged[0].starts_with("the supplicant on wlan0"),
+		"a supplicant was not called one: {}",
+		wedged[0]
+	);
+}

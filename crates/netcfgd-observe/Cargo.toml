@@ -21,6 +21,8 @@ netcfgd-apply   = { path = "../netcfgd-apply" }
 netcfgd-openvpn = { path = "../../backends/netcfgd-openvpn" }
 netcfgd-ra      = { path = "../../backends/netcfgd-ra" }
 netcfgd-hostapd = { path = "../../backends/netcfgd-hostapd" }
+# And the second question of that shape: does a running supplicant still answer?
+netcfgd-supplicant = { path = "../../backends/netcfgd-supplicant" }
 
 [dev-dependencies]
 netcfgd-testdir = { path = "../netcfgd-testdir" }

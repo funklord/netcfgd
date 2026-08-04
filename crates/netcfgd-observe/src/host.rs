@@ -53,6 +53,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	read_netfilter(observed);
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
+	ask_supplicants(observed);
 	read_advertised(observed, run_dir);
 	read_secret_currency(observed, run_dir, desired);
 	read_tunnel_currency(observed, run_dir, desired);
@@ -249,6 +250,40 @@ fn carried(state: &netcfgd_sys::wg::DeviceState) -> netcfgd_model::ObservedWireG
 		// the socket that says a mark is set when none is.
 		fwmark: state.fwmark.filter(|mark| *mark != 0),
 		peers,
+	}
+}
+
+/// Whether each running supplicant still answers its control socket.
+///
+/// 0085 gave an access point an `answering` field because netcfgd was already
+/// asking hostapd something on every observation and throwing the failure away.
+/// It recorded the supplicant as a real piece of work rather than a line,
+/// because netcfgd asks a station nothing during an observation -- and that was
+/// true when it was written. It is not now: `connect_within` exists (0080),
+/// it pings inside the connect, and its deadline is a parameter for exactly
+/// this case.
+///
+/// A supplicant that has bound its socket and stopped answering is the failure
+/// this is for. 0080 made a *dead* one visible by its pid file; a wedged one
+/// has a live pid, a socket on disk and a plan that says everything is fine
+/// while the radio associates with nothing -- which from every other angle
+/// netcfgd has looks exactly like a network that is simply not in range.
+///
+/// Asked only of a supplicant netcfgd believes is running, for the same reason
+/// `read_access_control` is: a control socket outlives the process that bound
+/// it (0080), so the file alone would happily describe a supplicant that exited
+/// an hour ago.
+///
+/// A warning and never a restart, which is 0085's decision unchanged: netcfgd
+/// cannot tell a wedged supplicant from a busy one, and restarting on a missed
+/// deadline would take working radios off the air on loaded machines.
+fn ask_supplicants(observed: &mut Observed) {
+	let dir = netcfgd_supplicant::ctrl_dir();
+	for backend in &mut observed.backends {
+		if backend.kind != netcfgd_model::BackendKind::Supplicant || !backend.running {
+			continue;
+		}
+		backend.answering = Some(netcfgd_supplicant::answers(&dir, &backend.interface));
 	}
 }
 

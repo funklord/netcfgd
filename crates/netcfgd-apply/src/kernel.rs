@@ -548,7 +548,7 @@ impl KernelExecutor {
 	/// `IEEE8021X`, while a radio gets every network in the document and picks
 	/// among them.
 	fn populate_supplicant(&self, iface: &str) -> Result<(), String> {
-		let dir = ctrl_dir();
+		let dir = netcfgd_supplicant::ctrl_dir();
 		let client = netcfgd_supplicant::Client::connect(&dir, iface).map_err(|error| {
 			format!("started a supplicant on {iface} but cannot reach it: {error}")
 		})?;
@@ -2956,18 +2956,6 @@ pub fn secrets_dir() -> std::path::PathBuf {
 	)
 }
 
-/// Where the supplicant's control sockets live.
-///
-/// Overridable so a test can point at a directory that is not the real one --
-/// a network namespace is not a mount namespace, so without this a test would
-/// share `/run/wpa_supplicant` with whatever the host is running.
-fn ctrl_dir() -> std::path::PathBuf {
-	std::env::var_os("NCFG_WPA_CTRL_DIR").map_or_else(
-		|| std::path::PathBuf::from(netcfgd_supplicant::DEFAULT_CTRL_DIR),
-		std::path::PathBuf::from,
-	)
-}
-
 /// Start a `wpa_supplicant` that holds no state.
 ///
 /// Decision 0015, as command-line arguments:
@@ -2987,7 +2975,7 @@ fn ctrl_dir() -> std::path::PathBuf {
 /// produces a supplicant that starts and never associates, so the wireless
 /// case is detected rather than assumed.
 fn start_supplicant(iface: &str) -> Result<(), String> {
-	let dir = ctrl_dir();
+	let dir = netcfgd_supplicant::ctrl_dir();
 	std::fs::create_dir_all(&dir)
 		.map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
 
@@ -3124,7 +3112,7 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 			// exists -- measured with the invocation above against a real one.
 			// openvpn's `--daemon` returns at the fork and needed a pid file
 			// for exactly that reason (0074).
-			let dir = ctrl_dir();
+			let dir = netcfgd_supplicant::ctrl_dir();
 			let outcome = match netcfgd_supplicant::Client::connect(&dir, iface) {
 				Ok(client) => client
 					.command("TERMINATE")

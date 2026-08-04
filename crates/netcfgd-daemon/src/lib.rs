@@ -147,7 +147,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	server::serve(&socket_path, &control, commands.clone())
 		.map_err(|error| format!("could not bind {}: {error}", socket_path.display()))?;
 	spawn_kernel_watcher(&commands);
-	spawn_roam_watcher(&commands, supplicant_ctrl_dir());
+	spawn_roam_watcher(&commands, netcfgd_supplicant::ctrl_dir());
 	spawn_rfkill_watcher(
 		&commands,
 		// Overridable for the reason the supplicant's directory is: a network
@@ -452,18 +452,6 @@ fn spawn_rfkill_watcher(commands: &Sender<Command>, device: PathBuf) {
 				}
 			}
 		});
-}
-
-/// Where `wpa_supplicant`'s control sockets are.
-///
-/// Overridable by the same variable `netcfgd-apply` reads, and for the same
-/// reason: a network namespace is not a mount namespace, so a test that could
-/// not move this would watch whatever the host is running.
-fn supplicant_ctrl_dir() -> PathBuf {
-	std::env::var_os("NCFG_WPA_CTRL_DIR").map_or_else(
-		|| PathBuf::from(netcfgd_supplicant::DEFAULT_CTRL_DIR),
-		PathBuf::from,
-	)
 }
 
 /// Probe for a captive portal on an interface that has just become addressed.

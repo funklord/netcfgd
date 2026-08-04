@@ -141,6 +141,7 @@ dependencies = [
  "netcfgd-openvpn",
  "netcfgd-ra",
  "netcfgd-secret",
+ "netcfgd-supplicant",
  "netcfgd-sys",
  "netcfgd-testdir",
 ]
