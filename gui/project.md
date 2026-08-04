@@ -322,7 +322,7 @@ Four rules, all of them the same rule:
 
 ## 8. Order of work
 
-1. ~~**`client/` against the local socket, and the GUI on top of it.**~~ **Started
+1. ~~**`client/` against the local socket, and the GUI on top of it.**~~ **Done
    2026-08-04.** `client/` holds the JSON reader and the connection, with the
    library and its checks building clean under `-Wall -Wextra -Wconversion` and
    under ASan and UBSan; `gui/` is a Qt Widgets window showing what netcfgd
@@ -349,9 +349,39 @@ Four rules, all of them the same rule:
      build of anything using this would have hit it eventually -- and "eventually"
      is what a sanitizer is for.
 
-   What is not there yet: `monitor` (the stream, and the event kinds above),
-   `plan` and `apply`, and anything that writes. The window says so by being
-   read-only rather than by disabling buttons that do not exist.
+   **Finished the same day.** The window is three tabs -- devices, plan, events --
+   and an apply that runs a plan first and applies nothing until the operator has
+   seen it, through the same widget the tab uses, so what is approved is what was
+   shown. The events pane is a `QSocketNotifier` on the descriptor `client/`
+   exposes: no thread and no timer, and it drains until the stream says "nothing
+   yet", because one read can carry several lines and a handler taking one per
+   activation strands the rest until something unrelated arrives.
+
+   Three more things worth knowing:
+
+   - **Building this was a protocol review**, and it found three defects in the
+     socket rather than in itself (0081, 0082, 0083). See project.md §10.
+   - **The daemon says yes to `monitor` by saying nothing.** The tier check runs
+     before the subscription and only a *refusal* is ever written, after which the
+     connection closes -- so a refusal is the first and only line, and the two ways
+     to get it wrong both end with a pane that lies: parsed as an event it is drawn
+     as network activity, noticed only as a close it reads "the stream ended"
+     instead of naming the tier that was wanted.
+   - **`ncfg_note_t` carries two remedies and a reason.** The first draft flattened
+     the remedies and kept the flag, which is the wrong one of the two to lose: it
+     showed an operator how to consent to walking away from a private key and not
+     how to stop leaving it behind. `ncfg` prints the config change first for that
+     reason.
+
+   What is not there yet: **consent**. `ncfg_client_apply` takes only a confirm
+   window, while the wire's `apply` carries `allow_disruption` and
+   `strand_credentials` -- so a refusal is an absolute stop in this client and the
+   remedy is shown as something to run elsewhere. Also **nothing asks the operator's
+   tier** (§4 wants a connection holding `observe` not to offer an apply that will
+   be refused), and `globals.confirm_default` is unreachable, so the dialog offers
+   60s to match `ncfg tui`. The monitor stream does not refresh the other two tabs,
+   which is the obvious use of `observed`/`drift`/`reloaded` and wants a coalescing
+   rule before it wants code.
 2. **`wire/` plus `agent/`, LAN only**, with the fuzzing standard from the first
    commit.
 3. **Android**, which by then is a kit and a transport choice rather than a port.
