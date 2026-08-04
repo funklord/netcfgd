@@ -497,6 +497,9 @@ live:
 	@# makes its own namespace the way dhcpcd.sh does.
 	@sh tests/live/slaac.sh
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/hooks.sh"
+	@# The one hook phase that is not a plan action, and therefore the one
+	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dhcp.sh"
 	@# The other client, and the one netcfgd prefers. Neither under NCFG_LIVE
 	@# nor under unshare: dhcpcd is a package, and it drops privileges to a user

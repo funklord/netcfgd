@@ -88,6 +88,21 @@ pub enum HookPhase {
 	/// A captive portal was detected.
 	Portal,
 	/// Observed state stopped matching desired state.
+	///
+	/// The one phase that is **not** a plan action, and deliberately (0084):
+	/// drift under `on_drift = "report"` applies nothing, so a planned hook
+	/// would never run and the policy that exists to say "tell me, do not touch
+	/// it" would tell nobody. It fires from the daemon at detection, before any
+	/// reconcile, so the script sees what drifted rather than what netcfgd has
+	/// already put back.
+	///
+	/// Fires when a drift *appears*, not while it persists -- under `report` it
+	/// persists indefinitely, and firing on presence runs the script on every
+	/// netlink event the machine sees.
+	///
+	/// `NCFG_REASON` is what moved; `NCFG_ACTION` is what netcfgd is doing about
+	/// it, which is the only thing that differs between the policies. Not a veto
+	/// phase: the drift has already happened.
 	Drift,
 }
 
