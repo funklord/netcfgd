@@ -11,7 +11,7 @@
 //! and the timeout is a `set_read_timeout` rather than a `setsockopt` -- so
 //! constraint 4 holds without an exception.
 
-use crate::protocol::{is_event, Reply};
+use crate::protocol::{is_event, Event, Reply};
 use std::io;
 use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
@@ -165,6 +165,58 @@ impl Client {
 					format!("no reply to `{command}`, only events"),
 				));
 			}
+		}
+	}
+
+	/// Ask to be sent unsolicited events on this connection.
+	///
+	/// `ATTACH` is per connection, not per supplicant: a client that has not
+	/// asked gets replies only. So this is the whole difference between a
+	/// connection that can watch a radio and one that can only interrogate it,
+	/// and it is deliberately a separate call -- the request path drops events
+	/// while waiting for a reply, and a connection doing both would throw away
+	/// the ones that arrived at the wrong moment.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the supplicant refuses or does not answer.
+	pub fn attach(&self) -> io::Result<()> {
+		self.command("ATTACH")
+	}
+
+	/// The next unsolicited event, or `None` if none arrived in time.
+	///
+	/// `None` is the ordinary answer on a quiet radio and is not an error --
+	/// which is why the timeout is an argument: a caller polling several
+	/// interfaces wants a short one, and one waiting on a single radio wants a
+	/// long one rather than a spin.
+	///
+	/// Replies are skipped rather than returned. Nothing should be issuing
+	/// commands on an attached connection, and if something does, its answer is
+	/// not an event and must not be handed back as one.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the socket fails. A timeout is `Ok(None)`.
+	pub fn next_event(&self, timeout: Duration) -> io::Result<Option<Event>> {
+		self.socket.set_read_timeout(Some(timeout))?;
+		let mut buffer = vec![0_u8; 8192];
+		match self.socket.recv(&mut buffer) {
+			Ok(read) => {
+				let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
+				Ok(Event::parse(&text))
+			}
+			// The two a timeout arrives as, which differ by platform and by
+			// whether the socket was interrupted first.
+			Err(error)
+				if matches!(
+					error.kind(),
+					io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+				) =>
+			{
+				Ok(None)
+			}
+			Err(error) => Err(error),
 		}
 	}
 

@@ -69,6 +69,12 @@ def status():
 def answer(command):
     if command == "PING":
         return "PONG\n"
+    # A real supplicant answers OK and then sends unsolicited events to this
+    # connection. Answering FAIL -- which is what this fake did before the roam
+    # watcher existed -- makes a client reconnect and attach forever, which is
+    # how that watcher's own behaviour under a refusing supplicant was found.
+    if command in ("ATTACH", "DETACH"):
+        return "OK\n"
     if command == "SCAN":
         return "OK\n"
     if command == "SCAN_RESULTS":
@@ -112,10 +118,38 @@ def main():
     # sleeping and hoping.
     print("ready", flush=True)
 
+    # Who has sent ATTACH. A real wpa_supplicant sends unsolicited events only
+    # to connections that asked, which is the whole reason netcfgd's roam
+    # watcher has to send one -- so a fake that broadcast to everybody would let
+    # a client that forgot ATTACH pass (0091).
+    attached = set()
+
     try:
         while True:
             data, sender = server.recvfrom(4096)
             command = data.decode(errors="replace").strip()
+            if command == "ATTACH" and sender:
+                attached.add(sender)
+            elif command == "DETACH" and sender:
+                attached.discard(sender)
+            # `ROAM <bssid>` is not a wpa_supplicant command. It is this fake's
+            # way of being told to emit the event a real one emits when the
+            # station moves, which needs two access points and a radio.
+            elif command.startswith("ROAM "):
+                bssid = command.split(None, 1)[1]
+                event = (
+                    "<3>CTRL-EVENT-CONNECTED - Connection to "
+                    f"{bssid} completed [id=0 id_str=]"
+                )
+                for listener in attached:
+                    try:
+                        server.sendto(event.encode(), listener)
+                    except OSError:
+                        pass
+                if sender:
+                    server.sendto(b"OK\n", sender)
+                print(command, flush=True)
+                continue
             # Logged so a test can assert which commands a D-Bus call produced.
             # Secrets are redacted: `SET_NETWORK 0 psk "..."` carries the
             # passphrase, and a test fixture writing one to a log is the habit

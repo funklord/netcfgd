@@ -146,6 +146,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	server::serve(&socket_path, &control, commands.clone())
 		.map_err(|error| format!("could not bind {}: {error}", socket_path.display()))?;
 	spawn_kernel_watcher(&commands);
+	spawn_roam_watcher(&commands, supplicant_ctrl_dir());
 	let mechanism = spawn_config_watcher(&commands, &paths, options.poll_config);
 
 	eprintln!(
@@ -181,6 +182,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		let mut config_changed = false;
 		let mut confirm_expired = false;
 		let mut requests = Vec::new();
+		let mut roamed: Vec<(String, String)> = Vec::new();
 
 		for command in std::iter::once(command).chain(server::drain(&incoming)) {
 			match command {
@@ -188,6 +190,9 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 				Command::ConfigChanged => config_changed = true,
 				Command::ConfirmExpired => confirm_expired = true,
 				Command::Tick => {}
+				// Not collapsed the way a netlink burst is: two roams are two
+				// events, and a station that moved twice moved twice.
+				Command::Roamed { interface, bssid } => roamed.push((interface, bssid)),
 				Command::Subscribe { events } => subscribers.push(events),
 				Command::Request {
 					request,
@@ -202,6 +207,14 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			for event in events {
 				server::broadcast(&mut subscribers, &event);
 			}
+		}
+
+		// Before the reobserve below, so a `roam` script sees the machine as
+		// the move left it. Nothing here re-plans: a station moving within its
+		// own network changes no desired state, which is why this is a hook and
+		// not drift.
+		for (interface, bssid) in &roamed {
+			run_roam_hooks(&state, interface, bssid);
 		}
 
 		if config_changed {
@@ -349,6 +362,53 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 			summary: format!("applied {} actions", journal.done()),
 		},
 	);
+}
+
+/// Where `wpa_supplicant`'s control sockets are.
+///
+/// Overridable by the same variable `netcfgd-apply` reads, and for the same
+/// reason: a network namespace is not a mount namespace, so a test that could
+/// not move this would watch whatever the host is running.
+fn supplicant_ctrl_dir() -> PathBuf {
+	std::env::var_os("NCFG_WPA_CTRL_DIR").map_or_else(
+		|| PathBuf::from(netcfgd_supplicant::DEFAULT_CTRL_DIR),
+		PathBuf::from,
+	)
+}
+
+/// Run the `roam` hooks for an interface that has just moved.
+///
+/// **No de-duplication, unlike `drift`.** That one fires on a condition which
+/// persists -- the machine stays drifted until something fixes it, so firing on
+/// presence would run the script forever. A roam is not a condition; it is a
+/// thing that happened once, and the watcher already reports only a *change* of
+/// access point. Suppressing a second would mean a station that moved back and
+/// forth told the script once.
+///
+/// Never a veto: the move has happened, and there is nothing left to stop.
+fn run_roam_hooks(state: &State, interface: &str, bssid: &str) {
+	let Some(desired) = state.desired.as_ref() else {
+		return;
+	};
+	let Some(configured) = desired.interfaces.iter().find(|i| i.name == interface) else {
+		return;
+	};
+	for hook in configured
+		.hooks
+		.iter()
+		.filter(|hook| hook.phase == netcfgd_model::HookPhase::Roam)
+	{
+		let env = netcfgd_apply::hooks::HookEnv::for_interface(interface)
+			.because(format!("moved to {bssid}"))
+			.with("NCFG_BSSID", bssid.to_owned());
+		match netcfgd_apply::hooks::run(hook, &env) {
+			netcfgd_apply::hooks::Outcome::Ok => {}
+			netcfgd_apply::hooks::Outcome::Vetoed(message)
+			| netcfgd_apply::hooks::Outcome::Noted(message) => {
+				eprintln!("netcfgd: {message}");
+			}
+		}
+	}
 }
 
 /// Record what the `drift` phase has been told, so it is told once.
@@ -577,6 +637,99 @@ fn spawn_expiry_timer(commands: &Sender<Command>, seconds: u32) {
 		.spawn(move || {
 			std::thread::sleep(std::time::Duration::from_secs(u64::from(seconds)));
 			let _ = commands.send(Command::ConfirmExpired);
+		});
+}
+
+/// Watch every radio's control socket for the one event an observation cannot
+/// catch: a station moving to a different access point.
+///
+/// **Push, not poll**, and that is the whole reason this thread exists. netcfgd
+/// asks a station nothing during an observation, so the alternative was a
+/// `STATUS` round trip per radio on every netlink event -- work added to the
+/// reconcile loop, needing its own deadline for the reason 0085's does, and
+/// still able to miss a move that happened and reversed between two
+/// observations. `wpa_supplicant` will simply tell us.
+///
+/// One thread for all radios rather than one each: they are polled with a short
+/// timeout in turn, so a machine with two radios costs one thread and not two,
+/// and a supplicant that goes away is reconnected on the next pass rather than
+/// taking a thread with it.
+///
+/// A **roam** is a `CONNECTED` naming a different access point than the last one
+/// this interface reported. The first one after netcfgd started is an
+/// association rather than a roam -- there is nothing to have moved from, and
+/// firing then would run the hook on every boot.
+fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
+	let commands = commands.clone();
+	let _ = std::thread::Builder::new()
+		.name("roam".to_owned())
+		.spawn(move || {
+			// interface -> (attached client, the access point it last named).
+			let mut watching: Vec<(String, netcfgd_supplicant::Client, Option<String>)> =
+				Vec::new();
+
+			loop {
+				// Anything with a control socket that is not being watched yet.
+				// Read every pass, because a radio appears when netcfgd starts
+				// a supplicant for it, which is after this thread exists.
+				if let Ok(entries) = std::fs::read_dir(&ctrl_dir) {
+					for entry in entries.flatten() {
+						let Some(interface) = entry.file_name().to_str().map(ToOwned::to_owned)
+						else {
+							continue;
+						};
+						if watching.iter().any(|(known, _, _)| *known == interface) {
+							continue;
+						}
+						let Ok(client) = netcfgd_supplicant::Client::connect(&ctrl_dir, &interface)
+						else {
+							continue;
+						};
+						// Without ATTACH this connection gets replies and no
+						// events, and the loop below would be a silent
+						// no-op forever.
+						if client.attach().is_ok() {
+							watching.push((interface, client, None));
+						}
+					}
+				}
+
+				if watching.is_empty() {
+					// Nothing to watch. Sleeping rather than spinning on an
+					// empty directory, which is every machine with no radio.
+					std::thread::sleep(std::time::Duration::from_millis(1000));
+					continue;
+				}
+
+				let mut lost: Vec<String> = Vec::new();
+				for (interface, client, last) in &mut watching {
+					match client.next_event(std::time::Duration::from_millis(250)) {
+						Ok(Some(event)) => {
+							let Some(bssid) = event.connected_bssid() else {
+								continue;
+							};
+							let moved = last.as_deref().is_some_and(|was| was != bssid);
+							*last = Some(bssid.to_owned());
+							if moved
+								&& commands
+									.send(Command::Roamed {
+										interface: interface.clone(),
+										bssid: bssid.to_owned(),
+									})
+									.is_err()
+							{
+								return;
+							}
+						}
+						Ok(None) => {}
+						// The supplicant went away. Dropped and picked up again
+						// on a later pass if it comes back, which is what an
+						// `ncfg apply` restarting one looks like from here.
+						Err(_) => lost.push(interface.clone()),
+					}
+				}
+				watching.retain(|(interface, _, _)| !lost.contains(interface));
+			}
 		});
 }
 

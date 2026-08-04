@@ -777,3 +777,37 @@ fn access_points_on_different_networks_are_refused() {
 	assert!(message.contains("aa:bb:cc:dd:ee:ff"), "got: {message}");
 	assert!(message.contains("11:22:33:44:55:66"), "got: {message}");
 }
+
+/// A roam is a `CONNECTED` naming a different access point.
+///
+/// The format string is `wpa_supplicant`'s own, read out of the binary:
+/// `CTRL-EVENT-CONNECTED - Connection to %02x:...:%02x completed [id=%d
+/// id_str=%s%s]`. Decision 0091.
+#[test]
+fn a_connected_event_names_the_access_point() {
+	let event = netcfgd_supplicant::protocol::Event::parse(
+		"<3>CTRL-EVENT-CONNECTED - Connection to aa:bb:cc:dd:ee:ff completed [id=0 id_str=]",
+	)
+	.expect("an event");
+	assert_eq!(event.connected_bssid(), Some("aa:bb:cc:dd:ee:ff"));
+
+	// Every other event says nothing, including the disconnect that carries an
+	// address of its own in a different shape -- a reader that took any address
+	// it found would report a roam every time the link dropped.
+	for other in [
+		"<3>CTRL-EVENT-DISCONNECTED bssid=aa:bb:cc:dd:ee:ff reason=3",
+		"<3>CTRL-EVENT-SCAN-STARTED ",
+		"<3>CTRL-EVENT-CONNECTED - Connection to nonsense completed [id=0 id_str=]",
+		// The one that reaches the *name* check rather than the shape check.
+		// Without it the three above pass with the name check deleted -- their
+		// fifth word is either absent or not an address, so the shape check
+		// alone rejects them, and the guard that says "only a connect is a
+		// move" was never exercised by anything. Synthetic, and deliberately:
+		// what it stands for is any future event with an address in that
+		// position, which is a thing `wpa_supplicant` could add without asking.
+		"<3>CTRL-EVENT-SOMETHING-ELSE a b c aa:bb:cc:dd:ee:ff",
+	] {
+		let event = netcfgd_supplicant::protocol::Event::parse(other).expect("an event");
+		assert_eq!(event.connected_bssid(), None, "{other}");
+	}
+}

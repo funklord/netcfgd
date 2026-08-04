@@ -39,6 +39,13 @@ pub(crate) enum Command {
 	Tick,
 	/// A commit-confirm window reached its deadline.
 	ConfirmExpired,
+	/// A radio associated with a different access point than it was on.
+	Roamed {
+		/// Which interface moved.
+		interface: String,
+		/// The access point it is on now.
+		bssid: String,
+	},
 }
 
 /// Bind the control socket and serve it until the process exits.

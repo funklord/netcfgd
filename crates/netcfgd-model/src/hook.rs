@@ -83,7 +83,20 @@ pub enum HookPhase {
 	Carrier,
 	/// A lease was acquired, renewed or lost.
 	Lease,
-	/// A wifi roam completed.
+	/// A station moved to a different access point on the same network.
+	///
+	/// Not a plan action and not netcfgd's decision: `wpa_supplicant` picks the
+	/// access point, and netcfgd hears about it on the supplicant's event
+	/// socket -- a `CONNECTED` naming a different address than the last one
+	/// (0091). The first association after netcfgd starts is not a roam; there
+	/// is nothing to have moved from.
+	///
+	/// `NCFG_BSSID` is the access point now in use and `NCFG_REASON` says it
+	/// moved there. Not de-duplicated the way `drift` is: drift is a condition
+	/// that persists, a roam is a thing that happened, and a station that moved
+	/// back and forth moved twice.
+	///
+	/// Not a veto phase: the move has already happened.
 	Roam,
 	/// A captive portal was detected.
 	Portal,

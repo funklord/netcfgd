@@ -239,12 +239,13 @@ const RESTART_LIMIT: u32 = 5;
 ///
 /// The phases a *plan* fires. Not the phases that run.
 ///
-/// `drift` runs and is deliberately not here: it fires from the daemon at
-/// detection rather than as an action, because drift under `report` produces no
-/// apply at all and a planned `HookRun` would be the one policy whose whole
-/// purpose is "tell me" telling nobody. It is listed as fired below, where the
-/// warning is, because the question an operator is asking there is "will my
-/// script run", not "will it be in a plan".
+/// `drift` and `roam` run and are deliberately not here. Neither is something a
+/// plan does: drift under `report` produces no apply at all, and a station
+/// moving to a louder access point on the same network is `wpa_supplicant`'s
+/// decision, which netcfgd learns about afterwards. Both fire from the daemon.
+/// They are listed as fired below, where the warning is, because the question
+/// an operator is asking there is "will my script run", not "will it be in a
+/// plan".
 ///
 /// The rest are recognised, written into `/run/netcfgd/hooks/`, hashed and
 /// carried in the document -- and never executed, which reads exactly like a
@@ -268,7 +269,7 @@ const FIRED_PHASES: &[HookPhase] = &[
 /// A count is not kept anywhere: the comment above this list carried one and
 /// said "the other five" when it was four, for two commits after the number
 /// moved. The lists are the count.
-const UNPLANNED_PHASES: &[HookPhase] = &[HookPhase::Drift];
+const UNPLANNED_PHASES: &[HookPhase] = &[HookPhase::Drift, HookPhase::Roam];
 
 /// Say which hooks the document declares that nothing will run.
 ///
