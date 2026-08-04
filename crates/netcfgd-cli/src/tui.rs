@@ -857,21 +857,95 @@ fn fit(text: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
 	use super::{body, fit, tabs, App, Pane};
+	use serde_json::Value;
 	use std::sync::{Arc, Mutex};
 
-	/// An app with canned answers and no daemon.
+	/// A witness from `docs/schema/`, which is the daemon's own bytes.
+	///
+	/// These tests used to carry fixtures written by hand, and one of them was
+	/// wrong for as long as it existed. The plan fixture said
+	/// `"op": {"op": "addr.add"}`; the wire said `addr_add` until 0083, so the
+	/// pane drew a word this test never saw and the test passed anyway. A
+	/// fixture written to match what somebody believed agrees with itself and
+	/// proves nothing -- which is the whole argument for `docs/schema/`, and
+	/// this is the last crate that was not taking it.
+	///
+	/// It is also not hypothetical twice over: the wifi pane read `entries`
+	/// where the daemon sends `access_points`, for the same reason.
+	fn witness(name: &str) -> Value {
+		let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("../../docs/schema")
+			.join(name);
+		let text = std::fs::read_to_string(&path)
+			.unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+
+		serde_json::from_str(&text).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+	}
+
+	/// One response line from the socket witness, by its tag.
+	///
+	/// `socket.json` pins the *envelopes*, one JSON object per line. Several are
+	/// complete answers on their own -- a scan, a station list -- and those are
+	/// used here exactly as they are.
+	fn socket_witness(response: &str) -> Value {
+		let path =
+			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/schema/socket.json");
+		let text = std::fs::read_to_string(&path)
+			.unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+
+		for line in text.lines() {
+			let line = line.trim();
+			if line.is_empty() || line.starts_with('#') {
+				continue;
+			}
+			let value: Value = serde_json::from_str(line).expect("a witness line parses");
+			if value.get("response").and_then(Value::as_str) == Some(response) {
+				return value;
+			}
+		}
+		panic!("the socket witness pins no `{response}` response");
+	}
+
+	/// Content under its envelope.
+	///
+	/// The two answers the panes lean on hardest are pinned in two places and
+	/// neither is enough alone: `socket.json` has the `status` and `plan`
+	/// envelopes but with every list empty, and `observed.json` and `plan.json`
+	/// have the content but no envelope. The daemon sends the content flattened
+	/// under the tag, so that is what these compose -- and
+	/// `the_envelopes_these_tests_compose_are_the_ones_the_socket_pins` is why
+	/// composing it is a reading of the witnesses rather than a guess about
+	/// them.
+	fn under_envelope(response: &str, content: Value) -> Value {
+		let mut object = content;
+		object
+			.as_object_mut()
+			.expect("a witness is an object")
+			.insert("response".to_owned(), Value::from(response));
+		object
+	}
+
+	fn status_response() -> Value {
+		under_envelope("status", witness("observed.json"))
+	}
+
+	fn plan_response() -> Value {
+		under_envelope("plan", witness("plan.json"))
+	}
+
+	/// An app with the daemon's answers and no daemon.
 	///
 	/// Each pane's content is a pure function of what the socket returned,
 	/// which is what keeps it testable with no terminal, no privileges and no
 	/// kernel. Only the painting goes through ncurses, and that is covered by
 	/// `tests/live/tui.py` against a real pty.
-	fn app(pane: Pane, status: &str, plan: &str) -> App {
+	fn app(pane: Pane, status: &Value, plan: &Value) -> App {
 		App {
 			pane,
 			selected: 0,
 			message: "msg".to_owned(),
-			status: serde_json::from_str(status).ok(),
-			plan: serde_json::from_str(plan).ok(),
+			status: Some(status.clone()),
+			plan: Some(plan.clone()),
 			scan: None,
 			stations: None,
 			events: Arc::new(Mutex::new(Vec::new())),
@@ -879,20 +953,40 @@ mod tests {
 		}
 	}
 
-	const STATUS: &str = r#"{
-		"links": [{"name": "eth0", "up": true, "carrier": true, "mtu": 1500}],
-		"addresses": [{"interface": "eth0", "address": "10.0.0.2/24", "ownership": "ours"}]
-	}"#;
+	/// A string member, or a failure naming the path rather than unwrapping.
+	fn text<'a>(value: &'a Value, path: &[&str]) -> &'a str {
+		let mut at = value;
+		for step in path {
+			at = at
+				.get(step)
+				.unwrap_or_else(|| panic!("the witness has no {}", path.join(".")));
+		}
+		at.as_str()
+			.unwrap_or_else(|| panic!("{} is not a string", path.join(".")))
+	}
 
-	const PLAN: &str = r#"{
-		"actions": [{
-			"op": {"op": "addr.add"},
-			"reason": {"interface": "eth0", "field": "addressing",
-			           "desired": "10.0.0.2/24", "observed": "<absent>"}
-		}],
-		"warnings": [{"message": "something worth knowing"}],
-		"refusals": []
-	}"#;
+	/// The composition above is the shape the daemon actually sends.
+	///
+	/// Every member of the pinned envelope has to come from the content
+	/// witness, or these tests are feeding the panes an object no daemon would
+	/// produce -- which is the mistake they are being moved off. The reverse is
+	/// not required: `socket.json` pins an *empty* observation, and a member
+	/// that is skipped when it is empty is absent there and present here.
+	#[test]
+	fn the_envelopes_these_tests_compose_are_the_ones_the_socket_pins() {
+		for (tag, composed) in [("status", status_response()), ("plan", plan_response())] {
+			let pinned = socket_witness(tag);
+			let composed = composed.as_object().expect("an object");
+
+			for key in pinned.as_object().expect("an object").keys() {
+				assert!(
+					composed.contains_key(key),
+					"the {tag} envelope has `{key}` and the content witness does not, \
+					 so these tests compose an answer netcfgd never sends"
+				);
+			}
+		}
+	}
 
 	/// Every line is exactly the pane's width.
 	///
@@ -902,7 +996,7 @@ mod tests {
 	#[test]
 	fn no_line_exceeds_the_width() {
 		for width in [80_usize, 132, 40] {
-			let app = app(Pane::Devices, STATUS, PLAN);
+			let app = app(Pane::Devices, &status_response(), &plan_response());
 			for pane in [Pane::Devices, Pane::Wifi, Pane::Plan, Pane::Events] {
 				let mut app = app.clone_for(pane);
 				app.selected = 0;
@@ -918,11 +1012,29 @@ mod tests {
 	}
 
 	/// The device pane shows the interface, its state and its addresses.
+	///
+	/// The names are read out of the witness rather than written here, so that
+	/// re-blessing an observation cannot leave this test asserting an interface
+	/// netcfgd no longer reports -- it would go on passing against a pane that
+	/// had stopped drawing anything.
 	#[test]
 	fn the_device_pane_draws_what_the_kernel_has() {
-		let lines = body(&app(Pane::Devices, STATUS, PLAN), 80).join("\n");
-		assert!(lines.contains("eth0"), "{lines}");
-		assert!(lines.contains("10.0.0.2/24"), "{lines}");
+		let status = status_response();
+		let interface = text(&status["links"][0], &["name"]);
+		let lines = body(&app(Pane::Devices, &status, &plan_response()), 132).join("\n");
+
+		assert!(
+			lines.contains(interface),
+			"{interface} missing from {lines}"
+		);
+		let address = status["addresses"]
+			.as_array()
+			.expect("the witness observes addresses")
+			.iter()
+			.find(|entry| entry["interface"] == status["links"][0]["name"])
+			.map(|entry| text(entry, &["address"]))
+			.expect("the witness gives that interface an address");
+		assert!(lines.contains(address), "{address} missing from {lines}");
 		assert!(lines.contains("carrier"), "{lines}");
 	}
 
@@ -930,18 +1042,39 @@ mod tests {
 	///
 	/// An action list without reasons is the black box this project exists to
 	/// not be, and the pane is where an operator reads it.
+	///
+	/// The op is the witness's own spelling. That is the assertion this file
+	/// most needed: it read `addr.add` from a fixture while the pane drew
+	/// `addr_add` from the wire, for as long as both existed (0083).
 	#[test]
 	fn the_plan_pane_shows_why() {
-		let lines = body(&app(Pane::Plan, STATUS, PLAN), 80).join("\n");
-		assert!(lines.contains("addr.add"), "{lines}");
-		assert!(lines.contains("<absent> -> 10.0.0.2/24"), "{lines}");
-		assert!(lines.contains("something worth knowing"), "{lines}");
+		let plan = plan_response();
+		let action = &plan["actions"][0];
+		let op = text(action, &["op", "op"]);
+		let reason = format!(
+			"{} -> {}",
+			text(action, &["reason", "observed"]),
+			text(action, &["reason", "desired"])
+		);
+		let warning = text(&plan["warnings"][0], &["message"]);
+		let lines = body(&app(Pane::Plan, &status_response(), &plan), 132).join("\n");
+
+		assert!(lines.contains(op), "{op} missing from {lines}");
+		assert!(lines.contains(&reason), "{reason} missing from {lines}");
+		assert!(lines.contains(warning), "{warning} missing from {lines}");
 	}
 
 	/// An empty plan says so rather than drawing a blank pane.
+	///
+	/// The socket witness pins an empty plan on its own, which is the answer a
+	/// machine that matches its configuration actually gets.
 	#[test]
 	fn an_empty_plan_says_so() {
-		let lines = body(&app(Pane::Plan, STATUS, r#"{"actions": []}"#), 80).join("\n");
+		let lines = body(
+			&app(Pane::Plan, &status_response(), &socket_witness("plan")),
+			80,
+		)
+		.join("\n");
 		assert!(lines.contains("nothing to do"), "{lines}");
 	}
 
@@ -949,7 +1082,7 @@ mod tests {
 	#[test]
 	fn the_tab_bar_marks_one_pane() {
 		for pane in [Pane::Devices, Pane::Wifi, Pane::Plan, Pane::Events] {
-			let bar = tabs(&app(pane, STATUS, PLAN), 80);
+			let bar = tabs(&app(pane, &status_response(), &plan_response()), 80);
 			assert!(bar.contains(&format!("[{}]", pane.title())), "{bar}");
 			assert_eq!(bar.matches('[').count(), 1, "{bar}");
 		}
@@ -964,20 +1097,49 @@ mod tests {
 	}
 
 	/// A station list with one of each case that renders differently.
-	const STATIONS: &str = r#"{
-		"interface": "ap0", "access_point": "guest", "access_control": "deny",
-		"stations": [
-			{"address": "00:11:22:33:44:55", "authorized": true, "listed": true,
-			 "signal": -52, "connected_seconds": 3600},
-			{"address": "aa:bb:cc:dd:ee:ff", "authorized": true, "listed": false},
-			{"address": "66:77:88:99:aa:bb", "authorized": false, "listed": false,
-			 "signal": -70, "connected_seconds": 120}
-		]
-	}"#;
+	///
+	/// The witness pins one station -- on the list, authorized, with
+	/// statistics -- and the pane has three cases. The other two are **derived**
+	/// from that one rather than written out: same members, different values,
+	/// and the "no statistics" case made by removing the members the daemon
+	/// omits when it has none. So the field names still come from netcfgd even
+	/// where the combination does not, and a renamed member breaks this instead
+	/// of quietly rendering dashes.
+	fn stations_response() -> Value {
+		let mut report = socket_witness("ap_stations");
+		let listed = report["stations"][0].clone();
+
+		let mut unlisted = listed.clone();
+		let object = unlisted.as_object_mut().expect("a station is an object");
+		object.insert("address".to_owned(), Value::from("aa:bb:cc:dd:ee:ff"));
+		object.insert("listed".to_owned(), Value::from(false));
+		// What a station that has only just associated looks like: hostapd has
+		// reported it and has no numbers for it yet.
+		for absent in [
+			"signal",
+			"connected_seconds",
+			"inactive_msec",
+			"rx_bytes",
+			"tx_bytes",
+		] {
+			object.remove(absent);
+		}
+
+		let mut unauthorized = listed.clone();
+		let object = unauthorized
+			.as_object_mut()
+			.expect("a station is an object");
+		object.insert("address".to_owned(), Value::from("66:77:88:99:aa:bb"));
+		object.insert("listed".to_owned(), Value::from(false));
+		object.insert("authorized".to_owned(), Value::from(false));
+
+		report["stations"] = Value::from(vec![listed, unlisted, unauthorized]);
+		report
+	}
 
 	fn clients_app() -> App {
-		let mut app = app(Pane::Clients, STATUS, PLAN);
-		app.stations = serde_json::from_str(STATIONS).ok();
+		let mut app = app(Pane::Clients, &status_response(), &plan_response());
+		app.stations = Some(stations_response());
 		app
 	}
 
@@ -986,21 +1148,26 @@ mod tests {
 		let lines = body(&clients_app(), 60);
 		assert_eq!(lines.len(), 3, "{lines:?}");
 		// On the deny list and connected anyway: hostapd was never told the
-		// list changed. That is the marker worth having on screen.
+		// list changed. That is the marker worth having on screen. The address
+		// comes from the witness, so a witness that renames the member fails
+		// here rather than matching an empty prefix.
+		let listed = text(&stations_response()["stations"][0], &["address"]).to_owned();
 		assert!(
-			lines[0].starts_with("! 00:11:22:33:44:55"),
+			lines[0].starts_with(&format!("! {listed}")),
 			"{:?}",
 			lines[0]
 		);
 		// Not listed, authorized, ordinary.
+		let ordinary = text(&stations_response()["stations"][1], &["address"]).to_owned();
 		assert!(
-			lines[1].starts_with("  aa:bb:cc:dd:ee:ff"),
+			lines[1].starts_with(&format!("  {ordinary}")),
 			"{:?}",
 			lines[1]
 		);
 		// Associated but not authorized.
+		let unauthorized = text(&stations_response()["stations"][2], &["address"]).to_owned();
 		assert!(
-			lines[2].starts_with("? 66:77:88:99:aa:bb"),
+			lines[2].starts_with(&format!("? {unauthorized}")),
 			"{:?}",
 			lines[2]
 		);
@@ -1008,37 +1175,46 @@ mod tests {
 
 	#[test]
 	fn a_station_with_no_statistics_still_gets_a_line() {
+		let stations = stations_response();
 		let lines = body(&clients_app(), 60);
+
 		assert!(lines[1].contains("--"), "{:?}", lines[1]);
 		// And one that has them shows them rather than dashes.
-		assert!(lines[0].contains("-52"), "{:?}", lines[0]);
+		let signal = stations["stations"][0]["signal"].to_string();
+		assert!(lines[0].contains(&signal), "{signal} in {:?}", lines[0]);
 	}
 
 	#[test]
 	fn an_empty_station_list_says_so_rather_than_drawing_nothing() {
-		let mut app = app(Pane::Clients, STATUS, PLAN);
-		app.stations = serde_json::from_str(r#"{"stations": []}"#).ok();
+		let mut app = app(Pane::Clients, &status_response(), &plan_response());
+		let mut empty = stations_response();
+		empty["stations"] = Value::from(Vec::<Value>::new());
+		app.stations = Some(empty);
 		let lines = body(&app, 60);
 		assert!(lines[0].contains("nobody associated"), "{lines:?}");
 	}
 
 	/// The wifi pane read a field the daemon has never sent.
 	///
-	/// `ScanReport`'s list is `access_points`; the pane asked for `entries`,
-	/// so every scan rendered as "(no scan)" from the day the TUI was written.
-	/// Nothing caught it because `tests/live/tui.py` never opens this pane.
+	/// `ScanReport`'s list is `access_points`; the pane asked for `entries`, so
+	/// every scan rendered as "(no scan)" from the day the TUI was written.
+	/// Nothing caught it because `tests/live/tui.py` never opens this pane --
+	/// and the fixture that replaced it was written from the same reading of
+	/// the type that got it wrong the first time. This one is the witness, so
+	/// the pane is checked against what the socket pins rather than against
+	/// somebody's second look at `ScanReport`.
 	#[test]
 	fn the_wifi_pane_reads_the_field_the_daemon_sends() {
-		let mut app = app(Pane::Wifi, STATUS, PLAN);
-		app.scan = serde_json::from_str(
-			r#"{"interface": "wl0", "access_points": [
-				{"bssid": "00:11:22:33:44:55", "frequency": 2412, "signal": -53,
-				 "secured": true, "ssid": "486f6d65", "name": "Home"}
-			]}"#,
-		)
-		.ok();
+		let scan = socket_witness("wifi_scan");
+		let point = &scan["access_points"][0];
+		let name = text(point, &["name"]).to_owned();
+		let signal = point["signal"].to_string();
+
+		let mut app = app(Pane::Wifi, &status_response(), &plan_response());
+		app.scan = Some(scan.clone());
 		let lines = body(&app, 60);
-		assert!(lines[0].contains("Home"), "{lines:?}");
-		assert!(lines[0].contains("-53"), "{lines:?}");
+
+		assert!(lines[0].contains(&name), "{name} in {lines:?}");
+		assert!(lines[0].contains(&signal), "{signal} in {lines:?}");
 	}
 }
