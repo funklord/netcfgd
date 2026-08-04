@@ -274,9 +274,18 @@ fn read_access_control(observed: &mut Observed, run_dir: &Path) {
 		let Ok(live) = netcfgd_hostapd::acl::read(run_dir, &backend.interface) else {
 			// hostapd is gone, or was never reachable. Recorded state said it
 			// was running and the socket says otherwise; the socket is closer
-			// to the truth, and saying nothing is the honest answer.
+			// to the truth, and saying nothing is the honest answer *about the
+			// list*.
+			//
+			// It is not the honest answer about the daemon. This round trip
+			// has run on every observation since 0052 and its failure was
+			// thrown away, which is exactly the open question section 10 carried --
+			// "a daemon that is alive and wedged still counts as running".
+			// netcfgd already knew; nothing wrote it down.
+			backend.answering = Some(false);
 			continue;
 		};
+		backend.answering = Some(true);
 		backend.access_control = Some(netcfgd_model::ObservedAccessControl {
 			policy: netcfgd_hostapd::recorded_policy(run_dir, &backend.interface),
 			denied: live.denied,

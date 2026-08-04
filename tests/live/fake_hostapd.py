@@ -25,6 +25,13 @@ deleting one that is absent both answer OK. A fake that answered OK to
 everything would let a converger pass while sending the same command forever.
 
     fake_hostapd.py <ctrl-dir> <interface> [--deny addr,addr] [--accept addr,...]
+                                           [--wedged]
+
+`--wedged` binds the socket and answers nothing, ever. That is the state
+decision 0085 is about and it is not the same as a dead daemon: the process is
+there, the pid file is right, the socket accepts a datagram and no reply comes
+back. Nothing else in this repository can produce it, which is why it is a flag
+here rather than a second fake.
 """
 
 import os
@@ -168,6 +175,7 @@ def main():
     # What hostapd read out of its configuration file at startup, which is the
     # state a converger has to reconcile against.
     rest = sys.argv[3:]
+    wedged = "--wedged" in rest
     for flag, name in (("--deny", "deny"), ("--accept", "accept")):
         if flag in rest:
             value = rest[rest.index(flag) + 1]
@@ -187,6 +195,12 @@ def main():
             data, sender = server.recvfrom(4096)
             command = data.decode(errors="replace").strip()
             print(f"cmd: {command}", flush=True)
+            if wedged:
+                # Read and dropped. A wedged hostapd is not one that refuses
+                # the connection -- it is one that takes the request and never
+                # gets round to it, which is why netcfgd needs a deadline
+                # rather than an error to notice.
+                continue
             try:
                 server.sendto(answer(command).encode(), sender)
             except OSError:
