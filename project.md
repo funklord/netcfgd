@@ -693,7 +693,27 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after ten pieces of work on the laptop list, every one of them
+Last rewritten after **M8's first client was built outside this workspace**, which
+turned out to be the most productive protocol review this project has had. `client/`
+and `gui/` are a C library and a Qt Widgets window speaking the pinned socket
+([gui/project.md](gui/project.md)), and writing them against `docs/schema/` rather
+than against the Rust types found three things nothing here could have:
+
+- **`Request::Reload` had been in the protocol, the witness and the authorisation
+  table since M2, and no shipped client could send it.** `ncfg reload` exists now,
+  and exposing it found the daemon answering a rejected config with `ok`
+  ([0081](docs/decisions/0081-a-request-nobody-can-send-is-not-a-feature.md)).
+- **Every operation had two names.** A plan serialised its op as serde's
+  `snake_case` of the variant, a journal stored `Op::name()`, and nothing saw both
+  until a GUI drew a plan above the journal its apply returned. The tags are the
+  names now ([0082](docs/decisions/0082-one-operation-has-one-name.md),
+  [0083](docs/decisions/0083-the-tag-is-the-name.md)) -- and that turned up
+  `ncfg tui` having rendered the wrong word since it was written.
+- **The TUI's tests told it what the daemon sends.** Hand-written fixtures, in the
+  last crate not reading `docs/schema/`, and wrong twice over. They read the
+  witness now.
+
+Before it, ten pieces of work on the laptop list, every one of them
 started by asking what an operator would actually hit rather than what the roadmap
 said next. The tenth was one line on that list -- "the dhcpcd script has never been
 run by dhcpcd" -- and running it found three defects rather than the nothing a test
@@ -1252,6 +1272,38 @@ stops the file compiling when a variant appears, and the payload-heavy socket
 responses carry an *empty* payload — enough to pin the tag and the framing, with
 the contents left to the witness that owns them.
 
+#### A second implementation is a protocol review
+
+`client/` is the first consumer of netcfgd's socket written outside this
+workspace, and building it found three defects in the *protocol* rather than in
+itself. None was reachable from here, and the reason each hid is the same: every
+program that read a plan had been written in the same workspace as the program
+that wrote it.
+
+**A request nobody can send is not a feature.** `reload` was pinned, authorised
+and handled, and no client offered it. Nothing was red because nothing compared
+the two lists; the daemon reloads by inotify, so the gap was not in the
+behaviour but in the *answer* -- a config that does not compile said so to the
+log while the person holding the editor was told nothing. Exposing it found the
+socket answering from `state.diagnostics` where the truth was in the event, so a
+config a revert had rejected got "reloaded; the configuration compiles"
+([0081](docs/decisions/0081-a-request-nobody-can-send-is-not-a-feature.md)).
+
+**Two names for one operation, invisible from inside.** The plan's op tag was
+serde's `snake_case`; the journal's was `Op::name()`; `ncfg plan` printed the
+second and `ncfg plan --json` emitted the first. It took a screen showing a plan
+above a journal to put `link_create` four lines from `link.create`. The repair
+was a field first ([0082](docs/decisions/0082-one-operation-has-one-name.md)) and
+then the rename it recorded as somebody's to authorise
+([0083](docs/decisions/0083-the-tag-is-the-name.md)) -- which found `ncfg tui`
+drawing the snake tag since the day it was written, with a hand-written fixture
+asserting the dotted one and passing.
+
+**And the rename traded one risk for a subtler one**: two lists of forty-seven
+strings with nothing making them agree. The gate that forces them earned itself
+on its first run, on the one unit variant among forty-eight that the mechanical
+edit had skipped.
+
 #### What the gates have been worth lately
 
 Several sessions in a row have found more in the *tests* and in the measurements
@@ -1425,6 +1477,9 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A break that correctly passes is a finding, not a failed break.** Renaming an op on the wire left the TUI's plan-pane test green, and that is right: the pane draws what the daemon sends, so pane and test moved together. "One operation has one name" is a different question and it fails one layer down, in `netcfgd-plan`. A break that does not fire is worth understanding before it is worth fixing -- the answer is either a blind gate or a gate whose subject is somewhere else, and the two look identical until you say which.
+- **A fixture written from a second reading of the type repeats the first reading's mistake.** The wifi pane read `entries` where the daemon sends `access_points`, and the test written to stop that happening again was itself written from `ScanReport` rather than from the witness. It could not have caught the bug it was named after. Where a test exists because a field name was got wrong, the fixture has to come from the wire, not from a fresh look at the struct.
+- **Two witnesses can both be necessary and neither sufficient.** `socket.json` pins the `status` and `plan` envelopes with every list empty; `observed.json` and `plan.json` hold the content with no envelope. A test wanting a realistic answer has to compose them -- which is a guess about the protocol unless something checks it, so the composition is asserted against the pinned envelope member by member. Worth knowing before writing the fourth witness.
 - **If one thing here is going to be re-learned, it is §9's.** Every corollary under "prove every new gate can fail" was paid for by a gate that was green while the thing it guarded was broken. The worst-shaped instance so far was a gate that did not exist at all, with a comment saying it did.
 - **A column that renders two things the same way cannot tell them apart, and neither can a check reading it.** `nmcli`'s TYPE column prints a *generic* device's `TypeDescription`, and netcfgd's type description is the kernel's link kind — so "the tunnel shows as `wireguard`" passed with the device-type mapping deliberately broken, because a generic device whose description is the word `wireguard` renders identically to a real one. The repair is to assert a value only the real thing can produce: a listen port the document chose, and the type as a *number* rather than as a rendered column.
 - **A script that skips on a missing package is a script whose failures nobody sees.** `tunnel.sh` had been red on every machine with openvpn installed since 0067 landed, and green everywhere else because it skips without the package -- so the suite said nothing. What it was asserting is that a pushed `dhcp-option DOMAIN` shows up as a *declined* comment in the report; 0067 made it a `search=` suffix, and neither the check nor the doc comment above the code followed. Both are the same disease in two media, and the second one is the reason to grep prose when behaviour changes. The bucket of scripts that skip on a package needs running *deliberately*, on a machine that has it, or it is a bucket of tests nobody is running.
