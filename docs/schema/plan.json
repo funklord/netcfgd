@@ -3,13 +3,12 @@
     {
       "id": 0,
       "op": {
-        "op": "link_create",
+        "op": "link.create",
         "name": "br0",
         "kind": {
           "kind": "dummy"
         }
       },
-      "op_name": "link.create",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -20,7 +19,7 @@
         0
       ],
       "inverse": {
-        "op": "link_create",
+        "op": "link.create",
         "name": "br0",
         "kind": {
           "kind": "dummy"
@@ -30,10 +29,9 @@
     {
       "id": 1,
       "op": {
-        "op": "link_delete",
+        "op": "link.delete",
         "name": "br0"
       },
-      "op_name": "link.delete",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -44,18 +42,17 @@
         0
       ],
       "inverse": {
-        "op": "link_delete",
+        "op": "link.delete",
         "name": "br0"
       }
     },
     {
       "id": 2,
       "op": {
-        "op": "link_set_mtu",
+        "op": "link.set_mtu",
         "name": "eth0",
         "mtu": 9000
       },
-      "op_name": "link.set_mtu",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -66,7 +63,7 @@
         0
       ],
       "inverse": {
-        "op": "link_set_mtu",
+        "op": "link.set_mtu",
         "name": "eth0",
         "mtu": 9000
       }
@@ -74,11 +71,10 @@
     {
       "id": 3,
       "op": {
-        "op": "link_set_mac",
+        "op": "link.set_mac",
         "name": "eth0",
         "mac": "02:00:00:00:00:01"
       },
-      "op_name": "link.set_mac",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -89,7 +85,7 @@
         0
       ],
       "inverse": {
-        "op": "link_set_mac",
+        "op": "link.set_mac",
         "name": "eth0",
         "mac": "02:00:00:00:00:01"
       }
@@ -97,11 +93,10 @@
     {
       "id": 4,
       "op": {
-        "op": "link_set_master",
+        "op": "link.set_master",
         "name": "eth0",
         "master": "br0"
       },
-      "op_name": "link.set_master",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -112,7 +107,7 @@
         0
       ],
       "inverse": {
-        "op": "link_set_master",
+        "op": "link.set_master",
         "name": "eth0",
         "master": "br0"
       }
@@ -120,10 +115,9 @@
     {
       "id": 5,
       "op": {
-        "op": "link_unset_master",
+        "op": "link.unset_master",
         "name": "eth0"
       },
-      "op_name": "link.unset_master",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -134,17 +128,16 @@
         0
       ],
       "inverse": {
-        "op": "link_unset_master",
+        "op": "link.unset_master",
         "name": "eth0"
       }
     },
     {
       "id": 6,
       "op": {
-        "op": "link_up",
+        "op": "link.up",
         "name": "eth0"
       },
-      "op_name": "link.up",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -155,17 +148,16 @@
         0
       ],
       "inverse": {
-        "op": "link_up",
+        "op": "link.up",
         "name": "eth0"
       }
     },
     {
       "id": 7,
       "op": {
-        "op": "link_down",
+        "op": "link.down",
         "name": "eth0"
       },
-      "op_name": "link.down",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -176,20 +168,19 @@
         0
       ],
       "inverse": {
-        "op": "link_down",
+        "op": "link.down",
         "name": "eth0"
       }
     },
     {
       "id": 8,
       "op": {
-        "op": "addr_add",
+        "op": "addr.add",
         "iface": "eth0",
         "addr": "192.168.1.10/24",
         "preferred_lifetime": 3600,
         "valid_lifetime": 7200
       },
-      "op_name": "addr.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -200,7 +191,7 @@
         0
       ],
       "inverse": {
-        "op": "addr_add",
+        "op": "addr.add",
         "iface": "eth0",
         "addr": "192.168.1.10/24",
         "preferred_lifetime": 3600,
@@ -210,11 +201,10 @@
     {
       "id": 9,
       "op": {
-        "op": "addr_del",
+        "op": "addr.del",
         "iface": "eth0",
         "addr": "192.168.1.10/24"
       },
-      "op_name": "addr.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -225,7 +215,7 @@
         0
       ],
       "inverse": {
-        "op": "addr_del",
+        "op": "addr.del",
         "iface": "eth0",
         "addr": "192.168.1.10/24"
       }
@@ -233,7 +223,7 @@
     {
       "id": 10,
       "op": {
-        "op": "route_add",
+        "op": "route.add",
         "iface": "eth0",
         "route": {
           "destination": "10.0.0.0/8",
@@ -246,7 +236,6 @@
           "proto": 110
         }
       },
-      "op_name": "route.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -257,7 +246,7 @@
         0
       ],
       "inverse": {
-        "op": "route_add",
+        "op": "route.add",
         "iface": "eth0",
         "route": {
           "destination": "10.0.0.0/8",
@@ -274,7 +263,7 @@
     {
       "id": 11,
       "op": {
-        "op": "route_del",
+        "op": "route.del",
         "iface": "eth0",
         "route": {
           "destination": "10.0.0.0/8",
@@ -287,7 +276,6 @@
           "proto": 110
         }
       },
-      "op_name": "route.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -298,7 +286,7 @@
         0
       ],
       "inverse": {
-        "op": "route_del",
+        "op": "route.del",
         "iface": "eth0",
         "route": {
           "destination": "10.0.0.0/8",
@@ -315,11 +303,10 @@
     {
       "id": 12,
       "op": {
-        "op": "backend_start",
+        "op": "backend.start",
         "kind": "dhcp4",
         "iface": "eth0"
       },
-      "op_name": "backend.start",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -330,7 +317,7 @@
         0
       ],
       "inverse": {
-        "op": "backend_start",
+        "op": "backend.start",
         "kind": "dhcp4",
         "iface": "eth0"
       }
@@ -338,11 +325,10 @@
     {
       "id": 13,
       "op": {
-        "op": "backend_stop",
+        "op": "backend.stop",
         "kind": "open_vpn",
         "iface": "vpn0"
       },
-      "op_name": "backend.stop",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -353,7 +339,7 @@
         0
       ],
       "inverse": {
-        "op": "backend_stop",
+        "op": "backend.stop",
         "kind": "open_vpn",
         "iface": "vpn0"
       }
@@ -361,11 +347,10 @@
     {
       "id": 14,
       "op": {
-        "op": "backend_reload",
+        "op": "backend.reload",
         "kind": "supplicant",
         "iface": "wlan0"
       },
-      "op_name": "backend.reload",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -376,7 +361,7 @@
         0
       ],
       "inverse": {
-        "op": "backend_reload",
+        "op": "backend.reload",
         "kind": "supplicant",
         "iface": "wlan0"
       }
@@ -384,14 +369,13 @@
     {
       "id": 15,
       "op": {
-        "op": "bridge_vlan_add",
+        "op": "bridge.vlan.add",
         "iface": "eth0",
         "vid": 10,
         "pvid": true,
         "untagged": true,
         "on_self": false
       },
-      "op_name": "bridge.vlan.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -402,7 +386,7 @@
         0
       ],
       "inverse": {
-        "op": "bridge_vlan_add",
+        "op": "bridge.vlan.add",
         "iface": "eth0",
         "vid": 10,
         "pvid": true,
@@ -413,12 +397,11 @@
     {
       "id": 16,
       "op": {
-        "op": "bridge_vlan_del",
+        "op": "bridge.vlan.del",
         "iface": "eth0",
         "vid": 10,
         "on_self": true
       },
-      "op_name": "bridge.vlan.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -429,7 +412,7 @@
         0
       ],
       "inverse": {
-        "op": "bridge_vlan_del",
+        "op": "bridge.vlan.del",
         "iface": "eth0",
         "vid": 10,
         "on_self": true
@@ -438,13 +421,12 @@
     {
       "id": 17,
       "op": {
-        "op": "wifi_set_profiles",
+        "op": "wifi.set_profiles",
         "device": "wlan0",
         "profiles": [
           "home"
         ]
       },
-      "op_name": "wifi.set_profiles",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -455,7 +437,7 @@
         0
       ],
       "inverse": {
-        "op": "wifi_set_profiles",
+        "op": "wifi.set_profiles",
         "device": "wlan0",
         "profiles": [
           "home"
@@ -465,11 +447,10 @@
     {
       "id": 18,
       "op": {
-        "op": "wifi_associate",
+        "op": "wifi.associate",
         "device": "wlan0",
         "network_id": "home"
       },
-      "op_name": "wifi.associate",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -480,7 +461,7 @@
         0
       ],
       "inverse": {
-        "op": "wifi_associate",
+        "op": "wifi.associate",
         "device": "wlan0",
         "network_id": "home"
       }
@@ -488,10 +469,9 @@
     {
       "id": 19,
       "op": {
-        "op": "wifi_disassociate",
+        "op": "wifi.disassociate",
         "device": "wlan0"
       },
-      "op_name": "wifi.disassociate",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -502,18 +482,17 @@
         0
       ],
       "inverse": {
-        "op": "wifi_disassociate",
+        "op": "wifi.disassociate",
         "device": "wlan0"
       }
     },
     {
       "id": 20,
       "op": {
-        "op": "wifi_set_regdom",
+        "op": "wifi.set_regdom",
         "device": "wlan0",
         "country": "SE"
       },
-      "op_name": "wifi.set_regdom",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -524,7 +503,7 @@
         0
       ],
       "inverse": {
-        "op": "wifi_set_regdom",
+        "op": "wifi.set_regdom",
         "device": "wlan0",
         "country": "SE"
       }
@@ -532,12 +511,11 @@
     {
       "id": 21,
       "op": {
-        "op": "access_control_add",
+        "op": "access_control.add",
         "iface": "wlan0",
         "list": "deny",
         "station": "02:00:00:00:00:aa"
       },
-      "op_name": "access_control.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -548,7 +526,7 @@
         0
       ],
       "inverse": {
-        "op": "access_control_add",
+        "op": "access_control.add",
         "iface": "wlan0",
         "list": "deny",
         "station": "02:00:00:00:00:aa"
@@ -557,12 +535,11 @@
     {
       "id": 22,
       "op": {
-        "op": "access_control_del",
+        "op": "access_control.del",
         "iface": "wlan0",
         "list": "allow",
         "station": "02:00:00:00:00:bb"
       },
-      "op_name": "access_control.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -573,7 +550,7 @@
         0
       ],
       "inverse": {
-        "op": "access_control_del",
+        "op": "access_control.del",
         "iface": "wlan0",
         "list": "allow",
         "station": "02:00:00:00:00:bb"
@@ -582,11 +559,10 @@
     {
       "id": 23,
       "op": {
-        "op": "link_set_bond",
+        "op": "link.set_bond",
         "name": "bond0",
         "mode": true
       },
-      "op_name": "link.set_bond",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -597,7 +573,7 @@
         0
       ],
       "inverse": {
-        "op": "link_set_bond",
+        "op": "link.set_bond",
         "name": "bond0",
         "mode": true
       }
@@ -605,10 +581,9 @@
     {
       "id": 24,
       "op": {
-        "op": "link_set_bridge",
+        "op": "link.set_bridge",
         "name": "br0"
       },
-      "op_name": "link.set_bridge",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -619,17 +594,16 @@
         0
       ],
       "inverse": {
-        "op": "link_set_bridge",
+        "op": "link.set_bridge",
         "name": "br0"
       }
     },
     {
       "id": 25,
       "op": {
-        "op": "link_set_macvlan",
+        "op": "link.set_macvlan",
         "name": "mv0"
       },
-      "op_name": "link.set_macvlan",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -640,17 +614,16 @@
         0
       ],
       "inverse": {
-        "op": "link_set_macvlan",
+        "op": "link.set_macvlan",
         "name": "mv0"
       }
     },
     {
       "id": 26,
       "op": {
-        "op": "link_set_tunnel",
+        "op": "link.set_tunnel",
         "name": "tun-office"
       },
-      "op_name": "link.set_tunnel",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -661,17 +634,16 @@
         0
       ],
       "inverse": {
-        "op": "link_set_tunnel",
+        "op": "link.set_tunnel",
         "name": "tun-office"
       }
     },
     {
       "id": 27,
       "op": {
-        "op": "link_set_vxlan",
+        "op": "link.set_vxlan",
         "name": "vx0"
       },
-      "op_name": "link.set_vxlan",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -682,20 +654,19 @@
         0
       ],
       "inverse": {
-        "op": "link_set_vxlan",
+        "op": "link.set_vxlan",
         "name": "vx0"
       }
     },
     {
       "id": 28,
       "op": {
-        "op": "wg_set_device",
+        "op": "wg.set_device",
         "iface": "wg0",
         "private_key_ref": "@secret:wg0",
         "listen_port": 51820,
         "fwmark": 1
       },
-      "op_name": "wg.set_device",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -706,7 +677,7 @@
         0
       ],
       "inverse": {
-        "op": "wg_set_device",
+        "op": "wg.set_device",
         "iface": "wg0",
         "private_key_ref": "@secret:wg0",
         "listen_port": 51820,
@@ -716,7 +687,7 @@
     {
       "id": 29,
       "op": {
-        "op": "wg_set_peers",
+        "op": "wg.set_peers",
         "iface": "wg0",
         "peers": [
           {
@@ -730,7 +701,6 @@
           }
         ]
       },
-      "op_name": "wg.set_peers",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -741,7 +711,7 @@
         0
       ],
       "inverse": {
-        "op": "wg_set_peers",
+        "op": "wg.set_peers",
         "iface": "wg0",
         "peers": [
           {
@@ -759,7 +729,7 @@
     {
       "id": 30,
       "op": {
-        "op": "dns_apply",
+        "op": "dns.apply",
         "scope": "globals",
         "policy": {
           "mode": "write_resolv_conf",
@@ -775,7 +745,6 @@
           "options": []
         }
       },
-      "op_name": "dns.apply",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -786,7 +755,7 @@
         0
       ],
       "inverse": {
-        "op": "dns_apply",
+        "op": "dns.apply",
         "scope": "globals",
         "policy": {
           "mode": "write_resolv_conf",
@@ -806,7 +775,7 @@
     {
       "id": 31,
       "op": {
-        "op": "link_set_offloads",
+        "op": "link.set_offloads",
         "name": "eth0",
         "features": [
           [
@@ -815,7 +784,6 @@
           ]
         ]
       },
-      "op_name": "link.set_offloads",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -826,7 +794,7 @@
         0
       ],
       "inverse": {
-        "op": "link_set_offloads",
+        "op": "link.set_offloads",
         "name": "eth0",
         "features": [
           [
@@ -839,11 +807,10 @@
     {
       "id": 32,
       "op": {
-        "op": "link_set_ipv6_token",
+        "op": "link.set_ipv6_token",
         "name": "eth0",
         "token": "::5"
       },
-      "op_name": "link.set_ipv6_token",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -854,7 +821,7 @@
         0
       ],
       "inverse": {
-        "op": "link_set_ipv6_token",
+        "op": "link.set_ipv6_token",
         "name": "eth0",
         "token": "::5"
       }
@@ -862,7 +829,7 @@
     {
       "id": 33,
       "op": {
-        "op": "rule_add",
+        "op": "rule.add",
         "rule": {
           "id": "from-lan",
           "priority": 100,
@@ -880,7 +847,6 @@
           "invert": true
         }
       },
-      "op_name": "rule.add",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -891,7 +857,7 @@
         0
       ],
       "inverse": {
-        "op": "rule_add",
+        "op": "rule.add",
         "rule": {
           "id": "from-lan",
           "priority": 100,
@@ -913,7 +879,7 @@
     {
       "id": 34,
       "op": {
-        "op": "rule_del",
+        "op": "rule.del",
         "rule": {
           "id": "from-lan",
           "priority": 100,
@@ -931,7 +897,6 @@
           "invert": true
         }
       },
-      "op_name": "rule.del",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -942,7 +907,7 @@
         0
       ],
       "inverse": {
-        "op": "rule_del",
+        "op": "rule.del",
         "rule": {
           "id": "from-lan",
           "priority": 100,
@@ -964,13 +929,12 @@
     {
       "id": 35,
       "op": {
-        "op": "qdisc_set",
+        "op": "qdisc.set",
         "iface": "eth0",
         "kind": "cake",
         "bandwidth_bits": 20000000,
         "ingress": true
       },
-      "op_name": "qdisc.set",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -981,7 +945,7 @@
         0
       ],
       "inverse": {
-        "op": "qdisc_set",
+        "op": "qdisc.set",
         "iface": "eth0",
         "kind": "cake",
         "bandwidth_bits": 20000000,
@@ -991,10 +955,9 @@
     {
       "id": 36,
       "op": {
-        "op": "qdisc_reset",
+        "op": "qdisc.reset",
         "iface": "eth0"
       },
-      "op_name": "qdisc.reset",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1005,18 +968,17 @@
         0
       ],
       "inverse": {
-        "op": "qdisc_reset",
+        "op": "qdisc.reset",
         "iface": "eth0"
       }
     },
     {
       "id": 37,
       "op": {
-        "op": "ingress_redirect",
+        "op": "ingress.redirect",
         "iface": "eth0",
         "target": "ifb-eth0"
       },
-      "op_name": "ingress.redirect",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1027,7 +989,7 @@
         0
       ],
       "inverse": {
-        "op": "ingress_redirect",
+        "op": "ingress.redirect",
         "iface": "eth0",
         "target": "ifb-eth0"
       }
@@ -1035,10 +997,9 @@
     {
       "id": 38,
       "op": {
-        "op": "ingress_redirect_clear",
+        "op": "ingress.redirect.clear",
         "iface": "eth0"
       },
-      "op_name": "ingress.redirect.clear",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1049,18 +1010,17 @@
         0
       ],
       "inverse": {
-        "op": "ingress_redirect_clear",
+        "op": "ingress.redirect.clear",
         "iface": "eth0"
       }
     },
     {
       "id": 39,
       "op": {
-        "op": "sysctl_set_forwarding",
+        "op": "sysctl.set_forwarding",
         "iface": "eth0",
         "enabled": true
       },
-      "op_name": "sysctl.set_forwarding",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1071,7 +1031,7 @@
         0
       ],
       "inverse": {
-        "op": "sysctl_set_forwarding",
+        "op": "sysctl.set_forwarding",
         "iface": "eth0",
         "enabled": true
       }
@@ -1079,11 +1039,10 @@
     {
       "id": 40,
       "op": {
-        "op": "sysctl_set_privacy",
+        "op": "sysctl.set_privacy",
         "iface": "eth0",
         "prefer_temporary": true
       },
-      "op_name": "sysctl.set_privacy",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1094,7 +1053,7 @@
         0
       ],
       "inverse": {
-        "op": "sysctl_set_privacy",
+        "op": "sysctl.set_privacy",
         "iface": "eth0",
         "prefer_temporary": true
       }
@@ -1102,11 +1061,10 @@
     {
       "id": 41,
       "op": {
-        "op": "sysctl_set_accept_ra",
+        "op": "sysctl.set_accept_ra",
         "iface": "eth0",
         "value": 2
       },
-      "op_name": "sysctl.set_accept_ra",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1117,7 +1075,7 @@
         0
       ],
       "inverse": {
-        "op": "sysctl_set_accept_ra",
+        "op": "sysctl.set_accept_ra",
         "iface": "eth0",
         "value": 2
       }
@@ -1125,10 +1083,9 @@
     {
       "id": 42,
       "op": {
-        "op": "hostname_set",
+        "op": "hostname.set",
         "name": "host.example"
       },
-      "op_name": "hostname.set",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1139,19 +1096,18 @@
         0
       ],
       "inverse": {
-        "op": "hostname_set",
+        "op": "hostname.set",
         "name": "host.example"
       }
     },
     {
       "id": 43,
       "op": {
-        "op": "nat_replace",
+        "op": "nat.replace",
         "uplinks": [
           "eth0"
         ]
       },
-      "op_name": "nat.replace",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1162,7 +1118,7 @@
         0
       ],
       "inverse": {
-        "op": "nat_replace",
+        "op": "nat.replace",
         "uplinks": [
           "eth0"
         ]
@@ -1171,13 +1127,12 @@
     {
       "id": 44,
       "op": {
-        "op": "hook_run",
+        "op": "hook.run",
         "iface": "eth0",
         "phase": "post_up",
         "path": "/run/netcfgd/hooks/eth0-post_up",
         "value": "192.168.1.50/24"
       },
-      "op_name": "hook.run",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1188,7 +1143,7 @@
         0
       ],
       "inverse": {
-        "op": "hook_run",
+        "op": "hook.run",
         "iface": "eth0",
         "phase": "post_up",
         "path": "/run/netcfgd/hooks/eth0-post_up",
@@ -1198,10 +1153,9 @@
     {
       "id": 45,
       "op": {
-        "op": "commit_arm",
+        "op": "commit.arm",
         "window_seconds": 90
       },
-      "op_name": "commit.arm",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1212,16 +1166,15 @@
         0
       ],
       "inverse": {
-        "op": "commit_arm",
+        "op": "commit.arm",
         "window_seconds": 90
       }
     },
     {
       "id": 46,
       "op": {
-        "op": "commit_confirm"
+        "op": "commit.confirm"
       },
-      "op_name": "commit.confirm",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1232,16 +1185,15 @@
         0
       ],
       "inverse": {
-        "op": "commit_confirm"
+        "op": "commit.confirm"
       }
     },
     {
       "id": 47,
       "op": {
-        "op": "commit_revert",
+        "op": "commit.revert",
         "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"
       },
-      "op_name": "commit.revert",
       "reason": {
         "interface": "eth0",
         "field": "addressing[0]",
@@ -1252,7 +1204,7 @@
         0
       ],
       "inverse": {
-        "op": "commit_revert",
+        "op": "commit.revert",
         "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"
       }
     }

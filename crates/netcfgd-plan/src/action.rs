@@ -15,9 +15,10 @@ use serde::{Deserialize, Serialize};
 /// this against section 4 should find the same list rather than a subset that
 /// happens to match the current milestone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op")]
 pub enum Op {
 	/// Create a link that does not exist.
+	#[serde(rename = "link.create")]
 	LinkCreate {
 		/// Interface name.
 		name: String,
@@ -25,11 +26,13 @@ pub enum Op {
 		kind: Box<InterfaceKind>,
 	},
 	/// Remove a link netcfgd created.
+	#[serde(rename = "link.delete")]
 	LinkDelete {
 		/// Interface name.
 		name: String,
 	},
 	/// Set the MTU.
+	#[serde(rename = "link.set_mtu")]
 	LinkSetMtu {
 		/// Interface name.
 		name: String,
@@ -37,6 +40,7 @@ pub enum Op {
 		mtu: u32,
 	},
 	/// Set the hardware address.
+	#[serde(rename = "link.set_mac")]
 	LinkSetMac {
 		/// Interface name.
 		name: String,
@@ -44,6 +48,7 @@ pub enum Op {
 		mac: String,
 	},
 	/// Enslave to a bridge or bond.
+	#[serde(rename = "link.set_master")]
 	LinkSetMaster {
 		/// Interface name.
 		name: String,
@@ -51,21 +56,25 @@ pub enum Op {
 		master: String,
 	},
 	/// Release from a bridge or bond.
+	#[serde(rename = "link.unset_master")]
 	LinkUnsetMaster {
 		/// Interface name.
 		name: String,
 	},
 	/// Bring a link up.
+	#[serde(rename = "link.up")]
 	LinkUp {
 		/// Interface name.
 		name: String,
 	},
 	/// Take a link down.
+	#[serde(rename = "link.down")]
 	LinkDown {
 		/// Interface name.
 		name: String,
 	},
 	/// Add an address.
+	#[serde(rename = "addr.add")]
 	AddrAdd {
 		/// Interface name.
 		iface: String,
@@ -77,6 +86,7 @@ pub enum Op {
 		valid_lifetime: Option<u32>,
 	},
 	/// Remove an address.
+	#[serde(rename = "addr.del")]
 	AddrDel {
 		/// Interface name.
 		iface: String,
@@ -84,6 +94,7 @@ pub enum Op {
 		addr: String,
 	},
 	/// Install a route.
+	#[serde(rename = "route.add")]
 	RouteAdd {
 		/// Interface name.
 		iface: String,
@@ -91,6 +102,7 @@ pub enum Op {
 		route: Box<Route>,
 	},
 	/// Remove a route.
+	#[serde(rename = "route.del")]
 	RouteDel {
 		/// Interface name.
 		iface: String,
@@ -98,6 +110,7 @@ pub enum Op {
 		route: Box<Route>,
 	},
 	/// Start a helper.
+	#[serde(rename = "backend.start")]
 	BackendStart {
 		/// Which helper.
 		kind: BackendKind,
@@ -105,6 +118,7 @@ pub enum Op {
 		iface: String,
 	},
 	/// Stop a helper.
+	#[serde(rename = "backend.stop")]
 	BackendStop {
 		/// Which helper.
 		kind: BackendKind,
@@ -112,6 +126,7 @@ pub enum Op {
 		iface: String,
 	},
 	/// Reconfigure a running helper.
+	#[serde(rename = "backend.reload")]
 	BackendReload {
 		/// Which helper.
 		kind: BackendKind,
@@ -119,6 +134,7 @@ pub enum Op {
 		iface: String,
 	},
 	/// Put a VLAN on a bridge port, or on the bridge itself.
+	#[serde(rename = "bridge.vlan.add")]
 	BridgeVlanAdd {
 		/// Which interface.
 		iface: String,
@@ -132,6 +148,7 @@ pub enum Op {
 		on_self: bool,
 	},
 	/// Take one off.
+	#[serde(rename = "bridge.vlan.del")]
 	BridgeVlanDel {
 		/// Which interface.
 		iface: String,
@@ -141,6 +158,7 @@ pub enum Op {
 		on_self: bool,
 	},
 	/// Hand a radio its network profiles.
+	#[serde(rename = "wifi.set_profiles")]
 	WifiSetProfiles {
 		/// Which device.
 		device: String,
@@ -148,6 +166,7 @@ pub enum Op {
 		profiles: Vec<String>,
 	},
 	/// Join a network.
+	#[serde(rename = "wifi.associate")]
 	WifiAssociate {
 		/// Which device.
 		device: String,
@@ -155,6 +174,7 @@ pub enum Op {
 		network_id: String,
 	},
 	/// Leave the current network.
+	#[serde(rename = "wifi.disassociate")]
 	WifiDisassociate {
 		/// Which device.
 		device: String,
@@ -168,6 +188,7 @@ pub enum Op {
 	/// transaction, and splitting it would describe states the kernel never
 	/// passes through, while joining these would describe one action that half
 	/// happened.
+	#[serde(rename = "access_control.add")]
 	AccessControlAdd {
 		/// Which access point's radio.
 		iface: String,
@@ -177,6 +198,7 @@ pub enum Op {
 		station: String,
 	},
 	/// Take one station off one of them.
+	#[serde(rename = "access_control.del")]
 	AccessControlDel {
 		/// Which access point's radio.
 		iface: String,
@@ -186,6 +208,7 @@ pub enum Op {
 		station: String,
 	},
 	/// Set the regulatory domain.
+	#[serde(rename = "wifi.set_regdom")]
 	WifiSetRegdom {
 		/// Which device.
 		device: String,
@@ -197,6 +220,7 @@ pub enum Op {
 	/// The kernel takes `mode` and `miimon` on a live bond -- asked rather than
 	/// assumed, which matters because the same question has the opposite answer
 	/// for a VLAN (0057).
+	#[serde(rename = "link.set_bond")]
 	LinkSetBond {
 		/// Interface name.
 		name: String,
@@ -215,6 +239,7 @@ pub enum Op {
 	/// The kernel takes them as one `RTM_NEWLINK` either way, and the executor
 	/// has always had one function for both -- what was missing was anything
 	/// that emitted this (decision 0057).
+	#[serde(rename = "link.set_bridge")]
 	LinkSetBridge {
 		/// Interface name.
 		name: String,
@@ -225,6 +250,7 @@ pub enum Op {
 	/// direction between one of those and `passthru` -- `macvlan_changelink`
 	/// answers `EINVAL` -- so that edit gets a sentence from the planner and
 	/// never reaches here (decision 0058).
+	#[serde(rename = "link.set_macvlan")]
 	LinkSetMacvlan {
 		/// Interface name.
 		name: String,
@@ -234,6 +260,7 @@ pub enum Op {
 	/// Carries no values: the executor reads them from the document, and it sends
 	/// the whole nest rather than the field that moved, because the GRE and ip
 	/// tunnel families reset every attribute a request leaves out.
+	#[serde(rename = "link.set_tunnel")]
 	LinkSetTunnel {
 		/// Interface name.
 		name: String,
@@ -243,11 +270,13 @@ pub enum Op {
 	/// The endpoints only. A changed `id` or `port` is refused by the kernel --
 	/// the port even at the value it already has -- and the planner says so
 	/// rather than emitting this (decision 0058).
+	#[serde(rename = "link.set_vxlan")]
 	LinkSetVxlan {
 		/// Interface name.
 		name: String,
 	},
 	/// Configure a `WireGuard` device.
+	#[serde(rename = "wg.set_device")]
 	WgSetDevice {
 		/// Interface name.
 		iface: String,
@@ -259,6 +288,7 @@ pub enum Op {
 		fwmark: Option<u32>,
 	},
 	/// Replace a `WireGuard` device's peers.
+	#[serde(rename = "wg.set_peers")]
 	WgSetPeers {
 		/// Interface name.
 		iface: String,
@@ -266,6 +296,7 @@ pub enum Op {
 		peers: Vec<WgPeer>,
 	},
 	/// Deliver a DNS scope through its mode's backend.
+	#[serde(rename = "dns.apply")]
 	DnsApply {
 		/// Which scope: an interface name, or `globals`.
 		scope: String,
@@ -278,6 +309,7 @@ pub enum Op {
 	/// what the kernel takes: a features message carries a mask bitset saying
 	/// "change exactly these", and splitting it per feature would be several
 	/// round trips describing states the device never passes through.
+	#[serde(rename = "link.set_offloads")]
 	LinkSetOffloads {
 		/// Interface name.
 		name: String,
@@ -285,6 +317,7 @@ pub enum Op {
 		features: Vec<(String, bool)>,
 	},
 	/// Set or clear the IPv6 interface identifier.
+	#[serde(rename = "link.set_ipv6_token")]
 	LinkSetIpv6Token {
 		/// Interface name.
 		name: String,
@@ -301,6 +334,7 @@ pub enum Op {
 	/// Whole-host, so unlike every other op here it names no interface: a guard
 	/// cannot match it and commit-confirm reverts it by name rather than by
 	/// interface.
+	#[serde(rename = "hostname.set")]
 	HostnameSet {
 		/// The name to set.
 		name: String,
@@ -311,6 +345,7 @@ pub enum Op {
 	/// globally for the reason `sysctl.set_forwarding` is: the global one would
 	/// change every interface on the machine, including the ones the document
 	/// says nothing about.
+	#[serde(rename = "sysctl.set_privacy")]
 	SysctlSetPrivacy {
 		/// Which interface.
 		iface: String,
@@ -324,6 +359,7 @@ pub enum Op {
 	/// an interface whose advertisements the kernel would otherwise ignore, and
 	/// `1` -- the kernel's default -- to give back one it wrote. It never writes
 	/// `0`. Decision 0073.
+	#[serde(rename = "sysctl.set_accept_ra")]
 	SysctlSetAcceptRa {
 		/// Which interface.
 		iface: String,
@@ -331,11 +367,13 @@ pub enum Op {
 		value: u8,
 	},
 	/// Install a policy routing rule.
+	#[serde(rename = "rule.add")]
 	RuleAdd {
 		/// The rule.
 		rule: Box<RoutingRule>,
 	},
 	/// Remove one netcfgd installed.
+	#[serde(rename = "rule.del")]
 	RuleDel {
 		/// The rule.
 		rule: Box<RoutingRule>,
@@ -345,6 +383,7 @@ pub enum Op {
 	/// The root and nothing below it (decision 0023). Sent as a replace, so
 	/// there is no moment where the interface is on the kernel default -- on a
 	/// shaped uplink that moment is a window of unshaped traffic.
+	#[serde(rename = "qdisc.set")]
 	QdiscSet {
 		/// Interface name.
 		iface: String,
@@ -360,6 +399,7 @@ pub enum Op {
 	/// Not deletion in the sense `addr.del` is: every interface has a qdisc,
 	/// so removing netcfgd's means `net.core.default_qdisc` returns
 	/// immediately. There is no state in between and nothing to restore.
+	#[serde(rename = "qdisc.reset")]
 	QdiscReset {
 		/// Interface name.
 		iface: String,
@@ -370,6 +410,7 @@ pub enum Op {
 	/// action -- the only filter netcfgd generates, and it carries no policy:
 	/// it matches every packet unconditionally and the sole variable is where
 	/// they land. Decision 0023's amendment.
+	#[serde(rename = "ingress.redirect")]
 	IngressRedirect {
 		/// Interface traffic arrives on.
 		iface: String,
@@ -377,6 +418,7 @@ pub enum Op {
 		target: String,
 	},
 	/// Remove the ingress qdisc, and the redirect hanging off it.
+	#[serde(rename = "ingress.redirect.clear")]
 	IngressRedirectClear {
 		/// Interface traffic arrives on.
 		iface: String,
@@ -386,6 +428,7 @@ pub enum Op {
 	/// A sysctl and nothing else -- see [`netcfgd_model::Interface::forwarding`]
 	/// for why this is the ingress side and what it does to IPv6 router
 	/// advertisements.
+	#[serde(rename = "sysctl.set_forwarding")]
 	SysctlSetForwarding {
 		/// Interface name.
 		iface: String,
@@ -402,11 +445,13 @@ pub enum Op {
 	///
 	/// An empty list removes the table. That is how a document that stops
 	/// asking for NAT is honoured, and it is why this is not `NatAdd`.
+	#[serde(rename = "nat.replace")]
 	NatReplace {
 		/// Interfaces to masquerade, sorted. Empty removes the table.
 		uplinks: Vec<String>,
 	},
 	/// Run a hook.
+	#[serde(rename = "hook.run")]
 	HookRun {
 		/// Which interface's lifecycle.
 		iface: String,
@@ -428,13 +473,16 @@ pub enum Op {
 		value: Option<String>,
 	},
 	/// Start a commit-confirm window.
+	#[serde(rename = "commit.arm")]
 	CommitArm {
 		/// How long before automatic revert.
 		window_seconds: u32,
 	},
 	/// Confirm within the window.
+	#[serde(rename = "commit.confirm")]
 	CommitConfirm,
 	/// Revert to a previous document.
+	#[serde(rename = "commit.revert")]
 	CommitRevert {
 		/// Which document to go back to.
 		to_document_hash: String,
@@ -786,21 +834,6 @@ pub struct Action {
 	pub id: u32,
 	/// What to do.
 	pub op: Op,
-	/// The op's short name, the one everything else already prints.
-	///
-	/// Redundant with `op`'s serde tag, and deliberately so. The tag is the
-	/// `snake_case` of the variant (`bridge_vlan_add`); the name is what `ncfg
-	/// plan` prints, what the TUI shows and what every journal record stores
-	/// (`bridge.vlan.add`). Three of forty-seven differ by more than a
-	/// separator, so no client can derive one from the other -- and the first
-	/// second implementation of this protocol duly showed `link_create` in its
-	/// plan and `link.create` in the journal beside it, for the same operation.
-	///
-	/// Sent rather than left to each client to tabulate, because a table of
-	/// forty-seven names copied into every client is forty-seven chances for
-	/// one of them to disagree with this one.
-	#[serde(default)]
-	pub op_name: String,
 	/// Why this is here.
 	pub reason: Reason,
 	/// Actions that must complete first.
