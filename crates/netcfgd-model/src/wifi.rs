@@ -98,6 +98,40 @@ impl<'de> Deserialize<'de> for Ssid {
 	}
 }
 
+/// When a client should look for a better access point on the same network.
+///
+/// **The oldest thing wifi does, and the one netcfgd could not ask for.** An ESS
+/// is several access points sharing one SSID, and a station picks whichever of
+/// them it hears best -- walk down the corridor and the laptop moves to the
+/// nearer one. `wpa_supplicant` does that itself, within one network block, and
+/// only while a `bgscan` module is asking it to look; without one it re-selects
+/// only after the link has already gone, which is a client that roams by first
+/// losing the network.
+///
+/// Stated as an intent rather than as `wpa_supplicant`'s string. The operator says
+/// how weak is weak and how often to look; `netcfgd-supplicant` renders the
+/// module, the way every other backend detail is rendered rather than passed
+/// through (design section 8). A `bgscan="simple:30:-70:300"` in a config file
+/// would be netcfgd asking the operator to know which supplicant is underneath.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoamPolicy {
+	/// Below this, in dBm, the radio is weak enough to look for better.
+	///
+	/// `wpa_supplicant` scans at `interval` while the signal is under this and
+	/// at `slow_interval` while it is over -- so this is the whole of "when
+	/// should a laptop start looking", and -70 dBm is the usual answer.
+	pub signal: i32,
+	/// Seconds between scans while the signal is below `signal`.
+	pub interval: u32,
+	/// Seconds between scans while it is above.
+	///
+	/// Not zero and not absent: a station that stops looking entirely once it
+	/// is comfortable never notices the access point it walked past, which is
+	/// the failure this whole policy exists to avoid.
+	pub slow_interval: u32,
+}
+
 /// A remembered wifi network.
 ///
 /// A profile, not a binding: it is not attached to a device, because the same
@@ -124,8 +158,20 @@ pub struct WifiNetwork {
 	#[serde(default)]
 	pub metered: bool,
 	/// Pin association to one BSSID.
+	///
+	/// The opposite of [`RoamPolicy`] and refused alongside it: a network
+	/// pinned to one access point has nowhere to roam, and a document asking
+	/// for both is asking for two different things at once.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub bssid_pin: Option<String>,
+	/// When to look for a better access point on this same network.
+	///
+	/// `None` is `wpa_supplicant`'s own default: look only after the link is
+	/// gone. That stays the default because a background scan costs airtime
+	/// and interrupts traffic, and a machine that never moves -- a router, a
+	/// server with a radio -- should not be paying for it.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub roam: Option<RoamPolicy>,
 	/// Addressing to apply once associated.
 	#[serde(default)]
 	pub addressing: Vec<AddressSource>,

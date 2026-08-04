@@ -184,6 +184,26 @@ pub fn settings(
 		out.push(Setting::plain("bssid", bssid.clone()));
 	}
 
+	if let Some(roam) = &network.roam {
+		// `simple`, not `learn`. The learn module keeps a database file of
+		// which channels this network uses, which is a second piece of state
+		// on disk that netcfgd would then own the lifetime of -- and its
+		// benefit is fewer scans, not better roaming. The module name is
+		// chosen here and not in the document for the reason every other
+		// backend detail is: a `bgscan="simple:30:-70:300"` in netcfgd.conf
+		// would be netcfgd asking the operator which supplicant is underneath.
+		//
+		// Quoted, because wpa_supplicant parses this one as a string and
+		// takes the whole quoted value as the module specification.
+		out.push(Setting::plain(
+			"bgscan",
+			format!(
+				"\"simple:{}:{}:{}\"",
+				roam.interval, roam.signal, roam.slow_interval
+			),
+		));
+	}
+
 	// `wpa_supplicant`'s priority is unsigned and higher wins, which matches the
 	// model's ordering but not its range.
 	if network.priority != 0 {

@@ -6159,6 +6159,25 @@
         "transport": "tls"
       },
       "hooks": []
+    },
+    {
+      "id": "n-roaming",
+      "ssid": "726f616d696e67",
+      "hidden": false,
+      "security": {
+        "type": "owe"
+      },
+      "priority": 10,
+      "autoconnect": true,
+      "metered": false,
+      "roam": {
+        "signal": -68,
+        "interval": 20,
+        "slow_interval": 240
+      },
+      "addressing": [],
+      "routes": [],
+      "hooks": []
     }
   ],
   "rules": [

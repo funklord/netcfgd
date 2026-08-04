@@ -550,7 +550,7 @@ fn every_network() -> Vec<WifiNetwork> {
 		("owe", Security::Owe),
 	];
 
-	securities
+	let mut networks: Vec<WifiNetwork> = securities
 		.into_iter()
 		.map(|(name, security)| WifiNetwork {
 			id: format!("n-{name}"),
@@ -561,12 +561,38 @@ fn every_network() -> Vec<WifiNetwork> {
 			autoconnect: true,
 			metered: true,
 			bssid_pin: Some("00:11:22:33:44:55".to_owned()),
+			roam: None,
 			addressing: every_address_source(),
 			routes: Vec::new(),
 			dns: Some(dns_policy(DnsMode::Resolved)),
 			hooks: Vec::new(),
 		})
-		.collect()
+		.collect();
+
+	// One that roams, on its own network rather than beside a pin: the two are
+	// mutually exclusive to the compiler -- an access point to stay on and a
+	// better one to move to are different requests -- so a sample carrying both
+	// would pin a document nothing can produce.
+	networks.push(WifiNetwork {
+		id: "n-roaming".to_owned(),
+		ssid: Ssid::new(b"roaming".to_vec()).expect("an ssid"),
+		hidden: false,
+		security: Security::Owe,
+		priority: 10,
+		autoconnect: true,
+		metered: false,
+		bssid_pin: None,
+		roam: Some(netcfgd_model::RoamPolicy {
+			signal: -68,
+			interval: 20,
+			slow_interval: 240,
+		}),
+		addressing: Vec::new(),
+		routes: Vec::new(),
+		dns: None,
+		hooks: Vec::new(),
+	});
+	networks
 }
 
 /// A document exercising every type, field and variant in the schema.

@@ -152,6 +152,7 @@ fn network(id: &str, ssid: &str, security: Security) -> WifiNetwork {
 		autoconnect: true,
 		metered: false,
 		bssid_pin: None,
+		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,
@@ -410,6 +411,45 @@ fn a_refused_setting_leaves_no_partial_network() {
 			.expect("REMOVE_NETWORK");
 		assert!(
 			parse_network_list(&client.ask("LIST_NETWORKS").expect("LIST_NETWORKS")).is_empty()
+		);
+	});
+}
+
+/// A real `wpa_supplicant` accepts the roaming module netcfgd renders.
+///
+/// `bgscan` is documented as a network-block key in `wpa_supplicant.conf`, and
+/// netcfgd does not write config files -- it sets fields over the control
+/// socket. Those are two different code paths in `wpa_supplicant`: a key the
+/// config parser takes is not necessarily one `SET_NETWORK` takes, because that
+/// goes through `wpa_config_set` against a table of settable fields. A string
+/// that is right for a file and rejected on the socket would leave roaming
+/// silently off, with the daemon reporting a configured network.
+///
+/// The `wired` driver is enough for this: the question is whether the field is
+/// accepted, not whether a radio then scans.
+#[test]
+fn a_real_supplicant_accepts_a_bgscan_over_the_control_socket() {
+	with_supplicant(|supplicant| {
+		let client = supplicant.connect();
+		let id = client.ask("ADD_NETWORK").expect("ADD_NETWORK");
+		let id = id.trim();
+
+		client
+			.command(&format!("SET_NETWORK {id} ssid \"corridor\""))
+			.expect("the ssid is accepted");
+		// Exactly what `network::settings` renders, quotes and all.
+		client
+			.command(&format!("SET_NETWORK {id} bgscan \"simple:20:-68:240\""))
+			.expect("wpa_supplicant refused the bgscan netcfgd sends");
+
+		// And it reads back, which is the half that says it was stored rather
+		// than accepted and dropped.
+		let stored = client
+			.ask(&format!("GET_NETWORK {id} bgscan"))
+			.expect("GET_NETWORK bgscan");
+		assert!(
+			stored.contains("simple:20:-68:240"),
+			"wpa_supplicant took the bgscan and did not keep it: {stored:?}"
 		);
 	});
 }

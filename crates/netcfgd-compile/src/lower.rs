@@ -921,6 +921,7 @@ fn station_placeholder() -> WifiNetwork {
 		autoconnect: true,
 		metered: false,
 		bssid_pin: None,
+		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,
@@ -1215,6 +1216,7 @@ fn lower_network(
 		autoconnect: true,
 		metered: false,
 		bssid_pin: None,
+		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,
@@ -1262,6 +1264,29 @@ fn lower_network(
 				"include was not resolved before compiling",
 			)),
 		}
+	}
+
+	// A pinned network has nowhere to roam: "use this access point" and "use
+	// whichever of them is loudest" are two different requests, and
+	// wpa_supplicant given both scans in the background for a better BSSID it
+	// is then forbidden to associate with.
+	//
+	// Checked here rather than inside the `wifi` block, because `bssid` is a
+	// network key and `roam` is a wifi one -- so a document that wrote the
+	// `wifi` block first would have been checked before the pin was read, and
+	// the contradiction would have been caught or missed depending on the
+	// order somebody typed two lines in.
+	if network.roam.is_some() && network.bssid_pin.is_some() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!(
+					"`{label}` is pinned to one access point and also asked to roam between them"
+				),
+			)
+			.with_help("drop `bssid` to roam, or drop `roam` to stay pinned"),
+		);
+		return None;
 	}
 
 	// An open network is a real thing, but it is almost never what somebody
@@ -1312,13 +1337,17 @@ fn lower_network_wifi(block: &Block, network: &mut WifiNetwork, diags: &mut Diag
 	for item in &block.items {
 		let Item::Assignment(assignment) = item else {
 			if let Item::Block(inner) = item {
-				diags.push(Diagnostic::new(
-					inner.span,
-					format!(
-						"`{}` is not valid inside a network `wifi` block",
-						inner.head
-					),
-				));
+				if inner.head == "roam" {
+					network.roam = Some(lower_roam(inner, diags));
+				} else {
+					diags.push(Diagnostic::new(
+						inner.span,
+						format!(
+							"`{}` is not valid inside a network `wifi` block",
+							inner.head
+						),
+					));
+				}
 			}
 			continue;
 		};
@@ -1343,6 +1372,84 @@ fn lower_network_wifi(block: &Block, network: &mut WifiNetwork, diags: &mut Diag
 	if let Some(security) = build_security(keys, block, diags) {
 		network.security = security;
 	}
+}
+
+/// A network's `roam { }` block: when to look for a better access point.
+///
+/// Three numbers and no module name. The operator says how weak is weak and how
+/// often to look; which bgscan module renders that is
+/// `netcfgd-supplicant`'s business, the way every other backend detail is.
+///
+/// The defaults are `wpa_supplicant`'s own documented example rounded to the
+/// number an operator would recognise: -70 dBm is where a link is usually
+/// described as poor, 30 seconds is often enough to catch a walk down a
+/// corridor, and 300 is quiet enough not to cost airtime while sitting still.
+fn lower_roam(block: &Block, diags: &mut Diagnostics) -> netcfgd_model::RoamPolicy {
+	let mut roam = netcfgd_model::RoamPolicy {
+		signal: -70,
+		interval: 30,
+		slow_interval: 300,
+	};
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			if let Item::Block(inner) = item {
+				diags.push(Diagnostic::new(
+					inner.span,
+					format!("`{}` is not valid inside `roam`", inner.head),
+				));
+			}
+			continue;
+		};
+		match assignment.key.as_str() {
+			"signal" => {
+				if let Some(value) = as_i64(&assignment.value, diags) {
+					// A positive dBm would be a signal stronger than the
+					// transmitter, and wpa_supplicant would scan forever.
+					if (-100..0).contains(&value) {
+						roam.signal = i32::try_from(value).unwrap_or(-70);
+					} else {
+						diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{value}` is not a signal strength"),
+							)
+							.with_help(
+								"dBm, negative, and between -100 and -1; -70 is a weak link",
+							),
+						);
+					}
+				}
+			}
+			"interval" => {
+				if let Some(value) = as_u32(&assignment.value, diags) {
+					roam.interval = value;
+				}
+			}
+			"slow_interval" => {
+				if let Some(value) = as_u32(&assignment.value, diags) {
+					roam.slow_interval = value;
+				}
+			}
+			other => diags.push(
+				Diagnostic::new(assignment.span, format!("unknown roam key `{other}`"))
+					.with_help("signal, interval and slow_interval"),
+			),
+		}
+	}
+
+	// Looking *less* often when the signal is bad than when it is good is the
+	// policy inverted, and it reads as a plausible pair of numbers.
+	if roam.interval > roam.slow_interval {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				"`interval` is how often to look while the signal is weak, so it cannot be longer than `slow_interval`",
+			)
+			.with_help("the usual pair is a short interval and a long one: 30 and 300"),
+		);
+	}
+	roam
 }
 
 /// One `key = value` inside a network's `wifi` block.
@@ -1437,6 +1544,7 @@ fn lower_dot1x_key(keys: &mut WifiKeys, assignment: &Assignment, diags: &mut Dia
 				autoconnect: true,
 				metered: false,
 				bssid_pin: None,
+				roam: None,
 				addressing: Vec::new(),
 				routes: Vec::new(),
 				dns: None,
@@ -3543,6 +3651,23 @@ fn as_bool(value: &Spanned<Value>, diags: &mut Diagnostics) -> Option<bool> {
 			diags.push(Diagnostic::new(
 				value.span,
 				format!("expected true or false, found {}", other.describe()),
+			));
+			None
+		}
+	}
+}
+
+/// A number that may be negative, which `as_u32` cannot read at all.
+///
+/// Signal strength is the only one so far: dBm is negative by construction, and
+/// a reader that only took unsigned numbers made `signal = -70` unwritable.
+fn as_i64(value: &Spanned<Value>, diags: &mut Diagnostics) -> Option<i64> {
+	match &value.node {
+		Value::Number(number) => Some(*number),
+		other => {
+			diags.push(Diagnostic::new(
+				value.span,
+				format!("expected a number, found {}", other.describe()),
 			));
 			None
 		}
