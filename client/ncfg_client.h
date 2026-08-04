@@ -79,7 +79,7 @@ const char *ncfg_client_socket_path(const ncfg_client_t *client);
  * here means the connection or the framing, and nothing else.
  */
 ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
-				     char *err, size_t err_size);
+                     char *err, size_t err_size);
 
 /*
  * The three requests every client makes, spelled out so that no caller writes
@@ -122,7 +122,7 @@ typedef struct {
 	int   mtu;
 	int   up;
 	int   carrier;   /* up and carrier are separate answers: no cable is not
-			  * the same state as not configured */
+	          * the same state as not configured */
 } ncfg_link_t;
 
 typedef struct {
@@ -146,7 +146,7 @@ typedef struct {
 	char     *desired;
 	char     *observed;
 	int       reversible; /* an action with no inverse is one a confirm
-			       * window cannot undo, and the plan says so loudly */
+	               * window cannot undo, and the plan says so loudly */
 } ncfg_action_t;
 
 /*
@@ -172,11 +172,11 @@ typedef struct {
 	char *message;
 	char *interface;
 	char *detail;  /* the guard's words or the credential's; empty for a
-			* plain warning */
+	        * plain warning */
 	char *remedy;  /* the change that makes it not happen; empty where there
-			* is none, which is every refusal */
+	        * is none, which is every refusal */
 	char *consent; /* what to pass to proceed anyway; empty where nothing
-			* will */
+	        * will */
 	char *field;
 	char *desired;
 	char *observed;
@@ -324,8 +324,8 @@ typedef struct {
  * what.
  */
 int ncfg_client_apply(ncfg_client_t *client, unsigned confirm_seconds,
-		      const ncfg_consent_t *consent, ncfg_journal_t *out, char *err,
-		      size_t err_size);
+              const ncfg_consent_t *consent, ncfg_journal_t *out, char *err,
+              size_t err_size);
 int ncfg_client_confirm(ncfg_client_t *client, char *err, size_t err_size);
 int ncfg_client_revert(ncfg_client_t *client, char *err, size_t err_size);
 
