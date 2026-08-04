@@ -43,7 +43,24 @@ phy=
 if [ -d /sys/class/rfkill ]; then
 	for path in /sys/class/net/*/phy80211/name; do
 		[ -r "$path" ] || continue
-		radio=$(basename "$(dirname "$(dirname "$path")")")
+		candidate=$(basename "$(dirname "$(dirname "$path")")")
+		# **sysfs is not filtered by network namespace unless it is remounted**,
+		# and `unshare -rn` does not remount it -- so inside a namespace this
+		# directory still lists the *host's* interfaces. `ip link show` goes to
+		# netlink, which is namespaced, and disagrees:
+		#
+		#     /sys/class/net/wlp0s20f3   exists
+		#     ip link show wlp0s20f3     does not
+		#
+		# Taking sysfs at its word therefore found a radio that is not here,
+		# and the check below then failed because netcfgd -- which observes
+		# through netlink -- correctly reported no such interface. The Makefile
+		# runs this script bare for that reason and says so; the failure only
+		# appears when somebody runs it under `unshare -rn` anyway, which is
+		# easy to do and reads as a broken feature rather than a wrong
+		# invocation.
+		ip link show "$candidate" >/dev/null 2>&1 || continue
+		radio=$candidate
 		phy=$(cat "$path")
 		break
 	done
