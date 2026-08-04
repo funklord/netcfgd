@@ -75,6 +75,7 @@ fn wifi(id: &str) -> WifiNetwork {
 		autoconnect: true,
 		metered: false,
 		bssid_pin: None,
+		roam: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,

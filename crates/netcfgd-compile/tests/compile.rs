@@ -1976,3 +1976,90 @@ fn an_advertise_block_needs_something_to_advertise() {
 		"got {message}"
 	);
 }
+
+/// A network can ask to roam, with three numbers and no module name.
+///
+/// The operator says how weak is weak and how often to look; which bgscan
+/// module renders that is the backend's business. A `bgscan="simple:30:-70:300"`
+/// in a config file would be netcfgd asking the operator which supplicant is
+/// underneath (0089).
+#[test]
+fn a_network_can_ask_to_roam() {
+	let document = build_ok(
+		r#"network "Corridor" { wifi { psk = "@secret:c"; roam { signal = -68; interval = 20; slow_interval = 240 } } }"#,
+	);
+	let roam = document.networks[0].roam.as_ref().expect("a roam policy");
+	assert_eq!(roam.signal, -68);
+	assert_eq!(roam.interval, 20);
+	assert_eq!(roam.slow_interval, 240);
+}
+
+/// And an empty block takes the numbers an operator would recognise.
+#[test]
+fn a_roam_block_has_defaults_worth_having() {
+	let document = build_ok(r#"network "C" { wifi { psk = "@secret:c"; roam { } } }"#);
+	let roam = document.networks[0].roam.as_ref().expect("a roam policy");
+	assert_eq!(
+		(roam.signal, roam.interval, roam.slow_interval),
+		(-70, 30, 300)
+	);
+}
+
+/// A network that does not mention roaming does not get it.
+///
+/// `wpa_supplicant`'s own default is to look only after the link is gone, and a
+/// background scan costs airtime -- so anything that never moves must not be
+/// made to pay for it by default.
+#[test]
+fn roaming_is_off_unless_asked_for() {
+	let document = build_ok(r#"network "C" { wifi { psk = "@secret:c" } }"#);
+	assert!(document.networks[0].roam.is_none());
+}
+
+/// Pinned to one access point, or roaming between them. Not both.
+///
+/// Two different requests -- "use this access point" and "use whichever is
+/// loudest" -- and `wpa_supplicant` given both scans in the background for a
+/// better BSSID it is then forbidden to associate with.
+#[test]
+fn a_pinned_network_cannot_also_roam() {
+	// Both orders, because `bssid` is a network key and `roam` is a wifi one:
+	// a check made inside the wifi block would catch one of these and miss the
+	// other, depending only on which line somebody typed first.
+	for text in [
+		"network \"C\" {\n\tbssid = \"aa:bb:cc:dd:ee:ff\"\n\twifi { psk = \"@secret:c\"; roam { } }\n}",
+		"network \"C\" {\n\twifi { psk = \"@secret:c\"; roam { } }\n\tbssid = \"aa:bb:cc:dd:ee:ff\"\n}",
+	] {
+		let message = errors(text);
+		assert!(
+			message.contains("pinned to one access point"),
+			"got: {message}"
+		);
+	}
+}
+
+/// A signal threshold that is not a signal strength is refused.
+///
+/// dBm is negative by construction. A positive one is a signal stronger than
+/// the transmitter, and `wpa_supplicant` would scan forever.
+#[test]
+fn a_roam_threshold_has_to_be_a_signal_strength() {
+	for bad in ["70", "0", "-200"] {
+		let message = errors(&format!(
+			r#"network "C" {{ wifi {{ psk = "@secret:c"; roam {{ signal = {bad} }} }} }}"#
+		));
+		assert!(
+			message.contains("not a signal strength"),
+			"{bad}: {message}"
+		);
+	}
+}
+
+/// And looking less often when the signal is bad is the policy inverted.
+#[test]
+fn a_short_interval_longer_than_the_long_one_is_refused() {
+	let message = errors(
+		r#"network "C" { wifi { psk = "@secret:c"; roam { interval = 600; slow_interval = 60 } } }"#,
+	);
+	assert!(message.contains("cannot be longer"), "got: {message}");
+}

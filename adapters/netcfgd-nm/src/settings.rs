@@ -955,6 +955,7 @@ mod tests {
 			autoconnect: true,
 			metered: false,
 			bssid_pin: None,
+			roam: None,
 			addressing: vec![AddressSource::Dhcp4(
 				netcfgd_model::address::Dhcp4::default(),
 			)],

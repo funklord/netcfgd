@@ -1240,6 +1240,36 @@ last two because a secret's name is a path under `secrets/`. An SSID that fails 
 refused with the fix: `--id` gives a plain label and the SSID is kept exactly, as
 hex, which is the mechanism the DSL already had.
 
+#### Roaming, which is how wifi always worked
+
+An ESS is several access points sharing one SSID, and a station picks whichever
+it hears best. netcfgd could not ask for it
+([0089](docs/decisions/0089-a-station-picks-the-loudest-access-point-and-netcfgd-must-say-so.md)):
+`wpa_supplicant` roams within a network block by itself but **only while a
+`bgscan` module is asking it to look**, and nothing here set one — grepped, in
+every crate and every test. So every netcfgd station re-selected only after the
+link had gone, which is roaming by first losing the network.
+
+`roam { signal = -68; interval = 20; slow_interval = 240 }` on a network, with
+`-70`/`30`/`300` as the defaults. **Intent, not a module name**: the operator
+says how weak is weak and how often to look, and the backend renders
+`bgscan="simple:..."` the way it renders everything else. Off unless asked for,
+because a background scan costs airtime and a router with a radio does not move.
+Pinned or roaming and never both — `bssid` and `roam` are two different requests,
+and the check sits where the whole network is known rather than inside the `wifi`
+block, since one is a network key and the other is not.
+
+Measured against a real `wpa_supplicant` 2.10, and the question is sharper than
+it looks: netcfgd writes no config file for a station, it sends `SET_NETWORK`.
+A key the file parser takes is not necessarily one the socket takes, and the
+failure would be roaming silently off with the daemon reporting success.
+
+**Still missing, and named rather than implied:** an access point identified
+*only* by BSSID. `wpa_supplicant`'s `ssid` is mandatory in a network block and
+`bssid` only narrows one, so "join this MAC, whatever it calls itself" cannot be
+passed through — netcfgd would have to scan, find that BSSID and learn its SSID
+first. And the `roam` hook still does not fire (0084).
+
 #### Explaining it
 
 `ncfg explain` follows the indirections. An address the document named by
