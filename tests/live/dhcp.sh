@@ -17,6 +17,27 @@
 
 set -eu
 
+# Is that pid a process that is still running?
+#
+# Not `kill -0`, which calls a **zombie** alive. A process that has been killed
+# but not yet reaped keeps its /proc entry and its pid, and that is what any
+# daemon this script stops becomes whenever pid 1 does not reap -- a container
+# whose pid 1 is a shell, say -- and equally what a child of *this script*
+# becomes between being killed and being waited for. So `kill -0` is wrong in
+# both directions: it reports a stopped daemon as still running, and it reports
+# a process that something wrongly killed as still alive.
+#
+# A zombie has no command line at all, which is the same question netcfgd's own
+# ownership check asks of a pid file. Found on Alpine, where the whole suite
+# runs in a container (0100); `delegation.sh` had reasoned it out first.
+still_running() {
+	[ "${1:-0}" -gt 0 ] 2>/dev/null || return 1
+	# `cat ... 2>/dev/null | tr`, not a redirection: with `< /proc/<pid>/...`
+	# it is the *shell* that reports a missing file, and its complaint does not
+	# go through the redirection attached to the command.
+	[ -n "$(cat "/proc/$1/cmdline" 2>/dev/null | tr -d '\0')" ]
+}
+
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 
 skip() {
@@ -304,12 +325,18 @@ ncfg apply > "$work/apply-stop.log" 2>&1 || {
 }
 contains "dropping dhcp stops the client" "$(cat "$work/apply-stop.log")" "backend.stop cli"
 waited=0
-while kill -0 "$pid" 2>/dev/null; do
+while still_running "$pid"; do
 	waited=$((waited + 1))
 	[ "$waited" -gt 30 ] && break
 	sleep 0.1
 done
-if kill -0 "$pid" 2>/dev/null; then
+if [ "$pid" -le 0 ]; then
+	# Never captured. Without this the check below passes for a client that
+	# was never started, which is the vacuous green section 9 warns about.
+	echo "FAIL and the client is gone"
+	echo "       no pid was captured, so this check proved nothing"
+	failures=$((failures + 1))
+elif still_running "$pid"; then
 	echo "FAIL and the client is gone"
 	echo "       pid $pid is still running"
 	failures=$((failures + 1))
