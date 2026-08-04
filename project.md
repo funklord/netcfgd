@@ -1451,9 +1451,21 @@ match.
      the item was really about. **Nothing forgets a network** either: `rm` on the
      file is the whole of it, and an `ncfg wifi forget` would take the secret with
      it the way the shim's delete path does.
-   - **An enterprise network cannot be added from the command line.** `eap` wants an
-     identity, a method and certificates, which is a form and not a flag list; the
-     same is true of `dot1x` on a wired port.
+   - ~~**An enterprise network cannot be added from the command line.**~~ —
+     **closed**
+     ([0087](docs/decisions/0087-an-enterprise-network-is-a-form-and-a-flag-list-can-hold-it.md)).
+     "A form and not a flag list" was the right diagnosis and the wrong
+     conclusion: the form part is that *which* fields are needed depends on the
+     method, and that is expressible as refusals — TLS presents a certificate,
+     the other three present a password, and every method needs an identity.
+     The prompt follows the method too, because a PEAP password typed into a
+     prompt saying "passphrase" is a network that never joins. What it found is
+     the better half: **netcfgd could not configure an EAP network that pinned
+     no CA certificate**, because the compiler pushed a `Diagnostic` — the only
+     severity it has, and fatal — under a comment reading "Not an error". 0017
+     had rejected exactly that behaviour and 0008's model has `ca_cert :
+     string?`. It is a plan warning now. `dot1x` on a wired port is still an
+     editor job, and is a smaller one: no SSID, no priority, no hidden flag.
    - ~~**`accept_ra` is unmanaged**~~ — **closed**
      ([0073](docs/decisions/0073-a-document-that-asks-for-slaac-makes-the-kernel-listen.md)).
      The kernel's default means "accept unless this interface forwards", so
@@ -1509,6 +1521,8 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A break that does not compile is not a break, and a harness grepping for `FAILED` calls it a pass.** §9 already warns that a break which silently fails to *apply* reads like a gate that works. This is the same disease one step later: the patch applied, `cargo test` failed to build, no line said `FAILED`, and the sweep reported the gate holding. A break harness has to treat a build failure as "not a break" — and the same run found the gap the break was aimed at, which is that a refusal was tested by calling the function that makes it rather than the command that reaches it. **A refusal nobody reaches is not a refusal.**
+- **A comment can be exactly wrong about the code it sits on, and the code can contradict a decision record.** `// Not an error, because plenty of real deployments pin nothing` sat above a `Diagnostic` in a compiler whose only severity is fatal — so an EAP network that pinned no CA did not compile, which 0017 had rejected in as many words and 0008's model contradicted with `ca_cert : string?`. Three places agreed and the code was the fourth. Nothing was red, because no gate reads prose and no gate compares code against decisions. When a comment states a *property* ("not an error", "this is only advisory"), check that the mechanism has that property at all.
 - **A negative assertion against the wrong file passes whatever the code does.** Two live checks in this session were written against the *system* `/etc/resolv.conf`, where netcfgd writes `$NCFG_RUN_DIR`'s copy. The positive one failed honestly and was found in a minute; the negative one — "netcfgd does not write this nameserver" — passed, and would have passed for a netcfgd that wrote it enthusiastically to its own file. A check that something did **not** happen is only as good as its aim, and it gives no sign when the aim is wrong. Both now name netcfgd's file with a comment saying why.
 - **A stated gap with a shape is still a gap.** 0072 ended with "which is now a stated gap with a shape (a fragment directory) rather than an accident", and that sentence is accurate and reads like closure. What it was describing is a machine on a v6-only network resolving nothing. The same tone problem 0078's note had, and worth the same treatment: when a record names the fix, the fix is a piece of work, not a footnote.
 - **A question already being asked, whose answer is discarded, looks exactly like a question nobody asks.** Section 10 carried "a daemon that is alive and wedged still counts as running" as work needing a new check. There was no new check: netcfgd had been asking hostapd something on every observation since 0052, under a deadline, and the failure branch was a `continue` with a comment explaining — correctly — why saying nothing about the *list* is honest. It was silent about the *daemon*, and nothing distinguished the two. The whole change is two assignments. Before building a check, grep for the round trip that would already have the answer.
