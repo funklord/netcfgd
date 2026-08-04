@@ -5825,7 +5825,9 @@
       "priority": 30,
       "autoconnect": true,
       "metered": true,
-      "bssid_pin": "00:11:22:33:44:55",
+      "bssid": [
+        "00:11:22:33:44:55"
+      ],
       "addressing": [
         {
           "source": "static",
@@ -5910,7 +5912,9 @@
       "priority": 30,
       "autoconnect": true,
       "metered": true,
-      "bssid_pin": "00:11:22:33:44:55",
+      "bssid": [
+        "00:11:22:33:44:55"
+      ],
       "addressing": [
         {
           "source": "static",
@@ -5995,7 +5999,9 @@
       "priority": 30,
       "autoconnect": true,
       "metered": true,
-      "bssid_pin": "00:11:22:33:44:55",
+      "bssid": [
+        "00:11:22:33:44:55"
+      ],
       "addressing": [
         {
           "source": "static",
@@ -6085,7 +6091,9 @@
       "priority": 30,
       "autoconnect": true,
       "metered": true,
-      "bssid_pin": "00:11:22:33:44:55",
+      "bssid": [
+        "00:11:22:33:44:55"
+      ],
       "addressing": [
         {
           "source": "static",

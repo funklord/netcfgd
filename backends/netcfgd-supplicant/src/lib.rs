@@ -81,12 +81,115 @@ pub fn configure_wired(
 ///
 /// Returns an error if the network cannot be expressed, a secret cannot be
 /// resolved, or the supplicant refuses a setting.
+/// The SSID the listed access points are advertising.
+///
+/// A document may name access points instead of a name -- "the one in the
+/// lobby", by address -- and something has to turn that into an SSID before the
+/// supplicant is configured, because **WPA derives its key from the passphrase
+/// and the SSID**. `wpa_supplicant`'s wildcard, which matches any name, is
+/// documented as working for plaintext access points only, and for the same
+/// reason.
+///
+/// Read from `SCAN_RESULTS`, which is what the supplicant last saw. No `SCAN`
+/// is issued: a scan takes seconds, interrupts traffic on the radio, and this
+/// runs inside an apply. If the access point is not in the last results the
+/// honest answer is that netcfgd cannot see it -- with its address in the
+/// message, because "network not found" about a network named by address is
+/// not a sentence anybody can act on.
+///
+/// # Errors
+///
+/// If none of the listed access points is in range, or if they disagree about
+/// what the network is called -- which means they are not one network, and
+/// joining either under one profile would be netcfgd picking for the operator.
+fn resolve_ssid(
+	client: &Client,
+	network: &WifiNetwork,
+) -> Result<netcfgd_model::Ssid, Box<dyn std::error::Error>> {
+	let body = client.ask("SCAN_RESULTS")?;
+	pick_ssid(network, &protocol::parse_scan_results(&body))
+}
+
+/// Which name the listed access points agree on, given what was seen.
+///
+/// Split from the socket so the choosing can be checked without one: "none of
+/// them is in range" and "they are on different networks" are the two answers
+/// that matter and neither needs a supplicant to produce.
+///
+/// # Errors
+///
+/// If none of the listed access points was seen, or if the ones that were
+/// disagree about the network's name.
+pub fn pick_ssid(
+	network: &WifiNetwork,
+	seen: &[protocol::ScanResult],
+) -> Result<netcfgd_model::Ssid, Box<dyn std::error::Error>> {
+	let mut found: Vec<(&str, &netcfgd_model::Ssid)> = Vec::new();
+	for wanted in &network.bssid {
+		if let Some(result) = seen
+			.iter()
+			.find(|result| result.bssid.eq_ignore_ascii_case(wanted))
+		{
+			found.push((wanted.as_str(), &result.ssid));
+		}
+	}
+
+	let Some((at_address, advertised)) = found.first().copied() else {
+		return Err(Box::new(io::Error::new(
+			io::ErrorKind::NotFound,
+			format!(
+				"none of the access points `{}` names is in range, so its network name \
+				 could not be read: {}",
+				network.id,
+				network.bssid.join(", ")
+			),
+		)));
+	};
+
+	// Every one that *is* in range has to agree. Two addresses advertising
+	// different names are two networks, and one passphrase cannot be right for
+	// both -- WPA's key is derived per SSID.
+	if let Some((elsewhere, differently)) =
+		found.iter().find(|(_, name)| *name != advertised).copied()
+	{
+		return Err(Box::new(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!(
+				"`{}` lists access points that are on different networks: {at_address} \
+				 advertises {} and {elsewhere} advertises {}",
+				network.id,
+				advertised.to_hex(),
+				differently.to_hex()
+			),
+		)));
+	}
+	Ok(advertised.clone())
+}
+
+///
+/// # Errors
+///
+/// Propagates a control-socket failure, a network `wpa_supplicant` will not
+/// take, and -- for a network named by address rather than by name -- a failure
+/// to read that name off the last scan.
 pub fn add_network(
 	client: &Client,
 	network: &WifiNetwork,
 	policy: netcfgd_model::MacPolicy,
 	resolver: &Resolver,
 ) -> Result<u32, Box<dyn std::error::Error>> {
+	// Resolved before anything is sent, so a network whose access points are
+	// out of range leaves nothing half-configured behind.
+	let learned;
+	let network = if network.ssid.is_some() {
+		network
+	} else {
+		let mut copy = network.clone();
+		copy.ssid = Some(resolve_ssid(client, network)?);
+		learned = copy;
+		&learned
+	};
+
 	let settings = settings(network, policy, resolver)?;
 
 	let id: u32 = client.ask("ADD_NETWORK")?.trim().parse().map_err(|_| {

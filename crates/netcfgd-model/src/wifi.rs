@@ -141,8 +141,19 @@ pub struct RoamPolicy {
 pub struct WifiNetwork {
 	/// Stable key, usually the SSID rendered as text. Sorting key.
 	pub id: String,
-	/// The SSID as octets.
-	pub ssid: Ssid,
+	/// The SSID as octets, when the document states one.
+	///
+	/// `None` means "whatever the access points in `bssid` call themselves",
+	/// and netcfgd reads it from a scan before configuring the supplicant.
+	/// That is not a convenience: **WPA derives its key from the passphrase
+	/// *and* the SSID**, so a secured network cannot be joined without one --
+	/// `wpa_supplicant`'s own wildcard-SSID example is marked "plaintext APs
+	/// only" for exactly that reason. The name has to be learned, not skipped.
+	///
+	/// Requires a non-empty `bssid`: with neither an SSID nor an access point
+	/// to ask, there is nothing to identify the network by at all.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ssid: Option<Ssid>,
 	/// Whether the network hides its SSID in beacons.
 	#[serde(default)]
 	pub hidden: bool,
@@ -157,13 +168,23 @@ pub struct WifiNetwork {
 	/// Whether the link is metered.
 	#[serde(default)]
 	pub metered: bool,
-	/// Pin association to one BSSID.
+	/// The access points this network may use, if it is restricted to any.
 	///
-	/// The opposite of [`RoamPolicy`] and refused alongside it: a network
-	/// pinned to one access point has nowhere to roam, and a document asking
-	/// for both is asking for two different things at once.
-	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub bssid_pin: Option<String>,
+	/// Empty is the ordinary network: associate with whatever is advertising
+	/// the SSID, which is what wifi has always done.
+	///
+	/// **One entry pins; several choose.** `wpa_supplicant` spells those
+	/// differently -- `bssid` refuses everything else, `bssid_accept` limits
+	/// selection to a set and picks among them by signal -- and the difference
+	/// matters: a list is "any of these, whichever is best", which is a
+	/// perfectly ordinary way to describe one site's access points.
+	///
+	/// A single entry is the opposite of [`RoamPolicy`] and refused alongside
+	/// it: a network pinned to one access point has nowhere to roam. A *list*
+	/// is not -- roaming among a named set is exactly what an operator who
+	/// listed them would want.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub bssid: Vec<String>,
 	/// When to look for a better access point on this same network.
 	///
 	/// `None` is `wpa_supplicant`'s own default: look only after the link is
