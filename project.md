@@ -153,7 +153,9 @@ DeviceMatch {                         // all present fields must match
 WifiDevicePolicy {
   backend      : enum { Auto, Iwd, WpaSupplicant } = Auto
   autoconnect  : bool = true
-  portal_check : bool = false
+  portal_check : string?             // an http:// URL to fetch; no default,
+                                     // and never https -- a portal intercepts,
+                                     // which is what TLS prevents (0095)
   regdom       : string?              // ISO 3166-1 alpha-2
   powersave    : enum { Default, On, Off } = Default
 }
@@ -1489,7 +1491,14 @@ match.
      `DhcpcdHooks`: with the v6 client given a script, nothing constructs
      `Silence`, so every dhcpcd netcfgd starts gets `-c` and there is no argument
      for one that does not.
-   - **Two hook phases still do not fire**: `pre_down` and `portal`. `roam` was
+   - **One hook phase still does not fire**: `pre_down`. `portal` was the other
+     and fires now
+     ([0095](docs/decisions/0095-a-portal-check-fetches-the-operators-url.md)),
+     which also closed the last of 0061's inert keys: `portal_check` is an
+     operator's `http://` URL rather than a boolean, netcfgd has no default,
+     and `https` is **refused** because a portal detects by intercepting and
+     TLS exists to stop interception — an `https` probe reports no portal on
+     exactly the networks it is for, which is 0061's own example corrected. `roam` was
      the third and now fires
      ([0091](docs/decisions/0091-a-roam-is-something-the-supplicant-tells-netcfgd.md)),
      from a watcher thread attached to each radio's control socket. **Push, not
@@ -1512,10 +1521,8 @@ match.
      ([0076](docs/decisions/0076-the-up-hook-is-the-moment-a-link-is-live-and-bare.md)):
      the one moment where the link is live and nothing is addressed, which is
      what `pre_up` cannot see and `post_up` is too late for. Of what is left,
-     `pre_down` is deferred with a reason (it and `down` fire at the same point
-     until there is a teardown ordering), and `portal` wants captive-portal
-     detection, which does not exist anywhere in the tree — so the phase is a
-     place to put a script rather than a feature.
+     `pre_down` is deferred with a reason: it and `down` fire at the same point
+     until there is a teardown ordering.
    - ~~**`ncfg secret set NAME` does not exist**~~ — **closed**
      ([0075](docs/decisions/0075-a-secret-is-stored-by-a-command-that-never-shows-it.md)).
      The value is never an argument, never echoed, and the file is 0600 from the
@@ -1607,6 +1614,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **Every interface that is up has a link-local, so "has an address" is true from the moment the link exists.** The portal check fires on an interface *becoming* addressed, and the first version asked whether it had any address at all -- which `fe80::` makes true immediately and permanently. The feature therefore fired once, at startup, and never again on any real machine, and it survived its first live run because the first probe is the one that works. **A transition test needs a condition that can actually go back**, and connectivity is not "has an address": it is having one that could reach something.
 - **A config key can be compiled, carried, pinned in the witness, documented, and read by nothing.** `globals.confirm_default` was all five. `global { confirm = 90 }` produced a document field that no code path consulted, so an operator who wrote it believing every apply had a safety net had none -- silently, and with the key listed in project.md's own config surface as though it worked. 0061 closed four of these by reading the DSL against the code; this one was found by going to fix something else and asking where the number lived. **Being in the schema is not being read**, and the witness cannot tell the difference: it pins the shape of a field, not that anything consults it.
 - **"Read what you know and ignore the rest" describes a record, not a stream, and the difference is a shift bug on a newer kernel.** `/dev/rfkill`'s header says the record may grow, which reads as an invitation to buffer bytes and cut them every eight. It is not: the kernel dequeues **one event per read** and copies as much of it as you asked for, so a generous buffer gets exactly one record and the surplus of a longer one belongs to that read. The stream reading would have kept the ninth byte and shifted every following event — visible only on kernels newer than the one it was written against. Opening the device and printing what came back settled it in a minute; the header could not have.
 - **A probe that reads the first widget of a kind reads whichever was constructed first, which is rarely the one meant.** A headless check asked whether the devices table had caught up and read `findChildren<QTableWidget*>().first()` -- which is the *plan* pane's notes table, built earlier and empty on a converged machine. It reported "the window did not change" for a window that had changed correctly, and the obvious next move would have been to debug working code. Select a widget by something only it has: a header, an object name, a title.

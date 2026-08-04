@@ -503,6 +503,9 @@ live:
 	@# The other daemon-driven hook: a roam is wpa_supplicant's decision and
 	@# reaches netcfgd on its event socket, so no apply can exercise it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/roam.sh"
+	@# The captive portal check, against a real HTTP server: the probe is a
+	@# question rather than a change, so no apply can exercise it either.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dhcp.sh"
 	@# The other client, and the one netcfgd prefers. Neither under NCFG_LIVE
 	@# nor under unshare: dhcpcd is a package, and it drops privileges to a user

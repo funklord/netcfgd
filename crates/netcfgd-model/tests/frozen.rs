@@ -629,7 +629,7 @@ fn witness() -> Document {
 			wifi: Some(WifiDevicePolicy {
 				backend: WifiBackend::WpaSupplicant,
 				autoconnect: true,
-				portal_check: true,
+				portal_check: Some("http://example.com/generate_204".to_owned()),
 				regdom: Some("SE".to_owned()),
 				powersave: Powersave::Off,
 				mac_policy: MacPolicy::PerNetwork,
