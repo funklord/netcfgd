@@ -613,6 +613,23 @@ Source, comments and commit messages are **ASCII**; write `--` where prose would
 
 Changing any of the above is a convention change: raise it rather than adjusting the default in passing.
 
+### `fmake` against `client/` and `gui/`, and why neither moved
+
+Evaluated 2026-08-04, by running it rather than reading about it. `fmake` builds C and C++ from an unannotated tree, and both C directories here are the shape it is for: `client/` is an 89-line hand-written Makefile, `gui/` is qmake.
+
+On a copy of `client/` it needed **no configuration at all** — it found the two sources and the `main()` in `tests/client_test.c`, compiled all three and linked a binary. That part is as advertised.
+
+It is not adopted, for one structural reason and three local ones:
+
+- **It builds programs, not archives.** `client/`'s entire output is `libncfg_client.a`, which `gui/` links; `fmake` linked the library sources *into* the test binary instead, and has no option to emit a static library. That alone decides it.
+- `.build-flags` would be lost. It exists because a `make SANITIZE=1 test` followed by a plain build in `gui/` linked a sanitized archive into a binary with no sanitizer runtime — forty lines about `__asan_report_store1` and no clue why. A stamp file that objects depend on is a project-specific fact, not something an unannotated builder can infer.
+- `DEBUG` and `SANITIZE` are checked for being *set*, never for a value, deliberately and identically to the sibling projects.
+- `make test` runs the binary with an argument — `../docs/schema/socket.json`, the daemon's own witness — which is the whole point of that test.
+
+`gui/` is not a candidate at all while Qt needs `moc`.
+
+**What the check was worth anyway:** it sent someone to read `client/Makefile` against the dependency rules the family treats as load-bearing, and it holds — `%.o: %.c $(HEADERS)` and `tests/client_test: … $(HEADERS)` make every object *and the test binary* depend on both headers explicitly, so the stale-object-versus-library ABI trap cannot happen here. Verified by touching a header and watching the test binary rebuild. The first measurement of that said it did **not** rebuild, and was wrong: `stat` reports whole seconds, and the rebuild landed inside one. Nanosecond timestamps settled it.
+
 ### Verifying — the method, which has earned its keep
 
 `make check` is the desk gate and `make live` is the one that finds things. The live suite runs each script in its own network namespace (`unshare -rn`), against a real kernel, with `NCFG_LIVE=1` turning skips into failures — without that variable a missing tool looks exactly like a passing suite.
