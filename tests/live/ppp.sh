@@ -102,22 +102,51 @@ check "at mode 0600, because the password is in it" \
 
 # ---------------------------------------------------- the reference tool
 
-# A real pppd, on the real file -- and the first thing it says is the one thing
-# this can check about the plugin: that it loaded. The rp-pppoe plugin opens
-# /dev/ppp when it is loaded, which needs real root, so pppd never reaches the
-# options *after* the plugin line here. That makes "no unrecognized option" on
-# the whole file a check that passes because nothing was parsed, which is how
-# the first version of this test passed.
-"$pppd" file "$options" > "$work/parse.txt" 2>&1 || true
+# A real pppd, on the real file. The first thing it says is the one thing this
+# can check about the plugin: that it loaded.
+#
+# **How far it gets after that depends on the machine, and both outcomes are
+# worth having -- but only if the script says which one it saw.** The rp-pppoe
+# plugin opens `/dev/ppp` as it loads. Where that device is absent -- an
+# ordinary desk, an unprivileged container -- the plugin fails there and pppd
+# never reaches the options *after* the plugin line, so "no unrecognized
+# option" over the whole file passes because nothing was parsed. That is how
+# the first version of this test passed, and it is why the narrower check
+# below exists.
+#
+# Where `/dev/ppp` *is* present -- real root, or the privileged container this
+# suite is meant to be run in -- pppd parses the whole file and accepts it,
+# exiting 0. That is the stronger result, and it is the one this script used to
+# call a failure: the check here demanded the `/dev/ppp` message and so went red
+# on every machine that could actually open the device. Debian 2.5.2 and Alpine
+# alike, and green everywhere else, which is the third instance of that shape
+# found in one session.
+# `|| parsed=$?` rather than a bare call: `set -e` is on, and pppd exits
+# non-zero in exactly the case this is here to distinguish -- so a bare call
+# killed the script instead of failing a check, and reported zero failures
+# while running none of the rest.
+parsed=0
+"$pppd" file "$options" > "$work/parse.txt" 2>&1 || parsed=$?
 check "a real pppd loads the plugin netcfgd named" \
 	"$(grep -c 'Plugin pppoe.so loaded' "$work/parse.txt" || true)" "1"
-check "and stops where an unprivileged machine has to" \
-	"$(grep -c '/dev/ppp' "$work/parse.txt" || true)" "1"
+if grep -q '/dev/ppp' "$work/parse.txt"; then
+	# The device is out of reach, so the plugin stopped there. Nothing after
+	# the plugin line was read, and the narrower check below is the one that
+	# means anything.
+	echo "ok   and stopped at /dev/ppp, which this machine cannot open"
+	whole_file_parsed=no
+else
+	# It got past the plugin, so the whole file was parsed -- and a non-zero
+	# exit would mean pppd rejected something in it.
+	check "and parsed the whole file, which this machine can" "$parsed" "0"
+	whole_file_parsed=yes
+fi
 
-# So the options netcfgd chose are parsed without it. `nic-` and `rp_pppoe_*`
-# are the plugin's own and go with it; what is left is netcfgd's own list, and
-# that is the half that has been wrong before -- `usepeerdns` was left out for
-# years on a belief nobody checked.
+# And the same again without the plugin, which is the check that carries the
+# weight where `/dev/ppp` was out of reach and corroborates the one above where
+# it was not. `nic-` and `rp_pppoe_*` are the plugin's own and go with it; what
+# is left is netcfgd's own list, and that is the half that has been wrong
+# before -- `usepeerdns` was left out for years on a belief nobody checked.
 grep -v '^plugin \|^nic-\|^rp_pppoe_' "$options" > "$work/core.opts"
 check "the plugin's options are the only ones this cannot check" \
 	"$(grep -c '^nic-eth-wan$' "$options" || true)" "1"
