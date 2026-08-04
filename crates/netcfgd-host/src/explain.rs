@@ -890,6 +890,7 @@ mod tests {
 			kind: netcfgd_model::BackendKind::AccessPoint,
 			interface: "wlan0".to_owned(),
 			running: true,
+			answering: None,
 			access_control: None,
 			started_with: Some(netcfgd_model::ObservedAccessPoint {
 				ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
