@@ -356,7 +356,44 @@ fn warn_wedged_backends(builder: &mut Builder, observed: &Observed) {
 	}
 }
 
+/// An EAP network that pins no CA certificate will trust any server that
+/// answers, which is the whole attack.
+///
+/// Said and not refused, which is 0017's call and was not what the code did:
+/// the compiler pushed a `Diagnostic`, the only severity it has is fatal, and
+/// so netcfgd could not configure a network that pins nothing at all. Plenty of
+/// real deployments do, and a tool that refuses a working deployment on
+/// security grounds nobody asked it for is a tool the operator replaces with
+/// one that works -- at which point netcfgd protects nothing. Decision 0087.
+///
+/// Here rather than in the compiler because this is the only place in netcfgd
+/// that can say something loudly without also stopping it.
+fn warn_eap_without_ca(builder: &mut Builder, desired: &Document) {
+	for network in &desired.networks {
+		let netcfgd_model::Security::Eap(eap) = &network.security else {
+			continue;
+		};
+		if eap.ca_cert.is_some() {
+			continue;
+		}
+		builder.warnings.push(Warning {
+			message: format!(
+				"network `{}` authenticates with EAP and pins no `ca_cert`, so it \
+				 will trust any server that answers -- which is how the credential \
+				 is taken. Set `ca_cert` to the issuer's certificate, or \
+				 `ncfg wifi add ... --ca-cert PATH`",
+				network.id
+			),
+			// A network is not an interface: the same profile can be handed to
+			// every radio on the machine, and naming one of them would be a
+			// guess dressed as a fact.
+			interface: None,
+		});
+	}
+}
+
 fn warn_unapplied(builder: &mut Builder, desired: &Document) {
+	warn_eap_without_ca(builder, desired);
 	warn_access_points(builder, desired);
 	warn_unfired_hooks(builder, desired);
 	// A radio asking for something this build does not do. `portal_check` is the

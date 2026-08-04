@@ -226,6 +226,62 @@ try:
     os.close(master)
     os.close(slave)
 
+    # The enterprise prompt, on a real terminal for the same reason: what an
+    # operator types depends on being told which credential is wanted, and a
+    # PEAP password typed into a prompt asking for a WPA passphrase is a
+    # network that never joins. The echo and restore properties are the same
+    # code path as above and are not re-asserted; the wording is the new thing.
+    for method, ssid, wants, flags in (
+        ("peap", "Campus", "EAP password for `Campus`",
+         ["--identity", "you@example.ac.uk", "--ca-cert", "/dev/null"]),
+        ("tls", "CorpTLS", "private key for `CorpTLS`",
+         ["--identity", "me", "--client-cert", "/dev/null"]),
+    ):
+        master, slave = pty.openpty()
+        proc = subprocess.Popen(
+            [NCFG, "wifi", "add", ssid, "--eap", method] + flags,
+            env=env, stdin=slave, stdout=slave, stderr=slave,
+        )
+        os.set_blocking(master, False)
+        seen = ""
+        deadline = time.time() + 5
+        while wants not in seen and time.time() < deadline:
+            try:
+                seen += os.read(master, 4096).decode(errors="replace")
+            except BlockingIOError:
+                time.sleep(0.02)
+        ok(f"--eap {method} asks for the credential that method uses", wants in seen, seen)
+        ok(
+            f"and --eap {method} does not ask for a WPA passphrase",
+            "passphrase for" not in seen,
+            seen,
+        )
+        during = termios.tcgetattr(slave)
+        ok(f"with echo off for --eap {method}", not during[3] & termios.ECHO)
+
+        os.write(master, (PASSPHRASE + "\n").encode())
+        rest = ""
+        deadline = time.time() + 5
+        while proc.poll() is None and time.time() < deadline:
+            try:
+                rest += os.read(master, 4096).decode(errors="replace")
+            except BlockingIOError:
+                time.sleep(0.02)
+        check(f"--eap {method} succeeded", proc.wait(timeout=5), 0)
+        ok(
+            f"and the --eap {method} credential was never echoed",
+            PASSPHRASE not in seen + rest,
+            seen + rest,
+        )
+        with open(f"{work}/etc/conf.d/wifi-{ssid}.conf") as handle:
+            text = handle.read()
+        # The key the secret is stored under follows the method, because the
+        # supplicant refuses the network outright if it is given the other one.
+        expected = "private_key" if method == "tls" else "password"
+        ok(f"--eap {method} stores the secret as {expected}", f'{expected} = "@secret:{ssid}"' in text, text)
+        os.close(master)
+        os.close(slave)
+
     # The value is never an argument, on this command either.
     attempt = subprocess.run(
         [NCFG, "secret", "set", "wg-key", KEY],

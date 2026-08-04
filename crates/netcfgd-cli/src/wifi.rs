@@ -40,6 +40,97 @@ pub(crate) struct Wanted {
 	pub(crate) proto: Option<&'static str>,
 	/// `--hidden`: the SSID is not broadcast, so it has to be probed for.
 	pub(crate) hidden: bool,
+	/// `--eap`: the method, for an enterprise network.
+	///
+	/// A campus or corporate network is the one thing a laptop meets that this
+	/// command could not add, and the reason it was left is that EAP is a form
+	/// rather than a flag: which fields are needed depends on the method, and
+	/// three of the four want a secret that must not be an argument.
+	pub(crate) eap: Option<&'static str>,
+	/// `--identity`: who you are to the authentication server.
+	pub(crate) identity: Option<String>,
+	/// `--anonymous-identity`: who you are *outside* the tunnel.
+	///
+	/// The whole point of a tunnelled method: the real identity goes inside the
+	/// encrypted tunnel and this is what the radio and anyone listening see.
+	/// eduroam's own guidance is `anonymous@realm`.
+	pub(crate) anonymous_identity: Option<String>,
+	/// `--ca-cert`: the certificate the server is checked against.
+	pub(crate) ca_cert: Option<String>,
+	/// `--client-cert`: the certificate presented, for EAP-TLS.
+	pub(crate) client_cert: Option<String>,
+	/// `--phase2`: the inner method, where the method tunnels one.
+	pub(crate) phase2: Option<String>,
+}
+
+/// What an enterprise network needs, per method, before anything is written.
+///
+/// **This is the form part.** A flag list cannot express "TLS wants a client
+/// certificate and PEAP wants a password", so the alternative to refusing here
+/// is a file that compiles and a network that never joins -- which is 0017's
+/// distinction between refusing what would work and refusing what cannot.
+///
+/// Each refusal names the flag to add rather than the field that is missing,
+/// because the reader is at a command line and not in the model.
+fn check_enterprise(wanted: &Wanted) -> Result<(), String> {
+	let Some(method) = wanted.eap else {
+		// The enterprise flags are meaningless without one, and silently
+		// ignoring them would write a personal network for somebody who
+		// believed they had written a corporate one.
+		for (value, flag) in [
+			(&wanted.identity, "--identity"),
+			(&wanted.anonymous_identity, "--anonymous-identity"),
+			(&wanted.ca_cert, "--ca-cert"),
+			(&wanted.client_cert, "--client-cert"),
+			(&wanted.phase2, "--phase2"),
+		] {
+			if value.is_some() {
+				return Err(format!(
+					"{flag} is for an enterprise network and this one has no method. \
+					 Add `--eap peap`, `--eap ttls`, `--eap tls` or `--eap pwd`"
+				));
+			}
+		}
+		return Ok(());
+	};
+
+	if wanted.open {
+		return Err(
+			"--open and --eap contradict each other: one says there is no \
+			 authentication and the other says which kind"
+				.to_owned(),
+		);
+	}
+	if wanted.proto.is_some() {
+		return Err(
+			"--wpa2/--wpa3 name a generation for a passphrase, and --eap says \
+			 there is no passphrase. An enterprise network negotiates its own"
+				.to_owned(),
+		);
+	}
+	if wanted.identity.is_none() {
+		return Err(format!(
+			"--eap {method} needs `--identity`, which is who you are to the \
+			 authentication server -- often your username, and often with a realm: \
+			 `--identity you@example.ac.uk`"
+		));
+	}
+	// TLS authenticates with a certificate and no password; the other three
+	// authenticate with a password and no certificate of their own. Getting
+	// this wrong is a network that will not join, and wpa_supplicant says so
+	// only in its log.
+	if method == "tls" && wanted.client_cert.is_none() {
+		return Err("--eap tls authenticates with a certificate, so it needs \
+			 `--client-cert PATH`. The private key is asked for, not passed"
+			.to_owned());
+	}
+	if method != "tls" && wanted.client_cert.is_some() {
+		return Err(format!(
+			"--client-cert is for `--eap tls`, which authenticates with a \
+			 certificate. `--eap {method}` authenticates with a password"
+		));
+	}
+	Ok(())
 }
 
 /// Add a network to the configuration.
@@ -66,6 +157,7 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 				.to_owned(),
 		);
 	}
+	check_enterprise(wanted)?;
 
 	let ssid = Ssid::new(ssid_text.as_bytes().to_vec())
 		.map_err(|error| format!("that is not a usable ssid: {error}"))?;
@@ -114,9 +206,9 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 	let stored = if wanted.open {
 		false
 	} else {
-		let passphrase = read_passphrase(&id)?;
+		let value = read_credential(&id, wanted)?;
 		crate::secret::make_secrets_dir(&secret)?;
-		config::write_atomically(&secret, passphrase.as_bytes(), 0o600)
+		config::write_atomically(&secret, value.as_bytes(), 0o600)
 			.map_err(|error| format!("could not write {}: {error}", secret.display()))?;
 		true
 	};
@@ -225,6 +317,33 @@ fn block(id: &str, ssid: &Ssid, wanted: &Wanted) -> String {
 	let mut keys: Vec<String> = Vec::new();
 	if wanted.open {
 		keys.push("open = true".to_owned());
+	} else if let Some(method) = wanted.eap {
+		keys.push(format!("eap = \"{method}\""));
+		// Every value that came off the command line is quoted rather than
+		// interpolated bare: an identity is `you@example.ac.uk` and a
+		// certificate is a path, and neither is guaranteed to be a bare word
+		// the lexer would read back as itself. `verify` below is what proves
+		// it round-tripped, the way it already does for a hex SSID.
+		for (value, key) in [
+			(&wanted.identity, "identity"),
+			(&wanted.anonymous_identity, "anonymous_identity"),
+			(&wanted.ca_cert, "ca_cert"),
+			(&wanted.client_cert, "client_cert"),
+			(&wanted.phase2, "phase2"),
+		] {
+			if let Some(value) = value {
+				keys.push(format!("{key} = \"{}\"", escape(value)));
+			}
+		}
+		// TLS presents a certificate and the rest present a password, and the
+		// supplicant refuses the network outright if it is given the other one
+		// -- so which key the stored secret is written under is the same branch
+		// `read_credential` prompts through.
+		if method == "tls" {
+			keys.push(format!("private_key = \"@secret:{id}\""));
+		} else {
+			keys.push(format!("password = \"@secret:{id}\""));
+		}
 	} else {
 		keys.push(format!("psk = \"@secret:{id}\""));
 		if let Some(proto) = wanted.proto {
@@ -234,9 +353,31 @@ fn block(id: &str, ssid: &Ssid, wanted: &Wanted) -> String {
 	if let Some(priority) = wanted.priority {
 		keys.push(format!("priority = {priority}"));
 	}
-	let _ = writeln!(text, "\twifi {{ {} }}", keys.join("; "));
+	// One key per line for an enterprise network. The single-line form reads
+	// well for `psk` and `priority` and badly for seven keys, and this file is
+	// meant to be edited by hand afterwards.
+	if keys.len() > 3 {
+		text.push_str("\twifi {\n");
+		for key in &keys {
+			let _ = writeln!(text, "\t\t{key}");
+		}
+		text.push_str("\t}\n");
+	} else {
+		let _ = writeln!(text, "\twifi {{ {} }}", keys.join("; "));
+	}
 	text.push_str("}\n");
 	text
+}
+
+/// A value going into a quoted string in generated configuration.
+///
+/// An identity or a certificate path comes off the command line and goes into a
+/// file the compiler reads back. A quote or a backslash in one would end the
+/// string early and produce a file that does not compile -- which takes every
+/// other interface on the machine with it, since the loader compiles the
+/// directory as one document.
+fn escape(value: &str) -> String {
+	value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Compile the configuration again and check the network arrived as asked.
@@ -266,6 +407,59 @@ fn verify(options: &Options, id: &str, wanted: &Wanted) -> Result<(), String> {
 			"network `{id}` compiled with the wrong security, so it was removed \
 			 again. This is a bug in `ncfg wifi add`"
 		));
+	}
+
+	// An enterprise network is checked further, because it has values that came
+	// off the command line and went through a quoted string: an identity with a
+	// realm, a certificate path. `secured` is true for a `psk` network too, so
+	// without this an `--eap` run that compiled to a passphrase network would
+	// pass -- and the operator would find out at association time, from a
+	// supplicant log.
+	if let Some(method) = wanted.eap {
+		let netcfgd_model::Security::Eap(eap) = &network.security else {
+			return Err(format!(
+				"network `{id}` asked for `--eap {method}` and compiled to \
+				 something else, so it was removed again. This is a bug in \
+				 `ncfg wifi add`"
+			));
+		};
+		// Compared as the compiler parsed them, not as they were written, which
+		// is what makes this a round trip rather than a restatement.
+		for (wrote, got, what) in [
+			(
+				wanted.identity.as_deref(),
+				Some(eap.identity.as_str()),
+				"identity",
+			),
+			(
+				wanted.anonymous_identity.as_deref(),
+				eap.anonymous_identity.as_deref(),
+				"anonymous identity",
+			),
+			(
+				wanted.ca_cert.as_deref(),
+				eap.ca_cert.as_deref(),
+				"CA certificate",
+			),
+			(
+				wanted.client_cert.as_deref(),
+				eap.client_cert.as_deref(),
+				"client certificate",
+			),
+			(
+				wanted.phase2.as_deref(),
+				eap.phase2.as_deref(),
+				"phase 2 method",
+			),
+		] {
+			if wrote.is_some() && wrote != got {
+				return Err(format!(
+					"network `{id}`'s {what} did not survive being written and read \
+					 back, so it was removed again. This is a bug in \
+					 `ncfg wifi add`"
+				));
+			}
+		}
 	}
 	Ok(())
 }
@@ -338,6 +532,27 @@ fn read_passphrase(id: &str) -> Result<String, String> {
 	let passphrase = crate::secret::read_without_echo(&format!("passphrase for `{id}`"))?;
 	check_passphrase(&passphrase)?;
 	Ok(passphrase)
+}
+
+/// The one secret this network needs, asked for by its own name.
+///
+/// Three different things live at `@secret:<id>` depending on the network, and
+/// the prompt has to say which or the operator types the wrong one: a WPA
+/// passphrase, an EAP password, or the private key an EAP-TLS certificate goes
+/// with. Only the first has length rules -- an EAP password is whatever the
+/// authentication server says it is, and checking it against WPA's 8-to-63 rule
+/// would refuse valid credentials.
+///
+/// Never an argument, for the reason `ncfg secret set` exists (0075): an
+/// argument is in the process table and in the shell's history.
+fn read_credential(id: &str, wanted: &Wanted) -> Result<String, String> {
+	match wanted.eap {
+		None => read_passphrase(id),
+		Some("tls") => crate::secret::read_without_echo(&format!(
+			"private key for `{id}` (the path wpa_supplicant should load, or the key itself)"
+		)),
+		Some(_) => crate::secret::read_without_echo(&format!("EAP password for `{id}`")),
+	}
 }
 
 /// The passphrase rules, refused here rather than by the supplicant.
@@ -417,11 +632,141 @@ mod tests {
 				open: false,
 				proto: Some("wpa3"),
 				hidden: true,
+				eap: None,
+				identity: None,
+				anonymous_identity: None,
+				ca_cert: None,
+				client_cert: None,
+				phase2: None,
 			},
 		);
 		assert!(text.contains("hidden = true"), "{text}");
 		assert!(text.contains("proto = \"wpa3\""), "{text}");
 		assert!(text.contains("priority = 30"), "{text}");
+	}
+
+	/// An enterprise network reaches the file with the keys the supplicant
+	/// needs, and the secret under the key its method uses.
+	#[test]
+	fn an_enterprise_network_writes_what_the_supplicant_wants() {
+		let ssid = Ssid::new(b"eduroam".to_vec()).expect("a short ssid");
+		let text = block(
+			"eduroam",
+			&ssid,
+			&Wanted {
+				eap: Some("peap"),
+				identity: Some("you@example.ac.uk".to_owned()),
+				anonymous_identity: Some("anonymous@example.ac.uk".to_owned()),
+				ca_cert: Some("/etc/ssl/certs/ca.pem".to_owned()),
+				phase2: Some("mschapv2".to_owned()),
+				..Wanted::default()
+			},
+		);
+		assert!(text.contains("eap = \"peap\""), "{text}");
+		assert!(text.contains("identity = \"you@example.ac.uk\""), "{text}");
+		assert!(
+			text.contains("anonymous_identity = \"anonymous@example.ac.uk\""),
+			"{text}"
+		);
+		assert!(text.contains("phase2 = \"mschapv2\""), "{text}");
+		// A password, and never a psk: the two are different keys and a network
+		// with both is refused by the compiler.
+		assert!(text.contains("password = \"@secret:eduroam\""), "{text}");
+		assert!(!text.contains("psk ="), "{text}");
+	}
+
+	/// EAP-TLS stores its secret under `private_key`, not `password`.
+	///
+	/// The supplicant refuses the network outright if it is given the other one
+	/// -- `MissingEapField` for whichever it wanted -- and the failure arrives
+	/// at association time in a log nobody is reading.
+	#[test]
+	fn eap_tls_stores_a_key_rather_than_a_password() {
+		let ssid = Ssid::new(b"Corp".to_vec()).expect("a short ssid");
+		let text = block(
+			"Corp",
+			&ssid,
+			&Wanted {
+				eap: Some("tls"),
+				identity: Some("me".to_owned()),
+				client_cert: Some("/etc/ssl/certs/me.pem".to_owned()),
+				..Wanted::default()
+			},
+		);
+		assert!(text.contains("private_key = \"@secret:Corp\""), "{text}");
+		assert!(!text.contains("password ="), "{text}");
+		assert!(
+			text.contains("client_cert = \"/etc/ssl/certs/me.pem\""),
+			"{text}"
+		);
+	}
+
+	/// A value with a quote in it does not end the string early.
+	///
+	/// An identity comes off the command line and goes into a quoted string in
+	/// a file the compiler reads back. Unescaped, `we"ird` closes the string and
+	/// the file does not compile -- which takes every other interface on the
+	/// machine with it, the loader compiling the directory as one document.
+	#[test]
+	fn a_value_with_a_quote_in_it_is_escaped() {
+		assert_eq!(escape(r#"we"ird"#), r#"we\"ird"#);
+		assert_eq!(escape(r"back\slash"), r"back\\slash");
+		assert_eq!(escape("ordinary@example.ac.uk"), "ordinary@example.ac.uk");
+	}
+
+	/// The enterprise flags are refused where they would do nothing, and the
+	/// combinations that cannot work are refused before a file exists.
+	#[test]
+	fn an_impossible_enterprise_network_is_refused_before_anything_is_written() {
+		fn with(f: impl FnOnce(&mut Wanted)) -> Result<(), String> {
+			let mut wanted = Wanted::default();
+			f(&mut wanted);
+			check_enterprise(&wanted)
+		}
+
+		// A method needs an identity, whichever method it is.
+		for method in ["peap", "ttls", "tls", "pwd"] {
+			let error = with(|w| w.eap = Some(method)).expect_err("no identity");
+			assert!(error.contains("--identity"), "{method}: {error}");
+		}
+		// TLS presents a certificate; the others present a password.
+		let error = with(|w| {
+			w.eap = Some("tls");
+			w.identity = Some("me".to_owned());
+		})
+		.expect_err("no client certificate");
+		assert!(error.contains("--client-cert"), "{error}");
+		let error = with(|w| {
+			w.eap = Some("peap");
+			w.identity = Some("me".to_owned());
+			w.client_cert = Some("/x".to_owned());
+		})
+		.expect_err("a certificate on a password method");
+		assert!(error.contains("--client-cert"), "{error}");
+
+		// And the two kinds of security do not mix.
+		for set in [
+			(|w: &mut Wanted| w.open = true) as fn(&mut Wanted),
+			|w: &mut Wanted| w.proto = Some("wpa3"),
+		] {
+			let error = with(|w| {
+				w.eap = Some("peap");
+				w.identity = Some("me".to_owned());
+				set(w);
+			})
+			.expect_err("two kinds of security");
+			assert!(error.contains("--eap"), "{error}");
+		}
+
+		// An enterprise flag with no method is a personal network somebody
+		// believed was a corporate one.
+		let error =
+			with(|w| w.identity = Some("me".to_owned())).expect_err("an identity with no method");
+		assert!(error.contains("--eap"), "{error}");
+
+		// And an ordinary network still passes.
+		assert!(with(|w| w.proto = Some("wpa3")).is_ok());
+		assert!(with(|w| w.open = true).is_ok());
 	}
 
 	#[test]
@@ -541,6 +886,72 @@ mod tests {
 		let error = add(&["Airport".to_owned()], &options).expect_err("it is refused");
 		assert!(error.contains("--open and --wpa2/--wpa3"), "{error}");
 		assert!(!root.join("etc/conf.d/wifi-Airport.conf").exists());
+		let _ = std::fs::remove_dir_all(&root);
+	}
+
+	/// And `add` is where the enterprise checks are made, not only the
+	/// function that makes them.
+	///
+	/// Written after a break landed and nothing went red: the test above it
+	/// calls `check_enterprise` directly, so deleting the call from `add`
+	/// changed nothing any check could see. A refusal nobody reaches is not a
+	/// refusal, and this one goes through the command with a real directory --
+	/// which also proves the refusal happens *before* the prompt, since a test
+	/// has no terminal to type a password at.
+	#[test]
+	fn an_enterprise_network_is_refused_by_the_command_and_not_only_the_check() {
+		let (root, mut options) = fixture("contra-eap");
+		options.wifi.eap = Some("peap");
+		let error = add(&["Corp".to_owned()], &options).expect_err("it is refused");
+		assert!(error.contains("--identity"), "{error}");
+		assert!(!root.join("etc/conf.d/wifi-Corp.conf").exists());
+		assert!(!root.join("etc/secrets/Corp").exists());
+		let _ = std::fs::remove_dir_all(&root);
+	}
+
+	/// `verify` reads the enterprise fields back and compares them.
+	///
+	/// The happy path cannot show this: `block` and `verify` agree, so a
+	/// working pair proves nothing about the check. So the file is written by
+	/// `block` and then verified against a *different* identity, which is what
+	/// a future bug in `block` would look like from here.
+	///
+	/// Written because breaking this comparison left every other test green:
+	/// the compile step already catches a file that does not parse, and only
+	/// this catches one that parses into the wrong network.
+	#[test]
+	fn verify_catches_a_field_that_did_not_survive_the_round_trip() {
+		let (root, options) = fixture("verify-eap");
+		let wanted = Wanted {
+			eap: Some("peap"),
+			identity: Some("you@example.ac.uk".to_owned()),
+			ca_cert: Some("/ca.pem".to_owned()),
+			..Wanted::default()
+		};
+		let ssid = Ssid::new(b"Corp".to_vec()).expect("a short ssid");
+		std::fs::write(
+			profile_path(Path::new(&root.join("etc")), "Corp"),
+			block("Corp", &ssid, &wanted),
+		)
+		.expect("the block is written");
+
+		// What was written is what was asked for.
+		verify(&options, "Corp", &wanted).expect("the round trip holds");
+
+		// And a mismatch is caught rather than reported as success.
+		let drifted = Wanted {
+			identity: Some("somebody.else@example.ac.uk".to_owned()),
+			..wanted.clone()
+		};
+		let error = verify(&options, "Corp", &drifted).expect_err("the identity moved");
+		assert!(error.contains("identity"), "{error}");
+
+		let drifted = Wanted {
+			phase2: Some("mschapv2".to_owned()),
+			..wanted.clone()
+		};
+		let error = verify(&options, "Corp", &drifted).expect_err("a phase 2 that is not there");
+		assert!(error.contains("phase 2"), "{error}");
 		let _ = std::fs::remove_dir_all(&root);
 	}
 
