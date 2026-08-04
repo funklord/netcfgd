@@ -111,6 +111,15 @@ check() {
 cp "$repo/tests/live/fake_openvpn.py" "$work/bin/openvpn"
 chmod +x "$work/bin/openvpn"
 PATH="$work/bin:$PATH"
+# And `NCFG_OPENVPN`, because `PATH` alone does not do it. netcfgd searches
+# /usr/sbin, /sbin, /usr/local/sbin and /usr/bin *before* PATH -- deliberately,
+# since sbin is not on a non-root PATH -- so on any machine with openvpn
+# installed netcfgd ran the real daemon and this script's fake logged nothing.
+# 20 of the 45 checks below were failing on every such machine, and passing
+# here only because openvpn is a package this one does not have. The same
+# disease `tunnel.sh` had, in the script that exists so the daemon does not
+# have to be installed at all (0101).
+export NCFG_OPENVPN="$work/bin/openvpn"
 export PATH
 
 # The operator's file, which netcfgd hands over and never reads. Its contents

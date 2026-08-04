@@ -64,7 +64,7 @@ skip() {
 [ "$(id -u)" = 0 ] || skip "needs real root (module loading and phy netns moves)"
 
 supplicant=$(find_in_sbin wpa_supplicant) || skip "wpa_supplicant is not installed"
-iw=$(find_in_sbin iw) || skip "iw is not installed (apt install iw)"
+iw=$(find_in_sbin iw) || skip "iw is not installed (apt install iw | apk add iw)"
 ip=$(find_in_sbin ip) || die "no ip(8), which is not something this can work around"
 [ -x "$repo/target/debug/ncfg" ] || skip "netcfgd is not built (cargo build --workspace)"
 
@@ -101,9 +101,9 @@ ip=$(find_in_sbin ip) || die "no ip(8), which is not something this can work aro
 # kernel that has it. A preflight that can only produce a false negative turns a
 # test that would have run into a skip that reads as a pass -- the mistake the
 # `AP-ENABLED` grep above already made once, in this file.
-modprobe=$(find_in_sbin modprobe) || skip "no modprobe (apt install kmod)"
-modinfo=$(find_in_sbin modinfo) || skip "no modinfo (apt install kmod)"
-rmmod=$(find_in_sbin rmmod) || skip "no rmmod (apt install kmod)"
+modprobe=$(find_in_sbin modprobe) || skip "no modprobe (apt install kmod | apk add kmod)"
+modinfo=$(find_in_sbin modinfo) || skip "no modinfo (apt install kmod | apk add kmod)"
+rmmod=$(find_in_sbin rmmod) || skip "no rmmod (apt install kmod | apk add kmod)"
 "$modinfo" mac80211_hwsim >/dev/null 2>&1 ||
 	skip "this kernel has no mac80211_hwsim module"
 
