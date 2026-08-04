@@ -31,11 +31,37 @@ use netcfgd_model::{
 };
 use serde::{Deserialize, Serialize};
 
+/// How long the confirm window is, if there is one.
+///
+/// The caller's answer, or the document's. `globals.confirm_default` was
+/// compiled from `global { confirm = N }`, carried in the document and in the
+/// witness, and read by nothing -- so an operator who wrote it believing every
+/// apply had a safety net had none (0094).
+///
+/// `Some(0)` is the caller saying *no* window despite that default, and is the
+/// only way to say it. It cannot mean a window of no seconds: that would arm
+/// and expire, which is two spellings of "no" where one of them reverts the
+/// change.
+fn confirm_window(desired: &Document, options: &PlanOptions) -> Option<u32> {
+	match options.confirm_window {
+		Some(0) => None,
+		Some(seconds) => Some(seconds),
+		None => desired.globals.confirm_default,
+	}
+}
+
 /// How to build the plan.
 #[derive(Debug, Clone, Default)]
 pub struct PlanOptions {
-	/// Seconds before an unconfirmed change reverts. `None` disables
-	/// commit-confirm for this run.
+	/// Seconds before an unconfirmed change reverts.
+	///
+	/// `None` means the caller did not say, and the document's
+	/// `globals.confirm_default` answers instead -- so a machine that wrote
+	/// `global { confirm = 90 }` gets a window on every apply, which is what
+	/// writing it means. `Some(0)` is how a caller says *no* window despite
+	/// that default, and is the only way to say it: a window of zero seconds
+	/// would arm and expire, which is not a thing to leave a reader to
+	/// distinguish (0094).
 	pub confirm_window: Option<u32>,
 	/// Hash of the document to revert to, precomputed at plan time.
 	pub revert_to: Option<String>,
@@ -666,7 +692,13 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// Rule 8: the confirm window is armed first, and the revert is computed
 	// now rather than after a failure, when the network may already be
 	// unreachable.
-	if let Some(window) = options.confirm_window {
+	//
+	// The caller's answer, or the document's. `globals.confirm_default` was
+	// compiled, carried in the document and in the witness, and read by
+	// nothing -- so an operator who wrote `confirm = 90` believing every apply
+	// had a safety net had none (0094). `Some(0)` is the caller saying no
+	// window, which is the only way to override a machine that set one.
+	if let Some(window) = confirm_window(desired, options) {
 		let inverse = options.revert_to.as_ref().map(|hash| Op::CommitRevert {
 			to_document_hash: hash.clone(),
 		});

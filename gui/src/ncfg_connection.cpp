@@ -289,6 +289,20 @@ ncfg_tiers_t ncfg_connection::tiers()
 	return held;
 }
 
+unsigned ncfg_connection::confirm_default()
+{
+	unsigned seconds = 0;
+	char message[NCFG_ERROR_MAX];
+
+	if (!client || !ncfg_client_confirm_default(client, &seconds, message, sizeof(message))) {
+		// Could not ask -- an older daemon, or one that refused `show`. Zero,
+		// and the dialog keeps its own default, which is the same answer as a
+		// machine that names none.
+		return 0;
+	}
+	return seconds;
+}
+
 bool ncfg_connection::confirm(QString *error)
 {
 	if (!client) {

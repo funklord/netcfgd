@@ -401,8 +401,16 @@ Four rules, all of them the same rule:
    Switching tabs re-asks too, or a pane that went stale while another was
    showing stays stale until the next event.
 
-   What is left: `globals.confirm_default` is unreachable, so the dialog offers
-   60s to match `ncfg tui`.
+   ~~`globals.confirm_default` is unreachable, so the dialog offers 60s.~~
+   **Done** ([0094](../docs/decisions/0094-a-confirm-default-nobody-read.md)),
+   and going to fix it found that **nothing anywhere read that key**: a machine
+   whose config said `global { confirm = 90 }` armed no window on any apply. The
+   dialog asks the machine now, and the planner honours it.
+
+   **Nothing is left on this list.** The window does what section 4 and section
+   5 ask of it: it says which machine it is talking to and what the operator may
+   do, it shows a plan with its reasons before applying anything, it consents to
+   a refusal one tick at a time, and it keeps up with the machine on its own.
 2. **`wire/` plus `agent/`, LAN only**, with the fuzzing standard from the first
    commit.
 3. **Android**, which by then is a kit and a transport choice rather than a port.

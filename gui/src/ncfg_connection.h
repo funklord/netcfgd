@@ -198,6 +198,12 @@ public:
 	 */
 	ncfg_tiers_t tiers();
 
+	/* The machine's own commit-confirm window in seconds, or 0 if its
+	 * configuration names none. Asked rather than assumed: a client with a
+	 * default of its own would disagree with `ncfg apply` on the same machine
+	 * about how long an operator has to confirm. */
+	unsigned confirm_default();
+
 	bool confirm(QString *error);
 	bool revert(QString *error);
 

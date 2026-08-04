@@ -7042,3 +7042,109 @@ interface wlan0 { config = "dhcp" }
 		plan.warnings
 	);
 }
+
+/// A machine that asked for a confirm window gets one on every apply.
+///
+/// `global { confirm = 90 }` compiled, was carried in the document and in the
+/// witness, and was read by nothing -- so an operator who wrote it believing
+/// every apply had a safety net had none (0094). The same inert-key defect
+/// 0061 closed four of, and silent in the same way.
+#[test]
+fn a_documents_confirm_default_arms_a_window() {
+	let desired = document(
+		r#"
+global { confirm = 90 }
+interface eth0 { config = "10.0.0.2/24" }
+"#,
+	);
+	let observed = observed_with(&["eth0"]);
+
+	// No window asked for by the caller: the document's answer is used.
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		names(&plan).contains(&"commit.arm"),
+		"the document asked for a window and got none: {:?}",
+		names(&plan)
+	);
+	// And it is the document's number, not some default of the planner's.
+	let armed = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "commit.arm")
+		.expect("the arm action");
+	assert!(
+		armed.reason.desired.contains("90"),
+		"armed the wrong window: {:?}",
+		armed.reason
+	);
+}
+
+/// And a caller who says a number gets that number rather than the document's.
+#[test]
+fn an_explicit_window_beats_the_documents() {
+	let desired = document(
+		r#"
+global { confirm = 90 }
+interface eth0 { config = "10.0.0.2/24" }
+"#,
+	);
+	let observed = observed_with(&["eth0"]);
+	let plan = plan(
+		&desired,
+		&observed,
+		&PlanOptions {
+			confirm_window: Some(30),
+			..PlanOptions::default()
+		},
+	);
+	let armed = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "commit.arm")
+		.expect("the arm action");
+	assert!(armed.reason.desired.contains("30"), "{:?}", armed.reason);
+}
+
+/// Zero is how a caller says "no window" on a machine that set one.
+///
+/// It cannot mean a window of no seconds: that would arm and expire, which is
+/// two spellings of "no" where one of them reverts the change. Without this
+/// there is no way at all to override a document default from the command line.
+#[test]
+fn zero_seconds_means_no_window_rather_than_an_instant_one() {
+	let desired = document(
+		r#"
+global { confirm = 90 }
+interface eth0 { config = "10.0.0.2/24" }
+"#,
+	);
+	let observed = observed_with(&["eth0"]);
+	let plan = plan(
+		&desired,
+		&observed,
+		&PlanOptions {
+			confirm_window: Some(0),
+			..PlanOptions::default()
+		},
+	);
+	assert!(
+		!names(&plan).contains(&"commit.arm"),
+		"zero armed a window: {:?}",
+		names(&plan)
+	);
+	// And the rest of the plan is still there, so this refused the window and
+	// not the apply.
+	assert!(names(&plan).contains(&"addr.add"), "{:?}", names(&plan));
+}
+
+/// A machine that said nothing still gets nothing.
+///
+/// The opt-in half. Arming a window on every apply everywhere would make a
+/// change revert itself on machines that never asked for that.
+#[test]
+fn a_document_that_asked_for_no_window_gets_none() {
+	let desired = document(r#"interface eth0 { config = "10.0.0.2/24" }"#);
+	let observed = observed_with(&["eth0"]);
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(!names(&plan).contains(&"commit.arm"), "{:?}", names(&plan));
+}

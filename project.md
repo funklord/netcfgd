@@ -78,7 +78,10 @@ Document {
 Globals {
   dns              : DnsPolicy
   on_drift_default : DriftPolicy      // = Report
-  confirm_default  : u32?             // seconds; commit-confirm default window
+  confirm_default  : u32?             // seconds; commit-confirm default window,
+                                      // armed on every apply that does not say
+                                      // otherwise. `--confirm-within 0` says
+                                      // otherwise (0094)
   hostname_policy  : enum { None, FromDhcp, Static(string) }
   control          : Control          // who may do what; see 0013
 }
@@ -1604,6 +1607,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 ### Things that are true and non-obvious
 
+- **A config key can be compiled, carried, pinned in the witness, documented, and read by nothing.** `globals.confirm_default` was all five. `global { confirm = 90 }` produced a document field that no code path consulted, so an operator who wrote it believing every apply had a safety net had none -- silently, and with the key listed in project.md's own config surface as though it worked. 0061 closed four of these by reading the DSL against the code; this one was found by going to fix something else and asking where the number lived. **Being in the schema is not being read**, and the witness cannot tell the difference: it pins the shape of a field, not that anything consults it.
 - **"Read what you know and ignore the rest" describes a record, not a stream, and the difference is a shift bug on a newer kernel.** `/dev/rfkill`'s header says the record may grow, which reads as an invitation to buffer bytes and cut them every eight. It is not: the kernel dequeues **one event per read** and copies as much of it as you asked for, so a generous buffer gets exactly one record and the surplus of a longer one belongs to that read. The stream reading would have kept the ninth byte and shifted every following event — visible only on kernels newer than the one it was written against. Opening the device and printing what came back settled it in a minute; the header could not have.
 - **A probe that reads the first widget of a kind reads whichever was constructed first, which is rarely the one meant.** A headless check asked whether the devices table had caught up and read `findChildren<QTableWidget*>().first()` -- which is the *plan* pane's notes table, built earlier and empty on a converged machine. It reported "the window did not change" for a window that had changed correctly, and the obvious next move would have been to debug working code. Select a widget by something only it has: a header, an object name, a title.
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.

@@ -78,7 +78,10 @@ options:
   --json                   machine-readable output
   --confirm-within SECS    apply, then revert automatically unless confirmed
                            within SECS. Needs netcfgd running, since the
-                           window has to outlive this command.
+                           window has to outlive this command. A machine whose
+                           config says `global { confirm = N }` arms one
+                           without this; `--confirm-within 0` is how to say no
+                           window on such a machine
   --allow-disruption IFACE consent to disrupting one guarded interface;
                            repeatable, and deliberately not a blanket --force
   --strand-credentials DEV consent to unmanaging one device while leaving a
