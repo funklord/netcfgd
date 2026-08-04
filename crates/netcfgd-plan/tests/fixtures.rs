@@ -8,8 +8,8 @@
 
 use netcfgd_compile::{compile, NoHooks, SourceMap};
 use netcfgd_model::{
-	AppliedDns, BackendKind, Document, Observed, ObservedAddress, ObservedBackend, ObservedLink,
-	ObservedRoute, Origin, Ownership,
+	AppliedDns, BackendKind, Document, HookPhase, Observed, ObservedAddress, ObservedBackend,
+	ObservedLink, ObservedRoute, Origin, Ownership,
 };
 use netcfgd_plan::{plan, Op, Plan, PlanOptions};
 
@@ -5865,47 +5865,74 @@ interface eth0  { config = "dhcp" }
 	);
 }
 
-/// A hook in a phase nothing fires says so.
+/// Every phase the model declares actually runs.
 ///
-/// Nine of the eleven phases are recognised, materialised into `/run` with a
-/// hash, and never run -- which reads exactly like a working feature. `PreUp`'s
-/// own documentation used to point at two of them.
+/// This used to assert the opposite half: that a hook in a phase nothing fires
+/// is *named* in the plan, because nine of the eleven were parsed, materialised
+/// and never executed. The last of them fires as of 0096, so the warning has no
+/// input any more -- and the property worth keeping is the one that made the
+/// warning necessary: **no phase is silently unfired**.
+///
+/// The match below has no wildcard arm, so a phase added to the model is a
+/// compile error here until somebody decides which list it belongs in. That is
+/// the same guard `netcfgd-plan`'s own witness uses, and it is the half that
+/// catches an addition -- the assertion catches a phase that stopped firing.
 #[test]
-fn a_hook_in_a_phase_nothing_fires_is_reported() {
+fn no_phase_is_recognised_and_silently_unfired() {
+	// Every variant, and how the config language spells it. A direct block for
+	// the lifecycle phases, `on <event>` for the rest.
+	let spelling = |phase: HookPhase| match phase {
+		HookPhase::PreUp => "pre_up",
+		HookPhase::Up => "up",
+		HookPhase::PostUp => "post_up",
+		HookPhase::PreDown => "pre_down",
+		HookPhase::Down => "down",
+		HookPhase::PostDown => "post_down",
+		HookPhase::Carrier => "on carrier",
+		HookPhase::Lease => "on lease",
+		HookPhase::Roam => "on roam",
+		HookPhase::Portal => "on portal",
+		HookPhase::Drift => "on drift",
+	};
+	let every = [
+		HookPhase::PreUp,
+		HookPhase::Up,
+		HookPhase::PostUp,
+		HookPhase::PreDown,
+		HookPhase::Down,
+		HookPhase::PostDown,
+		HookPhase::Carrier,
+		HookPhase::Lease,
+		HookPhase::Roam,
+		HookPhase::Portal,
+		HookPhase::Drift,
+	];
+
+	let mut text = String::from("interface eth0 {\n\tconfig = \"10.0.0.2/24\"\n");
+	for phase in every {
+		text.push_str(&format!("\t{} {{\necho {phase:?}\n}}\n", spelling(phase)));
+	}
+	text.push_str("}\n");
+
 	let mut sources = SourceMap::new();
-	sources.add(
-		"netcfgd.conf",
-		"interface eth0 {\n\
-		 \tconfig = \"10.0.0.2/24\"\n\
-		 \tpost_up {\necho up\n}\n\
-		 \tpre_down {\necho going\n}\n\
-		 }\n",
-	);
+	sources.add("netcfgd.conf", &text);
 	let desired = compile(&sources, &mut TestHooks).expect("compiles");
 	let observed = observed_with(&["eth0"]);
-
 	let plan = plan(&desired, &observed, &PlanOptions::default());
-	let said: Vec<&str> = plan
+
+	let unfired: Vec<&str> = plan
 		.warnings
 		.iter()
 		.map(|warning| warning.message.as_str())
 		.filter(|message| message.contains("never run by this build"))
 		.collect();
-	assert_eq!(
-		said.len(),
-		1,
-		"expected the `pre_down` hook to be named and nothing else: {:?}",
-		plan.warnings
+	assert!(
+		unfired.is_empty(),
+		"a phase is recognised and never run: {unfired:?}"
 	);
-	// `roam` used to be one of these and fires since 0091; `portal` was the
-	// other and fires since 0095. `pre_down` is what is left, deferred with a
-	// reason rather than unbuilt (0063): it and `down` fire at the same point
-	// in a plan until there is a teardown ordering.
-	assert!(said
-		.iter()
-		.any(|message| message.contains("`pre_down` hook")));
-	// And the one that does fire is still planned, rather than warned about.
-	assert!(names(&plan).contains(&"hook.run"));
+	// And the ones a plan carries are still planned, so this did not pass by
+	// the document failing to compile into anything.
+	assert!(names(&plan).contains(&"hook.run"), "{:?}", names(&plan));
 }
 
 /// `portal_check` takes a URL, and an `https` one is refused with the reason.
@@ -7151,4 +7178,111 @@ fn a_document_that_asked_for_no_window_gets_none() {
 	let observed = observed_with(&["eth0"]);
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 	assert!(!names(&plan).contains(&"commit.arm"), "{:?}", names(&plan));
+}
+
+/// Taking an interface down removes what netcfgd put on it, in order.
+///
+/// Two things at once (0096). The ordering gives `pre_down` a moment of its own
+/// -- before the addresses go, when the network still works -- which is what
+/// 0063 said the phase needed and did not have. And the address removal is a
+/// fix in its own right: `link.down` flushes IPv6 and **leaves IPv4 behind**,
+/// measured on a real kernel, so a disabled interface kept a stale address that
+/// netcfgd still recorded as its own.
+#[test]
+fn taking_an_interface_down_withdraws_its_addresses_first() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"interface eth0 {\n\
+		 \tconfig  = \"10.0.0.2/24\"\n\
+		 \tenabled = false\n\
+		 \tpre_down {\necho early\n}\n\
+		 \tdown {\necho late\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+	observed.addresses.push(ObservedAddress {
+		interface: "eth0".to_owned(),
+		address: "10.0.0.2/24".to_owned(),
+		proto: None,
+		ownership: Ownership::Ours,
+		origin: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let order = names(&plan);
+
+	let at = |op: &str| {
+		order
+			.iter()
+			.position(|name| *name == op)
+			.unwrap_or_else(|| panic!("no {op} in {order:?}"))
+	};
+	// The address goes, and before the link does.
+	assert!(at("addr.del") < at("link.down"), "{order:?}");
+
+	// And the two hook phases are now two moments rather than one: the first
+	// hook runs before the address is withdrawn and the second after it. That
+	// is the whole of what 0063 was waiting for.
+	let hooks: Vec<usize> = order
+		.iter()
+		.enumerate()
+		.filter(|(_, name)| **name == "hook.run")
+		.map(|(index, _)| index)
+		.collect();
+	assert_eq!(hooks.len(), 2, "{order:?}");
+	assert!(
+		hooks[0] < at("addr.del"),
+		"pre_down ran too late: {order:?}"
+	);
+	assert!(hooks[1] > at("addr.del"), "down ran too early: {order:?}");
+	assert!(hooks[1] < at("link.down"), "down ran too late: {order:?}");
+
+	// And the *edge*, not only the position. Actions execute in list order, so
+	// every assertion above passes on emission order alone -- deleting the
+	// dependency changes nothing any of them can see, which project.md already
+	// records as the way a `depends_on` becomes decoration. This is the one
+	// that fails when `down` stops waiting for the withdrawal.
+	let withdrawal = plan.actions[at("addr.del")].id;
+	let late_hook = &plan.actions[hooks[1]];
+	assert!(
+		late_hook.depends_on.contains(&withdrawal),
+		"the `down` hook does not wait for the address to go: {:?}",
+		late_hook.depends_on
+	);
+	// Its counterpart: `pre_down` must *not* wait for it, or the two phases are
+	// one moment again.
+	assert!(
+		!plan.actions[hooks[0]].depends_on.contains(&withdrawal),
+		"the `pre_down` hook waits for the withdrawal it is supposed to precede"
+	);
+}
+
+/// An address that is not netcfgd's is left where it is.
+///
+/// Disabling an interface is not permission to remove somebody else's address
+/// from it -- the same rule every other teardown here follows, and the reason
+/// `Ownership` exists.
+#[test]
+fn taking_an_interface_down_leaves_somebody_elses_address_alone() {
+	let desired = document("interface eth0 {\n\tconfig = \"10.0.0.2/24\"\n\tenabled = false\n}\n");
+	let mut observed = observed_with(&["eth0"]);
+	observed.links[0].up = true;
+	observed.addresses.push(ObservedAddress {
+		interface: "eth0".to_owned(),
+		address: "192.0.2.9/24".to_owned(),
+		proto: None,
+		ownership: Ownership::Foreign,
+		origin: None,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"addr.del"),
+		"removed an address that was not ours: {:?}",
+		names(&plan)
+	);
+	assert!(names(&plan).contains(&"link.down"), "{:?}", names(&plan));
 }
