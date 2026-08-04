@@ -369,8 +369,22 @@ fn write_script(run: &Path, iface: &str, report: &Path) -> Result<PathBuf, Strin
 ///
 /// The same search as hostapd's and for the same reason: it lives in
 /// `/usr/sbin`, which is not on a non-root `PATH` on Debian and several others.
+///
+/// `NCFG_OPENVPN` overrides it, in the same family as `NCFG_WPA_CTRL_DIR` and
+/// `NCFG_RESOLV_CONF` and for the same reason: a test needs to point at
+/// something that is not the real one. **This one is not a convenience.**
+/// Searching `sbin` before `PATH` is right for netcfgd and means a fake cannot
+/// be injected on `PATH` at all -- so `tests/live/openvpn.sh`, which fakes the
+/// daemon to check the command line netcfgd builds, was silently exercising
+/// the *real* openvpn on every machine that had it installed, and failing 20
+/// of its 45 checks. It passed here only because this machine has no openvpn
+/// (0101).
 #[must_use]
 pub fn binary() -> Option<PathBuf> {
+	if let Some(path) = std::env::var_os("NCFG_OPENVPN") {
+		let path = PathBuf::from(path);
+		return path.is_file().then_some(path);
+	}
 	for dir in ["/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/bin"] {
 		let path = Path::new(dir).join("openvpn");
 		if path.is_file() {

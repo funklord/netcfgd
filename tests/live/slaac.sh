@@ -80,7 +80,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 [ -d /proc/sys/net/ipv6 ] || skip "this kernel has no IPv6 (ipv6.disable=1)"
 dnsmasq=$(find_in_sbin dnsmasq) ||
-	skip "no dnsmasq, which is the router here (apt install dnsmasq-base)"
+	skip "no dnsmasq, which is the router here (apt install dnsmasq-base | apk add dnsmasq)"
 
 # ------------------------------------------------------------- the namespace
 
@@ -91,7 +91,7 @@ if [ -z "${NCFG_SLAAC_NS:-}" ]; then
 		exec unshare --net -- sh "$0" "$@"
 	fi
 	command -v newuidmap >/dev/null 2>&1 ||
-		skip "dnsmasq drops privileges and an unprivileged namespace needs newuidmap (apt install uidmap)"
+		skip "dnsmasq drops privileges and an unprivileged namespace needs newuidmap (apt install uidmap | apk add shadow-uidmap)"
 	unshare --map-root-user --map-auto --net true 2>/dev/null ||
 		skip "no subordinate uid range in /etc/subuid, so dnsmasq has no group to drop to"
 	exec unshare --map-root-user --map-auto --net -- sh "$0" "$@"

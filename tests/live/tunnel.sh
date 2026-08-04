@@ -55,7 +55,7 @@ find_openvpn() {
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
-openvpn=$(find_openvpn) || skip "openvpn is not installed (apt install openvpn)"
+openvpn=$(find_openvpn) || skip "openvpn is not installed (apt install openvpn | apk add openvpn)"
 [ -c /dev/net/tun ] || skip "no /dev/net/tun, so no tunnel can be opened"
 
 work=$(mktemp -d /tmp/ncfg-tunnel.XXXXXX)

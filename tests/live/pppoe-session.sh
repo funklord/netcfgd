@@ -25,7 +25,7 @@
 #
 # It has been run, which is the point of writing it down: a privileged container
 # is enough (`docker run --rm --privileged -v "$PWD":/repo:ro debian:trixie`,
-# then `apt-get install ppp pppoe iproute2` and this script). The first thing it
+# then `apt-get install ppp pppoe iproute2, or apk add ppp ppp-pppoe iproute2` and this script). The first thing it
 # found was that netcfgd could dial and could not hang up.
 
 set -eu
@@ -72,7 +72,7 @@ fi
 
 for tool in pppd pppoe-server ip; do
 	command -v "$tool" >/dev/null 2>&1 || {
-		echo "pppoe-session.sh: skipping: no $tool (apt install ppp pppoe)"
+		echo "pppoe-session.sh: skipping: no $tool (apt install ppp pppoe | apk add ppp ppp-pppoe)"
 		exit 0
 	}
 done
@@ -143,7 +143,7 @@ OPTIONS
 # server's child logs.
 plugin=$(ls /usr/lib/pppd/*/rp-pppoe.so 2>/dev/null | head -1)
 [ -n "$plugin" ] || {
-	echo "pppoe-session.sh: skipping: no rp-pppoe.so (apt install pppoe)"
+	echo "pppoe-session.sh: skipping: no rp-pppoe.so (apt install pppoe | apk add ppp-pppoe)"
 	exit 0
 }
 pppoe-server -I isp0 -L 10.99.0.1 -R 10.99.0.100 -N 1 -O "$work/ac.options" \

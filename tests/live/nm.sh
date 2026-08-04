@@ -37,7 +37,7 @@ skip() {
 }
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-command -v nmcli >/dev/null 2>&1 || skip "nmcli is not installed (apt install network-manager)"
+command -v nmcli >/dev/null 2>&1 || skip "nmcli is not installed (apt install network-manager | apk add networkmanager)"
 command -v dbus-daemon >/dev/null 2>&1 || skip "dbus-daemon is not installed"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 [ -x "$shim" ] || skip "netcfgd-nm is not built (make adapters)"
