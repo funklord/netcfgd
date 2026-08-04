@@ -37,7 +37,9 @@ class QLabel;
 class QPushButton;
 class QSpinBox;
 class QTableWidget;
+class QGroupBox;
 class QTimer;
+class QVBoxLayout;
 
 class ncfg_plan_view;
 
@@ -61,11 +63,19 @@ private slots:
 
 private:
 	void show_journal(const QList<ncfg_record_row> &journal);
+	void build_consent(const ncfg_plan_data &fetched);
 	void arm(unsigned seconds);
 	void say(const QString &text);
 
 	ncfg_connection *connection;
 	ncfg_plan_view  *plan;
+	QGroupBox       *consent_box;
+	QVBoxLayout     *consent_layout;
+	/* What the operator has ticked, filled in as they tick it rather than
+	 * gathered at apply time: the boxes are built from the plan and the plan
+	 * is fetched once, so reading them back would mean keeping a second list
+	 * of widgets that must not disagree with this one. */
+	ncfg_consent_rows agreed;
 	QCheckBox       *arm_window;
 	QSpinBox        *window_seconds;
 	QLabel          *message;
