@@ -32,7 +32,7 @@ namespace {
  * that paraphrases a command says no without saying how.
  */
 const char *const note_titles[] = { "severity", "interface",      "message",        "detail",
-				    "reason",   "what to change", "or proceed with" };
+		            "reason",   "what to change", "or proceed with" };
 constexpr int note_column_count = static_cast<int>(sizeof(note_titles) / sizeof(note_titles[0]));
 
 /*
@@ -46,7 +46,7 @@ constexpr int note_column_count = static_cast<int>(sizeof(note_titles) / sizeof(
  * the fields rather than inventing a phrasing of their own.
  */
 const char *const action_titles[] = { "id",       "op",      "interface",  "field",
-				      "observed", "desired", "reversible" };
+		              "observed", "desired", "reversible" };
 constexpr int action_column_count =
 	static_cast<int>(sizeof(action_titles) / sizeof(action_titles[0]));
 
@@ -114,7 +114,7 @@ void tidy(QTableWidget *table)
 } /* namespace */
 
 ncfg_plan_view::ncfg_plan_view(ncfg_connection *connection, QWidget *parent)
-	: QWidget(parent), connection(connection)
+    : QWidget(parent), connection(connection)
 {
 	auto *layout = new QVBoxLayout(this);
 
@@ -231,7 +231,7 @@ void ncfg_plan_view::show_plan(const ncfg_plan_data &plan)
 		 * whose reason merely did not fit.
 		 */
 		const bool reasoned = !action.field.isEmpty() || !action.observed.isEmpty() ||
-				      !action.desired.isEmpty();
+		              !action.desired.isEmpty();
 		if (reasoned) {
 			actions->setItem(row, 3, cell(action.field));
 			actions->setItem(row, 4, cell(action.observed));
@@ -251,7 +251,7 @@ void ncfg_plan_view::show_plan(const ncfg_plan_data &plan)
 			actions->setItem(row, 6, cell(QStringLiteral("yes")));
 		} else {
 			auto *irreversible =
-				cell(QStringLiteral("NO -- confirm cannot undo this"));
+			    cell(QStringLiteral("NO -- confirm cannot undo this"));
 			emphasise(irreversible, stop_colour);
 			actions->setItem(row, 6, irreversible);
 		}

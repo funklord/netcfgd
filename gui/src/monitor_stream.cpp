@@ -20,7 +20,7 @@ bool ncfg_monitor_stream::start(const QString &socket_path, QString *error)
 	char message[NCFG_ERROR_MAX];
 
 	monitor = ncfg_monitor_open(requested.isEmpty() ? nullptr : requested.constData(), message,
-				    sizeof(message));
+	                sizeof(message));
 	if (!monitor) {
 		if (error) {
 			*error = QString::fromUtf8(message);

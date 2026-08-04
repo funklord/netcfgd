@@ -43,7 +43,7 @@ const QColor skipped_colour(0xB0, 0x60, 0x00);
 } /* namespace */
 
 ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *parent)
-	: QDialog(parent), connection(connection)
+    : QDialog(parent), connection(connection)
 {
 	setWindowTitle(QStringLiteral("Apply"));
 
@@ -54,8 +54,8 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
 	 * unsure what they are about to reconfigure (gui/project.md sec 4), and
 	 * the apply dialog is the last moment that can be said. */
 	auto *where = new QLabel(QStringLiteral("About to change netcfgd at %1")
-					 .arg(connection->where()),
-				 this);
+	                 .arg(connection->where()),
+	             this);
 	where->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	layout->addWidget(where);
 
@@ -77,8 +77,8 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
 	auto *window_box = new QGroupBox(QStringLiteral("Confirm window"), this);
 	auto *window_layout = new QHBoxLayout(window_box);
 	arm_window = new QCheckBox(
-		QStringLiteral("Arm a confirm window; the change is undone unless confirmed"),
-		window_box);
+	    QStringLiteral("Arm a confirm window; the change is undone unless confirmed"),
+	    window_box);
 	/* Armed by default. The failure this guards against -- the apply cuts
 	 * off the connection that would have confirmed it -- is silent and
 	 * unrecoverable without physical access, while the cost of an unwanted
@@ -126,7 +126,7 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
 	apply_button = buttons->addButton(QStringLiteral("Apply"), QDialogButtonBox::AcceptRole);
 	confirm_button =
-		buttons->addButton(QStringLiteral("Confirm"), QDialogButtonBox::ActionRole);
+	    buttons->addButton(QStringLiteral("Confirm"), QDialogButtonBox::ActionRole);
 	revert_button = buttons->addButton(QStringLiteral("Revert"), QDialogButtonBox::ActionRole);
 	apply_button->setEnabled(false);
 	/* Only meaningful once a window is armed, and enabling them earlier
@@ -172,9 +172,9 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
 	apply_button->setEnabled(true);
 	if (fetched.blocked()) {
 		say(QStringLiteral("The daemon refuses part of this plan. Tick what you agree "
-				   "to below -- each one covers exactly the interface it "
-				   "names -- or apply without it and the refused actions "
-				   "will not run."));
+		           "to below -- each one covers exactly the interface it "
+		           "names -- or apply without it and the refused actions "
+		           "will not run."));
 	} else {
 		say(QStringLiteral("Review the plan above. Nothing is sent until Apply."));
 	}
@@ -220,10 +220,10 @@ void ncfg_apply_dialog::build_consent(const ncfg_plan_data &fetched)
 			 * that ticking this and running the command it names are
 			 * visibly the same act. */
 			auto *box = new QCheckBox(
-				QStringLiteral("%1 %2 -- %3")
-					.arg(QString::fromLatin1(g.verb), note.interface,
-					     note.consent.isEmpty() ? note.message : note.consent),
-				consent_box);
+			    QStringLiteral("%1 %2 -- %3")
+			        .arg(QString::fromLatin1(g.verb), note.interface,
+			             note.consent.isEmpty() ? note.message : note.consent),
+			    consent_box);
 			QStringList *into = g.into;
 			const QString name = note.interface;
 			connect(box, &QCheckBox::toggled, this, [into, name](bool on) {
@@ -245,7 +245,7 @@ void ncfg_apply_dialog::say(const QString &text)
 void ncfg_apply_dialog::run_apply()
 {
 	const unsigned seconds =
-		arm_window->isChecked() ? static_cast<unsigned>(window_seconds->value()) : 0u;
+	    arm_window->isChecked() ? static_cast<unsigned>(window_seconds->value()) : 0u;
 
 	/* One apply per dialog. Disabled before the call rather than after, so
 	 * that a second click while the daemon is working cannot queue a second
@@ -301,8 +301,8 @@ void ncfg_apply_dialog::show_journal(const QList<ncfg_record_row> &records)
 			font.setBold(true);
 			item->setFont(font);
 			item->setForeground(QBrush(record.outcome == QStringLiteral("failed")
-							   ? failed_colour
-							   : skipped_colour));
+			                   ? failed_colour
+			                   : skipped_colour));
 		}
 	}
 	journal->resizeColumnsToContents();
@@ -318,14 +318,14 @@ void ncfg_apply_dialog::arm(unsigned seconds)
 	tick();
 	clock->start();
 	say(QStringLiteral("Applied, and armed. Confirm keeps it; Revert undoes it now; doing "
-			   "neither undoes it when the window closes."));
+	           "neither undoes it when the window closes."));
 }
 
 void ncfg_apply_dialog::tick()
 {
 	if (remaining > 0) {
 		countdown->setText(
-			QStringLiteral("Confirm window: about %1s left").arg(remaining));
+		    QStringLiteral("Confirm window: about %1s left").arg(remaining));
 		remaining--;
 		return;
 	}
@@ -337,8 +337,8 @@ void ncfg_apply_dialog::tick()
 	 * away here would cost the operator the confirm they came for, and if it
 	 * is closed the daemon says so in words this screen will show. */
 	countdown->setText(QStringLiteral(
-		"Confirm window has closed by this client's clock. Unless the daemon says "
-		"otherwise, the change has been reverted."));
+	    "Confirm window has closed by this client's clock. Unless the daemon says "
+	    "otherwise, the change has been reverted."));
 }
 
 void ncfg_apply_dialog::run_confirm()

@@ -19,7 +19,7 @@
 #include <QWidget>
 
 ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
-	: QMainWindow(parent), connection(connection)
+    : QMainWindow(parent), connection(connection)
 {
 	setWindowTitle(QStringLiteral("netcfgd"));
 
@@ -82,8 +82,8 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	if (asked && !held.admin) {
 		apply_button->setEnabled(false);
 		apply_button->setToolTip(QStringLiteral(
-			"This connection does not hold the `admin` control tier, so netcfgd "
-			"would refuse an apply from it."));
+		    "This connection does not hold the `admin` control tier, so netcfgd "
+		    "would refuse an apply from it."));
 	}
 
 	/* Long enough that a bring-up settles into one refresh, short enough that

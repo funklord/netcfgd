@@ -22,15 +22,15 @@ int main(int argc, char **argv)
 
 	QCommandLineParser parser;
 	parser.setApplicationDescription(
-		QStringLiteral("A client for netcfgd. Shows what the machine is doing, what "
-			       "would change and why, and what has happened since you looked. "
-			       "Changes nothing without showing the plan first."));
+	    QStringLiteral("A client for netcfgd. Shows what the machine is doing, what "
+	               "would change and why, and what has happened since you looked. "
+	               "Changes nothing without showing the plan first."));
 	parser.addHelpOption();
 	QCommandLineOption socket_option(
-		QStringList() << QStringLiteral("socket"),
-		QStringLiteral("The daemon's control socket. Defaults to $NCFG_RUN_DIR or the "
-			       "installed location."),
-		QStringLiteral("path"));
+	    QStringList() << QStringLiteral("socket"),
+	    QStringLiteral("The daemon's control socket. Defaults to $NCFG_RUN_DIR or the "
+	               "installed location."),
+	    QStringLiteral("path"));
 	parser.addOption(socket_option);
 	parser.process(application);
 

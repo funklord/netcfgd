@@ -182,7 +182,7 @@ public:
 	 * value. An empty one is the ordinary apply.
 	 */
 	bool apply(unsigned confirm_seconds, const ncfg_consent_rows &consent,
-		   QList<ncfg_record_row> *out, QString *error);
+	       QList<ncfg_record_row> *out, QString *error);
 	/*
 	 * What this connection may do, asked once at the handshake.
 	 *

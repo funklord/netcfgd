@@ -95,7 +95,7 @@ static void reader_accepts_the_witness(const char *path)
 				 * ": " that says which line it was about is what
 				 * gets cut. */
 				snprintf(first_refusal, sizeof(first_refusal), "%.320s: %.120s",
-					 err, line);
+				     err, line);
 			}
 			refused++;
 			continue;
@@ -123,8 +123,8 @@ static void reader_accepts_the_witness(const char *path)
 	if (parsed != tagged) {
 		char detail[128];
 		snprintf(detail, sizeof(detail), "%u of %u lines are none of the three",
-			 parsed - tagged, parsed);
-			ok("and each is a request, a response or an event", 0, detail);
+		     parsed - tagged, parsed);
+		    ok("and each is a request, a response or an event", 0, detail);
 	} else {
 		ok("and each is a request, a response or an event", 1, NULL);
 	}
@@ -134,8 +134,8 @@ static void reader_reads_what_it_should(void)
 {
 	char err[NCFG_ERROR_MAX];
 	const char *text =
-		"{\"response\":\"status\",\"links\":[{\"name\":\"eth0\",\"mtu\":1500,"
-		"\"up\":true,\"mac\":null}],\"count\":-2}";
+	    "{\"response\":\"status\",\"links\":[{\"name\":\"eth0\",\"mtu\":1500,"
+	    "\"up\":true,\"mac\":null}],\"count\":-2}";
 	ncfg_json_doc_t *doc = ncfg_json_parse(text, strlen(text), err, sizeof(err));
 
 	if (!doc) {
@@ -162,7 +162,7 @@ static void reader_reads_what_it_should(void)
 	 * where the answer is known to be nothing. */
 	ok("null is a value that is present",
 	   ncfg_json_member(doc, first, "mac") != NCFG_JSON_NONE &&
-		   ncfg_json_type(doc, ncfg_json_member(doc, first, "mac")) == NCFG_JSON_NULL,
+	       ncfg_json_type(doc, ncfg_json_member(doc, first, "mac")) == NCFG_JSON_NULL,
 	   NULL);
 	ok("and an absent member is not",
 	   ncfg_json_member(doc, first, "carrier") == NCFG_JSON_NONE, NULL);
@@ -184,7 +184,7 @@ static void reader_unescapes(void)
 	}
 	size_t length = 0;
 	const char *value = ncfg_json_string(doc, ncfg_json_member(doc, ncfg_json_root(doc), "s"),
-					     &length);
+	                     &length);
 	const char expected[] = "a\tb\"c\xc3\xa5\xf0\x9f\x98\x80";
 
 	ok("escapes and a surrogate pair come out as UTF-8",
@@ -218,7 +218,7 @@ static void reader_refuses(void)
 	for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
 		char err[NCFG_ERROR_MAX];
 		ncfg_json_doc_t *doc = ncfg_json_parse(bad[i].text, strlen(bad[i].text), err,
-						       sizeof(err));
+		                       sizeof(err));
 		char what[128];
 		snprintf(what, sizeof(what), "refused: %s", bad[i].what);
 		if (doc) {
@@ -356,8 +356,8 @@ static void connection_reads_lines_however_they_arrive(void)
 	if (hello) {
 		ok("and its contents survive",
 		   ncfg_json_string_equals(hello, ncfg_json_member(hello, ncfg_json_root(hello),
-								   "response"),
-					   "hello"),
+		                           "response"),
+		               "hello"),
 		   NULL);
 		ncfg_json_free(hello);
 	}
@@ -367,8 +367,8 @@ static void connection_reads_lines_however_they_arrive(void)
 	if (second) {
 		ok("and is the right one",
 		   ncfg_json_string_equals(second, ncfg_json_member(second, ncfg_json_root(second),
-								    "response"),
-					   "ok"),
+		                            "response"),
+		               "ok"),
 		   NULL);
 		ncfg_json_free(second);
 	}
@@ -395,7 +395,7 @@ static void a_refusal_is_an_answer_not_a_failure(void)
 
 	ok("a refusal is recognised and its message read",
 	   message && length == strlen("the wifi tier is root's") &&
-		   memcmp(message, "the wifi tier is root's", length) == 0,
+	       memcmp(message, "the wifi tier is root's", length) == 0,
 	   message ? message : "(null)");
 
 	ncfg_json_free(doc);
@@ -524,27 +524,27 @@ static int staged_open(struct staged *staged, const char *what, const char *answ
  * action -- nat.replace, hostname.set -- looks like.
  */
 static const char plan_response[] =
-	"{\"response\":\"plan\",\"actions\":["
-	"{\"id\":0,\"op\":{\"op\":\"bridge.vlan.add\",\"name\":\"br0\",\"vid\":7},"
-	"\"reason\":{\"interface\":\"eth0\",\"field\":\"addressing[0]\","
-	"\"desired\":\"192.168.1.10/24\",\"observed\":\"<absent>\"},\"depends_on\":[],"
-	"\"inverse\":{\"op\":\"bridge.vlan.del\",\"name\":\"br0\",\"vid\":7}},"
-	"{\"id\":45,\"op\":{\"op\":\"commit.arm\",\"window_seconds\":90},"
-	"\"reason\":{\"interface\":\"eth0\",\"field\":\"confirm\",\"desired\":\"90\","
-	"\"observed\":\"<absent>\"},\"depends_on\":[0],\"inverse\":null},"
-	"{\"id\":43,\"op\":{\"op\":\"nat.replace\",\"uplinks\":[\"eth0\"]},"
-	"\"reason\":{\"field\":\"nat\",\"desired\":\"eth0\",\"observed\":\"<absent>\"},"
-	"\"depends_on\":[0]}"
-	"],\"warnings\":[{\"message\":\"slaac is accepted but not yet applied by this build\","
-	"\"interface\":\"eth0\"}],"
-	"\"refusals\":[{\"interface\":\"eth0\",\"op\":\"link.down\","
-	"\"guard\":\"the office runs on this\",\"reason\":{\"interface\":\"eth0\","
-	"\"field\":\"enabled\",\"desired\":\"false\",\"observed\":\"true\"},"
-	"\"override_with\":\"ncfg apply --allow-disruption eth0\"}],"
-	"\"stranded\":[{\"interface\":\"wg0\",\"credential\":\"the WireGuard private key\","
-	"\"irrevocable\":\"only every peer's administrator can revoke it\","
-	"\"remove_with\":\"on_unmanage = \\\"clear\\\"\","
-	"\"consent_with\":\"ncfg apply --strand-credentials wg0\"}]}\n";
+    "{\"response\":\"plan\",\"actions\":["
+    "{\"id\":0,\"op\":{\"op\":\"bridge.vlan.add\",\"name\":\"br0\",\"vid\":7},"
+    "\"reason\":{\"interface\":\"eth0\",\"field\":\"addressing[0]\","
+    "\"desired\":\"192.168.1.10/24\",\"observed\":\"<absent>\"},\"depends_on\":[],"
+    "\"inverse\":{\"op\":\"bridge.vlan.del\",\"name\":\"br0\",\"vid\":7}},"
+    "{\"id\":45,\"op\":{\"op\":\"commit.arm\",\"window_seconds\":90},"
+    "\"reason\":{\"interface\":\"eth0\",\"field\":\"confirm\",\"desired\":\"90\","
+    "\"observed\":\"<absent>\"},\"depends_on\":[0],\"inverse\":null},"
+    "{\"id\":43,\"op\":{\"op\":\"nat.replace\",\"uplinks\":[\"eth0\"]},"
+    "\"reason\":{\"field\":\"nat\",\"desired\":\"eth0\",\"observed\":\"<absent>\"},"
+    "\"depends_on\":[0]}"
+    "],\"warnings\":[{\"message\":\"slaac is accepted but not yet applied by this build\","
+    "\"interface\":\"eth0\"}],"
+    "\"refusals\":[{\"interface\":\"eth0\",\"op\":\"link.down\","
+    "\"guard\":\"the office runs on this\",\"reason\":{\"interface\":\"eth0\","
+    "\"field\":\"enabled\",\"desired\":\"false\",\"observed\":\"true\"},"
+    "\"override_with\":\"ncfg apply --allow-disruption eth0\"}],"
+    "\"stranded\":[{\"interface\":\"wg0\",\"credential\":\"the WireGuard private key\","
+    "\"irrevocable\":\"only every peer's administrator can revoke it\","
+    "\"remove_with\":\"on_unmanage = \\\"clear\\\"\","
+    "\"consent_with\":\"ncfg apply --strand-credentials wg0\"}]}\n";
 
 static void a_plan_becomes_a_model(void)
 {
@@ -653,13 +653,13 @@ static void a_plan_becomes_a_model(void)
 }
 
 static const char status_response[] =
-	"{\"response\":\"status\",\"links\":["
-	"{\"name\":\"eth0\",\"kind\":\"\",\"up\":true,\"carrier\":false,\"mtu\":1500,"
-	"\"mac\":\"02:00:00:00:00:01\"},"
-	"{\"name\":\"br0\",\"kind\":\"bridge\",\"up\":true,\"carrier\":true,\"mtu\":9000}],"
-	"\"addresses\":[{\"interface\":\"eth0\",\"address\":\"192.0.2.1/24\"},"
-	"{\"interface\":\"br0\",\"address\":\"10.0.0.1/24\"},"
-	"{\"interface\":\"eth0\",\"address\":\"fe80::1/64\"}]}\n";
+    "{\"response\":\"status\",\"links\":["
+    "{\"name\":\"eth0\",\"kind\":\"\",\"up\":true,\"carrier\":false,\"mtu\":1500,"
+    "\"mac\":\"02:00:00:00:00:01\"},"
+    "{\"name\":\"br0\",\"kind\":\"bridge\",\"up\":true,\"carrier\":true,\"mtu\":9000}],"
+    "\"addresses\":[{\"interface\":\"eth0\",\"address\":\"192.0.2.1/24\"},"
+    "{\"interface\":\"br0\",\"address\":\"10.0.0.1/24\"},"
+    "{\"interface\":\"eth0\",\"address\":\"fe80::1/64\"}]}\n";
 
 static void a_status_becomes_links(void)
 {
@@ -702,14 +702,14 @@ static void a_status_becomes_links(void)
 }
 
 static const char journal_response[] =
-	"{\"response\":\"journal\",\"records\":["
-	"{\"id\":1,\"op\":\"addr.add\",\"interface\":\"eth0\","
-	"\"reason\":{\"interface\":\"eth0\",\"field\":\"addressing[0]\","
-	"\"desired\":\"192.0.2.1/24\",\"observed\":\"<absent>\"},\"outcome\":\"done\"},"
-	"{\"id\":2,\"op\":\"link.up\",\"interface\":\"eth0\","
-	"\"reason\":{\"interface\":\"eth0\",\"field\":\"enabled\",\"desired\":\"true\","
-	"\"observed\":\"false\"},\"outcome\":\"failed\","
-	"\"error\":\"the kernel refused: Operation not permitted\"}]}\n";
+    "{\"response\":\"journal\",\"records\":["
+    "{\"id\":1,\"op\":\"addr.add\",\"interface\":\"eth0\","
+    "\"reason\":{\"interface\":\"eth0\",\"field\":\"addressing[0]\","
+    "\"desired\":\"192.0.2.1/24\",\"observed\":\"<absent>\"},\"outcome\":\"done\"},"
+    "{\"id\":2,\"op\":\"link.up\",\"interface\":\"eth0\","
+    "\"reason\":{\"interface\":\"eth0\",\"field\":\"enabled\",\"desired\":\"true\","
+    "\"observed\":\"false\"},\"outcome\":\"failed\","
+    "\"error\":\"the kernel refused: Operation not permitted\"}]}\n";
 
 static void an_apply_becomes_a_journal(void)
 {
@@ -722,7 +722,7 @@ static void an_apply_becomes_a_journal(void)
 	 * for. */
 	char answers[4096];
 	snprintf(answers, sizeof(answers), "%s{\"response\":\"ok\"}\n%s", journal_response,
-		 journal_response);
+	     journal_response);
 	if (!staged_open(&staged, "an apply answer can be staged", answers)) {
 		return;
 	}
@@ -777,8 +777,8 @@ static void a_daemon_refusal_is_a_zero_and_its_own_message(void)
 	ncfg_journal_t journal;
 
 	static const char refusal[] =
-		"{\"response\":\"error\",\"message\":\"the admin tier is root's\"}\n"
-		"{\"response\":\"error\",\"message\":\"the admin tier is root's\"}\n";
+	    "{\"response\":\"error\",\"message\":\"the admin tier is root's\"}\n"
+	    "{\"response\":\"error\",\"message\":\"the admin tier is root's\"}\n";
 
 	if (!staged_open(&staged, "a refusal can be staged", refusal)) {
 		return;
@@ -836,10 +836,10 @@ static void the_monitor_hands_over_one_event_at_a_time(void)
 	/* Two events in one write and the front half of a third: what a daemon
 	 * that emitted a burst and then began another line looks like. */
 	send_bytes(server,
-		   "{\"response\":\"event\",\"event\":\"observed\","
-		   "\"summary\":\"eth0 gained an address\"}\n"
-		   "{\"response\":\"event\",\"event\":\"drift\",\"interface\":\"eth0\","
-		   "\"summary\":\"an address we installed is gone\",\"action\":\"reconciled\"}\n");
+	       "{\"response\":\"event\",\"event\":\"observed\","
+	       "\"summary\":\"eth0 gained an address\"}\n"
+	       "{\"response\":\"event\",\"event\":\"drift\",\"interface\":\"eth0\","
+	       "\"summary\":\"an address we installed is gone\",\"action\":\"reconciled\"}\n");
 	send_bytes(server, "{\"response\":\"event\",\"event\":\"confirm_armed\",\"sec");
 
 	int got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
@@ -890,10 +890,10 @@ static void the_monitor_hands_over_one_event_at_a_time(void)
 	 * is the sentence that sends somebody to the log to find out which
 	 * line. */
 	send_bytes(server,
-		   "{\"response\":\"event\",\"event\":\"reloaded\",\"ok\":false,"
-		   "\"diagnostics\":\"netcfgd.conf:3: unknown key\"}\n"
-		   "{\"response\":\"event\",\"event\":\"confirm_resolved\","
-		   "\"confirmed\":false}\n");
+	       "{\"response\":\"event\",\"event\":\"reloaded\",\"ok\":false,"
+	       "\"diagnostics\":\"netcfgd.conf:3: unknown key\"}\n"
+	       "{\"response\":\"event\",\"event\":\"confirm_resolved\","
+	       "\"confirmed\":false}\n");
 
 	got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
 	ok("a failed reload arrives", got == 1, err);
@@ -941,11 +941,11 @@ static void the_handshake_says_what_this_connection_may_do(void)
 
 	/* Deliberately not a prefix: observe and admin, and no wifi. */
 	const char *answers =
-		"{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},"
-		"\"schema\":{\"major\":1,\"minor\":0},\"tiers\":[\"observe\",\"admin\"]}\n"
-		"{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},"
-		"\"schema\":{\"major\":1,\"minor\":0}}\n"
-		"{\"response\":\"error\",\"message\":\"go away\"}\n";
+	    "{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},"
+	    "\"schema\":{\"major\":1,\"minor\":0},\"tiers\":[\"observe\",\"admin\"]}\n"
+	    "{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},"
+	    "\"schema\":{\"major\":1,\"minor\":0}}\n"
+	    "{\"response\":\"error\",\"message\":\"go away\"}\n";
 	if (!staged_open(&staged, "a handshake can be staged", answers)) {
 		return;
 	}
@@ -990,7 +990,7 @@ static void consent_goes_out_the_way_the_daemon_spells_it(void)
 
 	char answers[4096];
 	snprintf(answers, sizeof(answers), "%s%s%s", journal_response, journal_response,
-		 journal_response);
+	     journal_response);
 	if (!staged_open(&staged, "an apply with consent can be staged", answers)) {
 		return;
 	}
@@ -1086,7 +1086,7 @@ static void a_refused_stream_says_which_tier_it_wanted(void)
 	(void)received(server, sent, sizeof(sent));
 
 	send_bytes(server, "{\"response\":\"error\",\"message\":\"monitor needs the observe "
-			   "tier; you are in none of its groups\"}\n");
+	           "tier; you are in none of its groups\"}\n");
 	close(server);
 
 	int got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
@@ -1125,8 +1125,8 @@ static void freeing_what_was_never_filled_in_is_nothing(void)
 
 	ok("freeing a model that was never filled in is nothing",
 	   links.items == NULL && links.count == 0u && plan.actions == NULL &&
-		   plan.warnings == NULL && plan.stranded_count == 0u &&
-		   journal.items == NULL && event.kind == NULL && event.raw == NULL,
+	       plan.warnings == NULL && plan.stranded_count == 0u &&
+	       journal.items == NULL && event.kind == NULL && event.raw == NULL,
 	   NULL);
 }
 

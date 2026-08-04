@@ -20,7 +20,7 @@ constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(col
 } /* namespace */
 
 ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *parent)
-	: QWidget(parent), connection(connection)
+    : QWidget(parent), connection(connection)
 {
 	auto *layout = new QVBoxLayout(this);
 
@@ -75,5 +75,5 @@ void ncfg_devices_view::refresh()
 	table->horizontalHeader()->setStretchLastSection(true);
 
 	emit reported(rows.isEmpty() ? QStringLiteral("no interfaces reported")
-				     : QStringLiteral("%1 interfaces").arg(rows.size()));
+	                 : QStringLiteral("%1 interfaces").arg(rows.size()));
 }

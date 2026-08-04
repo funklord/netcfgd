@@ -155,6 +155,6 @@ int ncfg_json_bool(const ncfg_json_doc_t *doc, uint32_t index, int fallback);
  * hand four hundred times is where an off-by-one lives.
  */
 size_t ncfg_json_copy_member(const ncfg_json_doc_t *doc, uint32_t object, const char *name,
-			     char *out, size_t out_size);
+                 char *out, size_t out_size);
 
 #endif /* NCFG_JSON_H */
