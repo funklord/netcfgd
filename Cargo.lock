@@ -87,6 +87,7 @@ dependencies = [
  "netcfgd-secret",
  "netcfgd-supplicant",
  "netcfgd-sys",
+ "netcfgd-testdir",
  "serde_json",
 ]
 

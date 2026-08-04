@@ -476,12 +476,13 @@ fn answer(
 			timers,
 		),
 		Request::Reload => {
+			// The answer comes from the event rather than from
+			// `state.diagnostics`; see `state::reload_answer` for what the two
+			// disagreed about and which cases got the wrong answer.
 			let event = state.reload();
+			let response = state::reload_answer(&event);
 			server::broadcast(subscribers, &event);
-			match &state.diagnostics {
-				Some(diagnostics) => Response::error(diagnostics.clone()),
-				None => Response::Ok,
-			}
+			response
 		}
 		// Commit-confirm is the next piece of M2; refusing by name beats
 		// accepting and doing nothing, which would let a client believe it had
