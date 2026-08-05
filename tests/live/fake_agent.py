@@ -102,6 +102,14 @@ def main():
 	# waits for the activation reply (0107). Kept anyway: announcing readiness
 	# before being able to answer is wrong on its own terms, and this is where
 	# the next person will look.
+	def announce():
+		manager.Register("org.netcfgd.test-agent")
+		# The unique name, because "which connection did the shim actually
+		# ask?" is the question that separates this agent from any other --
+		# nmcli registers a secret agent of its own.
+		print(f"registered as {bus.get_unique_name()}", flush=True)
+		return False
+
 	GLib.idle_add(announce)
 	try:
 		loop.run()
