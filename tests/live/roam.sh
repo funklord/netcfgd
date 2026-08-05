@@ -116,27 +116,48 @@ runs() {
 	grep -c '^roam ' "$log" 2>/dev/null || true
 }
 
-# Ask the fake to emit a CONNECTED. The first one is an association, not a
-# roam: there is nothing to have moved from, and firing here would run the hook
-# on every boot.
-python3 - "$work/ctrl/wlan0" "ROAM aa:bb:cc:dd:ee:ff" <<'PY'
+# Send one event to the fake supplicant, having first established that there is
+# a fake supplicant to send it to.
+#
+# The bare sends this replaces raised FileNotFoundError when the socket was not
+# there and took the whole run with it -- a traceback naming "<stdin>" line 5,
+# which says nothing about which of the two preconditions failed. That happened
+# once inside a full `make live` in a container and has not reproduced in twelve
+# runs here, so what is fixed is the report and not the cause: the next
+# occurrence says whether the socket went away or the fake did.
+send_event() {
+	if ! kill -0 "$fake" 2>/dev/null; then
+		echo "FAIL the fake supplicant was alive to be sent: $1"
+		echo "       pid $fake is gone; it last said:"
+		tail -3 "$work/fake.log" 2>/dev/null | sed 's/^/       /' || true
+		failures=$((failures + 1))
+		return 1
+	fi
+	if [ ! -S "$work/ctrl/wlan0" ]; then
+		echo "FAIL the control socket was there to be sent: $1"
+		echo "       $work/ctrl/wlan0 is missing, so nothing could be delivered"
+		ls -la "$work/ctrl" 2>/dev/null | sed 's/^/       /' || true
+		failures=$((failures + 1))
+		return 1
+	fi
+	python3 - "$work/ctrl/wlan0" "$1" <<'PY'
 import socket, sys, os, tempfile
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 local = os.path.join(tempfile.mkdtemp(), "c")
 sock.bind(local)
 sock.sendto(sys.argv[2].encode(), sys.argv[1])
 PY
+}
+
+# Ask the fake to emit a CONNECTED. The first one is an association, not a
+# roam: there is nothing to have moved from, and firing here would run the hook
+# on every boot.
+send_event "ROAM aa:bb:cc:dd:ee:ff"
 sleep 1
 check "the first association is not a roam" "$(runs)" 0
 
 # And now it moves.
-python3 - "$work/ctrl/wlan0" "ROAM 11:22:33:44:55:66" <<'PY'
-import socket, sys, os, tempfile
-sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-local = os.path.join(tempfile.mkdtemp(), "c")
-sock.bind(local)
-sock.sendto(sys.argv[2].encode(), sys.argv[1])
-PY
+send_event "ROAM 11:22:33:44:55:66"
 sleep 1
 
 check "moving to another access point runs the hook" "$(runs)" 1
@@ -147,24 +168,12 @@ check "and which access point it is on now" \
 
 # Not de-duplicated the way `drift` is: a roam is a thing that happened, not a
 # condition that persists, and a station that moved back moved twice.
-python3 - "$work/ctrl/wlan0" "ROAM aa:bb:cc:dd:ee:ff" <<'PY'
-import socket, sys, os, tempfile
-sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-local = os.path.join(tempfile.mkdtemp(), "c")
-sock.bind(local)
-sock.sendto(sys.argv[2].encode(), sys.argv[1])
-PY
+send_event "ROAM aa:bb:cc:dd:ee:ff"
 sleep 1
 check "moving back is a second roam and not a repeat" "$(runs)" 2
 
 # The same access point again is not a move at all.
-python3 - "$work/ctrl/wlan0" "ROAM aa:bb:cc:dd:ee:ff" <<'PY'
-import socket, sys, os, tempfile
-sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-local = os.path.join(tempfile.mkdtemp(), "c")
-sock.bind(local)
-sock.sendto(sys.argv[2].encode(), sys.argv[1])
-PY
+send_event "ROAM aa:bb:cc:dd:ee:ff"
 sleep 1
 check "re-associating with the same one is not a roam" "$(runs)" 2
 
