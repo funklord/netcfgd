@@ -51,9 +51,67 @@ skip() {
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
-command -v busybox >/dev/null 2>&1 || skip "no busybox (which is the client and the server here)"
-busybox --list | grep -qx udhcpd || skip "this busybox has no udhcpd applet"
+command -v busybox >/dev/null 2>&1 || skip "no busybox (which is the client here)"
 busybox --list | grep -qx udhcpc || skip "this busybox has no udhcpc applet"
+
+# ------------------------------------------------------- which server answers
+
+# The *client* is the thing under test and is always busybox's `udhcpc`. The
+# server is scenery: something that answers a real DHCP exchange with the
+# options 0049 and 0067 are about.
+#
+# `busybox udhcpd` was chosen for it because, in this script's own words, it
+# "needs no package that a build machine would not have if it has busybox at
+# all". **Alpine falsifies that.** The most busybox-native distribution there is
+# builds `udhcpc` and `udhcpc6` and no server at all, and no Alpine package
+# provides one -- so this script, and `dhcpcd.sh` behind it, could not run there
+# and `NCFG_LIVE=1` turned the skip into the failure that stopped `make live`.
+#
+# dnsmasq serves the same options and is packaged everywhere, so it is the
+# fallback rather than the replacement: where busybox has the applet, nothing
+# changes and no package is needed.
+if busybox --list | grep -qx udhcpd; then
+	dhcp_server=udhcpd
+elif command -v dnsmasq >/dev/null 2>&1; then
+	dhcp_server=dnsmasq
+else
+	skip "no DHCP server: this busybox has no udhcpd applet and there is no \
+dnsmasq (apt install busybox | apk add dnsmasq)"
+fi
+
+# ------------------------------------------------------------- the namespace
+#
+# Which namespace this needs depends on which server answered above, so it is
+# decided here rather than by the caller.
+#
+# `udhcpd` drops no privileges, so a plain `unshare -rn` is enough and is what
+# the Makefile used to do for this script. **dnsmasq does**, and `unshare -rn`
+# writes `deny` to /proc/self/setgroups -- the price of an unprivileged gid
+# mapping -- so the drop fails and it exits before answering anything. That is
+# `slaac.sh`'s note, and the reason it and `dhcpcd.sh` make their own.
+#
+# Nesting cannot rescue it: once inside a user namespace with setgroups denied,
+# no amount of further unsharing gets it back. So the Makefile runs this script
+# bare now and the strategy is chosen below -- which also means the udhcpd path
+# still needs no `newuidmap` and no /etc/subuid entry, as it never did.
+if [ -z "${NCFG_DHCP_NS:-}" ]; then
+	NCFG_DHCP_NS=1
+	export NCFG_DHCP_NS
+	if [ "$(id -u)" = 0 ] && [ "$(cat /proc/self/setgroups 2>/dev/null)" != deny ]; then
+		# Real root, or a namespace that still permits the drop.
+		exec unshare --net -- sh "$0" "$@"
+	fi
+	if [ "$dhcp_server" = udhcpd ]; then
+		exec unshare --map-root-user --net -- sh "$0" "$@"
+	fi
+	command -v newuidmap >/dev/null 2>&1 ||
+		skip "dnsmasq drops privileges and an unprivileged namespace needs \
+newuidmap (apt install uidmap | apk add shadow-uidmap)"
+	unshare --map-root-user --map-auto --net true 2>/dev/null ||
+		skip "no subordinate uid range in /etc/subuid, so dnsmasq has no group \
+to drop to"
+	exec unshare --map-root-user --map-auto --net -- sh "$0" "$@"
+fi
 
 work=$(mktemp -d /tmp/ncfg-dhcp.XXXXXX)
 server=
@@ -129,26 +187,54 @@ ip link add cli type veth peer name srv
 ip link set srv up
 ip addr add 10.44.0.1/24 dev srv
 
-cat > "$work/udhcpd.conf" <<EOF
+# A domain and a search list, which are options 15 and 119 and are two different
+# things on the wire. Both must arrive as `search=` suffixes and never as a routing
+# domain (0049, 0067) -- and the client prefers 119 where it has one, which is why
+# both are sent here: without the pair, the precedence has no subject.
+#
+# The two servers below hand out the same lease and the same six options. That
+# equivalence is the whole point of the fallback, so it is written once per
+# server and not abstracted: two short blocks that can be read against each
+# other beat one that has to be decoded.
+: > "$work/udhcpd.leases"
+if [ "$dhcp_server" = udhcpd ]; then
+	cat > "$work/udhcpd.conf" <<EOF
 start 10.44.0.20
 end 10.44.0.20
 interface srv
 option subnet 255.255.255.0
 option router 10.44.0.1
 option dns 10.44.0.53
-# A domain and a search list, which are options 15 and 119 and are two different
-# things on the wire. Both must arrive as `search=` suffixes and never as a routing
-# domain (0049, 0067) -- and the client prefers 119 where it has one, which is why
-# both are sent here: without the pair, the precedence has no subject.
 option domain lan.example
 option search a.example b.example
 option lease 600
 lease_file $work/udhcpd.leases
 pidfile $work/udhcpd.pid
 EOF
-: > "$work/udhcpd.leases"
-busybox udhcpd -f "$work/udhcpd.conf" > "$work/udhcpd.log" 2>&1 &
-server=$!
+	busybox udhcpd -f "$work/udhcpd.conf" > "$work/udhcpd.log" 2>&1 &
+	server=$!
+else
+	# `--port=0` because this is a DHCP server and not a resolver: dnsmasq
+	# binds 53 otherwise, which is somebody else's business even inside a
+	# namespace. `--bind-interfaces` keeps it off every other interface, and
+	# The options go out by dnsmasq's *names* rather than by number, because
+	# 119 is not a list of strings on the wire -- RFC 3397 encodes it as DNS
+	# names with compression, and `--dhcp-option=119,a.example,b.example` sends
+	# the text instead. udhcpc then reports no search list at all, which is
+	# what the first version of this did: the lease arrived, the nameserver
+	# arrived, and four checks about search suffixes failed.
+	dnsmasq --no-daemon --port=0 --interface=srv --bind-interfaces \
+		--dhcp-authoritative \
+		--dhcp-range=10.44.0.20,10.44.0.20,255.255.255.0,600 \
+		--dhcp-option=option:netmask,255.255.255.0 \
+		--dhcp-option=option:router,10.44.0.1 \
+		--dhcp-option=option:dns-server,10.44.0.53 \
+		--dhcp-option=option:domain-name,lan.example \
+		--dhcp-option=option:domain-search,a.example,b.example \
+		--dhcp-leasefile="$work/udhcpd.leases" \
+		> "$work/udhcpd.log" 2>&1 &
+	server=$!
+fi
 
 # netcfgd's side. Three deliberate things in six lines: a static address beside the
 # lease, so the generated script's `deconfig` has something it must *not* remove; a
