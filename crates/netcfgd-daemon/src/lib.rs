@@ -890,7 +890,7 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 						let Ok(client) = netcfgd_supplicant::Client::connect_within(
 							&ctrl_dir,
 							&interface,
-							netcfgd_supplicant::STOP_TIMEOUT,
+							netcfgd_supplicant::IMPATIENT,
 						) else {
 							continue;
 						};

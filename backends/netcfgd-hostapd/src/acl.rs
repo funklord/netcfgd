@@ -37,20 +37,6 @@
 
 use netcfgd_model::AclPolicy;
 use std::path::Path;
-use std::time::Duration;
-
-/// How long [`read`] waits, which is not how long anything else waits.
-///
-/// A `SHOW` formats a list hostapd already holds in memory, and this one runs
-/// in the reconcile loop -- on every netlink event -- so a hostapd that is alive
-/// with its socket bound but not answering would otherwise hold the loop for the
-/// full ten seconds twice per access point, every time. Measured at exactly that
-/// before this existed.
-///
-/// Being wrong in the impatient direction costs an observation that says
-/// "netcfgd could not ask", which the planner already knows to do nothing about.
-/// Being wrong in the other direction stalls the daemon.
-const IMPATIENT: Duration = Duration::from_secs(1);
 
 /// What hostapd's two lists currently hold.
 ///
@@ -98,7 +84,7 @@ impl Live {
 /// Returns a message naming the device when hostapd cannot be reached, which is
 /// the ordinary case for an access point that is not running.
 pub fn read(run_dir: &Path, device: &str) -> Result<Live, String> {
-	let client = crate::connect(run_dir, device, IMPATIENT)?;
+	let client = crate::connect(run_dir, device, netcfgd_supplicant::IMPATIENT)?;
 
 	let show = |policy: AclPolicy| -> Result<Vec<String>, String> {
 		let command = format!("{} SHOW", policy.ctrl_command());

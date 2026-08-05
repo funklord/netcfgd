@@ -389,7 +389,7 @@ pub fn stop(run_dir: &Path, device: &str) -> Result<(), String> {
 	let outcome = match netcfgd_supplicant::Client::connect_within(
 		&dir,
 		device,
-		netcfgd_supplicant::STOP_TIMEOUT,
+		netcfgd_supplicant::IMPATIENT,
 	) {
 		Ok(client) => client
 			.command("TERMINATE")
