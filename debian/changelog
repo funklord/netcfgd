@@ -1,0 +1,6 @@
+netcfgd (0.1) unstable; urgency=medium
+
+  * Package with debhelper. The version comes from the VERSION file at the
+    root; `make version-check` fails the build when this disagrees with it.
+
+ -- Nabeel Sowan <nabeel@vibes.se>  Wed, 05 Aug 2026 16:30:00 +0000

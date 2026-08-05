@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stop the daemon if this machine is running it. Whatever netcfgd configured
+# stays configured -- an interface does not go down because the thing that
+# brought it up was removed, and pulling a package is not an instruction to
+# take the network away.
+set -e
+
+case "$1" in
+remove | deconfigure)
+	if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+		systemctl stop netcfgd.service >/dev/null 2>&1 || true
+	fi
+	;;
+esac
