@@ -139,6 +139,20 @@ Write it atomically -- write a temporary file in the same directory and
 `rename(2)` it over the target -- because netcfgd may read at any moment and a
 half-written file is a file it will believe.
 
+**Name that temporary file with a leading dot**, and netcfgd will skip it. Any
+dotted name will do; the writers netcfgd generates use `.<interface>.tmp`. The
+same directory is not negotiable -- a rename is only atomic within one
+filesystem -- so the half-written file this rule exists to hide is sitting in
+the directory netcfgd reads, one name away from being taken for an interface.
+It was, until decision 0113: a report appeared for an interface called
+`.eth0.tmp.1234`, carrying a nameserver out of a file still being written.
+
+A leading dot rather than a `.tmp` suffix because dots are ordinary *inside* an
+interface name -- a VLAN is `eth0.100` -- so a rule about the suffix would
+silently drop the report of an interface somebody legitimately named that way.
+A name that *begins* with a dot is pathological as an interface, and `.` and
+`..` are excluded by the same stroke.
+
 **Truncate it to empty when the link goes down.** An empty file and a missing
 file both mean "no addresses", and they differ only in that the empty one says
 so deliberately. Prefer the empty file while the writer is running: it

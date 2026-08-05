@@ -97,6 +97,11 @@ pub fn read_delegations(run_dir: &Path) -> Vec<netcfgd_model::Delegation> {
 		.flatten()
 		.filter_map(|entry| {
 			let interface = entry.file_name().to_str()?.to_owned();
+			// Staged the same way, by the script netcfgd generates for
+			// odhcp6c. Decision 0113.
+			if netcfgd_apply::is_staging(&interface) {
+				return None;
+			}
 			let body = fs::read_to_string(entry.path()).ok()?;
 			let prefixes: Vec<String> = body
 				.lines()
@@ -169,6 +174,14 @@ pub fn read_reports(run_dir: &Path) -> Vec<netcfgd_model::ObservedReport> {
 			let Some(interface) = entry.file_name().to_str().map(ToOwned::to_owned) else {
 				continue;
 			};
+			// A writer's staging file is not a report. The contract tells every
+			// writer to build one in this directory and `rename(2)` it over the
+			// target, so the half-written file it exists to hide is sitting
+			// right here -- and without this it was read as a report for an
+			// interface named after the temporary file. Decision 0113.
+			if netcfgd_apply::is_staging(&interface) {
+				continue;
+			}
 			// A directory here is not a report. Nothing puts one there today,
 			// and `read_to_string` would fail anyway -- said out loud because
 			// the fragment tree deliberately lives somewhere else.
@@ -184,13 +197,26 @@ pub fn read_reports(run_dir: &Path) -> Vec<netcfgd_model::ObservedReport> {
 			let Some(interface) = entry.file_name().to_str().map(ToOwned::to_owned) else {
 				continue;
 			};
+			if netcfgd_apply::is_staging(&interface) {
+				continue;
+			}
 			let Ok(fragments) = fs::read_dir(entry.path()) else {
 				continue;
 			};
 			// Sorted, because `read_dir` order is the filesystem's and a
 			// nameserver list that changed order between boots would look like
 			// a change to anything comparing it.
-			let mut paths: Vec<_> = fragments.flatten().map(|f| f.path()).collect();
+			// And the fragments themselves, which a helper with more than one
+			// source for one interface writes the same way.
+			let mut paths: Vec<_> = fragments
+				.flatten()
+				.filter(|f| {
+					f.file_name()
+						.to_str()
+						.is_some_and(|name| !netcfgd_apply::is_staging(name))
+				})
+				.map(|f| f.path())
+				.collect();
 			paths.sort();
 			for path in paths {
 				if let Ok(body) = fs::read_to_string(path) {
