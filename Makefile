@@ -676,7 +676,11 @@ live:
 	@# netcfgd says about it and how long it takes to say it -- the round trip
 	@# is in the reconcile loop.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wedged.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dhcp.sh"
+	@# Bare, like slaac.sh and dhcpcd.sh: this one picks its own namespace,
+	@# because which one it needs depends on which DHCP server it found.
+	@# busybox udhcpd wants nothing special; the dnsmasq fallback drops
+	@# privileges, which `unshare -rn` forbids.
+	@NCFG_LIVE=1 sh tests/live/dhcp.sh
 	@# The other client, and the one netcfgd prefers. Neither under NCFG_LIVE
 	@# nor under unshare: dhcpcd is a package, and it drops privileges to a user
 	@# that a namespace with one mapped uid does not have -- so the script makes
