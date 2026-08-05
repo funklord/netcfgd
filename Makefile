@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check build test fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs
+.PHONY: deb apk apk-source apk-container all check build test fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -846,3 +846,12 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/ncfg
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
 	rm -f $(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf
+
+# The commit-msg hook lives in the tree so it is reviewable, survives a
+# clone, and can be kept in sync. .git/hooks is untracked, so a hook that
+# exists only there enforces a rule nobody can see and vanishes silently on
+# a fresh clone.
+hooks:
+	@test -d .git || { echo "hooks: not a git repository" >&2; exit 1; }
+	@install -m 0755 tools/hooks/commit-msg .git/hooks/commit-msg
+	@echo "hooks: commit-msg installed from tools/hooks/"
