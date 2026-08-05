@@ -3159,7 +3159,11 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 			// one of them would leave the other saying a daemon had stopped
 			// while it was still holding the radio.
 			let dir = netcfgd_supplicant::ctrl_dir();
-			let outcome = match netcfgd_supplicant::Client::connect(&dir, iface) {
+			let outcome = match netcfgd_supplicant::Client::connect_within(
+				&dir,
+				iface,
+				netcfgd_supplicant::STOP_TIMEOUT,
+			) {
 				Ok(client) => client
 					.command("TERMINATE")
 					.map_err(|error| format!("could not stop the supplicant on {iface}: {error}")),

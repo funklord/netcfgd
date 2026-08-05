@@ -17,7 +17,7 @@ pub mod client;
 pub mod network;
 pub mod protocol;
 
-pub use client::{nothing_is_listening, Client, DEFAULT_CTRL_DIR};
+pub use client::{nothing_is_listening, Client, DEFAULT_CTRL_DIR, STOP_TIMEOUT};
 pub use network::{mac_addr_value, settings, wired_settings, Setting, Unsupported};
 pub use protocol::{Event, NetworkEntry, Reply, ScanResult};
 
