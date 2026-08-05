@@ -170,6 +170,14 @@ wait_for_log() {
 }
 
 warm_fake() {
+	# Nothing to warm through yet: the sections build up a configuration and the
+	# first of them seeds the run state before writing one. A plan with no
+	# configuration says exactly that and reads no ACL, so there is no round
+	# trip to wait for -- the caller warms again after `write_config`, and this
+	# is called in both places precisely so no section is left cold.
+	if "$ncfg" plan 2>&1 | grep -q 'no configuration found'; then
+		return 0
+	fi
 	waited=0
 	while "$ncfg" plan 2>&1 | grep -q 'did not answer its control socket'; do
 		waited=$((waited + 1))
@@ -191,6 +199,7 @@ warm_fake() {
 # hostapd holds what it read at startup. The document now says something else.
 start_fake --deny 00:11:22:33:44:55
 seed_run_state deny
+warm_fake || true
 write_config '	access_control { deny = ["aa:bb:cc:dd:ee:ff"] }'
 warm_fake || true
 
@@ -234,6 +243,7 @@ check "and the next plan has nothing left to converge" \
 # worse than no deny list at all.
 start_fake --deny aa:bb:cc:dd:ee:ff --accept aa:bb:cc:dd:ee:ff
 seed_run_state deny
+warm_fake || true
 "$ncfg" apply > "$work/apply2.txt" 2>&1 || true
 wait_for_log 'cmd: ACCEPT_ACL DEL_MAC aa:bb:cc:dd:ee:ff' || true
 check "the entry overriding the deny list is removed" \
@@ -249,6 +259,7 @@ check "and the deny list itself is left alone" \
 # leave every unlisted station accepted, and netcfgd would report it applied.
 start_fake --deny 00:11:22:33:44:55
 seed_run_state deny
+warm_fake || true
 write_config '	access_control { allow = ["aa:bb:cc:dd:ee:ff"] }'
 warm_fake || true
 
@@ -381,6 +392,7 @@ check "and left no passphrase anywhere under /run" \
 # that far: a dummy has no radio and hostapd exits before it daemonizes.
 start_fake --deny 00:11:22:33:44:55
 seed_run_state deny
+warm_fake || true
 write_config '	access_control { deny = ["00:11:22:33:44:55"] }'
 warm_fake || true
 cat > "$work/run/hostapd/ap0.conf" <<'STARTED'
