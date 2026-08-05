@@ -258,6 +258,15 @@ It rejects generator attribution and a subject over 75 columns. It lives in
 the tree rather than only in `.git/hooks` so that it is reviewable and
 survives a clone; the copy that runs is installed from it.
 
+Two things it deliberately does not reject. The directory `.claude` and the
+file `CLAUDE.md` are names, so a message may say where the shared tooling
+comes from -- the ban is on crediting a generator, and neither spelling is
+one. And it ignores what git is about to discard: comment lines, and the
+diff that `git commit -v` puts below the scissors line. Reading those
+refused commits over text that never reaches the message -- the hook's own
+diff contains its own pattern list, so it rejected every commit that
+edited it.
+
 ## See also
 
 - **`project.md` §9** — working in this repo: build and CI conventions, and
