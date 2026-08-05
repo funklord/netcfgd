@@ -2501,6 +2501,10 @@ fn write_ppp_scripts(iface: &str) -> Result<(std::path::PathBuf, std::path::Path
 /// document gave this interface a `dns` block.
 #[must_use]
 pub fn ppp_script(iface: &str, report: &std::path::Path, going_up: bool) -> String {
+	// Bound before the `Display` that borrows it, so the path outlives the
+	// formatter rather than being a temporary in the argument list.
+	let staging = staged_report(report);
+	let staged = staging.display();
 	let report = report.display();
 	let when = if going_up { "ip-up" } else { "ip-down" };
 	// Emptied on the way down rather than removed, which the contract makes
@@ -2524,7 +2528,7 @@ pub fn ppp_script(iface: &str, report: &std::path::Path, going_up: bool) -> Stri
 		 set -u\n\
 		 \n\
 		 target='{report}'\n\
-		 tmp=\"$target.tmp\"\n\
+		 tmp='{staged}'\n\
 		 mkdir -p \"$(dirname \"$target\")\" || exit 1\n\
 		 \n\
 		 {{\n\
@@ -2685,8 +2689,8 @@ pub fn dhcpcd_script(iface: &str, report: &std::path::Path) -> String {
 		 \t\tfor suffix in $search; do\n\
 		 \t\t\tprintf 'search=%s\\n' \"$suffix\"\n\
 		 \t\tdone\n\
-		 \t}} > \"$report.tmp\"\n\
-		 \tmv \"$report.tmp\" \"$report\"\n\
+		 \t}} > '{staged}'\n\
+		 \tmv '{staged}' \"$report\"\n\
 		 \t;;\n\
 		 EXPIRE*|FAIL*|NAK*|STOP*|RELEASE*|NOCARRIER*)\n\
 		 \trm -f \"$report\"\n\
@@ -2694,6 +2698,7 @@ pub fn dhcpcd_script(iface: &str, report: &std::path::Path) -> String {
 		 esac\n\
 		 exit 0\n",
 		iface = iface,
+		staged = staged_report(report).display(),
 		report = report.display()
 	)
 }
@@ -2778,8 +2783,8 @@ pub fn udhcpc_script(iface: &str, state: &std::path::Path, report: &std::path::P
 		 \t\tfor suffix in ${{search:-${{domain:-}}}}; do\n\
 		 \t\t\tprintf 'search=%s\\n' \"$suffix\"\n\
 		 \t\tdone\n\
-		 \t}} > \"$report.tmp\"\n\
-		 \tmv \"$report.tmp\" \"$report\"\n\
+		 \t}} > '{staged}'\n\
+		 \tmv '{staged}' \"$report\"\n\
 		 }}\n\
 		 \n\
 		 case \"${{1:-}}\" in\n\
@@ -2810,6 +2815,7 @@ pub fn udhcpc_script(iface: &str, state: &std::path::Path, report: &std::path::P
 		 exit 0\n",
 		iface = iface,
 		state = state.display(),
+		staged = staged_report(report).display(),
 		report = report.display()
 	)
 }
@@ -2849,12 +2855,13 @@ pub fn pd_hook_script(iface: &str, target: &std::path::Path) -> String {
 		 # rather than leaving a variable here that would never be set.\n\
 		 set -u\n\
 		 out={}\n\
-		 : > \"$out.tmp\"\n\
+		 : > '{staged}'\n\
 		 for p in ${{PREFIXES:-}}; do\n\
-		 \tprintf '%s\\n' \"${{p%%,*}}\" >> \"$out.tmp\"\n\
+		 \tprintf '%s\\n' \"${{p%%,*}}\" >> '{staged}'\n\
 		 done\n\
-		 mv \"$out.tmp\" \"$out\"\n",
-		target.display()
+		 mv '{staged}' \"$out\"\n",
+		target.display(),
+		staged = staged_report(target).display()
 	)
 }
 
@@ -2901,6 +2908,51 @@ pub fn report_dir(run_dir: &std::path::Path) -> std::path::PathBuf {
 #[must_use]
 pub fn report_path(run_dir: &std::path::Path, iface: &str) -> std::path::PathBuf {
 	report_dir(run_dir).join(iface)
+}
+
+/// Where a writer stages a report before renaming it into place.
+///
+/// The contract tells every writer to write a temporary file *in the same
+/// directory* and `rename(2)` it over the target, because a rename is the only
+/// way to publish a file whole and it has to be on the same filesystem. It did
+/// not say what to call it, and the reader took every entry in that directory
+/// as an interface name -- so the half-written file the contract exists to hide
+/// was read as a report for an interface named after the temporary file.
+///
+/// Not a hypothetical about careless third parties: netcfgd's own three
+/// generated writers staged at `<report>.tmp`, so netcfgd created the artefact
+/// its own reader misread, on every lease renewal. Measured -- a report
+/// appeared for an interface called `.eth0.tmp.1234`, carrying a nameserver out
+/// of a file that was still being written. Decision 0113.
+///
+/// **A leading dot**, and the reason is collision rather than convention. Dots
+/// are ordinary *inside* an interface name -- a VLAN is `eth0.100` -- so a rule
+/// about the `.tmp` suffix would silently drop the report of an interface
+/// somebody legitimately named that way. A name that *begins* with a dot is
+/// pathological as an interface and universally understood as "not content".
+#[must_use]
+pub fn staged_report(target: &std::path::Path) -> std::path::PathBuf {
+	let name = target.file_name().map_or_else(
+		|| "report".to_owned(),
+		|name| name.to_string_lossy().into_owned(),
+	);
+	target
+		.parent()
+		.unwrap_or_else(|| std::path::Path::new("."))
+		.join(format!(".{name}.tmp"))
+}
+
+/// Is this directory entry a writer's staging file rather than a report?
+///
+/// The other half of [`staged_report`], and it is deliberately broader than
+/// that function's own output: it skips *anything* beginning with a dot, not
+/// just the `.tmp` names netcfgd generates. A third-party writer that stages
+/// under some other dotted name is then safe by following the contract's
+/// wording rather than by matching netcfgd's spelling exactly, and `.` and
+/// `..` are excluded for free.
+#[must_use]
+pub fn is_staging(name: &str) -> bool {
+	name.starts_with('.')
 }
 
 /// Where netcfgd's own writers report, one file each.

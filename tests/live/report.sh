@@ -116,6 +116,30 @@ EOF
 check "the documented example is read as the document describes" "$(seen)" \
 	"10.64.1.23/30 10.64.1.24 8.8.8.8 2001:4860:4860::8888"
 
+# ------------------------------------ a staging file is not a report
+
+# The contract tells a writer to build the file in this directory and
+# `rename(2)` it over the target, so a half-written one is present in here for a
+# moment on every write. Until 0113 netcfgd read that file as a report for an
+# interface named after it -- and this script's own `report` helper had been
+# staging under a leading dot all along while netcfgd's *generated* writers
+# staged at `<report>.tmp`, so the product created the artefact its own reader
+# misread and nothing here could see it.
+#
+# Left in place rather than renamed, which is what makes it a test: it stands in
+# for the instant between the write and the rename.
+printf 'address=203.0.113.7/32\ndns=203.0.113.53\nadd' \
+	> "$work/run/reported/.wwan1.tmp"
+staged_seen() {
+	"$ncfg" status --json 2>/dev/null | python3 -c '
+import json, sys
+reports = json.load(sys.stdin).get("reports", [])
+print(len([r for r in reports if r["interface"].startswith(".")]))
+'
+}
+check "a writer's staging file is not read as an interface" "$(staged_seen)" "0"
+rm -f "$work/run/reported/.wwan1.tmp"
+
 # The text output says it was *reported*, not applied, which is the true state:
 # netcfgd has no addressing source for this yet. An operator who could not tell
 # those apart would have no way to know which half was broken.
