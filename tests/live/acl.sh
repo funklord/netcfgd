@@ -148,6 +148,27 @@ start_fake() {
 # running backend "did not answer its control socket" exactly when this read
 # fails. Waiting for that to stop being true is waiting for a real answer to
 # have arrived within the real deadline.
+# Wait for a command to reach the fake's log before asserting it did.
+#
+# `ncfg apply` returns when netcfgd has *sent* a command, not when the process
+# on the other end has logged it, and under load those are far enough apart to
+# matter: with the cores saturated these checks failed three runs in four,
+# reading a log the fake had not got to yet. Bounded, so a command that never
+# arrives still fails its own check with its own message.
+#
+# Only for the assertions that a command *did* arrive. The ones asserting a
+# command did not must not wait -- there would be nothing to wait for, and five
+# seconds of it on every run.
+wait_for_log() {
+	waited=0
+	while [ "$(grep -c "$1" "$work/fake.log" 2>/dev/null || true)" = "0" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 50 ] && return 1
+		sleep 0.1
+	done
+	return 0
+}
+
 warm_fake() {
 	waited=0
 	while "$ncfg" plan 2>&1 | grep -q 'did not answer its control socket'; do
@@ -185,8 +206,10 @@ check "and does not restart the access point to do it" \
 
 "$ncfg" apply > "$work/apply.txt" 2>&1 || true
 
+wait_for_log 'cmd: DENY_ACL ADD_MAC aa:bb:cc:dd:ee:ff' || true
 check "the addition went out over the wire" \
 	"$(grep -c 'cmd: DENY_ACL ADD_MAC aa:bb:cc:dd:ee:ff' "$work/fake.log" || true)" "1"
+wait_for_log 'cmd: DENY_ACL DEL_MAC 00:11:22:33:44:55' || true
 check "so did the removal" \
 	"$(grep -c 'cmd: DENY_ACL DEL_MAC 00:11:22:33:44:55' "$work/fake.log" || true)" "1"
 # TERMINATE is how netcfgd stops an access point (decision 0026). Seeing one
@@ -212,6 +235,7 @@ check "and the next plan has nothing left to converge" \
 start_fake --deny aa:bb:cc:dd:ee:ff --accept aa:bb:cc:dd:ee:ff
 seed_run_state deny
 "$ncfg" apply > "$work/apply2.txt" 2>&1 || true
+wait_for_log 'cmd: ACCEPT_ACL DEL_MAC aa:bb:cc:dd:ee:ff' || true
 check "the entry overriding the deny list is removed" \
 	"$(grep -c 'cmd: ACCEPT_ACL DEL_MAC aa:bb:cc:dd:ee:ff' "$work/fake.log" || true)" "1"
 check "and the deny list itself is left alone" \
@@ -332,6 +356,12 @@ interface ap0 {
 CONF
 "$ncfg" apply > "$work/stopped.txt" 2>&1 || true
 
+# Wait for the fake to have written it. `ncfg apply` returns when netcfgd has
+# sent TERMINATE, not when the process on the other end has logged it, and under
+# load those are far enough apart to matter: this check failed three runs in
+# four with the machine's cores saturated, reading a log the fake had not got to
+# yet. Bounded, so a TERMINATE that never arrives still fails.
+wait_for_log 'cmd: TERMINATE' || true
 check "stopping the access point asked hostapd to terminate" \
 	"$(grep -c 'cmd: TERMINATE' "$work/fake.log" || true)" "1"
 # By content, not by path: what matters is the secret rather than the filename.
