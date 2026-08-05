@@ -344,9 +344,28 @@ fi
 wait_for '[ "$(hostname)" != localhost ]' || true
 check "dhcpcd's own hooks take the hostname from the lease" \
 	"$(hostname)" "leased-name.lan.example"
-wait_for 'grep -q 10.44.0.53 "$resolv"' || true
-contains "and rewrite the resolver file netcfgd's DNS backend owns" \
-	"$(cat "$resolv")" "nameserver 10.44.0.53"
+# And the resolver file, but only where dhcpcd's hook would write it directly.
+#
+# `20-resolv.conf` opens with "Support resolvconf(8) if available" and means it:
+# where a `resolvconf` exists on PATH the hook hands off to it rather than
+# writing the file, so this counter-proof has nothing to observe and the check
+# reports the untouched file as though netcfgd's silencing had failed.
+#
+# That is a property of the machine's packages and not of the run. It passed on
+# Alpine with dhcpcd alone and failed on Alpine with the suite's full package
+# set, which pulls in openresolv -- deterministic both times, and read as a
+# flake until the package that owns `/usr/sbin/resolvconf` was looked up.
+#
+# The hostname half above still runs either way, so the counter-proof is
+# weakened here rather than lost: 0072's silencing covers both hooks.
+if command -v resolvconf >/dev/null 2>&1; then
+	echo "note: dhcpcd's hook defers to resolvconf($(command -v resolvconf)), so"
+	echo "note:   the direct-rewrite counter-proof cannot run on this machine"
+else
+	wait_for 'grep -q 10.44.0.53 "$resolv"' || true
+	contains "and rewrite the resolver file netcfgd's DNS backend owns" \
+		"$(cat "$resolv")" "nameserver 10.44.0.53"
+fi
 
 "$dhcpcd" -4 -k cli > "$work/stock-stop.log" 2>&1 || true
 wait_for '! ip -4 -br addr show cli | grep -q 10.44.0.20' ||
