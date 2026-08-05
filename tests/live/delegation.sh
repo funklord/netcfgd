@@ -83,7 +83,20 @@ cleanup() {
 	# namespace that no longer exists. Killing every radvd on the machine is
 	# not this script's business.
 	pkill -f "radvd --config $work" 2>/dev/null || true
-	rm -rf "$work"
+	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
+	# races the process the lines above have just asked to stop. A trap that
+	# exits non-zero fails the whole run after every check has passed, which is
+	# how this surfaced -- three times, in three different scripts.
+	waited=0
+	while [ -d "$work" ]; do
+		rm -rf "$work" 2>/dev/null && break
+		waited=$((waited + 1))
+		[ "$waited" -gt 50 ] && break
+		sleep 0.1
+	done
+	if [ -d "$work" ]; then
+		echo "note: $work outlived five seconds of trying to remove it" >&2
+	fi
 }
 trap cleanup EXIT INT TERM
 mkdir -p "$work/etc" "$work/run" /run/kea /var/lib/kea
