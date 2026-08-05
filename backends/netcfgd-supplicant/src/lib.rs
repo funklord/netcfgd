@@ -17,7 +17,7 @@ pub mod client;
 pub mod network;
 pub mod protocol;
 
-pub use client::{is_reply_socket, nothing_is_listening, Client, DEFAULT_CTRL_DIR, STOP_TIMEOUT};
+pub use client::{is_reply_socket, nothing_is_listening, Client, DEFAULT_CTRL_DIR, IMPATIENT};
 pub use network::{mac_addr_value, settings, wired_settings, Setting, Unsupported};
 pub use protocol::{Event, NetworkEntry, Reply, ScanResult};
 
@@ -25,7 +25,6 @@ use netcfgd_model::WifiNetwork;
 use netcfgd_secret::Resolver;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Where the control sockets are.
 ///
@@ -44,18 +43,8 @@ pub fn ctrl_dir() -> PathBuf {
 		.map_or_else(|| PathBuf::from(DEFAULT_CTRL_DIR), PathBuf::from)
 }
 
-/// How long an observation waits for a supplicant to say `PONG`.
-///
-/// The same one second, for the same reason, as the deadline on hostapd's
-/// access-control read: this runs in the reconcile loop -- on every netlink
-/// event -- so a supplicant that is alive with its socket bound and not
-/// answering would otherwise hold the loop for the full ten seconds per radio,
-/// every time. Ten seconds is what a wedged one was measured at.
-///
-/// Being wrong in the impatient direction costs an observation that says
-/// netcfgd could not ask, which is a warning the operator can act on. Being
-/// wrong in the other direction stalls the daemon.
-const IMPATIENT: Duration = Duration::from_secs(1);
+// The observation's deadline is `client::IMPATIENT`, which this crate
+// re-exports: one second, for the reason recorded there.
 
 /// Does the supplicant on `interface` answer its control socket?
 ///
@@ -69,7 +58,7 @@ const IMPATIENT: Duration = Duration::from_secs(1);
 /// anything should be configured against.
 #[must_use]
 pub fn answers(dir: &Path, interface: &str) -> bool {
-	Client::connect_within(dir, interface, IMPATIENT).is_ok()
+	Client::connect_within(dir, interface, client::IMPATIENT).is_ok()
 }
 
 /// Remove every network the supplicant currently holds.
