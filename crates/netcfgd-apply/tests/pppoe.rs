@@ -188,3 +188,42 @@ fn service_and_concentrator_are_optional() {
 	assert!(!text.contains("rp_pppoe_service"), "got:\n{text}");
 	assert!(text.contains(r#"rp_pppoe_ac "BRAS-01""#), "got:\n{text}");
 }
+
+/// Every generated writer stages under a name the reader will skip.
+///
+/// All four in one test, because what they share is the bug: each staged at
+/// `<report>.tmp`, which is a perfectly good interface name, and netcfgd's own
+/// reader took it for one. Decision 0113.
+///
+/// Asserted as the whole path rather than "contains a dot", so a writer that
+/// staged under *some* dotted name in the wrong directory would still fail --
+/// the rename has to be within one filesystem, which means within this
+/// directory.
+#[test]
+fn every_generated_writer_stages_under_a_dot() {
+	use netcfgd_apply::kernel::{dhcpcd_script, pd_hook_script, udhcpc_script};
+	use std::path::Path;
+
+	let report = Path::new("/run/netcfgd/reported/eth0");
+	let state = Path::new("/run/netcfgd/udhcpc/eth0.state");
+	let staged = "/run/netcfgd/reported/.eth0.tmp";
+
+	let scripts = [
+		("ppp ip-up", ppp_script("eth0", report, true)),
+		("ppp ip-down", ppp_script("eth0", report, false)),
+		("dhcpcd", dhcpcd_script("eth0", report)),
+		("udhcpc", udhcpc_script("eth0", state, report)),
+		("odhcp6c", pd_hook_script("eth0", report)),
+	];
+
+	for (which, text) in &scripts {
+		assert!(
+			text.contains(staged),
+			"{which} does not stage at {staged}:\n{text}"
+		);
+		assert!(
+			!text.contains("/reported/eth0.tmp"),
+			"{which} still stages beside the report under a name that reads as an interface:\n{text}"
+		);
+	}
+}
