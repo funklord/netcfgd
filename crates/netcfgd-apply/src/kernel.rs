@@ -3140,13 +3140,24 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 			// exists -- measured with the invocation above against a real one.
 			// openvpn's `--daemon` returns at the fork and needed a pid file
 			// for exactly that reason (0074).
+			//
+			// A supplicant that is there and silent is a different state and
+			// gets a different answer, for the reasons decision 0109 records
+			// against the identical shape in `netcfgd-hostapd`. The two are
+			// kept in step deliberately: they are one mechanism, and fixing
+			// one of them would leave the other saying a daemon had stopped
+			// while it was still holding the radio.
 			let dir = netcfgd_supplicant::ctrl_dir();
 			let outcome = match netcfgd_supplicant::Client::connect(&dir, iface) {
 				Ok(client) => client
 					.command("TERMINATE")
 					.map_err(|error| format!("could not stop the supplicant on {iface}: {error}")),
 				// Nothing listening is the state this was asked to produce.
-				Err(_) => Ok(()),
+				Err(error) if netcfgd_supplicant::nothing_is_listening(&error) => Ok(()),
+				Err(error) => Err(format!(
+					"could not stop the supplicant on {iface}: it is running and \
+					 did not answer its control socket: {error}"
+				)),
 			};
 			// The pid file goes either way. wpa_supplicant removes its own on a
 			// clean exit; one that was killed leaves it, and a stale file would

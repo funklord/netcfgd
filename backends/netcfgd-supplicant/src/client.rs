@@ -263,11 +263,68 @@ impl Client {
 	}
 }
 
+/// Whether a failed [`Client::connect`] means there is nothing to talk to.
+///
+/// Every caller that stops a daemon through its control socket has to answer
+/// this, and until it existed they all answered it the same wrong way: any
+/// error at all was taken as "nothing is running", so the stop reported
+/// success. That is right for a socket that is not there and wrong for every
+/// other failure -- and the failure it is most wrong about is the one that
+/// matters, because [`Client::connect`] sends a `PING` and a daemon that has
+/// bound its socket and stopped answering fails here rather than at the
+/// command. Reading that as absence tells the operator an access point was
+/// stopped while it is still on the air with its passphrase in memory, and
+/// drops it out of the run state so nothing ever tries again.
+///
+/// Two kinds mean absence and no others. `NotFound` is the socket not
+/// existing, which `connect` raises by name. `ConnectionRefused` is a socket
+/// file left behind by a process that is gone -- the kernel's answer for a
+/// unix datagram address nobody has open. A timeout is not in the list, and
+/// that is the whole point of the list.
+#[must_use]
+pub fn nothing_is_listening(error: &io::Error) -> bool {
+	matches!(
+		error.kind(),
+		io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+	)
+}
+
 impl Drop for Client {
 	fn drop(&mut self) {
 		// The bound path is a real file. Leaving it behind fills
 		// `/run/wpa_supplicant` with dead sockets, and the next reader of that
 		// directory cannot tell which are live.
 		let _ = std::fs::remove_file(&self.local);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::nothing_is_listening;
+	use std::io;
+
+	/// The two that mean nothing is there, and the one that does not.
+	///
+	/// `WouldBlock` is what a `set_read_timeout` produces on Linux and is
+	/// therefore the shape of a daemon that is running and silent. It is
+	/// listed here so that a rewrite widening the match has to delete an
+	/// assertion rather than merely relax a condition.
+	#[test]
+	fn a_silent_daemon_is_not_an_absent_one() {
+		assert!(nothing_is_listening(&io::Error::from(
+			io::ErrorKind::NotFound
+		)));
+		assert!(nothing_is_listening(&io::Error::from(
+			io::ErrorKind::ConnectionRefused
+		)));
+		assert!(!nothing_is_listening(&io::Error::from(
+			io::ErrorKind::WouldBlock
+		)));
+		assert!(!nothing_is_listening(&io::Error::from(
+			io::ErrorKind::TimedOut
+		)));
+		assert!(!nothing_is_listening(&io::Error::from(
+			io::ErrorKind::InvalidData
+		)));
 	}
 }
