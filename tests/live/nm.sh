@@ -773,10 +773,29 @@ else
 
 	# And back the other way: a client creating a network with a static address
 	# has to produce a config line an operator would have written.
+	# `|| add_status=$?` rather than `|| true`: the four checks below all read
+	# the file this command writes, so if it fails they report `expected 1,
+	# actual 0` four times over and say nothing about the command having
+	# failed. That is the shape both of this script's other intermittent
+	# failures took, and in both cases making the give-up loud is what turned
+	# a mystery into a diagnosis (0106, 0107).
+	#
+	# The write itself is not suspected: `AddConnection` calls `store::write`
+	# synchronously, before it replies, and 240 add-and-delete cycles driven
+	# back to back produced no failure at all. So this is here to describe the
+	# next occurrence rather than to prevent it.
+	add_status=0
 	nmcli connection add type wifi ifname '*' con-name Office ssid Office \
 		ipv4.method manual ipv4.addresses 192.0.2.5/24 ipv4.gateway 192.0.2.1 \
 		ipv4.routes "10.0.0.0/8 192.0.2.9 600" \
-		> "$work/static.log" 2>&1 || true
+		> "$work/static.log" 2>&1 || add_status=$?
+	if [ "$add_status" -ne 0 ]; then
+		echo "FAIL a client can write a static profile at all"
+		echo "       nmcli exited $add_status and said:"
+		sed 's/^/       /' "$work/static.log" 2>/dev/null || true
+		echo "       the four checks below read the file it did not write"
+		failures=$((failures + 1))
+	fi
 	office="$work/etc/conf.d/nm-Office.conf"
 
 	# The address is in the config list. Not the whole line: nmcli defaults
