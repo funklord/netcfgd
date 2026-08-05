@@ -659,6 +659,46 @@ else
 		"$(detail 'IP4.ADDRESS[1]')" "10.7.7.1/24"
 	check "and the gateway is the next hop of the default route" \
 		"$(detail IP4.GATEWAY)" "10.7.7.254"
+	# Establish that netcfgd has actually delivered the DNS, rather than
+	# assuming the daemon's own pass got that far. It often has not.
+	#
+	# Execution stops at the first failed action (section 4), and this fixture
+	# *guarantees* one: the `Prompted` network references a secret that does
+	# not exist, so `backend.start radio0` fails on every apply -- deliberately,
+	# because the secret-agent tests below are about exactly that. Every action
+	# ordered after it is skipped, and `dns.apply` is one of them. So a panel
+	# shows no nameservers because there are none: netcfgd never wrote them.
+	#
+	# Section 4 also says what to do about it -- "the remainder is re-runnable:
+	# `ncfg apply` recomputes from current observed state and resumes cleanly"
+	# -- and that is measured here rather than hoped for. One further apply
+	# delivered the DNS in every occurrence seen; waiting does not, and ten
+	# seconds of polling never saw it arrive on its own.
+	#
+	# Intermittent because it depends on how far the daemon's own applies had
+	# got by the time these checks run, which is why it presented as three
+	# unrelated panel checks failing together about two runs in ten.
+	waited=0
+	while [ ! -f "$work/resolv.conf" ] && [ "$waited" -lt 8 ]; do
+		waited=$((waited + 1))
+		"$repo/target/debug/ncfg" apply > /dev/null 2>&1 || true
+	done
+	if [ ! -f "$work/resolv.conf" ]; then
+		echo "FAIL netcfgd delivered the DNS these panel checks read"
+		echo "       no $work/resolv.conf after $waited applies, so the three"
+		echo "       checks below would be asking about nothing"
+		failures=$((failures + 1))
+	fi
+	# And the shim reads netcfgd's state over its monitor subscription, so give
+	# that the moment it takes to arrive -- 200ms when measured. A bounded wait
+	# on the value rather than a sleep, so a shim that never catches up fails
+	# the check below rather than being papered over.
+	waited=0
+	while [ "$(detail 'IP4.DNS[1]')" != "10.0.0.1" ] && [ "$waited" -lt 50 ]; do
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+
 	check "the nameservers come from what was applied, not from the config" \
 		"$(detail 'IP4.DNS[1]')" "10.0.0.1"
 	check "and the search domains with them" \
