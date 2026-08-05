@@ -194,6 +194,49 @@ check "re-associating with the same one is not a roam" "$(runs)" 2
 check "and it stayed attached throughout" \
 	"$(grep -c '^ATTACH' "$work/fake.log" || true)" 1
 
+# ------------------------------- not everything in the directory is a radio
+
+# A datagram client has to bind an address of its own to be replied to, and it
+# binds it here, beside the sockets it talks to. So the control directory holds
+# entries that are not interfaces -- netcfgd's own in-flight connections -- and
+# the watcher above took every entry as one. Decision 0112.
+#
+# Two things went wrong and this checks the one that is visible. Connecting to a
+# reply socket waits out the whole timeout, because the far end is a live
+# process that is not a server: three `PING`s in twenty-five seconds, once per
+# timeout, for as long as the entry exists. The other is worse and racy -- the
+# `PING` lands in that client's reply queue, where it is not an event, so the
+# client can hand it back as the answer to a command it really sent.
+#
+# Named exactly as `Client::connect` names one, because a filter that does not
+# match the real thing is no filter. A pid that is not running is deliberate:
+# what makes this socket answer nothing is that nobody is serving it, and that
+# is true of a live client too.
+cat > "$work/stray.py" <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+s.bind(sys.argv[1])
+print("bound", flush=True)
+while True:
+	data, _ = s.recvfrom(4096)
+	print("received: " + data.decode("utf-8", "replace").strip(), flush=True)
+PY
+python3 "$work/stray.py" "$work/ctrl/netcfgd-999999-0" > "$work/stray.log" 2>&1 &
+stray=$!
+waited=0
+while ! grep -q bound "$work/stray.log" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+# The watcher rescans on every pass and sends its `PING` immediately -- it is
+# the *reply* it waits for -- so a second is enough to catch it. Measured with
+# the filter removed: the first `PING` arrives before this returns.
+sleep 2
+check "a reply socket in the control directory is not taken for a radio" \
+	"$(grep -c '^received:' "$work/stray.log" || true)" 0
+kill "$stray" 2>/dev/null || true
+
 if [ "$failures" -eq 0 ]; then
 	echo "roam.sh: all checks passed"
 else

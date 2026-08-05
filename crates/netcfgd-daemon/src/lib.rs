@@ -868,11 +868,30 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 						else {
 							continue;
 						};
+						// Not every entry here is an interface. A datagram client
+						// binds its own reply socket in this directory, so the
+						// daemon's own in-flight connections appear beside the
+						// supplicants -- and connecting to one waits out the
+						// full timeout against a process that will never answer,
+						// while delivering the `PING` into that client's reply
+						// queue where it can be read as the answer to a command
+						// it actually sent. Decision 0112.
+						if netcfgd_supplicant::is_reply_socket(&interface) {
+							continue;
+						}
 						if watching.iter().any(|(known, _, _)| *known == interface) {
 							continue;
 						}
-						let Ok(client) = netcfgd_supplicant::Client::connect(&ctrl_dir, &interface)
-						else {
+						// Impatiently, for the reason every other control-socket
+						// deadline in this tree exists: what is left after the
+						// filter above is a real supplicant, and a wedged one
+						// would otherwise cost this thread ten seconds a pass and
+						// starve the radios that are working of their events.
+						let Ok(client) = netcfgd_supplicant::Client::connect_within(
+							&ctrl_dir,
+							&interface,
+							netcfgd_supplicant::STOP_TIMEOUT,
+						) else {
 							continue;
 						};
 						// Without ATTACH this connection gets replies and no

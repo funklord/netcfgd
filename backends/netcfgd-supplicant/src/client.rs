@@ -24,6 +24,34 @@ static NEXT_SERIAL: AtomicU32 = AtomicU32::new(0);
 /// Where `wpa_supplicant` puts its per-interface sockets by default.
 pub const DEFAULT_CTRL_DIR: &str = "/run/wpa_supplicant";
 
+/// What a client's own reply socket is called.
+///
+/// A datagram client must bind an address to be replied to, and it binds it in
+/// the control directory beside the sockets it talks to -- that being the
+/// directory both ends are known to be able to write. The consequence is that
+/// **the control directory contains entries that are not interfaces**, and
+/// anything reading it has to know which.
+const REPLY_PREFIX: &str = "netcfgd-";
+
+/// Is this directory entry one of netcfgd's own reply sockets?
+///
+/// For readers of the control directory, and it exists because one of them was
+/// not doing this. The roam watcher took every entry as an interface name and
+/// connected to it, which against a reply socket has two effects and both are
+/// bad: the connect waits out its whole timeout, because the far end is a live
+/// process that is not a server and will never answer a `PING` -- measured at
+/// three `PING`s in twenty-five seconds, so once per timeout, forever -- and
+/// the `PING` lands **in another client's reply queue**, where it is not an
+/// event, so that client can return it as the answer to whatever command it had
+/// just sent. Decision 0112.
+///
+/// A prefix rather than a parse: the serial and the pid are this module's
+/// business, and a reader only needs to know the entry is ours.
+#[must_use]
+pub fn is_reply_socket(name: &str) -> bool {
+	name.starts_with(REPLY_PREFIX)
+}
+
 /// How long to wait for a reply.
 ///
 /// Generous, because `SCAN_RESULTS` on a busy band is not instant, and a
@@ -114,7 +142,7 @@ impl Client {
 		// stale file from a crashed run would be too. A counter rather than a
 		// clock, because two connections can be opened inside one clock tick.
 		let serial = NEXT_SERIAL.fetch_add(1, Ordering::Relaxed);
-		let local = dir.join(format!("netcfgd-{}-{serial}", std::process::id()));
+		let local = dir.join(format!("{REPLY_PREFIX}{}-{serial}", std::process::id()));
 		let _ = std::fs::remove_file(&local);
 
 		let socket = UnixDatagram::bind(&local).map_err(|error| {
@@ -326,8 +354,76 @@ impl Drop for Client {
 
 #[cfg(test)]
 mod tests {
-	use super::nothing_is_listening;
+	use super::{is_reply_socket, nothing_is_listening, Client};
 	use std::io;
+	use std::os::unix::net::UnixDatagram;
+
+	/// The reply socket a client binds is recognised as netcfgd's own.
+	///
+	/// Observed while a connect is in flight rather than asserted as a literal,
+	/// because the coupling this pins spans two places: what the client *names*
+	/// its socket and what a directory reader *skips*. A test asserting the
+	/// prefix alone would keep passing if the naming moved.
+	///
+	/// It has to be watched from another thread. The name exists only for the
+	/// duration of the attempt -- `Drop` removes it, including on the failure
+	/// path this takes -- so reading the directory afterwards finds nothing,
+	/// which is exactly how the first version of this test asserted nothing at
+	/// all while passing.
+	#[test]
+	fn a_clients_own_reply_socket_is_not_an_interface() {
+		use std::time::{Duration, Instant};
+
+		let dir = std::env::temp_dir().join(format!("ncfg-reply-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).expect("a directory to bind in");
+
+		// A socket that exists and answers nothing, so the connect gets past
+		// its existence check, binds its reply socket, and then waits.
+		let server = UnixDatagram::bind(dir.join("wlan0")).expect("a server socket");
+
+		let scanned = dir.clone();
+		let listing = std::thread::spawn(move || {
+			let deadline = Instant::now() + Duration::from_secs(2);
+			let mut seen: Vec<String> = Vec::new();
+			while Instant::now() < deadline {
+				if let Ok(entries) = std::fs::read_dir(&scanned) {
+					for entry in entries.flatten() {
+						if let Some(name) = entry.file_name().to_str() {
+							if name != "wlan0" && !seen.iter().any(|held| held == name) {
+								seen.push(name.to_owned());
+							}
+						}
+					}
+				}
+				if !seen.is_empty() {
+					break;
+				}
+				std::thread::sleep(Duration::from_millis(1));
+			}
+			seen
+		});
+
+		let outcome = Client::connect_within(&dir, "wlan0", Duration::from_millis(500));
+		let seen = listing.join().expect("the directory-listing thread");
+		drop(server);
+		let _ = std::fs::remove_dir_all(&dir);
+
+		assert!(outcome.is_err(), "nothing answers, so this cannot succeed");
+		assert!(
+			!seen.is_empty(),
+			"the connect bound no reply socket, so this test checked nothing"
+		);
+		for name in &seen {
+			assert!(
+				is_reply_socket(name),
+				"{name} was bound in the control directory and would be taken for an interface"
+			);
+		}
+
+		assert!(!is_reply_socket("wlan0"));
+		assert!(!is_reply_socket("p2p-dev-wlan0"));
+	}
 
 	/// The two that mean nothing is there, and the one that does not.
 	///
