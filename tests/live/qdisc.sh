@@ -194,6 +194,27 @@ if [ -n "$tc" ]; then
 	# the race is real, so the setup waits for it rather than the deadline being
 	# widened. Retrying the assignment is what makes it deterministic; a sleep
 	# would only make it likely.
+	# Wait for the daemon to be *finished* before touching the kernel, not just
+	# for the assignment to stick. Retrying until cake was in place closed the
+	# window between setting it and the apply, and left the one between that and
+	# the check: a reconcile the daemon planned while it still owned the qdisc
+	# is entitled to reset it, and landing late it wipes the foreign one.
+	#
+	# An empty plan is the signal. It says the world already matches the
+	# document, which is only true once the daemon's pending pass has landed --
+	# so nothing is left in flight to arrive afterwards.
+	waited=0
+	while [ "$("$ncfg" plan 2>&1 | grep -c 'nothing to do')" != "1" ]; do
+		waited=$((waited + 1))
+		if [ "$waited" -gt 100 ]; then
+			echo "FAIL the daemon settled before the foreign-qdisc check"
+			echo "       ten seconds and a plan still has work in it:"
+			"$ncfg" plan 2>&1 | sed 's/^/       /' | head -6
+			failures=$((failures + 1))
+			break
+		fi
+		sleep 0.1
+	done
 	waited=0
 	while :; do
 		"$tc" qdisc replace dev veth0 root cake bandwidth 30mbit
