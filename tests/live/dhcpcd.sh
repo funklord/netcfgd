@@ -103,9 +103,24 @@ find_in_sbin() {
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built (cargo build --workspace)"
 dhcpcd=$(find_in_sbin dhcpcd) || skip "dhcpcd is not installed (apt install dhcpcd-base | apk add dhcpcd)"
-command -v busybox >/dev/null 2>&1 || skip "no busybox, which is the server here"
 command -v hostname >/dev/null 2>&1 || skip "no hostname(1), which is how the counter-proof is measured"
-busybox --list | grep -qx udhcpd || skip "this busybox has no udhcpd applet"
+
+# Which server answers the v4 half. The client is dhcpcd and is the thing under
+# test; the server is scenery that has to send options 6, 12, 15 and 119.
+#
+# `busybox udhcpd` was the only one, and Alpine has no such applet -- its
+# busybox builds `udhcpc` and `udhcpc6` and no server at all -- so this script
+# could not run there. dnsmasq serves the same options and already answers the
+# v6 half of this very file, so it is the fallback rather than the replacement:
+# where the applet exists nothing changes (0108).
+if command -v busybox >/dev/null 2>&1 && busybox --list | grep -qx udhcpd; then
+	dhcp_server=udhcpd
+elif command -v dnsmasq >/dev/null 2>&1; then
+	dhcp_server=dnsmasq
+else
+	skip "no DHCPv4 server: no busybox udhcpd applet and no dnsmasq \
+(apt install busybox | apk add dnsmasq)"
+fi
 # Debian's path, and dhcpcd's compiled-in default. A build that keeps its leases
 # somewhere else would have this test writing to the real directory, which is
 # exactly what the namespace exists to prevent.
@@ -257,29 +272,56 @@ ip link add cli type veth peer name srv
 ip link set srv up
 ip addr add 10.44.0.1/24 dev srv
 
-cat > "$work/udhcpd.conf" <<EOF
+# Option 15 and option 119 are two different things on the wire: a domain and a
+# search list. dhcpcd prefers 119 where a server sends one, which is the
+# precedence netcfgd's hook copies -- and without both being sent, that
+# precedence has no subject. Option 12 is what dhcpcd's own 30-hostname hook
+# acts on; netcfgd's hook must not, and cannot be said to unless a name arrives.
+#
+# Both servers below send the same six options. Written twice rather than
+# abstracted, so the two can be read against each other.
+: > "$work/udhcpd.leases"
+if [ "$dhcp_server" = udhcpd ]; then
+	cat > "$work/udhcpd.conf" <<EOF
 start 10.44.0.20
 end 10.44.0.20
 interface srv
 option subnet 255.255.255.0
 option router 10.44.0.1
 option dns 10.44.0.53
-# Option 15 and option 119, which are two different things on the wire: a domain
-# and a search list. dhcpcd prefers 119 where a server sends one, which is the
-# precedence netcfgd's hook copies -- and without both being sent, that
-# precedence has no subject.
 option domain lan.example
 option search a.example b.example
-# Option 12, which is what dhcpcd's own 30-hostname hook acts on. netcfgd's hook
-# must not, and cannot be said to unless a name arrives.
 option hostname leased-name
 option lease 600
 lease_file $work/udhcpd.leases
 pidfile $work/udhcpd.pid
 EOF
-: > "$work/udhcpd.leases"
-busybox udhcpd -f "$work/udhcpd.conf" > "$work/udhcpd.log" 2>&1 &
-server=$!
+	busybox udhcpd -f "$work/udhcpd.conf" > "$work/udhcpd.log" 2>&1 &
+	server=$!
+else
+	# `--user=root` for the reason the v6 half below already passes it: dnsmasq
+	# drops privileges at startup and this runs in a user namespace. `--port=0`
+	# because this is a DHCP server and not a resolver. The options go out by
+	# dnsmasq's names rather than by number -- 119 is DNS-name encoded on the
+	# wire (RFC 3397) and a numeric `--dhcp-option=119,...` sends the text.
+	# Option 12 is the exception and goes out by number: dnsmasq refuses
+	# `option:hostname` outright -- `bad dhcp-option` and it will not start --
+	# because a hostname is something it derives per client rather than a
+	# constant it hands everybody. The number is accepted, and a bare string is
+	# what option 12 is on the wire, so nothing is lost by spelling it that way.
+	dnsmasq --keep-in-foreground --user=root --port=0 \
+		--interface=srv --bind-interfaces --no-resolv --dhcp-authoritative \
+		--dhcp-range=10.44.0.20,10.44.0.20,255.255.255.0,600 \
+		--dhcp-option=option:netmask,255.255.255.0 \
+		--dhcp-option=option:router,10.44.0.1 \
+		--dhcp-option=option:dns-server,10.44.0.53 \
+		--dhcp-option=option:domain-name,lan.example \
+		--dhcp-option=option:domain-search,a.example,b.example \
+		--dhcp-option=12,leased-name \
+		--dhcp-leasefile="$work/udhcpd.leases" \
+		> "$work/udhcpd.log" 2>&1 &
+	server=$!
+fi
 
 # ------------------------------------------- the counter-proof: dhcpcd's hooks
 
