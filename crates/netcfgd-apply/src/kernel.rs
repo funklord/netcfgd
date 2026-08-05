@@ -2206,6 +2206,17 @@ pub fn backend_pid_file(
 			let marker = path.to_string_lossy().into_owned();
 			Some((path, marker))
 		}
+		// The same, and it was `None` until decision 0110 -- which made an
+		// access point the one backend netcfgd could never notice had died.
+		// Section 10 recorded that as deliberate, on the grounds that nothing
+		// could test it: `ap.sh`'s hostapd never starts on a dummy and a real
+		// radio wants real root. That reason stopped being true when a fake
+		// hostapd was given a `--pidfile`, which is what a `-P` produces.
+		BackendKind::AccessPoint => {
+			let path = netcfgd_hostapd::pid_path(run, iface);
+			let marker = path.to_string_lossy().into_owned();
+			Some((path, marker))
+		}
 		// The interface name is the weakest marker netcfgd uses and is what
 		// these two clients give it -- neither is invoked with a path netcfgd
 		// chose that ends up in its command line.

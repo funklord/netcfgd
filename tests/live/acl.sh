@@ -116,7 +116,32 @@ STATE
 start_fake() {
 	[ -n "${fake:-}" ] && kill "$fake" 2>/dev/null
 	rm -f "$work/run/hostapd/ap0"
-	python3 "$repo/tests/live/fake_hostapd.py" "$work/run/hostapd" ap0 "$@" \
+	# Remove the log rather than letting the redirect below truncate it, and
+	# this is not tidiness either. The redirect is opened by the *child*, after
+	# the fork, while the readiness loop below runs in the parent -- so the
+	# first `grep` can win that race and match the **previous** fake's `ready`.
+	# `start_fake` then returns before the new one has run a line of code.
+	#
+	# That race was harmless until the pid file existed: nothing downstream
+	# depended on the new process having done any startup work, and `warm_fake`
+	# absorbed the rest. With 0110 it stopped being harmless -- the pid file
+	# still named the fake that had just been killed, so netcfgd correctly
+	# observed a dead access point and every check about a live one failed.
+	# Three in eight, and it moved from check to check depending on which
+	# section lost the race.
+	#
+	# Removing it closes the window rather than narrowing it: the file does not
+	# exist until the child opens it, `grep` on a missing file simply fails, and
+	# the loop keeps waiting. A wait that cannot match stale output is the only
+	# kind worth having.
+	rm -f "$work/fake.log"
+	# `--pidfile` is what netcfgd's `-P` produces against a real hostapd, and
+	# every section needs it now rather than only the one that tests it: since
+	# 0110 the liveness pass reads that file on every observation, and a
+	# section whose fake wrote none would be asking netcfgd a question with no
+	# handle -- answered "cannot tell", which passes for the wrong reason.
+	python3 "$repo/tests/live/fake_hostapd.py" "$work/run/hostapd" ap0 \
+		--pidfile "$work/run/hostapd/ap0.pid" "$@" \
 		> "$work/fake.log" 2>&1 &
 	fake=$!
 	waited=0
@@ -308,25 +333,14 @@ check "and says so rather than reporting the list as applied" \
 # Four seconds is the threshold rather than two: this is wall clock on whatever
 # machine is running the suite, and a gate that goes red under load teaches
 # people to re-run the suite. It is still nowhere near ten.
-kill "$fake" 2>/dev/null
-fake=
-rm -f "$work/run/hostapd/ap0"
-python3 -c '
-import os, socket, sys, time
-d, iface = sys.argv[1], sys.argv[2]
-p = os.path.join(d, iface)
-s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-s.bind(p)
-print("ready", flush=True)
-time.sleep(600)
-' "$work/run/hostapd" ap0 > "$work/wedged.log" 2>&1 &
-wedged=$!
-waited=0
-while ! grep -q ready "$work/wedged.log" 2>/dev/null; do
-	waited=$((waited + 1))
-	[ "$waited" -gt 50 ] && break
-	sleep 0.1
-done
+# The fake's own `--wedged` rather than a second socket written inline here,
+# which is what this was. Two reasons, and the first is not tidiness: since
+# 0110 a wedged access point needs a pid file naming *itself*, and an inline
+# socket inherits whatever the last `start_fake` left -- which names a process
+# that has been killed, so every check below would be about a hostapd netcfgd
+# believes has died rather than one that will not answer. The second is that
+# the flag already existed and nothing used it.
+start_fake --wedged
 seed_run_state deny
 
 before=$(date +%s)
@@ -359,7 +373,6 @@ interface ap0 {
 CONF
 wedgedstop=0
 "$ncfg" apply > "$work/wedgedstop.txt" 2>&1 || wedgedstop=$?
-kill "$wedged" 2>/dev/null
 check "a stop that could not be delivered is not reported as a stop" \
 	"$([ "$wedgedstop" -ne 0 ] && echo failed || echo "reported success")" "failed"
 check "and says which of the two states it found" \
@@ -487,12 +500,53 @@ printf 'wpa_passphrase=%s\n' "$passphrase" >> "$work/run/hostapd/ap0.conf"
 check "an access point already running what the document says is left alone" \
 	"$(grep -cE 'backend\.(stop|start)' "$work/identity2.txt" || true)" "0"
 
+# ------------------------------------------------------- dead, not wedged
+
+# The state 0110 is about, and until it there was no way for netcfgd to be in
+# any other one: an access point's `running` came from the record and nothing
+# ever set it false. A hostapd that crashed an hour ago stayed `running: true`
+# for as long as netcfgd was up, so the planner had nothing to do and 0079's
+# restart -- which every other backend gets -- could not fire for it.
+#
+# `SIGKILL` rather than `SIGTERM` because the point is what a crash leaves
+# behind. The socket is a file and outlives the process that bound it (0080),
+# and so does the pid file, so every artefact netcfgd could look at says the
+# access point is there. The only thing that says otherwise is the pid.
+start_fake --deny aa:bb:cc:dd:ee:ff
+seed_run_state deny
+write_config '	access_control { deny = ["aa:bb:cc:dd:ee:ff"] }'
+warm_fake || true
+
+# The counter-proof, and it goes first: a check that a dead access point is
+# restarted proves nothing unless a live one is left alone. Without this the
+# section passes for a netcfgd that starts hostapd on every reconcile.
+"$ncfg" plan > "$work/alive.txt" 2>&1 || true
+check "an access point whose process is there is not started again" \
+	"$(grep -cE 'backend\.start' "$work/alive.txt" || true)" "0"
+
+kill -9 "$fake" 2>/dev/null || true
+wait "$fake" 2>/dev/null || true
+fake=
+check "a killed hostapd leaves the socket it bound behind" \
+	"$([ -S "$work/run/hostapd/ap0" ] && echo present || echo gone)" "present"
+check "and the pid file it was told to write" \
+	"$([ -f "$work/run/hostapd/ap0.pid" ] && echo present || echo gone)" "present"
+
+"$ncfg" status --json > "$work/dead.json" 2>&1 || true
+check "and is observed as not running, on the strength of the pid alone" \
+	"$(grep -c '"running": *false' "$work/dead.json" || true)" "1"
+"$ncfg" plan > "$work/dead.txt" 2>&1 || true
+check "so the plan starts one" \
+	"$(grep -cE 'backend\.start ap0' "$work/dead.txt" || true)" "1"
+
 # ------------------------------------------------- alive, and not answering
 
 # The state 0085 is about, and the reason it needed a flag on the fake rather
 # than a second one: the process is there, the pid file is right, the socket
 # takes a datagram, and no reply ever comes. A dead hostapd is a different
-# thing and netcfgd already noticed that one (0078).
+# thing and netcfgd notices that one separately, in the section above -- which
+# is the pair this one has to be read against, because until 0110 the two
+# states were indistinguishable to everything downstream.
 start_fake --wedged
 seed_run_state deny
 write_config '	access_control { deny = ["aa:bb:cc:dd:ee:ff"] }'
