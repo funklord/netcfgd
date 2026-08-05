@@ -549,9 +549,20 @@ impl KernelExecutor {
 	/// among them.
 	fn populate_supplicant(&self, iface: &str) -> Result<(), String> {
 		let dir = netcfgd_supplicant::ctrl_dir();
-		let client = netcfgd_supplicant::Client::connect(&dir, iface).map_err(|error| {
-			format!("started a supplicant on {iface} but cannot reach it: {error}")
-		})?;
+		// Impatiently, and the deadline matters *after* the connect rather than
+		// during it. `connect_within` sets the timeout on the connection it
+		// returns as well as on its opening `PING`, which is the half that
+		// counts here: a supplicant can answer the `PING` and wedge before the
+		// first `SET`, and this runs inside `start_backend` on the apply path,
+		// so the reconcile loop is what waits. Measured on the default: ten
+		// seconds flat, per command, against a fake that answered `PING` and
+		// then nothing. Against a real one every command below answers in
+		// 0.07-0.13ms. Decision 0114.
+		let client =
+			netcfgd_supplicant::Client::connect_within(&dir, iface, netcfgd_supplicant::IMPATIENT)
+				.map_err(|error| {
+					format!("started a supplicant on {iface} but cannot reach it: {error}")
+				})?;
 
 		// Explicit, not assumed. Decision 0015: a silent default is not a
 		// control, and this is the property that keeps the document the only
@@ -3214,7 +3225,7 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 			let outcome = match netcfgd_supplicant::Client::connect_within(
 				&dir,
 				iface,
-				netcfgd_supplicant::STOP_TIMEOUT,
+				netcfgd_supplicant::IMPATIENT,
 			) {
 				Ok(client) => client
 					.command("TERMINATE")
