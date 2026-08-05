@@ -372,7 +372,9 @@ interface ap0 {
 }
 CONF
 wedgedstop=0
+stopstart=$(date +%s)
 "$ncfg" apply > "$work/wedgedstop.txt" 2>&1 || wedgedstop=$?
+stopelapsed=$(( $(date +%s) - stopstart ))
 check "a stop that could not be delivered is not reported as a stop" \
 	"$([ "$wedgedstop" -ne 0 ] && echo failed || echo "reported success")" "failed"
 check "and says which of the two states it found" \
@@ -381,6 +383,18 @@ check "and says which of the two states it found" \
 # forgotten access point is not, because nothing is left to plan against.
 check "and the access point is still recorded, so a re-run can try again" \
 	"$(grep -c '"kind": "access_point"' "$work/run/owned.json" || true)" "1"
+# And it failed *quickly*, which is a separate property and the one that costs
+# the machine something. `stop` runs inside the reconcile loop, so waiting on a
+# daemon that will not answer is the whole machine waiting: measured on the
+# laptop feature that has no operator in it, pulling the cable with a wedged
+# access point recorded took **12.2 seconds** to switch to wifi against 106ms
+# with nothing wedged. The read got a deadline in 0085 for exactly this and the
+# stop kept the client's ten-second default.
+#
+# Four seconds for the same reason the check above uses four: this is wall clock
+# on whatever machine is running the suite, and it is still nowhere near ten.
+check "and failed quickly, rather than holding the reconcile loop" \
+	"$([ "$stopelapsed" -lt 4 ] && echo quick || echo "slow: ${stopelapsed}s")" "quick"
 
 # ------------------------------------ a stopped access point keeps no secret
 

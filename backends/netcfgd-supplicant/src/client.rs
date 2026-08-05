@@ -31,6 +31,32 @@ pub const DEFAULT_CTRL_DIR: &str = "/run/wpa_supplicant";
 /// unresponsive -- a false one of those is worse than a slow command.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a *stop* waits, which is not the same question.
+///
+/// The default above is sized for `SCAN_RESULTS` on a busy band. A `TERMINATE`
+/// is a local datagram to a daemon that either answers at once or is not going
+/// to, and the difference is not academic: `stop` runs inside the reconcile
+/// loop, so the wait is a wait the whole machine takes.
+///
+/// Measured rather than reasoned about, on the laptop feature that has no
+/// operator in it. Pull the cable with a wedged access point recorded, and the
+/// switch to wifi took **12.2 seconds** on the ten-second default against
+/// **106ms** with nothing wedged -- the reconcile loop blocked in the `PING`
+/// inside `connect`, with a carrier event waiting behind it. That is the same
+/// stall decision 0085 measured on the ACL read at 10.2 seconds and cured with
+/// a deadline; the read got one and the stop kept the default.
+///
+/// One second, matching that read deliberately. It is enormous for a unix
+/// datagram round trip and the symmetry is worth more than a tighter number.
+///
+/// **What this costs**: a healthy hostapd that is merely slow now fails its
+/// stop rather than being waited for -- `acl.sh` has seen a healthy fake miss a
+/// one-second deadline on a saturated machine. That failure is loud, fail-stop
+/// and re-runnable, and it leaves the backend recorded (0109). Stalling every
+/// other interface on the machine for ten seconds is neither loud nor
+/// recoverable, and it happens on a working machine rather than a busy one.
+pub const STOP_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// A connection to one interface's control socket.
 #[derive(Debug)]
 pub struct Client {
