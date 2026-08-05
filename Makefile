@@ -264,7 +264,9 @@ install-procd:
 # built from a later commit must upgrade one built from an earlier, or an
 # evaluation cannot install twice.
 PKG_NAME    ?= netcfgd
-PKG_VERSION ?= $(shell sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+# The one place the version is stated; Cargo.toml and debian/changelog
+# are checked against it by `make version-check`.
+VERSION     ?= $(shell cat VERSION)
 GIT_COUNT   := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
 GIT_SHA     := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # Two spellings of one version, because the two formats disagree about what a
@@ -273,8 +275,9 @@ GIT_SHA     := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # a version is digits and dots with a `_git` suffix, so the hash cannot go in
 # it. Both increase with the commit count, which is what an evaluator needs --
 # a package built from a later commit must upgrade one built from an earlier.
-DEB_VERSION ?= $(PKG_VERSION)~git$(GIT_COUNT).$(GIT_SHA)
-APK_VERSION ?= $(PKG_VERSION)_git$(GIT_COUNT)
+# Alpine keeps the git suffix: its packages are built from a snapshot
+# tarball rather than a release, and the count distinguishes them.
+APK_VERSION ?= $(VERSION)_git$(GIT_COUNT)
 # Not committed anywhere: a maintainer field belongs to whoever built the
 # package, and a name baked into a template is wrong for everybody else.
 MAINTAINER  ?= $(shell git config user.name 2>/dev/null || echo netcfgd) <$(shell git config user.email 2>/dev/null || echo netcfgd@localhost)>
@@ -283,43 +286,34 @@ DIST        ?= dist
 # `Depends` is derived, never guessed: the binary links ncurses behind a
 # default-on feature, and a hand-written list would be wrong the first time
 # that changed. dpkg-shlibdeps reads the ELF and gives versioned dependencies.
-deb:
-	@command -v dpkg-deb >/dev/null 2>&1 || { echo "deb: dpkg-deb is not installed"; exit 1; }
-	@arch=$$(dpkg-architecture -qDEB_HOST_ARCH 2>/dev/null || dpkg --print-architecture); \
-	root=$$(mktemp -d); \
-	trap 'rm -rf "$$root"' EXIT INT TERM; \
-	$(MAKE) --no-print-directory install DESTDIR="$$root" >/dev/null; \
-	$(MAKE) --no-print-directory install-systemd DESTDIR="$$root" >/dev/null; \
-	install -d "$$root/usr/share/doc/$(PKG_NAME)"; \
-	install -m 0644 packaging/debian/copyright "$$root/usr/share/doc/$(PKG_NAME)/copyright"; \
-	install -m 0644 packaging/systemd/netcfgd-exclusive.conf \
-		"$$root/usr/share/doc/$(PKG_NAME)/netcfgd-exclusive.conf"; \
-	install -d "$$root/DEBIAN"; \
-	for script in postinst prerm postrm; do \
-		install -m 0755 "packaging/debian/$$script" "$$root/DEBIAN/$$script"; \
-	done; \
-	shlib=$$(mktemp -d); \
-	mkdir -p "$$shlib/debian"; \
-	printf 'Source: $(PKG_NAME)\n\nPackage: $(PKG_NAME)\nArchitecture: any\n' \
-		> "$$shlib/debian/control"; \
-	depends=$$(cd "$$shlib" && dpkg-shlibdeps -O --ignore-missing-info \
-		"$$root/usr/sbin/netcfgd" 2>/dev/null | sed 's/^shlibs:Depends=//'); \
-	rm -rf "$$shlib"; \
-	if [ -z "$$depends" ]; then echo "deb: could not derive Depends"; exit 1; fi; \
-	sed -e "s|@VERSION@|$(DEB_VERSION)|" -e "s|@ARCH@|$$arch|" \
-	    -e "s|@DEPENDS@|$$depends|" -e "s|@MAINTAINER@|$(MAINTAINER)|" \
-		packaging/debian/control.in > "$$root/DEBIAN/control"; \
-	mkdir -p $(DIST); \
-	out="$(DIST)/$(PKG_NAME)_$(DEB_VERSION)_$$arch.deb"; \
-	fakeroot dpkg-deb --build "$$root" "$$out" >/dev/null; \
-	printf 'deb: %s\n' "$$out"; \
-	dpkg-deb --field "$$out" Package Version Architecture Depends \
-		| sed 's/^/deb:   /'
+# Native Debian packaging. Only the systemd glue goes in the deb; Alpine and
+# OpenWrt have their own packaging under packaging/ and are untouched by this.
+deb: version-check
+	@test -n "$(DIST)" || { echo "deb: DIST is empty, refusing" >&2; exit 1; }
+	dpkg-buildpackage -b -us -uc
+	@mkdir -p $(DIST)
+	@for f in ../netcfgd_$(VERSION)_*.deb ../netcfgd-dbgsym_$(VERSION)_*.deb \
+	          ../netcfgd_$(VERSION)_*.buildinfo ../netcfgd_$(VERSION)_*.changes; do \
+		[ -e "$$f" ] && mv -f "$$f" $(DIST)/ || true; \
+	done
+	@ls -1 $(DIST)/*.deb
 
-# Alpine. `abuild` is not packaged for Debian, so the container recipe is the
-# path that works from a desk here -- and it is the same one `make live`'s
-# root-only scripts document. Everything else is the same tarball and the same
-# APKBUILD.
+# VERSION is the source; debian/changelog and Cargo.toml are held to it.
+version-check:
+	@file=$$(cat VERSION); \
+	changelog=$$(dpkg-parsechangelog -SVersion 2>/dev/null); \
+	cargo=$$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1); \
+	rc=0; \
+	if [ -n "$$changelog" ] && [ "$$file" != "$$changelog" ]; then \
+		echo "version-check: VERSION says $$file, debian/changelog says $$changelog"; rc=1; \
+	fi; \
+	case "$$cargo" in \
+	"$$file"|"$$file".*) ;; \
+	*) echo "version-check: VERSION says $$file, Cargo.toml says $$cargo"; rc=1 ;; \
+	esac; \
+	[ $$rc -eq 0 ] && echo "version-check: $$file, in step"; \
+	exit $$rc
+
 apk:
 	@command -v abuild >/dev/null 2>&1 || { \
 		echo "apk: abuild is not installed. It is Alpine's own tool and is not"; \
