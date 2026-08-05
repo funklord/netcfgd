@@ -83,7 +83,20 @@ work=$(mktemp -d /tmp/ncfg-openvpn.XXXXXX)
 fake="$work/bin/openvpn"
 cleanup() {
 	pkill -f "$fake" 2>/dev/null || true
-	rm -rf "$work"
+	# Retry, for the reason tunnel.sh does: `pkill` returns as soon as the
+	# signal is sent and the daemon writes under $work on the way out, so a
+	# single `rm -rf` races it. A trap that exits non-zero fails the whole run
+	# after every check has passed, which is how this surfaced next door.
+	waited=0
+	while [ -d "$work" ]; do
+		rm -rf "$work" 2>/dev/null && break
+		waited=$((waited + 1))
+		[ "$waited" -gt 50 ] && break
+		sleep 0.1
+	done
+	if [ -d "$work" ]; then
+		echo "note: $work outlived five seconds of trying to remove it" >&2
+	fi
 }
 trap cleanup EXIT INT TERM
 mkdir -p "$work/etc" "$work/run" "$work/bin"

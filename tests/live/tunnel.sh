@@ -69,7 +69,22 @@ cleanup() {
 		kill "$peer" 2>/dev/null || true
 		wait "$peer" 2>/dev/null || true
 	fi
-	rm -rf "$work"
+	# Retry the removal rather than doing it once. `pkill` returns as soon as
+	# the signal is sent, and openvpn writes its pid file and management socket
+	# under $work/run on the way out -- so a single `rm -rf` races the daemon it
+	# has just asked to stop. busybox's rm then says "Directory not empty",
+	# which is a non-zero exit *from a trap*, and therefore a failed `make live`
+	# after every check in the script had passed.
+	waited=0
+	while [ -d "$work" ]; do
+		rm -rf "$work" 2>/dev/null && break
+		waited=$((waited + 1))
+		[ "$waited" -gt 50 ] && break
+		sleep 0.1
+	done
+	if [ -d "$work" ]; then
+		echo "note: $work outlived five seconds of trying to remove it" >&2
+	fi
 }
 trap cleanup EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
