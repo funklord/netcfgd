@@ -125,16 +125,44 @@ start_fake() {
 		[ "$waited" -gt 50 ] && skip "the fake hostapd never started"
 		sleep 0.1
 	done
-	# A round trip nobody reads, before anything is measured. The socket
-	# existing is not the same as the process answering on it, and netcfgd
-	# reads a running access point's ACL under a one-second deadline that is
-	# there on purpose -- a wedged hostapd must not stall the reconcile loop.
-	# On a loaded machine a Python fake's *first* reply can cost more than
-	# that, and netcfgd then correctly treats the list as unreadable and
-	# converges nothing, which reads as two checks failing for no reason.
-	# Seen once, during a `make live` sharing the machine with a container
-	# build; the deadline is not the thing to change.
-	"$ncfg" plan > /dev/null 2>&1 || true
+}
+
+# Wait until netcfgd has actually had an answer out of the fake.
+#
+# The socket existing is not the same as the process answering on it, and
+# netcfgd reads a running access point's ACL under a one-second deadline that
+# is there on purpose -- a wedged hostapd must not stall the reconcile loop. On
+# a loaded machine a Python fake's *first* reply can cost more than that, and
+# netcfgd then correctly treats the list as unreadable and converges nothing,
+# which reads as checks failing for no reason. The deadline is not the thing to
+# change.
+#
+# This replaces a single round trip nobody read, at the end of `start_fake`.
+# Two things were wrong with it. It was **blind** -- a warm-up that itself
+# timed out looked exactly like one that worked -- and it ran *before*
+# `seed_run_state`, so on the first call netcfgd did not yet believe an access
+# point was running, never read an ACL, and never touched the fake at all. It
+# missed the one moment it existed for: the interpreter's first reply.
+#
+# 0085's warning is the signal, and it is a positive one: netcfgd says a
+# running backend "did not answer its control socket" exactly when this read
+# fails. Waiting for that to stop being true is waiting for a real answer to
+# have arrived within the real deadline.
+warm_fake() {
+	waited=0
+	while "$ncfg" plan 2>&1 | grep -q 'did not answer its control socket'; do
+		waited=$((waited + 1))
+		if [ "$waited" -gt 50 ]; then
+			echo "FAIL the fake hostapd answered netcfgd inside its deadline"
+			echo "       five seconds of plans and it is still reported as not"
+			echo "       answering, so every check below would converge nothing"
+			echo "       and say so for a reason that is not netcfgd's"
+			failures=$((failures + 1))
+			return 1
+		fi
+		sleep 0.1
+	done
+	return 0
 }
 
 # --------------------------------------------------- an edited list converges
@@ -143,6 +171,7 @@ start_fake() {
 start_fake --deny 00:11:22:33:44:55
 seed_run_state deny
 write_config '	access_control { deny = ["aa:bb:cc:dd:ee:ff"] }'
+warm_fake || true
 
 "$ncfg" plan > "$work/plan.txt" 2>&1 || true
 check "the plan names the station being denied" \
@@ -197,6 +226,7 @@ check "and the deny list itself is left alone" \
 start_fake --deny 00:11:22:33:44:55
 seed_run_state deny
 write_config '	access_control { allow = ["aa:bb:cc:dd:ee:ff"] }'
+warm_fake || true
 
 "$ncfg" plan > "$work/flip.txt" 2>&1 || true
 check "a changed policy restarts the access point" \
@@ -221,6 +251,7 @@ check "and says what the restart costs" \
 start_fake --accept 00:11:22:33:44:55
 printf '00:11:22:33:44:55\n' > "$work/run/hostapd/ap0.acl"
 write_config '	access_control { deny = ["aa:bb:cc:dd:ee:ff"] }'
+warm_fake || true
 
 "$ncfg" plan > "$work/norecord.txt" 2>&1 || true
 check "an unrecorded policy converges nothing" \
@@ -321,6 +352,7 @@ check "and left no passphrase anywhere under /run" \
 start_fake --deny 00:11:22:33:44:55
 seed_run_state deny
 write_config '	access_control { deny = ["00:11:22:33:44:55"] }'
+warm_fake || true
 cat > "$work/run/hostapd/ap0.conf" <<'STARTED'
 # hostapd configuration for the `guest` access point.
 interface=ap0
