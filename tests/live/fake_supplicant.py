@@ -103,6 +103,30 @@ def answer(command):
 	return "FAIL\n"
 
 
+def reply(server, sender, payload):
+	"""Answer a sender that may already have gone away.
+
+	The senders in `roam.sh` bind a socket, send one datagram and exit without
+	waiting for anything back -- so by the time this replies, the process is
+	often gone and the reply gets ECONNREFUSED. Unguarded, that raised OSError
+	out of the receive loop, where the outer handler caught it and let the fake
+	shut down *cleanly*: no traceback, no message, just a supplicant that had
+	stopped answering. Every send after it then failed, and the report said only
+	that a socket was missing.
+
+	Caught once in a full `make live` in a container, after roam.sh was changed
+	to say which precondition had failed rather than raising FileNotFoundError
+	from a heredoc. A reply nobody is waiting for is not a reason to stop
+	serving.
+	"""
+	if not sender:
+		return
+	try:
+		server.sendto(payload, sender)
+	except OSError:
+		pass
+
+
 def _unlink(path):
 	try:
 		os.unlink(path)
@@ -171,8 +195,7 @@ def main():
 						server.sendto(event.encode(), listener)
 					except OSError:
 						pass
-				if sender:
-					server.sendto(b"OK\n", sender)
+				reply(server, sender, b"OK\n")
 				print(command, flush=True)
 				continue
 			# Logged so a test can assert which commands a D-Bus call produced.
@@ -181,8 +204,7 @@ def main():
 			# this project refuses to get into.
 			first = command.split(" psk ")[0].split(" sae_password ")[0]
 			print(first, flush=True)
-			if sender:
-				server.sendto(answer(command).encode(), sender)
+			reply(server, sender, answer(command).encode())
 	except (KeyboardInterrupt, OSError):
 		pass
 	finally:
