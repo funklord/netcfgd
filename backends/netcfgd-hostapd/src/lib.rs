@@ -386,7 +386,11 @@ pub fn stop(run_dir: &Path, device: &str) -> Result<(), String> {
 	// access point was still on the air, and the run state came back with no
 	// backend in it at all, so nothing would ever try again.
 	let dir = ctrl_dir(run_dir);
-	let outcome = match netcfgd_supplicant::Client::connect(&dir, device) {
+	let outcome = match netcfgd_supplicant::Client::connect_within(
+		&dir,
+		device,
+		netcfgd_supplicant::STOP_TIMEOUT,
+	) {
 		Ok(client) => client
 			.command("TERMINATE")
 			.map_err(|error| format!("could not stop the access point on {device}: {error}")),
