@@ -327,12 +327,25 @@ pub fn stop(run_dir: &Path, device: &str) -> Result<(), String> {
 	// the moment the parent exits. openvpn's `--daemon` is the opposite and
 	// needed a pid file for it (0074); do not make these symmetrical without
 	// measuring the daemon in question.
+	//
+	// But *only* nothing listening. This swallowed every error at all until
+	// decision 0109, and the one it was most wrong about is a hostapd that has
+	// bound its socket and gone silent: `connect` opens with a `PING`, so that
+	// daemon fails here rather than at `TERMINATE`, and the stop reported
+	// success without a byte having been sent. Measured, not reasoned about --
+	// a stopped fake answers nothing, `ncfg apply` said `ok backend.stop`, the
+	// access point was still on the air, and the run state came back with no
+	// backend in it at all, so nothing would ever try again.
 	let dir = ctrl_dir(run_dir);
 	let outcome = match netcfgd_supplicant::Client::connect(&dir, device) {
 		Ok(client) => client
 			.command("TERMINATE")
 			.map_err(|error| format!("could not stop the access point on {device}: {error}")),
-		Err(_) => Ok(()),
+		Err(error) if netcfgd_supplicant::nothing_is_listening(&error) => Ok(()),
+		Err(error) => Err(format!(
+			"could not stop the access point on {device}: it is running and did \
+			 not answer its control socket: {error}"
+		)),
 	};
 
 	// The generated configuration holds the passphrase in the clear, because
