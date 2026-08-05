@@ -91,6 +91,24 @@ asserts the pid path as a whole string rather than the presence of `-P`, because
 a `-P` pointing somewhere netcfgd does not read would satisfy a looser test and
 tell netcfgd nothing. Dropping the flag prints both lists.
 
+## What is not verified
+
+**No running hostapd has been started with `-P`.** The flag is right -- it is in
+hostapd 2.10's own usage, read out of the binary rather than assumed -- and the
+argument list has a unit test. What has not happened is a real hostapd coming up
+with that flag and netcfgd then reading the file it wrote.
+
+Nothing in the suite can do it today. `ap.sh` drives a real hostapd and proves
+netcfgd writes a configuration it accepts, but a dummy has no radio and hostapd
+exits before it listens, so it never reaches the pid file. `hwsim.sh` is the one
+script that would, and it needs radios `mac80211_hwsim` creates in the host's
+network namespace -- so it does not run in the container the rest of the suite
+was proven in, and running it means giving that container the host's network.
+
+Stated here rather than left implied, because the gap is narrow and specific:
+the *liveness* half is covered live by `acl.sh`, and it is the *start* half that
+rests on a usage string.
+
 ## What it cost on the way
 
 **A readiness wait that could match the previous run's output.** `start_fake`
