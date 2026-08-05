@@ -332,13 +332,42 @@ seed_run_state deny
 before=$(date +%s)
 "$ncfg" plan > "$work/wedgedplan.txt" 2>&1 || true
 elapsed=$(( $(date +%s) - before ))
-kill "$wedged" 2>/dev/null
 check "a hostapd that never answers does not stall the reconcile loop" \
 	"$([ "$elapsed" -lt 4 ] && echo quick || echo "slow: ${elapsed}s")" "quick"
 # And what it does instead is nothing, rather than converging against a list it
 # could not read.
 check "and nothing is converged against a list that could not be read" \
 	"$(grep -cE 'access_control\.(add|del)' "$work/wedgedplan.txt" || true)" "0"
+
+# The same wedged hostapd, asked to stop. Decision 0109.
+#
+# `stop` connects before it sends `TERMINATE`, and the connect opens with a
+# `PING` -- so a daemon that has bound its socket and gone silent fails at the
+# connect, and until 0109 every connect failure was read as "nothing is
+# running". The stop then reported success without a byte having been sent: the
+# access point stayed on the air, and the run state came back with no backend in
+# it, so no later run would ever try again.
+#
+# Two states, and the whole check is that netcfgd tells them apart. Nothing is
+# killed and restarted here -- reusing the wedged process is the point, because
+# it is the only one that produces the state.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+interface ap0 {
+	kind   = "dummy"
+	config = "192.168.9.1/24"
+}
+CONF
+wedgedstop=0
+"$ncfg" apply > "$work/wedgedstop.txt" 2>&1 || wedgedstop=$?
+kill "$wedged" 2>/dev/null
+check "a stop that could not be delivered is not reported as a stop" \
+	"$([ "$wedgedstop" -ne 0 ] && echo failed || echo "reported success")" "failed"
+check "and says which of the two states it found" \
+	"$(grep -c 'did not answer its control socket' "$work/wedgedstop.txt" || true)" "1"
+# The half that matters more. A failure the operator reads is recoverable; a
+# forgotten access point is not, because nothing is left to plan against.
+check "and the access point is still recorded, so a re-run can try again" \
+	"$(grep -c '"kind": "access_point"' "$work/run/owned.json" || true)" "1"
 
 # ------------------------------------ a stopped access point keeps no secret
 
@@ -358,6 +387,11 @@ printf '# a previous start left this\nwpa_passphrase=correct-horse-battery\n' \
 	> "$work/run/hostapd/ap0.conf"
 chmod 600 "$work/run/hostapd/ap0.conf"
 write_config ""
+# The fake here is three lines old and the stop below is the first thing that
+# talks to it. Since 0109 an unanswered stop is a failure rather than a silent
+# success, so a cold interpreter that misses the deadline fails this section
+# loudly -- which is the right behaviour and still not what is being tested.
+warm_fake || true
 # The document no longer names an access point on ap0, so the plan stops it.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 interface ap0 {
