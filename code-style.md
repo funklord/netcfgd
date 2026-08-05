@@ -229,29 +229,29 @@ without one does not merit review time.
 
 ## 8. Commit messages
 
-Precise and short. What changed and why, in as few words as do the job.
-
-The subject carries the crate or adapter it touches, first and followed by a
-colon, then a word from the shared set saying what the change does:
+Kernel format. See `~/.claude/guidelines/build-and-commit.md` for the full
+statement; what is specific here is the subsystem name.
 
     netcfgd-plan: fix the ordering edge for a renamed link
-    nm: rework the containment check as one pass
+    adapters/nm: rework the containment check as one pass
 
-`git log --grep '^netcfgd-plan:'` then answers what has happened to the
-planner without a path list, and keeps answering after files move.
+The crate or adapter comes first, followed by a colon, with a slash for
+nesting. `git log --grep '^netcfgd-plan:'` then answers what has happened to
+the planner without naming paths, and keeps answering after files move.
 
-- **The message ends at its real content.** No trailers, no sign-offs, no
-  tooling or assistant attribution.
-- **No docs-only commits.** Documentation rides along with the code commit
-  it describes; folding an accumulated session's findings back into
-  `project.md` is the standing exception.
+Subject at 75 columns, imperative mood, no trailing period. The body
+explains why rather than what, wrapped at 75. Length is not a constraint:
+this document can be deleted, and the log cannot, so a message that carries
+the reasoning behind a decision is doing the job the design docs would
+otherwise have to.
+
+Trailers at the end -- `Fixes:`, `Reported-by:`, `Reviewed-by:`,
+`Tested-by:`, `Signed-off-by:`. The one prohibition is generator
+attribution: a tool is not an author and does not sign anything.
+
 - **Nothing under `/run` or `target/` is ever committed,** and neither is
   anything containing real secret material -- not in fixtures, not in test
   data, not "temporarily".
-
-There is deliberately no subject format, column limit or body shape here.
-Those were stated once, were never asked for, and produced commit bodies
-averaging tens of lines across every sibling project.
 ## See also
 
 - **`project.md` §9** — working in this repo: build and CI conventions, and
