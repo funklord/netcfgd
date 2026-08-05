@@ -954,7 +954,12 @@ else
 	# project's own style rule says to write instead of an em dash. Every
 	# interface here was malformed, and only a client that introspects (which
 	# dbus-python does by default, and GDBus does not) ever noticed.
-	if command -v python3 >/dev/null 2>&1; then
+	# `import dbus` as well as python3, the way the agent section below already
+	# does. dbus-python is a separate package, and without it this heredoc
+	# raised ModuleNotFoundError and took the whole run down -- stopping `make
+	# live` at this line and leaving every script after it unrun, on any
+	# machine with python3 and without python3-dbus.
+	if command -v python3 >/dev/null 2>&1 && python3 -c 'import dbus' 2>/dev/null; then
 		malformed=$(DBUS_SYSTEM_BUS_ADDRESS="$address" python3 - <<'PYEOF'
 import sys
 import xml.parsers.expat
@@ -986,6 +991,8 @@ for line in bad:
 PYEOF
 )
 		check "every object's introspection is well-formed xml" "$malformed" "0"
+	else
+		echo "note: no python3-dbus, so the introspection check did not run"
 	fi
 
 	# A network whose credential does not exist, and nobody to ask. netcfgd's
