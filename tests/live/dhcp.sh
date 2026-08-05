@@ -132,20 +132,43 @@ export NCFG_RUN_DIR="$work/run"
 # netcfgd looks for its client on PATH and prefers dhcpcd, so on a machine that
 # has dhcpcd installed -- which is most of them, and which `dhcpcd.sh` is the
 # other half of -- this script would silently drive the client it is not written
-# for, and would say so several checks later as a missing pid file. So the daemon
-# is handed the machine's own PATH with every directory holding a dhcpcd taken
-# out. That is narrower than it sounds: dhcpcd installs into sbin, and the one
-# tool the generated script needs is `ip`, which iproute2 moved to /usr/bin --
-# handing the daemon a PATH with busybox alone on it broke the script instead,
-# which is the first thing this was tried as.
+# for, and would say so several checks later as a missing pid file.
+#
+# **Build a PATH rather than subtracting from one.** This used to hand the
+# daemon the machine's own PATH with every directory holding a dhcpcd removed,
+# which worked on Debian for a reason that is Debian's: dhcpcd installs into
+# sbin and iproute2 puts `ip` in /usr/bin, so dropping the sbin directories left
+# `ip` reachable. On Alpine `ip` is /sbin/ip -- the same directory as dhcpcd --
+# so the filter took away the one tool the generated script needs, the client
+# obtained a lease and could configure nothing, and the failure read as "the
+# lease never reached the interface" four checks later.
+#
+# So: subtract as before, then **put back what the subtraction took**. A
+# directory of symlinks goes on the front carrying the tools that live in the
+# removed directories, so the client and its script keep everything they had and
+# only dhcpcd is out of reach. Replacing the PATH outright was tried first and
+# is worse: the generated script needs more than the three tools anybody thinks
+# to list, and naming them is a guess that fails somewhere else.
+mkdir -p "$work/bin"
 client_path=
 saved_ifs=$IFS
 IFS=:
 for dir in $PATH; do
-	if [ -x "$dir/dhcpcd" ]; then continue; fi
+	if [ -x "$dir/dhcpcd" ]; then
+		# Everything else in that directory is still wanted -- on Alpine it
+		# holds `ip`, which is what the client's script runs.
+		for tool in "$dir"/*; do
+			name=${tool##*/}
+			[ "$name" = dhcpcd ] && continue
+			[ -e "$work/bin/$name" ] && continue
+			[ -x "$tool" ] && ln -sf "$tool" "$work/bin/$name"
+		done
+		continue
+	fi
 	client_path="${client_path:+$client_path:}$dir"
 done
 IFS=$saved_ifs
+client_path="$work/bin${client_path:+:$client_path}"
 ncfg() { PATH="$client_path" "$repo/target/debug/ncfg" "$@"; }
 
 failures=0
