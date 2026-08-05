@@ -70,13 +70,29 @@ check() {
 chosen() { ip route show default | head -1 | sed -n 's/.* dev \([^ ]*\).*/\1/p'; }
 
 # Wait rather than sleep a fixed time: the daemon reacts to a netlink event and
-# a fixed sleep is either flaky or slow. Fifty tries at 100ms is five seconds,
-# which is far longer than a reconcile and short enough to fail usefully.
+# a fixed sleep is either flaky or slow.
+#
+# This is the test's patience, not a deadline the daemon is being held to --
+# every check here is about *which* uplink wins, never how fast. It polls, so a
+# wider bound costs nothing when the answer is already right, which it is within
+# 100ms in every run measured. Fifty tries proved too tight exactly once, in a
+# full `make live` on a cold Alpine container: the daemon had not applied at all
+# by five seconds, `chosen` was empty, and the check reported `expected eth-lan,
+# actual` with nothing to say a wait had run out.
+#
+# Widening is not a demonstrated fix -- the failure has not reproduced in 24
+# further runs under deliberate load, with either bound -- but the timeout being
+# silent is a defect on its own terms, and that is what is fixed here.
 settle_to() {
 	waited=0
 	while [ "$(chosen)" != "$1" ]; do
 		waited=$((waited + 1))
-		[ "$waited" -gt 50 ] && return 1
+		if [ "$waited" -gt 150 ]; then
+			echo "       waited 15s for the default route to be on $1; it is:"
+			ip route show default 2>&1 | sed 's/^/         /' || true
+			echo "         (empty above means netcfgd had not applied at all)"
+			return 1
+		fi
 		sleep 0.1
 	done
 	return 0
