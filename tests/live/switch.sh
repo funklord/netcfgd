@@ -98,6 +98,27 @@ settle_to() {
 	return 0
 }
 
+# Wait for an uplink to win, and assert it, in one operation.
+#
+# `settle_to X` followed by `check ... "$(chosen)" X` samples twice, and the
+# daemon is running: a reconcile in flight can withdraw and reinstall the
+# default routes between the two reads. That happened -- `expected: eth-lan,
+# actual:` with nothing, and no timeout message above it, which is what says
+# the wait had already *succeeded* and the second read caught the gap.
+#
+# So the assertion is the wait. It reports the last value it saw rather than a
+# fresh one, which cannot disagree with what it waited for.
+settled() {
+	if settle_to "$2"; then
+		echo "ok   $1"
+	else
+		echo "FAIL $1"
+		echo "       expected: $2"
+		echo "       actual:   $(chosen)"
+		failures=$((failures + 1))
+	fi
+}
+
 "$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
 daemon=$!
 
@@ -141,13 +162,11 @@ done
 ip link set eth-peer up
 ip link set wl-peer up
 
-settle_to eth-lan || true
-check "the wired uplink wins while it has carrier" "$(chosen)" "eth-lan"
+settled "the wired uplink wins while it has carrier" eth-lan
 
 # The whole feature: pull the cable and run nothing.
 ip link set eth-peer down
-settle_to wl-fake || true
-check "unplugging switches to wifi on its own" "$(chosen)" "wl-fake"
+settled "unplugging switches to wifi on its own" wl-fake
 
 # A route left down a dead cable would still be preferred on metric, and the
 # kernel would black-hole traffic rather than use the link that works. So the
@@ -161,8 +180,7 @@ else
 fi
 
 ip link set eth-peer up
-settle_to eth-lan || true
-check "plugging back in switches back" "$(chosen)" "eth-lan"
+settled "plugging back in switches back" eth-lan
 
 # The daemon does this because a preferred interface is always reconciled, not
 # because the drift policy says so. Nothing in the config above mentions drift,
