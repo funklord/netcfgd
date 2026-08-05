@@ -13,3 +13,25 @@ indent_width = 4
 floor = 120
 
 ascii_only = true
+
+# The gate's own defaults, plus this tree's one addition. Listing a value
+# here REPLACES the default list rather than adding to it, so the defaults
+# are repeated deliberately -- dropping `target` would put a cargo build
+# tree in front of every check.
+#
+# `schema` is `docs/schema`, generated output whose bytes are pinned:
+# netcfgd writes those four witnesses and `make check` compares them byte
+# for byte against what the model produces. code-style.md exempts generated
+# sources for exactly this reason, and adopting the gate here without the
+# exemption added a final newline to `document.json` -- which no generator
+# writes -- leaving `make check` red on master with "the document schema has
+# changed" and a difference at the end of a file nobody had edited.
+#
+# A bare component name rather than `docs/schema`, because the gate matches
+# entries against each path component and a multi-segment prefix therefore
+# never matches anything. `schema` is the only directory of that name in this
+# tree, so the two are equivalent here -- but the gate accepting a path that
+# silently matches nothing is worth raising against the shared tool rather
+# than working around in seven copies of it.
+exclude = ["attic", "third_party", "vendor", "build", "target",
+           "dist", ".pytest_cache", ".claude", "schema"]
