@@ -1870,6 +1870,48 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 /// handoff -- which turns a fresh lease into observed state -- lands with
 /// `netcfgd-dhcp` in M2; until then the client configures the interface and
 /// netcfgd sees the result as somebody else's, which is the safe direction.
+/// What `udhcpc` is started with.
+///
+/// A function rather than a literal in the caller, so the argument list has
+/// somewhere to be asserted -- `dhcpcd_start_args` beside it is the same shape
+/// for the same reason. The one below that nothing could have caught otherwise
+/// is `-O search`.
+fn udhcpc_start_args(
+	iface: &str,
+	script: &std::path::Path,
+	pidfile: &std::path::Path,
+) -> Vec<String> {
+	vec![
+		"-b".to_owned(),
+		"-i".to_owned(),
+		iface.to_owned(),
+		"-s".to_owned(),
+		script.display().to_string(),
+		"-p".to_owned(),
+		pidfile.display().to_string(),
+		// Release the lease on the way out, which is also what makes the script
+		// run `deconfig` on a `SIGTERM`. Without it a stopped client leaves its
+		// address on the interface -- measured -- where `dhcpcd -k` takes it
+		// away, and two clients that disagree about what stopping means is two
+		// behaviours for one `backend.stop`.
+		"-R".to_owned(),
+		// Ask for the search list. **udhcpc does not request option 119 by
+		// default** -- its list is 1, 3, 6, 12, 15, 28, 42 -- so a server that
+		// honours the request list never sends one. 0067's search suffixes
+		// reached netcfgd only because the live test's server was `busybox
+		// udhcpd`, which pushes every configured option whether it was asked
+		// for or not; against dnsmasq, ISC dhcpd or a domestic router the
+		// client asked for nothing and got nothing. Found by porting that test
+		// to a second server, not by reading the code.
+		//
+		// Option 15 (`domain`) is in the default list and is a single name; 119
+		// is the list, and is what an operator writing `dns { }` on a DHCP
+		// interface expects to arrive.
+		"-O".to_owned(),
+		"search".to_owned(),
+	]
+}
+
 fn start_backend(
 	kind: netcfgd_model::BackendKind,
 	iface: &str,
@@ -1897,21 +1939,7 @@ fn start_backend(
 				metric.as_deref(),
 				&hook.display().to_string(),
 			);
-			let udhcpc = vec![
-				"-b".to_owned(),
-				"-i".to_owned(),
-				iface.to_owned(),
-				"-s".to_owned(),
-				script.display().to_string(),
-				"-p".to_owned(),
-				pidfile.display().to_string(),
-				// Release the lease on the way out, which is also what makes the
-				// script run `deconfig` on a `SIGTERM`. Without it a stopped client
-				// leaves its address on the interface -- measured -- where `dhcpcd
-				// -k` takes it away, and two clients that disagree about what
-				// stopping means is two behaviours for one `backend.stop`.
-				"-R".to_owned(),
-			];
+			let udhcpc = udhcpc_start_args(iface, &script, &pidfile);
 
 			// Three candidates, not two. Debian packages busybox as one binary with
 			// no `udhcpc` symlink beside it, so a machine that has the client at all
@@ -3279,6 +3307,38 @@ mod tests {
 
 #[cfg(test)]
 mod udhcpc_tests {
+	/// udhcpc is asked for the search list, which it does not request itself.
+	///
+	/// The client's default request list is 1, 3, 6, 12, 15, 28, 42 -- no 119 --
+	/// so a server that honours it sends no search suffixes at all. That was
+	/// invisible for as long as the only server this suite drove was `busybox
+	/// udhcpd`, which pushes every configured option whether it was asked for
+	/// or not. Against dnsmasq the same test lost four checks, and the wire
+	/// showed why: `requested options: 1:netmask, 3:router, 6:dns-server,
+	/// 12:hostname, 15:domain-name, 28:broadcast, 42:ntp-server`.
+	#[test]
+	fn the_client_asks_for_the_search_list() {
+		let args = super::udhcpc_start_args(
+			"eth0",
+			std::path::Path::new("/run/netcfgd/udhcpc/eth0.script"),
+			std::path::Path::new("/run/netcfgd/udhcpc/eth0.pid"),
+		);
+		assert!(
+			args.windows(2).any(|pair| pair == ["-O", "search"]),
+			"udhcpc is not asked for option 119: {args:?}"
+		);
+		// And the three that were already load-bearing, so a rewrite of this
+		// list cannot quietly drop one: without `-s` the client obtains a lease
+		// and configures nothing, without `-p` it cannot be stopped, and
+		// without `-R` it leaves its address behind when it is.
+		for flag in ["-s", "-p", "-R"] {
+			assert!(
+				args.iter().any(|argument| argument == flag),
+				"udhcpc lost {flag}: {args:?}"
+			);
+		}
+	}
+
 	/// The generated script is valid shell, and says what it will not touch.
 	///
 	/// `sh -n` rather than an eyeball: this is a shell script written from Rust
