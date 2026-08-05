@@ -568,7 +568,14 @@ else
 	# do to a file netcfgd's DNS backend owns.
 	printf 'nameserver 203.0.113.99\n# what was here before dhcpcd ran\n' > "$work/etc-resolv"
 	"$dhcpcd" -6 -b cli > "$work/stock6.log" 2>&1 || true
-	if wait_for 'grep -q 2001:db8:44::53 "$resolv"'; then
+	if command -v resolvconf >/dev/null 2>&1; then
+		# The same reason as the v4 counter-proof above: `20-resolv.conf` hands
+		# off to resolvconf where one exists rather than writing the file, so
+		# there is nothing here to observe. `hook_quarters` keeps the default
+		# set above, which is what the negative assertion below needs.
+		echo "note: dhcpcd's hook defers to resolvconf, so the DHCPv6"
+		echo "note:   counter-proof cannot run on this machine either"
+	elif wait_for 'grep -q 2001:db8:44::53 "$resolv"'; then
 		# How long the whole thing took when it was allowed to happen: client
 		# start, router solicitation, the DHCPv6 exchange and the hook. The
 		# assertion below is a negative one and has no event of its own to wait
