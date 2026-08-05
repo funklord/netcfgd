@@ -57,6 +57,18 @@ pub fn log_path(run_dir: &Path, device: &str) -> PathBuf {
 	ctrl_dir(run_dir).join(format!("{device}.log"))
 }
 
+/// Where the access point on this device records its pid.
+///
+/// netcfgd chooses the path and passes it as `-P`, which is what makes it a
+/// usable marker: it names the interface and it lands in hostapd's command
+/// line, so `/proc/<pid>/cmdline` can confirm that the pid belongs to *this*
+/// access point rather than to whatever recycled the number. The supplicant's
+/// pid file is the same shape for the same reason (0080).
+#[must_use]
+pub fn pid_path(run_dir: &Path, device: &str) -> PathBuf {
+	ctrl_dir(run_dir).join(format!("{device}.pid"))
+}
+
 /// Find `hostapd`.
 ///
 /// The same search as the supplicant's, and for the same reason: it lives in
@@ -253,6 +265,44 @@ pub fn connect(
 /// same as the one that does not.
 pub const PATIENT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How hostapd is invoked, as a list something can assert against.
+///
+/// A function rather than four chained `arg` calls for the reason
+/// `udhcpc_start_args` is one (0108): an argument list nothing can read back is
+/// an argument list a rewrite can quietly drop a flag from, and both flags here
+/// are load-bearing in ways no compiler notices.
+///
+/// `-B` daemonizes, which is what makes the exit status mean "hostapd started"
+/// rather than "hostapd was launched" -- it forks only after the interface is
+/// up, so a configuration it will not parse and a driver it cannot attach to
+/// both come back as a failure here rather than as a daemon that dies later.
+///
+/// `-P` names the pid file, and without it an access point is the one backend
+/// netcfgd can never tell has died: the liveness pass (0078) needs a handle,
+/// and the recorded `running: true` would otherwise be the only account of a
+/// daemon that crashed an hour ago -- so 0079's restart could not fire for it
+/// either. Decision 0110.
+///
+/// The order is hostapd's own usage, which puts the flags before the
+/// configuration file: `hostapd [-hdBKtv] [-P <PID file>] ...
+/// <configuration file(s)>`.
+///
+/// One thing this deliberately does not fix. hostapd writes the pid file
+/// *after* it daemonizes -- `os_daemonize` calls `daemon(0, 0)` and only then
+/// `fopen` -- so the parent whose exit status is read above is gone before the
+/// file appears. That window is harmless, and only because of 0078's rule: a
+/// pid file that is not there means netcfgd cannot tell, which is not the same
+/// as "it is not running". Do not turn a missing file into a stop.
+#[must_use]
+pub fn start_args(pid: &Path, config: &Path) -> Vec<std::ffi::OsString> {
+	vec![
+		"-B".into(),
+		"-P".into(),
+		pid.as_os_str().to_owned(),
+		config.as_os_str().to_owned(),
+	]
+}
+
 /// Start an access point.
 ///
 /// # Errors
@@ -287,8 +337,7 @@ pub fn start(
 		.map_err(|error| format!("cannot write {}: {error}", log.display()))?;
 
 	let status = Command::new(&program)
-		.arg("-B")
-		.arg(&path)
+		.args(start_args(&pid_path(run_dir, device), &path))
 		.stdout(capture)
 		.stderr(errors)
 		.status()
@@ -363,6 +412,18 @@ pub fn stop(run_dir: &Path, device: &str) -> Result<(), String> {
 	// policy record the observer reads lives in the `.acl` beside it, which
 	// holds no secret and keeps the lifecycle decision 0039 gave it.
 	let _ = std::fs::remove_file(config_path(run_dir, device));
+
+	// And the pid file, for the reason the supplicant's teardown gives (0080):
+	// hostapd removes its own on a clean exit, one that was killed leaves it,
+	// and a stale file would have the next observation asking about a pid that
+	// belongs to somebody else by then.
+	//
+	// After the `TERMINATE` above rather than before, and unconditionally: if
+	// the stop failed, `outcome` carries that and the backend stays in the run
+	// state, so the next run asks again. Removing the file cannot make that
+	// worse -- a missing pid file is "cannot tell", which is where an access
+	// point that will not answer already is.
+	let _ = std::fs::remove_file(pid_path(run_dir, device));
 	outcome
 }
 
@@ -426,4 +487,50 @@ fn complaints(path: &Path, count: usize) -> Option<String> {
 	// puts this in the middle of a sentence. Trimming here rather than there,
 	// because here is where it is known that the text came from somebody else.
 	Some(chosen.join("; ").trim_end_matches('.').to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{pid_path, start_args};
+	use std::path::Path;
+
+	/// Both flags, in hostapd's order, with the pid file netcfgd chose.
+	///
+	/// The pid path is asserted as a whole string rather than "contains -P",
+	/// because the path is not decoration: it is the marker the liveness check
+	/// looks for in `/proc/<pid>/cmdline`, so a `-P` pointing somewhere netcfgd
+	/// does not read would satisfy a looser test and tell netcfgd nothing.
+	#[test]
+	fn the_access_point_is_told_where_to_record_its_pid() {
+		let run = Path::new("/run/netcfgd");
+		let args = start_args(
+			&pid_path(run, "ap0"),
+			Path::new("/run/netcfgd/hostapd/ap0.conf"),
+		);
+		let args: Vec<String> = args
+			.iter()
+			.map(|arg| arg.to_string_lossy().into_owned())
+			.collect();
+		assert_eq!(
+			args,
+			vec![
+				"-B",
+				"-P",
+				"/run/netcfgd/hostapd/ap0.pid",
+				"/run/netcfgd/hostapd/ap0.conf",
+			]
+		);
+	}
+
+	/// The pid file sits beside the socket and the configuration, and names the
+	/// device -- one access point per device, so two never collide.
+	#[test]
+	fn the_pid_file_is_named_for_the_device() {
+		let run = Path::new("/run/netcfgd");
+		assert_eq!(
+			pid_path(run, "wlan1"),
+			Path::new("/run/netcfgd/hostapd/wlan1.pid")
+		);
+		assert_ne!(pid_path(run, "ap0"), pid_path(run, "ap1"));
+	}
 }
