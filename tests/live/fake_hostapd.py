@@ -168,7 +168,8 @@ def valid(address):
 
 def main():
 	if len(sys.argv) < 3:
-		print("fake_hostapd.py <ctrl-dir> <interface> [--deny a,b] [--accept a,b]",
+		print("fake_hostapd.py <ctrl-dir> <interface> [--deny a,b] [--accept a,b]"
+		      " [--pidfile path] [--wedged]",
 		      file=sys.stderr)
 		return 2
 	ctrl_dir, interface = sys.argv[1], sys.argv[2]
@@ -181,6 +182,24 @@ def main():
 			value = rest[rest.index(flag) + 1]
 			ACL[name] = sorted(a for a in value.split(",") if a)
 	os.makedirs(ctrl_dir, exist_ok=True)
+
+	# What hostapd's `-P` produces, and the reason it is spelled as a flag with
+	# the path as its own argument rather than derived from `ctrl_dir`: the
+	# marker netcfgd checks is the path *appearing in the command line*, so a
+	# fake that wrote the file without being told where would confirm a
+	# liveness check that could not work against the real daemon. Decision
+	# 0110, and the same trap 0105 caught with the fake supplicant.
+	#
+	# Written before the socket exists, where hostapd writes it after
+	# daemonizing. That difference is deliberate and does not weaken anything:
+	# a test waits on `ready`, which comes after both, and the earlier write
+	# means no window in which the socket is up and the pid file is missing --
+	# a window whose only effect would be to make a check pass for the wrong
+	# reason.
+	if "--pidfile" in rest:
+		with open(rest[rest.index("--pidfile") + 1], "w") as handle:
+			handle.write(f"{os.getpid()}\n")
+
 	path = os.path.join(ctrl_dir, interface)
 	if os.path.exists(path):
 		os.unlink(path)
