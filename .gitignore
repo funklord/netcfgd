@@ -23,3 +23,12 @@ gui/build-*/
 # they produce are not -- a package is a build artifact of a specific commit,
 # and `make deb` reproduces it from that commit.
 dist/
+
+# debhelper's working state; debian/ holds packaging sources only.
+debian/.debhelper/
+debian/files
+debian/tmp/
+debian/netcfgd/
+debian/*.substvars
+debian/*.debhelper.log
+debian/debhelper-build-stamp

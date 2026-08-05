@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+#
+# The version comes from the VERSION file at the root; `make version-check`
+# gates debian/changelog and Cargo.toml against it.
+#
+# Only the systemd glue is packaged here. install-openrc and install-procd
+# exist for Alpine and OpenWrt, which have their own packaging under
+# packaging/ and must not be dragged into the deb.
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE) build
+
+override_dh_auto_install:
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/netcfgd PREFIX=/usr
+	$(MAKE) install-systemd DESTDIR=$(CURDIR)/debian/netcfgd
+	install -Dm644 packaging/systemd/netcfgd-exclusive.conf \
+		$(CURDIR)/debian/netcfgd/usr/share/doc/netcfgd/netcfgd-exclusive.conf
+
+override_dh_auto_test:
+	# `make check` is the gate; it wants a build tree the packaging keeps no
+	# part of.
+
+override_dh_auto_clean:
+	$(MAKE) clean
