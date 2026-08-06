@@ -26,7 +26,7 @@ skip() {
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 
-work=$(mktemp -d /tmp/ncfg-switch.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-switch.XXXXXX")
 cleanup() {
 	[ -n "${daemon:-}" ] && kill "$daemon" 2>/dev/null
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`

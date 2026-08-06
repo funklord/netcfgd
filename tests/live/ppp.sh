@@ -53,7 +53,7 @@ find_pppd() {
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 pppd=$(find_pppd) || skip "pppd is not installed (apt install ppp | apk add ppp)"
 
-work=$(mktemp -d /tmp/ncfg-ppp.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-ppp.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM
 mkdir -p "$work/etc/secrets" "$work/run"
 

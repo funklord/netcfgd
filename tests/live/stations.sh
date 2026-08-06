@@ -29,7 +29,7 @@ command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 
-work=$(mktemp -d /tmp/ncfg-stations.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-stations.XXXXXX")
 cleanup() {
 	[ -n "${fake:-}" ] && kill "$fake" 2>/dev/null
 	[ -n "${daemon:-}" ] && kill "$daemon" 2>/dev/null

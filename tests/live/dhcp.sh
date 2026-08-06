@@ -113,7 +113,7 @@ to drop to"
 	exec unshare --map-root-user --map-auto --net -- sh "$0" "$@"
 fi
 
-work=$(mktemp -d /tmp/ncfg-dhcp.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-dhcp.XXXXXX")
 server=
 cleanup() {
 	# `if` rather than `[ ... ] && kill`: under `set -e` an AND-list whose last

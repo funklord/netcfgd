@@ -30,7 +30,7 @@ skip() {
 command -v ip >/dev/null 2>&1 || skip "no ip(8) to check the result with"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
-work=$(mktemp -d /tmp/ncfg-links.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-links.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
 
