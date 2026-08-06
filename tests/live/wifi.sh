@@ -38,7 +38,7 @@ skip() {
 
 # Short, because a unix socket path has to fit in SUN_LEN (108 bytes) and a
 # path under the usual scratch directories does not.
-work=$(mktemp -d /tmp/ncfg-live.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-live.XXXXXX")
 cleanup() {
 	[ -n "${daemon:-}" ] && kill "$daemon" 2>/dev/null
 	[ -n "${radio:-}" ] && kill "$radio" 2>/dev/null

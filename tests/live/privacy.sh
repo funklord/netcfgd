@@ -32,7 +32,7 @@ skip() {
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 [ -d /proc/sys/net/ipv6 ] || skip "this kernel has no IPv6 (ipv6.disable=1)"
 
-work=$(mktemp -d /tmp/ncfg-privacy.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-privacy.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
 

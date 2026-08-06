@@ -34,7 +34,7 @@ skip() {
 command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 
-work=$(mktemp -d /tmp/ncfg-rfk.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-rfk.XXXXXX")
 daemon=
 feeder=
 cleanup() {

@@ -34,7 +34,7 @@ for candidate in /sbin/tc /usr/sbin/tc; do
 	[ -x "$candidate" ] && tc=$candidate && break
 done
 
-work=$(mktemp -d /tmp/ncfg-ingress.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-ingress.XXXXXX")
 daemon=
 cleanup() {
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null

@@ -162,7 +162,7 @@ fi
 
 # From here on: root in a private user, mount, UTS and network namespace.
 
-work=$(mktemp -d /tmp/ncfg-dhcpcd.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-dhcpcd.XXXXXX")
 server=
 dnsmasq_pid=
 cleanup() {
@@ -176,7 +176,7 @@ cleanup() {
 	# whose last command fails takes the whole function with it -- and a `kill`
 	# of a process that has already been stopped fails. That left the work
 	# directory behind on every run that got as far as stopping dnsmasq, which
-	# is how it was noticed: five of them in /tmp.
+	# is how it was noticed: five of them side by side.
 	if [ -n "$dnsmasq_pid" ]; then kill "$dnsmasq_pid" 2>/dev/null || true; fi
 	if [ -n "$server" ]; then kill "$server" 2>/dev/null || true; fi
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`

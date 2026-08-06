@@ -73,13 +73,13 @@ command -v python3 >/dev/null 2>&1 || skip "no python3"
 # leave a daemon behind on every invocation, which is what it did for months.
 command -v pkill >/dev/null 2>&1 || skip "no pkill (procps), so this could not clean up after itself"
 
-work=$(mktemp -d /tmp/ncfg-openvpn.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-openvpn.XXXXXX")
 # Where netcfgd will find the fake, and the pattern that stops one. Named once
 # because the trap and the crash below both need it, and they had already
 # drifted: the trap said `$work/fake_openvpn`, which is not where the file is
 # installed, so it matched nothing on every run since it was renamed. Nine
 # daemons were found alive on the machine this was written on, the oldest 21
-# hours old, each holding its own /tmp directory open.
+# hours old, each holding its own work directory open.
 fake="$work/bin/openvpn"
 cleanup() {
 	pkill -f "$fake" 2>/dev/null || true

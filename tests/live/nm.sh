@@ -45,7 +45,7 @@ command -v dbus-daemon >/dev/null 2>&1 || skip "dbus-daemon is not installed"
 # Short, because a unix socket path has to fit in sun_path and the repo may be
 # checked out somewhere deep. The first version of this used the scratch
 # directory it was written in and netcfgd refused the socket outright.
-work=$(mktemp -d /tmp/ncfg-nm.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-nm.XXXXXX")
 daemon=
 bus=
 shim_pid=

@@ -35,7 +35,7 @@ for candidate in /sbin/tc /usr/sbin/tc; do
 done
 command -v tc >/dev/null 2>&1 && tc=$(command -v tc)
 
-work=$(mktemp -d /tmp/ncfg-qdisc.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-qdisc.XXXXXX")
 daemon=
 cleanup() {
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
