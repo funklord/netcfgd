@@ -151,9 +151,19 @@ Divergence needs a technical reason. These are accepted and need no
 discussion: **Makefile recipe lines** (`make` requires a literal tab, so they
 are compliant by construction), **YAML** (the spec forbids tabs for
 indentation outright — use spaces), **Markdown** (list continuation and code
-fences are space-indented by specification), **Go** (`gofmt` emits tabs
-natively), and **vendored, generated or attic sources**, which keep whatever
-their upstream or generator produced.
+fences are space-indented by specification), **Debian packaging files** (see
+below), **Go** (`gofmt` emits tabs natively), and **vendored, generated or
+attic sources**, which keep whatever their upstream or generator produced.
+
+**The two halves of `debian/` are exempt for different reasons**, and both
+were measured against dpkg rather than read off the manual.
+`debian/changelog` has a fixed layout that a tab is simply not part of:
+`dpkg-parsechangelog` calls a tab-indented change line "unrecognized", and
+loses the trailer outright if a tab precedes `--`. A deb822 continuation in
+`control` or `copyright` is the opposite case — `deb822(5)` allows a leading
+SPACE *or* TAB and dpkg round-trips either, but that leading whitespace is
+field *syntax* rather than indentation, so the rule has nothing to say about
+it and everything past it is alignment.
 
 ### No formatter for `client/` and `gui/`
 
