@@ -1525,7 +1525,7 @@ the sentence that disposes of an alternative in half a line.
    (0063), the `lease` hook (0064), DHCPv4 with busybox (0065), a lease's
    nameservers and search suffixes (0066, 0067), the `carrier` hook (0068) and
    joining a network without an editor (0069), an enterprise network from the
-   command line (0087) and the rfkill event stream (0093). **What is left is two
+   command line (0087) and the rfkill event stream (0093). **What is left is
    nothing** — every item on this list is closed, and ten of the fifteen found a
    defect older than the work itself:
 

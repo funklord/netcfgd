@@ -330,8 +330,11 @@ prevents, so an `https` probe reports no portal on the networks it is for.
 `ncfg explain interface wlp0s20f3` says which switch and what to do, and a plan
 gives the remedy -- but netcfgd will not unblock one, on purpose: your function key
 turning the wifi off is you deciding, not drift to be corrected. `rfkill unblock
-wifi` is the other half. What it cannot see yet is the *moment* a switch flips: the
-block shows up on the next observation, a second or so later.
+wifi` is the other half. The *moment* a switch flips is seen as it happens -- a
+watcher reads `/dev/rfkill`'s event stream and asks for a fresh observation, which
+matters most for *un*blocking, since blocking usually takes the interface down and
+netlink reports that anyway. The device is never opened for writing, so "netcfgd
+will not unblock your radio" is a property of the code rather than a promise.
 
 **systemd-networkd detection is unverified.** The NetworkManager path was
 checked against a running NetworkManager. The networkd equivalent was written
