@@ -51,7 +51,7 @@ skip() {
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
-work=$(mktemp -d /tmp/ncfg-helper.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-helper.XXXXXX")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"

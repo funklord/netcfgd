@@ -60,7 +60,7 @@ openvpn=$(find_openvpn) || skip "openvpn is not installed (apt install openvpn |
 command -v openssl >/dev/null 2>&1 \
 	|| skip "no openssl (apt install openssl | apk add openssl), needed for the peer's keys"
 
-work=$(mktemp -d /tmp/ncfg-tunnel.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-tunnel.XXXXXX")
 peer=
 cleanup() {
 	"$repo/target/debug/ncfg" apply > /dev/null 2>&1 || true

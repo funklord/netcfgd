@@ -55,7 +55,7 @@ skip() {
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 cli="${supplicant%wpa_supplicant}wpa_cli"
 
-work=$(mktemp -d /tmp/ncfg-8021x.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-8021x.XXXXXX")
 cleanup() {
 	[ -e "$work/ctrl/lo" ] && "$cli" -p "$work/ctrl" -i lo terminate >/dev/null 2>&1
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`

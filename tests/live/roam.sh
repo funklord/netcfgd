@@ -34,7 +34,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 
-work=$(mktemp -d /tmp/ncfg-roam.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-roam.XXXXXX")
 daemon=
 fake=
 cleanup() {
@@ -156,9 +156,22 @@ send_event() {
 	python3 - "$work/ctrl/wlan0" "$1" <<'PY'
 import socket, sys, os, tempfile
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-local = os.path.join(tempfile.mkdtemp(), "c")
-sock.bind(local)
-sock.sendto(sys.argv[2].encode(), sys.argv[1])
+# A datagram sender needs an address of its own, in a directory of its own
+# because two of these can be in flight at once. `c` because the whole path
+# has to fit a unix socket's 108 bytes, and the directory part is not ours.
+#
+# Removed rather than left, which it was until the scripts honoured `TMPDIR`
+# and the litter stopped being invisible: one directory per event delivered,
+# four per run, going to `/tmp` on every machine that ever ran this.
+staging = tempfile.mkdtemp()
+local = os.path.join(staging, "c")
+try:
+	sock.bind(local)
+	sock.sendto(sys.argv[2].encode(), sys.argv[1])
+finally:
+	sock.close()
+	os.unlink(local)
+	os.rmdir(staging)
 PY
 }
 

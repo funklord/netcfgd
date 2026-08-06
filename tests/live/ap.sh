@@ -48,7 +48,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 # netcfgd does not look would pass while netcfgd reported it missing.
 hostapd=$(find_hostapd) || skip "hostapd is not installed (apt install hostapd | apk add hostapd)"
 
-work=$(mktemp -d /tmp/ncfg-ap.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-ap.XXXXXX")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT INT TERM
 mkdir -p "$work/etc/secrets" "$work/run"

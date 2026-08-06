@@ -34,7 +34,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
-work=$(mktemp -d /tmp/ncfg-report.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-report.XXXXXX")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"

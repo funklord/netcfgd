@@ -85,7 +85,7 @@ done
 	exit 0
 }
 
-work=$(mktemp -d /tmp/ncfg-pppoe.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pppoe.XXXXXX")
 cleanup() {
 	pkill -f 'pppoe-server -I isp0' 2>/dev/null || true
 	pkill -f "$work/run/ppp" 2>/dev/null || true

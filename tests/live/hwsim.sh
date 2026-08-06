@@ -168,7 +168,7 @@ cleanup() {
 	# anything writing between the walk and the rmdir defeats it once; a
 	# second attempt after the writer is certainly gone does not need to know
 	# which writer it was. Seen twice, unreproduced afterwards -- the run that
-	# left `/tmp/ncfg-hwsim.XXXXXX` behind still exited 0, so it was litter on
+	# left its work directory behind still exited 0, so it was litter on
 	# whichever machine has root rather than a failing test.
 	if [ -n "${work:-}" ]; then
 		for _ in 1 2 3; do
@@ -232,7 +232,7 @@ inns() { "$ip" netns exec "$ns" "$@"; }
 # ------------------------------------------------------------------ fixtures
 
 # Short, because a unix socket path has to fit in SUN_LEN.
-work=$(mktemp -d /tmp/ncfg-hwsim.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-hwsim.XXXXXX")
 mkdir -p "$work/etc/secrets" "$work/run" "$work/ctrl" "$work/ap"
 
 passphrase=hunter2hunter2

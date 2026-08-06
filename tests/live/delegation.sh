@@ -74,7 +74,7 @@ done
 	exit 0
 }
 
-work=$(mktemp -d /tmp/ncfg-pd.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pd.XXXXXX")
 cleanup() {
 	pkill -f 'kea-dhcp6 -c' 2>/dev/null || true
 	pkill -f 'odhcp6c' 2>/dev/null || true

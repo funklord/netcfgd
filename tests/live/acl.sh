@@ -41,7 +41,7 @@ skip() {
 command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
-work=$(mktemp -d /tmp/ncfg-acl.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-acl.XXXXXX")
 cleanup() {
 	[ -n "${fake:-}" ] && kill "$fake" 2>/dev/null
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`

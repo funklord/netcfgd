@@ -30,7 +30,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
-work=$(mktemp -d /tmp/ncfg-nat.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-nat.XXXXXX")
 daemon=
 cleanup() {
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null

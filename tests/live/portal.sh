@@ -34,7 +34,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 
-work=$(mktemp -d /tmp/ncfg-portal.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-portal.XXXXXX")
 daemon=
 server=
 cleanup() {

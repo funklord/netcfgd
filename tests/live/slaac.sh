@@ -112,7 +112,7 @@ if [ -z "${NCFG_SLAAC_NS:-}" ]; then
 	exec unshare --map-root-user --map-auto --net -- sh "$0" "$@"
 fi
 
-work=$(mktemp -d /tmp/ncfg-slaac.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-slaac.XXXXXX")
 router=
 cleanup() {
 	if [ -n "$router" ]; then kill "$router" 2>/dev/null || true; fi

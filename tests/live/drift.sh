@@ -40,7 +40,7 @@ skip() {
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 
-work=$(mktemp -d /tmp/ncfg-drift.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-drift.XXXXXX")
 daemon=
 cleanup() {
 	if [ -n "$daemon" ]; then

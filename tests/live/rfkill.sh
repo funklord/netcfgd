@@ -66,7 +66,7 @@ if [ -d /sys/class/rfkill ]; then
 	done
 fi
 
-work=$(mktemp -d /tmp/ncfg-rfkill.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-rfkill.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
 
