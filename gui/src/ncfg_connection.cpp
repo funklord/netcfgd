@@ -346,7 +346,13 @@ bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_poin
 		 * arrive at all means the SSID is not text, and the hex is the
 		 * only honest thing to show for it. */
 		if (!point.named) {
-			row.display = QStringLiteral("<%1>").arg(from_c(point.ssid));
+			/* `hex:` and not angle brackets, because `ncfg wifi scan` and
+			 * the TUI both spell it that way -- the prefix is what stops
+			 * the hex being read as the name. netcfgd-cli's
+			 * access_point_name() is the same three cases in Rust, and
+			 * the two have to keep agreeing until the socket has a
+			 * specification (0116). */
+			row.display = QStringLiteral("hex:%1").arg(from_c(point.ssid));
 		} else if (point.name[0] == '\0') {
 			row.display = QStringLiteral("(hidden)");
 		} else {
@@ -391,7 +397,7 @@ bool ncfg_connection::wifi_status(const QString &interface, ncfg_wifi_status_row
 	out->network = from_c(status.network);
 	out->display = from_c(status.name);
 	if (out->display.isEmpty() && status.ssid[0] != '\0') {
-		out->display = QStringLiteral("<%1>").arg(from_c(status.ssid));
+		out->display = QStringLiteral("hex:%1").arg(from_c(status.ssid));
 	}
 
 	ncfg_wifi_status_free(&status);

@@ -883,6 +883,33 @@ fn render_stations(report: &netcfgd_proto::StationReport, json: bool) -> Result<
 	Ok(())
 }
 
+/// How an access point is named on a screen, for every client that draws one.
+///
+/// Three cases and not two, because the daemon sends three. A name that arrived
+/// is the name. A name that arrived *empty* is a hidden network, which is a fact
+/// worth saying rather than a blank cell. A name that did not arrive at all
+/// means the SSID is not valid UTF-8 -- the daemon omits it rather than mangling
+/// it -- and then the hex is the only honest name it has, so it is shown with a
+/// prefix that stops anybody reading the hex as the name.
+///
+/// Here rather than at each call site because it was at each call site: `ncfg
+/// wifi scan` said `hex:...` and nothing for hidden, the TUI said `<not text>`
+/// for one and nothing for the other, and the GUI grew a third spelling. Three
+/// words for one thing is the drift section 10 keeps recording, and losing the
+/// hex was worse than untidy -- two unprintable SSIDs became the same row.
+///
+/// The C client renders the same three cases in `ncfg_connection.cpp` and must
+/// keep saying the same words. Until the socket has a specification (0116) that
+/// agreement is a comment in two languages, which is why it is written down in
+/// both.
+pub(crate) fn access_point_name(name: Option<&str>, ssid: &str) -> String {
+	match name {
+		None => format!("hex:{ssid}"),
+		Some("") => "(hidden)".to_owned(),
+		Some(text) => text.to_owned(),
+	}
+}
+
 fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), String> {
 	if json {
 		println!(
@@ -897,12 +924,7 @@ fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), Str
 	}
 	let mut any_unconfigured = false;
 	for entry in &report.access_points {
-		// A name that is not UTF-8 is shown as hex rather than mangled, and
-		// marked so nobody reads the hex as the name.
-		let name = entry
-			.name
-			.clone()
-			.unwrap_or_else(|| format!("hex:{}", entry.ssid));
+		let name = access_point_name(entry.name.as_deref(), &entry.ssid);
 		let security = if entry.secured { "secured" } else { "open" };
 		let configured = if let Some(id) = &entry.configured {
 			format!("  [{id}]")
@@ -934,7 +956,13 @@ fn render_wifi_status(state: &netcfgd_proto::WifiState, json: bool) -> Result<()
 		return Ok(());
 	}
 	println!("{} {}", state.interface, state.state);
-	if let Some(name) = state.name.as_ref().or(state.ssid.as_ref()) {
+	// Keyed on the ssid, which is the field that says "associated at all", and
+	// rendered by the shared namer. `name.or(ssid)` printed the raw hex with
+	// nothing marking it as hex whenever the SSID was not text -- the exact
+	// misreading the `hex:` prefix exists to stop, in the one place a scan's
+	// rendering had not reached.
+	if let Some(ssid) = state.ssid.as_deref() {
+		let name = access_point_name(state.name.as_deref(), ssid);
 		let bssid = state
 			.bssid
 			.as_ref()
@@ -1323,7 +1351,7 @@ fn describe(op: &str, reason: &netcfgd_plan::Reason) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::parse_options;
+	use super::{access_point_name, parse_options};
 
 	fn split(arguments: &[&str]) -> (super::Options, Vec<String>) {
 		let owned: Vec<String> = arguments.iter().map(|a| (*a).to_owned()).collect();
@@ -1432,5 +1460,27 @@ mod tests {
 	fn a_mistyped_flag_is_refused_rather_than_ignored() {
 		let owned = vec!["--jsonn".to_owned()];
 		assert!(parse_options(&owned).is_err());
+	}
+
+	/// Three cases, because the daemon sends three and every client draws
+	/// them. The two that are not "a name" are the ones that were being got
+	/// wrong: a hidden network drew as a blank cell in two clients, and an
+	/// unprintable SSID drew as `<not text>` in the TUI -- which named the
+	/// condition and threw the network away, so two of them were one row.
+	#[test]
+	fn an_access_point_is_named_three_ways_and_never_two() {
+		assert_eq!(access_point_name(Some("home"), "686f6d65"), "home");
+		assert_eq!(access_point_name(Some(""), "00"), "(hidden)");
+		assert_eq!(access_point_name(None, "ff00ff"), "hex:ff00ff");
+	}
+
+	/// The hex is kept, not summarised, so two unprintable networks are two
+	/// rows. This is the assertion the old TUI wording could not have passed.
+	#[test]
+	fn two_unprintable_networks_do_not_become_one_row() {
+		assert_ne!(
+			access_point_name(None, "ff00ff"),
+			access_point_name(None, "ff00fe")
+		);
 	}
 }
