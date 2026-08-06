@@ -33,13 +33,30 @@ impl Window {
 	/// Whether the window has closed.
 	#[must_use]
 	pub fn expired(&self) -> bool {
-		now_epoch() >= self.deadline_epoch
+		self.expired_at(now_epoch())
 	}
 
 	/// How long is left, saturating at zero.
 	#[must_use]
 	pub fn remaining(&self) -> Duration {
-		Duration::from_secs(self.deadline_epoch.saturating_sub(now_epoch()))
+		self.remaining_at(now_epoch())
+	}
+
+	/// Whether the window has closed, against a clock the caller supplies.
+	///
+	/// Split out from [`Window::expired`] so the interesting cases can be
+	/// tested at all: a machine that slept through the window, and a clock
+	/// somebody moved. Reading `SystemTime::now()` inside the comparison made
+	/// both of those unwritable, which is why neither had ever been checked.
+	#[must_use]
+	pub fn expired_at(&self, now: u64) -> bool {
+		now >= self.deadline_epoch
+	}
+
+	/// How long is left against a supplied clock, saturating at zero.
+	#[must_use]
+	pub fn remaining_at(&self, now: u64) -> Duration {
+		Duration::from_secs(self.deadline_epoch.saturating_sub(now))
 	}
 }
 
@@ -178,6 +195,63 @@ mod tests {
 		let future = arm(60, "x".to_owned());
 		assert!(!future.expired());
 		assert!(future.remaining().as_secs() > 55);
+	}
+
+	/// A window is wall-clock, so a machine that sleeps through it wakes with
+	/// it already closed. That is the property suspend needs and the reason
+	/// the deadline is an epoch rather than a monotonic instant: `Instant`
+	/// does not advance across a suspend, so a window stored that way would
+	/// come back with its whole duration still to run.
+	///
+	/// Pinned rather than argued about, because the consequence is a decision
+	/// nobody has made: the first observation after the lid opens reverts a
+	/// change the operator has been living with all night.
+	#[test]
+	fn a_window_does_not_survive_the_machine_sleeping_through_it() {
+		let armed_at = 1_700_000_000;
+		let window = Window {
+			deadline_epoch: armed_at + 60,
+			window_seconds: 60,
+			last_good_hash: "x".to_owned(),
+		};
+
+		assert!(!window.expired_at(armed_at + 59));
+		assert_eq!(window.remaining_at(armed_at + 59), Duration::from_secs(1));
+
+		let eight_hours = armed_at + 8 * 60 * 60;
+		assert!(window.expired_at(eight_hours));
+		assert_eq!(window.remaining_at(eight_hours), Duration::from_secs(0));
+	}
+
+	/// The cost of wall-clock, stated where somebody deciding about it will
+	/// look: the window is anchored to a clock other things move. A laptop
+	/// usually takes an NTP correction shortly after resuming, and a step
+	/// backwards lengthens an open window rather than leaving it alone.
+	///
+	/// Neither direction is asserted to be *right* here. The test exists so
+	/// that changing it is a decision with a number attached rather than an
+	/// accident.
+	#[test]
+	fn moving_the_clock_moves_an_open_window() {
+		let armed_at = 1_700_000_000;
+		let window = Window {
+			deadline_epoch: armed_at + 60,
+			window_seconds: 60,
+			last_good_hash: "x".to_owned(),
+		};
+
+		// Stepped back an hour: the window that had 60s left now has an hour
+		// and a minute, and nothing in netcfgd notices the jump.
+		let back_an_hour = armed_at - 60 * 60;
+		assert!(!window.expired_at(back_an_hour));
+		assert_eq!(
+			window.remaining_at(back_an_hour),
+			Duration::from_secs(60 * 60 + 60)
+		);
+
+		// Stepped forward past the deadline: it closes early, and an operator
+		// who was still deciding loses the change rather than the machine.
+		assert!(window.expired_at(armed_at + 61));
 	}
 
 	/// Clearing is idempotent, because the expiry timer and an explicit revert
