@@ -1836,13 +1836,29 @@ the sentence that disposes of an alternative in half a line.
    clients are *for*.
 
    - **The GUI is far behind its own client library.** `gui/` builds cleanly
-     (`cd gui && make`, 244 KB against Qt 6) and offers **three tabs — devices,
-     plan, events — and three actions: `device`, `up`, `down`.** `client/`
-     underneath it already implements apply, confirm, revert, plan-of, monitor,
-     tiers and hello. So the window is not blocked on plumbing, and the cheapest
-     real progress available is spending what is already there. **No wifi, no
-     passphrase entry, no config editing**, which is what makes it a viewer
-     rather than a network manager.
+     (`cd gui && make` against Qt 6) and offered **three tabs — devices, plan,
+     events — and three actions: `device`, `up`, `down`**, while `client/`
+     underneath it already implemented apply, confirm, revert, plan-of, monitor,
+     tiers and hello. The window was never blocked on plumbing, so the cheapest
+     real progress is spending what is already there.
+
+     **A wifi tab is the first of that spent** — scan, join, disconnect, and a
+     radio's current state, in the TUI's vocabulary so that the two clients name
+     one thing once. The wireless half of `client/` did not exist either and was
+     written with it: the C library had no wifi call at all, only the generic
+     request, so the models went below the seam where 0116 and `gui/project.md`
+     section 3 both say they belong. **Which links are radios moved down with
+     them**, because "is this a radio" is not a visual question — though it is
+     now the same heuristic in two languages, which is exactly the drift 0116
+     names and does not yet fix.
+
+     What it still cannot do is **add** a network, and that is a boundary rather
+     than a gap: the socket has no request for it, because 0013 puts joining a
+     known network in the `wifi` tier and 0069 makes adding one *writing a file*.
+     So no passphrase is entered and none can be read back (0029, 0031), and an
+     access point with no `network` block is listed, greyed, and given no join
+     button rather than a refusal after the fact. Config editing is what is left
+     between this and a network manager.
    - **M8's tray applet does not exist.** Section 7 lists "GUI + tray applet" and
      there is no `QSystemTrayIcon` and no tray source anywhere in the tree. The
      milestone reads as done because the shim half was; the applet was never

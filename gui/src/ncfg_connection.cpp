@@ -152,6 +152,7 @@ bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 		row.mac = from_c(link.mac);
 		row.addresses = from_c(link.addresses);
 		row.mtu = link.mtu;
+		row.wireless = link.wireless != 0;
 		out->append(row);
 	}
 
@@ -301,6 +302,145 @@ unsigned ncfg_connection::confirm_default()
 		return 0;
 	}
 	return seconds;
+}
+
+bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out,
+                QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_scan_t scan = {};
+	char message[NCFG_ERROR_MAX];
+	const QByteArray name = interface.toUtf8();
+
+	if (!ncfg_client_wifi_scan(client, name.constData(), &scan, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < scan.count; i++) {
+		const ncfg_access_point_t &point = scan.items[i];
+		ncfg_access_point_row row;
+
+		row.bssid = from_c(point.bssid);
+		row.ssid = from_c(point.ssid);
+		row.configured = from_c(point.configured);
+		row.frequency = point.frequency;
+		row.signal = point.signal;
+		row.secured = point.secured != 0;
+		/* Three cases and not two. A name that arrived is shown as sent; a
+		 * name that arrived empty is a hidden network, which is a fact
+		 * worth naming rather than a blank cell; a name that did not
+		 * arrive at all means the SSID is not text, and the hex is the
+		 * only honest thing to show for it. */
+		if (!point.named) {
+			row.display = QStringLiteral("<%1>").arg(from_c(point.ssid));
+		} else if (point.name[0] == '\0') {
+			row.display = QStringLiteral("(hidden)");
+		} else {
+			row.display = from_c(point.name);
+		}
+		out->append(row);
+	}
+
+	ncfg_scan_free(&scan);
+	return true;
+}
+
+bool ncfg_connection::wifi_status(const QString &interface, ncfg_wifi_status_row *out,
+                  QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	*out = ncfg_wifi_status_row();
+
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_wifi_status_t status = {};
+	char message[NCFG_ERROR_MAX];
+	const QByteArray name = interface.toUtf8();
+
+	if (!ncfg_client_wifi_status(client, name.constData(), &status, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	out->interface = from_c(status.interface);
+	out->state = from_c(status.state);
+	out->bssid = from_c(status.bssid);
+	out->network = from_c(status.network);
+	out->display = from_c(status.name);
+	if (out->display.isEmpty() && status.ssid[0] != '\0') {
+		out->display = QStringLiteral("<%1>").arg(from_c(status.ssid));
+	}
+
+	ncfg_wifi_status_free(&status);
+	return true;
+}
+
+bool ncfg_connection::wifi_connect(const QString &interface, const QString &network,
+                   QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray name = interface.toUtf8();
+	const QByteArray id = network.toUtf8();
+
+	if (!ncfg_client_wifi_connect(client, name.constData(), id.constData(), message,
+	                  sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
+bool ncfg_connection::wifi_disconnect(const QString &interface, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray name = interface.toUtf8();
+
+	if (!ncfg_client_wifi_disconnect(client, name.constData(), message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
 }
 
 bool ncfg_connection::confirm(QString *error)
