@@ -340,24 +340,11 @@ bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_poin
 		row.frequency = point.frequency;
 		row.signal = point.signal;
 		row.secured = point.secured != 0;
-		/* Three cases and not two. A name that arrived is shown as sent; a
-		 * name that arrived empty is a hidden network, which is a fact
-		 * worth naming rather than a blank cell; a name that did not
-		 * arrive at all means the SSID is not text, and the hex is the
-		 * only honest thing to show for it. */
-		if (!point.named) {
-			/* `hex:` and not angle brackets, because `ncfg wifi scan` and
-			 * the TUI both spell it that way -- the prefix is what stops
-			 * the hex being read as the name. netcfgd-cli's
-			 * access_point_name() is the same three cases in Rust, and
-			 * the two have to keep agreeing until the socket has a
-			 * specification (0116). */
-			row.display = QStringLiteral("hex:%1").arg(from_c(point.ssid));
-		} else if (point.name[0] == '\0') {
-			row.display = QStringLiteral("(hidden)");
-		} else {
-			row.display = from_c(point.name);
-		}
+		/* Rendered below the seam, not here. The three cases -- text,
+		 * `(hidden)`, `hex:<ssid>` -- are vocabulary every client has to
+		 * share, and this file held a fourth spelling of them until it
+		 * moved down. What is left is a copy. */
+		row.display = from_c(point.display);
 		out->append(row);
 	}
 

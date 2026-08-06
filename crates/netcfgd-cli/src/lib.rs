@@ -883,6 +883,21 @@ fn render_stations(report: &netcfgd_proto::StationReport, json: bool) -> Result<
 	Ok(())
 }
 
+/// Whether a link with this kind and name is a radio.
+///
+/// The kernel's word first and the name only as a fallback: `wlan` is a fact
+/// where the kernel says it, and the `wl` prefix is a convention that happens
+/// to hold, in the same way `eth0` is not proof of an ethernet.
+///
+/// `client/`'s `ncfg_link_is_wireless()` is the identical rule in C, because
+/// the GUI needs it and cannot reach this one. Two implementations of one
+/// heuristic is the drift 0116 names and does not fix -- so `make conformance`
+/// feeds both the same table and diffs the answers, which is the cheapest
+/// honest substitute for sharing the code.
+pub(crate) fn is_radio(kind: Option<&str>, name: &str) -> bool {
+	kind == Some("wlan") || name.starts_with("wl")
+}
+
 /// How an access point is named on a screen, for every client that draws one.
 ///
 /// Three cases and not two, because the daemon sends three. A name that arrived
@@ -1351,7 +1366,7 @@ fn describe(op: &str, reason: &netcfgd_plan::Reason) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::{access_point_name, parse_options};
+	use super::{access_point_name, is_radio, parse_options};
 
 	fn split(arguments: &[&str]) -> (super::Options, Vec<String>) {
 		let owned: Vec<String> = arguments.iter().map(|a| (*a).to_owned()).collect();
@@ -1482,5 +1497,177 @@ mod tests {
 			access_point_name(None, "ff00ff"),
 			access_point_name(None, "ff00fe")
 		);
+	}
+
+	/// The naming cases both implementations are asked to render.
+	///
+	/// Fixed rather than drawn from the witness, and that is the load-bearing
+	/// part: the witness carries one access point and it has a text name, so
+	/// the two cases that actually drifted -- hidden, and an SSID that is not
+	/// text -- are in it nowhere. Drifting the C renderer back to its old
+	/// spelling was *not caught* until this table existed. A gate that has
+	/// never seen its subject is not a gate, and this one had not.
+	const NAMING_CASES: [(bool, &str, &str); 3] = [
+		(true, "home", "686f6d65"),
+		(true, "", ""),
+		(false, "", "ff00ff"),
+	];
+
+	/// The kind/name pairs both implementations are asked to classify.
+	///
+	/// Fixed rather than drawn from the witness, because the cases worth
+	/// comparing are the ones no witness line contains: a kind the kernel did
+	/// not give, and a name that only looks wireless. `wl-bridge` is in here
+	/// deliberately -- the name fallback calls a bridge a radio, which is a
+	/// real false positive of a heuristic nobody had written down, and a table
+	/// that hid it would be agreeing about the easy half.
+	const RADIO_CASES: [(&str, &str); 6] = [
+		("wlan", "wlan0"),
+		("", "wlp0s20f3"),
+		("bridge", "wl-bridge"),
+		("", "eth0"),
+		("", "wwan0"),
+		("wlan", "enp1s0"),
+	];
+
+	/// What this implementation extracts from the witness, in the form the C
+	/// one is asked for the same thing.
+	fn rust_facts(witness: &str) -> String {
+		let mut out = String::new();
+		for (index, line) in witness.lines().enumerate() {
+			let number = index + 1;
+			let line = line.trim_end();
+			if line.is_empty() || line.starts_with('#') {
+				continue;
+			}
+			let Ok(response) = serde_json::from_str::<netcfgd_proto::Response>(line) else {
+				continue;
+			};
+			match response {
+				netcfgd_proto::Response::WifiScan(report) => {
+					out.push_str(&format!("scan {number} interface={}\n", report.interface));
+					for (i, ap) in report.access_points.iter().enumerate() {
+						let display = access_point_name(ap.name.as_deref(), &ap.ssid);
+						out.push_str(&format!("scan {number} ap[{i}] bssid={}\n", ap.bssid));
+						out.push_str(&format!("scan {number} ap[{i}] ssid={}\n", ap.ssid));
+						out.push_str(&format!(
+							"scan {number} ap[{i}] named={}\n",
+							i32::from(ap.name.is_some())
+						));
+						out.push_str(&format!("scan {number} ap[{i}] display={display}\n"));
+						out.push_str(&format!(
+							"scan {number} ap[{i}] configured={}\n",
+							ap.configured.as_deref().unwrap_or("")
+						));
+						out.push_str(&format!(
+							"scan {number} ap[{i}] frequency={}\n",
+							ap.frequency
+						));
+						out.push_str(&format!("scan {number} ap[{i}] signal={}\n", ap.signal));
+						out.push_str(&format!(
+							"scan {number} ap[{i}] secured={}\n",
+							i32::from(ap.secured)
+						));
+					}
+				}
+				netcfgd_proto::Response::WifiStatus(state) => {
+					let empty = |value: &Option<String>| value.clone().unwrap_or_default();
+					out.push_str(&format!("status {number} interface={}\n", state.interface));
+					out.push_str(&format!("status {number} state={}\n", state.state));
+					out.push_str(&format!("status {number} ssid={}\n", empty(&state.ssid)));
+					out.push_str(&format!("status {number} name={}\n", empty(&state.name)));
+					out.push_str(&format!("status {number} bssid={}\n", empty(&state.bssid)));
+					out.push_str(&format!(
+						"status {number} network={}\n",
+						empty(&state.network)
+					));
+				}
+				_ => {}
+			}
+		}
+		for (named, name, ssid) in NAMING_CASES {
+			let display = access_point_name(named.then_some(name), ssid);
+			out.push_str(&format!(
+				"name named={} name={name} ssid={ssid} display={display}\n",
+				i32::from(named)
+			));
+		}
+		for (kind, name) in RADIO_CASES {
+			let kind_field = if kind.is_empty() { None } else { Some(kind) };
+			out.push_str(&format!(
+				"radio kind={kind} name={name} wireless={}\n",
+				i32::from(is_radio(kind_field, name))
+			));
+		}
+		out
+	}
+
+	/// The two client implementations agree about the same bytes.
+	///
+	/// This is the only check here that compares two *clients*. The schema
+	/// witness pins what the daemon sends and every other gate reads it from
+	/// one side; nothing asked whether the C client and this one extracted the
+	/// same facts from it -- which is how one access point's name came to be
+	/// spelled three ways and an unprintable SSID lost its identity in one of
+	/// them.
+	///
+	/// Fails rather than skips when the C binary is absent. A conformance
+	/// check that quietly passes because it compared nothing is the vacuous
+	/// pass this project keeps finding, and it would be worse here than
+	/// anywhere: the whole value is in the comparison happening.
+	#[test]
+	fn both_client_implementations_extract_the_same_facts() {
+		let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+		let witness_path = root.join("docs/schema/socket.json");
+		let binary = root.join("client/tests/client_test");
+
+		assert!(
+			binary.exists(),
+			"the C client's test binary is not built, so nothing would be compared. \
+			 Run `make -C client tests/client_test`, or `make conformance`, which does."
+		);
+
+		let witness = std::fs::read_to_string(&witness_path).expect("the witness is readable");
+		let mine = rust_facts(&witness);
+		assert!(
+			mine.contains("display=") && mine.contains("radio "),
+			"this implementation produced no facts, so the comparison would be vacuous"
+		);
+
+		let dump =
+			std::env::temp_dir().join(format!("ncfg-conformance-{}.facts", std::process::id()));
+		let status = std::process::Command::new(&binary)
+			.arg("--facts")
+			.arg(&dump)
+			.arg(&witness_path)
+			.output()
+			.expect("the C client's dump runs");
+		assert!(status.status.success(), "the C dump failed");
+
+		let theirs = std::fs::read_to_string(&dump).expect("the C dump is readable");
+		let _ = std::fs::remove_file(&dump);
+
+		if mine != theirs {
+			let mut report = String::from("the two clients disagree:\n");
+			for difference in mine
+				.lines()
+				.zip(theirs.lines())
+				.filter(|(a, b)| a != b)
+				.take(10)
+			{
+				report.push_str(&format!(
+					"  rust: {}\n  c:    {}\n",
+					difference.0, difference.1
+				));
+			}
+			if mine.lines().count() != theirs.lines().count() {
+				report.push_str(&format!(
+					"  and they produced {} and {} lines\n",
+					mine.lines().count(),
+					theirs.lines().count()
+				));
+			}
+			panic!("{report}");
+		}
 	}
 }

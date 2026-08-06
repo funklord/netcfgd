@@ -1272,8 +1272,164 @@ static void freeing_what_was_never_filled_in_is_nothing(void)
 	   NULL);
 }
 
+/* ------------------------------------------------------------ conformance
+ *
+ * The facts this implementation extracts, in a form the Rust one can be asked
+ * for too.
+ *
+ * `make conformance` runs both over the same witness and diffs. That is the
+ * only check in this tree that compares two *clients* rather than a client
+ * against the daemon: the schema witness pins what netcfgd sends, and nothing
+ * pinned what a second implementation made of it -- which is how three clients
+ * came to spell one access point's name three ways.
+ *
+ * A dump mode on the test binary rather than a program of its own, because the
+ * staging harness above is what makes the typed calls reachable without a
+ * daemon, and a second copy of it would be the thing that drifts next.
+ */
+static void dump_scan(FILE *out, unsigned line, const char *response)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_scan_t scan;
+	/* Two bytes larger than the caller's line buffer, so a maximum-length
+	 * witness line plus its newline cannot be truncated into a different
+	 * message -- which is a silent corruption, not a short one. */
+	char answer[65538];
+
+	snprintf(answer, sizeof(answer), "%s\n", response);
+	if (!staged_open(&staged, "staging a scan for the dump", answer)) {
+		return;
+	}
+	if (ncfg_client_wifi_scan(staged.client, "wlan0", &scan, err, sizeof(err))) {
+		fprintf(out, "scan %u interface=%s\n", line, scan.interface);
+		for (size_t i = 0; i < scan.count; i++) {
+			const ncfg_access_point_t *ap = &scan.items[i];
+			fprintf(out, "scan %u ap[%zu] bssid=%s\n", line, i, ap->bssid);
+			fprintf(out, "scan %u ap[%zu] ssid=%s\n", line, i, ap->ssid);
+			fprintf(out, "scan %u ap[%zu] named=%d\n", line, i, ap->named);
+			fprintf(out, "scan %u ap[%zu] display=%s\n", line, i, ap->display);
+			fprintf(out, "scan %u ap[%zu] configured=%s\n", line, i, ap->configured);
+			fprintf(out, "scan %u ap[%zu] frequency=%d\n", line, i, ap->frequency);
+			fprintf(out, "scan %u ap[%zu] signal=%d\n", line, i, ap->signal);
+			fprintf(out, "scan %u ap[%zu] secured=%d\n", line, i, ap->secured);
+		}
+		ncfg_scan_free(&scan);
+	} else {
+		fprintf(out, "scan %u refused=%s\n", line, err);
+	}
+	staged_close(&staged);
+}
+
+static void dump_wifi_status(FILE *out, unsigned line, const char *response)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_wifi_status_t state;
+	char answer[65538];
+
+	snprintf(answer, sizeof(answer), "%s\n", response);
+	if (!staged_open(&staged, "staging a wifi status for the dump", answer)) {
+		return;
+	}
+	if (ncfg_client_wifi_status(staged.client, "wlan0", &state, err, sizeof(err))) {
+		fprintf(out, "status %u interface=%s\n", line, state.interface);
+		fprintf(out, "status %u state=%s\n", line, state.state);
+		fprintf(out, "status %u ssid=%s\n", line, state.ssid);
+		fprintf(out, "status %u name=%s\n", line, state.name);
+		fprintf(out, "status %u bssid=%s\n", line, state.bssid);
+		fprintf(out, "status %u network=%s\n", line, state.network);
+		ncfg_wifi_status_free(&state);
+	} else {
+		fprintf(out, "status %u refused=%s\n", line, err);
+	}
+	staged_close(&staged);
+}
+
+/*
+ * The naming cases both implementations are asked to render.
+ *
+ * Fixed rather than taken from the witness, and that is not belt-and-braces:
+ * the witness carries exactly one access point and it has a text name, so the
+ * two cases that actually drifted -- a hidden network and an SSID that is not
+ * text -- appear in it nowhere. Drifting the C renderer back to its old
+ * spelling was not caught until this table existed, which is this tree's own
+ * rule about a gate that has never seen its subject.
+ */
+static const int naming_named[] = { 1, 1, 0 };
+static const char *const naming_names[] = { "home", "", "" };
+static const char *const naming_ssids[] = { "686f6d65", "", "ff00ff" };
+
+/* The kind/name pairs the radio heuristic is asked about. Fixed rather than
+ * taken from the witness, because the interesting cases -- a kind the kernel
+ * did not give, a name that only looks wireless -- are ones no witness line
+ * happens to contain. */
+static const char *const radio_kinds[] = { "wlan", "", "bridge", "", "", "wlan" };
+static const char *const radio_names[] = { "wlan0", "wlp0s20f3", "wl-bridge",
+	                   "eth0",  "wwan0",     "enp1s0" };
+
+static void dump_facts(const char *witness, const char *out_path)
+{
+	FILE *file = fopen(witness, "r");
+	FILE *out = fopen(out_path, "w");
+
+	if (!file || !out) {
+		fprintf(stderr, "conformance: cannot open %s or %s\n", witness, out_path);
+		exit(1);
+	}
+
+	char line[65536];
+	unsigned number = 0;
+	while (fgets(line, sizeof(line), file)) {
+		size_t length = strlen(line);
+		while (length && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
+			line[--length] = '\0';
+		}
+		number++;
+		if (!length || line[0] == '#') {
+			continue;
+		}
+		char err[NCFG_ERROR_MAX];
+		ncfg_json_doc_t *doc = ncfg_json_parse(line, length, err, sizeof(err));
+		if (!doc) {
+			continue;
+		}
+		uint32_t tag = ncfg_json_member(doc, ncfg_json_root(doc), "response");
+		int is_scan = ncfg_json_string_equals(doc, tag, "wifi_scan");
+		int is_status = ncfg_json_string_equals(doc, tag, "wifi_status");
+		ncfg_json_free(doc);
+
+		if (is_scan) {
+			dump_scan(out, number, line);
+		} else if (is_status) {
+			dump_wifi_status(out, number, line);
+		}
+	}
+	fclose(file);
+
+	for (size_t i = 0; i < sizeof(naming_named) / sizeof(naming_named[0]); i++) {
+		char *display = ncfg_access_point_display(naming_named[i], naming_names[i],
+		                     naming_ssids[i]);
+		fprintf(out, "name named=%d name=%s ssid=%s display=%s\n", naming_named[i],
+		    naming_names[i], naming_ssids[i], display ? display : "(oom)");
+		free(display);
+	}
+
+	for (size_t i = 0; i < sizeof(radio_kinds) / sizeof(radio_kinds[0]); i++) {
+		fprintf(out, "radio kind=%s name=%s wireless=%d\n", radio_kinds[i],
+		    radio_names[i], ncfg_link_is_wireless(radio_kinds[i], radio_names[i]));
+	}
+	fclose(out);
+}
+
 int main(int argc, char **argv)
 {
+	/* `--facts OUT WITNESS`: the conformance dump, not the test run. */
+	if (argc > 3 && !strcmp(argv[1], "--facts")) {
+		dump_facts(argv[3], argv[2]);
+		return 0;
+	}
+
 	const char *witness = (argc > 1) ? argv[1] : "../docs/schema/socket.json";
 
 	reader_accepts_the_witness(witness);
