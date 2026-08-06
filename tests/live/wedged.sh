@@ -35,7 +35,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
-work=$(mktemp -d /tmp/ncfg-wedged.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-wedged.XXXXXX")
 fake=
 cleanup() {
 	if [ -n "$fake" ]; then

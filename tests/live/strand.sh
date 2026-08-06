@@ -38,7 +38,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 ip link add wgprobe type wireguard 2>/dev/null || skip "this kernel has no wireguard support"
 ip link del wgprobe 2>/dev/null || true
 
-work=$(mktemp -d /tmp/ncfg-strand.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-strand.XXXXXX")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT INT TERM
 mkdir -p "$work/etc/secrets" "$work/run"
