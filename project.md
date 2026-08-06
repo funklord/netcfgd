@@ -1558,6 +1558,11 @@ start without it: every remaining item on that bar needs somebody living with
 netcfgd on real hardware, and the tools to do that are what item 5 is about.
 **Build the clients, then evaluate, then refine.**
 
+**Item 6 is a feature that does not exist rather than work that stalled**, and
+it is the first entry here to arrive from asking what a network daemon ought to
+do rather than from a defect or a measurement: nothing in netcfgd ever asks
+whether a link it prefers actually reaches anything.
+
 Where the last six pieces came from instead, in order: **a live flake nobody had
 chased to the end**, and then each fix exposing the next
 ([0109](docs/decisions/0109-a-daemon-that-does-not-answer-has-not-stopped.md)
@@ -1872,7 +1877,73 @@ the sentence that disposes of an alternative in half a line.
    class of drift. **Raise it before building it**: this is a cross-project
    design question, and `harmonization.md` is explicit that extracting or
    aligning shared technology is its own deliberate piece of work rather than
-   something done while in one repo.
+   something done while in one repo. **Settled in
+   [0116](docs/decisions/0116-a-client-that-needs-the-model-is-rust.md)**: the
+   shape harmonises, the language does not, and the dividing line is the model
+   — `ncfg` needs the compiler and planner locally so constraint 7 keeps it
+   Rust, while `ncfg tui` is a pure socket client and a *new* socket-only client
+   should prefer C over `client/`. The TUI is deliberately not moved.
+
+6. **An uplink is chosen by carrier, and nothing ever asks whether it works.**
+   netcfgd has **no reachability probe and no probe-driven failover**, and this
+   is a gap rather than a decision — no record refuses it, and the words
+   `failover`, `mwan` and `dead gateway` appear nowhere in the tree. The only
+   `ping` in it is `wpa_supplicant`'s control-socket `PING`, which asks whether
+   a *daemon* is answering, not whether a *route* works.
+
+   What exists is adjacent and is not this. **`preference` ranks uplinks and
+   switches on carrier**, which is what a laptop wants when a cable is unplugged
+   and useless when the cable is plugged into a switch that has lost its own
+   uplink — the carrier is up, the link is dead, and netcfgd keeps preferring it.
+   **`portal_check`** fetches a URL **once**, when the interface becomes
+   addressed, and fires the `portal` hook; it is captive-portal detection, not a
+   repeating health check, and its result feeds a hook rather than the planner.
+   Hooks are **outputs**: an `on carrier` hook can run `curl` today and has no
+   way to tell the reconciler what it learned. That missing direction is the
+   feature.
+
+   It earns its place on the constraints rather than despite them. Constraint 9
+   asks whether something is common real-world networking, and dual-WAN failover
+   is one of the most-installed things on an OpenWrt box; constraint 6 asks
+   whether a local operator would want it in their own file, and "use the cable,
+   but fall back to LTE when it stops reaching anything" is exactly that. It
+   needs no new dependency: netcfgd already runs as root and already executes
+   hook programs, so an arbitrary checker — `ping`, `curl`, `wget`, a script —
+   costs nothing the hook runner does not already pay.
+
+   **The shape that fits this architecture: a probe result is an observation,
+   never desired state.** The config says what to prefer and under what
+   condition; the probe outcome joins observed state beside carrier and address;
+   the planner does what it already does with a difference between the two. That
+   keeps §2's determinism intact — the *document* stays byte-identical from the
+   same config, and only the observation moves — and it means `ncfg plan` can
+   explain a failover in the same sentences it uses for everything else, which
+   is the product.
+
+   Four things to get right, and they are where every implementation of this is
+   wrong first:
+
+   - **Hysteresis is the feature, not a refinement.** A probe-driven failover
+     that flaps is worse than none, because it moves the default route under
+     live connections. It needs consecutive-failure and consecutive-success
+     counts and a hold-down, and those belong in the config where an operator
+     can see them, not as constants.
+   - **A reachability probe is the opposite of `portal_check`, and conflating
+     them is a bug.** [0095](docs/decisions/0095-a-portal-check-fetches-the-operators-url.md)
+     makes portal detection plain `http://` **because** a portal intercepts and
+     TLS prevents exactly that. A reachability probe wants the opposite
+     guarantee — that it reached the real destination — so it wants TLS, or a
+     known response, or both. Two questions that look alike and want contrary
+     transports.
+   - **It changes the route the operator may be connected through**, which is
+     the hazard commit-confirm exists for, except netcfgd initiates it. Whether
+     an automatic failover arms a window, and what reverting one would even
+     mean while the probe still fails, is a decision to make before the code.
+   - **An exit status is the contract.** `ping`, `curl -f` and a custom script
+     already agree that zero means reachable, which is why an arbitrary program
+     works here at all -- and it is the same shape as `HookRef`, so the probe
+     should be a reference with a hash and a timeout rather than an inline
+     command line (§2.2).
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one. [0115](docs/decisions/0115-the-way-back-in-is-not-ours-to-configure.md) closes the other half of that question and one next to it: serving SNMP is refused because M9 already picks RESTCONF as the northbound answer, and **IPMI is refused because a BMC is the way back into a machine you have locked yourself out of** — netcfgd cannot tell a BMC setting it made from one the BIOS screen made, and a bad change to the way back in survives the reboot that would otherwise undo it. It passes constraints 3, 6 and 9, which is why it needed a record rather than a sentence.
 
