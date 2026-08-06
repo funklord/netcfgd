@@ -47,6 +47,43 @@ static void ok(const char *what, int condition, const char *detail)
 	failures++;
 }
 
+/* Where a test socket goes, and whether it fits.
+ *
+ * `TMPDIR` for the reason every live script takes it: a suite that can only
+ * run in one directory cannot run beside anything else, and a full `/tmp`
+ * stopped this binary along with the rest.
+ *
+ * The length check is the half that is not optional. `snprintf` truncates
+ * silently, and a truncated unix socket path is not an error -- it is a
+ * *different* path, which two of these could then quietly share. The
+ * hardcoded `/tmp` this replaces always fit, so nothing here had ever needed
+ * to look; a `TMPDIR` an operator chose is not under that guarantee, and
+ * `sun_path` is 108 bytes on Linux and smaller on other systems.
+ *
+ * Returns 0 and reports its own failure when the path will not fit.
+ */
+static int socket_path(char *path, size_t path_size, const char *what, int serial)
+{
+	const char *dir = getenv("TMPDIR");
+	if (dir == NULL || *dir == '\0') {
+		dir = "/tmp";
+	}
+
+	int wanted;
+	if (serial < 0) {
+		wanted = snprintf(path, path_size, "%s/ncfg-client-test-%d.sock", dir,
+		                  (int)getpid());
+	} else {
+		wanted = snprintf(path, path_size, "%s/ncfg-client-test-%d-%d.sock", dir,
+		                  (int)getpid(), serial);
+	}
+	if (wanted < 0 || (size_t)wanted >= path_size) {
+		ok(what, 0, "TMPDIR is too long to hold a unix socket address");
+		return 0;
+	}
+	return 1;
+}
+
 static void equals(const char *what, const char *actual, const char *expected)
 {
 	if (actual && strcmp(actual, expected) == 0) {
@@ -315,7 +352,9 @@ static void connection_reads_lines_however_they_arrive(void)
 	struct sockaddr_un address;
 	char path[sizeof(address.sun_path)];
 
-	snprintf(path, sizeof(path), "/tmp/ncfg-client-test-%d.sock", (int)getpid());
+	if (!socket_path(path, sizeof(path), "the test's own socket path fits an address", -1)) {
+		return;
+	}
 	unlink(path);
 
 	int listener = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -429,7 +468,10 @@ static int listen_somewhere(char *path, size_t path_size)
 	static int serial;
 	struct sockaddr_un address;
 
-	snprintf(path, path_size, "/tmp/ncfg-client-test-%d-%d.sock", (int)getpid(), ++serial);
+	if (!socket_path(path, path_size, "the test's own socket path fits an address",
+	                 ++serial)) {
+		return -1;
+	}
 	unlink(path);
 
 	memset(&address, 0, sizeof(address));
