@@ -675,28 +675,37 @@ fn wifi(app: &App, width: usize) -> Vec<String> {
 	entries
 		.iter()
 		.map(|entry| {
-			let name = entry
-				.get("name")
-				.and_then(serde_json::Value::as_str)
-				.unwrap_or("<not text>");
+			// Was `<not text>`, which named the *condition* and threw away
+			// the network: two unprintable SSIDs drew as one row, and no
+			// key would have told them apart. The shared renderer keeps
+			// the hex, which is the only name such a network has.
+			let name = crate::access_point_name(
+				entry.get("name").and_then(serde_json::Value::as_str),
+				entry
+					.get("ssid")
+					.and_then(serde_json::Value::as_str)
+					.unwrap_or(""),
+			);
 			let signal = entry
 				.get("signal")
 				.and_then(serde_json::Value::as_i64)
 				.unwrap_or(0);
 			let secured = entry.get("secured").and_then(serde_json::Value::as_bool) == Some(true);
 			// The marker that makes decision 0013's boundary visible: `c` is
-			// joinable now, blank needs config written first.
-			let known = if entry.get("configured").is_some() {
-				"c"
-			} else {
-				" "
-			};
+			// joinable now, blank needs config written first. The id follows
+			// the name as `[block]`, the way `ncfg wifi scan` and the GUI's
+			// column both spell it -- the marker is a fixed column a reader
+			// scans down, not a second concept.
+			let configured = entry.get("configured").and_then(serde_json::Value::as_str);
+			let known = if configured.is_some() { "c" } else { " " };
+			let block = configured.map_or_else(String::new, |id| format!("  [{id}]"));
 			fit(
 				&format!(
-					"{known} {:<28} {:>4} dBm  {}",
+					"{known} {:<28} {:>4} dBm  {:<7}{}",
 					name,
 					signal,
-					if secured { "secured" } else { "open" }
+					if secured { "secured" } else { "open" },
+					block
 				),
 				width,
 			)
