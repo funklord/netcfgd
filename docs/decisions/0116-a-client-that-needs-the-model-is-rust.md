@@ -78,16 +78,20 @@ That is a deferral, not a refusal. It becomes worth revisiting if something
 real asks for it -- a build with no Rust toolchain, or wanting the TUI and the
 GUI to share pane logic rather than merely agree about it.
 
-## The prerequisite, which is missing
+## The prerequisite, which was missing
 
 Two implementations are only two witnesses if there is a specification to be
-independent *against*. There is not: `docs/schema/socket.json` is 3 KB of
-example messages, there is no prose protocol document in `docs/`, and nothing
-runs both clients against one server and compares. Today the second
-implementation is not a check on the first, it is a guess about it -- and 0082
-found its defect by accident rather than by any gate.
+independent *against*. When this was written there was not:
+`docs/schema/socket.json` was 3 KB of example messages, there was no prose
+protocol document in `docs/`, and nothing ran both clients against one server
+and compared. The second implementation was not a check on the first, it was a
+guess about it -- and 0082 found its defect by accident rather than by any
+gate.
 
-**So the protocol specification and a conformance test running both clients
+**Both halves exist now**: `make conformance` diffs what the two clients
+extract, and `docs/socket-protocol.md` says in prose what they are agreeing
+to -- written afterwards, and it immediately found that the daemon accepts a
+request member nobody defined. **The specification and a conformance test
 come before any third implementation**, and before the harmonisation above is
 worth much. That work is also what the sibling's clients would be written
 against if the two projects ever do share anything.

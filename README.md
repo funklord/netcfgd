@@ -5,11 +5,14 @@ source of truth, whose runtime state is greppable files in `/run`, and whose
 behaviour is a visible reconcile loop: `ncfg plan` shows what would change,
 `ncfg apply` makes it so. Terraform for interfaces, roughly.
 
-**Status: pre-1.0, and substantially built.** Wired and wireless addressing,
+**Status: a proof of concept, substantially built and not yet proven.** Wired and wireless addressing,
 DHCPv4/v6 and prefix delegation, WireGuard, PPPoE, OpenVPN, bridges, bonds,
 VLANs and VXLANs, DNS scopes, access points, a control socket, a TUI, and a
 NetworkManager shim are all implemented and exercised against real kernels and
-real daemons. Interfaces are not frozen and there has been no release.
+real daemons. Interfaces are not frozen and there has been no release — and
+nothing here has driven a real radio, run on the OpenWrt-class device it was
+designed for, or been anybody's daily network configuration. `project.md`
+section 10 keeps that list under *What would prove it*.
 
 ## Why it exists
 
@@ -74,7 +77,7 @@ which stops netcfgd operating on it and changes nothing else.
 |---|---|
 | `netcfgd` | the daemon: watches config, reconciles, answers the control socket |
 | `ncfg` | the CLI — `plan`, `apply`, `explain`, `monitor`, `wifi`, `reload`, `reset` |
-| `ncfg tui` | four panes over the public socket; 80x24, no colour required |
+| `ncfg tui` | five panes over the public socket; 80x24, no colour required |
 | `crates/` | the Rust workspace: model, compiler, planner, netlink, apply, daemon |
 | `adapters/netcfgd-nm` | a NetworkManager shim, so `nmcli` and desktop applets work |
 | `gui/` | a Qt Widgets client, desktop and Android, over `client/` |
@@ -95,8 +98,11 @@ audited exception and carries its own fuzz targets.
   authoritative record of intent. It wins over the code.
 - **[netcfgd-design.md](netcfgd-design.md)** — the reference design, and where
   the rationale lives.
-- **[docs/decisions/](docs/decisions/)** — 114 decision records, each one a
+- **[docs/decisions/](docs/decisions/)** — 116 decision records, each one a
   question that was settled and the measurement that settled it.
+- **[docs/socket-protocol.md](docs/socket-protocol.md)** — the control
+  socket: what a client sends, what the daemon answers, and what an
+  implementation has to get right.
 - **[docs/interface-report.md](docs/interface-report.md)** — the contract a
   DHCP client, pppd script or VPN helper writes into.
 - **[code-style.md](code-style.md)** — tabs, `snake_case`, lowercase filenames,

@@ -621,6 +621,39 @@ Source, comments and commit messages are **ASCII**; write `--` where prose would
 
 Changing any of the above is a convention change: raise it rather than adjusting the default in passing.
 
+### `situ` against the control socket, and why the answer splits
+
+Re-evaluated 2026-08-07, while writing `docs/socket-protocol.md`, and the
+answer changed on one half since `gui/project.md` §6.1 last looked. **situ has
+grown text-protocol support** — `delimited-member`, `unbounded-scan`,
+`scanned-predecessor`, with HTTP as its worked example — so a line ending at
+`\n` is now something it can describe.
+
+**The framing: yes in principle, and it validates a decision already taken.**
+situ's `unbounded-scan` rule says a delimited member with no cap on the scan
+takes an effect on read. That is `MAX_LINE` exactly: its model would have
+*predicted* the bound this protocol needs, rather than the bound being noticed
+because somebody thought about a hostile client. Worth recording even though
+nothing changes, because a tool that derives a constraint you reached by
+judgement is a tool worth trusting on the constraint you have not reached yet.
+
+**The payload: no, and not for a reason that will age.** situ describes data
+that already has a binary representation. A JSON object has no byte layout to
+pin — members may be in any order, whitespace is insignificant, escaping
+varies — and the protocol makes non-canonicality a *rule* rather than an
+accident, because nothing hashes a socket message. Nearly every member would
+come back `canonical := NonCanonical`, which is situ correctly reporting that
+there is nothing here for it to be exact about. A schema pinning this
+encoder's bytes would pin the encoder rather than the contract, and a second
+implementation held to it would be wrong the first time serde reordered a
+field.
+
+**And the payload already has the mechanism a self-describing format wants**:
+a witness generated from the daemon's own types. situ's value is exactness
+about bytes; the witness's is completeness about shapes. They answer different
+questions, and the socket needs the second. `wire/`'s binary frame is where
+situ is the right tool here, unchanged from §6.1.
+
 ### `fmake` against `client/` and `gui/`, and why neither moved
 
 Evaluated 2026-08-04, by running it rather than reading about it. `fmake` builds C and C++ from an unannotated tree, and both C directories here are the shape it is for: `client/` is an 89-line hand-written Makefile, `gui/` is qmake.
@@ -2092,6 +2125,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **A negative check with no event of its own needs a bound somebody measured.** "dhcpcd did not write that file" is satisfied by "has not written it yet", and there is nothing to wait for, because the whole assertion is that nothing happens. The answer that works is to wait twice as long as the counter-proof needed for the same exchange *in the same run on the same machine* — which scales with a loaded machine, where a sleep somebody guessed does not. That is also the only kind of wait this repository has that cannot be tuned into passing.
 - **An exit status ignored for a good reason hides a defect of a different shape.** `dhcpcd -k` says "dhcpcd is not running" and exits 1, which is the ordinary answer on every machine whose client is udhcpc — so netcfgd could not check the status, and the *same* sentence appearing because the pid file's name was wrong was invisible. The two failures are indistinguishable from the outside, and only running the daemon showed which one was happening. Where a status is deliberately unchecked, the comment saying why is also the note saying what it can no longer catch.
 - **Breaking a gate to prove it fails needs the artefact rebuilt.** Restoring a file from a copy can leave it with an *older* mtime than the broken build, and cargo then keeps the broken artefact — so the "restored" run silently tests the break. It looked like a new test failing for no reason. `touch` after restoring, or the whole break-it-and-watch-it-go-red method reports on a binary nobody has.
+- **Writing the specification down found a defect that pointing at the witness could not.** The socket had a generated witness, a second implementation parsing it and a conformance gate diffing them, and all three were green — but nothing said in prose what the contract *was*, so nothing had ever asked whether the daemon rejects a request member nobody defined. It does not: `{"request":"status","bogus":1}` is **accepted**, while a payload struct carrying an unknown member is refused. The payloads are `deny_unknown_fields` and the `Request` enum cannot be, because serde does not support that attribute on an internally-tagged enum. So **the envelope does exactly what section 2 forbids for the document** — silent field-dropping — on the surface that reads untrusted bytes, and the strictness is on the inside where the bytes are already trusted. Found by measuring a sentence that was about to be written as fact, which is the whole argument for a specification: a witness pins what the daemon *does*, and only prose states what it *must*.
 - **The conformance gate passed while comparing nothing, and the witness is why.** `make conformance` runs both client implementations over the same bytes and diffs what they extract — the first gate here that compares two *clients* rather than a client against the daemon. Its first version was **vacuous**, and the way that was found is the method: drifting the C renderer back to its old spelling did not turn it red. The witness carries **one** access point and it has a text name, so `hex:` and `(hidden)` — the two cases that had actually drifted — appear in `docs/schema/socket.json` nowhere at all. A comparison over data that does not contain the disagreement agrees perfectly. Fixed by asking both sides a fixed table of cases rather than only the witness's, after which the same break fails with `rust: display=hex:ff00ff` against `c: display=<ff00ff>`, and dropping the kind test from the C radio predicate fails with `rust: wireless=1` against `c: wireless=0`. **And the witness gap it exposed is closed**: `ScanEntry`'s `name` and `configured` and all four of `WifiState`'s optionals are `skip_serializing_if`, so a sample that filled every one of them pinned only the *present* form — the bytes the daemon actually sends for an unprintable SSID, an unconfigured network or a radio associated with nothing were pinned by nothing at all. The witness carries those shapes now, and the same break fails on a *witness* line rather than only on the table beside it. **No version bump: no type changed.** The bytes moved because the samples grew, which is the witness doing its job rather than the schema doing anything.
 - **Three clients had three spellings for one fact, and one of them destroyed the fact.** An access point's name arrives three ways — text, present-and-empty for a hidden network, absent when the SSID is not UTF-8 — and each client had invented its own rendering. `ncfg wifi scan` said `hex:ff00ff` and drew a hidden network as a blank; the TUI said **`<not text>`**, naming the *condition* and throwing the network away, so two unprintable SSIDs became one row that no keystroke could tell apart; the GUI then added a fourth spelling. None of this was wrong enough to fail anything, because **no gate compares two clients** — the schema witness pins what the daemon *sends*, not what a screen makes of it. One renderer now, called by both Rust clients, with the C one holding the same words by comment until the socket has a specification ([0116](docs/decisions/0116-a-client-that-needs-the-model-is-rust.md)). The test that matters is the one asserting two unprintable networks do not render alike: it fails on the old wording with `left: "<not text>", right: "<not text>"`, which is the defect stated as an assertion. **A vocabulary is a thing that drifts, and nothing in this tree was watching it.**
 - **A convention adopted in one file has not been adopted.** The kernel commit format was taken into `code-style.md` §8 and nowhere else, so §9 of *this* file went on stating the superseded rule — 72 columns, capitalised, no subsystem prefix, no trailers at all — for the forty-five commits that followed, while `tools/hooks/commit-msg` was enforcing 75 and the log itself had already switched. Two documents in one repository, both current, flatly contradicting each other, and nothing red: **no gate reads prose**, which this section already knew about comments and is no different about rules. What settled it was neither document but `git log`, where the practice was visible and unanimous — the tell being that a document describing what people do can be checked against what they did. The reconciliation deletes the restatement rather than correcting it, because a rule stated in two places is a rule that will drift again.
@@ -2103,5 +2137,7 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 ---
 
 ## 11. Reference
+
+The control socket's contract is **[docs/socket-protocol.md](docs/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `docs/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
 
 Full rationale, principles, comparisons, security model, migration paths and the northbound-adapter discipline are in **`netcfgd-design.md`** (v0.6). Read §2 (principles), §4 (architecture and the compiler/reconciler seam), §9.2 (the one-way rule) and §10 (embedded tiers) before making structural decisions.
