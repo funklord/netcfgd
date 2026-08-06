@@ -743,6 +743,106 @@ static void a_status_becomes_links(void)
 	staged_close(&staged);
 }
 
+/*
+ * Three access points, chosen for the three ways a network can be named.
+ *
+ * `home` has a text name and a `network` block. `hidden` has a name that is
+ * present and empty, which is what a hidden network broadcasts. The third sends
+ * no `name` at all, which is what the daemon does when the SSID is not valid
+ * UTF-8 -- and the hex is the only thing that can be shown for it. A client that
+ * flattened those would draw the second and third identically.
+ */
+static const char scan_response[] =
+    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":["
+    "{\"bssid\":\"00:11:22:33:44:55\",\"frequency\":2412,\"signal\":-40,"
+    "\"secured\":true,\"ssid\":\"686f6d65\",\"name\":\"home\",\"configured\":\"home\"},"
+    "{\"bssid\":\"00:11:22:33:44:66\",\"frequency\":5180,\"signal\":-58,"
+    "\"secured\":false,\"ssid\":\"\",\"name\":\"\"},"
+    "{\"bssid\":\"00:11:22:33:44:77\",\"frequency\":2437,\"signal\":-71,"
+    "\"secured\":true,\"ssid\":\"ff00ff\"}]}\n";
+
+static void a_scan_becomes_access_points(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_scan_t scan;
+
+	if (!staged_open(&staged, "a scan answer can be staged", scan_response)) {
+		return;
+	}
+	if (!ncfg_client_wifi_scan(staged.client, "wlan0", &scan, err, sizeof(err))) {
+		ok("a scan converts to access points", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("a scan converts to access points", 1, NULL);
+	ok("one row per access point", scan.count == 3u, NULL);
+	equals("the interface comes back with them", scan.interface, "wlan0");
+
+	if (scan.count == 3u) {
+		equals("a text name arrives as text", scan.items[0].name, "home");
+		ok("and is marked as having been sent", scan.items[0].named == 1, NULL);
+		/* The distinction the whole struct exists for. Both of these have
+		 * an empty `name` after conversion and they are not the same
+		 * network: one broadcast an empty SSID, the other an SSID that is
+		 * not text at all. */
+		ok("a hidden network's empty name was sent", scan.items[1].named == 1, NULL);
+		ok("an unprintable SSID sends no name at all", scan.items[2].named == 0, NULL);
+		equals("and keeps its hex, which is the only name it has",
+		       scan.items[2].ssid, "ff00ff");
+		/* This is what decides whether a client may offer to join it. */
+		equals("a configured network names its block", scan.items[0].configured, "home");
+		equals("and an unconfigured one names nothing", scan.items[1].configured, "");
+		ok("the numbers come through",
+		   scan.items[0].frequency == 2412 && scan.items[0].signal == -40
+		       && scan.items[0].secured == 1,
+		   NULL);
+		ok("and an open network is not marked secured", scan.items[1].secured == 0, NULL);
+	}
+	ncfg_scan_free(&scan);
+	staged_close(&staged);
+}
+
+static void joining_names_a_network_and_never_a_secret(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[512];
+
+	char answers[512];
+	snprintf(answers, sizeof(answers), "%s%s", "{\"response\":\"ok\"}\n",
+	     "{\"response\":\"ok\"}\n");
+	if (!staged_open(&staged, "a join can be staged", answers)) {
+		return;
+	}
+
+	/* By id, never by SSID and never with a credential: that is decision
+	 * 0013's boundary expressed as a request, and the reason no passphrase
+	 * can cross this interface in either direction. */
+	if (ncfg_client_wifi_connect(staged.client, "wlan0", "home", err, sizeof(err))) {
+		equals("a join names the interface and the network block",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"wifi_connect\",\"interface\":\"wlan0\","
+		       "\"network\":\"home\"}\n");
+	} else {
+		ok("a join names the interface and the network block", 0, err);
+	}
+
+	/* A network id is whatever an operator labelled a block, and 0069 lets
+	 * that be any string the config language accepts. Interpolated, this one
+	 * would join something else. */
+	if (ncfg_client_wifi_connect(staged.client, "wlan0", "we\"ird", err, sizeof(err))) {
+		equals("and a label with a quote in it is escaped rather than interpolated",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"wifi_connect\",\"interface\":\"wlan0\","
+		       "\"network\":\"we\\\"ird\"}\n");
+	} else {
+		ok("and a label with a quote in it is escaped rather than interpolated", 0, err);
+	}
+
+	staged_close(&staged);
+}
+
 static const char journal_response[] =
     "{\"response\":\"journal\",\"records\":["
     "{\"id\":1,\"op\":\"addr.add\",\"interface\":\"eth0\","
@@ -1185,6 +1285,8 @@ int main(int argc, char **argv)
 	a_refusal_is_an_answer_not_a_failure();
 	a_plan_becomes_a_model();
 	a_status_becomes_links();
+	a_scan_becomes_access_points();
+	joining_names_a_network_and_never_a_secret();
 	an_apply_becomes_a_journal();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
 	the_handshake_says_what_this_connection_may_do();

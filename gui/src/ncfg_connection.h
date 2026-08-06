@@ -43,6 +43,9 @@ struct ncfg_link_row {
 	QString mac;
 	QString addresses;
 	int     mtu = 0;
+	/* Whether the wifi tab should offer this one. Answered below the seam so
+	 * that the rule lives with the other models rather than in a table. */
+	bool    wireless = false;
 };
 
 /*
@@ -108,6 +111,43 @@ struct ncfg_record_row {
 	QString   detail;
 };
 
+/*
+ * One access point a scan found.
+ *
+ * `display` is what a row shows and is built below the seam's rules rather than
+ * by the table: a network whose SSID is not valid UTF-8 has no text name at all,
+ * and one that is hidden has a name that is genuinely empty. Those are different
+ * networks and a table that printed both as blank would merge them, so the
+ * distinction is resolved once, here, into something a cell can hold.
+ *
+ * `configured` is the network id and empty means the configuration has no
+ * `network` block for it. That is the difference between an entry this client
+ * can join and one that needs a config file written first (0013, 0069) -- shown
+ * rather than discovered by pressing a button and being refused.
+ */
+struct ncfg_access_point_row {
+	QString bssid;
+	QString ssid; /* hex, the canonical name */
+	QString display;
+	QString configured;
+	int     frequency = 0;
+	int     signal = 0;
+	bool    secured = false;
+
+	bool joinable() const { return !configured.isEmpty(); }
+};
+
+/* What a radio is doing. `state` is the supplicant's own word, kept rather than
+ * translated so that this window and every other tool on the machine say the
+ * same thing about the same condition. */
+struct ncfg_wifi_status_row {
+	QString interface;
+	QString state;
+	QString display;
+	QString bssid;
+	QString network;
+};
+
 /* One event off a monitor stream. `raw` travels with the rest because an event
  * netcfgd grows a field for should not become invisible to a client built
  * before it. */
@@ -167,6 +207,25 @@ public:
 	 */
 	bool links(QList<ncfg_link_row> *out, QString *error);
 	bool plan(ncfg_plan_data *out, QString *error);
+
+	/*
+	 * The wireless half, on one named interface.
+	 *
+	 * A scan blocks for as long as the radio takes to visit its channels,
+	 * which on real hardware is seconds. It is called from the pane's own
+	 * action rather than from a timer for that reason: a window that scanned
+	 * on a refresh tick would freeze on a cadence nobody asked for.
+	 *
+	 * `wifi_connect` names a network by its id in the document and carries no
+	 * credential, which is not this class being careful -- it is the only
+	 * shape the socket offers (0013), and the reason no passphrase can leak
+	 * through a client. Joining a network the configuration does not describe
+	 * is writing a file (0069) and is not available here at all.
+	 */
+	bool wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out, QString *error);
+	bool wifi_status(const QString &interface, ncfg_wifi_status_row *out, QString *error);
+	bool wifi_connect(const QString &interface, const QString &network, QString *error);
+	bool wifi_disconnect(const QString &interface, QString *error);
 
 	/*
 	 * Apply, with a confirm window in seconds or 0 for none.

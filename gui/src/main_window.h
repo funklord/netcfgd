@@ -28,6 +28,7 @@ class QTimer;
 
 class ncfg_connection;
 class ncfg_devices_view;
+class ncfg_wifi_view;
 class ncfg_events_view;
 class ncfg_plan_view;
 
@@ -65,6 +66,7 @@ private:
 	QTimer            *settle;
 	QTabWidget        *tabs;
 	ncfg_devices_view *devices;
+	ncfg_wifi_view    *wifi;
 	ncfg_plan_view    *plan;
 	ncfg_events_view  *events;
 	QLabel            *where;

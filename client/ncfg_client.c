@@ -540,6 +540,11 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->up = ncfg_json_bool(doc, ncfg_json_member(doc, link, "up"), 0);
 		item->carrier = ncfg_json_bool(doc, ncfg_json_member(doc, link, "carrier"), 0);
 		item->addresses = item->name ? join_addresses(doc, addresses, item->name) : NULL;
+		/* Kind first, name second, and never name only: the kernel's word
+		 * is a fact where it exists and the prefix is a convention that
+		 * happens to hold on every machine anybody has run this on. */
+		item->wireless = (item->kind && !strcmp(item->kind, "wlan"))
+		         || (item->name && !strncmp(item->name, "wl", 2));
 		if (!item->name || !item->kind || !item->mac || !item->addresses) {
 			set_error(err, err_size, "out of memory");
 			ncfg_links_free(out);
@@ -901,6 +906,251 @@ int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size
 		return 0;
 	}
 	int done = !took_refusal(doc, err, err_size) && convert_plan(doc, out, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
+void ncfg_scan_free(ncfg_scan_t *scan)
+{
+	if (!scan) {
+		return;
+	}
+	for (size_t i = 0; i < scan->count; i++) {
+		free(scan->items[i].bssid);
+		free(scan->items[i].ssid);
+		free(scan->items[i].name);
+		free(scan->items[i].configured);
+	}
+	free(scan->items);
+	free(scan->interface);
+	memset(scan, 0, sizeof(*scan));
+}
+
+void ncfg_wifi_status_free(ncfg_wifi_status_t *status)
+{
+	if (!status) {
+		return;
+	}
+	free(status->interface);
+	free(status->state);
+	free(status->ssid);
+	free(status->name);
+	free(status->bssid);
+	free(status->network);
+	memset(status, 0, sizeof(*status));
+}
+
+/*
+ * `{"request":"verb","interface":"name"}`, with the name quoted.
+ *
+ * Returns 0 if it would not fit, which every caller turns into a refusal. A
+ * truncated request is not a smaller request; it is a different one, and this
+ * one names an interface.
+ */
+static int wifi_request(char *out, size_t out_size, const char *verb, const char *interface)
+{
+	int head = snprintf(out, out_size, "{\"request\":\"%s\",\"interface\":", verb);
+
+	if (head < 0 || (size_t)head >= out_size) {
+		return 0;
+	}
+	size_t at = (size_t)head;
+	size_t span = ncfg_client_quote(interface, out + at, out_size - at);
+	if (!span) {
+		return 0;
+	}
+	at += span;
+	if (at + 2 > out_size) {
+		return 0;
+	}
+	out[at++] = '}';
+	out[at] = '\0';
+	return 1;
+}
+
+static int convert_scan(const ncfg_json_doc_t *doc, ncfg_scan_t *out, char *err, size_t err_size)
+{
+	uint32_t root = ncfg_json_root(doc);
+	uint32_t points = ncfg_json_member(doc, root, "access_points");
+	uint32_t count = ncfg_json_count(doc, points);
+
+	out->interface = member_text(doc, root, "interface");
+	if (!out->interface) {
+		set_error(err, err_size, "out of memory");
+		return 0;
+	}
+	if (!count) {
+		/* A radio that found nothing is a real answer, and the same
+		 * calloc(0) trap convert_links() documents applies here. */
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_scan_free(out);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, points, i);
+		ncfg_access_point_t *item = &out->items[i];
+
+		item->bssid = member_text(doc, entry, "bssid");
+		item->ssid = member_text(doc, entry, "ssid");
+		item->name = member_text(doc, entry, "name");
+		/* Asked separately from the text, because absent and empty are
+		 * different networks: the daemon omits `name` when the SSID is
+		 * not valid UTF-8, and a hidden network broadcasts an SSID that
+		 * genuinely is empty. member_text() flattens both to "", so the
+		 * distinction has to come from the member itself. */
+		item->named = ncfg_json_member(doc, entry, "name") != NCFG_JSON_NONE;
+		item->configured = member_text(doc, entry, "configured");
+		item->frequency = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "frequency"), 0);
+		item->signal = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "signal"), 0);
+		item->secured = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "secured"), 0);
+		if (!item->bssid || !item->ssid || !item->name || !item->configured) {
+			set_error(err, err_size, "out of memory");
+			ncfg_scan_free(out);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int convert_wifi_status(const ncfg_json_doc_t *doc, ncfg_wifi_status_t *out, char *err,
+                   size_t err_size)
+{
+	uint32_t root = ncfg_json_root(doc);
+
+	out->interface = member_text(doc, root, "interface");
+	out->state = member_text(doc, root, "state");
+	out->ssid = member_text(doc, root, "ssid");
+	out->name = member_text(doc, root, "name");
+	out->bssid = member_text(doc, root, "bssid");
+	out->network = member_text(doc, root, "network");
+	if (!out->interface || !out->state || !out->ssid || !out->name || !out->bssid
+	    || !out->network) {
+		set_error(err, err_size, "out of memory");
+		ncfg_wifi_status_free(out);
+		return 0;
+	}
+	return 1;
+}
+
+int ncfg_client_wifi_scan(ncfg_client_t *client, const char *interface, ncfg_scan_t *out,
+              char *err, size_t err_size)
+{
+	if (!out || !interface) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	char request[512];
+	if (!wifi_request(request, sizeof(request), "wifi_scan", interface)) {
+		set_error(err, err_size, "interface name is too long to ask about");
+		return 0;
+	}
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size) && convert_scan(doc, out, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
+int ncfg_client_wifi_status(ncfg_client_t *client, const char *interface,
+                ncfg_wifi_status_t *out, char *err, size_t err_size)
+{
+	if (!out || !interface) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	char request[512];
+	if (!wifi_request(request, sizeof(request), "wifi_status", interface)) {
+		set_error(err, err_size, "interface name is too long to ask about");
+		return 0;
+	}
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size) && convert_wifi_status(doc, out, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
+int ncfg_client_wifi_connect(ncfg_client_t *client, const char *interface, const char *network,
+                 char *err, size_t err_size)
+{
+	if (!interface || !network) {
+		set_error(err, err_size, "no network to join");
+		return 0;
+	}
+
+	char request[768];
+	int head = snprintf(request, sizeof(request), "{\"request\":\"wifi_connect\",\"interface\":");
+	if (head < 0 || (size_t)head >= sizeof(request)) {
+		return 0;
+	}
+	size_t at = (size_t)head;
+	size_t span = ncfg_client_quote(interface, request + at, sizeof(request) - at);
+	if (!span) {
+		set_error(err, err_size, "interface name is too long to ask about");
+		return 0;
+	}
+	at += span;
+	int mid = snprintf(request + at, sizeof(request) - at, ",\"network\":");
+	if (mid < 0 || (size_t)mid >= sizeof(request) - at) {
+		return 0;
+	}
+	at += (size_t)mid;
+	/* The network's id, quoted for the same reason the interface is: it comes
+	 * from a `network` block whose label an operator chose, and 0069 lets that
+	 * be any string the config language accepts. */
+	span = ncfg_client_quote(network, request + at, sizeof(request) - at);
+	if (!span) {
+		set_error(err, err_size, "network name is too long to ask about");
+		return 0;
+	}
+	at += span;
+	if (at + 2 > sizeof(request)) {
+		return 0;
+	}
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
+int ncfg_client_wifi_disconnect(ncfg_client_t *client, const char *interface, char *err,
+                size_t err_size)
+{
+	if (!interface) {
+		set_error(err, err_size, "no interface to leave");
+		return 0;
+	}
+
+	char request[512];
+	if (!wifi_request(request, sizeof(request), "wifi_disconnect", interface)) {
+		set_error(err, err_size, "interface name is too long to ask about");
+		return 0;
+	}
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
 	ncfg_json_free(doc);
 	return done;
 }

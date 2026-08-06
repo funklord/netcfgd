@@ -40,7 +40,8 @@ SOURCES += \
 	src/main_window.cpp \
 	src/monitor_stream.cpp \
 	src/ncfg_connection.cpp \
-	src/plan_view.cpp
+	src/plan_view.cpp \
+	src/wifi_view.cpp
 
 HEADERS += \
 	src/apply_dialog.h \
@@ -49,4 +50,5 @@ HEADERS += \
 	src/main_window.h \
 	src/monitor_stream.h \
 	src/ncfg_connection.h \
-	src/plan_view.h
+	src/plan_view.h \
+	src/wifi_view.h

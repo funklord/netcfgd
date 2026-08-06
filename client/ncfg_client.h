@@ -123,6 +123,21 @@ typedef struct {
 	int   up;
 	int   carrier;   /* up and carrier are separate answers: no cable is not
 	          * the same state as not configured */
+	/*
+	 * Whether this link is a radio, so that a client can offer the wireless
+	 * screens for it.
+	 *
+	 * Here rather than in a screen because it is not a visual question, and
+	 * because the rule is a *heuristic* that should exist once: the kernel's
+	 * link kind is `wlan` where it says anything at all, and otherwise the
+	 * name is the only clue. `ncfg tui` asks it the same way, which is one
+	 * rule in two languages until the protocol is specified -- the exact drift
+	 * decision 0116 names and does not yet fix.
+	 *
+	 * The name half is a convention rather than a fact, in the same way `eth0`
+	 * is, so it is the fallback and never the first test.
+	 */
+	int   wireless;
 } ncfg_link_t;
 
 typedef struct {
@@ -272,10 +287,72 @@ int ncfg_client_tiers(ncfg_client_t *client, ncfg_tiers_t *out, char *err, size_
  */
 int ncfg_client_confirm_default(ncfg_client_t *client, unsigned *out, char *err, size_t err_size);
 
+/*
+ * One access point a scan found.
+ *
+ * THREE NAMES, AND THEY ARE THREE
+ *   `ssid` is hex and is the canonical one: an SSID is 32 arbitrary octets
+ *   (project.md sec 2.1), so it is the only field always present and the only
+ *   one two networks cannot collide in after rendering.
+ *
+ *   `name` is that SSID as text, and `named` says whether the daemon sent it at
+ *   all. The daemon omits it rather than mangling it, "so a client can tell
+ *   'not text' from 'empty'" -- and an empty name is a real thing, because that
+ *   is what a hidden network broadcasts. Collapsing the two would make a hidden
+ *   network and a network named in Shift-JIS the same row.
+ *
+ *   `configured` is the id of the `network` block describing it, and empty when
+ *   the configuration has none. It is what decides whether this entry can be
+ *   joined at all: decision 0013 puts joining a *known* network in the `wifi`
+ *   tier, and writing config for an unknown one in `admin`. The proto's own note
+ *   on this field asks the client to show the difference, because the
+ *   alternative is the operator discovering it by being refused.
+ */
+typedef struct {
+	char *bssid;
+	char *ssid;       /* hex; always present */
+	char *name;       /* the SSID as text, "" when it is not text */
+	char *configured; /* network id, "" when the configuration has none */
+	int   named;      /* whether a text name was sent at all */
+	int   frequency;  /* MHz */
+	int   signal;     /* dBm, closer to zero is stronger */
+	int   secured;    /* joining it needs a credential */
+} ncfg_access_point_t;
+
+typedef struct {
+	char                *interface;
+	ncfg_access_point_t *items;
+	size_t               count; /* strongest first, as the daemon ordered them */
+} ncfg_scan_t;
+
+/*
+ * What a radio is currently doing.
+ *
+ * `state` is the supplicant's own word -- `COMPLETED`, `SCANNING`, `INACTIVE`
+ * -- and is not translated here, for the reason every other daemon word in this
+ * header is kept: a client that invented a vocabulary would give an operator two
+ * names for one condition, and the supplicant's is the one that matches every
+ * other tool on the machine.
+ *
+ * `network` empty while associated is worth showing rather than hiding. After
+ * decision 0015 the supplicant holds no state of its own, so a radio on a
+ * network the document did not put there is a discrepancy, not a gap.
+ */
+typedef struct {
+	char *interface;
+	char *state;
+	char *ssid; /* hex, "" when not associated */
+	char *name; /* as text, "" when not associated or not text */
+	char *bssid;
+	char *network; /* the `network` block it came from */
+} ncfg_wifi_status_t;
+
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_plan_free(ncfg_plan_t *plan);
 void ncfg_journal_free(ncfg_journal_t *journal);
 void ncfg_event_free(ncfg_event_t *event);
+void ncfg_scan_free(ncfg_scan_t *scan);
+void ncfg_wifi_status_free(ncfg_wifi_status_t *status);
 
 /*
  * The three requests the models above are for.
@@ -287,6 +364,34 @@ void ncfg_event_free(ncfg_event_t *event);
  */
 int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_t err_size);
 int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size_t err_size);
+
+/*
+ * The wireless half, on one named interface.
+ *
+ * `interface` is quoted rather than interpolated on the way out, for the reason
+ * ncfg_client_quote() exists: a name is not guaranteed to be a bare word.
+ *
+ * A scan takes as long as a scan takes -- seconds, on a real radio, because the
+ * card has to visit the channels. That is the caller's problem to present and
+ * not this layer's to hide behind a cache: a stale list of access points is a
+ * list of places that may no longer be there.
+ *
+ * ncfg_client_wifi_connect() names the network by its **id in the document**,
+ * never by SSID and never with a credential. That is decision 0013's boundary
+ * expressed as a signature: this call cannot be used to join something the
+ * configuration does not already describe, so it stays inside the `wifi` tier,
+ * and no passphrase ever crosses this interface in either direction (0029,
+ * 0031). Joining something new is writing a config file (0069) and is not a
+ * socket operation at all.
+ */
+int ncfg_client_wifi_scan(ncfg_client_t *client, const char *interface, ncfg_scan_t *out,
+              char *err, size_t err_size);
+int ncfg_client_wifi_status(ncfg_client_t *client, const char *interface,
+                ncfg_wifi_status_t *out, char *err, size_t err_size);
+int ncfg_client_wifi_connect(ncfg_client_t *client, const char *interface, const char *network,
+                 char *err, size_t err_size);
+int ncfg_client_wifi_disconnect(ncfg_client_t *client, const char *interface, char *err,
+                size_t err_size);
 
 /*
  * What an operator has agreed to, beyond the plan itself.
