@@ -1,8 +1,14 @@
 # netcfgd — implementation brief
 
-**Status:** pre-1.0 and substantially built — milestones M1 through M9 are worked, with the state of each in §7 and what to pick up next in §10. This document is the working brief; `netcfgd-design.md` is the reference design and holds all rationale. Where the two disagree, this document wins for *what to build*, the design doc wins for *why*.
+**Status: a proof of concept, substantially built and not yet proven.** Milestones M1 through M9 are worked, with the state of each in §7 and what to pick up next in §10. The design is what is under test, and **§10's *What would prove it* is the bar** — until those are met, this is a system that works everywhere it has been run and has not been run in the places that matter.
 
-*(This line read "pre-implementation, nothing is built yet" until 2026-08-06, roughly two hundred commits after it stopped being true. §7 had been kept current throughout, so the file contradicted itself in its own header — see §10's note on a document nobody re-reads from the top.)*
+**Deferred is not broken, and this is the distinction to read the document with.** Size, language and multiple client implementations are all *refinements that come after the concept proves itself*, not promises being missed now. Reading a deferred measurement as a contradiction produces work nobody wanted: the 2.3 MB install against §10.2's sub-megabyte router figure is a measurement not yet taken on a target nobody has built for, and `size-budget.txt` is deliberately a **ratchet against drift** rather than a tier goal ([0024](docs/decisions/0024-one-binary-and-what-a-megabyte-would-actually-cost.md), [0104](docs/decisions/0104-the-four-megabytes-belonged-to-a-tier-that-was-dropped.md)).
+
+**A proof of concept is not licence for bad code, and here the structure is half of what is being proven.** The concept is a config-driven reconcile loop; the *claim* is that it can be built with a frozen model, no mandatory dependencies, `forbid(unsafe_code)` outside one audited crate, and gates that catch their own blind spots. Code written carelessly now does not prove that claim, it hides it — and poorly written code is not something a later pass repairs cheaply. **Everything in `code-style.md` and §9 applies at full strength.** What a proof of concept relaxes is *scope and measurement*, never craft.
+
+This document is the working brief; `netcfgd-design.md` is the reference design and holds all rationale. Where the two disagree, this document wins for *what to build*, the design doc wins for *why*.
+
+*(The status line read "pre-implementation, nothing is built yet" until 2026-08-06, roughly two hundred commits after it stopped being true. §7 had been kept current throughout, so the file contradicted itself in its own header — see §10's note on a document nobody re-reads from the top.)*
 
 **What it is, in one line:** a Linux network configuration daemon whose plain-text config is the single source of truth, whose runtime state is greppable files in `/run`, and whose behaviour is a visible reconcile loop (`plan` then `apply`, like Terraform for interfaces).
 
@@ -1480,6 +1486,57 @@ witness had the hole its own comment claimed to cover, too — three responses w
 pinned by nothing anywhere, and all three lists now go through an exhaustive
 match.
 
+### What would prove it
+
+The status line calls this a proof of concept. That is only meaningful with a
+bar attached, or it never graduates — so this is the bar, and every entry is
+something that has **never been done**, not something that failed.
+
+**Passing the suite does not count**, and the reason is the whole point. 696
+unit tests and 37 live scripts is a lot of evidence, and the live ones drive a
+real dhcpcd, dnsmasq, hostapd, openvpn and wpa_supplicant. But the radio is
+`mac80211_hwsim`, several daemons are fakes, and every run has been x86_64. The
+tests are *disciplined* and not yet *validated against reality*, which is a
+different property and the one this list is about.
+
+- **Nobody has run netcfgd against a real radio.** Association is proven end to
+  end against virtual radios; a real card, real drivers and real firmware have
+  never been tried. `docs/first-run.md` says so at the top and calls step 5 the
+  least proven thing in it.
+- **Nobody has used it as their machine's network configuration.** Not a day, on
+  hardware they depend on, with the failure modes that only appear when a
+  machine moves between networks.
+- **It has never run on the class of device it was designed for.** The design's
+  §10 wants an OpenWrt-class device and §10.2 budgets `netcfgd-embedded` at
+  ≤ 1 MB; the install measures 2.3 MB, and there is no cross-compile target in
+  the `Makefile` at all, so mips and arm have not merely failed, they have not
+  been attempted. §10.2 already says what to make of that — those are
+  "**budgets to validate, not measurements**" — which is this section's framing,
+  written into the design before any code existed and then lost from the brief.
+- **The modem path has never met hardware** — Next item 1, written entirely
+  against a fake copied from libmbim's own output.
+- **Suspend and resume have never been exercised**, per item 3, and it is the
+  most-travelled path a laptop has.
+- **systemd-networkd detection has never been run against systemd-networkd.**
+  Written from its documented layout, unlike the NetworkManager path, which was
+  checked against a running one.
+
+Two things follow from this list, and both change what to work on.
+
+**The bar and any future rewrite want the same work.** A rewrite is a
+translation problem when the semantics are settled and the tests are accurate,
+and a design problem when they are not — so every item here is simultaneously a
+graduation criterion *and* the prerequisite for a rewrite ever being a safe
+thing to attempt. There is no tension between proving this and refining it
+later; there is a sequence, and this is the first half of it.
+
+**The clients are the blocker, which is why item 5 outranks its number.** Every
+entry above needs somebody living with netcfgd on real hardware, and today the
+interface for that is `ncfg` plus a five-pane TUI, against a GUI that is a
+three-tab viewer and a shim whose value assumes a NetworkManager applet the
+operator does not have. **Nothing else on the list can start until the tools to
+evaluate it exist.**
+
 ### Next, roughly in order
 
 **This list is down to what is blocked, what was refused, and one thing nobody
@@ -1492,11 +1549,14 @@ the one entry that came from asking what a laptop does rather than from
 something going wrong. It needs a real laptop, so it is blocked the way item 1
 is, and unlike item 1 nothing has been written for it yet.
 
-**Item 5 is new and is the only one here that is not blocked on anything.** The
-clients are behind what they already have underneath them, and the operator this
-was written for has no NetworkManager applet — so the shim, which the roadmap
-treated as the desktop answer, is not the fallback that reasoning assumed. A
-session looking for work that needs no hardware should start there.
+**Item 5 is the top of this list regardless of its number, and the only entry
+not blocked on anything.** The clients are behind what already sits underneath
+them, and the operator this was written for has no NetworkManager applet — so
+the shim, which the roadmap treated as the desktop answer, is not the fallback
+that reasoning assumed. It ranks first because *What would prove it* cannot
+start without it: every remaining item on that bar needs somebody living with
+netcfgd on real hardware, and the tools to do that are what item 5 is about.
+**Build the clients, then evaluate, then refine.**
 
 Where the last six pieces came from instead, in order: **a live flake nobody had
 chased to the end**, and then each fix exposing the next
