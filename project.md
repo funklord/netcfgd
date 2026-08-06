@@ -741,8 +741,12 @@ Kept current deliberately: this is the section to read after a break, and the on
 
 **Read this first after a break, and rewrite it rather than appending to it.**
 Last rewritten after **M8's first client was built outside this workspace**, which
-turned out to be the most productive protocol review this project has had. `client/`
-and `gui/` are a C library and a Qt Widgets window speaking the pinned socket
+turned out to be the most productive protocol review this project has had.
+Appended to since, most recently by a run of six control-socket findings
+(0109-0114) whose lessons live in *Things that are true and non-obvious* rather
+than here.
+
+`client/` and `gui/` are a C library and a Qt Widgets window speaking the pinned socket
 ([gui/project.md](gui/project.md)), and writing them against `docs/schema/` rather
 than against the Rust types found three things nothing here could have:
 
@@ -1475,6 +1479,25 @@ pinned by nothing anywhere, and all three lists now go through an exhaustive
 match.
 
 ### Next, roughly in order
+
+**This list is down to what is blocked and what was refused.** Items 3 and 4 are
+closed in full, item 2 is half done and half refused with a reason
+([0077](docs/decisions/0077-a-type-leaves-generic-when-every-property-is-answerable.md)),
+and item 1 has needed hardware since it was written. So a session picking this up
+should not expect to find its next piece of work here.
+
+Where the last six pieces came from instead, in order: **a live flake nobody had
+chased to the end**, and then each fix exposing the next
+([0109](docs/decisions/0109-a-daemon-that-does-not-answer-has-not-stopped.md)
+through [0114](docs/decisions/0114-one-second-is-one-constant.md)) — a stop that
+reported success without asking, an access point that could never be noticed
+dead, a deadline that stalled the whole machine, a watcher talking to netcfgd's
+own sockets, a contract that created the artefact it warns about, and a
+dismissal written in a sentence that turned out to be wrong. Four of those six
+were found by **re-reading something this document already said** and measuring
+it rather than believing it. That is the seam worth working when the list is
+empty: the notes that say what *would* happen, the reasons for a deferral, and
+the sentence that disposes of an alternative in half a line.
 
 1. **Run the modem path against a real modem.** Everything is written and
    nothing has met hardware: `helpers/netcfgd-modem-mbim` drives `mbimcli`
