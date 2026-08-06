@@ -313,6 +313,18 @@ typedef struct {
 	char *ssid;       /* hex; always present */
 	char *name;       /* the SSID as text, "" when it is not text */
 	char *configured; /* network id, "" when the configuration has none */
+	/*
+	 * The three cases resolved into the one string a screen shows:
+	 * the text where there is text, `(hidden)` for a name that arrived
+	 * empty, and `hex:<ssid>` where none arrived at all.
+	 *
+	 * Here and not in a widget because it is vocabulary rather than
+	 * layout, and every client has to say the same words -- the GUI said
+	 * one thing, `ncfg wifi scan` another and the TUI a third until this
+	 * moved down. netcfgd-cli's access_point_name() is the same three
+	 * cases in Rust, and `make conformance` diffs the two.
+	 */
+	char *display;
 	int   named;      /* whether a text name was sent at all */
 	int   frequency;  /* MHz */
 	int   signal;     /* dBm, closer to zero is stronger */
@@ -346,6 +358,28 @@ typedef struct {
 	char *bssid;
 	char *network; /* the `network` block it came from */
 } ncfg_wifi_status_t;
+
+/*
+ * Whether a link with this kind and name is a radio.
+ *
+ * Exposed rather than left inside the conversion because it is a *rule*, and
+ * the same rule is written again in Rust in `ncfg tui`. Two implementations of
+ * one heuristic is the drift 0116 names; a conformance check can only compare
+ * them if both are reachable, so this is the C half being reachable.
+ *
+ * `kind` may be NULL or empty, which is what the kernel reports for a real NIC.
+ */
+int ncfg_link_is_wireless(const char *kind, const char *name);
+
+/*
+ * The one string a screen shows for an access point's name, as a function.
+ *
+ * `ncfg_access_point_t` already carries the answer, and this is the same rule
+ * reachable without a scan -- which is what lets the conformance dump ask for
+ * the two cases the witness does not contain. Returns a string the caller
+ * frees, or NULL if it could not be allocated.
+ */
+char *ncfg_access_point_display(int named, const char *name, const char *ssid);
 
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_plan_free(ncfg_plan_t *plan);

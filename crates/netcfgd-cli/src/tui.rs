@@ -352,11 +352,12 @@ impl App {
 		links
 			.iter()
 			.find(|link| {
-				link.get("kind").and_then(serde_json::Value::as_str) == Some("wlan")
-					|| link
-						.get("name")
+				crate::is_radio(
+					link.get("kind").and_then(serde_json::Value::as_str),
+					link.get("name")
 						.and_then(serde_json::Value::as_str)
-						.is_some_and(|name| name.starts_with("wl"))
+						.unwrap_or(""),
+				)
 			})
 			.and_then(|link| link.get("name")?.as_str())
 			.map(ToOwned::to_owned)

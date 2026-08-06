@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check build test fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks
+.PHONY: deb apk apk-source apk-container all check build test conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -33,7 +33,7 @@ ncfg-link:
 # is the one gate that fails if an adapter's dependencies have leaked into the
 # core -- which is the kind of thing that is trivial to prevent and miserable to
 # unpick later.
-check: style fmt ascii shell clippy unsafe-policy executor-policy nm-containment packaging test size footprint rss adapters
+check: style fmt ascii shell clippy unsafe-policy executor-policy nm-containment packaging conformance test size footprint rss adapters
 
 # Each adapter, built and checked with the same bar as the core.
 #
@@ -124,8 +124,35 @@ fmt-fix:
 clippy:
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
-test:
+# The C client's test binary, which `conformance` and `test` both need.
+#
+# A FORCE prerequisite and not a bare rule: only the sub-make knows whether
+# client/'s sources moved, and a rule with no prerequisites fires solely when
+# its target is *missing* -- so once the binary existed it would be treated as
+# current forever, and the conformance check would compare against whatever was
+# built last week.
+client/tests/client_test: FORCE
+	@$(MAKE) --no-print-directory -C client tests/client_test
+
+# The two client implementations, asked the same questions.
+#
+# The only gate here that compares two *clients*. Every other one reads the
+# schema witness from one side: it pins what netcfgd sends, and nothing pinned
+# what a second implementation made of it -- which is how one access point's
+# name came to be spelled three ways, with the TUI's spelling losing the
+# network's identity entirely.
+#
+# In `check` and before `test`, because `test` runs the same comparison as part
+# of the workspace and needs the binary to exist. The Rust side *fails* rather
+# than skips when it is absent, so a missing binary is a red gate rather than a
+# green one that compared nothing.
+conformance: client/tests/client_test
+	$(CARGO) test -p netcfgd-cli both_client_implementations_extract_the_same_facts
+
+test: client/tests/client_test
 	$(CARGO) test --workspace
+
+FORCE:
 
 # section 1 constraint 4: forbid(unsafe_code) holds everywhere except netcfgd-sys,
 # which is the sole audited exception. Checked by reading the crate roots rather

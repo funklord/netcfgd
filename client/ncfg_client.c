@@ -373,6 +373,20 @@ static char *member_text(const ncfg_json_doc_t *doc, uint32_t object, const char
  * that needed to know which case it was in would be a rule somebody forgets on
  * an error path, which is the path nobody tests.
  */
+/*
+ * Kind first, name second, and never name only: the kernel's word is a fact
+ * where it exists, and the `wl` prefix is a convention that happens to hold on
+ * every machine anybody has run this on -- the same reason `eth0` is not proof
+ * of an ethernet.
+ *
+ * `ncfg tui` asks the identical question in Rust. The two are checked against
+ * each other by the conformance target rather than trusted to stay in step.
+ */
+int ncfg_link_is_wireless(const char *kind, const char *name)
+{
+	return (kind && !strcmp(kind, "wlan")) || (name && !strncmp(name, "wl", 2));
+}
+
 void ncfg_links_free(ncfg_links_t *links)
 {
 	if (!links) {
@@ -540,11 +554,7 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->up = ncfg_json_bool(doc, ncfg_json_member(doc, link, "up"), 0);
 		item->carrier = ncfg_json_bool(doc, ncfg_json_member(doc, link, "carrier"), 0);
 		item->addresses = item->name ? join_addresses(doc, addresses, item->name) : NULL;
-		/* Kind first, name second, and never name only: the kernel's word
-		 * is a fact where it exists and the prefix is a convention that
-		 * happens to hold on every machine anybody has run this on. */
-		item->wireless = (item->kind && !strcmp(item->kind, "wlan"))
-		         || (item->name && !strncmp(item->name, "wl", 2));
+		item->wireless = ncfg_link_is_wireless(item->kind, item->name);
 		if (!item->name || !item->kind || !item->mac || !item->addresses) {
 			set_error(err, err_size, "out of memory");
 			ncfg_links_free(out);
@@ -920,6 +930,7 @@ void ncfg_scan_free(ncfg_scan_t *scan)
 		free(scan->items[i].ssid);
 		free(scan->items[i].name);
 		free(scan->items[i].configured);
+		free(scan->items[i].display);
 	}
 	free(scan->items);
 	free(scan->interface);
@@ -968,6 +979,31 @@ static int wifi_request(char *out, size_t out_size, const char *verb, const char
 	return 1;
 }
 
+/*
+ * The one string a screen shows for an access point's name.
+ *
+ * Three cases because the daemon sends three, and the two that are not "a
+ * name" are the ones every client was getting wrong: a hidden network drew as
+ * a blank cell, and an unprintable SSID drew as a word naming the *condition*,
+ * which made two such networks one row. The hex is kept, prefixed so nobody
+ * reads it as the name.
+ */
+char *ncfg_access_point_display(int named, const char *name, const char *ssid)
+{
+	if (!named) {
+		size_t span = strlen("hex:") + strlen(ssid) + 1u;
+		char *text = malloc(span);
+		if (text) {
+			snprintf(text, span, "hex:%s", ssid);
+		}
+		return text;
+	}
+	if (!*name) {
+		return dup_string("(hidden)");
+	}
+	return dup_string(name);
+}
+
 static int convert_scan(const ncfg_json_doc_t *doc, ncfg_scan_t *out, char *err, size_t err_size)
 {
 	uint32_t root = ncfg_json_root(doc);
@@ -1005,11 +1041,13 @@ static int convert_scan(const ncfg_json_doc_t *doc, ncfg_scan_t *out, char *err,
 		 * genuinely is empty. member_text() flattens both to "", so the
 		 * distinction has to come from the member itself. */
 		item->named = ncfg_json_member(doc, entry, "name") != NCFG_JSON_NONE;
+		item->display = ncfg_access_point_display(item->named, item->name, item->ssid);
 		item->configured = member_text(doc, entry, "configured");
 		item->frequency = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "frequency"), 0);
 		item->signal = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "signal"), 0);
 		item->secured = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "secured"), 0);
-		if (!item->bssid || !item->ssid || !item->name || !item->configured) {
+		if (!item->bssid || !item->ssid || !item->name || !item->configured
+		    || !item->display) {
 			set_error(err, err_size, "out of memory");
 			ncfg_scan_free(out);
 			return 0;
