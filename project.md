@@ -1482,11 +1482,15 @@ match.
 
 ### Next, roughly in order
 
-**This list is down to what is blocked and what was refused.** Items 3 and 4 are
-closed in full, item 2 is half done and half refused with a reason
+**This list is down to what is blocked, what was refused, and one thing nobody
+has looked at.** Item 4 is closed in full, item 2 is half done and half refused
+with a reason
 ([0077](docs/decisions/0077-a-type-leaves-generic-when-every-property-is-answerable.md)),
-and item 1 has needed hardware since it was written. So a session picking this up
-should not expect to find its next piece of work here.
+and item 1 has needed hardware since it was written. **Item 3 reopened**: every
+defect on the laptop list is closed, and then suspend/resume was added to it —
+the one entry that came from asking what a laptop does rather than from
+something going wrong. It needs a real laptop, so it is blocked the way item 1
+is, and unlike item 1 nothing has been written for it yet.
 
 Where the last six pieces came from instead, in order: **a live flake nobody had
 chased to the end**, and then each fix exposing the next
@@ -1525,9 +1529,11 @@ the sentence that disposes of an alternative in half a line.
    (0063), the `lease` hook (0064), DHCPv4 with busybox (0065), a lease's
    nameservers and search suffixes (0066, 0067), the `carrier` hook (0068) and
    joining a network without an editor (0069), an enterprise network from the
-   command line (0087) and the rfkill event stream (0093). **What is left is
-   nothing** — every item on this list is closed, and ten of the fifteen found a
-   defect older than the work itself:
+   command line (0087) and the rfkill event stream (0093). **What is left is one item, and it is the
+   first that was never a defect report**: every entry below it is closed, ten of
+   the fifteen found a defect older than the work itself, and suspend/resume is
+   here because somebody asked what a laptop does that this tree has never
+   simulated — not because anything went wrong:
 
    - ~~**dhcpcd's generated script has never been run by dhcpcd**~~ — **closed**
      ([0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md)),
@@ -1709,6 +1715,39 @@ the sentence that disposes of an alternative in half a line.
      to **181** after it. netcfgd tries five times and then stops and says so. What
      it deliberately does *not* stop is a daemon that comes up and dies later —
      each of those is a real event and restarting is the right answer.
+   - **Suspend and resume have never been designed for or run.** Closing the lid
+     is the most-exercised path a laptop has and the only item here that arrived
+     by *asking what was missing* rather than by a defect: nothing in the tree
+     mentions suspend or hibernate at all, the only `resume` in it is a partial
+     plan being re-run, there is no test, and no record says it was considered
+     and dismissed. **Absence of a finding here is absence of looking, not
+     evidence of working.**
+
+     Much of what it needs exists by construction, which is why this is a
+     verification item rather than a feature. A resume brings the link down and
+     up, so netlink reports it; the loop has a five-second backstop for anything
+     netlink does not say; the rfkill watcher catches the hardware block many
+     laptops apply across a suspend; and the confirm window is an absolute
+     `deadline_epoch` in `/run/confirm.json` rather than a monotonic timer, so it
+     keeps running while the machine is asleep instead of freezing — the trap a
+     `CLOCK_MONOTONIC` deadline would have walked into, since that clock does not
+     advance across a suspend and `CLOCK_BOOTTIME` is the one that does.
+
+     What that same design does next has not been decided. A window armed before
+     an eight-hour suspend is long expired on resume, so the first observation
+     after the lid opens **reverts a change the operator has been living with all
+     night** — defensible, since unconfirmed means revert, and surprising enough
+     that it should be a decision rather than a consequence. Wall-clock also means
+     the resume-time NTP correction a laptop usually takes can move the deadline
+     under a window that is still open.
+
+     Worth measuring specifically, in the order it will bite: whether a lease that
+     expired during the suspend is renewed or silently stale; whether the
+     supplicant is still associated and, if not, how long netcfgd takes to notice;
+     whether the rfkill watcher's blocking read survives the suspend or returns an
+     error nothing handles; and what the confirm window does across the lid.
+     `tests/live/` cannot suspend a machine, so the first three want a real laptop
+     and the fourth is a unit test on a clock somebody moves.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one. [0115](docs/decisions/0115-the-way-back-in-is-not-ours-to-configure.md) closes the other half of that question and one next to it: serving SNMP is refused because M9 already picks RESTCONF as the northbound answer, and **IPMI is refused because a BMC is the way back into a machine you have locked yourself out of** — netcfgd cannot tell a BMC setting it made from one the BIOS screen made, and a bad change to the way back in survives the reboot that would otherwise undo it. It passes constraints 3, 6 and 9, which is why it needed a record rather than a sentence.
 
