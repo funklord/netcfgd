@@ -226,17 +226,50 @@ fn every_response_sample() -> Vec<Response> {
 				source: Some("netcfgd.conf:3".to_owned()),
 			}],
 		})),
+		// Three entries and not one, because `name` and `configured` are
+		// `skip_serializing_if` and a sample that fills both pins only the
+		// present form. The absent form is a *different* set of bytes, it is
+		// what the daemon sends for an unprintable SSID and for a network
+		// nobody has written config for, and until these arrived it was
+		// pinned by nothing -- which a second client implementation then
+		// disagreed about without any gate noticing.
 		Response::WifiScan(Box::new(ScanReport {
 			interface: "wlan0".to_owned(),
-			access_points: vec![ScanEntry {
-				bssid: "00:11:22:33:44:55".to_owned(),
-				frequency: 2412,
-				signal: -40,
-				secured: true,
-				ssid: "686f6d65".to_owned(),
-				name: Some("home".to_owned()),
-				configured: Some("home".to_owned()),
-			}],
+			access_points: vec![
+				ScanEntry {
+					bssid: "00:11:22:33:44:55".to_owned(),
+					frequency: 2412,
+					signal: -40,
+					secured: true,
+					ssid: "686f6d65".to_owned(),
+					name: Some("home".to_owned()),
+					configured: Some("home".to_owned()),
+				},
+				// Hidden: the SSID is not broadcast, so it arrives empty
+				// and the name arrives *present and empty*. Not the same
+				// answer as absent, and a client that renders them alike
+				// merges two networks.
+				ScanEntry {
+					bssid: "00:11:22:33:44:66".to_owned(),
+					frequency: 5180,
+					signal: -58,
+					secured: false,
+					ssid: String::new(),
+					name: Some(String::new()),
+					configured: None,
+				},
+				// An SSID that is not UTF-8: no `name` at all, and the hex
+				// is the only name it has.
+				ScanEntry {
+					bssid: "00:11:22:33:44:77".to_owned(),
+					frequency: 2437,
+					signal: -71,
+					secured: true,
+					ssid: "ff00ff".to_owned(),
+					name: None,
+					configured: None,
+				},
+			],
 		})),
 		Response::WifiStatus(Box::new(WifiState {
 			interface: "wlan0".to_owned(),
@@ -245,6 +278,18 @@ fn every_response_sample() -> Vec<Response> {
 			name: Some("home".to_owned()),
 			bssid: Some("00:11:22:33:44:55".to_owned()),
 			network: Some("home".to_owned()),
+		})),
+		// A radio that is associated with nothing, which is every one of
+		// this response's optional fields in its absent form. Four
+		// `skip_serializing_if` members that the sample above spells and
+		// this one does not.
+		Response::WifiStatus(Box::new(WifiState {
+			interface: "wlan0".to_owned(),
+			state: "SCANNING".to_owned(),
+			ssid: None,
+			name: None,
+			bssid: None,
+			network: None,
 		})),
 		// Empty payloads, deliberately: the tag and the framing are this
 		// witness's business and the contents belong to `observed.json`,
