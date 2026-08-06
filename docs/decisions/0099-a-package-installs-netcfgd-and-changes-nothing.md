@@ -52,9 +52,9 @@ not undo what the daemon configured. An interface does not go down because the
 thing that brought it up was uninstalled.
 
 **Two spellings of one version.** Debian takes `~`, which sorts before the
-release it heads for, and accepts a commit hash: `0.0.0~git226.8b88f74`.
+release it heads for, and accepts a commit hash: `0.0.0~git202.c5a1d09`.
 Alpine's grammar takes neither — a version is digits and dots with a `_git`
-suffix — so it gets `0.0.0_git226`. Both increase with the commit count, which
+suffix — so it gets `0.0.0_git202`. Both increase with the commit count, which
 is what an evaluator needs: a package built from a later commit must upgrade
 one built from an earlier.
 

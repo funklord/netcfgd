@@ -7,7 +7,7 @@ Milestone: the nm.sh regression, bisected properly
 ## Context
 
 The previous session reported `nm.sh` as failing seven checks, blamed
-`b1cd6eb`, and described a "gradual erosion" across many commits. **Both claims
+`e1f94f8`, and described a "gradual erosion" across many commits. **Both claims
 were wrong, and they were wrong for the same reason: single runs of a test that
 is not deterministic.**
 
@@ -18,19 +18,19 @@ Sampling five runs per commit says what is actually there:
 
 | commit | five runs |
 | --- | --- |
-| `8ddf020` | 0 0 0 0 0 |
-| `d2db524` | 0 0 0 0 1 |
-| `1a6f5dc` | **7 7 7 7 7** |
+| `f527505` | 0 0 0 0 0 |
+| `c3e01a8` | 0 0 0 0 1 |
+| `a8567a1` | **7 7 7 7 7** |
 | `master` | 7 7 7 7 7 |
 
 One commit, consistently, and its parent consistently clean apart from a rare
 single failure that is a separate and older thing. There is no erosion. The
-earlier "4 failures at `d2db524`" and "6 at `1a6f5dc`" were both flakes read as
+earlier "4 failures at `c3e01a8`" and "6 at `a8567a1`" were both flakes read as
 signal.
 
 ## The regression
 
-`1a6f5dc` is [0080](0080-a-socket-outlives-the-process-that-bound-it.md), *stop
+`a8567a1` is [0080](0080-a-socket-outlives-the-process-that-bound-it.md), *stop
 trusting its socket*, and it is correct. It changed the **start** path to ask a
 question a control socket cannot answer:
 
@@ -83,7 +83,7 @@ unchanged by it.
 
 **A pre-existing flake, roughly one run in six**: *"a cancelled prompt is
 reported as such"*, in the secret-agent bridge and not the wireless path. It is
-visible at `d2db524`, before 0080, so it is older than the regression above and
+visible at `c3e01a8`, before 0080, so it is older than the regression above and
 unrelated to it. The wait for the fake agent's `registered` line breaks silently
 after ten seconds and proceeds either way, which is a plausible mechanism and
 not a demonstrated one — recorded as an observation rather than fixed on a
