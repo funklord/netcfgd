@@ -294,13 +294,16 @@ this.
 
 ## 12. Known gaps
 
-- **Nothing fuzzes this parser.** The fuzz targets are `config_parse`,
-  `document_json` and `netlink_wire`; the socket's request parser is not among
-  them, and it is the surface that reads bytes from any principal the control
-  tiers admit — which a site may set to `any`. The sibling's rule applies and
-  is not yet followed here: fuzzing is permanent infrastructure, validated by
-  mutation rather than by passing, with the acceptance rate printed so it
-  cannot silently fall to zero.
+- ~~**Nothing fuzzes this parser.**~~ **Closed.**
+  `fuzz/fuzz_targets/socket_message.rs` is the libFuzzer target and
+  `crates/netcfgd-proto/tests/random.rs` the stable counterpart that runs on
+  every `make check`, seeded from the witness because synthetic bytes almost
+  never form a valid frame. Both directions are driven, and a parsed message
+  must survive its own encoder. The acceptance rate is **asserted** rather than
+  reported: 33.4% of mutations reach a complete parse against a calibrated
+  floor of 25%, and the floor is 25% rather than zero because destroying the
+  seeding entirely still scores 16.4% — measured, after a floor of zero passed
+  a deliberately degenerate mutator.
 - **The two client implementations share no code**, only this document and
   `make conformance`. That is the state
   [0116](decisions/0116-a-client-that-needs-the-model-is-rust.md) settled and

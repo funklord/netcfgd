@@ -16,6 +16,7 @@ libfuzzer-sys   = "0.4"
 netcfgd-sys = { path = "../crates/netcfgd-sys" }
 netcfgd-compile = { path = "../crates/netcfgd-compile" }
 netcfgd-model   = { path = "../crates/netcfgd-model" }
+netcfgd-proto   = { path = "../crates/netcfgd-proto" }
 
 [[bin]]
 name = "netlink_wire"
@@ -32,5 +33,11 @@ doc  = false
 [[bin]]
 name = "document_json"
 path = "fuzz_targets/document_json.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "socket_message"
+path = "fuzz_targets/socket_message.rs"
 test = false
 doc  = false
