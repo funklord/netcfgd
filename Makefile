@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross
+.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -43,7 +43,8 @@ ncfg-link:
 # can build the tree. BUDGET_GATES measure *this* machine, and running them
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
-                 nm-containment packaging conformance test adapters gui
+                 nm-containment packaging conformance test adapters gui \
+                 linkage
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -660,6 +661,59 @@ cross:
 		echo "cross: $(CROSS_TARGET) was NOT fully attempted -- see above"; \
 		exit 1; \
 	fi
+
+# What the shipped binary is allowed to link.
+#
+# Section 1 constraint 3 and the README's headline both say the core needs
+# nothing beyond libc and the kernel, and nothing checked it. `deny` governs
+# the *crate* graph, which is a different question: a Rust dependency that
+# links a C library adds a NEEDED entry without adding anything `deny` objects
+# to, and a build script that finds a system library adds one with no crate at
+# all.
+#
+# Reads the release binary `size` already built, so it costs no rebuild -- and
+# runs after it in PORTABLE_GATES for that reason.
+#
+# ncurses is on the list because `ncfg tui` is a default feature and design
+# section 10.2 has always listed it as removable. Measured rather than assumed:
+# `--no-default-features` leaves libgcc_s and libc alone, and that build
+# produces a byte-identical document, so the feature costs a dependency and
+# changes no behaviour.
+LINKAGE_ALLOWED = libc.so libgcc_s.so ld-linux libncursesw.so libtinfo.so
+
+linkage:
+	@# Built here rather than trusted: whatever is in target/release depends
+	@# on the last build's feature set, so a `--no-default-features` binary
+	@# left behind would pass this gate while the shipped one links more. It
+	@# is a no-op when `size` has already built it.
+	@$(CARGO) build --release --quiet
+	@bin=target/release/netcfgd; \
+	[ -x "$$bin" ] || { \
+		echo "linkage: $$bin is missing, so this would check nothing"; \
+		exit 1; \
+	}; \
+	needed=$$(objdump -p "$$bin" 2>/dev/null | awk '/NEEDED/ {print $$2}'); \
+	if [ -z "$$needed" ]; then \
+		echo "linkage: no NEEDED entries were read at all -- either this is a"; \
+		echo "linkage:   static binary or objdump said nothing, and a gate that"; \
+		echo "linkage:   cannot tell those apart is not a gate"; \
+		exit 1; \
+	fi; \
+	fail=0; \
+	for lib in $$needed; do \
+		ok=0; \
+		for allowed in $(LINKAGE_ALLOWED); do \
+			case "$$lib" in *"$$allowed"*) ok=1 ;; esac; \
+		done; \
+		[ "$$ok" -eq 1 ] || { \
+			echo "linkage: $$bin links $$lib, which constraint 3 does not allow"; \
+			echo "linkage:   if this is deliberate, it is a decision to record,"; \
+			echo "linkage:   not a line to add to LINKAGE_ALLOWED in passing"; \
+			fail=1; \
+		}; \
+	done; \
+	[ "$$fail" -eq 0 ] || exit 1; \
+	echo "linkage: $$(echo $$needed | wc -w) shared libraries, all allowed"
 
 # Size, ratcheted, and measured as total installed size.
 #
