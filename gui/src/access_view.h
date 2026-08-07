@@ -47,6 +47,15 @@ class ncfg_access_view : public QWidget {
 public:
 	explicit ncfg_access_view(ncfg_connection *connection, QWidget *parent = nullptr);
 
+	/* Who the kernel says is running this, or an empty string where the
+	 * account has no password-database entry.
+	 *
+	 * Public for the same reason the tray's painters are: it is the piece
+	 * worth checking on a machine with no session, and `$USER` disagreeing
+	 * with it is the defect it exists to prevent. See
+	 * gui/tests/access_identity.cpp. */
+	static QString current_user();
+
 public slots:
 	void refresh();
 

@@ -2146,6 +2146,25 @@ the sentence that disposes of an alternative in half a line.
    are what Apply shells out to, and none has been exercised. That wants a real
    session, and it is a smaller claim than the whole tab being unverified was.
 
+   **Building the probe found a real defect beside it, and it is the kind this
+   item is about.** The `this user` row took its name from `$USER`. That is not
+   identity: any parent process may set it to anything, it survives an `su`
+   that does not reset it, and some session launches do not set it at all —
+   while this string decides *whose* name is written into a policy granting
+   access to configure the network. Measured, all three cases: with `USER=root`
+   the environment says `root` and `getpwuid(getuid())` says the real account,
+   so the client wrote `user:root` **under a label reading `this user`**; with
+   `USER` unset it wrote `user:`, which `Principal::parse` refuses — correctly,
+   but only after the operator has been asked for a root password.
+
+   It asks the kernel now, and refuses before elevating rather than after. The
+   probe makes the environment lie, which is the only way that proves anything;
+   putting `$USER` back turns three of its four assertions red and leaves the
+   fourth green, because the fourth is the one that agrees either way on a
+   machine where the environment happens to be honest. **This was the only such
+   site in the tree** — checked across the Rust, C and C++ sources, not
+   assumed.
+
    Two things found by wiring the probe in. `gui/`'s `clean` was
    `rm -rf $(BUILD_DIR)` with no check that the variable is non-empty and
    relative, which build-and-commit.md requires of exactly this shape; it

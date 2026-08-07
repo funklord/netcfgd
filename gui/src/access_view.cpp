@@ -13,6 +13,9 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QStandardPaths>
+
+#include <pwd.h>
+#include <unistd.h>
 #include <QVBoxLayout>
 
 namespace {
@@ -42,6 +45,38 @@ void fill(QComboBox *box)
  * askpass helper is configured, since a `sudo` that wants a terminal from a
  * process with none would hang forever with nothing on screen.
  */
+} /* namespace */
+
+/*
+ * Who is running this, according to the kernel rather than the environment.
+ *
+ * `$USER` is not identity. It is a string any parent process may set to
+ * anything, it survives an `su` that does not reset it, and it is simply
+ * absent in some session launches -- while this function's answer decides
+ * *whose* name is written into a policy granting access to configure the
+ * network. The combo box says `this user`, so writing anything other than this
+ * user is the label lying.
+ *
+ * Measured, all three cases, before this was changed: with `USER=root` the
+ * environment says root and `getpwuid(getuid())` says the real account; with
+ * `USER` unset the environment says nothing and the kernel still answers. The
+ * old code produced `user:root` for the first -- granting a tier to somebody
+ * else under a label reading `this user` -- and `user:` for the second, which
+ * is refused by `Principal::parse`, but only after the operator has been
+ * asked for a root password.
+ */
+QString ncfg_access_view::current_user()
+{
+	const struct passwd *entry = getpwuid(getuid());
+
+	if (!entry || !entry->pw_name || !*entry->pw_name) {
+		return QString();
+	}
+	return QString::fromLocal8Bit(entry->pw_name);
+}
+
+namespace {
+
 QString elevator()
 {
 	if (!QStandardPaths::findExecutable(QStringLiteral("pkexec")).isEmpty()) {
@@ -168,13 +203,31 @@ void ncfg_access_view::apply()
 	/* The `this user` row carries no value, because the username is not known
 	 * until now and hardcoding one at construction would be wrong the moment
 	 * somebody switches user. */
-	const auto chosen = [](QComboBox *box) {
+	const QString me = current_user();
+	const auto chosen = [&me](QComboBox *box) {
 		const QString value = box->currentData().toString();
 		if (!value.isEmpty()) {
 			return value;
 		}
-		return QStringLiteral("user:%1").arg(qEnvironmentVariable("USER"));
+		return QStringLiteral("user:%1").arg(me);
 	};
+
+	/* Before anything is elevated, because the alternative is spending a root
+	 * password on a command that cannot succeed: `user:` with no name is
+	 * refused by the principal parser, and the operator would meet that
+	 * refusal after authenticating rather than instead of it. */
+	if (me.isEmpty()) {
+		const bool wants_me = observe->currentData().toString().isEmpty()
+		                  || wifi->currentData().toString().isEmpty()
+		                  || admin->currentData().toString().isEmpty();
+		if (wants_me) {
+			note->setText(QStringLiteral(
+			    "this account has no name in the password database, so `this user` "
+			    "cannot be written. Choose `anybody`, or use `group:netcfgd` from a "
+			    "terminal."));
+			return;
+		}
+	}
 
 	QStringList tiers;
 	tiers << QStringLiteral("--observe") << chosen(observe);
