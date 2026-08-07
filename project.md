@@ -2475,9 +2475,28 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
   What is actually known: the observed qdisc is `noqueue`, netcfgd's ownership
   record still says the qdisc is netcfgd's, and the plan therefore keeps
-  proposing a reset that the guard's `ncfg plan` loop can never see emptied —
-  **the guard only plans, it never applies**, and the daemon's default drift
-  policy is `Report`. Whether that is the whole story is not established.
+  proposing a reset the guard's `ncfg plan` loop can never see emptied —
+  **the loop only plans, it never applies**, so nothing in it can correct a
+  record that is wrong.
+
+  **The mechanism to check first, which is a real finding either way:
+  `state::write_owned` has no locking, and two processes call it.** `ncfg apply`
+  writes it from `netcfgd-cli`, and the daemon writes it from five places. It is
+  a read-modify-write of one file, so a lost update is structurally possible —
+  and `qdisc.sh`'s own comment says the two are running concurrently there, a
+  daemon reconcile started by `write_config` alongside the explicit `apply`.
+
+  If the daemon's pass holds state read *before* the CLI cleared `qdisc`, its
+  write puts `veth0` back into the owned set while the kernel already has
+  `noqueue`. Every later plan then proposes a reset that changes nothing, which
+  is exactly the symptom, and it explains why the host passes: a different
+  interleaving. **This is a hypothesis with the code read but not demonstrated.**
+  The experiment is to dump `/run/netcfgd/`'s owned state at the moment the
+  guard times out and see whether `qdisc` contains `veth0`.
+
+  Two earlier explanations were wrong and are recorded above so they are not
+  tried again: the observed qdisc was never absent, and `delete_root` already
+  treats `ENOENT` and `EINVAL` as success.
 
   The guard behaving correctly is what surfaced it at all — it refused to
   assert against a half-converged daemon and said what was still in the plan,
