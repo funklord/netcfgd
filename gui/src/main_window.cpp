@@ -5,11 +5,14 @@
 
 #include "apply_dialog.h"
 #include "devices_view.h"
-#include "wifi_view.h"
 #include "events_view.h"
 #include "ncfg_connection.h"
 #include "plan_view.h"
+#include "tray.h"
+#include "wifi_view.h"
 
+#include <QApplication>
+#include <QCloseEvent>
 #include <QLabel>
 #include <QPushButton>
 #include <QStatusBar>
@@ -114,9 +117,37 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	tab_changed();
 }
 
+void ncfg_main_window::attach_tray(ncfg_tray *adopted)
+{
+	tray = adopted;
+	connect(tray, &ncfg_tray::window_requested, this, [this]() {
+		showNormal();
+		raise();
+		activateWindow();
+	});
+	connect(tray, &ncfg_tray::quit_requested, this, []() { QApplication::quit(); });
+	/* The tray changed the machine, so the tabs are stale. Same path an event
+	 * takes, so there is one answer to "something moved". */
+	connect(tray, &ncfg_tray::changed, this, &ncfg_main_window::reload);
+}
+
+void ncfg_main_window::closeEvent(QCloseEvent *event)
+{
+	if (tray && !QApplication::quitOnLastWindowClosed()) {
+		hide();
+		event->ignore();
+		return;
+	}
+	QMainWindow::closeEvent(event);
+}
+
 void ncfg_main_window::refresh()
 {
 	where->setText(QStringLiteral("netcfgd at %1").arg(connection->where()));
+
+	if (tray) {
+		tray->refresh();
+	}
 
 	QWidget *current = tabs->currentWidget();
 	if (current == devices) {

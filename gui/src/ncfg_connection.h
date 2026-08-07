@@ -146,6 +146,20 @@ struct ncfg_wifi_status_row {
 	QString display;
 	QString bssid;
 	QString network;
+
+	/*
+	 * The one line that says what a radio is doing.
+	 *
+	 * On the struct rather than in a view because two things draw it -- the
+	 * wifi tab and the tray -- and a second copy is how three clients came to
+	 * spell one access point's name three ways. One spelling, one place.
+	 *
+	 * An associated radio whose network the document does not name is called
+	 * out rather than hidden: after 0015 the supplicant holds no profiles of
+	 * its own, so something else put it there, and a client that said nothing
+	 * would hide the only sign of it.
+	 */
+	QString summary() const;
 };
 
 /* One event off a monitor stream. `raw` travels with the rest because an event

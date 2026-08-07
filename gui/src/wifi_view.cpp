@@ -166,19 +166,8 @@ void ncfg_wifi_view::update_status()
 		return;
 	}
 
-	QString line = QStringLiteral("%1: %2").arg(interface, state.state);
-	if (!state.display.isEmpty()) {
-		line += QStringLiteral(" on %1").arg(state.display);
-	}
-	/* An associated radio whose network the document does not name is a
-	 * discrepancy rather than a gap: after 0015 the supplicant holds no
-	 * profiles of its own, so something else put it there. Said out loud
-	 * because a client that hid it would hide the only sign of it. */
-	if (!state.display.isEmpty() && state.network.isEmpty()) {
-		line += QStringLiteral(" -- not from any network block");
-	} else if (!state.network.isEmpty()) {
-		line += QStringLiteral(" (%1)").arg(state.network);
-	}
+	/* Composed once, on the row, because the tray draws the same line. */
+	const QString line = state.summary();
 	status->setText(line);
 	emit reported(line);
 }

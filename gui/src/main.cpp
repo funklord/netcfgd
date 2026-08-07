@@ -9,11 +9,14 @@
  */
 #include "main_window.h"
 #include "ncfg_connection.h"
+#include "tray.h"
 
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QMessageBox>
+
+#include <cstdio>
 
 int main(int argc, char **argv)
 {
@@ -32,6 +35,11 @@ int main(int argc, char **argv)
 	               "installed location."),
 	    QStringLiteral("path"));
 	parser.addOption(socket_option);
+	QCommandLineOption tray_option(
+	    QStringList() << QStringLiteral("tray"),
+	    QStringLiteral("Start in the notification area with no window. Closing the window "
+	               "then hides it rather than quitting."));
+	parser.addOption(tray_option);
 	parser.process(application);
 
 	ncfg_connection connection;
@@ -47,6 +55,38 @@ int main(int argc, char **argv)
 	}
 
 	ncfg_main_window window(&connection);
-	window.show();
+
+	/* Returns nullptr where the desktop has no status-notifier host, which is
+	 * ordinary rather than an error: the window then behaves exactly as it did
+	 * before this existed. */
+	ncfg_tray *tray = ncfg_tray::create(&connection, &window);
+	const bool wanted_tray = parser.isSet(tray_option);
+	if (tray) {
+		window.attach_tray(tray);
+	} else if (wanted_tray) {
+		/* Asked for something the desktop cannot give. Complained about on
+		 * stderr and then carried on with a window, which is the daemon's own
+		 * convention for a policy it cannot honour: say so loudly, do the
+		 * safe thing, do not stop.
+		 *
+		 * Deliberately not a modal dialog. This is launched from a command
+		 * line, the message is for whoever typed the flag, and a box that
+		 * blocks startup until somebody clicks it is worse than the situation
+		 * it is reporting -- especially on the machines with no tray, which
+		 * are the ones most likely to have nobody sitting in front of them.
+		 */
+		fputs("netcfgd-gui: this desktop has no notification area, so --tray has "
+		      "nothing to start in; showing the window instead\n",
+		      stderr);
+	}
+
+	/* Quitting is the tray's business once there is one: a window that closed
+	 * the last visible thing while an icon remained would leave a process
+	 * nobody can reach. */
+	QApplication::setQuitOnLastWindowClosed(!(tray && wanted_tray));
+
+	if (!tray || !wanted_tray) {
+		window.show();
+	}
 	return QApplication::exec();
 }
