@@ -2414,6 +2414,32 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
 - **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
 - **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
+- **`ingress.sh` failed its three teardown checks once, and has not since.** It
+  is written down rather than left as folklore, because an undiagnosed flake
+  that nobody recorded is one the next person rediscovers from scratch. What is
+  known: the redirect, the ifb and the ingress hook all survived an apply that
+  *reported success*, while every creation check in the same run passed. What
+  is also known is that the machine had **eleven orphaned `netcfgd` processes
+  on it at the time**, left by manual verification runs over the preceding
+  hours — so the most likely cause is the state of the machine rather than the
+  code. It has not reproduced since: standalone at that commit, six runs
+  concurrently, and a full `make live` on a cleaned machine, all green.
+
+  This is not a diagnosis and is deliberately not written as one. If it
+  returns, the first thing to try is the guard `qdisc.sh` already carries
+  (commit `2862623`): wait until `ncfg plan` says there is nothing to do before
+  asserting the objects are gone, because an empty plan is the signal that the
+  daemon's own pending pass has landed and nothing is still in flight.
+  `ingress.sh` asserts immediately after `apply` and has no such wait. That
+  guard was **not** added now, because a fix for an unreproduced flake is a
+  guess, and one that makes the symptom rarer without explaining it is worse
+  than the symptom.
+
+  The orphans are the other lesson and the one that cost the time: every one of
+  them was a daemon started by hand to check something, and
+  `running-code.md` asks for a look at `ps --ppid 1` afterwards. Nobody looked
+  until a test failed.
+
 - **The probe that found the Apply-consent bug is now in the tree** (`gui/tests/apply_actionable`), which it was not: the fix was committed and the thing that caught it was thrown away, so nothing stopped it coming back. It is a predicate now rather than three conditions inline, which is what makes it statable without a daemon — four plans, and the two that matter carry *no actions at all*. Both directions are checked, because the opposite error is as easy to write: restoring the original bug fails exactly the two consent assertions, and making everything actionable fails the converged and warning-only ones. A warning is not consent and is not work.
 
 - **"Is there anything to do?" cannot be read off the action list once a refusal can be consented to.** A guard refusal usually means the plan has *no* actions -- the guard stops the ones it covers -- so a plan whose only content is a refusal has an empty action list. The GUI read "nothing to do" off that and disabled Apply on exactly the plan consent exists for (0088). Found by a headless probe that ticks a box and clicks a button; the headless run that already existed proves the window opens, which is a different claim entirely. **When a screen gains a way to act on something, re-check every emptiness test near it.**
