@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=netcfgd
+GenericName=Network Configuration
+Comment=Review what netcfgd would change, then apply it
+Exec=netcfgd-gui
+Icon=network-wireless
+Terminal=false
+Categories=Settings;Network;Qt;
+Keywords=network;wifi;wireless;vpn;dns;
