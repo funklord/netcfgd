@@ -479,6 +479,9 @@ schema-bless:
 FILLED = @VERSION@ @ARCH@ @DEPENDS@ @MAINTAINER@ @PKGVER@
 
 packaging:
+	@# install and uninstall must agree, checked statically so it runs
+	@# everywhere rather than only where a full install works.
+	@python3 tools/uninstall_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
@@ -1033,10 +1036,34 @@ distclean: veryclean
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
 
 # The counterpart to install: named targets only, no sweeps.
+# Removes every file the install targets place, each named, and nothing else.
+#
+# **It does not touch the configuration**, and that is a fix rather than a
+# nicety: this used to `rm -f $(SYSCONFDIR)/netcfgd/netcfgd.conf`, a file
+# `install` has never written. `install` creates the *directory* and stops,
+# because the configuration is the operator's and netcfgd ships no default one
+# -- so the old line could only ever delete something a person wrote by hand.
+# Measured on a staged tree: install, put a config in place, uninstall, and it
+# was gone.
+#
+# Named rather than globbed, and covering every install-* target rather than
+# only `install`, because an uninstall that leaves root-owned files behind is
+# how a machine ends up with a binary nobody can account for. `install-gui`
+# and `install-modem-mbim` were both missing.
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/ncfg
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
-	rm -f $(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf
+	rm -f $(DESTDIR)$(BINDIR)/netcfgd-gui
+	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
+	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
+	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
+	@# Only if the operator left nothing in it. Their configuration is not
+	@# ours to remove, and an empty directory is not worth keeping.
+	@rmdir $(DESTDIR)$(SYSCONFDIR)/netcfgd 2>/dev/null || true
+	@echo "uninstall: removed the programs, the desktop entry and the init glue"
+	@echo "uninstall:   $(SYSCONFDIR)/netcfgd is left alone -- the configuration"
+	@echo "uninstall:   is yours and was never installed by this Makefile"
 
 # The commit-msg hook lives in the tree so it is reviewable, survives a
 # clone, and can be kept in sync. .git/hooks is untracked, so a hook that

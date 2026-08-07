@@ -528,6 +528,22 @@ calling a zombie alive — and it runs no live script, because a green tick over
 a suite that skipped everything is the vacuous pass this section exists to
 avoid.
 
+**`make uninstall` deleted a file `make install` never wrote.** It removed
+`/etc/netcfgd/netcfgd.conf`, and `install` creates the *directory* and stops —
+netcfgd ships no default configuration, so that line could only ever delete
+something a person wrote by hand. Measured on a staged tree: install, put a
+config in place, uninstall, and it was gone. The same target had never heard of
+`install-gui` or `install-modem-mbim`, so removing netcfgd left root-owned
+binaries behind with nothing accounting for them.
+
+Both directions are one defect — two lists kept in step by memory — so
+`tools/uninstall_gate.py` compares them mechanically, and it is static: no
+build, no root, no staging tree, so it runs in `check` on any machine rather
+than only where a full install works. It refuses a path installed and not
+removed, a path removed and not installed, **and an empty result**, since a
+regex that matched nothing would report success exactly as loudly. All three
+were made to fire, the third by putting the original config bug back.
+
 **`make cross` is deliberately in neither list, and deliberately does not
 skip.** `gui` and `deny` skip when their tool is absent because they run inside
 `check` on machines that are not desktops, and a gate demanding Qt on a router
