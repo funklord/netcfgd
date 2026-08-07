@@ -43,6 +43,13 @@ jobs:
             --component rustfmt --component clippy
           rustup default stable
 
+      # Qt, because `make gui` skips loudly rather than failing when qmake is
+      # absent -- which is right on the routers this mostly builds for, and
+      # would be a vacuous pass here. This is the one machine that should
+      # always compile the Qt client.
+      - name: Install Qt
+        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev
+
       - uses: actions/cache@v4
         with:
           path: |
