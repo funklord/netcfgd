@@ -237,10 +237,114 @@ pub(crate) fn run(positional: &[String], options: &Options) -> Result<ExitCode, 
 	match subcommand.as_str() {
 		"show" => show(options),
 		"set" => set(options),
+		"helper" => helper(options),
 		other => Err(format!(
 			"unknown control subcommand `{other}`; it is `show` or `set`"
 		)),
 	}
+}
+
+/// The privileged half of the client's administrator mode.
+///
+/// [0120]: the red frame around an editor is a claim that something on the
+/// other side of a process boundary holds root. This is that something. It is
+/// started by whatever the desktop has -- `pkexec`, `kdesu`, `sudo -A` -- so
+/// the authentication happens *before* any editor opens, and the client never
+/// handles a password.
+///
+/// **Deliberately not a GUI.** 0117 and 0118 both refuse running Qt as root
+/// "so that it can write one file", and that refusal stands: a toolkit with a
+/// theme engine and a plugin loader is not a thing to hand uid 0. What crosses
+/// the boundary is this, which links no toolkit at all.
+///
+/// **The whole of what it can do is write a control policy.** One verb, three
+/// typed principals, parsed by the same [`Principal::parse`] the CLI uses and
+/// written by the same [`write_policy`]. It takes no path, no config text and
+/// no shell -- a config file may name a hook whose `run_as` defaults to root,
+/// which is why 0117 made `wifi_add` typed and is the same reason here.
+///
+/// **It cannot outlive the window that authenticated it.** The protocol ends
+/// at end-of-file on stdin, so when the client exits -- cleanly, killed, or
+/// crashed -- the pipe closes and this returns. There is no timeout to get
+/// wrong and nothing to leave running.
+///
+/// The `ready` line reports the uid it actually got, so the client reddens its
+/// frame on a *checked* claim rather than on having asked. An elevator that
+/// silently did nothing would otherwise produce a red frame around an
+/// unprivileged process, which is the one thing the frame must never mean.
+///
+/// [0120]: ../../../docs/decisions/0120-the-red-frame-is-a-process-boundary.md
+fn helper(options: &Options) -> Result<ExitCode, String> {
+	use std::io::{BufRead, Write};
+
+	let stdin = std::io::stdin();
+	let mut stdout = std::io::stdout();
+
+	writeln!(stdout, "ready uid={}", nix_geteuid()).map_err(|error| error.to_string())?;
+	stdout.flush().map_err(|error| error.to_string())?;
+
+	for line in stdin.lock().lines() {
+		let line = line.map_err(|error| format!("could not read a command: {error}"))?;
+		let reply = match handle(&line, options) {
+			Ok(path) => format!("ok {}", path.display()),
+			// One line, because the protocol is one line per reply and a
+			// diagnostic with a newline in it would be read as two.
+			Err(message) => format!("error {}", message.replace('\n', " ")),
+		};
+		writeln!(stdout, "{reply}").map_err(|error| error.to_string())?;
+		stdout.flush().map_err(|error| error.to_string())?;
+	}
+	Ok(ExitCode::SUCCESS)
+}
+
+/// The effective uid, without a dependency for one call.
+fn nix_geteuid() -> u32 {
+	// SAFETY is not the question -- this is the libc call every process makes
+	// and it cannot fail. `netcfgd-sys` is the crate allowed unsafe, and
+	// reaching for it here would be a dependency edge for one integer, so the
+	// value is read from /proc instead, which is where the daemon already
+	// reads a peer's supplementary groups.
+	std::fs::read_to_string("/proc/self/status")
+		.ok()
+		.and_then(|status| {
+			status
+				.lines()
+				.find_map(|line| line.strip_prefix("Uid:"))
+				.and_then(|values| values.split_whitespace().nth(1).map(str::to_owned))
+		})
+		.and_then(|effective| effective.parse().ok())
+		.unwrap_or(u32::MAX)
+}
+
+/// One command. The whole grammar is here, and it is three principals.
+fn handle(line: &str, options: &Options) -> Result<PathBuf, String> {
+	let mut words = line.split_whitespace();
+	match words.next() {
+		Some("set") => {}
+		Some(other) => return Err(format!("unknown command `{other}`; it is `set`")),
+		None => return Err("an empty line is not a command".to_owned()),
+	}
+
+	let mut principals = Vec::new();
+	for tier in ["observe", "wifi", "admin"] {
+		let word = words
+			.next()
+			.ok_or_else(|| format!("`set` needs three principals; {tier} was not given"))?;
+		principals.push(
+			Principal::parse(word)
+				.map_err(|message| format!("`{word}` is not a principal for {tier}: {message}"))?,
+		);
+	}
+	if words.next().is_some() {
+		return Err("`set` takes exactly three principals".to_owned());
+	}
+
+	let control = Control {
+		observe: principals[0].clone(),
+		wifi: principals[1].clone(),
+		admin: principals[2].clone(),
+	};
+	write_policy(&control, options)
 }
 
 fn show(options: &Options) -> Result<ExitCode, String> {
@@ -290,6 +394,20 @@ fn set(options: &Options) -> Result<ExitCode, String> {
 		);
 	}
 
+	let path = write_policy(&control, options)?;
+	println!("{}", path.display());
+	report(&control);
+	Ok(ExitCode::SUCCESS)
+}
+
+/// Write a policy and prove it compiled back to itself. Returns what it wrote.
+///
+/// Split out of [`set`] so that `ncfg control helper` writes through exactly
+/// this code and not a second copy of it. The helper runs as root and this
+/// function is everything it is allowed to do, so a second implementation
+/// would be a second thing to audit -- and the tree's own recurring lesson is
+/// that two lists of one thing have already drifted.
+fn write_policy(control: &Control, options: &Options) -> Result<PathBuf, String> {
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 
 	// A drop-in can only *replace* a `global` block, never adjust one key of
@@ -308,7 +426,7 @@ fn set(options: &Options) -> Result<ExitCode, String> {
 	// wrote and splicing into it, on the file that decides who may configure
 	// the network.
 	if let Some(existing) = defines_global(&config_dir, options)? {
-		return splice_into(&existing, &control, options);
+		return splice_into(&existing, control, options);
 	}
 
 	let path = control_path(&config_dir);
@@ -321,14 +439,14 @@ fn set(options: &Options) -> Result<ExitCode, String> {
 	// leave the machine with a policy nobody chose.
 	let previous = std::fs::read(&path).ok();
 
-	config::write_atomically(&path, render(&control).as_bytes(), 0o644)
+	config::write_atomically(&path, render(control).as_bytes(), 0o644)
 		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
 
 	// Compiled back through the loader the daemon uses, for the reason
 	// `wifi_profile::install` does it: a generated file that does not compile
 	// takes the whole directory with it, and this one decides who may talk to
 	// the daemon at all.
-	if let Err(error) = verify(options, &control) {
+	if let Err(error) = verify(options, control) {
 		match previous {
 			Some(bytes) => {
 				let _ = config::write_atomically(&path, &bytes, 0o644);
@@ -340,9 +458,7 @@ fn set(options: &Options) -> Result<ExitCode, String> {
 		return Err(error);
 	}
 
-	println!("{}", path.display());
-	report(&control);
-	Ok(ExitCode::SUCCESS)
+	Ok(path)
 }
 
 /// What the policy is now, and what an operator still has to do about it.
@@ -366,7 +482,7 @@ fn report(control: &Control) {
 /// wrote is the kind of change that eats a line and looks fine, and this one
 /// happens on the file that decides who may configure the network -- so a
 /// result that fails the invariant is put back rather than reported.
-fn splice_into(path: &Path, wanted: &Control, options: &Options) -> Result<ExitCode, String> {
+fn splice_into(path: &Path, wanted: &Control, options: &Options) -> Result<PathBuf, String> {
 	let (before, _) = super::compile(options)?;
 	let text = std::fs::read_to_string(path)
 		.map_err(|error| format!("could not read {}: {error}", path.display()))?;
@@ -413,9 +529,7 @@ fn splice_into(path: &Path, wanted: &Control, options: &Options) -> Result<ExitC
 		)));
 	}
 
-	println!("{}", path.display());
-	report(wanted);
-	Ok(ExitCode::SUCCESS)
+	Ok(path.to_path_buf())
 }
 
 fn verify(options: &Options, wanted: &Control) -> Result<(), String> {

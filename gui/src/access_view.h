@@ -35,6 +35,7 @@
 #include <QWidget>
 
 class QComboBox;
+class QProcess;
 class QFrame;
 class QLabel;
 class QPushButton;
@@ -67,8 +68,17 @@ signals:
 private slots:
 	void unlock();
 	void apply();
+	/* The helper said something, or went away. */
+	void helper_spoke();
+	void helper_finished();
+	/* A slot so the headless probe can leave the mode the way the button does. */
+	void stop_helper();
 
 private:
+	/* Enter or leave administrator mode.
+	 *
+	 * `live` is only ever true because a helper reported uid 0. It is not a
+	 * mode the client may put itself into. */
 	void set_administrator_mode(bool live);
 
 	ncfg_connection *connection;
@@ -77,8 +87,15 @@ private:
 	QComboBox       *wifi;
 	QComboBox       *admin;
 	QLabel          *note;
+	/* TDE's RootInfoWidget: the read-only state saying why it is read-only. */
+	QLabel          *notice;
 	QPushButton     *unlock_button;
 	QPushButton     *apply_button;
+	QPushButton     *leave_button;
+	/* The privileged process. Non-null exactly while administrator mode is
+	 * live, which is what makes the red frame a statement about something
+	 * that exists rather than about a bool this class set. */
+	QProcess        *helper = nullptr;
 	bool             administrator = false;
 };
 
