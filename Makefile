@@ -478,6 +478,11 @@ schema-bless:
 # which dpkg accepts and which sorts below every real version.
 FILLED = @VERSION@ @ARCH@ @DEPENDS@ @MAINTAINER@ @PKGVER@
 
+# The maintainer scripts checked here are `debian/`'s, not
+# `packaging/debian/`'s. The latter was the pre-debhelper generation and this
+# gate checked it for as long as it existed, so the scripts dpkg actually ships
+# were never parsed -- and they had already drifted, the group reservation
+# reaching one copy and not the other. That directory is gone.
 packaging:
 	@# install and uninstall must agree, checked statically so it runs
 	@# everywhere rather than only where a full install works.
@@ -489,12 +494,12 @@ packaging:
 		exit 1; \
 	fi; \
 	for script in packaging/openrc/netcfgd packaging/procd/netcfgd \
-			packaging/debian/postinst packaging/debian/prerm \
-			packaging/debian/postrm packaging/alpine/build-in-container.sh; do \
+			debian/postinst debian/prerm \
+			debian/postrm packaging/alpine/build-in-container.sh; do \
 		sh -n "$$script" || { echo "packaging: $$script does not parse"; fail=1; }; \
 	done; \
-	for script in packaging/debian/postinst packaging/debian/prerm \
-			packaging/debian/postrm; do \
+	for script in debian/postinst debian/prerm \
+			debian/postrm; do \
 		[ -x "$$script" ] || { echo "packaging: $$script is not executable, so dpkg would not run it"; fail=1; }; \
 	done; \
 	if command -v systemd-analyze >/dev/null 2>&1; then \
@@ -516,7 +521,7 @@ packaging:
 		   fail=1 ;; \
 		esac; \
 	done; \
-	for template in packaging/debian/control.in packaging/alpine/APKBUILD.in; do \
+	for template in packaging/alpine/APKBUILD.in; do \
 		for token in $$(grep -o '@[A-Z]*@' "$$template" | sort -u); do \
 			case " $$FILLED " in \
 			*" $$token "*) ;; \
