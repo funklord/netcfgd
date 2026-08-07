@@ -2207,9 +2207,15 @@ the sentence that disposes of an alternative in half a line.
    the bound makes the script fail with a 5 MB principal in the diagnostic,
    which is what it looks like when it is missing.
 
-   **What is still not verified is the elevator itself** — which of `pkexec`,
-   `kdesu` and `sudo -A` a real desktop picks, and whether its prompt behaves.
-   The probe fakes one; a session is what would exercise the real thing.
+   **The elevator's *choice* is verified; its *prompt* is not, and the two
+   were being counted as one unverified thing.** `QStandardPaths::findExecutable`
+   reads PATH, so PATH is the whole harness and the order is a table:
+   `pkexec`, then `kdesu`, then `sudo -A`, then nothing. The last case matters
+   most — **`sudo` without `SUDO_ASKPASS` is refused**, because it would ask
+   for a password on a terminal a GUI does not have and wait forever with
+   nothing on screen. That guard is one `&&`, and dropping it fails exactly the
+   assertion that names it. Whether a real agent's dialog behaves still wants a
+   session; which program gets asked never did.
 
    **Building the probe found a real defect beside it, and it is the kind this
    item is about.** The `this user` row took its name from `$USER`. That is not
