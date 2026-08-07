@@ -393,9 +393,6 @@ this.
   untrusted bytes is the more permissive half. Found by writing this document
   and measuring a claim that was about to be asserted, which is the argument
   for writing specifications down rather than pointing at a witness.
-- **No client speaks `wifi_add` yet.** The request exists and the daemon serves
-  it; `client/` has no typed call for it and the GUI has no dialog, so netcfgd's
-  own desktop client is still the one that cannot add a network.
 - **`hello` does not negotiate a version.** It reports the tiers a connection
   holds. There is nothing to negotiate while section 1 holds, and this is the
   obvious place for it when that changes.

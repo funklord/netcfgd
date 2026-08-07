@@ -318,6 +318,45 @@ unsigned ncfg_connection::confirm_default()
 	return seconds;
 }
 
+bool ncfg_connection::wifi_add(const QString &ssid, const QString &id,
+                   const QString &passphrase, const QString &proto, bool hidden,
+                   QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	/* Held here so the pointers below outlive the call. Temporaries would be
+	 * gone before the C layer read them, and one of them is a passphrase. */
+	const QByteArray ssid_bytes = ssid.toUtf8();
+	const QByteArray id_bytes = id.toUtf8();
+	const QByteArray passphrase_bytes = passphrase.toUtf8();
+	const QByteArray proto_bytes = proto.toUtf8();
+
+	ncfg_network_t network = {};
+	network.ssid = ssid_bytes.constData();
+	/* Empty means "not given" rather than "given as empty": the daemon
+	 * derives an id from the ssid, and applies its own defaults, and a client
+	 * sending empty strings would be inventing answers on its behalf. */
+	network.id = id.isEmpty() ? nullptr : id_bytes.constData();
+	network.passphrase = passphrase.isEmpty() ? nullptr : passphrase_bytes.constData();
+	network.proto = proto.isEmpty() ? nullptr : proto_bytes.constData();
+	network.hidden = hidden ? 1 : 0;
+	network.priority = -1;
+
+	if (!ncfg_client_wifi_add(client, &network, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out,
                 QString *error)
 {

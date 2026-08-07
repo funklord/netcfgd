@@ -803,6 +803,58 @@ static void a_scan_becomes_access_points(void)
 	staged_close(&staged);
 }
 
+static void adding_a_network_sends_typed_fields_only(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[1024];
+
+	char answers[512];
+	snprintf(answers, sizeof(answers), "%s%s", "{\"response\":\"ok\"}\n",
+	     "{\"response\":\"ok\"}\n");
+	if (!staged_open(&staged, "an add can be staged", answers)) {
+		return;
+	}
+
+	const ncfg_network_t full = {
+		.ssid = "686f6d65",
+		.id = "home",
+		.passphrase = "hunter2",
+		.proto = "wpa3",
+		.hidden = 1,
+		.priority = 10,
+	};
+	if (ncfg_client_wifi_add(staged.client, &full, err, sizeof(err))) {
+		equals("an add carries the typed fields and nothing else",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"wifi_add\",\"ssid\":\"686f6d65\",\"id\":\"home\","
+		       "\"passphrase\":\"hunter2\",\"proto\":\"wpa3\",\"hidden\":true,"
+		       "\"priority\":10}\n");
+	} else {
+		ok("an add carries the typed fields and nothing else", 0, err);
+	}
+
+	/* An open network: every optional left out rather than sent empty, which
+	 * is the shape the witness pins and the one a client sends most. */
+	const ncfg_network_t open = {
+		.ssid = "63616665",
+		.id = NULL,
+		.passphrase = NULL,
+		.proto = NULL,
+		.hidden = 0,
+		.priority = -1,
+	};
+	if (ncfg_client_wifi_add(staged.client, &open, err, sizeof(err))) {
+		equals("and an open network mentions nothing it does not have",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"wifi_add\",\"ssid\":\"63616665\"}\n");
+	} else {
+		ok("and an open network mentions nothing it does not have", 0, err);
+	}
+
+	staged_close(&staged);
+}
+
 static void joining_names_a_network_and_never_a_secret(void)
 {
 	struct staged staged;
@@ -1443,6 +1495,7 @@ int main(int argc, char **argv)
 	a_status_becomes_links();
 	a_scan_becomes_access_points();
 	joining_names_a_network_and_never_a_secret();
+	adding_a_network_sends_typed_fields_only();
 	an_apply_becomes_a_journal();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
 	the_handshake_says_what_this_connection_may_do();

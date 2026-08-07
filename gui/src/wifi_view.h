@@ -29,7 +29,10 @@
 #ifndef NCFG_WIFI_VIEW_H
 #define NCFG_WIFI_VIEW_H
 
+#include <QList>
 #include <QWidget>
+
+#include "ncfg_connection.h"
 
 class QComboBox;
 class QLabel;
@@ -55,6 +58,7 @@ signals:
 private slots:
 	void scan();
 	void join();
+	void add();
 	void leave();
 	void selection_changed();
 
@@ -67,8 +71,13 @@ private:
 	QLabel          *status;
 	QPushButton     *scan_button;
 	QPushButton     *join_button;
+	QPushButton     *add_button;
 	QPushButton     *leave_button;
 	QTableWidget    *table;
+	/* The rows as the daemon sent them, because the table holds rendered text
+	 * and `add` needs the exact SSID octets as hex. Re-drawing from a QString
+	 * would mean parsing back what was formatted for a person. */
+	QList<ncfg_access_point_row> scanned;
 };
 
 #endif /* NCFG_WIFI_VIEW_H */
