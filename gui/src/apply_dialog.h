@@ -49,6 +49,16 @@ class ncfg_apply_dialog : public QDialog {
 public:
 	explicit ncfg_apply_dialog(ncfg_connection *connection, QWidget *parent = nullptr);
 
+	/* Whether this plan has anything for Apply to do.
+	 *
+	 * A predicate rather than three conditions written inline, because it was
+	 * written inline and got it wrong: a refusal usually means *no* actions,
+	 * so a plan whose only content is a refusal has an empty action list, and
+	 * reading "nothing to do" off the actions alone disabled Apply on exactly
+	 * the plan consent exists for. Public so the headless probe can state the
+	 * four cases; see gui/tests/apply_actionable.cpp. */
+	static bool actionable(const ncfg_plan_data &plan);
+
 signals:
 	/* Something changed on the machine. The window behind this reloads what
 	 * it is showing, because a table that still described the state before
