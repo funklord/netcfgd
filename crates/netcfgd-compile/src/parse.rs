@@ -27,16 +27,33 @@ pub fn parse(source: SourceId, text: &str) -> Result<File, Diagnostics> {
 	}
 }
 
+/// How deeply blocks may nest before the parser refuses.
+///
+/// The parser descends once per `{`, so without a bound a file of nothing but
+/// open braces exhausts the stack -- a crash rather than a diagnostic, in a
+/// daemon that re-reads its configuration directory whenever anything in it
+/// changes. Found by `cargo fuzz` on the `config_parse` target, which reported
+/// an `AddressSanitizer` stack-overflow on 3679 bytes containing 1238 `{`.
+///
+/// Thirty-two is roughly ten times the deepest nesting the language actually
+/// has -- `interface` holds `qdisc` holds its keys, and that is three -- so no
+/// real configuration comes near it, and a file that does is a mistake worth
+/// naming rather than a shape worth supporting.
+const MAX_BLOCK_DEPTH: usize = 32;
+
 struct Parser<'a> {
 	lexer: Lexer<'a>,
 	lookahead: Option<SpannedToken>,
 	diagnostics: Diagnostics,
 	source: SourceId,
+	/// How many blocks are currently open. See [`MAX_BLOCK_DEPTH`].
+	depth: usize,
 }
 
 impl<'a> Parser<'a> {
 	fn new(source: SourceId, text: &'a str) -> Self {
 		Self {
+			depth: 0,
 			lexer: Lexer::new(source, text),
 			lookahead: None,
 			diagnostics: Diagnostics::new(),
@@ -291,6 +308,36 @@ impl<'a> Parser<'a> {
 			return None;
 		}
 
+		// Bounded here rather than at the recursive call, because this is the
+		// one place a block body is entered from -- `parse_block` and
+		// `parse_item` both arrive through it.
+		if self.depth >= MAX_BLOCK_DEPTH {
+			self.diagnostics.push(
+				Diagnostic::new(
+					brace.span,
+					format!("`{head}` nests more than {MAX_BLOCK_DEPTH} blocks deep"),
+				)
+				.with_help("this is almost always an unclosed block earlier in the file"),
+			);
+			return None;
+		}
+		self.depth += 1;
+		let block = self.parse_block_items(head, label, span);
+		self.depth -= 1;
+		block
+	}
+
+	/// The body of a block, once its head, label and `{` are consumed.
+	///
+	/// Split from [`Self::parse_block_after_head`] so the depth counter has one
+	/// place to go up and one to come back down, rather than a decrement before
+	/// each of several early returns.
+	fn parse_block_items(
+		&mut self,
+		head: String,
+		label: Option<String>,
+		span: Span,
+	) -> Option<Block> {
 		let mut items = Vec::new();
 		loop {
 			self.skip_terminators();
