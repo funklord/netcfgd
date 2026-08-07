@@ -1,0 +1,116 @@
+# What CI is for here, and what it is not.
+#
+# `make check` is the gate and it already runs on a developer's machine. What
+# this adds is the two things a laptop cannot say: that a *clean* checkout
+# builds with no stale artifact helping it, and that the second platform this
+# project actually targets still works.
+#
+# It deliberately does **not** run `make live`. Those 37 scripts drive real
+# daemons -- dhcpcd, dnsmasq, hostapd, wpa_supplicant, openvpn -- and several
+# need namespaces or real root; three of them make their own namespaces and
+# must be run bare. Pretending to run them here would be worse than not: a
+# green tick over a suite that skipped everything is the vacuous pass this
+# project keeps finding. They stay a thing somebody runs, and section 10 says
+# where.
+#
+# YAML is spaces, per code-style.md's settled exception: the spec forbids tabs
+# for indentation outright.
+name: check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# A second push while the first is still running makes the first irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: make check (glibc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rustfmt and clippy by name: `make check` runs both and a toolchain
+      # without them fails in a way that reads like a code problem.
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --component rustfmt --component clippy
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # `make check` minus the three budget gates, and the omission is
+      # deliberate rather than convenient.
+      #
+      # `rss` is a ratchet on a *measurement*, and measuring it on a rented VM
+      # measures the VM. Its own noise band was calibrated against a known
+      # machine, and even there an identical binary spreads: three runs while
+      # writing this gave 4240, 4244 and 4392 KB against a 4608 limit, so 152
+      # KB of spread inside 360 KB of headroom. A gate that fails a coin toss
+      # teaches people to ignore red, which costs more than the gate is worth.
+      #
+      # `size` and `footprint` are deterministic for a given toolchain and not
+      # across toolchains, and `stable` here moves every six weeks. Constraint
+      # 8 wants a size regression caught, and it is caught -- by whoever runs
+      # `make check` on a machine whose numbers mean something.
+      #
+      # Listed rather than expressed as an exclusion because make has no way to
+      # say "all but these", so the list can drift from `check`. It is one file
+      # and the drift is visible; a `check-ci` target would be tidier and is a
+      # convention change to raise rather than make in passing.
+      #
+      # `conformance` is the one worth naming, because it is the only gate that
+      # compares two *client implementations* rather than a client against the
+      # daemon -- and it needs the C client built, which the target does.
+      - name: Conventions, policies and packaging
+        run: make style fmt ascii shell clippy unsafe-policy executor-policy
+
+      - name: Containment and packaging
+        run: make nm-containment packaging
+
+      - name: Tests, and the two clients against each other
+        run: make conformance test
+
+      - name: Adapters
+        run: make adapters
+
+  musl:
+    name: build and test (musl)
+    runs-on: ubuntu-latest
+    # The second platform, and the hostile one: project.md records that running
+    # the same tree under musl and busybox is where `kill -0` was caught calling
+    # a zombie alive. Worth a job of its own precisely because it has found
+    # things glibc did not.
+    container: alpine:latest
+    steps:
+      - name: Install the toolchain
+        run: apk add --no-cache rust cargo make gcc musl-dev python3 git
+
+      - uses: actions/checkout@v4
+
+      # Not `make check`: the conventions it enforces are platform-independent
+      # and the job above already ran them, so repeating them here would spend
+      # minutes to learn nothing. What is not platform-independent is whether
+      # this builds and passes its tests against musl, which is what this asks.
+      #
+      # Alpine's packaged rustc lags, so `--locked` is deliberately absent: a
+      # lockfile needing a newer toolchain should fail as a version error here
+      # rather than as a resolution one.
+      - name: cargo test
+        run: cargo test --workspace
+
+      - name: cargo build --release
+        run: cargo build --release
