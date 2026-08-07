@@ -3021,7 +3021,16 @@ impl Builder {
 				// Stopped asking. Put the kernel default back, but only where
 				// netcfgd is what moved it -- an interface that was already
 				// running `cake` before netcfgd existed keeps it.
-				if ours {
+				//
+				// `current.is_some()` because the sentence above about every
+				// interface always having a qdisc is not true everywhere. A
+				// container's kernel reported none at all, and resetting a
+				// qdisc that is absent changes nothing -- so the next
+				// observation was identical, the plan never emptied, and
+				// `qdisc.sh` failed there while passing here. An action that
+				// cannot change anything is not an action, and planning one
+				// for ever is plan idempotence failing.
+				if ours && current.is_some() {
 					self.push(
 						Op::QdiscReset {
 							iface: interface.name.clone(),

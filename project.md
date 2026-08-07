@@ -2456,21 +2456,27 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
   shares the host's kernel, so a module the host lacks cannot appear inside one;
   `delegation.sh` wants `odhcp6c`, which Debian does not package at all.
 
-  **Open, and not diagnosed: `qdisc.sh` fails inside the container and passes
-  on the host.** Its settle guard reports "ten seconds and a plan still has work
-  in it", and the work it names is `qdisc.reset veth0  qdisc: <absent> (was
-  noqueue)` — a reset planned against a qdisc that is *already absent*, which
-  never converges and so never empties the plan. On the host the kernel puts
-  `noqueue` back after a reset and the script asserts exactly that; in the
-  container it reports nothing at all.
+  **It found a real planner bug, and the bug was not the container's.**
+  `qdisc.sh` failed there and passed here, with the settle guard reporting a
+  plan that still held `qdisc.reset veth0  qdisc: <absent> (was noqueue)` after
+  ten seconds. `plan_qdisc` carried the sentence "every interface always has a
+  qdisc, so this is never install-where-absent" — true on this desktop, false
+  in that container, where the kernel reported no qdisc at all. Resetting an
+  absent qdisc changes nothing, so the next observation was identical and the
+  plan never emptied: **plan idempotence failing**, which §6 lists as a
+  property, on exactly the class of machine netcfgd is written for.
 
-  That is either an environment difference the planner should tolerate or a
-  real non-convergence, and §6 lists plan idempotence as a property. It matters
-  more than a container quirk sounds: **the environments where the kernel
-  differs from a desktop's are the ones netcfgd is written for.** It is
-  recorded rather than guessed at, and the guard behaving correctly is what
-  surfaced it — it refused to assert against a half-converged daemon instead of
-  failing somewhere confusing.
+  Reproduced as a *pure planner test* — no container, no kernel, no root — by
+  handing the planner an observation with `qdisc: None` and an ownership record
+  saying netcfgd set one. That is the whole value of the planner being a
+  function: an environment-only failure became a three-line fixture. The fix is
+  one condition, `ours && current.is_some()`, and `qdisc.sh` then passes in the
+  container that found it.
+
+  The guard behaving correctly is what surfaced it at all — it refused to
+  assert against a half-converged daemon and said what was still in the plan,
+  instead of failing somewhere unrelated. `ingress.sh`, which has no such
+  guard, is the one that failed obscurely earlier in this session.
 
 - ~~**netcfgd has never run on anything but x86_64.**~~ **It has now**, and
   determinism holds across architectures. `sh tests/determinism.sh`
