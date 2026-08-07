@@ -785,6 +785,30 @@ pub struct ProbePolicy {
 	/// than leaving -- and a link that just failed that many times in a row has
 	/// earned less trust than one that never failed.
 	pub up_after: u32,
+	/// Seconds a verdict must stand before it may change again. 0 for none.
+	///
+	/// The counts are the first brake and are not the whole one: a link that
+	/// alternates in *runs* -- three bad, two good, three bad -- satisfies both
+	/// of them and moves the default route on every cycle, just at a longer
+	/// period. This is the minimum dwell that stops that.
+	///
+	/// Zero by default, so the counts remain the only mandatory brake and a
+	/// machine that names no dwell behaves exactly as it did. A dwell is
+	/// something an operator adds when they have watched a link misbehave, and
+	/// it is measured in the period of the flapping they saw
+	/// ([0119](../../../docs/decisions/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)).
+	#[serde(skip_serializing_if = "is_zero", default)]
+	pub hold_down: u32,
+}
+
+/// `#[serde(skip_serializing_if)]` needs a predicate.
+///
+/// By reference because serde calls it that way and not because it is the
+/// better signature for a `u32`; clippy's advice is correct in general and
+/// cannot apply here.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(value: &u32) -> bool {
+	*value == 0
 }
 
 impl ProbePolicy {

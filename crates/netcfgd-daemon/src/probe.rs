@@ -31,6 +31,8 @@ struct Tally {
 	verdict: Option<bool>,
 	/// When to run again.
 	due: Option<Instant>,
+	/// The earliest the verdict may change again, where a dwell is configured.
+	settled_until: Option<Instant>,
 }
 
 /// Every interface's tally, across ticks.
@@ -75,6 +77,12 @@ fn succeeds(policy: &ProbePolicy) -> bool {
 	}
 }
 
+/// When a verdict that has just changed may change again.
+fn dwell(policy: &ProbePolicy) -> Option<Instant> {
+	(policy.hold_down > 0)
+		.then(|| Instant::now() + Duration::from_secs(u64::from(policy.hold_down)))
+}
+
 impl Probes {
 	/// Run whatever is due, and say whether any verdict changed.
 	///
@@ -104,18 +112,28 @@ impl Probes {
 			// the failure run and the other way about. Hysteresis is the whole
 			// feature, and a tally that let them accumulate independently
 			// would flip on a link that alternated.
+			// A dwell suppresses the *change*, not the running: the program
+			// keeps being asked, so the counts stay current and the moment the
+			// dwell expires the verdict reflects what has been happening
+			// rather than one stale result.
+			let held = tally
+				.settled_until
+				.is_some_and(|until| Instant::now() < until);
+
 			if succeeds(policy) {
 				tally.failures = 0;
 				tally.successes = tally.successes.saturating_add(1);
-				if tally.successes >= policy.up_after && tally.verdict != Some(true) {
+				if !held && tally.successes >= policy.up_after && tally.verdict != Some(true) {
 					tally.verdict = Some(true);
+					tally.settled_until = dwell(policy);
 					changed = true;
 				}
 			} else {
 				tally.successes = 0;
 				tally.failures = tally.failures.saturating_add(1);
-				if tally.failures >= policy.down_after && tally.verdict != Some(false) {
+				if !held && tally.failures >= policy.down_after && tally.verdict != Some(false) {
 					tally.verdict = Some(false);
+					tally.settled_until = dwell(policy);
 					changed = true;
 				}
 			}
@@ -146,5 +164,106 @@ impl Probes {
 				link.reachable = tally.verdict;
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use netcfgd_testdir::TestDir;
+
+	/// A probe that alternates: succeed, fail, succeed, fail.
+	///
+	/// A fixed `/bin/true` or `/bin/false` cannot exercise a dwell at all --
+	/// the dwell only ever suppresses a *second* change, so a probe that never
+	/// changes its mind would let a broken implementation pass. This is the
+	/// flapping link the hold-down exists for, at the fastest period it can
+	/// have.
+	fn flapping(dir: &TestDir) -> String {
+		let script = dir.join("flap.sh");
+		std::fs::write(
+			&script,
+			"#!/bin/sh\nn=$(cat \"$0.n\" 2>/dev/null || echo 0)\n\
+			 echo $((n + 1)) > \"$0.n\"\nexit $((n % 2))\n",
+		)
+		.unwrap();
+		let mut mode = std::fs::metadata(&script).unwrap().permissions();
+		std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
+		std::fs::set_permissions(&script, mode).unwrap();
+		script.to_str().unwrap().to_owned()
+	}
+
+	/// Built by compiling config text rather than by a struct literal, so the
+	/// test also proves `hold_down` survives the lowering it was added to.
+	fn document(command: &str, hold_down: u32) -> Document {
+		let mut sources = netcfgd_compile::SourceMap::new();
+		sources.add(
+			"netcfgd.conf",
+			format!(
+				"interface eth0 {{\n\tpreference = 10\n\tprobe {{\n\
+				 \t\tcommand = \"{command}\"\n\t\tinterval = 1\n\
+				 \t\ttimeout = 5\n\t\tdown_after = 1\n\t\tup_after = 1\n\
+				 \t\thold_down = {hold_down}\n\t}}\n}}\n"
+			),
+		);
+		let document = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
+			.expect("the test config compiles");
+		assert_eq!(
+			document.interfaces[0]
+				.probe
+				.as_ref()
+				.expect("the probe lowered")
+				.hold_down,
+			hold_down,
+			"hold_down did not survive the compiler, so neither test below \
+			 would be measuring a dwell"
+		);
+		document
+	}
+
+	/// Count how many times the verdict changes over six runs of a link that
+	/// alternates on every single run.
+	///
+	/// Paced at the real interval rather than driven synthetically, because the
+	/// compiler refuses `interval = 0` and a test that reached around it would
+	/// be exercising a configuration nobody can write.
+	fn changes(hold_down: u32) -> usize {
+		let dir = TestDir::new("probe-dwell");
+		let document = document(&flapping(&dir), hold_down);
+		let mut probes = Probes::default();
+		let mut changed = 0;
+		for run in 0..6 {
+			if run > 0 {
+				std::thread::sleep(Duration::from_millis(1050));
+			}
+			if probes.run_due(Some(&document)) {
+				changed += 1;
+			}
+		}
+		changed
+	}
+
+	/// The counter-case, and the one that makes the other mean something: with
+	/// no dwell this link moves the default route on every tick, which is
+	/// precisely what 0119 left open.
+	#[test]
+	fn without_a_dwell_a_flapping_link_oscillates() {
+		assert!(
+			changes(0) >= 4,
+			"a link alternating every run should change verdict nearly every \
+			 run when no dwell is configured; if this stops being true the \
+			 dwell test below is passing vacuously"
+		);
+	}
+
+	/// And with one, it settles: the first verdict stands, and the rest of the
+	/// flapping is absorbed.
+	#[test]
+	fn a_dwell_absorbs_the_flapping() {
+		assert!(
+			changes(60) <= 1,
+			"a dwell longer than the test should let the verdict change once \
+			 and then hold"
+		);
 	}
 }

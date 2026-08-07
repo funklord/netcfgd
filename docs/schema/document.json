@@ -231,7 +231,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -410,7 +411,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -589,7 +591,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -773,7 +776,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -957,7 +961,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -1141,7 +1146,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -1325,7 +1331,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -1511,7 +1518,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -1700,7 +1708,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -1893,7 +1902,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -2077,7 +2087,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -2261,7 +2272,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -2447,7 +2459,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -2637,7 +2650,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -2821,7 +2835,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -3013,7 +3028,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -3200,7 +3216,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -3390,7 +3407,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -3575,7 +3593,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -3762,7 +3781,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -3947,7 +3967,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -4136,7 +4157,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -4341,7 +4363,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -4525,7 +4548,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -4709,7 +4733,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -4893,7 +4918,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -5078,7 +5104,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -5263,7 +5290,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -5448,7 +5476,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -5633,7 +5662,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -5818,7 +5848,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -6003,7 +6034,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
@@ -6188,7 +6220,8 @@
         "interval": 30,
         "timeout": 5,
         "down_after": 3,
-        "up_after": 2
+        "up_after": 2,
+        "hold_down": 120
       },
       "bridge_vlans": [
         {
