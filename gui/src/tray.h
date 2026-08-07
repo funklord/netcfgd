@@ -32,6 +32,8 @@
 #include <QObject>
 #include <QString>
 
+#include <QIcon>
+
 class QAction;
 class QMenu;
 class QSystemTrayIcon;
@@ -44,6 +46,16 @@ class ncfg_tray : public QObject {
 public:
 	/* Returns nullptr when the desktop has no tray, which is not an error. */
 	static ncfg_tray *create(ncfg_connection *connection, QObject *parent);
+
+	/* The indicator, and the theme-or-fallback choice in front of it.
+	 *
+	 * Public because they are the only part of this class reachable without a
+	 * notification host -- `create` returns nullptr where there is none, which
+	 * is every machine this has been built on. Exposing them is what lets the
+	 * icon be rendered and checked rather than asserted about; see
+	 * gui/tests/tray_icon.cpp. Not otherwise called from outside. */
+	static QIcon painted_icon(bool connected);
+	static QIcon state_icon(bool connected);
 
 	void refresh();
 
