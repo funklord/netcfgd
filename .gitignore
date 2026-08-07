@@ -18,6 +18,7 @@ client/.build-flags
 client/tests/client_test
 gui/build/
 gui/build-*/
+gui/tests/build/
 
 # Built packages. The recipes and the metadata are tracked; the .deb and .apk
 # they produce are not -- a package is a build artifact of a specific commit,

@@ -22,6 +22,13 @@ QT += widgets
 CONFIG += c++17
 CONFIG -= app_bundle
 
+# -Os, because build-and-commit.md asks for it and says that in a Qt project
+# file it means saying so rather than accepting the qmake default -- which is
+# -O2, and was what this built at until somebody looked. Load-bearing: remove
+# these two lines and qmake silently puts -O2 back.
+QMAKE_CXXFLAGS_RELEASE -= -O2
+QMAKE_CXXFLAGS_RELEASE += -Os
+
 CLIENT_DIR = $$PWD/../client
 CLIENT_LIB = $$CLIENT_DIR/libncfg_client.a
 

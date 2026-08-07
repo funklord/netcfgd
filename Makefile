@@ -935,6 +935,7 @@ fuzz:
 gui:
 	@if command -v qmake6 >/dev/null 2>&1; then \
 		$(MAKE) --no-print-directory -C gui; \
+		$(MAKE) --no-print-directory -C gui test; \
 	else \
 		echo "gui: qmake6 not installed, skipping (apt install qt6-base-dev)"; \
 	fi
