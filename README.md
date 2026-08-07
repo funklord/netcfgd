@@ -41,7 +41,9 @@ make build          # release build
 make check          # the gates: fmt, clippy, tests, size, style
 make test           # unit and fixture tests
 make live           # scripted checks against real daemons
-sudo make install   # honours DESTDIR
+sudo make install   # honours DESTDIR; the daemon and the CLI
+make gui            # the Qt client, if you want it
+sudo make install-gui
 ```
 
 ### What you need installed
@@ -72,8 +74,14 @@ works out for itself.
 
 Worth knowing before you install it: **the Qt client links `libQt6DBus`**, so
 the "no D-Bus" property above is the *core's* and not the GUI's. That is Qt's
-own dependency rather than a choice made here, and it is one more reason the
-client is a separate package from the daemon.
+own dependency rather than a choice made here.
+
+**The client is not in any package yet.** `make gui` builds it and
+`make install-gui` installs it — opt-in, the way `install-modem-mbim` is, and
+deliberately not part of `make install`. Putting it in the `.deb` would put
+`qt6-base-dev` in the source package's `Build-Depends`, so building the
+*daemon* on a router would need Qt; splitting the source package is the usual
+answer and is a decision worth making deliberately rather than in passing.
 
 **To cross-compile** (`make cross`), the linker for the target — the table in
 the `Makefile` maps triples to these:

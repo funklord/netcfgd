@@ -27,6 +27,11 @@ Description: network configuration daemon that states what it will do
  resolver it names. netcfgd speaks netlink itself, so it needs no ip, iw or
  nft. Prefix delegation wants odhcp6c, which Debian does not package.
  .
+ The Qt client is not in this package and has no package of its own yet:
+ building it would put qt6-base-dev in this source package's Build-Depends,
+ and the daemon is meant to build on machines that have no toolkit at all.
+ `make gui && make install-gui` is how to have it meanwhile.
+ .
  Installing this package configures nothing and starts nothing. The systemd
  unit is installed and left disabled: netcfgd takes over an interface only
  when a configuration names it and an operator applies a plan.

@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross
+.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -256,6 +256,10 @@ DESTDIR ?=
 PREFIX  ?= /usr
 SBINDIR ?= $(PREFIX)/sbin
 BINDIR  ?= $(PREFIX)/bin
+DATADIR ?= $(PREFIX)/share
+# Where gui/Makefile leaves its binary. Its own BUILD_DIR defaults to `build`
+# and is not visible here, so this tracks it and is overridable the same way.
+GUI_BUILD_DIR ?= gui/build
 SYSCONFDIR ?= /etc
 
 # Two binaries and a config directory. Nothing else, and nothing that makes
@@ -291,6 +295,24 @@ install-modem-mbim:
 	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
 	@echo "install-modem-mbim:   docs/interface-report.md is the contract -- write"
 	@echo "install-modem-mbim:   your own helper if this one does not fit"
+
+# The Qt client, opt-in the way install-modem-mbim is.
+#
+# Not part of `make install`, and the reason is the same one that keeps it out
+# of the .deb: the daemon's whole claim is that it needs nothing, and a client
+# that pulls in a toolkit is not something to install on a machine that did not
+# ask for it. `make gui` builds it; this puts it somewhere.
+install-gui:
+	@[ -x $(GUI_BUILD_DIR)/netcfgd-gui ] || { \
+		echo "install-gui: $(GUI_BUILD_DIR)/netcfgd-gui is not built -- run \`make gui\` first"; \
+		exit 1; \
+	}
+	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/applications
+	install -m 0755 $(GUI_BUILD_DIR)/netcfgd-gui $(DESTDIR)$(BINDIR)/netcfgd-gui
+	install -m 0644 gui/packaging/netcfgd-gui.desktop \
+		$(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	@echo "install-gui: netcfgd-gui installed; it needs libqt6widgets6 at run time"
+	@echo "install-gui:   and links libQt6DBus, which the daemon does not"
 
 install-systemd:
 	install -d $(DESTDIR)/usr/lib/systemd/system
