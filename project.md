@@ -514,6 +514,20 @@ The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are
 
 ## 6. CI gates — establish before writing features
 
+**`make check` is the gate; `make check-ci` is the half a machine nobody owns
+can honestly run.** One list of portable gates feeds both, so a gate added is
+in both by construction rather than by somebody remembering. What `check-ci`
+leaves out is the three budgets — they are ratchets on a *measurement*, and a
+rented runner measures the runner: `rss` spreads 152 KB across runs of an
+identical binary inside 360 KB of headroom, and `size` is deterministic for a
+toolchain and not across them. Constraint 8 is not weakened by that. The size
+budget is still a gate and still in `check`; what moves is *who is asked*, not
+whether. `.github/workflows/check.yml` runs `check-ci` on a clean checkout and
+builds and tests under musl, which is the platform that caught `kill -0`
+calling a zombie alive — and it runs no live script, because a green tick over
+a suite that skipped everything is the vacuous pass this section exists to
+avoid.
+
 | Gate | What it checks |
 |---|---|
 | Size budget | `make size`. **Total installed size, not per binary** — merging two binaries that each link most of the workspace makes the one binary bigger and the install a megabyte smaller, so a per-binary gate points the wrong way. It **ratchets**: the limit is the last measured size, and `size-budget.txt` carries a line per feature saying what it bought. The 3% tolerance is for compiler-version noise; spend it on a feature and the next feature fails the gate for the wrong reason. Design §10.2's 1 MB embedded target was measured as unreachable ([0021](docs/decisions/0021-no-nano-tier.md), [0024](docs/decisions/0024-one-binary-and-what-a-megabyte-would-actually-cost.md)) |

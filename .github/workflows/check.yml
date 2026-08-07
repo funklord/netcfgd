@@ -52,40 +52,16 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
 
-      # `make check` minus the three budget gates, and the omission is
-      # deliberate rather than convenient.
+      # `check-ci` is `check` minus the budget gates, and the Makefile says
+      # why: they are ratchets on a measurement, and a rented VM measures the
+      # VM. It shares one gate list with `check`, so a gate added there is
+      # added here by construction rather than by somebody remembering.
       #
-      # `rss` is a ratchet on a *measurement*, and measuring it on a rented VM
-      # measures the VM. Its own noise band was calibrated against a known
-      # machine, and even there an identical binary spreads: three runs while
-      # writing this gave 4240, 4244 and 4392 KB against a 4608 limit, so 152
-      # KB of spread inside 360 KB of headroom. A gate that fails a coin toss
-      # teaches people to ignore red, which costs more than the gate is worth.
-      #
-      # `size` and `footprint` are deterministic for a given toolchain and not
-      # across toolchains, and `stable` here moves every six weeks. Constraint
-      # 8 wants a size regression caught, and it is caught -- by whoever runs
-      # `make check` on a machine whose numbers mean something.
-      #
-      # Listed rather than expressed as an exclusion because make has no way to
-      # say "all but these", so the list can drift from `check`. It is one file
-      # and the drift is visible; a `check-ci` target would be tidier and is a
-      # convention change to raise rather than make in passing.
-      #
-      # `conformance` is the one worth naming, because it is the only gate that
-      # compares two *client implementations* rather than a client against the
-      # daemon -- and it needs the C client built, which the target does.
-      - name: Conventions, policies and packaging
-        run: make style fmt ascii shell clippy unsafe-policy executor-policy
-
-      - name: Containment and packaging
-        run: make nm-containment packaging
-
-      - name: Tests, and the two clients against each other
-        run: make conformance test
-
-      - name: Adapters
-        run: make adapters
+      # Not a step list written out in this file, which is what this replaced:
+      # that could drift from `check` silently, and the drift would be a gate
+      # nobody ran.
+      - name: make check-ci
+        run: make check-ci
 
   musl:
     name: build and test (musl)
