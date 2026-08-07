@@ -290,15 +290,24 @@ SSID and never with a credential. That is
 expressed as a message: the request cannot be used to join something the
 configuration does not already describe, so it stays inside the `wifi` tier.
 
-**There is no request that adds a network**, and that is a boundary rather
-than a gap. Adding one is *writing a config file*
-([0069](decisions/0069-adding-a-network-is-writing-a-file.md)), which needs the
-`admin` tier and the secret provider, and is not a socket operation at all.
-**No passphrase crosses this socket in either direction**
+**There is no request that adds a network today**, and **no passphrase crosses
+this socket in either direction**
 ([0029](decisions/0029-a-profile-is-a-projection-and-secrets-do-not-travel.md),
-[0031](decisions/0031-the-secret-bridge-runs-one-way.md)). A client that wants
-to offer "join a new network" is writing a file, with everything that implies
-about permissions.
+[0031](decisions/0031-the-secret-bridge-runs-one-way.md)). Adding one is
+*writing a config file*
+([0069](decisions/0069-adding-a-network-is-writing-a-file.md)), which needs the
+`admin` tier and the secret provider. An implementation written against this
+document should assume both sentences hold.
+
+**That is decided to change, and has not yet.**
+[0117](decisions/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)
+accepts an `admin`-tier `wifi_add` carrying **typed fields — never config text
+and never a path** — with the daemon rendering the block and storing the
+credential through the provider. The distinction is the point: a config file
+may name a hook and a hook's `run_as` defaults to root, so a request carrying
+config text is remote code execution while one carrying an SSID and a
+passphrase is not. When it lands, the second sentence above becomes *inbound
+only, in one request, never outbound* -- 0031's bridge direction, unchanged.
 
 ## 10. What an implementation must do
 
@@ -376,6 +385,9 @@ this.
   untrusted bytes is the more permissive half. Found by writing this document
   and measuring a claim that was about to be asserted, which is the argument
   for writing specifications down rather than pointing at a witness.
+- **A client cannot add a network** (section 9). Decided in 0117 and not built,
+  so netcfgd's own GUI is still less capable than a NetworkManager applet
+  talking to the same daemon through the shim.
 - **`hello` does not negotiate a version.** It reports the tiers a connection
   holds. There is nothing to negotiate while section 1 holds, and this is the
   obvious place for it when that changes.

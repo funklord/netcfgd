@@ -1904,8 +1904,13 @@ the sentence that disposes of an alternative in half a line.
      editor of its own authority, against constraint 1), or the shim's route,
      where a privileged adapter already accepts exactly this from a desktop
      ([0030](docs/decisions/0030-a-gui-is-an-editor-of-config-files.md)) and
-     netcfgd's own GUI would be the odd one out. **Raise it before building
-     it**: it is a security decision, not a UI task.
+     netcfgd's own GUI would be the odd one out. **Settled in
+     [0117](docs/decisions/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)**:
+     an `admin`-tier `wifi_add` carrying typed fields, never config text and
+     never a path, because a config file may name a hook whose `run_as`
+     defaults to root — so the cheapest option, a group-writable config
+     directory, is group-writable root code execution and the obvious answer is
+     the one that quietly grants the most. Decided, not built.
    - ~~**M8's tray applet does not exist.**~~ — **written**, and it is the one
      thing a GUI gives that `ncfg` and `ncfg tui` structurally cannot: an
      answer to "am I on the network" costing no window and no command, on a
