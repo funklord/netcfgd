@@ -137,3 +137,45 @@ fn mutated_valid_messages_never_panic() {
 		exercise(&data);
 	}
 }
+
+/// The values random search will not find, tried on purpose.
+///
+/// `random_bytes_never_panic` draws two thousand strings, so a specific
+/// four-byte value turns up with probability about two in ten billion. That is
+/// how `error_code` kept `-raw` on `i32::MIN` -- a real crash, found by
+/// `cargo fuzz` and not by this file, which had been calling `error_code` on
+/// random bytes the whole time.
+///
+/// Coverage feedback finds these because a boundary sits on a branch edge;
+/// undirected random draws do not. So they are enumerated: the extremes of
+/// each width, at every aligned offset in a buffer long enough to reach the
+/// scalar fields, with the rest of the buffer left as both zeroes and ones so
+/// a value is not neutralised by whatever surrounds it.
+#[test]
+fn boundary_scalars_never_panic() {
+	const EXTREMES: [u32; 8] = [
+		0,
+		1,
+		u32::MAX,
+		i32::MAX as u32,
+		i32::MIN as u32,
+		0x0000_8000,
+		0x8000_0000,
+		0xffff_0000,
+	];
+
+	for filler in [0x00u8, 0xff] {
+		for length in [4usize, 9, 16, 20, 32, 64] {
+			for offset in (0..length).step_by(4) {
+				if offset + 4 > length {
+					continue;
+				}
+				for value in EXTREMES {
+					let mut data = vec![filler; length];
+					data[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+					exercise(&data);
+				}
+			}
+		}
+	}
+}
