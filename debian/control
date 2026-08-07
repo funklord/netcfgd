@@ -3,12 +3,15 @@ Section: net
 Priority: optional
 Maintainer: Nabeel Sowan <nabeel@vibes.se>
 Homepage: https://github.com/netcfgd/netcfgd
-Build-Depends: debhelper-compat (= 13), cargo, rustc, libncurses-dev, pkgconf
+Build-Depends: debhelper-compat (= 13), cargo (>= 1.85), rustc (>= 1.85),
+ libncurses-dev, pkgconf
 Rules-Requires-Root: no
 
 Package: netcfgd
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Suggests: dhcpcd-base, wpasupplicant, hostapd, openvpn, ppp, pppoe, radvd,
+ dnsmasq-base, unbound, openresolv, systemd-resolved
 Description: network configuration daemon that states what it will do
  netcfgd reads one declarative configuration, reports what the machine
  currently looks like, and prints the exact list of operations that would
@@ -17,6 +20,12 @@ Description: network configuration daemon that states what it will do
  .
  It links no D-Bus, no polkit and no glib, and depends on no system message
  bus. The daemon speaks a newline-delimited JSON protocol over a unix socket.
+ .
+ Every program in Suggests is optional and none is needed to install, start
+ or configure netcfgd. Each is pulled in by one feature: a DHCP lease wants
+ dhcpcd, a wifi network wants wpasupplicant, a DNS mode wants whichever
+ resolver it names. netcfgd speaks netlink itself, so it needs no ip, iw or
+ nft. Prefix delegation wants odhcp6c, which Debian does not package.
  .
  Installing this package configures nothing and starts nothing. The systemd
  unit is installed and left disabled: netcfgd takes over an interface only
