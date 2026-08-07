@@ -1610,9 +1610,24 @@ different property and the one this list is about.
   against a fake copied from libmbim's own output.
 - **Suspend and resume have never been exercised**, per item 3, and it is the
   most-travelled path a laptop has.
-- **systemd-networkd detection has never been run against systemd-networkd.**
-  Written from its documented layout, unlike the NetworkManager path, which was
-  checked against a running one.
+- ~~**systemd-networkd detection has never been run against systemd-networkd.**~~
+  **Done, and it needed no hardware** — only real root, because networkd drops
+  privileges to `systemd-network` and cannot start in a user namespace, which is
+  why it had gone unchecked. A privileged container ran systemd 257 over two
+  dummy links, one with a `.network` and one without; `crates/netcfgd-host/
+  tests/networkd/` holds the files it wrote, and the test uses those rather than
+  a hand-written approximation.
+
+  Two findings. The detector is **right** — `configured` for the claimed link,
+  `unmanaged` for the other — and there is a **third state nobody had written
+  down**: `pending`, a link networkd has seen and not decided about, which
+  persisted for the whole run rather than flickering past. It is deliberately
+  not a claim, and that is now a measured decision instead of an untested
+  assumption; treating it as one fails the test. And every link file opens with
+  `# This is private data. Do not parse.`, which netcfgd parses anyway — a
+  trade, since the supported routes are `networkctl` and D-Bus and constraint 3
+  keeps a bus off the mandatory path. What a format change costs is a warning,
+  not a network.
 
 Two things follow from this list, and both change what to work on.
 

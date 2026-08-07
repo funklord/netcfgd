@@ -4,8 +4,10 @@
 //! -- a test that only passes on a machine running `NetworkManager` is a test
 //! that passes on one machine.
 //!
-//! The NM layout below was read off a running `NetworkManager`; the `networkd` one
-//! was not, and its test is worth exactly what that is worth.
+//! The NM layout below was read off a running `NetworkManager`. The `networkd`
+//! one now is too: `tests/networkd/` holds link state files copied verbatim
+//! from systemd 257, and the tests at the bottom of this file use those rather
+//! than a hand-written approximation of them.
 
 use netcfgd_host::contention::{contenders, describe};
 use std::fs;
@@ -136,4 +138,78 @@ fn the_message_names_the_device_and_the_command() {
 	assert!(text.contains("intermittently"), "got: {text}");
 
 	let _ = fs::remove_dir_all(&root);
+}
+
+/// What a real `systemd-networkd` writes, used as it wrote it.
+fn networkd_link(root: &std::path::Path, index: u32, sample: &str) {
+	let dir = root.join("systemd/netif/links");
+	fs::create_dir_all(&dir).expect("mkdir");
+	let body = fs::read_to_string(
+		std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("tests/networkd")
+			.join(sample),
+	)
+	.expect("the captured sample is in the tree");
+	fs::write(dir.join(index.to_string()), body).expect("write");
+}
+
+/// The three states a running networkd actually produced, against the detector.
+///
+/// This is the test the module header used to disclaim. It was written from
+/// systemd's documentation because networkd would not start here -- it drops
+/// privileges to `systemd-network`, which cannot map inside a user namespace,
+/// so it took a privileged container to run one at all.
+///
+/// What that found: the documented two states are right, and there is a third.
+/// `pending` is a link networkd has seen and not yet decided about, and it
+/// persisted for the whole run rather than flickering past. It is deliberately
+/// *not* a claim -- networkd has configured nothing on such a link, so warning
+/// about a contest there would be the false alarm the NM test above exists to
+/// avoid.
+#[test]
+fn the_three_states_a_real_networkd_writes() {
+	let root = scratch("networkd-real");
+	networkd_link(&root, 7, "configured");
+	networkd_link(&root, 8, "unmanaged");
+	networkd_link(&root, 1, "pending");
+
+	let found = with_root(&root, || {
+		contenders(&[
+			("nd0".to_owned(), 7),
+			("nd1".to_owned(), 8),
+			("lo".to_owned(), 1),
+		])
+	});
+
+	assert_eq!(found.len(), 1, "only networkd should be reported");
+	assert_eq!(found[0].name, "systemd-networkd");
+	assert_eq!(
+		found[0].interfaces,
+		vec!["nd0".to_owned()],
+		"the configured link is the claim; unmanaged and pending are not"
+	);
+}
+
+/// The header line is part of what is parsed, and it says not to.
+///
+/// `# This is private data. Do not parse.` is the first line of every one of
+/// these files. netcfgd parses them anyway, and that is a decision rather than
+/// an oversight: the supported ways to ask are `networkctl` and networkd's
+/// D-Bus API, and section 1 constraint 3 keeps a message bus off the core's
+/// mandatory path. The cost is that this can break on a systemd release, and
+/// the mitigation is that it is a *warning* -- netcfgd loses a diagnostic, not
+/// a network, if the format moves.
+///
+/// Asserted so the assumption is visible rather than implied by a fixture.
+#[test]
+fn the_link_file_is_private_data_and_says_so() {
+	let body = fs::read_to_string(
+		std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/networkd/configured"),
+	)
+	.expect("the captured sample is in the tree");
+	assert!(
+		body.starts_with("# This is private data. Do not parse."),
+		"systemd still marks these files private; if this line has gone, the \
+		 format may have moved and the detector is what to check"
+	);
 }

@@ -94,10 +94,24 @@ fn network_manager_claims(root: &Path, interfaces: &[(String, u32)]) -> Vec<Stri
 /// for every link it can see, and one it was given no `.network` for reports
 /// `unmanaged`.
 ///
-/// Written from the documented layout rather than from a running `networkd` --
-/// this machine has `NetworkManager`, so unlike the NM path above this one has
-/// not been checked against the real thing. Said here rather than discovered
-/// by somebody whose `networkd` went unreported.
+/// **Checked against a running `networkd`** -- systemd 257, two dummy links,
+/// one with a `.network` and one without. `tests/networkd/` holds the files it
+/// wrote. It took a privileged container to do it: networkd drops privileges
+/// to `systemd-network`, which cannot map inside a user namespace, and that is
+/// why this went unverified for as long as it did.
+///
+/// It found a third state the documentation above did not mention. `pending`
+/// is a link networkd has seen and not yet decided about, and it persisted for
+/// the whole run rather than flickering past. It is deliberately not a claim:
+/// networkd has configured nothing on such a link, and warning about a contest
+/// there is the false alarm that gets a warning ignored.
+///
+/// Every one of these files opens with `# This is private data. Do not parse.`
+/// This parses them anyway, which is a decision and not an oversight -- the
+/// supported ways to ask are `networkctl` and networkd's D-Bus API, and
+/// constraint 3 keeps a message bus off the core's mandatory path. The cost is
+/// that a systemd release can move the format; the mitigation is that this
+/// feeds a *warning*, so what breaks is a diagnostic and not a network.
 fn networkd_claims(root: &Path, interfaces: &[(String, u32)]) -> Vec<String> {
 	let links = root.join("systemd/netif/links");
 	let mut claimed: Vec<String> = interfaces
