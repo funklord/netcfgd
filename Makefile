@@ -621,6 +621,9 @@ cross:
 	elif ! command -v $(CROSS_CC) >/dev/null 2>&1; then \
 		echo "cross: no linker $(CROSS_CC) on PATH"; \
 		echo "cross:   apt install gcc-$(CROSS_GNU)"; \
+		echo "cross:   the workspace also needs the target's ncurses --"; \
+		echo "cross:   dpkg --add-architecture, then libncurses-dev:<arch>,"; \
+		echo "cross:   or build --no-default-features, which links neither"; \
 		skipped=1; \
 	else \
 		echo "cross: client/ for $(CROSS_TARGET) via $(CROSS_CC)"; \
@@ -641,6 +644,9 @@ cross:
 		echo "cross:   rustup target add $(CROSS_TARGET)"; \
 		echo "cross:   (this toolchain is $$(rustc -vV | awk '/^host/ {print $$2}') and has"; \
 		echo "cross:    no rustup; a distro rustc ships one target and cannot add another)"; \
+		echo "cross:   a container is the way round it, and has been done:"; \
+		echo "cross:     docker run --rm -v \$$PWD:/src:ro rust:1-slim-trixie"; \
+		echo "cross:   see section 10, which records what aarch64 measured"; \
 		skipped=1; \
 	else \
 		echo "cross: workspace for $(CROSS_TARGET) via $(CROSS_CC)"; \

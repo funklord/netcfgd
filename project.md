@@ -1594,18 +1594,35 @@ different property and the one this list is about.
   section's framing, written into the design before any code existed and then
   lost from the brief.
 
-  **`make cross` now exists**, which is the part of this entry that needed no
-  hardware: there was previously no target at all, so mips and arm had not
-  merely failed, they had never been attempted. The C client **builds clean for
-  aarch64** — 49,800 bytes, and clean under `-Wconversion -Wsign-conversion`,
-  which is worth more than it looks because aarch64's plain `char` is unsigned
-  where x86_64's is signed, so those two warnings have now been satisfied under
-  both conventions rather than one. The **Rust half has still not been
-  attempted**: this machine's rustc is a distro build with one target and no
-  rustup, so no cross `std` can be added, and `make cross` says exactly that
-  and exits non-zero rather than skipping. Running is still untried either way —
-  a cross build proves the tree compiles for another machine, which is the step
-  before anybody can try it, not a substitute for trying.
+  **The whole tree now cross-compiles for aarch64, and there are numbers.**
+  There was previously no target at all, so mips and arm had not merely failed,
+  they had never been attempted. The C client builds clean — 49,800 bytes, and
+  clean under `-Wconversion -Wsign-conversion`, which is worth more than it
+  looks because aarch64's plain `char` is unsigned where x86_64's is signed, so
+  those two warnings have now been satisfied under both conventions rather than
+  one.
+
+  The **Rust half needed a container**, for the same reason the networkd check
+  did: this machine's rustc is a distro build carrying one target with no
+  rustup, so no cross `std` can be added to it. A `rust:1-slim-trixie` image has
+  one. `netcfgd` for `aarch64-unknown-linux-gnu` is **1,774,416 bytes** against
+  2,267,672 installed on x86_64 — about 22% smaller, and still **1.77× over
+  §10.2's 1 MB embedded budget**, which is the first measurement that number has
+  ever had on an architecture it was written for.
+
+  Two things came out of doing it. The TUI needs the *target's* ncurses, so a
+  cross build fails at `-lncursesw` until `libncurses-dev:<arch>` is installed
+  or the TUI is compiled out — `make cross` says so now, having hit it. And
+  **the size gate would be blind on aarch64**: `--no-default-features` produces
+  a genuinely different binary, 23 KB less text and none of the 22 ncurses
+  symbols, at *byte-identical* file size, because aarch64 links with 64 KB
+  segment alignment. size-budget.txt already records that x86_64's 4 KB pages
+  hide changes smaller than a page; on this target the blind spot is sixteen
+  times wider, so a 1 MB budget has about sixteen distinguishable steps in it.
+
+  Running is still untried, on any architecture. A cross build proves the tree
+  compiles for another machine, which is the step before anybody can try it,
+  not a substitute for trying.
 - **The modem path has never met hardware** — Next item 1, written entirely
   against a fake copied from libmbim's own output.
 - **Suspend and resume have never been exercised**, per item 3, and it is the
