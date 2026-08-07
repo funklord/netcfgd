@@ -23,6 +23,16 @@ makedepends="cargo make ncurses-dev"
 # splitting it out would mean a machine that installed netcfgd and got no way
 # to run it. The default subpackages that would apply here are empty anyway.
 subpackages=""
+# The group `ncfg control set` points a policy at. Reserved and empty, the way
+# the Debian package reserves it: every tier defaults to root, so a client run
+# by an ordinary user is refused until somebody says otherwise, and joining a
+# group is one of the two ways 0118 gives to say it.
+#
+# `pkggroups` rather than a post-install script, because abuild already knows
+# how to create a group idempotently and a script that ran `addgroup` would be
+# a second implementation of that.
+pkggroups="netcfgd"
+
 source="$pkgname-$pkgver.tar.gz"
 builddir="$srcdir/$pkgname-$pkgver"
 options="!check"
