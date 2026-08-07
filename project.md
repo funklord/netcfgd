@@ -2035,7 +2035,17 @@ the sentence that disposes of an alternative in half a line.
    file that decides who may configure the network is its own piece of work
    rather than a detail of this one.
 
-   ~~**What to do about the wall itself is decided and unbuilt.**~~ Two ways to be allowed: a reserved group the packages
+   **Both halves of 0118 are built.** `ncfg control set` edits the `global`
+   block where it lives, with the invariant that the compiled document may
+   differ in `globals.control` and nowhere else -- and breaking the splicer to
+   *move* a line did not fire that check, correctly, because the meaning was
+   unchanged; only swallowing a key did. The client's access tab is the other
+   half: read-only until `Administrator Mode...`, then live inside a red frame,
+   with Apply shelling out to that same typed command through pkexec, kdesu or
+   `sudo -A`, and printing the command where none of those exists.
+
+   **The frame has never been drawn.** Nothing here has a graphical session, so
+   that and the elevator are the third thing on this list wanting the laptop. Two ways to be allowed: a reserved group the packages
    create empty, and an administrator mode in the client on KDE 3.5's pattern —
    read-only until the operator authenticates as root, **surrounded by a red
    frame while it is live**, editing the `control` block and nothing else. The
