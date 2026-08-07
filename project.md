@@ -571,7 +571,7 @@ the whole value of this target is telling somebody what to install.
 | Supply chain | `cargo-deny`, `cargo-audit`, pinned lockfile, stated MSRV |
 | Packaging | `make packaging`: every path an init script names is a path that gets installed, every maintainer script parses **and is executable** (dpkg silently skips one that is not), and every `@TOKEN@` in a package template is one a recipe substitutes. `make deb` and `make apk-container` build real packages, with dependencies derived from the ELF by `dpkg-shlibdeps` and `abuild` rather than typed out ([0099](docs/decisions/0099-a-package-installs-netcfgd-and-changes-nothing.md)) |
 | Adapter containment | `make nm-containment`: every crate in the core lockfile appears in `deny.toml`'s allow list, so an adapter's dependencies cannot reach the core. Design §9.2 asks for exactly this assertion; [0027](docs/decisions/0027-the-shim-is-a-separate-workspace-and-libnm-reads-interfaces.md) |
-| Fuzzing | every parser — DSL, netlink messages, backend IPC — has a `cargo-fuzz` target running in CI |
+| Fuzzing | four `cargo-fuzz` targets — `config_parse`, `document_json`, `netlink_wire`, `socket_message` — plus randomised tests in `crates/*/tests/random.rs` that run on stable. **Not in CI**, and that row said it was: `cargo-fuzz` needs nightly, which the workflow does not install. Run in a container instead ([§10](#10-where-this-is-now-and-what-to-pick-up-next)), which is how `netlink_wire` produced its first crash |
 | Determinism | same config compiles to byte-identical document across runs and platforms |
 | Plan idempotence | applying a plan twice produces an empty second plan |
 
@@ -2446,6 +2446,31 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
 - **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
 - **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
+- **The first `cargo fuzz` run found a real crash, in the parser its own
+  comment calls the one that matters most.** `netlink_wire` says a bad netlink
+  parser fails by hanging, and "a hang in a daemon holding CAP_NET_ADMIN is
+  invisible" — so it is fuzzed hardest. What came out in a hundred seconds was
+  not a hang: nine bytes, and `error_code` computing `-raw` on `i32::MIN`.
+  Under overflow checks that panics; without them it wraps back to `i32::MIN`,
+  so the same kernel message either killed the daemon or produced a nonsense
+  errno depending on which profile was built. It is `checked_neg()` now, and
+  `None` was already the right answer — both callers map it to `EPROTO`, which
+  is what a payload carrying an impossible errno is.
+
+  **These targets had never been run.** `cargo-fuzz` needs nightly, this
+  machine's rustc is a distro build without it, and the §6 table claimed all
+  four were "running in CI" while the workflow installs no nightly and mentions
+  fuzzing nowhere. A container has a nightly, the same one that ran networkd
+  and the cross build. Three targets came back clean over a hundred seconds
+  each — `config_parse` at 1.36M runs, `document_json` at 4.73M,
+  `socket_message` reaching 1485 corpus entries without a finding.
+
+  Reproducing it needed care: the crash did not appear when the three iterator
+  calls were driven on their own, because the failing call was one of the six
+  scalar decoders beside them. Mirroring the *whole* target rather than the
+  part that looked relevant is what turned an unsymbolized `deadly signal` into
+  a file and a line number.
+
 - **The packaging gate was checking maintainer scripts the package does not
   ship.** `packaging/debian/` is the pre-debhelper generation, superseded by
   `debian/` when the build moved to debhelper, and untouched since the commit

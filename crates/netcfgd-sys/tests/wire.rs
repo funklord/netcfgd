@@ -328,6 +328,22 @@ fn an_error_payload_reports_its_errno() {
 
 	let ack = 0_i32.to_ne_bytes();
 	assert_eq!(error_code(&ack), Some(0));
+
+	// i32::MIN is the one value with no positive counterpart, and `-raw`
+	// panicked on it under overflow checks -- or wrapped back to i32::MIN
+	// without them, so the same message either killed the daemon or produced a
+	// nonsense errno depending on the build profile. Found by `cargo fuzz` on
+	// the netlink_wire target, from a nine-byte input, and reduced to this.
+	//
+	// `None` rather than a saturated value, because both callers map `None` to
+	// EPROTO and that is exactly what a payload carrying an impossible errno
+	// is. No real errno is within nine digits of this.
+	let hostile = i32::MIN.to_ne_bytes();
+	assert_eq!(
+		error_code(&hostile),
+		None,
+		"an errno with no positive counterpart is a malformed payload, not a code"
+	);
 }
 
 /// The classic netlink parser bug: a length field below the header size makes

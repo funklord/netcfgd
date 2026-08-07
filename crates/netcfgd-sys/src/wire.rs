@@ -595,8 +595,18 @@ pub fn build_request(kind: u16, flags: u16, seq: u32, body: &[u8], attrs: &AttrB
 /// The error code in an `NLMSG_ERROR` payload, negated into a positive errno.
 ///
 /// Zero means this was an acknowledgement rather than a failure.
+///
+/// `None` for a payload with no readable code, which both callers turn into
+/// `EPROTO` -- and that now includes `i32::MIN`, the one value with no positive
+/// counterpart. Plain `-raw` panicked on it under overflow checks and wrapped
+/// back to `i32::MIN` without them, so the daemon either died or reported a
+/// nonsense errno depending on the profile it was built with. No errno is
+/// anywhere near that magnitude, so a payload carrying it is malformed, and
+/// "malformed" is what `None` already means here.
+///
+/// Found by `cargo fuzz` on the `netlink_wire` target, from a nine-byte input.
 #[must_use]
 pub fn error_code(payload: &[u8]) -> Option<i32> {
 	let raw = i32::from_ne_bytes(payload.get(0..4)?.try_into().ok()?);
-	Some(-raw)
+	raw.checked_neg()
 }
