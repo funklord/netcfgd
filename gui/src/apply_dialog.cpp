@@ -165,7 +165,7 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
 	 * list. So "nothing to do" cannot be read off the actions alone -- doing
 	 * that disabled Apply on exactly the plan consent exists for, which is
 	 * what the headless probe found on its first run. */
-	if (fetched.actions.isEmpty() && !fetched.blocked() && fetched.stranded.isEmpty()) {
+	if (!actionable(fetched)) {
 		say(QStringLiteral("Nothing to do -- the machine matches the configuration."));
 		return;
 	}
@@ -194,6 +194,15 @@ ncfg_apply_dialog::ncfg_apply_dialog(ncfg_connection *connection, QWidget *paren
  * saying no, and a dialog that arrived with the override already ticked would
  * be answering on the operator's behalf.
  */
+bool ncfg_apply_dialog::actionable(const ncfg_plan_data &plan)
+{
+	/* Three ways a plan can be worth applying, and the last two are the ones
+	 * that were missed. A refusal is a thing to consent to; a stranded
+	 * credential is a thing to consent to; and either can arrive with no
+	 * actions beside it at all. */
+	return !plan.actions.isEmpty() || plan.blocked() || !plan.stranded.isEmpty();
+}
+
 void ncfg_apply_dialog::build_consent(const ncfg_plan_data &fetched)
 {
 	if (fetched.refusals.isEmpty() && fetched.stranded.isEmpty()) {
