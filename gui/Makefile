@@ -31,7 +31,7 @@ CLIENT_LIB = $(CLIENT_DIR)/libncfg_client.a
 BUILD_DIR ?= build
 TARGET = $(BUILD_DIR)/netcfgd-gui
 
-.PHONY: all run clean $(CLIENT_LIB)
+.PHONY: all run test clean $(CLIENT_LIB)
 
 all: $(TARGET)
 
@@ -48,6 +48,29 @@ $(TARGET): $(CLIENT_LIB) gui.pro $(wildcard src/*.cpp src/*.h)
 run: $(TARGET)
 	./$(TARGET)
 
+# The headless render probe. Its own qmake project under tests/, so a plain
+# `make` here does not build it -- build-and-commit.md wants tests built by the
+# test target and only by it.
+#
+# Offscreen because the thing under test is *pixels*: 0118's frame is the whole
+# argument for administrator mode, and a mode nobody can look at is the feature
+# not existing. Qt's offscreen platform runs the real paint path, so this needs
+# a graphical session no more than it needs a person.
+test: $(CLIENT_LIB)
+	@mkdir -p tests/$(BUILD_DIR)
+	@cd tests/$(BUILD_DIR) && $(QMAKE) ../access_frame.pro >/dev/null && \
+		$(MAKE) --no-print-directory
+	@QT_QPA_PLATFORM=offscreen tests/$(BUILD_DIR)/access_frame
+
 clean:
-	rm -rf $(BUILD_DIR)
+	@# Verified before it is deleted, per build-and-commit.md: this is the
+	@# wholesale-directory shape, which is allowed because the build created
+	@# the directory -- but only once the variable is known to be non-empty
+	@# and relative. An unset or absolute BUILD_DIR here is how a clean target
+	@# eats something it should not.
+	@case "$(BUILD_DIR)" in \
+		"" ) echo "clean: BUILD_DIR is empty, refusing"; exit 1 ;; \
+		/* ) echo "clean: BUILD_DIR $(BUILD_DIR) is absolute, refusing"; exit 1 ;; \
+	esac
+	rm -rf $(BUILD_DIR) tests/$(BUILD_DIR)
 	$(MAKE) -C $(CLIENT_DIR) clean

@@ -2088,9 +2088,9 @@ the sentence that disposes of an alternative in half a line.
    with Apply shelling out to that same typed command through pkexec, kdesu or
    `sudo -A`, and printing the command where none of those exists.
 
-   **The frame has never been drawn.** Nothing here has a graphical session, so
-   that and the elevator are the third thing on this list wanting the laptop. Two ways to be allowed: a reserved group the packages
-   create empty, and an administrator mode in the client on KDE 3.5's pattern —
+   **0118's shape, restated**, because it is the part of this item worth
+   remembering: two ways to be allowed — a reserved group the packages create
+   empty, and an administrator mode in the client on KDE 3.5's pattern,
    read-only until the operator authenticates as root, **surrounded by a red
    frame while it is live**, editing the `control` block and nothing else. The
    frame is the argument: polkit prompts per action and leaves nothing on screen
@@ -2099,6 +2099,35 @@ the sentence that disposes of an alternative in half a line.
    that refusal rested on `wifi_add` being strictly better — and you cannot ask
    the daemon for permission to ask the daemon, so the option that lost on merit
    there wins here on necessity.
+
+   ~~**The frame has never been drawn.**~~ **It has now, and this was never
+   blocked on a laptop.** Qt's offscreen platform runs the real paint path, so
+   `gui/tests/access_frame` builds the view, drives `unlock` through the
+   meta-object rather than reaching past it to the private setter, and *counts
+   pixels*: 5,468 of `#c00000` while privileged and **zero** before. A mode
+   nobody can look at is the feature not existing, which is why this one
+   property of 0118 is worth a pixel test instead of a state assertion.
+
+   **The pair is what makes it evidence.** Breaking the frame to never be red
+   fails "the red frame is drawn"; breaking it to be red *always* fails "no
+   administrator red on screen" — and that second one is the bug that matters,
+   because a border that is always on says nothing about whether this window is
+   privileged now. A one-sided test would have passed it. Both were run. The
+   probe also hard-codes the colour rather than reading the constant out of the
+   code under test, which would have agreed with it however it changed,
+   including into something that is not red.
+
+   **What is still not verified is the elevator** — pkexec, kdesu and `sudo -A`
+   are what Apply shells out to, and none has been exercised. That wants a real
+   session, and it is a smaller claim than the whole tab being unverified was.
+
+   Two things found by wiring the probe in. `gui/`'s `clean` was
+   `rm -rf $(BUILD_DIR)` with no check that the variable is non-empty and
+   relative, which build-and-commit.md requires of exactly this shape; it
+   refuses both now. And the GUI was building at qmake's default **`-O2`** —
+   the guidelines ask for `-Os` and say that in a Qt project file it means
+   saying so rather than accepting the default. Saying so took the binary from
+   360,216 to 291,712 bytes, **19% for two lines**.
 
 7. ~~**An uplink is chosen by carrier, and nothing ever asks whether it
    works.**~~ **Built** ([0119](docs/decisions/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)),
