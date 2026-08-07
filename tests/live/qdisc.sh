@@ -221,6 +221,22 @@ if [ -n "$tc" ]; then
 		waited=$((waited + 1))
 		if [ "$waited" -gt 100 ]; then
 			echo "FAIL the daemon settled before the foreign-qdisc check"
+			# Dump what netcfgd believes it owns, because that is the thing
+			# worth knowing when this fires and it is gone by the time anybody
+			# looks. `write_owned` takes no lock and both this script's `ncfg
+			# apply` and the daemon call it, so the leading hypothesis is a
+			# lost update putting veth0 back into the owned set while the
+			# kernel already holds `noqueue` -- after which every plan proposes
+			# a reset that changes nothing and this loop, which only plans, can
+			# never see it clear.
+			#
+			# Costs nothing on a passing run and is the whole evidence on a
+			# failing one. This has failed twice in four container runs and
+			# never on the host, so whoever catches it next gets one chance.
+			echo "       what netcfgd believes it owns:"
+			find "$work/run" -name '*owned*' -exec sh -c \
+				'echo "         $1:"; sed "s/^/           /" "$1"' _ {} \; \
+				2>/dev/null || echo "         (no owned-state file found)"
 			echo "       ten seconds and a plan still has work in it:"
 			"$ncfg" plan 2>&1 | sed 's/^/       /' | head -6
 			failures=$((failures + 1))

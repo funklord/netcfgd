@@ -2486,6 +2486,14 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
   and `qdisc.sh`'s own comment says the two are running concurrently there, a
   daemon reconcile started by `write_config` alongside the explicit `apply`.
 
+  **The experiment was run and did not reproduce.** A full instrumented suite
+  in the container passed outright, which makes the count two failures and two
+  passes across four container runs and none on the host. Intermittent is
+  itself evidence: it argues for a race rather than a deterministic mistake,
+  which is what the hypothesis below predicts. `qdisc.sh` now dumps the owned
+  state on that failure path, so the next occurrence captures what would settle
+  it instead of being another sighting.
+
   If the daemon's pass holds state read *before* the CLI cleared `qdisc`, its
   write puts `veth0` back into the owned set while the kernel already has
   `noqueue`. Every later plan then proposes a reset that changes nothing, which
