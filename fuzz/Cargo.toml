@@ -17,6 +17,8 @@ netcfgd-sys = { path = "../crates/netcfgd-sys" }
 netcfgd-compile = { path = "../crates/netcfgd-compile" }
 netcfgd-model   = { path = "../crates/netcfgd-model" }
 netcfgd-proto   = { path = "../crates/netcfgd-proto" }
+netcfgd-supplicant = { path = "../backends/netcfgd-supplicant" }
+netcfgd-hostapd    = { path = "../backends/netcfgd-hostapd" }
 
 [[bin]]
 name = "netlink_wire"
@@ -39,5 +41,11 @@ doc  = false
 [[bin]]
 name = "socket_message"
 path = "fuzz_targets/socket_message.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "backend_ipc"
+path = "fuzz_targets/backend_ipc.rs"
 test = false
 doc  = false
