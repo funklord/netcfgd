@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks
+.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -538,6 +538,92 @@ ascii:
 		exit 1; \
 	fi; \
 	echo "ascii: ok"
+
+# Cross-compiling, which is the one thing on `What would prove it` that needs
+# no hardware at all.
+#
+# That list says netcfgd "has never run on the class of device it was designed
+# for", and that mips and arm "have not merely failed, they have not been
+# attempted" -- because there was no target here to attempt them with. This is
+# that target. It does not prove anything runs; it proves the tree builds for a
+# machine that is not this one, which is the step before anybody can try.
+#
+# Deliberately NOT in PORTABLE_GATES, and deliberately not skipping. `gui` and
+# `deny` skip when their tool is absent because they run inside `check` on
+# machines that are not desktops, and a gate demanding Qt on a router is a gate
+# people delete. This is the opposite case: nobody runs `make cross` by
+# accident, so a skip would answer the question it was asked with silence. It
+# fails, and it names the package that would fix it.
+CROSS_TARGET ?= aarch64-unknown-linux-gnu
+# The linker for a triple, since cargo will not find one by itself.
+#
+# A table and not a rule, because the mechanical derivation is wrong and was
+# measured to be. Dropping the vendor field turns aarch64-unknown-linux-gnu
+# into aarch64-linux-gnu-gcc correctly, and turns armv7-unknown-linux-gnueabihf
+# into `armv7-linux-gnueabihf-gcc` -- which does not exist, because Debian
+# spells that architecture `arm` where Rust spells it `armv7`. The first draft
+# of this target advised `apt install gcc-armv7-linux-gnueabihf`, and no such
+# package is in the archive.
+#
+# A diagnostic that confidently names a package nobody can install is worse
+# than one that says less, so an unknown triple gets told it is unknown rather
+# than getting a guess wearing the same voice as the two entries that are
+# right. Add a row when a triple is actually tried.
+CROSS_GNU_aarch64-unknown-linux-gnu      = aarch64-linux-gnu
+CROSS_GNU_armv7-unknown-linux-gnueabihf  = arm-linux-gnueabihf
+CROSS_GNU_arm-unknown-linux-gnueabi      = arm-linux-gnueabi
+CROSS_GNU_mips-unknown-linux-gnu         = mips-linux-gnu
+CROSS_GNU_mipsel-unknown-linux-gnu       = mipsel-linux-gnu
+CROSS_GNU_riscv64gc-unknown-linux-gnu    = riscv64-linux-gnu
+CROSS_GNU = $(CROSS_GNU_$(CROSS_TARGET))
+CROSS_CC ?= $(if $(CROSS_GNU),$(CROSS_GNU)-gcc,)
+# Cargo takes the linker from an environment variable named after the triple.
+CROSS_LINKER_VAR = CARGO_TARGET_$(shell echo $(CROSS_TARGET) | tr 'a-z-' 'A-Z_')_LINKER
+
+cross:
+	@std=$$(rustc --print sysroot)/lib/rustlib/$(CROSS_TARGET); \
+	skipped=0; \
+	if [ -z "$(CROSS_CC)" ]; then \
+		echo "cross: no linker known for $(CROSS_TARGET)"; \
+		echo "cross:   set CROSS_CC=<triple>-gcc, and add a CROSS_GNU_ row to"; \
+		echo "cross:   the Makefile once it is known to be the right one"; \
+		skipped=1; \
+	elif ! command -v $(CROSS_CC) >/dev/null 2>&1; then \
+		echo "cross: no linker $(CROSS_CC) on PATH"; \
+		echo "cross:   apt install gcc-$(CROSS_GNU)"; \
+		skipped=1; \
+	else \
+		echo "cross: client/ for $(CROSS_TARGET) via $(CROSS_CC)"; \
+		$(MAKE) --no-print-directory -C client clean >/dev/null 2>&1; \
+		if $(MAKE) --no-print-directory -C client \
+			CC=$(CROSS_CC) AR=$(CROSS_GNU)-ar >/dev/null; then \
+			printf 'cross:   libncfg_client.a %s bytes\n' \
+				"$$(stat -c%s client/libncfg_client.a)"; \
+		else \
+			echo "cross:   client/ FAILED to build for $(CROSS_TARGET)"; \
+			$(MAKE) --no-print-directory -C client clean >/dev/null 2>&1; \
+			exit 1; \
+		fi; \
+		$(MAKE) --no-print-directory -C client clean >/dev/null 2>&1; \
+	fi; \
+	if [ ! -d "$$std" ]; then \
+		echo "cross: no Rust standard library for $(CROSS_TARGET)"; \
+		echo "cross:   rustup target add $(CROSS_TARGET)"; \
+		echo "cross:   (this toolchain is $$(rustc -vV | awk '/^host/ {print $$2}') and has"; \
+		echo "cross:    no rustup; a distro rustc ships one target and cannot add another)"; \
+		skipped=1; \
+	else \
+		echo "cross: workspace for $(CROSS_TARGET) via $(CROSS_CC)"; \
+		$(CROSS_LINKER_VAR)=$(CROSS_CC) \
+			$(CARGO) build --release --target $(CROSS_TARGET) || exit 1; \
+		printf 'cross:   netcfgd %s bytes, against %s on x86_64\n' \
+			"$$(stat -c%s target/$(CROSS_TARGET)/release/netcfgd)" \
+			"$$(awk '/^total/ {print $$2}' size-budget.txt)"; \
+	fi; \
+	if [ "$$skipped" -ne 0 ]; then \
+		echo "cross: $(CROSS_TARGET) was NOT fully attempted -- see above"; \
+		exit 1; \
+	fi
 
 # Size, ratcheted, and measured as total installed size.
 #

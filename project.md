@@ -528,6 +528,24 @@ calling a zombie alive — and it runs no live script, because a green tick over
 a suite that skipped everything is the vacuous pass this section exists to
 avoid.
 
+**`make cross` is deliberately in neither list, and deliberately does not
+skip.** `gui` and `deny` skip when their tool is absent because they run inside
+`check` on machines that are not desktops, and a gate demanding Qt on a router
+is a gate people delete. `cross` is the opposite case: nobody types it by
+accident, so answering with silence would defeat the one thing it is for. It
+attempts each half independently — the C client needs only a linker, the
+workspace needs a Rust `std` for the target — reports what it built, names what
+it could not, and exits non-zero when anything went unattempted.
+
+Its first draft derived the linker name by dropping the triple's vendor field,
+which is right for aarch64 and **wrong for arm**: Rust spells that architecture
+`armv7` and Debian spells it `arm`, so the target advised `apt install
+gcc-armv7-linux-gnueabihf`, a package that is not in the archive. It is a table
+now, and a triple not in it is told it is unknown rather than handed a guess in
+the same voice as the rows that are correct. **A diagnostic that confidently
+names something nonexistent is worse than one that admits it does not know** —
+the whole value of this target is telling somebody what to install.
+
 | Gate | What it checks |
 |---|---|
 | Size budget | `make size`. **Total installed size, not per binary** — merging two binaries that each link most of the workspace makes the one binary bigger and the install a megabyte smaller, so a per-binary gate points the wrong way. It **ratchets**: the limit is the last measured size, and `size-budget.txt` carries a line per feature saying what it bought. The 3% tolerance is for compiler-version noise; spend it on a feature and the next feature fails the gate for the wrong reason. Design §10.2's 1 MB embedded target was measured as unreachable ([0021](docs/decisions/0021-no-nano-tier.md), [0024](docs/decisions/0024-one-binary-and-what-a-megabyte-would-actually-cost.md)) |
@@ -1555,11 +1573,23 @@ different property and the one this list is about.
   machine moves between networks.
 - **It has never run on the class of device it was designed for.** The design's
   §10 wants an OpenWrt-class device and §10.2 budgets `netcfgd-embedded` at
-  ≤ 1 MB; the install measures 2.3 MB, and there is no cross-compile target in
-  the `Makefile` at all, so mips and arm have not merely failed, they have not
-  been attempted. §10.2 already says what to make of that — those are
-  "**budgets to validate, not measurements**" — which is this section's framing,
-  written into the design before any code existed and then lost from the brief.
+  ≤ 1 MB; the install measures 2.3 MB. §10.2 already says what to make of that —
+  those are "**budgets to validate, not measurements**" — which is this
+  section's framing, written into the design before any code existed and then
+  lost from the brief.
+
+  **`make cross` now exists**, which is the part of this entry that needed no
+  hardware: there was previously no target at all, so mips and arm had not
+  merely failed, they had never been attempted. The C client **builds clean for
+  aarch64** — 49,800 bytes, and clean under `-Wconversion -Wsign-conversion`,
+  which is worth more than it looks because aarch64's plain `char` is unsigned
+  where x86_64's is signed, so those two warnings have now been satisfied under
+  both conventions rather than one. The **Rust half has still not been
+  attempted**: this machine's rustc is a distro build with one target and no
+  rustup, so no cross `std` can be added, and `make cross` says exactly that
+  and exits non-zero rather than skipping. Running is still untried either way —
+  a cross build proves the tree compiles for another machine, which is the step
+  before anybody can try it, not a substitute for trying.
 - **The modem path has never met hardware** — Next item 1, written entirely
   against a fake copied from libmbim's own output.
 - **Suspend and resume have never been exercised**, per item 3, and it is the
