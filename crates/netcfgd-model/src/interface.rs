@@ -745,6 +745,62 @@ pub struct Guard {
 	pub reason: String,
 }
 
+/// What to run to find out whether an uplink carries traffic.
+///
+/// **The exit status is the answer**, and that is why an arbitrary program is
+/// the interface rather than a lowered ambition: `ping`, `curl -f`, `wget -q`
+/// and a script somebody wrote all agree that zero means it worked, and on a
+/// captive-portal network or behind a proxy the operator's definition of
+/// reachable is the one that matters.
+///
+/// A path with a timeout and never inline shell, the shape `HookRef` already
+/// has -- section 2.2's argument that a document able to carry shell is remote
+/// code execution with extra steps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProbePolicy {
+	/// The program to run. Absolute.
+	pub command: String,
+	/// Arguments, as given.
+	#[serde(skip_serializing_if = "Vec::is_empty", default)]
+	pub args: Vec<String>,
+	/// Seconds between runs.
+	pub interval: u32,
+	/// Seconds before a run is abandoned and counted as a failure.
+	pub timeout: u32,
+	/// Consecutive failures before the routes are withheld.
+	///
+	/// Asymmetric with `up_after` on purpose: symmetric counts make a marginal
+	/// link oscillate at whatever period `interval` sets. One lost packet is
+	/// not an outage, so this is larger.
+	///
+	/// Named `down_after` and not `down` because the config language reserves
+	/// `up` and `down` as hook phases -- a key called `down` inside a block
+	/// parses as the head of a hook body, which is a grammar collision rather
+	/// than a naming preference.
+	pub down_after: u32,
+	/// Consecutive successes before they come back.
+	///
+	/// Smaller than `down_after`, because returning is cheaper to get wrong
+	/// than leaving -- and a link that just failed that many times in a row has
+	/// earned less trust than one that never failed.
+	pub up_after: u32,
+}
+
+impl ProbePolicy {
+	/// The counts netcfgd uses when a config names none.
+	#[must_use]
+	pub fn default_down_after() -> u32 {
+		3
+	}
+
+	/// See [`ProbePolicy::default_down_after`].
+	#[must_use]
+	pub fn default_up_after() -> u32 {
+		2
+	}
+}
+
 /// An interface and everything netcfgd configures on it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -865,6 +921,16 @@ pub struct Interface {
 	/// with one uplink wants.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub preference: Option<u32>,
+	/// Whether this uplink actually carries traffic, and what to run to find
+	/// out.
+	///
+	/// `preference` already withholds a ranked interface's routes while it has
+	/// no carrier, because a route down an unplugged cable is a black hole and
+	/// its better metric would beat the wifi that works. A link that fails a
+	/// probe is a black hole for the same reason, so it gets the same answer
+	/// ([0119](../../../docs/decisions/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)).
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub probe: Option<ProbePolicy>,
 	/// VLANs this interface carries, as a bridge port or as a bridge.
 	///
 	/// **Authoritative where present.** A port whose config lists VLANs has
