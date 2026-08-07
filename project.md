@@ -1,6 +1,6 @@
 # netcfgd — implementation brief
 
-**Status: a proof of concept, substantially built and not yet proven.** Milestones M1 through M9 are worked, with the state of each in §7 and what to pick up next in §10. The design is what is under test, and **§10's *What would prove it* is the bar** — until those are met, this is a system that works everywhere it has been run and has not been run in the places that matter.
+**Status: a proof of concept, substantially built, thoroughly checked, and still not proven.** Milestones M1 through M9 are worked, with the state of each in §7 and what to pick up next in §10. The design is what is under test, and **§10's *What would prove it* is the bar** — until those are met, this is a system that works everywhere it has been run and has not been run in the places that matter.
 
 **Deferred is not broken, and this is the distinction to read the document with.** Size, language and multiple client implementations are all *refinements that come after the concept proves itself*, not promises being missed now. Reading a deferred measurement as a contradiction produces work nobody wanted: the 2.3 MB install against §10.2's sub-megabyte router figure is a measurement not yet taken on a target nobody has built for, and `size-budget.txt` is deliberately a **ratchet against drift** rather than a tier goal ([0024](docs/decisions/0024-one-binary-and-what-a-megabyte-would-actually-cost.md), [0104](docs/decisions/0104-the-four-megabytes-belonged-to-a-tier-that-was-dropped.md)).
 
@@ -830,11 +830,34 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
-Last rewritten after **M8's first client was built outside this workspace**, which
-turned out to be the most productive protocol review this project has had.
-Appended to since, most recently by a run of six control-socket findings
-(0109-0114) whose lessons live in *Things that are true and non-obvious* rather
-than here.
+
+**Where this stands, as of the last rewrite.** The software is built and now
+*checked* in ways it had not been: every parser has a fuzz target and all five
+have been run, the daemon has been built and executed on three architectures,
+and the gates cover what the packages ship rather than what an older
+generation of them shipped. Two real crashes and one real planner defect came
+out of that, all fixed. What has still never happened is the thing §*What
+would prove it* is about — nobody has run netcfgd against a real radio, on a
+real router, or as the network configuration of a machine they depend on.
+
+**The most useful discovery of that pass was a method, not a defect.** Three
+things this project had recorded as blocked on hardware were blocked on
+*privilege* or on *a toolchain*, and a container supplies both. `systemd-networkd`
+would not start because it drops privileges to a user a namespace cannot map;
+`cargo-fuzz` and cross-compilation both wanted a nightly this machine's distro
+rustc does not have. All three ran in a container, and each found something.
+**Before recording an item as needing hardware, check whether it needs root or
+a rustup.**
+
+**Four things are open and named**, with their evidence, further down: the
+`qdisc.sh` container failure (a race, hypothesis recorded, instrumentation now
+in place to catch it), the unreproduced `ingress.sh` one, the licensing gap
+lintian confirms, and three decisions that are the maintainer's rather than a
+worker's — see *Waiting on a decision* at the end of this section.
+
+Below this line is the accumulated record of earlier passes, kept because the
+findings are durable even where the narrative is long. Their lessons live in
+*Things that are true and non-obvious*.
 
 `client/` and `gui/` are a C library and a Qt Widgets window speaking the pinned socket
 ([gui/project.md](gui/project.md)), and writing them against `docs/schema/` rather
@@ -1665,15 +1688,18 @@ evaluate it exist.**
 
 ### Next, roughly in order
 
-**This list is down to what is blocked, what was refused, and one thing nobody
-has looked at.** Item 4 is closed in full, item 2 is half done and half refused
-with a reason
-([0077](docs/decisions/0077-a-type-leaves-generic-when-every-property-is-answerable.md)),
-and item 1 has needed hardware since it was written. **Item 3 reopened**: every
-defect on the laptop list is closed, and then suspend/resume was added to it —
-the one entry that came from asking what a laptop does rather than from
-something going wrong. It needs a real laptop, so it is blocked the way item 1
-is, and unlike item 1 nothing has been written for it yet.
+**Every item on this list is now closed, refused, or blocked on hardware.**
+Items 4, 5, 6 and 7 are done; item 2 is half built and half refused with a
+reason
+([0077](docs/decisions/0077-a-type-leaves-generic-when-every-property-is-answerable.md));
+items 1 and 3 have needed hardware since they were written — a modem and a
+laptop respectively, and nothing has been written for suspend/resume at all.
+
+**So the next worker should not start here.** Start at *What would prove it*,
+and before assuming an entry there needs hardware, check whether it needs root
+or a toolchain instead: three entries that looked hardware-bound were not.
+What is left on this list that is *not* hardware is in *Waiting on a decision*
+below, and none of it is a worker's to settle.
 
 **Item 5 is the top of this list regardless of its number, and the only entry
 not blocked on anything.** The clients are behind what already sits underneath
@@ -2390,7 +2416,54 @@ the sentence that disposes of an alternative in half a line.
 
 Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md) and governed by constraint 9: VPN's second half (ipsec, where strongswan and libreswan disagree about nearly everything), complete wifi as configuration surface over `wpa_supplicant`/`hostapd`, teaming stays dropped in favour of bonding, Open vSwitch is out, and SNMP switch management is a fleet-tree concern rather than a single-host one. [0115](docs/decisions/0115-the-way-back-in-is-not-ours-to-configure.md) closes the other half of that question and one next to it: serving SNMP is refused because M9 already picks RESTCONF as the northbound answer, and **IPMI is refused because a BMC is the way back into a machine you have locked yourself out of** — netcfgd cannot tell a BMC setting it made from one the BIOS screen made, and a bad change to the way back in survives the reboot that would otherwise undo it. It passes constraints 3, 6 and 9, which is why it needed a record rather than a sentence.
 
+### Waiting on a decision
+
+Not work anybody should do unasked. Each is recorded where it arose; they are
+gathered here so a new session does not have to find them.
+
+- **Licensing.** `Cargo.toml`, `debian/copyright` and the Alpine template all
+  declare `MIT OR Apache-2.0`, and the repository states no terms at all: no
+  `LICENSE`, no SPDX header anywhere in its own code. `debian/copyright` also
+  carries **no `Copyright:` line**, which lintian reports as
+  `copyright-without-copyright-notice`. Three files assert terms on behalf of a
+  copyright holder the tree never names, and naming one is not a thing to infer
+  from a git log. `harmonization.md` already lists licensing as unresolved
+  across all these projects.
+
+- **Hide or grey out `Apply` while unprivileged.** TDE hides it; netcfgd greys
+  it. This project's own rule is that a refusal explains itself and a greyed
+  button does not, so the two conventions disagree.
+  [0120](docs/decisions/0120-the-red-frame-is-a-process-boundary.md) records
+  the disagreement without settling it.
+
+- **Whether the Qt client gets a package.** It builds and installs
+  (`make gui && make install-gui`) and is in no `.deb`. Putting it in one would
+  add `qt6-base-dev` to this source package's `Build-Depends`, so building the
+  *daemon* would need a toolkit on machines that have none. Splitting the source
+  package is the usual answer and is worth doing deliberately.
+
+- **Whether the three clients should share one implementation.**
+  [0116](docs/decisions/0116-a-client-that-needs-the-model-is-rust.md) settled
+  that the *shape* harmonises and the language does not. What is unsettled is
+  the cross-project half, and `harmonization.md` is explicit that extracting or
+  aligning shared technology is its own deliberate piece of work rather than
+  something done from inside one repository.
+
+- **Man pages.** `lintian` reports `no-manual-page` for both binaries. Held
+  deliberately until the software is proven: documenting an interface that has
+  not survived contact with hardware documents guesses.
+
 ### Things that are true and non-obvious
+
+- **"Needs hardware" is often "needs root" or "needs a toolchain", and a container supplies both.** Three items recorded here as blocked turned out not to be. `systemd-networkd` would not start under `unshare -rn` because it drops privileges to `systemd-network`, a user no user namespace can map — in a privileged container it runs, and checking netcfgd's detection against a real one found a third link state (`pending`) nobody had written down. `cargo-fuzz` and cross-compilation both wanted a nightly toolchain this machine's distro rustc cannot provide; a `rust:1-slim-trixie` image has one, and running the fuzz targets for the first time found two real crashes. **Before recording something as hardware-blocked, ask what specifically is missing.** Real hardware is a short list: a radio's firmware, a modem, a machine that suspends.
+- **A fix verified only against the input that found it is verified against one input.** The config parser's stack overflow was fixed by bounding block nesting, the regression test passed, and all one hundred and sixteen existing tests passed. Re-running the fuzzer against the fix crashed again in under five minutes on `parse_value` → `parse_list` → `parse_value`: the same defect down a path a block counter could not see. **Re-fuzz after fixing, seeded from the corpus that found it** — a fresh search that happens not to look in the same place proves nothing, and the confirming run is only evidence because it started from the corpus that had crashed in seconds.
+- **Undirected random draws never reach boundary values, and a parser's bugs live there.** `random.rs` had been calling `error_code` on random bytes since it was written and never found `-i32::MIN`, because two thousand draws hit a specific four-byte value about twice in ten billion times. Coverage feedback walks straight to it, because a boundary sits on a branch edge. The stable stand-in now **enumerates** extremes at every aligned offset rather than hoping, and catches the crash the fuzzer found without a fuzzer.
+- **A clean fuzz run and a target that reaches nothing look identical from outside.** `backend_ipc` reported 2.35M runs and no findings, which means nothing until you know the parsers were executed. Checked by putting a deliberate panic behind one event-line value in a throwaway copy: the fuzzer found it. **A negative result needs its own positive control.**
+- **Read the diagnostic's own format before diagnosing from it.** `qdisc.reset veth0  qdisc: <absent> (was noqueue)` was read as "the kernel reports no qdisc". `Reason::unwanted` renders the **desired** value first, so `<absent>` was the *configuration* asking for no qdisc and `noqueue` was what was observed. Two fixes were built on that misreading, one of them committed with a claim it did not support. The field order is in `action.rs` and takes ten seconds to check.
+- **A gate can be checking a file the package does not ship.** `packaging` ran `sh -n` over `packaging/debian/`, the pre-debhelper generation, while dpkg shipped `debian/`. They had already diverged — the reserved-group `postinst` reached one copy and not the other — so the maintainer scripts that actually run had never been parsed by anything. **When a gate names a path, check that path is the one in the artifact.**
+- **An uninstall that removes what install never wrote destroys somebody's work.** `make uninstall` deleted `/etc/netcfgd/netcfgd.conf`, and `install` only ever creates the *directory*: netcfgd ships no default configuration, so that line could only delete a file a person wrote by hand. The same target had never heard of two `install-*` targets either. Both directions are one defect — two lists kept in step by memory — and `tools/uninstall_gate.py` now compares them mechanically, refusing an empty match set in either direction.
+- **The size gate is blind below the linker's segment alignment, and that is sixteen times wider on aarch64.** Two builds differing by 23 KB of text and twenty-two dynamic symbols produced *byte-identical* files, because aarch64 aligns segments to 64 KB where x86_64 uses 4 KB pages. A one-megabyte embedded budget therefore holds about sixteen distinguishable steps on the architecture the budget is for. Two identical numbers with no explanation were nearly written down as "the same".
+- **The multi-call binary picks its program from `argv[0]`, so a path ending in anything else is refused.** Copying it to `ncfg-x86` to compare two architectures produced a clear refusal rather than a wrong answer, which is the design working — but it means any harness that renames the binary must give each copy its own directory and the name `ncfg`.
 
 - **A warm-up that runs before the thing it warms is not a warm-up.** `acl.sh` sent one round trip nobody read, at the end of `start_fake` — which runs before `seed_run_state`, so netcfgd did not yet believe an access point was running, never read an ACL, and never touched the fake. It missed the one moment it existed for, the Python interpreter's first reply. Moving it after the run state was not enough either: the configuration is written later still, and a plan with no configuration says so and reads nothing. It waits for [0085](docs/decisions/0085-a-daemon-that-does-not-answer-is-not-running-well.md)'s warning to stop being true now, which is netcfgd itself reporting that the read succeeded inside the real one-second deadline. **A readiness check should assert readiness, not perform an action and hope.**
 - **`ncfg apply` returns when netcfgd has sent a command, not when the other end has logged it.** Checks that read a fake's log immediately after an apply are reading a file the fake has not reached yet, which is a race that only opens under load. The assertions that a command *did* arrive wait for it; the ones that it did **not** must never wait, because there is nothing to wait for and the wait would cost its full bound on every run.
