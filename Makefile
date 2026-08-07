@@ -1191,9 +1191,22 @@ veryclean: clean
 	$(CARGO) clean
 	rm -rf target
 
+# **`distclean` no longer sweeps the tree for editor droppings.** `*~`,
+# `*.swp` and `*.orig` are not build output: they belong to somebody's
+# editor, and a `.orig` belongs to a merge they may be in the middle of.
+# The sweep was also unbounded -- `find .` walks `.git` and every adapter's
+# own workspace, and it was measured deleting files inside `.git`. `git
+# clean -xdn` lists that class and is the person's call rather than the
+# build system's.
+#
+# What is left is what the tooling here really wrote. The search is a
+# wildcard because a `__pycache__` appears beside whatever Python ran, but
+# the thing removed is named exactly and is disposable by construction;
+# `.git` is pruned and every removal is printed, because a clean target that
+# deletes silently is one nobody can check.
 distclean: veryclean
-	find . -name '*~' -o -name '*.swp' -o -name '*.orig' | xargs -r rm -f
-	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+	@find . -name .git -prune -o \
+	        -name __pycache__ -type d -prune -print -exec rm -rf {} +
 
 # The counterpart to install: named targets only, no sweeps.
 # Removes every file the install targets place, each named, and nothing else.
