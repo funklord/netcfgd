@@ -8,6 +8,7 @@
 //! bind on the first binary or it never binds at all.
 
 mod client;
+mod control;
 mod secret;
 #[cfg(feature = "tui")]
 mod tui;
@@ -47,6 +48,15 @@ usage:
                              disconnect [IFACE]  leave it, keeping the config
                            IFACE may be omitted when the config describes one
                            wireless device.
+  ncfg control SUBCOMMAND  who may ask netcfgd for what. SUBCOMMAND is one of:
+                             show                what the policy is now
+                             set --observe P     change a tier; P is one of
+                                 --wifi P        root, any, user:NAME or
+                                 --admin P       group:NAME. Repeatable, and
+                                                 what is not named is left
+                                                 alone. Needs root: this is
+                                                 what grants a desktop client
+                                                 access in the first place
   ncfg secret SUBCOMMAND   credentials the config refers to. SUBCOMMAND is:
                              set NAME            store the value of
                                                  `@secret:NAME`, asked for at
@@ -156,6 +166,9 @@ pub(crate) struct Options {
 	/// `wifi add` only, and named for what they mean in the config file they
 	/// write rather than for the flag that set them.
 	wifi: wifi::Wanted,
+	/// What `ncfg control set` was asked to change. What is not named here is
+	/// left alone, so a tier nobody mentioned keeps whatever it had.
+	control: control::Wanted,
 }
 
 fn run(arguments: &[String]) -> Result<ExitCode, String> {
@@ -178,6 +191,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"explain" => command_explain(&positional, &options),
 		"monitor" => command_monitor(&options),
 		"wifi" => command_wifi(&positional, &options),
+		"control" => control::run(&positional, &options),
 		"secret" => command_secret(&positional, &options),
 		#[cfg(feature = "tui")]
 		"tui" => tui::run(&options),
@@ -212,6 +226,7 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 		allow_disruption: Vec::new(),
 		strand_credentials: Vec::new(),
 		wifi: wifi::Wanted::default(),
+		control: control::Wanted::default(),
 	};
 	let mut positional = Vec::new();
 	let mut index = 0;
@@ -243,6 +258,12 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 			"--json" => options.json = true,
 			"--yes" => options.yes = true,
 			"--replace" => options.replace = true,
+			// The control tiers. Named here rather than parsed inside the
+			// subcommand because this parser refuses a flag it does not
+			// know, which is what stops a mistyped one being ignored.
+			"--observe" => options.control.observe = Some(take_value("--observe")?),
+			"--wifi" => options.control.wifi = Some(take_value("--wifi")?),
+			"--admin" => options.control.admin = Some(take_value("--admin")?),
 			"--id" => options.wifi.id = Some(take_value("--id")?),
 			"--priority" => {
 				let value = take_value("--priority")?;

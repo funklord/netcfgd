@@ -2017,7 +2017,25 @@ the sentence that disposes of an alternative in half a line.
 
    **What to do about the wall itself is
    [0118](docs/decisions/0118-two-ways-to-be-allowed-and-one-of-them-is-visible.md),
-   decided and unbuilt.** Two ways to be allowed: a reserved group the packages
+   decided and half built.** The group half is done: the package reserves
+   `netcfgd`, empty, and `ncfg control show|set` writes the policy typed —
+   three principals, never config text, for the reason `wifi_add` is typed.
+
+   **Building it found a language constraint the decision had not anticipated,
+   and it is worth knowing beyond this feature.** A drop-in cannot adjust one
+   key of `global`: §3 makes redefining a block a compile error and `override`
+   replace it *whole*, deliberately, so that last-wins is never silent.
+   Measured, because the failure is quiet and severe — `override global {
+   control { ... } }` beside a `global` naming `write_resolv_conf` compiled to
+   `mode: none`. **Writing a policy drop-in on a configured machine would take
+   that machine's name resolution away in order to change who may open a
+   socket.** So `set` writes the file only where no `global` block exists, and
+   otherwise refuses with the exact `control { ... }` text to paste. Editing a
+   block inside a file a person wrote is the other answer, and splicing the
+   file that decides who may configure the network is its own piece of work
+   rather than a detail of this one.
+
+   ~~**What to do about the wall itself is decided and unbuilt.**~~ Two ways to be allowed: a reserved group the packages
    create empty, and an administrator mode in the client on KDE 3.5's pattern —
    read-only until the operator authenticates as root, **surrounded by a red
    frame while it is live**, editing the `control` block and nothing else. The

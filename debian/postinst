@@ -9,11 +9,34 @@ set -e
 
 case "$1" in
 configure)
+	# Reserved, and empty. 0118: a client run by a desktop user cannot reach a
+	# root-only socket, and the two ways out are joining a group or the
+	# client's own administrator mode -- this is the group.
+	#
+	# Its own group rather than `netdev`, which every desktop already has and
+	# NetworkManager already uses: pointing the policy there would mean
+	# installing netcfgd silently grants network configuration to everybody
+	# who joined that group years ago for an unrelated reason. Empty, so
+	# joining it is a thing somebody did.
+	#
+	# The group is created and *no policy is written*. Installing netcfgd must
+	# not change how this machine's network works, and a policy widens who may
+	# configure it -- so that stays one command the operator runs.
+	if ! getent group netcfgd >/dev/null 2>&1; then
+		addgroup --system netcfgd >/dev/null 2>&1 || true
+	fi
+
 	echo "netcfgd: installed. Nothing is configured and nothing is running."
 	echo "netcfgd:   write /etc/netcfgd/netcfgd.conf, then:"
 	echo "netcfgd:     ncfg plan      # what it would do, and why"
 	echo "netcfgd:     ncfg apply     # do it"
 	echo "netcfgd:   to run it as a daemon: systemctl enable --now netcfgd"
+	echo "netcfgd:"
+	echo "netcfgd:   a client run by an ordinary user is refused until you say so:"
+	echo "netcfgd:     ncfg control set --observe group:netcfgd --wifi group:netcfgd"
+	echo "netcfgd:     usermod -aG netcfgd USER   # then log out and back in"
+	echo "netcfgd:   adding a network needs the admin tier; ncfg control show"
+	echo "netcfgd:   prints the policy at any time"
 	;;
 abort-upgrade | abort-remove | abort-deconfigure) ;;
 esac
