@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check build test conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks
+.PHONY: deb apk apk-source apk-container all check check-ci build test conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -33,7 +33,41 @@ ncfg-link:
 # is the one gate that fails if an adapter's dependencies have leaked into the
 # core -- which is the kind of thing that is trivial to prevent and miserable to
 # unpick later.
-check: style fmt ascii shell clippy unsafe-policy executor-policy nm-containment packaging conformance test size footprint rss adapters
+#
+# Split into two lists rather than two target lists, so they cannot drift: a
+# gate added to PORTABLE_GATES is in both `check` and `check-ci` by
+# construction, and there is no second place to forget it.
+#
+# The division is not "cheap and expensive", it is **what the answer depends
+# on**. Everything in PORTABLE_GATES gives the same answer on any machine that
+# can build the tree. BUDGET_GATES measure *this* machine, and running them
+# somewhere else measures somewhere else -- see `check-ci`.
+PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
+                 nm-containment packaging conformance test adapters
+BUDGET_GATES   = size footprint rss
+
+check: $(PORTABLE_GATES) $(BUDGET_GATES)
+
+# What a machine nobody owns can honestly check.
+#
+# `check` minus the budgets, because those are ratchets on a measurement and a
+# rented VM measures the VM. `rss` is the clearest case: three runs of an
+# identical binary here gave 4240, 4244 and 4392 KB against a 4608 limit, which
+# is 152 KB of spread inside 360 KB of headroom, so on unknown hardware it is a
+# coin toss. A gate that fails a coin toss teaches people to ignore red, which
+# costs more than the gate is worth. `size` and `footprint` are deterministic
+# for a given toolchain and not across them, and a CI runner's `stable` moves
+# every six weeks.
+#
+# Constraint 8 is not weakened by this: the size budget is still a gate, it is
+# still in `check`, and it still fails on the machine where the number means
+# something. What moves is who is asked, not whether.
+#
+# This does **not** run `make live`, and no CI target should. Those scripts
+# drive real daemons and several want namespaces or real root; a green tick
+# over a suite that skipped everything is the vacuous pass this tree keeps
+# finding, and the live scripts are most of the evidence this project has.
+check-ci: $(PORTABLE_GATES)
 
 # Each adapter, built and checked with the same bar as the core.
 #
