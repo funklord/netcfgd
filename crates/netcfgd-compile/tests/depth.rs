@@ -46,6 +46,46 @@ fn nesting_past_the_limit_is_named_as_nesting() {
 	);
 }
 
+/// The other way down, which bounding blocks alone did not cover.
+///
+/// `parse_value` calls `parse_list` calls `parse_value`, so a run of `[`
+/// recurses exactly as a run of `{` does. This is here because the first fix
+/// was to blocks only, and re-running the fuzzer against it crashed again in
+/// under five minutes -- the same defect down a path the block counter could
+/// not see.
+#[test]
+fn a_run_of_open_brackets_is_refused_too() {
+	let mut text = String::from("interface eth0 {\n\tdns { servers = ");
+	for _ in 0..2_000 {
+		text.push('[');
+	}
+	text.push('\n');
+	let mut sources = SourceMap::new();
+	sources.add("brackets.conf", &text);
+
+	let error = compile(&sources, &mut NoHooks).expect_err("a bracket run is refused");
+	let message = format!("{error}");
+	assert!(
+		message.contains("nests more than"),
+		"the diagnostic should name the nesting, and said: {message}"
+	);
+}
+
+/// A list nested to a sane depth still parses, so the bound did not simply
+/// break lists.
+#[test]
+fn an_ordinary_nested_list_still_compiles() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"list.conf",
+		"interface eth0 {\n\tdns { servers = [\"10.0.0.1\", \"2001:db8::1\"] }\n}\n",
+	);
+	assert!(
+		compile(&sources, &mut NoHooks).is_ok(),
+		"an ordinary list must still compile"
+	);
+}
+
 /// The limit is far above anything the language actually uses, so ordinary
 /// configuration is untouched. Three levels is the real depth.
 #[test]

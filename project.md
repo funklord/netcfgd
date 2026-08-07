@@ -2461,6 +2461,20 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
   case, because the tidy version is the one somebody later simplifies into
   something that no longer reaches the recursion.
 
+  **The first fix was incomplete, and only re-running the fuzzer said so.** It
+  bounded blocks; the regression test passed; every existing test passed. Then
+  the same target crashed again in under five minutes, on
+  `parse_value` → `parse_list` → `parse_value` — a run of `[` recursing exactly
+  as a run of `{` does, down a path a block counter cannot see. One counter now
+  covers both, so a third nesting construct cannot arrive with its own private
+  budget. The confirming run is 2.36M executions clean, *starting from the
+  corpus that had found the crash in seconds*, which is what makes it evidence
+  rather than a fresh search that happened not to look there.
+
+  **A fix verified only against the input that found it is a fix verified
+  against one input.** That is the lesson worth keeping from this: re-fuzz
+  after fixing, from the corpus, before believing it.
+
 - **The first `cargo fuzz` run found a real crash, in the parser its own
   comment calls the one that matters most.** `netlink_wire` says a bad netlink
   parser fails by hanging, and "a hang in a daemon holding CAP_NET_ADMIN is
