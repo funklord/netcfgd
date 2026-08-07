@@ -174,6 +174,9 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		kind: "veth".to_owned(),
 		up: true,
 		carrier: true,
+		// The decided form, for the reason above: absent is already pinned by
+		// every other sample, and `Some(false)` is the one the planner acts on.
+		reachable: Some(false),
 		mtu: 1500,
 		mac: Some("02:00:00:00:00:01".to_owned()),
 		master: Some("br0".to_owned()),

@@ -83,6 +83,15 @@ pub struct ObservedLink {
 	/// Whether the link has carrier. Distinct from `up`: an interface can be
 	/// administratively up with the cable out.
 	pub carrier: bool,
+	/// Whether this uplink's probe says it carries traffic.
+	///
+	/// `None` where no probe is configured or none has finished yet, and that
+	/// is **not** the same as `Some(false)`: a link nobody asked about must
+	/// keep its routes, so only an explicit `false` withholds them. A reader
+	/// that conflated the two would take the network away from every interface
+	/// on a machine that configured no probes at all.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub reachable: Option<bool>,
 	/// Current MTU.
 	pub mtu: u32,
 	/// Current hardware address.

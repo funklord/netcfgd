@@ -985,6 +985,16 @@ impl Builder {
 		observed.link(name).is_none_or(|link| link.carrier)
 	}
 
+	/// Whether a probe has actually said no.
+	///
+	/// `Some(false)` and nothing else. Absent means no probe is configured or
+	/// none has finished, and a link nobody asked about keeps its routes.
+	fn probe_failing(name: &str, observed: &Observed) -> bool {
+		observed
+			.link(name)
+			.is_some_and(|link| link.reachable == Some(false))
+	}
+
 	/// The VLANs a bridge port or bridge device carries.
 	///
 	/// Authoritative where the document lists any: the port has exactly those
@@ -2701,6 +2711,24 @@ impl Builder {
 			self.warn(
 				name,
 				format!("no carrier, so {name}'s routes are not installed"),
+			);
+			return;
+		}
+
+		// And the same answer for a link that has carrier and no path. A cable
+		// into a switch that has lost its own uplink looks identical to a
+		// working one from here, so the probe is what tells them apart (0119).
+		//
+		// Only an explicit `false` withholds. `None` is "nobody asked" or "no
+		// answer yet", and treating that as unreachable would take the network
+		// away from every interface on a machine that configured no probes.
+		if interface.preference.is_some() && Self::probe_failing(name, observed) {
+			self.warn(
+				name,
+				format!(
+					"{name}'s probe says it is not reaching anything, so its \
+					 routes are not installed"
+				),
 			);
 			return;
 		}

@@ -31,6 +31,7 @@ fn link(name: &str) -> ObservedLink {
 		kind: String::new(),
 		up: false,
 		carrier: true,
+		reachable: None,
 		mtu: 1500,
 		mac: None,
 		master: None,

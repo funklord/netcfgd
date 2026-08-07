@@ -274,6 +274,18 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 		}),
 		ipv6_token: Some("::5".to_owned()),
 		preference: Some(100),
+		// Filled rather than left None, because `probe` is
+		// skip_serializing_if: a sample without it pins only the absent form,
+		// and the bytes the daemon sends for a probed uplink would be pinned
+		// by nothing. The same gap the scan report had.
+		probe: Some(netcfgd_model::ProbePolicy {
+			command: "/bin/ping".to_owned(),
+			args: vec!["-c1".to_owned(), "-W1".to_owned(), "192.0.2.1".to_owned()],
+			interval: 30,
+			timeout: 5,
+			down_after: 3,
+			up_after: 2,
+		}),
 		bridge_vlans: vec![
 			BridgeVlan {
 				vid: 10,

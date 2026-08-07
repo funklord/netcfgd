@@ -682,6 +682,7 @@ mod tests {
 			ipv6_token: None,
 			link_settings: None,
 			preference: None,
+			probe: None,
 			bridge_vlans: Vec::new(),
 		}
 	}
@@ -701,6 +702,7 @@ mod tests {
 				kind: String::new(),
 				up: true,
 				carrier: true,
+				reachable: None,
 				mtu: 1500,
 				mac: None,
 				master: None,

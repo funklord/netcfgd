@@ -1609,10 +1609,10 @@ netcfgd on real hardware, and the tools to do that are what item 5 is about.
 asking whether the thing was ready rather than from any gate: a default install
 refuses its own client and misdiagnoses why.
 
-**Item 7 is a feature that does not exist rather than work that stalled**, and
-it is the first entry here to arrive from asking what a network daemon ought to
-do rather than from a defect or a measurement: nothing in netcfgd ever asks
-whether a link it prefers actually reaches anything.
+**Item 7 was the first entry here to arrive from asking what a network daemon
+ought to do** rather than from a defect or a measurement, and it is now built.
+What it cost was one term in a condition the planner already had, which is
+what a feature looks like when the shape underneath it is right.
 
 Where the last six pieces came from instead, in order: **a live flake nobody had
 chased to the end**, and then each fix exposing the next
@@ -2070,7 +2070,27 @@ the sentence that disposes of an alternative in half a line.
    the daemon for permission to ask the daemon, so the option that lost on merit
    there wins here on necessity.
 
-7. **An uplink is chosen by carrier, and nothing ever asks whether it works.**
+7. ~~**An uplink is chosen by carrier, and nothing ever asks whether it
+   works.**~~ **Built** ([0119](docs/decisions/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)),
+   and small because the planner already had the answer: it withheld a
+   preference-ranked interface's routes without carrier, and a link failing a
+   probe is a black hole for the same reason, so the condition grew one term.
+   A probe is an observation, the exit status is the answer, and the counts are
+   asymmetric config — three failures to withhold, two successes to restore.
+   `None` is not `Some(false)`: a link nobody probed keeps its routes.
+
+   Two things worth carrying forward. The keys are `down_after`/`up_after`
+   because **`up` and `down` are reserved hook phases** — `down = 2` inside a
+   block parses as the head of a hook body, which is a grammar collision rather
+   than a naming preference. And both new fields are `skip_serializing_if`, so
+   the witness samples carry them *filled*: the same gap the scan report had,
+   avoided rather than discovered this time.
+
+   Left open by 0119: the hold-down, and `ncfg explain` naming the probe behind
+   a withheld route — which constraint 7 says it should, a route missing
+   because a program exited non-zero being exactly what an operator stares at.
+
+   ~~**An uplink is chosen by carrier.**~~
    netcfgd has **no reachability probe and no probe-driven failover**, and this
    is a gap rather than a decision — no record refuses it, and the words
    `failover`, `mwan` and `dead gateway` appear nowhere in the tree. The only
