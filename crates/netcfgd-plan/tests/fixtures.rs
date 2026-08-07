@@ -4430,16 +4430,15 @@ fn a_qdisc_netcfgd_did_not_set_is_left_alone() {
 /// A kernel that reports no qdisc at all must not be reset for ever.
 ///
 /// `plan_qdisc` says "every interface always has a qdisc, so this is never
-/// install-where-absent". That holds on this desktop and did not hold in a
-/// container: `make live-container` had `qdisc.sh` fail with a plan that still
-/// contained `qdisc.reset veth0  qdisc: <absent> (was noqueue)` after ten
-/// seconds, because the kernel there reports nothing where this one reports
-/// `noqueue`.
+/// install-where-absent". Nothing enforced that, and an observation with no
+/// qdisc produced a reset that could change nothing.
 ///
-/// Nothing to reset is nothing to do. Resetting an absent qdisc changes no
-/// kernel state, so the next observation is identical and the plan never
-/// empties -- which is plan idempotence failing, on exactly the class of
-/// machine netcfgd is written for.
+/// **This is not the `qdisc.sh` container failure**, though it was written
+/// believing it was. That diagnostic reads `qdisc: <absent> (was noqueue)`,
+/// and `Reason::unwanted` puts the *desired* value first -- so `<absent>` is
+/// the configuration asking for no qdisc, and the observed value was
+/// `noqueue`, not nothing. The case below is a real gap and a cheap guard; it
+/// is not that bug, which is still open.
 #[test]
 fn an_absent_qdisc_is_nothing_to_reset() {
 	let desired = document("interface eth0 { config = \"10.0.0.2/24\" }");

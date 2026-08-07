@@ -3022,14 +3022,15 @@ impl Builder {
 				// netcfgd is what moved it -- an interface that was already
 				// running `cake` before netcfgd existed keeps it.
 				//
-				// `current.is_some()` because the sentence above about every
-				// interface always having a qdisc is not true everywhere. A
-				// container's kernel reported none at all, and resetting a
-				// qdisc that is absent changes nothing -- so the next
-				// observation was identical, the plan never emptied, and
-				// `qdisc.sh` failed there while passing here. An action that
-				// cannot change anything is not an action, and planning one
-				// for ever is plan idempotence failing.
+				// `current.is_some()` because nothing enforced the sentence
+				// above: an observation carrying no qdisc produced a reset
+				// that could change nothing. An action that cannot change
+				// anything is not an action.
+				//
+				// This was added believing it explained `qdisc.sh` failing in
+				// a container, and it does not -- there the observed qdisc was
+				// `noqueue` and this guard never fires. See section 10; that
+				// one is open.
 				if ours && current.is_some() {
 					self.push(
 						Op::QdiscReset {

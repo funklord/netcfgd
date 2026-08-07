@@ -2456,22 +2456,28 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
   shares the host's kernel, so a module the host lacks cannot appear inside one;
   `delegation.sh` wants `odhcp6c`, which Debian does not package at all.
 
-  **It found a real planner bug, and the bug was not the container's.**
-  `qdisc.sh` failed there and passed here, with the settle guard reporting a
-  plan that still held `qdisc.reset veth0  qdisc: <absent> (was noqueue)` after
-  ten seconds. `plan_qdisc` carried the sentence "every interface always has a
-  qdisc, so this is never install-where-absent" — true on this desktop, false
-  in that container, where the kernel reported no qdisc at all. Resetting an
-  absent qdisc changes nothing, so the next observation was identical and the
-  plan never emptied: **plan idempotence failing**, which §6 lists as a
-  property, on exactly the class of machine netcfgd is written for.
+  **`qdisc.sh` fails inside the container and passes on the host. Still open,
+  and the first diagnosis of it was wrong.** The settle guard reports a plan
+  that still holds `qdisc.reset veth0  qdisc: <absent> (was noqueue)` after ten
+  seconds.
 
-  Reproduced as a *pure planner test* — no container, no kernel, no root — by
-  handing the planner an observation with `qdisc: None` and an ownership record
-  saying netcfgd set one. That is the whole value of the planner being a
-  function: an environment-only failure became a three-line fixture. The fix is
-  one condition, `ours && current.is_some()`, and `qdisc.sh` then passes in the
-  container that found it.
+  That was read as "the kernel reports no qdisc". It does not.
+  `Reason::unwanted` renders the **desired** value first, so `<absent>` is the
+  configuration asking for no qdisc and `noqueue` is what was observed — the
+  kernel default, already in place. A guard was added for the misread case
+  (`ours && current.is_some()`), and it is worth keeping on its own terms
+  because nothing enforced the "every interface always has a qdisc" comment,
+  but **it does not fire here and did not fix this.**
+
+  A second hypothesis was also wrong: `delete_root` already treats `ENOENT` and
+  `EINVAL` as success, so the executor is idempotent and a reset against an
+  already-default qdisc does not error.
+
+  What is actually known: the observed qdisc is `noqueue`, netcfgd's ownership
+  record still says the qdisc is netcfgd's, and the plan therefore keeps
+  proposing a reset that the guard's `ncfg plan` loop can never see emptied —
+  **the guard only plans, it never applies**, and the daemon's default drift
+  policy is `Report`. Whether that is the whole story is not established.
 
   The guard behaving correctly is what surfaced it at all — it refused to
   assert against a half-converged daemon and said what was still in the plan,
@@ -2596,15 +2602,23 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
   code. It has not reproduced since: standalone at that commit, six runs
   concurrently, and a full `make live` on a cleaned machine, all green.
 
-  This is not a diagnosis and is deliberately not written as one. If it
-  returns, the first thing to try is the guard `qdisc.sh` already carries
-  (commit `2862623`): wait until `ncfg plan` says there is nothing to do before
+  This is not a diagnosis and is deliberately not written as one, and the
+  evidence has since got stronger rather than weaker: it has not reproduced
+  standalone, under six concurrent runs, in a full `make live` on a cleaned
+  machine, or in **three runs inside the container** — the same container whose
+  different kernel exposed the qdisc bug. Four independent ways of looking, and
+  the only run that ever failed is the one where eleven orphaned daemons were
+  on the machine.
+
+  If it returns, the first thing to try is the guard `qdisc.sh` carries (commit
+  `2862623`): wait until `ncfg plan` says there is nothing to do before
   asserting the objects are gone, because an empty plan is the signal that the
-  daemon's own pending pass has landed and nothing is still in flight.
-  `ingress.sh` asserts immediately after `apply` and has no such wait. That
-  guard was **not** added now, because a fix for an unreproduced flake is a
-  guess, and one that makes the symptom rarer without explaining it is worse
-  than the symptom.
+  daemon's own pending pass has landed. `ingress.sh` asserts immediately after
+  `apply` and has no such wait. That guard is still **not** added, and the
+  reason has sharpened: `qdisc.sh`'s guard earned its place by exposing a real
+  planner defect, not by hiding a timing one. Adding a wait to a test whose
+  failure nobody can reproduce would make a symptom rarer without explaining
+  it, which is how a real race gets buried.
 
   The orphans are the other lesson and the one that cost the time: every one of
   them was a daemon started by hand to check something, and
