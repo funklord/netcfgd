@@ -3,10 +3,56 @@
 # already blown, and the same goes for every other check here.
 #
 # `make check` is what CI runs and what to run before committing.
+#
+# TARGETS
+#   make               -- build the workspace and link the `ncfg` name
+#   make gui           -- the Qt client, which nothing else builds
+#   make cross         -- the cross-compilation check
+#   make test          -- the test suite alone
+#   make check         -- every gate; the one to run before a commit
+#   make check-ci      -- check minus the budgets, which a rented VM cannot
+#                         measure honestly
+#   make live          -- the supplicant tests that need a real
+#                         wpa_supplicant and a privileged netns; not in check
+#   make fuzz          -- the fuzz targets
+#   make conformance   -- the two client implementations, asked the same
+#                         questions
+#   make adapters      -- each adapter, built and checked to the core's bar
+#   make nm-containment -- assert the core's manifest has gained no entry
+#   make style         -- the shared source gate, plus project.md held to the
+#                         tree it describes
+#   make fmt           -- rustfmt, checking only; `fmt-fix` rewrites
+#   make clippy        -- clippy across the workspace
+#   make deny          -- supply chain; reports rather than fails where the
+#                         tools are not installed
+#   make size          -- the installed-size ratchet
+#   make footprint     -- an unused optional feature must leave no trace
+#   make rss           -- the resident-memory budget
+#   make install       -- the two binaries and the config directory, and
+#                         nothing of anybody else's
+#   make install-systemd, install-openrc, install-procd
+#                      -- the init glue for one system, chosen deliberately
+#   make install-gui   -- the Qt client, opt-in; not part of install
+#   make install-modem-mbim
+#                      -- the reference modem helper; optional on purpose
+#   make uninstall     -- remove what install put there
+#   make deb           -- the Debian package; Depends read from the ELF
+#   make apk           -- the Alpine package. Alpine's `apk`, not Android's
+#   make apk-container -- the same, built by `abuild` inside Alpine
+#   make apk-source    -- the tarball an APKBUILD builds from
+#   make schema-bless  -- re-bless the frozen document and socket witnesses
+#   make version-check -- VERSION is the source; debian/changelog and
+#                         Cargo.toml are held to it
+#   make hooks         -- install the git hooks from tools/hooks/
+#   make clean         -- remove build products
+#   make veryclean     -- clean, plus the build directories
+#   make distclean     -- veryclean, plus editor and tool droppings
+#   make help          -- this list
+#
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container
+.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -1187,3 +1233,13 @@ hooks:
 	@test -d .git || { echo "hooks: not a git repository" >&2; exit 1; }
 	@install -m 0755 tools/hooks/commit-msg .git/hooks/commit-msg
 	@echo "hooks: commit-msg installed from tools/hooks/"
+
+# The TARGETS block in the header is the one statement of what the targets
+# are, and this reads it back rather than repeating it: a list written twice
+# is a list that disagrees with itself eventually.
+#
+# Defined last on purpose -- make takes the first non-special target in the
+# file as the default goal, so a `help` rule above `all` makes plain `make`
+# print the help instead of building.
+help:
+	@sed -n '/^# TARGETS/,/^#$$/p' $(firstword $(MAKEFILE_LIST)) | sed 's/^# \{0,1\}//'
