@@ -236,6 +236,21 @@ public:
 	 * through a client. Joining a network the configuration does not describe
 	 * is writing a file (0069) and is not available here at all.
 	 */
+	/*
+	 * Add a network, and store its credential through the daemon.
+	 *
+	 * The only call here that carries a secret, and it carries it one way:
+	 * the daemon writes it through the provider and the config keeps an
+	 * `@secret:` reference, so nothing reads one back (0029, 0031). Needs
+	 * the `admin` tier; a refusal says so.
+	 *
+	 * `ssid` is lowercase hex because an SSID is arbitrary octets --
+	 * `ncfg_access_point_row::ssid` is exactly this, so a row from a scan
+	 * can be handed straight in.
+	 */
+	bool wifi_add(const QString &ssid, const QString &id, const QString &passphrase,
+	          const QString &proto, bool hidden, QString *error);
+
 	bool wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out, QString *error);
 	bool wifi_status(const QString &interface, ncfg_wifi_status_row *out, QString *error);
 	bool wifi_connect(const QString &interface, const QString &network, QString *error);

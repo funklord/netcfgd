@@ -3,6 +3,7 @@
  */
 #include "wifi_view.h"
 
+#include "add_network_dialog.h"
 #include "ncfg_connection.h"
 
 #include <QComboBox>
@@ -60,9 +61,11 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 
 	scan_button = new QPushButton(QStringLiteral("scan"), this);
 	join_button = new QPushButton(QStringLiteral("join"), this);
+	add_button = new QPushButton(QStringLiteral("add"), this);
 	leave_button = new QPushButton(QStringLiteral("disconnect"), this);
 	controls->addWidget(scan_button);
 	controls->addWidget(join_button);
+	controls->addWidget(add_button);
 	controls->addWidget(leave_button);
 	controls->addStretch();
 	layout->addLayout(controls);
@@ -88,6 +91,7 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 
 	connect(scan_button, &QPushButton::clicked, this, &ncfg_wifi_view::scan);
 	connect(join_button, &QPushButton::clicked, this, &ncfg_wifi_view::join);
+	connect(add_button, &QPushButton::clicked, this, &ncfg_wifi_view::add);
 	connect(leave_button, &QPushButton::clicked, this, &ncfg_wifi_view::leave);
 	connect(table, &QTableWidget::itemSelectionChanged, this,
 	    &ncfg_wifi_view::selection_changed);
@@ -192,6 +196,7 @@ void ncfg_wifi_view::scan()
 	scan_button->setEnabled(true);
 
 	if (!done) {
+		scanned.clear();
 		table->setRowCount(0);
 		status->setText(error);
 		emit reported(error);
@@ -199,6 +204,7 @@ void ncfg_wifi_view::scan()
 		return;
 	}
 
+	scanned = points;
 	table->setRowCount(points.size());
 	int joinable = 0;
 	for (int row = 0; row < points.size(); row++) {
@@ -298,5 +304,37 @@ void ncfg_wifi_view::selection_changed()
 	/* Enabled only for a row that names a `network` block. The button is the
 	 * honest place to express 0013's boundary: offering it and answering with
 	 * a refusal would teach the operator the rule one failure at a time. */
-	join_button->setEnabled(have_radio && configured && !configured->text().isEmpty());
+	const bool joinable = configured && !configured->text().isEmpty();
+	join_button->setEnabled(have_radio && joinable);
+	/* The mirror image: `add` is for a row that has *no* block yet. A row with
+	 * one is already configured, and offering to add it again would be
+	 * offering the refusal the daemon gives by name. */
+	add_button->setEnabled(have_radio && row >= 0 && !joinable);
+}
+
+void ncfg_wifi_view::add()
+{
+	const int row = table->currentRow();
+	if (row < 0) {
+		return;
+	}
+	/* Straight off the selected row rather than retyped. The hex is what the
+	 * radio actually saw, and a network whose name does not render as text is
+	 * exactly the one somebody would type wrongly. */
+	const QTableWidgetItem *shown = table->item(row, 1);
+	const QTableWidgetItem *security = table->item(row, 2);
+	if (!shown || row >= scanned.size()) {
+		return;
+	}
+	const bool secured = security && security->text() == QStringLiteral("secured");
+
+	ncfg_add_network_dialog dialog(connection, scanned.at(row).ssid, shown->text(), secured,
+	                   this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	/* Re-scan rather than patching the row: the daemon has re-read its
+	 * configuration, so `configured` has changed for this access point and
+	 * possibly for others, and asking is cheaper than being clever. */
+	scan();
 }

@@ -1924,9 +1924,21 @@ the sentence that disposes of an alternative in half a line.
      with an `@secret:` reference and the credential at 0600, a duplicate
      refused, and `../../../tmp/pwned` refused with nothing written.
 
-     **What is left is the clients.** `client/` has no typed call and the GUI no
-     dialog, so netcfgd's own desktop client is still the one that cannot add a
-     network.
+     ~~**What is left is the clients.**~~ **Done.** `ncfg_client_wifi_add` takes a
+     typed `ncfg_network_t` and is the only call in that library carrying a
+     secret -- it wipes its request buffer through a volatile pointer, because a
+     plain `memset` to a local about to leave scope is a write a compiler may
+     drop. The GUI's dialog opens from a selected scan row, so the SSID is the
+     exact octets the radio saw rather than something retyped: a network whose
+     name does not render as text is precisely the one somebody types wrongly.
+     The passphrase field is `Password` echo and is cleared before the dialog
+     closes, and `add` is offered only for a row with no `network` block --
+     the mirror of `join`, which is offered only for a row that has one.
+
+     Driven against a real daemon: a secured network written with `@secret:` and
+     its credential at 0600, an open network written with **no secret file at
+     all**, a duplicate refused by name, and an SSID of `cafe\0` keeping its hex
+     because the label cannot carry the trailing NUL.
    - ~~**M8's tray applet does not exist.**~~ — **written**, and it is the one
      thing a GUI gives that `ncfg` and `ncfg tui` structurally cannot: an
      answer to "am I on the network" costing no window and no command, on a

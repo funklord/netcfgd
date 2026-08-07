@@ -1076,6 +1076,107 @@ static int convert_wifi_status(const ncfg_json_doc_t *doc, ncfg_wifi_status_t *o
 	return 1;
 }
 
+/*
+ * Append `,"key":"value"` with the value quoted, or nothing when it is NULL.
+ *
+ * Returns 0 if it would not fit, which the caller turns into a refusal rather
+ * than a shorter request: a truncated request is a different request, and one
+ * of these members is a passphrase.
+ */
+static int append_member(char *out, size_t out_size, size_t *at, const char *key,
+             const char *value)
+{
+	if (!value) {
+		return 1;
+	}
+	int head = snprintf(out + *at, out_size - *at, ",\"%s\":", key);
+	if (head < 0 || (size_t)head >= out_size - *at) {
+		return 0;
+	}
+	*at += (size_t)head;
+	size_t span = ncfg_client_quote(value, out + *at, out_size - *at);
+	if (!span) {
+		return 0;
+	}
+	*at += span;
+	return 1;
+}
+
+/*
+ * Wipe a buffer that held a secret.
+ *
+ * Through a volatile pointer so the compiler cannot decide the writes are dead
+ * -- which it may, and does, for a plain memset to a local about to go out of
+ * scope. This is the one request in this library that carries a passphrase, so
+ * it is the one place worth the care.
+ */
+static void wipe(char *buffer, size_t size)
+{
+	volatile char *p = (volatile char *)buffer;
+
+	while (size--) {
+		*p++ = '\0';
+	}
+}
+
+int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, char *err,
+             size_t err_size)
+{
+	if (!network || !network->ssid) {
+		set_error(err, err_size, "a network needs an ssid, as lowercase hex");
+		return 0;
+	}
+
+	char request[2048];
+	int head = snprintf(request, sizeof(request), "{\"request\":\"wifi_add\",\"ssid\":");
+	if (head < 0 || (size_t)head >= sizeof(request)) {
+		return 0;
+	}
+	size_t at = (size_t)head;
+
+	int built = ncfg_client_quote(network->ssid, request + at, sizeof(request) - at) > 0;
+	if (built) {
+		at += strlen(request + at);
+	}
+	built = built && append_member(request, sizeof(request), &at, "id", network->id)
+	    && append_member(request, sizeof(request), &at, "passphrase", network->passphrase)
+	    && append_member(request, sizeof(request), &at, "proto", network->proto);
+
+	if (built && network->hidden) {
+		int span = snprintf(request + at, sizeof(request) - at, ",\"hidden\":true");
+		built = span >= 0 && (size_t)span < sizeof(request) - at;
+		if (built) {
+			at += (size_t)span;
+		}
+	}
+	if (built && network->priority >= 0) {
+		int span = snprintf(request + at, sizeof(request) - at, ",\"priority\":%d",
+		            network->priority);
+		built = span >= 0 && (size_t)span < sizeof(request) - at;
+		if (built) {
+			at += (size_t)span;
+		}
+	}
+	if (!built || at + 2 > sizeof(request)) {
+		wipe(request, sizeof(request));
+		set_error(err, err_size, "that network does not fit in one request");
+		return 0;
+	}
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	/* Before anything else, including the error path: the passphrase has been
+	 * written to the socket and has no further business in this process. */
+	wipe(request, sizeof(request));
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
 int ncfg_client_wifi_scan(ncfg_client_t *client, const char *interface, ncfg_scan_t *out,
               char *err, size_t err_size)
 {

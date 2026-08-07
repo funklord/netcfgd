@@ -400,6 +400,44 @@ int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_
 int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size_t err_size);
 
 /*
+ * A network to add to the configuration.
+ *
+ * Typed fields and nothing else, which is decision 0117's whole point: a
+ * config file may name a hook, and a hook's `run_as` defaults to root, so a
+ * request able to carry config *text* would be remote code execution. There is
+ * no field here that could name a hook, a path or a `run_as`, and there is no
+ * enterprise arm because those carry certificate paths.
+ *
+ * `ssid` is lowercase hex and required -- an SSID is 0..32 arbitrary octets, so
+ * hex is the only form that always works. Everything else may be NULL or
+ * negative to leave it out, and the daemon applies netcfgd's own defaults
+ * rather than this library inventing them.
+ */
+typedef struct {
+	const char *ssid;       /* lowercase hex; required */
+	const char *id;         /* NULL derives one from the ssid, where it is text */
+	const char *passphrase; /* NULL for an open network */
+	const char *proto;      /* NULL, "wpa2" or "wpa3" */
+	int         hidden;
+	int         priority; /* negative to leave it out */
+} ncfg_network_t;
+
+/*
+ * Add a wireless network, and store its credential through the daemon.
+ *
+ * The **only** call in this library that carries a secret, and it carries it
+ * one way: the daemon writes it through the secret provider and the config
+ * file keeps an `@secret:` reference, so nothing reads one back out (0029,
+ * 0031). Needs the `admin` tier, because writing configuration is what admin
+ * names -- a refusal will say so.
+ *
+ * The request buffer is wiped before returning. That is not a guarantee about
+ * the caller's own copy of the passphrase, which this cannot reach.
+ */
+int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, char *err,
+             size_t err_size);
+
+/*
  * The wireless half, on one named interface.
  *
  * `interface` is quoted rather than interpolated on the way out, for the reason
