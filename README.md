@@ -44,6 +44,89 @@ make live           # scripted checks against real daemons
 sudo make install   # honours DESTDIR
 ```
 
+### What you need installed
+
+**To build the daemon and the CLI** — Debian and derivatives:
+
+```sh
+sudo apt install build-essential cargo rustc libncurses-dev pkgconf python3
+```
+
+`rustc` must be **1.85 or newer** (`rust-version` in `Cargo.toml`). Debian
+trixie's is 1.85, so it is exactly enough; older releases need rustup.
+`libncurses-dev` is for `ncfg tui` and is the only library the daemon links
+beyond libc — `--no-default-features` drops the TUI and with it that
+dependency. `python3` runs the style gate and several test scripts, not the
+daemon.
+
+**To build the Qt client** as well:
+
+```sh
+sudo apt install qt6-base-dev
+```
+
+That one package is enough: it pulls `qmake6` and `qt6-base-dev-tools` (which
+has `moc`) as dependencies, and it is what CI installs. At runtime the client
+needs `libqt6widgets6`, `libqt6gui6` and `libqt6core6t64`, which `dpkg-shlibdeps`
+works out for itself.
+
+Worth knowing before you install it: **the Qt client links `libQt6DBus`**, so
+the "no D-Bus" property above is the *core's* and not the GUI's. That is Qt's
+own dependency rather than a choice made here, and it is one more reason the
+client is a separate package from the daemon.
+
+**To cross-compile** (`make cross`), the linker for the target — the table in
+the `Makefile` maps triples to these:
+
+```sh
+sudo apt install gcc-aarch64-linux-gnu     # aarch64-unknown-linux-gnu
+sudo apt install gcc-arm-linux-gnueabihf   # armv7-unknown-linux-gnueabihf
+sudo apt install gcc-mips-linux-gnu        # mips-unknown-linux-gnu
+```
+
+The Rust half also needs a standard library for the target, which is
+`rustup target add <triple>` and cannot be done with a distro `rustc`.
+
+### What you need at run time, and only if you use it
+
+**None of these is required**, and nothing here is a package dependency. netcfgd
+speaks netlink directly, so there is no `ip`, `iw` or `nft` in this list — the
+programs below are ones it *manages*, each pulled in only by the feature that
+needs it.
+
+| feature | program | Debian package |
+|---|---|---|
+| DHCPv4, DHCPv6 | `dhcpcd` | `dhcpcd-base` |
+| prefix delegation | `odhcp6c` | **not packaged in Debian** — see below |
+| wifi, wired 802.1X | `wpa_supplicant` | `wpasupplicant` |
+| access point | `hostapd` | `hostapd` |
+| VPN tunnel | `openvpn` | `openvpn` |
+| DSL / PPPoE | `pppd`, `pppoe` | `ppp`, `pppoe` |
+| router advertisement | `radvd` | `radvd` |
+| DNS: `dnsmasq` mode | `dnsmasq` | `dnsmasq-base` |
+| DNS: `unbound` mode | `unbound` | `unbound` |
+| DNS: `resolvconf` mode | any `resolvconf` | `openresolv`, or `resolvconf` |
+| DNS: `openresolv` mode | `resolvconf` | `openresolv` specifically |
+| DNS: `resolved` mode | `resolvectl` | `systemd-resolved` |
+
+**`odhcp6c` is the one gap and it is deliberate.** Debian does not package it,
+and netcfgd needs it for prefix delegation specifically because `dhcpcd` cannot
+report a delegated prefix to a script — so the two are not interchangeable and
+`ncfg plan` says so rather than taking a lease that goes nowhere. On OpenWrt it
+is already there.
+
+`resolvconf` and `openresolv` are two modes and not one spelling of the same
+thing. The first hands a flat per-interface blob to *any* implementation of the
+`resolvconf` interface; the second uses openresolv's own `private_interfaces`
+and subscriber mechanism, which is the one that carries DNS **scopes** — so a
+network you joined answers only for its own domains instead of for everything.
+`openresolv` is the mode to recommend where there is no systemd, and it shares
+an upstream with the `dhcpcd` netcfgd already delegates leases to.
+
+The `write_resolv_conf` mode needs nothing at all, which is why it is the one
+an ordinary single-link host should start with. `exec` needs only the script
+you point it at.
+
 A minimal configuration is `/etc/netcfgd/netcfgd.conf` plus `conf.d/`. Nothing
 else appears on disk until a feature is actually used.
 
