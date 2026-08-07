@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check check-ci build test conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks
+.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -43,7 +43,7 @@ ncfg-link:
 # can build the tree. BUDGET_GATES measure *this* machine, and running them
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
-                 nm-containment packaging conformance test adapters
+                 nm-containment packaging conformance test adapters gui
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -833,6 +833,25 @@ fuzz:
 		exit 1; \
 	fi
 	$(CARGO) fuzz run $(FUZZ_TARGET) -- $(FUZZ_ARGS)
+
+# The Qt client, which nothing else builds.
+#
+# `client/` is built by `conformance`, so a change that breaks the C library is
+# caught. Nothing built `gui/` at all -- so a change to that library's API
+# broke a tree nobody compiled, and the only reason it was ever noticed was
+# somebody building it by hand. That is the failure class the dependency rules
+# in build-and-commit.md are about: a rule that quietly does not run.
+#
+# Skipped loudly rather than failed when qmake is absent, matching `deny`
+# below: most machines that build netcfgd are not desktops, and a gate that
+# demanded Qt on a router would be one people delete. CI installs Qt, which is
+# where the skip would otherwise become a vacuous pass.
+gui:
+	@if command -v qmake6 >/dev/null 2>&1; then \
+		$(MAKE) --no-print-directory -C gui; \
+	else \
+		echo "gui: qmake6 not installed, skipping (apt install qt6-base-dev)"; \
+	fi
 
 # Supply chain. Both are optional installs, so this reports rather than failing
 # when they are absent -- a gate nobody can run locally is a gate that rots.
