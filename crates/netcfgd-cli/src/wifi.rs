@@ -14,10 +14,11 @@
 //! can read, and deleting the file is the whole of forgetting a network.
 
 use crate::Options;
-use netcfgd_host::config;
+use netcfgd_host::{config, wifi_profile};
 use netcfgd_model::Ssid;
-use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// The parts of a `network` block the command line can say.
@@ -183,54 +184,41 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 	}
 
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
-	let file = profile_path(&config_dir, &id);
-	if file.exists() {
-		return Err(format!(
-			"{} already exists but describes no network `{id}` -- refusing to \
-			 overwrite a file this did not write",
-			file.display()
-		));
-	}
-	let secret = secret_path(&config_dir, &id);
-	if !wanted.open && secret.exists() {
-		return Err(format!(
-			"{} already exists -- refusing to overwrite a stored passphrase. \
-			 Remove it first if it is stale",
-			secret.display()
-		));
-	}
+	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
 
-	// Last, because it is the only step that stops and waits for a person: a
-	// refusal that was going to happen anyway should not happen after the
-	// passphrase has been typed.
-	let stored = if wanted.open {
-		false
+	// The credential last, because it is the only step that stops and waits for
+	// a person: a refusal that was going to happen anyway should not happen
+	// after the passphrase has been typed. `install` refuses an existing file
+	// or stored credential before it writes either, so nothing below this
+	// line can clobber what somebody else wrote.
+	let credential = if wanted.open {
+		None
 	} else {
-		let value = read_credential(&id, wanted)?;
-		crate::secret::make_secrets_dir(&secret)?;
-		config::write_atomically(&secret, value.as_bytes(), 0o600)
-			.map_err(|error| format!("could not write {}: {error}", secret.display()))?;
-		true
+		Some(read_credential(&id, wanted)?)
 	};
 
-	let text = block(&id, &ssid, wanted);
-	if let Err(error) = config::write_atomically(&file, text.as_bytes(), 0o644) {
-		remove(stored, &secret);
-		return Err(format!("could not write {}: {error}", file.display()));
-	}
+	// The rendering, the paths and the compile-it-back check are
+	// netcfgd-host's, shared with the socket's `wifi_add` (0117). Two
+	// implementations of "what a `network` block looks like" is the drift this
+	// tree keeps finding, so there is one.
+	let profile = wifi_profile::Profile {
+		id: id.clone(),
+		ssid,
+		hidden: wanted.hidden,
+		priority: wanted.priority,
+		security: security_of(wanted),
+	};
+	let written =
+		wifi_profile::install(&config_dir, &factory_dir, &profile, credential.as_deref())?;
 
-	// Read back what was written, through the same loader and compiler the
-	// daemon uses. A generated config file that does not compile is worse than
-	// no file at all, because it takes every other interface with it -- so if
-	// the machine cannot use what this wrote, this removes it and says why
-	// rather than leaving the operator with a broken directory.
-	if let Err(error) = verify(options, &id, wanted) {
-		remove(true, &file);
-		remove(stored, &secret);
-		return Err(error);
-	}
-
-	report(&file, &secret, &id, wanted, stored, document.as_ref());
+	report(
+		&written.file,
+		&wifi_profile::secret_path(&config_dir, &id),
+		&id,
+		wanted,
+		written.secret.is_some(),
+		document.as_ref(),
+	);
 	Ok(ExitCode::SUCCESS)
 }
 
@@ -257,22 +245,6 @@ fn current(options: &Options) -> Result<Option<netcfgd_model::Document>, String>
 	Ok(Some(document))
 }
 
-/// The file a network's block goes in.
-///
-/// Flat, and `.conf`, because that is what the loader reads: it takes
-/// `conf.d/*.conf` and does not descend, so a subdirectory per client would
-/// configure nothing. The `wifi-` prefix says where the file came from without
-/// claiming ownership of it -- there is no marker file and no registry, and a
-/// block edited by hand afterwards is simply the configuration.
-fn profile_path(config_dir: &Path, id: &str) -> PathBuf {
-	config_dir.join("conf.d").join(format!("wifi-{id}.conf"))
-}
-
-/// Where the `file` secret provider will look for the passphrase.
-fn secret_path(config_dir: &Path, id: &str) -> PathBuf {
-	config_dir.join("secrets").join(id)
-}
-
 /// Whether an id can be a block label, a filename and a secret name at once.
 ///
 /// It has to be all three, and the strictest of the three wins. The label rules
@@ -290,188 +262,29 @@ fn usable_label(id: &str) -> Result<(), String> {
 	})
 }
 
-/// The block, as text.
+/// What the flags say about how the network is protected.
 ///
-/// Kept to what was asked for. netcfgd's defaults are the ones a laptop wants
-/// -- `autoconnect` is on, `metered` is off, and a PSK negotiates WPA2 and WPA3
-/// both -- and writing them out anyway would turn every generated file into a
-/// list of things to wonder about.
-fn block(id: &str, ssid: &Ssid, wanted: &Wanted) -> String {
-	let mut text = String::new();
-	text.push_str(
-		"# Written by `ncfg wifi add`. This file is ordinary netcfgd\n\
-		 # configuration: edit it, diff it, commit it, or delete it. Deleting it\n\
-		 # is how the machine forgets this network.\n",
-	);
-	let _ = writeln!(text, "\nnetwork \"{id}\" {{");
-	// The SSID as hex whenever it is not exactly the label, which is what makes
-	// `--id` lossless: an SSID is 32 arbitrary octets and a label is text, so a
-	// network whose name is not usable as a label still keeps its exact name.
-	if ssid.as_bytes() != id.as_bytes() {
-		let _ = writeln!(text, "\tssid = \"{}\"", ssid.to_hex());
-	}
-	if wanted.hidden {
-		text.push_str("\thidden = true\n");
-	}
-
-	let mut keys: Vec<String> = Vec::new();
+/// The CLI can reach the `Eap` arm and the socket's `wifi_add` cannot, which is
+/// 0117's line: an enterprise network names certificate *paths*, and a path is
+/// a file the daemon would hand to a supplicant running as root. Somebody
+/// typing flags on their own machine is a different question from a client
+/// asking a privileged daemon.
+fn security_of(wanted: &Wanted) -> wifi_profile::Security {
 	if wanted.open {
-		keys.push("open = true".to_owned());
-	} else if let Some(method) = wanted.eap {
-		keys.push(format!("eap = \"{method}\""));
-		// Every value that came off the command line is quoted rather than
-		// interpolated bare: an identity is `you@example.ac.uk` and a
-		// certificate is a path, and neither is guaranteed to be a bare word
-		// the lexer would read back as itself. `verify` below is what proves
-		// it round-tripped, the way it already does for a hex SSID.
-		for (value, key) in [
-			(&wanted.identity, "identity"),
-			(&wanted.anonymous_identity, "anonymous_identity"),
-			(&wanted.ca_cert, "ca_cert"),
-			(&wanted.client_cert, "client_cert"),
-			(&wanted.phase2, "phase2"),
-		] {
-			if let Some(value) = value {
-				keys.push(format!("{key} = \"{}\"", escape(value)));
-			}
-		}
-		// TLS presents a certificate and the rest present a password, and the
-		// supplicant refuses the network outright if it is given the other one
-		// -- so which key the stored secret is written under is the same branch
-		// `read_credential` prompts through.
-		if method == "tls" {
-			keys.push(format!("private_key = \"@secret:{id}\""));
-		} else {
-			keys.push(format!("password = \"@secret:{id}\""));
-		}
-	} else {
-		keys.push(format!("psk = \"@secret:{id}\""));
-		if let Some(proto) = wanted.proto {
-			keys.push(format!("proto = \"{proto}\""));
-		}
+		return wifi_profile::Security::Open;
 	}
-	if let Some(priority) = wanted.priority {
-		keys.push(format!("priority = {priority}"));
-	}
-	// One key per line for an enterprise network. The single-line form reads
-	// well for `psk` and `priority` and badly for seven keys, and this file is
-	// meant to be edited by hand afterwards.
-	if keys.len() > 3 {
-		text.push_str("\twifi {\n");
-		for key in &keys {
-			let _ = writeln!(text, "\t\t{key}");
-		}
-		text.push_str("\t}\n");
-	} else {
-		let _ = writeln!(text, "\twifi {{ {} }}", keys.join("; "));
-	}
-	text.push_str("}\n");
-	text
-}
-
-/// A value going into a quoted string in generated configuration.
-///
-/// An identity or a certificate path comes off the command line and goes into a
-/// file the compiler reads back. A quote or a backslash in one would end the
-/// string early and produce a file that does not compile -- which takes every
-/// other interface on the machine with it, since the loader compiles the
-/// directory as one document.
-fn escape(value: &str) -> String {
-	value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-/// Compile the configuration again and check the network arrived as asked.
-///
-/// Not a formality. It has caught the two things that can go wrong between a
-/// rendered block and a usable network -- a label that the lexer reads
-/// differently from the way it was written, and an SSID whose hex form did not
-/// round-trip -- and it is the only check that covers the file as the daemon
-/// will actually read it, includes and drop-in ordering and all.
-fn verify(options: &Options, id: &str, wanted: &Wanted) -> Result<(), String> {
-	let (document, _) = super::compile(options).map_err(|error| {
-		format!(
-			"what that would have written does not compile, so it was removed \
-			 again:\n{error}"
-		)
-	})?;
-	let Some(network) = document.networks.iter().find(|network| network.id == id) else {
-		return Err(format!(
-			"the file was written and compiled, and the configuration still has \
-			 no network `{id}`, so it was removed again. This is a bug in \
-			 `ncfg wifi add`"
-		));
-	};
-	let secured = !matches!(network.security, netcfgd_model::Security::Open);
-	if secured == wanted.open {
-		return Err(format!(
-			"network `{id}` compiled with the wrong security, so it was removed \
-			 again. This is a bug in `ncfg wifi add`"
-		));
-	}
-
-	// An enterprise network is checked further, because it has values that came
-	// off the command line and went through a quoted string: an identity with a
-	// realm, a certificate path. `secured` is true for a `psk` network too, so
-	// without this an `--eap` run that compiled to a passphrase network would
-	// pass -- and the operator would find out at association time, from a
-	// supplicant log.
 	if let Some(method) = wanted.eap {
-		let netcfgd_model::Security::Eap(eap) = &network.security else {
-			return Err(format!(
-				"network `{id}` asked for `--eap {method}` and compiled to \
-				 something else, so it was removed again. This is a bug in \
-				 `ncfg wifi add`"
-			));
+		return wifi_profile::Security::Eap {
+			method: method.to_owned(),
+			identity: wanted.identity.clone(),
+			anonymous_identity: wanted.anonymous_identity.clone(),
+			ca_cert: wanted.ca_cert.clone(),
+			client_cert: wanted.client_cert.clone(),
+			phase2: wanted.phase2.clone(),
 		};
-		// Compared as the compiler parsed them, not as they were written, which
-		// is what makes this a round trip rather than a restatement.
-		for (wrote, got, what) in [
-			(
-				wanted.identity.as_deref(),
-				Some(eap.identity.as_str()),
-				"identity",
-			),
-			(
-				wanted.anonymous_identity.as_deref(),
-				eap.anonymous_identity.as_deref(),
-				"anonymous identity",
-			),
-			(
-				wanted.ca_cert.as_deref(),
-				eap.ca_cert.as_deref(),
-				"CA certificate",
-			),
-			(
-				wanted.client_cert.as_deref(),
-				eap.client_cert.as_deref(),
-				"client certificate",
-			),
-			(
-				wanted.phase2.as_deref(),
-				eap.phase2.as_deref(),
-				"phase 2 method",
-			),
-		] {
-			if wrote.is_some() && wrote != got {
-				return Err(format!(
-					"network `{id}`'s {what} did not survive being written and read \
-					 back, so it was removed again. This is a bug in \
-					 `ncfg wifi add`"
-				));
-			}
-		}
 	}
-	Ok(())
-}
-
-/// Remove a file this command wrote, if it wrote one.
-///
-/// Only ever called on the two paths above, and only with `ours` true when this
-/// command created them: both are refused up front if they already exist, so a
-/// rollback cannot delete anything of the operator's.
-fn remove(ours: bool, path: &Path) {
-	if ours {
-		let _ = std::fs::remove_file(path);
+	wifi_profile::Security::Psk {
+		proto: wanted.proto.map(ToOwned::to_owned),
 	}
 }
 
@@ -584,6 +397,23 @@ fn check_passphrase(passphrase: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+
+	/// The block these flags produce.
+	///
+	/// The renderer moved to `netcfgd_host::wifi_profile` when the socket
+	/// gained a second caller (0117), so these tests go through the mapping
+	/// this crate still owns -- flags to a `Security` -- and then through the
+	/// shared renderer, which is the same path `ncfg wifi add` now takes.
+	fn block(id: &str, ssid: &Ssid, wanted: &Wanted) -> String {
+		wifi_profile::render(&wifi_profile::Profile {
+			id: id.to_owned(),
+			ssid: ssid.clone(),
+			hidden: wanted.hidden,
+			priority: wanted.priority,
+			security: security_of(wanted),
+		})
+	}
+
 	use super::*;
 
 	fn wanted() -> Wanted {
@@ -707,11 +537,23 @@ mod tests {
 	/// a file the compiler reads back. Unescaped, `we"ird` closes the string and
 	/// the file does not compile -- which takes every other interface on the
 	/// machine with it, the loader compiling the directory as one document.
+	///
+	/// Asserted through the rendered block rather than on the escaping helper,
+	/// which moved with the renderer. That is the stronger test anyway: it
+	/// checks what ends up in the file, so it would still fail if the escaping
+	/// were correct and the renderer stopped calling it.
 	#[test]
 	fn a_value_with_a_quote_in_it_is_escaped() {
-		assert_eq!(escape(r#"we"ird"#), r#"we\"ird"#);
-		assert_eq!(escape(r"back\slash"), r"back\\slash");
-		assert_eq!(escape("ordinary@example.ac.uk"), "ordinary@example.ac.uk");
+		let ssid = Ssid::new(b"Corp".to_vec()).expect("a short ssid");
+		let wanted = Wanted {
+			eap: Some("peap"),
+			identity: Some(r#"we"ird"#.to_owned()),
+			ca_cert: Some(r"back\slash".to_owned()),
+			..Wanted::default()
+		};
+		let text = block("Corp", &ssid, &wanted);
+		assert!(text.contains(r#"identity = "we\"ird""#), "{text}");
+		assert!(text.contains(r#"ca_cert = "back\\slash""#), "{text}");
 	}
 
 	/// The enterprise flags are refused where they would do nothing, and the
@@ -909,61 +751,15 @@ mod tests {
 		let _ = std::fs::remove_dir_all(&root);
 	}
 
-	/// `verify` reads the enterprise fields back and compares them.
-	///
-	/// The happy path cannot show this: `block` and `verify` agree, so a
-	/// working pair proves nothing about the check. So the file is written by
-	/// `block` and then verified against a *different* identity, which is what
-	/// a future bug in `block` would look like from here.
-	///
-	/// Written because breaking this comparison left every other test green:
-	/// the compile step already catches a file that does not parse, and only
-	/// this catches one that parses into the wrong network.
-	#[test]
-	fn verify_catches_a_field_that_did_not_survive_the_round_trip() {
-		let (root, options) = fixture("verify-eap");
-		let wanted = Wanted {
-			eap: Some("peap"),
-			identity: Some("you@example.ac.uk".to_owned()),
-			ca_cert: Some("/ca.pem".to_owned()),
-			..Wanted::default()
-		};
-		let ssid = Ssid::new(b"Corp".to_vec()).expect("a short ssid");
-		std::fs::write(
-			profile_path(Path::new(&root.join("etc")), "Corp"),
-			block("Corp", &ssid, &wanted),
-		)
-		.expect("the block is written");
-
-		// What was written is what was asked for.
-		verify(&options, "Corp", &wanted).expect("the round trip holds");
-
-		// And a mismatch is caught rather than reported as success.
-		let drifted = Wanted {
-			identity: Some("somebody.else@example.ac.uk".to_owned()),
-			..wanted.clone()
-		};
-		let error = verify(&options, "Corp", &drifted).expect_err("the identity moved");
-		assert!(error.contains("identity"), "{error}");
-
-		let drifted = Wanted {
-			phase2: Some("mschapv2".to_owned()),
-			..wanted.clone()
-		};
-		let error = verify(&options, "Corp", &drifted).expect_err("a phase 2 that is not there");
-		assert!(error.contains("phase 2"), "{error}");
-		let _ = std::fs::remove_dir_all(&root);
-	}
-
 	#[test]
 	fn a_file_is_named_for_the_id_and_marked_as_generated() {
-		let path = profile_path(Path::new("/etc/netcfgd"), "HomeFiber");
+		let path = wifi_profile::profile_path(Path::new("/etc/netcfgd"), "HomeFiber");
 		assert_eq!(
 			path,
 			PathBuf::from("/etc/netcfgd/conf.d/wifi-HomeFiber.conf")
 		);
 		assert_eq!(
-			secret_path(Path::new("/etc/netcfgd"), "HomeFiber"),
+			wifi_profile::secret_path(Path::new("/etc/netcfgd"), "HomeFiber"),
 			PathBuf::from("/etc/netcfgd/secrets/HomeFiber")
 		);
 	}

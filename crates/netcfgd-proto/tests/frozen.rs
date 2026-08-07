@@ -82,6 +82,7 @@ fn every_request() -> Vec<Request> {
 		Request::Monitor => "monitor",
 		Request::WifiScan { .. } => "wifi_scan",
 		Request::WifiStatus { .. } => "wifi_status",
+		Request::WifiAdd { .. } => "wifi_add",
 		Request::WifiConnect { .. } => "wifi_connect",
 		Request::WifiDisconnect { .. } => "wifi_disconnect",
 		Request::ApStations { .. } => "ap_stations",
@@ -103,6 +104,7 @@ fn every_request() -> Vec<Request> {
 			"revert",
 			"show",
 			"status",
+			"wifi_add",
 			"wifi_connect",
 			"wifi_disconnect",
 			"wifi_scan",
@@ -155,6 +157,27 @@ fn every_request_sample() -> Vec<Request> {
 		Request::WifiConnect {
 			interface: "wlan0".to_owned(),
 			network: "home".to_owned(),
+		},
+		// Two samples, because `id`, `passphrase`, `proto`, `hidden` and
+		// `priority` are all skip_serializing_if and one that fills them pins
+		// only the present form. The second is an open network: every optional
+		// absent, which is `wifi_add` at its smallest and the shape a client
+		// is most likely to send.
+		Request::WifiAdd {
+			ssid: "686f6d65".to_owned(),
+			id: Some("home".to_owned()),
+			passphrase: Some("hunter2".to_owned()),
+			proto: Some("wpa3".to_owned()),
+			hidden: true,
+			priority: Some(10),
+		},
+		Request::WifiAdd {
+			ssid: "63616665".to_owned(),
+			id: None,
+			passphrase: None,
+			proto: None,
+			hidden: false,
+			priority: None,
 		},
 		Request::WifiDisconnect {
 			interface: "wlan0".to_owned(),

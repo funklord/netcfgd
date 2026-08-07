@@ -140,7 +140,7 @@ reach.
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations` |
 | `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect` |
-| `admin` | `apply`, `confirm`, `revert`, `reload` |
+| `admin` | `apply`, `confirm`, `revert`, `reload`, `wifi_add` |
 
 Two placements are deliberate and worth knowing, because both look wrong at
 first glance:
@@ -290,24 +290,32 @@ SSID and never with a credential. That is
 expressed as a message: the request cannot be used to join something the
 configuration does not already describe, so it stays inside the `wifi` tier.
 
-**There is no request that adds a network today**, and **no passphrase crosses
-this socket in either direction**
-([0029](decisions/0029-a-profile-is-a-projection-and-secrets-do-not-travel.md),
-[0031](decisions/0031-the-secret-bridge-runs-one-way.md)). Adding one is
-*writing a config file*
-([0069](decisions/0069-adding-a-network-is-writing-a-file.md)), which needs the
-`admin` tier and the secret provider. An implementation written against this
-document should assume both sentences hold.
+**`wifi_add` adds one, and it is the only request carrying a credential.** It
+is `admin`, it takes **typed fields — never config text and never a path** —
+and the daemon renders the block itself, storing the passphrase through the
+secret provider so the file holds an `@secret:` reference and nothing else
+([0117](decisions/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)).
 
-**That is decided to change, and has not yet.**
-[0117](decisions/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)
-accepts an `admin`-tier `wifi_add` carrying **typed fields — never config text
-and never a path** — with the daemon rendering the block and storing the
-credential through the provider. The distinction is the point: a config file
-may name a hook and a hook's `run_as` defaults to root, so a request carrying
-config text is remote code execution while one carrying an SSID and a
-passphrase is not. When it lands, the second sentence above becomes *inbound
-only, in one request, never outbound* -- 0031's bridge direction, unchanged.
+The distinction is the point rather than a detail. A config file may name a
+hook, and a hook's `run_as` defaults from globals — which is root — so a
+request carrying config *text* is remote code execution, while one carrying an
+SSID and a passphrase is not. `wifi_add` has no field that could name a hook, a
+path or a `run_as`. **The id is validated inside the writer**, not by the
+caller: it becomes a filename and a secret name, so `../../../tmp/x` is refused
+there rather than wherever somebody remembered to ask.
+
+There is **no enterprise (802.1X) arm**, deliberately: those carry certificate
+paths, which is a file the daemon would hand to a supplicant running as root,
+and 0117 leaves how to carry them undecided. `ncfg wifi add --eap` configures
+one from a machine where somebody already has the rights to write the file.
+
+So the credential rule is **inbound only, in that one request, never
+outbound** — 0031's bridge direction, unchanged. Everything else still refuses:
+no response carries a passphrase, and `GetSecrets` on the shim still says no
+([0029](decisions/0029-a-profile-is-a-projection-and-secrets-do-not-travel.md),
+[0031](decisions/0031-the-secret-bridge-runs-one-way.md)). The
+*desired-state document* remains free of secret material (constraint 5), which
+is a claim about the document rather than about a request in flight.
 
 ## 10. What an implementation must do
 
@@ -385,9 +393,9 @@ this.
   untrusted bytes is the more permissive half. Found by writing this document
   and measuring a claim that was about to be asserted, which is the argument
   for writing specifications down rather than pointing at a witness.
-- **A client cannot add a network** (section 9). Decided in 0117 and not built,
-  so netcfgd's own GUI is still less capable than a NetworkManager applet
-  talking to the same daemon through the shim.
+- **No client speaks `wifi_add` yet.** The request exists and the daemon serves
+  it; `client/` has no typed call for it and the GUI has no dialog, so netcfgd's
+  own desktop client is still the one that cannot add a network.
 - **`hello` does not negotiate a version.** It reports the tiers a connection
   holds. There is nothing to negotiate while section 1 holds, and this is the
   obvious place for it when that changes.

@@ -811,7 +811,45 @@ fn answer(
 		Request::WifiDisconnect { interface } => {
 			wifi::disconnect(state.desired.as_ref(), interface)
 		}
+		Request::WifiAdd {
+			ssid,
+			id,
+			passphrase,
+			proto,
+			hidden,
+			priority,
+		} => add_network_request(
+			state,
+			&wifi::Wanted {
+				ssid_hex: ssid,
+				id: id.as_deref(),
+				passphrase: passphrase.as_deref(),
+				proto: proto.as_deref(),
+				hidden: *hidden,
+				priority: *priority,
+			},
+		),
 	}
+}
+
+/// Write a network into the configuration, then read the configuration back.
+///
+/// Separate from the dispatcher because of the reload, which is the part worth
+/// explaining: inotify would notice the new file on its own, but a client that
+/// added a network and was told by the very next request that there is no such
+/// network would be right to call that a bug. So the document is refreshed
+/// before answering.
+fn add_network_request(state: &mut State, wanted: &wifi::Wanted<'_>) -> Response {
+	let answer = wifi::configure_network(
+		state.desired.as_ref(),
+		&state.paths.config,
+		&state.paths.factory,
+		wanted,
+	);
+	if matches!(answer, Response::Ok) {
+		state.reload();
+	}
+	answer
 }
 
 /// Wake the loop when a window closes.
