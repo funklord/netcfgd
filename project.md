@@ -2142,9 +2142,52 @@ the sentence that disposes of an alternative in half a line.
    code under test, which would have agreed with it however it changed,
    including into something that is not red.
 
-   **What is still not verified is the elevator** — pkexec, kdesu and `sudo -A`
-   are what Apply shells out to, and none has been exercised. That wants a real
-   session, and it is a smaller claim than the whole tab being unverified was.
+   **Reading TDE's actual code found that the frame meant the wrong thing, and
+   [0120](docs/decisions/0120-the-red-frame-is-a-process-boundary.md) fixes
+   it.** In `ConfigModule::runAsRoot()` the red frame surrounds a **separate
+   process running as root**, started by `tdesu` *before* the frame exists and
+   embedded through XEmbed. netcfgd's reddened on a bool, with nothing
+   authenticated and no privileged process anywhere — 0118's own text said
+   "read-only until the operator authenticates as root" and the code did not do
+   that. The frame is a **credential boundary made visible**; a border that
+   reddens because a client set a flag says nothing, because the client could
+   set the flag at any time. The operator's version of the same argument: an
+   editor that opens before authentication is a form that lies about what it
+   can do.
+
+   So `Administrator Mode` now starts `ncfg control helper` through the
+   elevator, and the frame reddens **only on `ready uid=0`** — a checked claim
+   about the process on the other end, because an elevator that silently did
+   nothing would otherwise put a red frame around an unprivileged window.
+   Editors open on that same event and nothing else; Apply writes three typed
+   principals down the pipe with no second prompt; the protocol ends at
+   end-of-file, so the helper cannot outlive the window that authenticated it.
+   **Qt still never runs as root** — 0118 refuses that and 0120 keeps the
+   refusal, which is why the privileged half is a toolkit-free subcommand
+   sharing the CLI's one `write_policy` rather than a root GUI.
+
+   TDE's concrete details came with it: the palette built *from* red with the
+   Background role put back, so the border is red while the interior keeps the
+   theme's colour (a stylesheet border cannot do that — it also restyles the
+   children); `Box | Raised` at `lineWidth 2, midLineWidth 2`; and the
+   uncoloured framed notice for the *unprivileged* state, which is the half of
+   the pattern easiest to leave out and what keeps red meaning one thing.
+
+   **The probe drives all of it through PATH**, which is what chooses the
+   elevator: a fake `pkexec` saying `ready uid=0` for the privileged case and
+   one saying `ready uid=1000` for the case that must be refused. Neither needs
+   root or a session. Breaking the uid check fails exactly one assertion;
+   reddening unconditionally fails four.
+
+   **It found a crash on its first run.** `waitForFinished` runs an event loop,
+   so the helper's `finished` signal was delivered *inside* `stop_helper`,
+   `helper_finished` nulled the member, and the rest of `stop_helper`
+   dereferenced it. The pointer is taken into a local and the member cleared
+   first now. That path runs on every normal exit and had never been executed.
+
+   **What is still not verified is the elevator itself** — which of `pkexec`,
+   `kdesu` and `sudo -A` a real desktop picks, and whether its prompt behaves.
+   The probe fakes one; a session is what would exercise the real thing.
 
    **Building the probe found a real defect beside it, and it is the kind this
    item is about.** The `this user` row took its name from `$USER`. That is not

@@ -57,6 +57,13 @@ KDE 3.5's pattern, deliberately: the section that edits the control policy is
 read-only until the operator authenticates as root, and while it is live it is
 **surrounded by a red frame**.
 
+> **Amended by [0120](0120-the-red-frame-is-a-process-boundary.md).** The
+> sentence above is right and the first implementation did not honour it: it
+> reddened the frame and opened the editors with nothing authenticated. 0120
+> reads TDE's actual code, finds that the frame there surrounds a *separate
+> root process*, and makes netcfgd's mean the same thing -- without handing Qt
+> uid 0, which the refusal further down this document still forbids.
+
 The frame is not decoration and it is the reason to prefer this shape:
 
 > **Privilege you can see.** polkit's model is per-action prompts, and between
