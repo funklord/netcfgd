@@ -285,6 +285,9 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 			timeout: 5,
 			down_after: 3,
 			up_after: 2,
+			// Non-zero, so the present form is pinned and not only the
+			// default: `hold_down` is skip_serializing_if too.
+			hold_down: 120,
 		}),
 		bridge_vlans: vec![
 			BridgeVlan {

@@ -1773,6 +1773,7 @@ fn lower_probe(block: &Block, diags: &mut Diagnostics) -> Option<ProbePolicy> {
 	let mut timeout = 5u32;
 	let mut down_after = ProbePolicy::default_down_after();
 	let mut up_after = ProbePolicy::default_up_after();
+	let mut hold_down = 0u32;
 
 	for item in &block.items {
 		let Item::Assignment(assignment) = item else {
@@ -1794,6 +1795,9 @@ fn lower_probe(block: &Block, diags: &mut Diagnostics) -> Option<ProbePolicy> {
 				down_after = as_u32(&assignment.value, diags).unwrap_or(down_after);
 			}
 			"up_after" => up_after = as_u32(&assignment.value, diags).unwrap_or(up_after),
+			"hold_down" => {
+				hold_down = as_u32(&assignment.value, diags).unwrap_or(hold_down);
+			}
 			other => diags.push(Diagnostic::new(
 				assignment.span,
 				format!("`{other}` is not valid inside `probe`"),
@@ -1838,6 +1842,7 @@ fn lower_probe(block: &Block, diags: &mut Diagnostics) -> Option<ProbePolicy> {
 		timeout,
 		down_after,
 		up_after,
+		hold_down,
 	})
 }
 

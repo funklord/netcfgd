@@ -182,6 +182,41 @@ fn interface(
 				),
 				Some("kernel".to_owned()),
 			));
+			// Beside carrier and before the addresses, because it answers the
+			// same question and is the harder one to guess at: a link with
+			// carrier and no routes looks like a netcfgd bug until something
+			// says a program was asked and said no. Constraint 7 -- a route
+			// that is missing because a probe exited non-zero is exactly what
+			// an operator will be staring at.
+			if let Some(reachable) = link.reachable {
+				let probe = desired
+					.and_then(|document| {
+						document
+							.interfaces
+							.iter()
+							.find(|interface| interface.name == name)
+					})
+					.and_then(|interface| interface.probe.as_ref());
+				facts.push(sourced(
+					"probe",
+					match (reachable, probe) {
+						(true, Some(policy)) => {
+							format!("{} says this link is reaching the network", policy.command)
+						}
+						(false, Some(policy)) => format!(
+							"{} says it is not, so this interface's routes are \
+							 not installed",
+							policy.command
+						),
+						(true, None) => "says this link is reaching the network".to_owned(),
+						(false, None) => "says it is not, so this interface's routes are not \
+							 installed"
+							.to_owned(),
+					},
+					Some("probe".to_owned()),
+				));
+			}
+
 			// Before the addresses, because it is the answer to the question
 			// somebody is asking when they run this on a radio that will not
 			// associate. A blocked radio has no addresses to list, so a fact

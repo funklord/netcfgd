@@ -98,14 +98,42 @@ and why the probe is the operator's own program: both of them are the brake.
 
 ## What this leaves open
 
-- **A hold-down**, so a link that flaps between the counts cannot oscillate at
-  a longer period. The counts are the first defence and may not be the whole
-  one; adding a minimum dwell time is a change to this design rather than a
-  detail of it.
 - **Probing something other than an uplink.** Nothing here is specific to a
   default route, and the restriction to preference-ranked interfaces is
   deliberate caution rather than a discovered limit.
-- **What `ncfg explain` says about a withheld route.** It should name the probe
-  and its last result; constraint 7 says netcfgd is not a black box, and a route
-  that is missing because a program exited non-zero is exactly the thing an
-  operator will be staring at.
+
+## Since accepted
+
+Two of the three things this left open are built, and the design changed only
+in the first.
+
+**A hold-down**, as `hold_down` in the probe block, seconds, **zero by
+default**. It is the minimum dwell a verdict must stand before it may change
+again, and it exists because the counts are not the whole brake: a link that
+alternates in *runs* -- three bad, two good, three bad -- satisfies both counts
+and moves the default route on every cycle, just at a longer period than the
+interval.
+
+The dwell suppresses the *change* and not the running. The program keeps being
+asked throughout, so the counts stay current and the moment the dwell expires
+the verdict reflects what has been happening rather than one stale result from
+when it started.
+
+It defaults to zero deliberately, so the counts remain the only mandatory brake
+and a machine that names no dwell behaves exactly as it did before this
+existed. A dwell is something an operator adds once they have watched a link
+misbehave, and its value is the period of the flapping they saw -- which is not
+a number netcfgd can guess.
+
+The test is the flapping link itself, alternating on every single run, and it
+comes in a pair: with no dwell the verdict changes nearly every run, and with
+one it changes once. The first is what makes the second mean anything, and
+deleting the dwell enforcement was checked to turn the second red and leave the
+first green.
+
+**`ncfg explain` names the probe**, next to carrier rather than after the
+addresses, because it answers the same question and is the harder one to guess
+at: a link with carrier and no routes reads as a netcfgd bug until something
+says a program was asked and said no. It names the command, so the output is
+`/bin/false says it is not, so this interface's routes are not installed`
+rather than a verdict with no author.

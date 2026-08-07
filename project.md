@@ -2086,9 +2086,23 @@ the sentence that disposes of an alternative in half a line.
    the witness samples carry them *filled*: the same gap the scan report had,
    avoided rather than discovered this time.
 
-   Left open by 0119: the hold-down, and `ncfg explain` naming the probe behind
-   a withheld route — which constraint 7 says it should, a route missing
-   because a program exited non-zero being exactly what an operator stares at.
+   Both things 0119 left open are now built. **`hold_down`** is a minimum dwell
+   in seconds, zero by default, and it exists because the counts are not the
+   whole brake: a link alternating in *runs* — three bad, two good, three bad —
+   satisfies both counts and moves the default route every cycle, just at a
+   longer period. The dwell suppresses the change and not the running, so the
+   counts stay current and the verdict at expiry reflects what has been
+   happening rather than one stale result. **`ncfg explain` names the command**,
+   beside carrier rather than after the addresses — it answers the same question
+   and is the harder one to guess at, since a link with carrier and no routes
+   reads as a netcfgd bug until something says a program was asked and said no.
+
+   The dwell's test is the flapping link itself, and it is a **pair**: with no
+   dwell the verdict changes nearly every run, with one it changes once. The
+   first is what makes the second mean anything — deleting the enforcement turns
+   the dwell test red and leaves the no-dwell test green, which was checked
+   rather than assumed. It compiles its config from text rather than building a
+   struct, so it also proves the new key survives the lowering.
 
    ~~**An uplink is chosen by carrier.**~~
    netcfgd has **no reachability probe and no probe-driven failover**, and this
