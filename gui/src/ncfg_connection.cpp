@@ -72,6 +72,20 @@ void notes_into(const ncfg_note_t *items, size_t count, QList<ncfg_note_row> *ou
 
 } /* namespace */
 
+QString ncfg_wifi_status_row::summary() const
+{
+	QString line = QStringLiteral("%1: %2").arg(interface, state);
+	if (!display.isEmpty()) {
+		line += QStringLiteral(" on %1").arg(display);
+	}
+	if (!display.isEmpty() && network.isEmpty()) {
+		line += QStringLiteral(" -- not from any network block");
+	} else if (!network.isEmpty()) {
+		line += QStringLiteral(" (%1)").arg(network);
+	}
+	return line;
+}
+
 ncfg_connection::ncfg_connection(QObject *parent) : QObject(parent) {}
 
 ncfg_connection::~ncfg_connection()

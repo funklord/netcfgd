@@ -41,6 +41,7 @@ SOURCES += \
 	src/monitor_stream.cpp \
 	src/ncfg_connection.cpp \
 	src/plan_view.cpp \
+	src/tray.cpp \
 	src/wifi_view.cpp
 
 HEADERS += \
@@ -51,4 +52,5 @@ HEADERS += \
 	src/monitor_stream.h \
 	src/ncfg_connection.h \
 	src/plan_view.h \
+	src/tray.h \
 	src/wifi_view.h

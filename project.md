@@ -544,7 +544,7 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 | **M5** | Embedded | ~~Getting `netcfgd-embedded` under 1 MB~~ — one multi-call binary took the install from 2.89 MB to 1.75 MB (40%); 1 MB measured as unreachable, [0024](docs/decisions/0024-one-binary-and-what-a-megabyte-would-actually-cost.md). ~~procd integration~~ (done, `packaging/procd/`), ~~read-only-root support~~ (done: factory layer under the writable one, `ncfg reset`, `tests/live/readonly.sh`). ~~Nano consumer without compiler~~ — dropped, [0021](docs/decisions/0021-no-nano-tier.md). ~~`uci` import~~ — dropped, [0019 amendment](docs/decisions/0019-no-importers-for-config-stores-that-rewrite-themselves.md): OpenWrt provisioning generates uci and never reads it, and the factory config layer is the netcfgd shape of that flow. |
 | **M6** | TUI | ~~`ncfg tui` including the interactive plan-preview pane~~ — done: four panes over the public socket only, 80x24, no colour required. Drawing and key decoding are ncurses behind a default-on cargo feature; with it off nothing links beyond libc ([0025](docs/decisions/0025-the-audited-crate-is-the-libc-boundary-not-netlink.md)). |
 | **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). **Tier 1 is essentially there:** bus name, object tree, `ObjectManager` at `/org/freedesktop`, every device with its properties, `AccessPoint` objects with `RequestScan`, connection profiles with derived UUIDs, and activation -- all driven by a real `nmcli` in `tests/live/nm.sh`. The write path is in too: `nmcli connection add` writes a netcfgd `network` block, with the passphrase going to the secret provider and a `@secret:` reference into the block ([0030](docs/decisions/0030-a-gui-is-an-editor-of-config-files.md)) — the files are `conf.d/nm-*.conf`, flat, because `conf.d` is not read recursively and making it so would be a core change justified only by an adapter. `GetSecrets` refuses, which is a security property rather than a gap ([0029](docs/decisions/0029-a-profile-is-a-projection-and-secrets-do-not-travel.md)). The `AgentManager` secret bridge is in as well: an agent supplies a credential netcfgd lacks, it goes to the provider at 0600, and the block keeps its `@secret:` reference — inbound only, since `GetSecrets` still refuses ([0031](docs/decisions/0031-the-secret-bridge-runs-one-way.md)). That closes tier 1. Tier 2 has started: `IP4Config`/`IP6Config` objects make a settings panel's Details tab show the addresses, gateway, routes and nameservers netcfgd actually applied ([0032](docs/decisions/0032-the-details-panel-is-the-observation.md)). Static addressing round-trips too — a panel sees a profile's configured address and can write one back, with the default route moving between netcfgd's route list and NM's `gateway` field ([0033](docs/decisions/0033-nm-splits-what-netcfgd-keeps-together.md)). Per-connection options round-trip too — metered, autoconnect priority and per-profile DNS, with an MTU named in the file as unexpressible rather than dropped ([0034](docs/decisions/0034-libnm-validates-what-the-shim-projects.md)). **Tier 2 is done.** Tier 3 has started with the part that was a live defect: `Managed` now reads the document, and an unmanaged device reports `UNMANAGED` ([0035](docs/decisions/0035-managed-false-means-it.md)) — which needed a core fix first, because `managed = false` did not actually stop the planner. **Tier 3 bounds the shim, not netcfgd** ([0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md)): VPN, modems and complete wifi are wanted in netcfgd and simply will not be projected through NM's interfaces. `AddConnection` creates wifi networks only. Each adapter is its own cargo workspace so its dependencies cannot reach the core, enforced by `make nm-containment` ([0027](docs/decisions/0027-the-shim-is-a-separate-workspace-and-libnm-reads-interfaces.md)). A scan's security detail is lost at the socket, so the shim reads it from the document rather than growing the socket an adapter wanted ([0028](docs/decisions/0028-the-scan-is-lossy-and-the-document-is-not.md)) -- which leaves `ncfg wifi scan`'s own lossiness as work with a local justification. |
-| **M8** | Desktop | GUI + tray applet; NM shim tier 2. **The shim half is done** (0032-0034). **The desktop half is not, and section 10 item 5 is where it is tracked**: the GUI builds and is a three-tab viewer with `up`/`down` against a `client/` that already does far more, and the tray applet was never started — no `QSystemTrayIcon` exists in the tree. The GUI is Qt Widgets, C++17, desktop and Android from one source, in the style of the sibling `fuzzypickles`/`hydra`/`beerssh` trees -- brief in [gui/project.md](gui/project.md). Under it sit three C directories: a shared frontend layer, the remote protocol with Monocypher, and an agent that terminates it on the netcfgd host. **The daemon does not change**: design §11.3 already says a remote path is an ordinary unprivileged socket client, not a new authority layer, which is also what keeps the core's dependency budget and `forbid(unsafe_code)` intact. Feasibility, and what does and does not carry over from the sibling's protocol, in [docs/remote-access-feasibility.md](docs/remote-access-feasibility.md). |
+| **M8** | Desktop | GUI + tray applet; NM shim tier 2. **The shim half is done** (0032-0034). **The desktop half is in progress, and section 10 item 5 is where it is tracked**: the GUI has gained a wifi tab and a tray applet, and what stands between it and a network manager is adding a network — which is a security decision rather than a UI task, because writing config needs privileges a desktop client does not have. The GUI is Qt Widgets, C++17, desktop and Android from one source, in the style of the sibling `fuzzypickles`/`hydra`/`beerssh` trees -- brief in [gui/project.md](gui/project.md). Under it sit three C directories: a shared frontend layer, the remote protocol with Monocypher, and an agent that terminates it on the netcfgd host. **The daemon does not change**: design §11.3 already says a remote path is an ordinary unprivileged socket client, not a new authority layer, which is also what keeps the core's dependency budget and `forbid(unsafe_code)` intact. Feasibility, and what does and does not carry over from the sibling's protocol, in [docs/remote-access-feasibility.md](docs/remote-access-feasibility.md). |
 | **M9** | **RESTCONF — last** | `netcfgd-restconf`: `ietf-interfaces`/`ietf-ip` mapping plus a netcfgd augment module, hooks read-only. Full NETCONF (SSH/XML) only if sites ask. |
 
 **The M4 freeze's four inert features are all closed**, after M6 rather than at M4 — the schema had to carry them before the freeze, the behaviour did not. Policy routing rules, `ipv6_token` and the ethtool offloads are netlink; access points are hostapd, configured by a generated file under `/run` ([0026](docs/decisions/0026-an-access-point-is-a-file-hostapd-reads.md)). What is still recognised and not applied is the half of the `ethtool` block that needs a physical NIC to exercise, and `ncfg plan` names those fields individually.
@@ -1890,12 +1890,42 @@ the sentence that disposes of an alternative in half a line.
      known network in the `wifi` tier and 0069 makes adding one *writing a file*.
      So no passphrase is entered and none can be read back (0029, 0031), and an
      access point with no `network` block is listed, greyed, and given no join
-     button rather than a refusal after the fact. Config editing is what is left
-     between this and a network manager.
-   - **M8's tray applet does not exist.** Section 7 lists "GUI + tray applet" and
-     there is no `QSystemTrayIcon` and no tray source anywhere in the tree. The
-     milestone reads as done because the shim half was; the applet was never
-     started.
+     button rather than a refusal after the fact.
+
+     **And this is the blocker for daily-driving, with a real decision under
+     it.** `ncfg wifi add` writes `conf.d/wifi-<id>.conf` at 0644 and a secret
+     at 0600 into the config directory, which is root's. A GUI running as the
+     desktop user cannot do that, and the socket deliberately offers no way to
+     ask the daemon to. So an operator can join networks somebody already wrote
+     config for and no others -- which on a laptop means every new café needs a
+     terminal. The options are not obviously ranked and each gives something
+     up: a privileged helper (a polkit-shaped dependency constraint 3 avoids),
+     an `admin`-tier socket request that writes config (making the daemon an
+     editor of its own authority, against constraint 1), or the shim's route,
+     where a privileged adapter already accepts exactly this from a desktop
+     ([0030](docs/decisions/0030-a-gui-is-an-editor-of-config-files.md)) and
+     netcfgd's own GUI would be the odd one out. **Raise it before building
+     it**: it is a security decision, not a UI task.
+   - ~~**M8's tray applet does not exist.**~~ — **written**, and it is the one
+     thing a GUI gives that `ncfg` and `ncfg tui` structurally cannot: an
+     answer to "am I on the network" costing no window and no command, on a
+     desktop that has no NetworkManager applet to fall back to. State at a
+     glance, disconnect, show, quit. **It does not scan** -- a scan blocks for
+     seconds and transmits probe requests, and doing that because somebody
+     opened a menu would be wrong twice -- and it offers nothing needing the
+     admin tier, because a menu is the wrong place to change a machine without
+     showing the plan first. Absent tray, `create()` returns nothing and the
+     window behaves as it always did; `--tray` on a desktop without one
+     complains on stderr and shows the window, which is the daemon's own
+     convention rather than a modal that blocks startup on the machines least
+     likely to have somebody in front of them. The icon is painted rather than
+     shipped, so the tree still has no image assets.
+
+     **Unverified: the icon itself.** It compiles, the no-tray path runs
+     against a real daemon, and the `--tray`-without-a-tray path was measured.
+     Nothing here has a status-notifier host, so the menu, the refresh and the
+     disconnect have never been drawn or clicked. That wants the same laptop
+     the rest of *What would prove it* wants.
    - **The shim is not the fallback it was assumed to be.** The reasoning that
      tier 1 and 2 cover a desktop assumes the operator *has* an NM applet, and
      this one does not — the current tool is `nmtui`. So **`ncfg tui` is the
