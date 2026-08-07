@@ -1591,7 +1591,11 @@ start without it: every remaining item on that bar needs somebody living with
 netcfgd on real hardware, and the tools to do that are what item 5 is about.
 **Build the clients, then evaluate, then refine.**
 
-**Item 6 is a feature that does not exist rather than work that stalled**, and
+**Item 6 is the wall a first evaluation hits**, and it arrived from somebody
+asking whether the thing was ready rather than from any gate: a default install
+refuses its own client and misdiagnoses why.
+
+**Item 7 is a feature that does not exist rather than work that stalled**, and
 it is the first entry here to arrive from asking what a network daemon ought to
 do rather than from a defect or a measurement: nothing in netcfgd ever asks
 whether a link it prefers actually reaches anything.
@@ -2000,7 +2004,31 @@ the sentence that disposes of an alternative in half a line.
    Rust, while `ncfg tui` is a pure socket client and a *new* socket-only client
    should prefer C over `client/`. The TUI is deliberately not moved.
 
-6. **An uplink is chosen by carrier, and nothing ever asks whether it works.**
+6. **A default install refuses its own client, and says the wrong thing about
+   why.** Every tier defaults to root
+   ([0013](docs/decisions/0013-three-things-a-caller-may-be-allowed-to-do.md)),
+   the socket's mode follows the policy, so a desktop user opening the GUI is
+   refused — and was told `Permission denied. Is the daemon running?`, which
+   sends them to `systemctl` and the journal for something that is in a config
+   file. **The diagnostic is fixed** in both clients, and the Rust one had the
+   sentence written four times, three of them terse: one diagnostic in four
+   places is one that is right in at most one of them, and this was wrong in all
+   four for the case that matters.
+
+   **What to do about the wall itself is
+   [0118](docs/decisions/0118-two-ways-to-be-allowed-and-one-of-them-is-visible.md),
+   decided and unbuilt.** Two ways to be allowed: a reserved group the packages
+   create empty, and an administrator mode in the client on KDE 3.5's pattern —
+   read-only until the operator authenticates as root, **surrounded by a red
+   frame while it is live**, editing the `control` block and nothing else. The
+   frame is the argument: polkit prompts per action and leaves nothing on screen
+   saying whether you are privileged *now*, and a mode is a thing you can look
+   at. It does not contradict 0117's refusal of a privileged helper, because
+   that refusal rested on `wifi_add` being strictly better — and you cannot ask
+   the daemon for permission to ask the daemon, so the option that lost on merit
+   there wins here on necessity.
+
+7. **An uplink is chosen by carrier, and nothing ever asks whether it works.**
    netcfgd has **no reachability probe and no probe-driven failover**, and this
    is a gap rather than a decision — no record refuses it, and the words
    `failover`, `mwan` and `dead gateway` appear nowhere in the tree. The only
