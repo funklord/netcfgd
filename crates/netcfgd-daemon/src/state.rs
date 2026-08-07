@@ -41,6 +41,12 @@ pub(crate) struct State {
 	/// straight back. A hash rather than a flag so that *fixing* the config
 	/// clears it automatically: a different document is a different answer.
 	pub(crate) rejected: Option<String>,
+	/// What each uplink's probe has been saying, across ticks.
+	///
+	/// Here and not in `observed`, because `reobserve` builds a fresh
+	/// observation from the kernel every time and a verdict written into one
+	/// would be gone on the next tick.
+	pub(crate) probes: crate::probe::Probes,
 }
 
 /// What a `reload` request answers, given the event that reload produced.
@@ -76,6 +82,7 @@ impl State {
 	#[must_use]
 	pub(crate) fn new(paths: Paths) -> Self {
 		let mut state = Self {
+			probes: crate::probe::Probes::default(),
 			paths,
 			desired: None,
 			diagnostics: None,
@@ -152,6 +159,11 @@ impl State {
 			netcfgd_observe::current(&prior, &self.paths.run, self.desired.as_ref())
 		{
 			self.observed = observed;
+			// After the kernel and before anything reads it: the planner asks
+			// the observation whether a link is reaching anything, and an
+			// observation without the verdicts stamped on would say `None`
+			// for a link that has just been declared down.
+			self.probes.apply(&mut self.observed);
 			let _ = run_state::write_observed(&self.paths.run, &self.observed);
 		}
 	}
@@ -462,6 +474,7 @@ mod tests {
 	fn state_over(config: &Path, run: &Path, text: &str) -> State {
 		std::fs::write(config.join("netcfgd.conf"), text).expect("config written");
 		State {
+			probes: crate::probe::Probes::default(),
 			paths: Paths {
 				factory: config.to_path_buf(),
 				config: config.to_path_buf(),

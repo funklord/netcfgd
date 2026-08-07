@@ -221,6 +221,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -388,6 +400,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -555,6 +579,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -727,6 +763,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -899,6 +947,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1071,6 +1131,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1243,6 +1315,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1417,6 +1501,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1594,6 +1690,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1775,6 +1883,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -1947,6 +2067,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2119,6 +2251,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2293,6 +2437,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2471,6 +2627,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2643,6 +2811,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2823,6 +3003,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -2998,6 +3190,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3176,6 +3380,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3349,6 +3565,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3524,6 +3752,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3697,6 +3937,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -3874,6 +4126,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4067,6 +4331,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4239,6 +4515,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4411,6 +4699,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4583,6 +4883,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4756,6 +5068,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -4929,6 +5253,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -5102,6 +5438,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -5275,6 +5623,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -5448,6 +5808,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -5621,6 +5993,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,
@@ -5794,6 +6178,18 @@
         "tx_checksum": "unmanaged"
       },
       "preference": 100,
+      "probe": {
+        "command": "/bin/ping",
+        "args": [
+          "-c1",
+          "-W1",
+          "192.0.2.1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "down_after": 3,
+        "up_after": 2
+      },
       "bridge_vlans": [
         {
           "vid": 10,

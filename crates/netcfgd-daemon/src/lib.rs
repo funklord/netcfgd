@@ -10,6 +10,7 @@
 
 mod authorize;
 mod confirm;
+mod probe;
 mod server;
 mod state;
 mod wifi;
@@ -230,7 +231,15 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			let event = state.reload();
 			server::broadcast(&mut subscribers, &event);
 		}
-		if kernel_changed || config_changed {
+
+		// Whatever is due, and only a *changed* verdict counts as movement.
+		// A probe that has agreed with itself for an hour should cost the
+		// program it runs and nothing else -- no re-observation, no plan, no
+		// event. Run before the block below so a verdict that did change goes
+		// round the same path a carrier change does (0119).
+		let probe_changed = state.probes.run_due(state.desired.as_ref());
+
+		if kernel_changed || config_changed || probe_changed {
 			state.reobserve();
 			let drift = state.detect_drift();
 			for event in &drift {

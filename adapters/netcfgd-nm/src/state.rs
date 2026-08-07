@@ -1045,6 +1045,7 @@ mod tests {
 			kind: String::new(),
 			up: true,
 			carrier: true,
+			reachable: None,
 			mtu: 1500,
 			mac: None,
 			master: None,

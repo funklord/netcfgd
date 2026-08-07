@@ -24,7 +24,7 @@ use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
 use netcfgd_model::{
 	AddressSource, Device, Dhcp4, Dhcp6, DnsPolicy, DnsServer, Document, DriftPolicy, HookPhase,
-	HostnamePolicy, Interface, InterfaceKind, Route, Slaac,
+	HostnamePolicy, Interface, InterfaceKind, ProbePolicy, Route, Slaac,
 };
 use netcfgd_model::{EapConfig, EapMethod, SecretProvider, SecretRef, Security, Ssid, WifiNetwork};
 use std::net::IpAddr;
@@ -233,6 +233,7 @@ fn expand_ingress_shapers(
 			ipv6_token: None,
 			link_settings: None,
 			preference: None,
+			probe: None,
 			bridge_vlans: Vec::new(),
 		});
 	}
@@ -318,6 +319,7 @@ fn expand_members(
 			ipv6_token: None,
 			link_settings: None,
 			preference: None,
+			probe: None,
 			bridge_vlans: Vec::new(),
 		});
 	}
@@ -1759,6 +1761,86 @@ fn as_secret(value: &Spanned<Value>, diags: &mut Diagnostics) -> Option<SecretRe
 	})
 }
 
+/// `probe { command = "/bin/ping"; args = ["-c1", "1.1.1.1"]; ... }`.
+///
+/// The exit status is the answer, so the whole block is a program, how often
+/// to run it, how long to wait, and how many results in a row it takes to
+/// change netcfgd's mind (0119).
+fn lower_probe(block: &Block, diags: &mut Diagnostics) -> Option<ProbePolicy> {
+	let mut command = None;
+	let mut args = Vec::new();
+	let mut interval = 30u32;
+	let mut timeout = 5u32;
+	let mut down_after = ProbePolicy::default_down_after();
+	let mut up_after = ProbePolicy::default_up_after();
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			continue;
+		};
+		match assignment.key.as_str() {
+			"command" => command = as_string(&assignment.value, diags),
+			"args" => {
+				// `as_lines` carries spans for diagnostics; the model wants
+				// the words.
+				args = as_lines(&assignment.value, diags)
+					.into_iter()
+					.map(|line| line.node)
+					.collect();
+			}
+			"interval" => interval = as_u32(&assignment.value, diags).unwrap_or(interval),
+			"timeout" => timeout = as_u32(&assignment.value, diags).unwrap_or(timeout),
+			"down_after" => {
+				down_after = as_u32(&assignment.value, diags).unwrap_or(down_after);
+			}
+			"up_after" => up_after = as_u32(&assignment.value, diags).unwrap_or(up_after),
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("`{other}` is not valid inside `probe`"),
+			)),
+		}
+	}
+
+	let command = command?;
+	// Absolute, for the reason a hook path is: netcfgd runs this as root, and
+	// a relative name is whatever `PATH` happens to resolve at the time.
+	if !command.starts_with('/') {
+		diags.push(
+			Diagnostic::new(block.span, format!("`{command}` is not an absolute path"))
+				.with_help("a probe runs as root, so it is named by path and not found on PATH"),
+		);
+		return None;
+	}
+	// A zero count would mean "change my mind on no evidence", which is not a
+	// faster failover, it is none of the hysteresis the counts exist for.
+	if down_after == 0 || up_after == 0 {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				"`up_after` and `down_after` have to be at least 1".to_owned(),
+			)
+			.with_help("they are consecutive-result counts; zero would switch on no result"),
+		);
+		return None;
+	}
+	if interval == 0 {
+		diags.push(Diagnostic::new(
+			block.span,
+			"`interval` has to be at least 1 second".to_owned(),
+		));
+		return None;
+	}
+
+	Some(ProbePolicy {
+		command,
+		args,
+		interval,
+		timeout,
+		down_after,
+		up_after,
+	})
+}
+
 #[allow(clippy::too_many_lines)]
 fn lower_interface(
 	block: &Block,
@@ -1790,6 +1872,7 @@ fn lower_interface(
 		ipv6_token: None,
 		link_settings: None,
 		preference: None,
+		probe: None,
 		bridge_vlans: Vec::new(),
 	};
 	let mut dns = DnsPolicy::default();
@@ -1936,6 +2019,7 @@ fn lower_interface(
 				}
 				"bridge" => interface.kind = lower_bridge(inner, diags),
 				"qdisc" => interface.qdisc = lower_qdisc(inner, diags),
+				"probe" => interface.probe = lower_probe(inner, diags),
 				"bond" => {
 					if let Some(kind) = lower_bond(inner, diags) {
 						interface.kind = kind;

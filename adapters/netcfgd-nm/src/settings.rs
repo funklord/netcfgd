@@ -1003,6 +1003,7 @@ mod tests {
 			ipv6_token: None,
 			link_settings: None,
 			preference: None,
+			probe: None,
 			bridge_vlans: Vec::new(),
 		}
 	}
