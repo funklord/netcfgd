@@ -73,18 +73,46 @@ impl Answer {
 ///
 /// # Errors
 ///
+/// Connect, and say what went wrong in a way that points at the right file.
+///
+/// One place, because there were four: three of them said only "cannot reach
+/// the daemon" and the fourth added a sentence about it having to be running.
+/// A diagnostic written four times is a diagnostic that is right in one of
+/// them, and this one was wrong in all four for the case that matters.
+///
+/// `EACCES` is not "it is not running". The socket's mode follows
+/// `global { control { ... } }` and every tier defaults to root, so a client
+/// run by a desktop user meets exactly this on a default install -- and being
+/// told to check whether the daemon is running sends them to the journal for
+/// something that is in a config file (0118). Section 2.1 makes the daemon
+/// complain about the same mismatch from its own side and calls it a lie that
+/// costs an afternoon; this is that afternoon from the client's side.
+fn connect(socket: &Path) -> Result<UnixStream, String> {
+	UnixStream::connect(socket).map_err(|error| {
+		if matches!(error.kind(), std::io::ErrorKind::PermissionDenied) {
+			format!(
+				"not allowed to talk to netcfgd at {}: {error}\n\
+				 the socket's mode follows `global {{ control {{ ... }} }}`, and \
+				 every tier defaults to root -- so this is a permission policy \
+				 rather than a daemon that is not running",
+				socket.display()
+			)
+		} else {
+			format!(
+				"cannot reach the daemon at {}: {error}\n\
+				 this command is answered by netcfgd, so the daemon has to be \
+				 running",
+				socket.display()
+			)
+		}
+	})
+}
+
 /// Returns a message naming what could not be reached, which for a missing
 /// daemon is the useful half: "connection refused" alone sends the reader
 /// looking for a network problem.
 pub(crate) fn ask(socket: &Path, request: &Request) -> Result<Answer, String> {
-	let stream = UnixStream::connect(socket).map_err(|error| {
-		format!(
-			"cannot reach the daemon at {}: {error}\n\
-			 this command is answered by netcfgd, so the daemon has to be \
-			 running",
-			socket.display()
-		)
-	})?;
+	let stream = connect(socket)?;
 	let write_half = stream
 		.try_clone()
 		.map_err(|error| format!("cannot use the socket: {error}"))?;
@@ -110,8 +138,7 @@ pub(crate) fn ask(socket: &Path, request: &Request) -> Result<Answer, String> {
 ///
 /// Returns a message naming what could not be reached.
 pub(crate) fn ask_value(socket: &Path, request: &Request) -> Result<serde_json::Value, String> {
-	let stream = UnixStream::connect(socket)
-		.map_err(|error| format!("cannot reach the daemon at {}: {error}", socket.display()))?;
+	let stream = connect(socket)?;
 	let write_half = stream
 		.try_clone()
 		.map_err(|error| format!("cannot use the socket: {error}"))?;
@@ -135,8 +162,7 @@ pub(crate) fn ask_value(socket: &Path, request: &Request) -> Result<serde_json::
 ///
 /// Returns a message naming what could not be reached.
 pub(crate) fn stream_lines(socket: &Path, sink: &dyn Fn(String)) -> Result<(), String> {
-	let stream = UnixStream::connect(socket)
-		.map_err(|error| format!("cannot reach the daemon at {}: {error}", socket.display()))?;
+	let stream = connect(socket)?;
 	let write_half = stream
 		.try_clone()
 		.map_err(|error| format!("cannot use the socket: {error}"))?;
@@ -167,8 +193,7 @@ pub(crate) fn socket_path(run_dir: &Path) -> std::path::PathBuf {
 ///
 /// Returns a message naming what could not be reached.
 pub(crate) fn stream(socket: &Path, json: bool) -> Result<std::process::ExitCode, String> {
-	let stream = UnixStream::connect(socket)
-		.map_err(|error| format!("cannot reach the daemon at {}: {error}", socket.display()))?;
+	let stream = connect(socket)?;
 	let write_half = stream
 		.try_clone()
 		.map_err(|error| format!("cannot use the socket: {error}"))?;

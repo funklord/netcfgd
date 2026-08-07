@@ -91,12 +91,36 @@ static int connect_socket(const char *socket_path, char *err, size_t err_size)
 		return -1;
 	}
 	if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+		int failed = errno;
+
 		/* The path is in the message on purpose. "Connection refused"
 		 * alone sends the reader looking for a network problem, when the
 		 * answer is nearly always that netcfgd is not running or that
-		 * this client is looking in the wrong run directory. */
-		set_error(err, err_size, "cannot reach netcfgd at %s: %s. Is the daemon running?",
-		      socket_path, strerror(errno));
+		 * this client is looking in the wrong run directory.
+		 *
+		 * EACCES is the one that is *not* that, and asking "is the daemon
+		 * running?" for it is actively wrong: the daemon is running and
+		 * refusing, and the reader is sent to systemctl and the journal
+		 * for a problem that is in a config file. The socket's mode
+		 * follows `global { control { ... } }`, every tier of which
+		 * defaults to root, so this is what a desktop client meets on a
+		 * default install (0118). Section 2.1 already makes the daemon
+		 * complain about the same mismatch from its side and calls it a
+		 * lie that costs an afternoon to diagnose; this is that afternoon
+		 * from the client's side.
+		 */
+		if (failed == EACCES || failed == EPERM) {
+			set_error(err, err_size,
+			      "not allowed to talk to netcfgd at %s: %s. The socket's mode "
+			      "follows `global { control { ... } }`, and every tier "
+			      "defaults to root -- so this is a permission policy rather "
+			      "than a daemon that is not running",
+			      socket_path, strerror(failed));
+		} else {
+			set_error(err, err_size,
+			      "cannot reach netcfgd at %s: %s. Is the daemon running?",
+			      socket_path, strerror(failed));
+		}
 		close(fd);
 		return -1;
 	}
