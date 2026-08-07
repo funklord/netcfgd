@@ -1,0 +1,106 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "globals": {
+    "dns": {
+      "mode": "write_resolv_conf",
+      "servers": [],
+      "search": [],
+      "domains": [],
+      "options": []
+    },
+    "on_drift_default": "report",
+    "confirm_default": null,
+    "hostname_policy": "none",
+    "control": {
+      "observe": "root",
+      "wifi": "root",
+      "admin": "root"
+    }
+  },
+  "devices": [],
+  "interfaces": [
+    {
+      "name": "br0",
+      "kind": {
+        "kind": "bridge",
+        "members": [],
+        "stp": true,
+        "vlan_filtering": false
+      },
+      "enabled": true,
+      "addressing": [
+        {
+          "source": "static",
+          "address": "10.9.0.2/24"
+        }
+      ],
+      "routes": [],
+      "hooks": [],
+      "bridge_vlans": []
+    },
+    {
+      "name": "eth0",
+      "kind": {
+        "kind": "physical"
+      },
+      "enabled": true,
+      "mtu": 1492,
+      "addressing": [
+        {
+          "source": "dhcp4",
+          "hostname_mode": "none",
+          "request_options": [],
+          "backend": "auto"
+        }
+      ],
+      "routes": [],
+      "dns": {
+        "mode": "none",
+        "servers": [
+          {
+            "addr": "10.0.0.1"
+          },
+          {
+            "addr": "2001:db8::1"
+          }
+        ],
+        "search": [],
+        "domains": [],
+        "options": []
+      },
+      "hooks": [],
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
+      "preference": 100,
+      "bridge_vlans": []
+    }
+  ],
+  "networks": [
+    {
+      "id": "café-guest",
+      "ssid": "636166c3a92d6775657374",
+      "hidden": false,
+      "security": {
+        "type": "psk",
+        "passphrase": {
+          "provider": "file",
+          "name": "cafe"
+        },
+        "proto": "wpa2_wpa3"
+      },
+      "priority": 0,
+      "autoconnect": true,
+      "metered": false,
+      "addressing": [],
+      "routes": [],
+      "hooks": []
+    }
+  ],
+  "rules": [],
+  "access_points": []
+}

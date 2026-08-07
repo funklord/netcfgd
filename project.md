@@ -572,7 +572,7 @@ the whole value of this target is telling somebody what to install.
 | Packaging | `make packaging`: every path an init script names is a path that gets installed, every maintainer script parses **and is executable** (dpkg silently skips one that is not), and every `@TOKEN@` in a package template is one a recipe substitutes. `make deb` and `make apk-container` build real packages, with dependencies derived from the ELF by `dpkg-shlibdeps` and `abuild` rather than typed out ([0099](docs/decisions/0099-a-package-installs-netcfgd-and-changes-nothing.md)) |
 | Adapter containment | `make nm-containment`: every crate in the core lockfile appears in `deny.toml`'s allow list, so an adapter's dependencies cannot reach the core. Design §9.2 asks for exactly this assertion; [0027](docs/decisions/0027-the-shim-is-a-separate-workspace-and-libnm-reads-interfaces.md) |
 | Fuzzing | five `cargo-fuzz` targets — `config_parse`, `document_json`, `netlink_wire`, `socket_message`, `backend_ipc` — plus randomised tests in `crates/*/tests/random.rs` that run on stable. **Not in CI**, and that row said it was: `cargo-fuzz` needs nightly, which the workflow does not install. Run in a container instead ([§10](#10-where-this-is-now-and-what-to-pick-up-next)), which is how `netlink_wire` produced its first crash |
-| Determinism | same config compiles to byte-identical document across runs and platforms |
+| Determinism | same config compiles to byte-identical document across runs and platforms. `sh tests/determinism.sh` cross-builds and runs `ncfg show --json` on **x86_64, aarch64 and s390x**, all byte-identical (md5 `dccacd09181d5903e5eda91db2183207`). The platforms half had never been checked against a second platform at all; s390x is the one that counts, being the only big-endian of the three |
 | Plan idempotence | applying a plan twice produces an empty second plan |
 
 Size posture in `Cargo.toml`: `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, static musl target. ~~Avoid `serde_json` in the nano tier — hand-roll a minimal CBOR codec there.~~ Measured at M5 and wrong: the JSON library is 29 KB, while the encoder and decoder generated from the model's types are 283 KB. A different codec saves nothing; see [0021](docs/decisions/0021-no-nano-tier.md).
@@ -2446,6 +2446,32 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
 - **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
 - **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
+- ~~**netcfgd has never run on anything but x86_64.**~~ **It has now**, and
+  determinism holds across architectures. `sh tests/determinism.sh`
+  cross-builds `ncfg` for x86_64, aarch64 and s390x and runs each under
+  qemu-user, compiling one deliberately awkward configuration — a list, a
+  nested block, a non-ASCII SSID, two interface kinds. **All three produce the
+  same 2014 bytes**, md5 `dccacd09181d5903e5eda91db2183207`.
+
+  **s390x is the one that counts.** aarch64 and x86_64 are both little-endian,
+  so their agreement says nothing about byte order; s390x is big-endian and is
+  the only one that would catch a native-endian assumption in the compiler, the
+  canonicaliser or the hash. It found none, which is what the code predicted —
+  `hash.rs` uses explicit `to_be_bytes`, as SHA-256 specifies, and nothing in
+  the document path uses native-endian conversions.
+
+  **Emulated, and that limit is stated rather than buried.** This proves the
+  *pure* path — text in, canonical document out — and nothing about drivers,
+  netlink or timing on real hardware. It is the half that never needed the
+  hardware, and §10.2's budget entry above is the half that still does.
+
+  Writing it cost three failures worth keeping: `[ -n "$x" ] && ...` under
+  `set -e` exits the script when the test is false, the host architecture needs
+  ncurses too and had fallen through a per-cross-target install, and Debian's
+  package `gcc-aarch64-linux-gnu` contains a binary named
+  `aarch64-linux-gnu-gcc` — the same distinction the Makefile's `CROSS_GNU`
+  table already existed to keep straight, rediscovered by ignoring it.
+
 - **Backend IPC had no fuzz target, which is the third kind §6 names.** The
   DSL and netlink had one each; what `wpa_supplicant` and `hostapd` send back
   had none, so the parsers deciding whether a station is associated and whether

@@ -14,6 +14,18 @@ floor = 120
 
 ascii_only = true
 
+# `determinism` joins `schema` for the same reason: both hold generated
+# witnesses rather than files this project writes by hand, and both are
+# compared byte for byte. `tests/determinism/` carries a deliberately
+# non-ASCII SSID, which code-style.md names as an exception outright -- "a
+# fixture for a UTF-8 parser" -- and which is the whole point of the fixture,
+# since a document that survives three architectures unchanged has to survive
+# them with its multi-byte characters intact.
+#
+# Excluded here rather than by teaching the shared gate a per-path ASCII
+# exemption: that tool is copied into every project and changing it is a
+# cross-project decision, not a thing to do while passing.
+
 # The gate's own defaults, plus this tree's one addition. Listing a value
 # here REPLACES the default list rather than adding to it, so the defaults
 # are repeated deliberately -- dropping `target` would put a cargo build
@@ -34,4 +46,4 @@ ascii_only = true
 # silently matches nothing is worth raising against the shared tool rather
 # than working around in seven copies of it.
 exclude = ["attic", "third_party", "vendor", "build", "target",
-           "dist", ".pytest_cache", ".claude", "schema"]
+           "dist", ".pytest_cache", ".claude", "schema", "determinism"]
