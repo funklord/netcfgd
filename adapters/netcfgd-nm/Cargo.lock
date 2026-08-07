@@ -388,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-apply"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-dns",
  "netcfgd-hostapd",
@@ -405,14 +405,14 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-dns"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-model",
 ]
 
 [[package]]
 name = "netcfgd-hostapd"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-model",
  "netcfgd-secret",
@@ -421,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-model"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-openvpn"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-model",
  "netcfgd-sys",
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-plan"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-model",
  "serde",
@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-proto"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-apply",
  "netcfgd-model",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-ra"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-model",
  "netcfgd-sys",
@@ -477,14 +477,14 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-secret"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-model",
 ]
 
 [[package]]
 name = "netcfgd-supplicant"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "netcfgd-model",
  "netcfgd-secret",
@@ -492,14 +492,14 @@ dependencies = [
 
 [[package]]
 name = "netcfgd-sys"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "netcfgd-testdir"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "once_cell"
