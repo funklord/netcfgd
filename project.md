@@ -2447,6 +2447,31 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
 - **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
 - **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
+- **`make live` skips six of its thirty-eight scripts here, and four of them
+  need not be skipped.** Three want a program that is not installed and three
+  want real root, so `make live-container` runs the suite privileged with the
+  packages present: `pppoe-session`, `ap`, `tunnel` and `wireguard` all pass
+  there. The other two cannot be answered this way and it is worth writing down
+  rather than rediscovering — `hwsim.sh` loads `mac80211_hwsim` and a container
+  shares the host's kernel, so a module the host lacks cannot appear inside one;
+  `delegation.sh` wants `odhcp6c`, which Debian does not package at all.
+
+  **Open, and not diagnosed: `qdisc.sh` fails inside the container and passes
+  on the host.** Its settle guard reports "ten seconds and a plan still has work
+  in it", and the work it names is `qdisc.reset veth0  qdisc: <absent> (was
+  noqueue)` — a reset planned against a qdisc that is *already absent*, which
+  never converges and so never empties the plan. On the host the kernel puts
+  `noqueue` back after a reset and the script asserts exactly that; in the
+  container it reports nothing at all.
+
+  That is either an environment difference the planner should tolerate or a
+  real non-convergence, and §6 lists plan idempotence as a property. It matters
+  more than a container quirk sounds: **the environments where the kernel
+  differs from a desktop's are the ones netcfgd is written for.** It is
+  recorded rather than guessed at, and the guard behaving correctly is what
+  surfaced it — it refused to assert against a half-converged daemon instead of
+  failing somewhere confusing.
+
 - ~~**netcfgd has never run on anything but x86_64.**~~ **It has now**, and
   determinism holds across architectures. `sh tests/determinism.sh`
   cross-builds `ncfg` for x86_64, aarch64 and s390x and runs each under

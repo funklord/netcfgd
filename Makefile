@@ -6,7 +6,7 @@
 
 CARGO ?= cargo
 
-.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage
+.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -661,6 +661,55 @@ cross:
 		echo "cross: $(CROSS_TARGET) was NOT fully attempted -- see above"; \
 		exit 1; \
 	fi
+
+# The live suite with the things this machine cannot give it.
+#
+# `make live` skipped six of its thirty-eight scripts here, for two different
+# reasons and neither of them a defect: three wanted a program that is not
+# installed (hostapd, openvpn, wireguard-tools) and three wanted real root
+# (`/dev/ppp`, ports 546 and 547, module loading). A privileged container with
+# the packages present answers both, and four of the six then pass.
+#
+# The remaining two cannot be answered this way and it is worth knowing why
+# rather than rediscovering it: `hwsim.sh` loads `mac80211_hwsim`, and a
+# container shares the host's kernel, so a module the host does not have cannot
+# appear inside one. `delegation.sh` wants `odhcp6c`, which Debian does not
+# package at all -- it is OpenWrt's, and that is where that test will first run.
+#
+# Deliberately not part of `check` or `live`: it pulls an image, installs a
+# dozen packages and takes minutes. Nobody should get that by accident.
+LIVE_IMAGE ?= rust:1-slim-trixie
+# Everything a live script asks for. `dhcpcd-base` was missing from the first
+# version, so `dhcpcd.sh` skipped inside the container while passing on the
+# host -- a container run that covers *less* than the host is worse than none,
+# because it looks like more.
+LIVE_PACKAGES = build-essential libncurses-dev iproute2 iputils-ping dnsmasq \
+                dhcpcd-base hostapd wpasupplicant openvpn wireguard-tools \
+                ppp pppoe iw kmod python3 socat unbound
+
+live-container:
+	@command -v docker >/dev/null 2>&1 || { \
+		echo "live-container: docker is not installed, and this target is docker"; \
+		exit 1; \
+	}
+	@docker info >/dev/null 2>&1 || { \
+		echo "live-container: docker is installed but not usable by this user"; \
+		exit 1; \
+	}
+	@mkdir -p $(DIST)
+	@printf '%s\n' \
+		'set -eu' \
+		'apt-get -qq update >/dev/null' \
+		'apt-get -qq install -y $(LIVE_PACKAGES) >/dev/null' \
+		'# Copied, not built in place: /src is read-only so the host tree' \
+		'# cannot be left holding root-owned build output.' \
+		'cp -a /src /work && cd /work' \
+		'cargo build --workspace --quiet' \
+		'make ncfg-link PROFILE=debug >/dev/null' \
+		'exec make live' \
+		> $(DIST)/live-container.sh
+	docker run --rm --privileged -v "$$PWD":/src:ro -v "$$PWD/$(DIST)":/dist \
+		$(LIVE_IMAGE) sh /dist/live-container.sh
 
 # What the shipped binary is allowed to link.
 #
