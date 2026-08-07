@@ -57,6 +57,13 @@ public:
 	 * gui/tests/access_identity.cpp. */
 	static QString current_user();
 
+	/* Something on PATH that can run a command as root, or an empty string.
+	 *
+	 * Public for the same reason as `current_user`: PATH decides the answer,
+	 * so a probe can decide it too, and the `sudo` case carries a guard worth
+	 * pinning -- see gui/tests/access_elevator.cpp. */
+	static QString elevator();
+
 public slots:
 	void refresh();
 

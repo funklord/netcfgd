@@ -75,9 +75,7 @@ QString ncfg_access_view::current_user()
 	return QString::fromLocal8Bit(entry->pw_name);
 }
 
-namespace {
-
-QString elevator()
+QString ncfg_access_view::elevator()
 {
 	if (!QStandardPaths::findExecutable(QStringLiteral("pkexec")).isEmpty()) {
 		return QStringLiteral("pkexec");
@@ -87,14 +85,12 @@ QString elevator()
 	}
 	const bool askpass = !qEnvironmentVariableIsEmpty("SUDO_ASKPASS");
 	const bool have_sudo =
-		!QStandardPaths::findExecutable(QStringLiteral("sudo")).isEmpty();
+	    !QStandardPaths::findExecutable(QStringLiteral("sudo")).isEmpty();
 	if (askpass && have_sudo) {
 		return QStringLiteral("sudo");
 	}
 	return QString();
 }
-
-} /* namespace */
 
 ncfg_access_view::ncfg_access_view(ncfg_connection *connection, QWidget *parent)
     : QWidget(parent), connection(connection)
