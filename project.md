@@ -2414,6 +2414,18 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
 - **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
 - **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
+- **The packaging gate was checking maintainer scripts the package does not
+  ship.** `packaging/debian/` is the pre-debhelper generation, superseded by
+  `debian/` when the build moved to debhelper, and untouched since the commit
+  that created it — while the gate `sh -n`'d it for as long as it existed. The
+  two had already diverged: the reserved-group `postinst` from 0118 reached
+  `debian/postinst` and not the copy being checked. So the scripts dpkg
+  actually ships had never been parsed by anything, which is the vacuous pass
+  in its packaging form. The gate points at `debian/` now, proved by breaking
+  `debian/postinst` and watching it fail — it did not before. The dead
+  directory is removed by name, `control.in` included: nothing substituted its
+  tokens either.
+
 - **`ingress.sh` failed its three teardown checks once, and has not since.** It
   is written down rather than left as folklore, because an undiagnosed flake
   that nobody recorded is one the next person rediscovers from scratch. What is

@@ -7,8 +7,20 @@ set -e
 
 case "$1" in
 remove | deconfigure)
-	if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-		systemctl stop netcfgd.service >/dev/null 2>&1 || true
+	if [ -d /run/systemd/system ]; then
+		# `deb-systemd-invoke` rather than `systemctl`, because it honours
+		# policy-rc.d and systemctl does not. Without it, removing this package
+		# inside a chroot or an image build reaches out and stops the service
+		# on whatever is really running there. That is the whole reason the
+		# policy layer exists, and it matters more here than for most packages,
+		# because netcfgd is built into images on purpose.
+		#
+		# Not a dependency, and not guarded either: init-system-helpers is
+		# Essential and Priority: required, so `deb-systemd-invoke` is on every
+		# Debian system by definition. A `command -v` fallback to systemctl was
+		# written first and removed -- it covered a machine that cannot exist,
+		# and the branch it added was the one lintian objects to.
+		deb-systemd-invoke stop netcfgd.service >/dev/null 2>&1 || true
 	fi
 	;;
 esac
