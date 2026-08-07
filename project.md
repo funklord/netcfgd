@@ -2185,6 +2185,28 @@ the sentence that disposes of an alternative in half a line.
    dereferenced it. The pointer is taken into a local and the member cleared
    first now. That path runs on every normal exit and had never been executed.
 
+   **The privileged half is tested as a parser and as a process.** Its grammar
+   is a unit test stating what it *refuses* — a shell command, a path, a file,
+   wrong arity, a bad principal, `SET` in capitals — because "the one command
+   works" is the easy half and "nothing else does" is the half that matters
+   when the process is root. A second test proves a refusal writes nothing at
+   all, which is a different claim from returning an error. Breaking the verb
+   check fails exactly one line; breaking the arity check fails a different
+   one, each named in the assertion.
+
+   `tests/live/control_helper.sh` drives the real process for what a unit test
+   cannot reach: the ready line, end-of-file ending it, and **a bound on what
+   it will read**. That last one was a genuine gap — the helper used
+   `lines()`, which allocates whatever it is sent, in a root process reading a
+   pipe. `netcfgd-proto` bounds the socket at `MAX_LINE` for exactly this
+   reason and the helper had no bound at all. It is 4 KB now, sized to a verb
+   and three principals rather than to memory, and over it the helper says so
+   and **stops rather than resynchronising**: whatever follows an over-length
+   line is the tail of something nobody can parse, and treating that as fresh
+   input is how a parser gets fed a command its sender never wrote. Removing
+   the bound makes the script fail with a 5 MB principal in the diagnostic,
+   which is what it looks like when it is missing.
+
    **What is still not verified is the elevator itself** — which of `pkexec`,
    `kdesu` and `sudo -A` a real desktop picks, and whether its prompt behaves.
    The probe fakes one; a session is what would exercise the real thing.

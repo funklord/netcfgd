@@ -239,10 +239,18 @@ pub(crate) fn run(positional: &[String], options: &Options) -> Result<ExitCode, 
 		"set" => set(options),
 		"helper" => helper(options),
 		other => Err(format!(
+			// `helper` is deliberately absent from both this sentence and
+			// the usage text. It is not a command for a person: it speaks a
+			// line protocol on stdin to the client that started it, and
+			// naming it here would invite somebody to run it by hand and
+			// wonder why it appears to hang. 0120 documents it.
 			"unknown control subcommand `{other}`; it is `show` or `set`"
 		)),
 	}
 }
+
+/// The longest command the helper will read. A verb and three principals.
+const MAX_COMMAND: usize = 4096;
 
 /// The privileged half of the client's administrator mode.
 ///
@@ -275,16 +283,41 @@ pub(crate) fn run(positional: &[String], options: &Options) -> Result<ExitCode, 
 ///
 /// [0120]: ../../../docs/decisions/0120-the-red-frame-is-a-process-boundary.md
 fn helper(options: &Options) -> Result<ExitCode, String> {
-	use std::io::{BufRead, Write};
+	use std::io::{BufRead, Read, Write};
 
 	let stdin = std::io::stdin();
+	let mut reader = std::io::BufReader::new(stdin.lock());
 	let mut stdout = std::io::stdout();
 
 	writeln!(stdout, "ready uid={}", nix_geteuid()).map_err(|error| error.to_string())?;
 	stdout.flush().map_err(|error| error.to_string())?;
 
-	for line in stdin.lock().lines() {
-		let line = line.map_err(|error| format!("could not read a command: {error}"))?;
+	loop {
+		// Bounded, because this is a root process reading a pipe and
+		// `lines()` will allocate whatever it is sent. `netcfgd-proto` bounds
+		// the socket at MAX_LINE for the same reason; the number here is much
+		// smaller because the whole grammar is a verb and three principals,
+		// and a bound that fits the protocol is worth more than one that
+		// merely fits memory.
+		let mut line = String::new();
+		let read = (&mut reader)
+			.take(MAX_COMMAND as u64)
+			.read_line(&mut line)
+			.map_err(|error| format!("could not read a command: {error}"))?;
+		if read == 0 {
+			// End of file: the client that authenticated this is gone.
+			break;
+		}
+		if read == MAX_COMMAND && !line.ends_with('\n') {
+			// No resynchronising after this -- whatever follows is the tail of
+			// a command nobody can parse, so say so and stop rather than
+			// treating the remainder as fresh input.
+			writeln!(stdout, "error a command may not exceed {MAX_COMMAND} bytes")
+				.map_err(|error| error.to_string())?;
+			let _ = stdout.flush();
+			break;
+		}
+		let line = line.trim_end().to_owned();
 		let reply = match handle(&line, options) {
 			Ok(path) => format!("ok {}", path.display()),
 			// One line, because the protocol is one line per reply and a
@@ -548,6 +581,81 @@ fn verify(options: &Options, wanted: &Control) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// A config directory with a compilable document and nothing else.
+	fn config(dir: &std::path::Path) -> Options {
+		std::fs::write(
+			dir.join("netcfgd.conf"),
+			"interface eth0 {\n\tconfig = \"dhcp\"\n}\n",
+		)
+		.expect("written");
+		Options {
+			config_dir: Some(dir.to_string_lossy().into_owned()),
+			..Options::default()
+		}
+	}
+
+	/// The whole grammar the privileged half accepts, stated as a test.
+	///
+	/// This parser runs as root. What matters is not that `set` works -- it is
+	/// that nothing else does, and that a refusal happens before anything is
+	/// written. Every line below was chosen because it is a shape somebody
+	/// would try if they found the pipe: a shell command, a path, a file, an
+	/// extra argument, a missing one.
+	#[test]
+	fn the_helper_accepts_one_verb_and_three_principals() {
+		let dir = netcfgd_testdir::TestDir::new("control-helper");
+		let options = config(&dir);
+
+		assert!(
+			handle("set group:netcfgd any root", &options).is_ok(),
+			"the one command it exists for has to work"
+		);
+
+		for refused in [
+			"",
+			"   ",
+			"rm -rf /",
+			"show",
+			"SET root root root",
+			"set",
+			"set root",
+			"set root root",
+			"set root root root extra",
+			"set bogus root root",
+			"set user: root root",
+			"set group: root root",
+			"set /etc/passwd root root",
+			"set root root root; sh",
+		] {
+			assert!(
+				handle(refused, &options).is_err(),
+				"the helper must refuse `{refused}`"
+			);
+		}
+	}
+
+	/// A refusal writes nothing at all.
+	///
+	/// Separate from the list above because "returned an error" and "changed
+	/// nothing" are different claims, and it is the second one that matters
+	/// when the process making the change is root.
+	#[test]
+	fn a_refused_helper_command_leaves_the_policy_alone() {
+		let dir = netcfgd_testdir::TestDir::new("control-helper-untouched");
+		let options = config(&dir);
+
+		handle("set group:netcfgd any root", &options).expect("the good one writes");
+		let written = std::fs::read_to_string(dir.join("conf.d").join("00-control.conf"))
+			.expect("it wrote a policy");
+
+		for refused in ["set any", "set bogus any root", "sh -c id"] {
+			assert!(handle(refused, &options).is_err(), "`{refused}` is refused");
+			let now = std::fs::read_to_string(dir.join("conf.d").join("00-control.conf"))
+				.expect("the policy is still there");
+			assert_eq!(now, written, "`{refused}` must not have changed the policy");
+		}
+	}
 
 	fn policy() -> Control {
 		Control {
