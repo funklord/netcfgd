@@ -11,6 +11,7 @@
 //! this module can create a network, so the tier cannot be talked into writing
 //! config (decision 0013).
 
+use netcfgd_host::wifi_profile;
 use netcfgd_model::device::WifiBackend;
 use netcfgd_model::{Document, Ssid, WifiNetwork};
 use netcfgd_proto::{Response, ScanEntry, ScanReport, StationEntry, StationReport, WifiState};
@@ -357,4 +358,116 @@ pub(crate) fn ap_stations(
 		access_control: access_point.access_control.as_ref().map(|acl| acl.policy),
 		stations,
 	}))
+}
+
+/// Add a wireless network to the configuration, for a client that cannot write
+/// the file itself.
+///
+/// Decision 0117. The request carries typed fields and never config text, so
+/// the daemon renders the block and this function's shape is what bounds the
+/// privilege: there is no field here that could name a hook, a path or a
+/// `run_as`, and a hook's `run_as` defaults to root.
+///
+/// The write, the credential and the compile-it-back check are
+/// `netcfgd_host::wifi_profile`'s, shared with `ncfg wifi add` -- two
+/// implementations of "what a `network` block looks like" is the drift this
+/// tree keeps finding.
+/// Named `configure_network` and not `add_network`, because
+/// `netcfgd_supplicant::add_network` already means something different one
+/// layer down -- telling a running supplicant about a network. This writes a
+/// config file. Two things called "add a network" in one module is how a
+/// reader ends up sure they know which one a call site meant.
+pub(crate) struct Wanted<'a> {
+	pub(crate) ssid_hex: &'a str,
+	pub(crate) id: Option<&'a str>,
+	pub(crate) passphrase: Option<&'a str>,
+	pub(crate) proto: Option<&'a str>,
+	pub(crate) hidden: bool,
+	pub(crate) priority: Option<u32>,
+}
+
+pub(crate) fn configure_network(
+	document: Option<&Document>,
+	config_dir: &std::path::Path,
+	factory_dir: &std::path::Path,
+	wanted: &Wanted<'_>,
+) -> Response {
+	let Wanted {
+		ssid_hex,
+		id,
+		passphrase,
+		proto,
+		hidden,
+		priority,
+	} = *wanted;
+	let Ok(ssid) = Ssid::from_hex(ssid_hex) else {
+		return Response::error(format!(
+			"`{ssid_hex}` is not a usable ssid: it has to be lowercase hex of 0 to \
+			 32 octets, because an ssid is not guaranteed to be text"
+		));
+	};
+
+	// The label defaults to the ssid read as text, which is what an operator
+	// means by "the network's name" whenever the two coincide. Where they do
+	// not -- an ssid that is not UTF-8 -- the caller has to say, because a
+	// label is a filename and this will not invent one.
+	let derived = String::from_utf8(ssid.as_bytes().to_vec()).ok();
+	let Some(id) = id.map(ToOwned::to_owned).or(derived) else {
+		return Response::error(
+			"this ssid is not text, so it cannot be used as a name. Send an `id` \
+			 as well: the ssid itself is kept exactly, as hex"
+				.to_owned(),
+		);
+	};
+
+	// Refused before anything is written. A second block with the same label is
+	// a compile error, which would break every interface on the machine to add
+	// one network.
+	if let Some(existing) =
+		document.and_then(|document| document.networks.iter().find(|network| network.id == id))
+	{
+		return Response::error(format!(
+			"a network `{}` is already configured. Change it by editing the \
+			 configuration, or remove it and add it again",
+			existing.id
+		));
+	}
+
+	// An open network with a passphrase is refused rather than quietly
+	// dropping one of the two: the caller believes one of those things and it
+	// is not this function's business to pick.
+	let security = match (passphrase, proto) {
+		(None, None) => wifi_profile::Security::Open,
+		(None, Some(_)) => {
+			return Response::error(
+				"a `proto` was given with no passphrase. An open network has no \
+				 generation to pin"
+					.to_owned(),
+			)
+		}
+		(Some(_), proto) => wifi_profile::Security::Psk {
+			proto: proto.map(ToOwned::to_owned),
+		},
+	};
+	if let Some(proto) = proto {
+		if proto != "wpa2" && proto != "wpa3" {
+			return Response::error(format!(
+				"`{proto}` is not a generation this understands; it is `wpa2` or \
+				 `wpa3`, and leaving it out negotiates both"
+			));
+		}
+	}
+
+	let profile = wifi_profile::Profile {
+		id,
+		ssid,
+		hidden,
+		priority,
+		security,
+	};
+
+	match wifi_profile::install(config_dir, factory_dir, &profile, passphrase) {
+		Ok(_) => Response::Ok,
+		Err(error) => Response::error(error),
+	}
 }

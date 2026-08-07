@@ -84,6 +84,50 @@ pub enum Request {
 		/// Which interface.
 		interface: String,
 	},
+	/// Add a wireless network to the configuration.
+	///
+	/// **Typed fields, never config text and never a path**, which is the whole
+	/// of decision 0117. A config file may name a hook, and a hook's `run_as`
+	/// defaults from globals -- which is root -- so anything able to write
+	/// arbitrary config into `/etc/netcfgd` can run arbitrary code as root
+	/// whatever the file's mode says. This request cannot express a hook, a
+	/// path or a `run_as`, because it has no such fields: the privilege it
+	/// grants is bounded by the shape of the message rather than by the
+	/// caller's good manners.
+	///
+	/// That is also why there is no enterprise (802.1X) arm here. Those carry
+	/// certificate *paths*, which is a file the daemon would hand to a
+	/// supplicant running as root, and 0117 leaves how to carry them undecided.
+	/// `ncfg wifi add --eap` is the way to configure one, from a machine where
+	/// somebody already has the rights to write the file.
+	///
+	/// The credential travels **inbound only**, is written through the secret
+	/// provider, and the block keeps an `@secret:` reference -- so the
+	/// desired-state document stays free of secret material (constraint 5), and
+	/// 0031's bridge still runs one way.
+	WifiAdd {
+		/// The network's real name, as lowercase hex. An SSID is 0..32
+		/// arbitrary octets and is not guaranteed to be text, so hex is the
+		/// only form that always works.
+		ssid: String,
+		/// The block's label, the filename and the secret's name. Defaults to
+		/// the SSID read as text where that is usable as all three.
+		#[serde(skip_serializing_if = "Option::is_none", default)]
+		id: Option<String>,
+		/// The passphrase. Absent means an open network, and an open network
+		/// with one supplied is refused rather than quietly ignored.
+		#[serde(skip_serializing_if = "Option::is_none", default)]
+		passphrase: Option<String>,
+		/// `wpa2` or `wpa3` to pin one generation; absent negotiates both.
+		#[serde(skip_serializing_if = "Option::is_none", default)]
+		proto: Option<String>,
+		/// The SSID is not broadcast, so it has to be probed for.
+		#[serde(skip_serializing_if = "std::ops::Not::not", default)]
+		hidden: bool,
+		/// Higher wins when several are in range.
+		#[serde(skip_serializing_if = "Option::is_none", default)]
+		priority: Option<u32>,
+	},
 	/// Join a network **that is already in the configuration**.
 	///
 	/// The network is named by its id in the document, not by SSID and

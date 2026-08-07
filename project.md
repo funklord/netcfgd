@@ -1910,7 +1910,23 @@ the sentence that disposes of an alternative in half a line.
      never a path, because a config file may name a hook whose `run_as`
      defaults to root — so the cheapest option, a group-writable config
      directory, is group-writable root code execution and the obvious answer is
-     the one that quietly grants the most. Decided, not built.
+     the one that quietly grants the most. **Built**, with the renderer, the
+     paths, the id validation and the compile-it-back check moved to
+     `netcfgd_host::wifi_profile` so there is one writer.
+
+     The move immediately justified itself. The round-trip check compared the
+     enterprise fields one by one; a first pass at sharing it kept only "a
+     network with this id exists", and the test whose own comment says breaking
+     that comparison leaves every other test green is what caught the loss.
+     Validation lives **inside** the writer rather than in its callers, because
+     with a socket request the caller is a remote client and an id is joined
+     onto a directory twice. Driven against a real daemon: a network written
+     with an `@secret:` reference and the credential at 0600, a duplicate
+     refused, and `../../../tmp/pwned` refused with nothing written.
+
+     **What is left is the clients.** `client/` has no typed call and the GUI no
+     dialog, so netcfgd's own desktop client is still the one that cannot add a
+     network.
    - ~~**M8's tray applet does not exist.**~~ — **written**, and it is the one
      thing a GUI gives that `ncfg` and `ncfg tui` structurally cannot: an
      answer to "am I on the network" costing no window and no command, on a

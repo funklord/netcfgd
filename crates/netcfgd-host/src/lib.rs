@@ -19,6 +19,7 @@ pub mod explain;
 pub mod hooks;
 pub mod portal;
 pub mod state;
+pub mod wifi_profile;
 
 pub use config::load;
 pub use confirm::{document_hash, Window};

@@ -52,7 +52,18 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// only thing in the plan is a wifi association: a tier that could call
 		// Apply could apply any config change at all, which would make the
 		// wifi tier Admin wearing a hat.
-		Request::Apply { .. } | Request::Confirm | Request::Revert | Request::Reload => Tier::Admin,
+		//
+		// `WifiAdd` writes configuration, which is what `admin` names. It is
+		// deliberately not `wifi`: 0013's wifi tier is join, leave and scan
+		// *known* networks, and adding one is beyond that by definition. A
+		// site that wants its users adding networks grants them admin; one
+		// that does not, does not. That is the tier system working rather than
+		// a gap (0117).
+		Request::Apply { .. }
+		| Request::Confirm
+		| Request::Revert
+		| Request::Reload
+		| Request::WifiAdd { .. } => Tier::Admin,
 	}
 }
 
