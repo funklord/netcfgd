@@ -56,11 +56,27 @@ run: $(TARGET)
 # argument for administrator mode, and a mode nobody can look at is the feature
 # not existing. Qt's offscreen platform runs the real paint path, so this needs
 # a graphical session no more than it needs a person.
+# Found rather than listed, so a fourth probe needs no edit here. Each gets its
+# own directory because two qmake projects in one directory overwrite each
+# other's Makefile.
+TEST_PROS = $(wildcard tests/*.pro)
+
 test: $(CLIENT_LIB)
-	@mkdir -p tests/$(BUILD_DIR)
-	@cd tests/$(BUILD_DIR) && $(QMAKE) ../access_frame.pro >/dev/null && \
-		$(MAKE) --no-print-directory
-	@QT_QPA_PLATFORM=offscreen tests/$(BUILD_DIR)/access_frame
+	@failed=0; \
+	for pro in $(TEST_PROS); do \
+		name=$$(basename $$pro .pro); \
+		dir=tests/$(BUILD_DIR)/$$name; \
+		mkdir -p $$dir; \
+		( cd $$dir && $(QMAKE) ../../$$name.pro >/dev/null && \
+			$(MAKE) --no-print-directory >/dev/null ) || \
+			{ echo "gui test: $$name failed to build"; failed=1; continue; }; \
+		QT_QPA_PLATFORM=offscreen $$dir/$$name || failed=1; \
+	done; \
+	if [ "$$failed" -ne 0 ]; then exit 1; fi; \
+	if [ -z "$(TEST_PROS)" ]; then \
+		echo "gui test: no probes found under tests/, which is not a pass"; \
+		exit 1; \
+	fi
 
 clean:
 	@# Verified before it is deleted, per build-and-commit.md: this is the

@@ -2002,11 +2002,36 @@ the sentence that disposes of an alternative in half a line.
      likely to have somebody in front of them. The icon is painted rather than
      shipped, so the tree still has no image assets.
 
-     **Unverified: the icon itself.** It compiles, the no-tray path runs
-     against a real daemon, and the `--tray`-without-a-tray path was measured.
-     Nothing here has a status-notifier host, so the menu, the refresh and the
-     disconnect have never been drawn or clicked. That wants the same laptop
-     the rest of *What would prove it* wants.
+     ~~**Unverified: the icon itself.**~~ **The icon is verified; the menu is
+     not, and the split is measured rather than assumed.**
+     `QSystemTrayIcon::isSystemTrayAvailable()` is false under *both* the
+     offscreen and the minimal platform, so `create()` returns nullptr and
+     there is genuinely no object to drive — the menu, the refresh and the
+     disconnect do want the laptop. The **icon does not**, because this tree
+     paints it rather than shipping it, so `gui/tests/tray_icon` renders both
+     states and compares pixels.
+
+     **What that checks is not that something was drawn.** It is that the two
+     states draw something *different* — an indicator identical connected and
+     disconnected is not an indicator, and it would pass any test that only
+     asked whether a pixmap came back. Both breaks were run: painting both
+     states in one colour fails "the two states are not the same picture", and
+     removing the arcs and the dot fails the ink counts at 0 pixels against 136.
+
+     `painted_icon` and `state_icon` left the anonymous namespace to become
+     statics on the class, which is the cost of this and worth naming: they are
+     the only part of the tray reachable without a host, and the header says so
+     rather than leaving a reader wondering why they are public.
+
+     **A verified non-finding, since it looked like this tree's recurring
+     bug.** `state_icon` falls back to the painted icon when
+     `QIcon::fromTheme(name).isNull()`, and a wrong emptiness test is the shape
+     that has bitten here twice — a link-local making "has an address" true
+     forever, and an empty action list making "nothing to do" true on the one
+     plan consent exists for. Measured against a hand-built theme that exists
+     and lacks `network-wireless`: `isNull()` is correctly true, and a name the
+     theme *does* have comes back non-null with a 22x22 pixmap. The test is
+     right, and this is recorded so nobody re-derives it.
    - **The shim is not the fallback it was assumed to be.** The reasoning that
      tier 1 and 2 cover a desktop assumes the operator *has* an NM applet, and
      this one does not — the current tool is `nmtui`. So **`ncfg tui` is the

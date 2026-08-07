@@ -12,8 +12,6 @@
 #include <QPixmap>
 #include <QSystemTrayIcon>
 
-namespace {
-
 /*
  * An icon, drawn rather than shipped.
  *
@@ -27,7 +25,7 @@ namespace {
  * question for a drawing nobody will look at closely. Three arcs and a dot is
  * what a wifi indicator is.
  */
-QIcon painted_icon(bool connected)
+QIcon ncfg_tray::painted_icon(bool connected)
 {
 	QPixmap pixmap(22, 22);
 	pixmap.fill(Qt::transparent);
@@ -52,7 +50,7 @@ QIcon painted_icon(bool connected)
 	return QIcon(pixmap);
 }
 
-QIcon state_icon(bool connected)
+QIcon ncfg_tray::state_icon(bool connected)
 {
 	QString name = QStringLiteral("network-offline");
 	if (connected) {
@@ -61,8 +59,6 @@ QIcon state_icon(bool connected)
 	const QIcon themed = QIcon::fromTheme(name);
 	return themed.isNull() ? painted_icon(connected) : themed;
 }
-
-} /* namespace */
 
 ncfg_tray *ncfg_tray::create(ncfg_connection *connection, QObject *parent)
 {
