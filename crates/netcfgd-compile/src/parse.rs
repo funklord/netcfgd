@@ -27,26 +27,32 @@ pub fn parse(source: SourceId, text: &str) -> Result<File, Diagnostics> {
 	}
 }
 
-/// How deeply blocks may nest before the parser refuses.
+/// How deeply anything may nest before the parser refuses.
 ///
-/// The parser descends once per `{`, so without a bound a file of nothing but
-/// open braces exhausts the stack -- a crash rather than a diagnostic, in a
-/// daemon that re-reads its configuration directory whenever anything in it
-/// changes. Found by `cargo fuzz` on the `config_parse` target, which reported
-/// an `AddressSanitizer` stack-overflow on 3679 bytes containing 1238 `{`.
+/// The parser descends once per `{` **and once per `[`**, so without a bound a
+/// file of nothing but open braces -- or open brackets -- exhausts the stack.
+/// That is a crash rather than a diagnostic, in a daemon that re-reads its
+/// configuration directory whenever anything in it changes.
+///
+/// Found by `cargo fuzz` on the `config_parse` target, twice. The first report
+/// was an `AddressSanitizer` stack-overflow on 3679 bytes containing 1238 `{`,
+/// and bounding blocks alone did not fix it: re-running the fuzzer against the
+/// fix found `parse_value` -> `parse_list` -> `parse_value`, which is the same
+/// defect down a path a block counter cannot see. **One counter for both**, so
+/// a third nesting construct cannot be added with its own private budget.
 ///
 /// Thirty-two is roughly ten times the deepest nesting the language actually
 /// has -- `interface` holds `qdisc` holds its keys, and that is three -- so no
 /// real configuration comes near it, and a file that does is a mistake worth
 /// naming rather than a shape worth supporting.
-const MAX_BLOCK_DEPTH: usize = 32;
+const MAX_NESTING_DEPTH: usize = 32;
 
 struct Parser<'a> {
 	lexer: Lexer<'a>,
 	lookahead: Option<SpannedToken>,
 	diagnostics: Diagnostics,
 	source: SourceId,
-	/// How many blocks are currently open. See [`MAX_BLOCK_DEPTH`].
+	/// How many blocks are currently open. See [`MAX_NESTING_DEPTH`].
 	depth: usize,
 }
 
@@ -311,11 +317,11 @@ impl<'a> Parser<'a> {
 		// Bounded here rather than at the recursive call, because this is the
 		// one place a block body is entered from -- `parse_block` and
 		// `parse_item` both arrive through it.
-		if self.depth >= MAX_BLOCK_DEPTH {
+		if self.depth >= MAX_NESTING_DEPTH {
 			self.diagnostics.push(
 				Diagnostic::new(
 					brace.span,
-					format!("`{head}` nests more than {MAX_BLOCK_DEPTH} blocks deep"),
+					format!("`{head}` nests more than {MAX_NESTING_DEPTH} blocks deep"),
 				)
 				.with_help("this is almost always an unclosed block earlier in the file"),
 			);
@@ -393,6 +399,24 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_list(&mut self, span: Span) -> Option<Spanned<Value>> {
+		if self.depth >= MAX_NESTING_DEPTH {
+			self.diagnostics.push(
+				Diagnostic::new(
+					span,
+					format!("a list nests more than {MAX_NESTING_DEPTH} deep"),
+				)
+				.with_help("this is almost always an unclosed `[` earlier in the file"),
+			);
+			return None;
+		}
+		self.depth += 1;
+		let list = self.parse_list_entries(span);
+		self.depth -= 1;
+		list
+	}
+
+	/// The entries of a list, with the depth counter already raised.
+	fn parse_list_entries(&mut self, span: Span) -> Option<Spanned<Value>> {
 		let mut entries = Vec::new();
 		loop {
 			// A list may span lines, so terminators inside it are whitespace.
