@@ -842,6 +842,10 @@ live:
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ingress.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/readonly.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/unmanage.sh"
+	@# No namespace: this one touches no interface and no socket. It drives a
+	@# process that reads a pipe and writes a file, which is the whole of what
+	@# the privileged half of administrator mode does.
+	@NCFG_LIVE=1 sh tests/live/control_helper.sh
 	@# The interface reporting contract, checked from the side a writer writes.
 	@# Under NCFG_LIVE: it needs no modem and no module, only a file.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/report.sh"
