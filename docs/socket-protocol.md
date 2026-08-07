@@ -38,21 +38,83 @@ Three things, and each catches something the others cannot:
   one checks the clients against each other, which is where three spellings of
   one access point's name came from.
 
-## 3. Transport
+## 3. Transport, and why it is text
 
 A `SOCK_STREAM` socket in the `AF_UNIX` family, at
 `$NCFG_RUN_DIR/netcfgd.sock`, defaulting to `/run/netcfgd/netcfgd.sock`. A
 client resolves it the same way `ncfg` does; a client that guessed differently
 would talk to a different daemon than the CLI on the same machine.
 
-There is no network transport and this is not a network protocol. Remote
-access is an ordinary unprivileged client of *this* socket reached through an
-agent, never a second authority layer (design section 11.3).
-
 The connection is a request/response loop: a client may hold one open and ask
 repeatedly. A clean end of stream is a client disconnecting and is not an
 error. `monitor` turns a connection into a one-way stream and it never goes
 back, which is why it takes a connection of its own.
+
+### 3.1 Why text, and why JSON
+
+Design section 6 states the choice and its reason in one line: **"deliberately
+boring: no D-Bus, no IDL, no codegen, no bindings. You can drive it from
+`socat` and a shell script."** That is worth expanding here, because a reader
+who has just been told the daemon holds `CAP_NET_ADMIN` is entitled to ask why
+it parses JSON.
+
+- **A binary IDL protocol would rebuild the thing this project exists to
+  avoid.** netcfgd's whole premise is no mandatory D-Bus, glib, polkit or
+  systemd (constraint 3), and a substantial part of its audience is people
+  escaping exactly that stack. A protocol needing generated bindings to speak
+  puts a codegen dependency between the operator and their own daemon, which is
+  the same bargain wearing different clothes.
+- **It is the same claim as `/run` being greppable.** netcfgd's product is not
+  being a black box (constraint 7). Runtime state is readable files; the socket
+  carries the same shapes those files hold, so `ncfg --json` prints what the
+  socket sends and one serde derive and one witness cover both. A binary
+  control channel would make the daemon's state inspectable and its
+  *conversation* opaque, which is a strange place to draw that line.
+- **A third-party client costs nothing to write.** A shell script with `jq` is
+  a legitimate client, and so is a Python service on a router with no Rust
+  toolchain. For a single-host tool whose adapters are meant to live at the
+  edge (design section 9), the cost of entry to the protocol is a feature.
+- **Diagnosis without a decoder.** A protocol you can read in `strace` or with
+  `socat` is one that can be debugged on the machine having the problem, which
+  is frequently a router reached over the very network being reconfigured.
+
+**What it costs, stated rather than glossed.** A JSON parser is a larger and
+more interesting attack surface than a fixed binary frame -- which is why the
+framing carries a hard bound (section 5) and why both parsers are fuzzed
+(section 12). Messages have no canonical form, so nothing can hash or
+byte-compare one (section 7). And the envelope's unknown-member behaviour is
+an artifact of expressing a tagged union in JSON through serde, which is a
+real inconsistency and is written down as one (section 7).
+
+### 3.2 It is never transmitted
+
+**There is no network transport and this is not a network protocol.** The
+socket is `AF_UNIX`; these bytes do not leave the machine, and "we are sending
+JSON over the network" is not a thing netcfgd does or plans to do.
+
+Remote access is an ordinary unprivileged client of *this* socket, reached
+through an agent that terminates a different protocol and holds a local
+connection -- never a second authority layer inside the daemon (design section
+11.3). That remote protocol is **binary**: a `situ`-described frame with
+Monocypher as the codec (`gui/project.md` section 6), and design section 11.3
+puts its encoding, framing, authentication and encryption explicitly out of
+scope for the document that specifies *this* one.
+
+So the split is deliberate and already made:
+
+| | local control socket | remote path |
+|---|---|---|
+| carries | newline-delimited JSON | a binary framed message |
+| reaches | this machine only | across a trust boundary |
+| chosen for | no bindings, greppable, `socat`-able | exactness, authentication, size |
+| specified by | this document and `docs/schema/socket.json` | a `situ` schema |
+
+**Text where a shell script is a legitimate client; binary where bytes cross a
+trust boundary.** An argument for making the local socket binary has to say
+which of the four properties above it is willing to give up, and an argument
+for JSON on the wire has to explain what it does about authentication -- which
+is where it stops, since the answer is the remote protocol that already
+exists.
 
 ## 4. Who may ask
 
