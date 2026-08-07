@@ -31,6 +31,10 @@ You want two things: a way back in, and a way to see what happened.
 Nothing below needs root until step 4. `ncfg plan` reads the kernel and your
 config and changes nothing, so run it as often as you like.
 
+Steps 1 to 6 are `ncfg` from a root shell and need no access policy at all.
+Step 7 is for when you want a client that is *not* run as root -- the TUI in
+your own terminal, or the GUI -- which a default install refuses.
+
 ## 1. Write a config
 
 `/etc/netcfgd/netcfgd.conf`:
@@ -222,6 +226,51 @@ available until it is in the config.
 
 At this stage, if it goes wrong, `nmcli device set wlp0s20f3 managed yes` and
 `sudo systemctl stop netcfgd` puts it back.
+
+## 7. If you want a client that is not run as root
+
+Everything above is `ncfg` from a root shell, which needs no policy at all.
+The moment you want `ncfg tui` in your own terminal, or the GUI, or its tray
+icon, you hit the one thing that is not in any of the steps above: **every
+tier defaults to root, and the socket's mode follows the policy.** So a client
+run by you is refused before it can show anything, and the message you get
+names the socket rather than the reason.
+
+Two ways to change that, and neither is the only one.
+
+**The group.** The packages reserve `netcfgd`, empty, and it grants nothing
+until a policy points at it:
+
+```sh
+sudo ncfg control set --observe group:netcfgd --wifi group:netcfgd
+sudo usermod -aG netcfgd "$USER"   # adduser on Alpine
+```
+
+Then log out and back in -- the kernel gives a session its group memberships
+when it starts, so a shell you already had open still has the old set. `ncfg
+control show` prints the policy at any time, and `ncfg control set` edits the
+`global` block you wrote in step 1 rather than adding a second one.
+
+**Or the client's access tab**, which does the same thing through
+`Administrator Mode...`: the editors come alive inside a red frame and Apply
+runs that same command as root. Use whichever you prefer; they write the same
+file, and it is ordinary configuration you can read, diff and delete.
+
+**What that does not give you is `admin`**, and the difference matters more
+than it looks:
+
+| tier | what a client can then do |
+|---|---|
+| `observe` | see what the network is doing |
+| `wifi` | scan, and join or leave a network **the configuration already describes** |
+| `admin` | everything else, including *adding* a network |
+
+So with the two tiers above you can watch and switch between networks you
+have already written config for, and a new one still needs `ncfg wifi add`
+from a root shell. Granting `admin` to a group lets a desktop session add
+networks -- and also apply any other configuration change on the machine,
+which is the same permission. That is a choice worth making deliberately
+rather than because a button was greyed out.
 
 ## When something goes wrong
 
