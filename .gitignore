@@ -30,5 +30,11 @@ debian/files
 debian/tmp/
 debian/netcfgd/
 debian/*.substvars
+# The snippets dh_installsystemd and friends generate into maintainer scripts,
+# as well as the log. `*.debhelper.log` alone missed `*.debhelper`, so
+# `netcfgd.postrm.debhelper` sat in `git status` after every `make deb` -- and
+# a line that is always there and never explained is what trains somebody to
+# skim the list they are supposed to read before committing.
+debian/*.debhelper
 debian/*.debhelper.log
 debian/debhelper-build-stamp
