@@ -698,18 +698,75 @@ pub fn write_journal(run_dir: &Path, journal: &Journal) -> io::Result<()> {
 /// Design section 17 requires that a power cut during a write cannot leave an
 /// unparseable file. Rename is atomic within a filesystem, so a reader sees
 /// either the old contents or the new ones and never a half-written mixture.
+///
+/// One implementation, not two. This had its own, and the two had drifted in
+/// the direction that matters: [`crate::config::write_atomically`] names its
+/// temporary after the process that made it, and this one called every
+/// temporary `<name>.tmp`. That is a fixed path two processes share, and two
+/// processes do write here -- `ncfg apply` and the daemon both write
+/// `owned.json`. Interleaved, one writer's content is renamed into place by
+/// the *other* writer's rename and the loser's rename fails with `ENOENT`,
+/// which five of the six call sites discard with `let _ =`. So the older copy
+/// was not atomic between writers at all, only against readers.
+///
+/// `0o666` is what [`fs::write`] opens with, so the umask still decides the
+/// mode exactly as it did before and this is not a permission change riding
+/// along inside a concurrency fix. `/run/netcfgd/owned.json` carries secret
+/// *digests* (0055), so tightening it is a decision to take deliberately
+/// rather than in passing.
 pub fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
-	if let Some(parent) = path.parent() {
-		fs::create_dir_all(parent)?;
-	}
-	let temporary = path.with_extension("tmp");
-	fs::write(&temporary, text)?;
-	fs::rename(&temporary, path)
+	crate::config::write_atomically(path, text.as_bytes(), 0o666)
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// Two writers of one `/run` file must not tread on each other.
+	///
+	/// `owned.json` is written by `ncfg apply` and by the daemon, and this
+	/// wrote every temporary as `<name>.tmp` -- one path, shared by everyone.
+	/// Interleaved, the second writer's bytes land under the first writer's
+	/// rename and the loser renames a file that is no longer there, which is
+	/// an `ENOENT` five of the six call sites discard with `let _ =`.
+	///
+	/// Threads rather than processes because the defect does not need two
+	/// processes and the fix must not either: a temporary named after the pid
+	/// alone is still one path for every thread in it. `netcfgd-testdir` had
+	/// this written down already -- "the process id alone is not enough, tests
+	/// in one binary share it" -- for its directories, while the code that
+	/// writes the machine's state did not follow it.
+	///
+	/// Probabilistic in the direction that is safe: it can only pass when
+	/// there is nothing to find, and it failed on the first round every time
+	/// it was run against the implementation this replaced.
+	#[test]
+	fn two_writers_of_one_file_do_not_share_a_temporary() {
+		let dir = netcfgd_testdir::TestDir::new("state-two-writers");
+		let path = dir.join("owned.json");
+		// Big enough that writing is not one instruction, which is what opens
+		// the window at all.
+		let texts = ["a".repeat(64 * 1024), "b".repeat(64 * 1024)];
+
+		std::thread::scope(|scope| {
+			for text in &texts {
+				let path = path.clone();
+				scope.spawn(move || {
+					for _ in 0..200 {
+						write_atomic(&path, text).expect("another writer must not fail this one");
+					}
+				});
+			}
+		});
+
+		// And the survivor is one of them whole, never a mixture.
+		let final_text = fs::read_to_string(&path).expect("the file is there");
+		assert!(
+			texts.contains(&final_text),
+			"{} bytes, neither writer's content",
+			final_text.len()
+		);
+	}
 
 	/// The example from `docs/interface-report.md`, verbatim. If this test and that
 	/// document ever disagree, the document is right: it is what somebody else

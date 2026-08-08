@@ -189,6 +189,15 @@ pub fn writable_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
 /// 0030), and pulling this crate in to save twenty lines would undo the
 /// containment the packaging gate enforces.
 ///
+/// The temporary's name carries the process **and** a counter. The process id
+/// alone is what this had, and it is only half of the question: two threads in
+/// one process share a pid, so they would share the temporary and one would
+/// rename the other's bytes into place while its own rename failed with
+/// `ENOENT`. Two writers is not a hypothetical here -- `ncfg apply` and the
+/// daemon both write `/run/netcfgd/owned.json` -- and a helper that is safe
+/// between processes and unsafe between threads is one whose safety depends on
+/// which caller reaches it.
+///
 /// # Errors
 ///
 /// Returns an `io::Error`. The temporary is removed on a failed rename, so a
@@ -196,16 +205,21 @@ pub fn writable_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
 pub fn write_atomically(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
 	use std::io::Write as _;
 	use std::os::unix::fs::OpenOptionsExt as _;
+	use std::sync::atomic::{AtomicU64, Ordering};
+
+	/// Distinguishes one call from the next within a process.
+	static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 	let directory = path.parent().unwrap_or_else(|| Path::new("."));
 	fs::create_dir_all(directory)?;
 	let temporary = directory.join(format!(
-		".{}.{}",
+		".{}.{}.{}",
 		path.file_name().map_or_else(
 			|| "tmp".to_owned(),
 			|name| name.to_string_lossy().into_owned()
 		),
-		std::process::id()
+		std::process::id(),
+		SEQUENCE.fetch_add(1, Ordering::Relaxed)
 	));
 
 	let outcome = (|| -> io::Result<()> {

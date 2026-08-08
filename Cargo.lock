@@ -96,6 +96,7 @@ name = "netcfgd-dns"
 version = "0.1.0"
 dependencies = [
  "netcfgd-model",
+ "netcfgd-testdir",
 ]
 
 [[package]]

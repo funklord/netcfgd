@@ -79,15 +79,7 @@ fn write_resolv_conf(scopes: &[Scope<'_>], path: &Path) -> Result<Vec<AppliedDns
 	let flat = render::flatten(scopes);
 	let text = render::resolv_conf(&flat, "netcfgd");
 
-	// Temp file plus rename, as everywhere else netcfgd writes: a resolver
-	// reading during the write must see the old file or the new one, never
-	// half of each. A truncated resolv.conf is a machine that cannot resolve
-	// anything.
-	let temporary = path.with_extension("netcfgd.tmp");
-	std::fs::write(&temporary, &text)
-		.map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
-	std::fs::rename(&temporary, path)
-		.map_err(|error| format!("could not replace {}: {error}", path.display()))?;
+	replace(path, &text)?;
 
 	Ok(applied(scopes))
 }
@@ -298,13 +290,68 @@ fn write_forwarder(scopes: &[Scope<'_>], forwarder: Forwarder) -> Result<Vec<App
 		}
 	}
 
-	let temporary = path.with_extension("netcfgd.tmp");
-	std::fs::write(&temporary, &text)
-		.map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
-	std::fs::rename(&temporary, &path)
-		.map_err(|error| format!("could not replace {}: {error}", path.display()))?;
+	replace(&path, &text)?;
 
 	Ok(applied(scopes))
+}
+
+/// Put `text` at `path`, through a temporary in the same directory.
+///
+/// A resolver reading during the write must see the old file or the new one
+/// and never half of each: a truncated `resolv.conf` is a machine that cannot
+/// resolve anything.
+///
+/// **The temporary's name is what makes that true for more than one writer.**
+/// Both call sites named it after the target alone -- `resolv.netcfgd.tmp` for
+/// every writer there will ever be -- and netcfgd applies from two processes,
+/// `ncfg apply` and the daemon, either of which may deliver DNS. Interleaved,
+/// one writer's bytes are renamed into place by the other writer's rename and
+/// the loser's rename fails with `ENOENT` on a file it had just written. So
+/// the pid and a counter are in the name: the pid because the second writer is
+/// another process, the counter because it need not be.
+///
+/// One function rather than two copies for the same reason it was worth
+/// finding: the copies had the same defect, and a fix applied to the one that
+/// was noticed leaves the other reading as though it were safe.
+///
+/// The leading dot is not decoration. One of these directories is read by a
+/// glob and the other by a program: `unbound.conf.d/*.conf` does not match a
+/// name beginning with a dot, and dnsmasq's `conf-dir` always skips one. The
+/// name this replaced -- `netcfgd.netcfgd.tmp` -- relied on the extension
+/// alone, which is the weaker of the two guarantees and the only one dnsmasq
+/// documents as configurable.
+fn replace(path: &std::path::Path, text: &str) -> Result<(), String> {
+	use std::sync::atomic::{AtomicU64, Ordering};
+
+	/// Distinguishes one call from the next within a process.
+	static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+	let name = path.file_name().map_or_else(
+		|| "netcfgd".to_owned(),
+		|name| name.to_string_lossy().into_owned(),
+	);
+	let temporary = path
+		.parent()
+		.unwrap_or_else(|| std::path::Path::new("."))
+		.join(format!(
+			".{name}.netcfgd.{}.{}",
+			std::process::id(),
+			SEQUENCE.fetch_add(1, Ordering::Relaxed)
+		));
+
+	let outcome = std::fs::write(&temporary, text)
+		.map_err(|error| format!("could not write {}: {error}", temporary.display()))
+		.and_then(|()| {
+			std::fs::rename(&temporary, path)
+				.map_err(|error| format!("could not replace {}: {error}", path.display()))
+		});
+	if outcome.is_err() {
+		// A failed rename would otherwise leave the staging file next to the
+		// resolver's own configuration for ever, which is how a full disk
+		// turns into a directory nobody can read.
+		let _ = std::fs::remove_file(&temporary);
+	}
+	outcome
 }
 
 /// Hand the whole scoped structure to a script, as JSON on stdin.
@@ -392,4 +439,67 @@ fn record(delivered: &[AppliedDns], run_dir: &Path) -> Result<(), String> {
 #[must_use]
 pub fn single<'a>(name: &'a str, policy: &'a DnsPolicy) -> Vec<Scope<'a>> {
 	vec![Scope { name, policy }]
+}
+
+#[cfg(test)]
+mod tests {
+	use super::replace;
+
+	/// Two writers of one resolver file must not tread on each other.
+	///
+	/// netcfgd applies from two processes -- `ncfg apply` and the daemon --
+	/// and either may deliver DNS, so `/etc/resolv.conf` had one staging name
+	/// for every writer there would ever be. The loser of that race renames a
+	/// file that is no longer there, and the caller is told it could not
+	/// replace `resolv.conf` when it had in fact written it perfectly well.
+	///
+	/// Threads, because a temporary named after the process alone would pass a
+	/// two-process test and still be one path for every thread inside one.
+	#[test]
+	fn two_writers_of_one_file_do_not_share_a_temporary() {
+		let dir = netcfgd_testdir::TestDir::new("dns-two-writers");
+		let path = dir.join("resolv.conf");
+		let texts = [
+			"nameserver 192.0.2.1\n".repeat(2048),
+			"nameserver 192.0.2.2\n".repeat(2048),
+		];
+
+		std::thread::scope(|scope| {
+			for text in &texts {
+				let path = path.clone();
+				scope.spawn(move || {
+					for _ in 0..200 {
+						replace(&path, text).expect("another writer must not fail this one");
+					}
+				});
+			}
+		});
+
+		let final_text = std::fs::read_to_string(&path).expect("the file is there");
+		assert!(
+			texts.contains(&final_text),
+			"{} bytes, neither writer's content",
+			final_text.len()
+		);
+	}
+
+	/// And nothing is left beside it for the resolver to find.
+	///
+	/// The staging file is a dotfile so that `unbound.conf.d/*.conf` cannot
+	/// glob it and dnsmasq's `conf-dir` skips it, but the stronger property is
+	/// that it is not there at all once the write returns.
+	#[test]
+	fn the_staging_file_does_not_outlive_the_write() {
+		let dir = netcfgd_testdir::TestDir::new("dns-staging");
+		let path = dir.join("netcfgd.conf");
+		replace(&path, "server=192.0.2.1\n").expect("written");
+
+		let left: Vec<String> = std::fs::read_dir(&dir)
+			.expect("readable")
+			.filter_map(Result::ok)
+			.map(|entry| entry.file_name().to_string_lossy().into_owned())
+			.filter(|name| name != "netcfgd.conf")
+			.collect();
+		assert!(left.is_empty(), "{left:?}");
+	}
 }

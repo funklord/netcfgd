@@ -2494,6 +2494,7 @@ gathered here so a new session does not have to find them.
 - **A test double is a claim about the real component, and nothing enforces it stays true.** [0080](docs/decisions/0080-a-socket-outlives-the-process-that-bound-it.md) correctly stopped treating a control socket as proof a supplicant is running — the proof is a pid file whose own path appears in the process's command line. `fake_supplicant.py` offered a socket and nothing else, so netcfgd rightly decided nothing was running and started a **real** `wpa_supplicant`, which bound the same socket and answered scans from a radio that does not exist. Seven wireless checks read blank for as long as 0080 has been in the tree ([0105](docs/decisions/0105-a-fake-that-stopped-being-believable.md)).
 - **`TERM` is unset in every container and most CI runners, and a pty test that inherits it fails fourteen ways for no reason of its own.** `tui.py` opens a pty it controls and decodes xterm's sequences by hand, then handed the child whatever `TERM` the caller happened to have. On a desk that is `xterm` and everything works; in a container ncurses cannot initialise at all. The terminal a test emulates is a property of the test — it sets `TERM=xterm` itself now. Found by running the full suite in a container for the first time, which is also the only way it could have been found.
 - **A daemon watching the config directory reconciles alongside your explicit apply, and a test that then changes kernel state by hand is racing it.** `qdisc.sh` sets a foreign qdisc to prove netcfgd leaves it alone, while the daemon still had a reset pending from the previous config change — planned when netcfgd *did* own that qdisc, and correct when planned. Landing late, it wipes the foreign one and the check reports netcfgd resetting somebody else's queueing. Seen once in a full `make live`, not reproducible in twelve standalone runs across two machines. The setup establishes its precondition by retrying now, rather than assuming it; a sleep would only have made it likely.
+- **"Atomic" through a temporary and a rename is atomic against a *reader*, and says nothing about a second *writer* until the temporary has a name of its own.** Three functions here wrote files that way, none of them shared, and each named the temporary after the target: `<name>.tmp` for every `/run` file, `<stem>.netcfgd.tmp` for `resolv.conf` and the forwarder configs, `.<name>.<pid>` for `/etc` and the secrets. Only the third distinguished writers at all, and only between processes — threads in one share a pid. netcfgd applies from **two** processes, `ncfg apply` and the daemon, and both write `owned.json` and either may deliver DNS: on one shared temporary the second writer's bytes land under the first writer's rename and the loser is told `ENOENT` for a file it wrote perfectly well. All three carry the process and a counter now ([0121](docs/decisions/0121-a-temporary-named-after-its-target-is-one-path-for-every-writer.md)). **The rule was already written down in this repository — for tests.** `netcfgd-testdir` exists because test directories collided and says "the process id alone is not enough … and a fixed name is worse still"; the production path did the worse of the two things its own test harness warns against. Each copy also read as correct, because all three comments give the reader argument for temp-and-rename and none of them mentions a second writer, so there was no sentence to disagree with.
 - **A requirement quoted without its scope is a requirement invented.** Design §10.4 reads *"target < 4 MB RSS steady-state **for nano**"*, and [0021](docs/decisions/0021-no-nano-tier.md) dropped the nano tier — a qualifier three words long, in the same sentence, which survived being copied into a Makefile comment, two decision records and this file in a single session. The measurement was correct every time; nobody checked what the number was *for*. `size-budget.txt` had carried exactly that distinction since M5 and the RSS gate had not.
 - **RSS is mostly somebody else's text, and which C library you use moves it by a third.** netcfgd peaks at ~4.2 MB on glibc and **~2.9 MB on musl** — the platform the size posture targets and the one the apk ships — for the same work. `RssAnon`, what netcfgd actually allocated, is ~520 kB against ~205 kB: glibc's allocator arenas are most of that difference. Pss is little over half of VmHWM either way, because the rest is text shared with every process on the machine. A footprint gate that prints one number invites the reading that number cannot support, so `make rss` prints three and pins the pessimistic one ([0104](docs/decisions/0104-the-four-megabytes-belonged-to-a-tier-that-was-dropped.md)).
 - **A check can assert a fact about the machine while reading as a fact about the code.** `ppp.sh` demanded that pppd fail with a message naming `/dev/ppp` — true where the device is out of reach, which is an ordinary desk. Where it *is* present, real root or the privileged container this suite is meant to run in, pppd parses netcfgd's whole options file and **accepts it, exiting 0** — and the check called that a failure. Green on the machine in front of you, red wherever the thing under test is actually available: the third instance of that shape in one session, after `tunnel.sh` and `openvpn.sh`. The script now says which world it is in and asserts the stronger thing where it can ([0103](docs/decisions/0103-a-check-that-asserted-the-machine-rather-than-the-code.md)).
@@ -2559,13 +2560,34 @@ gathered here so a new session does not have to find them.
   and `qdisc.sh`'s own comment says the two are running concurrently there, a
   daemon reconcile started by `write_config` alongside the explicit `apply`.
 
-  **The experiment was run and did not reproduce.** A full instrumented suite
-  in the container passed outright, which makes the count two failures and two
-  passes across four container runs and none on the host. Intermittent is
-  itself evidence: it argues for a race rather than a deterministic mistake,
-  which is what the hypothesis below predicts. `qdisc.sh` now dumps the owned
-  state on that failure path, so the next occurrence captures what would settle
-  it instead of being another sighting.
+  **Reading that path found a second defect underneath the first, and it is
+  fixed** ([0121](docs/decisions/0121-a-temporary-named-after-its-target-is-one-path-for-every-writer.md)).
+  The lost update above is about the read-modify-write; this is about the write
+  itself. `state::write_atomic` staged every `/run` file at `<name>.tmp` — one
+  path, shared by every writer there will ever be — so two processes writing
+  `owned.json` do not merely lose an update, they publish each other's bytes:
+  the second `write` destroys the first's staged content, the first `rename`
+  puts the *second's* bytes under the target, and the second `rename` gets
+  `ENOENT` on a file it had written perfectly well. Five of the six call sites
+  discard that error with `let _ =`. The same shape was in `netcfgd-dns`, which
+  writes `/etc/resolv.conf` and the forwarder configs and is likewise reached
+  from both processes. Both now stage under `.<name>.<pid>.<n>`, and the only
+  copy that had ever distinguished writers — `config::write_atomically`, by pid
+  — gained the counter, because two threads in one process share a pid.
+
+  **It is not established that this was the qdisc failure.** Both defects can
+  land stale content in `owned.json` and neither has been caught doing it here.
+  Saying so is the point: two fixes for this failure have already been
+  committed with explanations that turned out to be wrong.
+
+  **The experiment was run three times and did not reproduce.** Full
+  instrumented suites in the container passed outright, which makes the count
+  two failures and three passes across five container runs and none on the
+  host. Intermittent is itself evidence: it argues for a race rather than a
+  deterministic mistake, which is what the hypothesis below predicts.
+  `qdisc.sh` now dumps the owned state on that failure path, so the next
+  occurrence captures what would settle it instead of being another sighting —
+  and it has still never fired.
 
   If the daemon's pass holds state read *before* the CLI cleared `qdisc`, its
   write puts `veth0` back into the owned set while the kernel already has
