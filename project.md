@@ -2449,6 +2449,22 @@ gathered here so a new session does not have to find them.
   aligning shared technology is its own deliberate piece of work rather than
   something done from inside one repository.
 
+- **The remote protocol is being authored elsewhere**, and what netcfgd needs
+  from it is written down in
+  [docs/shared-protocol-brief.md](docs/shared-protocol-brief.md). fuzzypickles
+  has been asked to produce the shared IPC and network protocol for itself,
+  netcfgd and a planned `raidcfgd`. **The timing is the whole of the benefit**:
+  `wire/` and `agent/` do not exist, and the 2026-08-04 plan was to *copy* that
+  design into netcfgd's own C — so consuming a library means the second
+  implementation is never written. What this reopens is decision 4 of
+  `docs/remote-access-feasibility.md` §8, and it is the cross-project half of
+  the entry above arriving from the other side. **The local socket is not part
+  of it**: `docs/socket-protocol.md` §3.1 argues why newline-delimited JSON is
+  a stated product property rather than a placeholder, and the brief repeats
+  the argument for a reader who has not read this tree. `raidcfgd` does not
+  exist yet, which is the risk worth watching — two real consumers and one
+  imagined one.
+
 - **Man pages.** `lintian` reports `no-manual-page` for both binaries. Held
   deliberately until the software is proven: documenting an interface that has
   not survived contact with hardware documents guesses.
