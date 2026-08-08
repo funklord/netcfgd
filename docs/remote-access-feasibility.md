@@ -187,12 +187,17 @@ expectation somebody plans around:
   two-layer envelope needs, and `sealed` is defined as a coded region plus a tag
   rather than as a second mechanism. So this half is not merely deletable later;
   it should not be written at all.
-- **Chunking is not moving in, and building around the expectation that it will
-  would be waiting for something that is not coming.** This is a scope exclusion
-  rather than a gap in the implementation: situ describes a *message* and does
-  not run a *protocol*, and its own not-translated list rules out service and
-  RPC definitions entirely. Retransmission, reassembly and timers are protocol
-  dynamics rather than layout.
+- **Chunking is not moving in on any timescale worth waiting for.** State the
+  reason precisely, because a first version of this note overstated it: situ's
+  §2 non-goals say **nothing** about protocols or protocol dynamics, and the
+  "service and RPC definitions are out of scope entirely" line is from its
+  *protobuf importer*, about what a `.proto` will not translate. So this is
+  **unaddressed and unplanned, not excluded**. There is no construct for
+  retransmission, reassembly or timers today, nothing about them in the
+  thirteen-phase plan, and nothing anywhere in that document about
+  request/response correlation. Two of its non-goals -- no dynamic allocation
+  ever, and "not a parser combinator library... not a runtime interpreter" --
+  are also what a state machine would have to argue with.
 
 The advice below is therefore corrected rather than dropped, because the split
 it draws is right and only the expectation attached to one half was wrong.

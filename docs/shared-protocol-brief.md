@@ -228,11 +228,15 @@ opposite ways, and planning around it would put the risk in the wrong place:
   tag coverage recomputes innermost first, and the sealed interior is reachable
   only through a view type the verified open produces. So do not write that half
   at all, rather than writing it to be deleted.
-- **Chunking is not going to be absorbed.** It is excluded by scope rather than
-  missing from the implementation: situ describes a message and does not run a
-  protocol, and its own non-scope list rules out service and RPC definitions
-  entirely. Retransmission, reassembly and the memory bound on a half-finished
-  response are protocol dynamics.
+- **Chunking is not going to be absorbed on any timescale worth waiting for**,
+  and the reason is weaker than a first version of this note claimed. situ's §2
+  non-goals say nothing about protocols at all; the "service and RPC out of
+  scope entirely" line is from its protobuf importer, about what a `.proto`
+  will not translate. So chunking is **unaddressed and unplanned rather than
+  excluded** — no construct for retransmission, reassembly or timers, nothing
+  in the thirteen-phase plan, and nothing about request/response correlation
+  anywhere in that document. Planning around its arrival is still wrong; the
+  door is merely not bolted.
 
 The consequence for whoever builds `agent/`: **the chunking state machine is
 permanent code and should be designed as such.** Section 5 of this document
