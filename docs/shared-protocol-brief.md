@@ -210,7 +210,7 @@ to revisit any of them, deliberately.
 3. **The local hop stays JSON**; the agent translates. Section 4.
 4. **`situ` describes the frame**, with Monocypher bound as an extern codec,
    and the hand-written half built to be deleted as situ absorbs chunking and
-   encryption.
+   encryption. **Half of that has been corrected since** — see the note below.
 5. **Makefiles and qmake only** in this tree, no CMake.
 
 Item 4 is worth flagging: netcfgd's own §9 evaluated `situ` against the control
@@ -218,6 +218,31 @@ socket and split the answer — the *framing* is describable, and situ's
 `unbounded-scan` rule would have predicted the `MAX_LINE` bound netcfgd reached
 by judgement; the *payload* is not, because a JSON object has no byte layout to
 pin. That split is the same seam as section 4's.
+
+**Correction to item 4, from the library author (2026-08-08).** The phrase "as
+situ absorbs chunking and encryption" bundled two things that have since gone
+opposite ways, and planning around it would put the risk in the wrong place:
+
+- **Encryption is absorbed already.** situ's phases 7 and 8 — extern codecs and
+  the cryptographic model — both record status *complete*, not planned. Nested
+  tag coverage recomputes innermost first, and the sealed interior is reachable
+  only through a view type the verified open produces. So do not write that half
+  at all, rather than writing it to be deleted.
+- **Chunking is not going to be absorbed.** It is excluded by scope rather than
+  missing from the implementation: situ describes a message and does not run a
+  protocol, and its own non-scope list rules out service and RPC definitions
+  entirely. Retransmission, reassembly and the memory bound on a half-finished
+  response are protocol dynamics.
+
+The consequence for whoever builds `agent/`: **the chunking state machine is
+permanent code and should be designed as such.** Section 5 of this document
+already calls it the largest and highest-risk piece; it is also the piece that
+was, until now, expected to be temporary. Those two beliefs together are how a
+component ends up under-built.
+
+`docs/remote-access-feasibility.md` §5.0 carries the same correction in longer
+form. Nothing else in this brief changes: the local hop, the tiers, the
+freshness rule and the constraints are untouched.
 
 ---
 
