@@ -504,9 +504,7 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 
 	// Record what happened before reporting it. A journal that exists only in
 	// the terminal is no use to whoever finds the machine afterwards.
-	let mut owned = state::read_owned(&run_dir);
-	owned.absorb(&executor.effects);
-	if let Err(error) = state::write_owned(&run_dir, &owned) {
+	if let Err(error) = state::update_owned(&run_dir, |owned| owned.absorb(&executor.effects)) {
 		eprintln!("ncfg: could not record ownership: {error}");
 	}
 	if let Err(error) = state::write_journal(&run_dir, &journal) {

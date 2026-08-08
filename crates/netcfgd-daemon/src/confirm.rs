@@ -130,9 +130,7 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 		);
 	};
 	let (_, journal) = state.apply(&PlanOptions::default(), &mut executor);
-	let mut owned = run_state::read_owned(&state.paths.run);
-	owned.absorb(&executor.effects);
-	let _ = run_state::write_owned(&state.paths.run, &owned);
+	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	let _ = confirm::clear_window(&state.paths.run);
 	state.reobserve();
 

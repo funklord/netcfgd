@@ -567,6 +567,46 @@ pub fn write_owned(run_dir: &Path, state: &OwnedState) -> io::Result<()> {
 	write_atomic(&run_dir.join("owned.json"), &text)
 }
 
+/// Change recorded state, with nobody else changing it in between.
+///
+/// **This is how ownership is recorded. [`read_owned`] and [`write_owned`] as
+/// a pair are not**, and the difference is the whole reason this exists.
+///
+/// Six places did the pair by hand -- read, fold in what an apply just did,
+/// write -- and two *processes* run them: `ncfg apply` builds a plan and drives
+/// an executor in its own process, and the daemon converges on inotify, on
+/// netlink events and on a socket request. Two read-modify-writes of one file
+/// with nothing between them lose an update, and the direction that loses is
+/// the dangerous one. [`OwnedState::absorb`] only ever folds in what *this*
+/// apply did, so a pass whose own effects are empty writes back whatever it
+/// read: a stale read therefore does not merely fail to record something, it
+/// **puts back** a record the other process had just removed. netcfgd then
+/// believes it owns an object it has already given up, and ownership is what
+/// decides whether netcfgd may reset a qdisc, withdraw an address or delete a
+/// link at all.
+///
+/// The lock is a separate file rather than `owned.json` itself, because
+/// `owned.json` is replaced by a rename: a lock taken on it is a lock on an
+/// inode that the next writer unlinks, which is a lock two writers can hold at
+/// once. `owned.lock` is never renamed and never read.
+///
+/// A failure to take the lock is returned rather than swallowed. Carrying on
+/// unlocked is exactly the behaviour this replaces, and a caller that wants it
+/// can have it by ignoring the error -- deliberately, and in its own words.
+///
+/// # Errors
+///
+/// Returns an `io::Error` if the lock cannot be taken, or if the write fails.
+pub fn update_owned<F>(run_dir: &Path, change: F) -> io::Result<()>
+where
+	F: FnOnce(&mut OwnedState),
+{
+	let _guard = netcfgd_sys::lock::FileLock::exclusive(&run_dir.join("owned.lock"))?;
+	let mut owned = read_owned(run_dir);
+	change(&mut owned);
+	write_owned(run_dir, &owned)
+}
+
 /// Write the per-interface projections of a whole-host document.
 ///
 /// Section 2 is explicit that the whole-host document is canonical and these
@@ -766,6 +806,50 @@ mod tests {
 			"{} bytes, neither writer's content",
 			final_text.len()
 		);
+	}
+
+	/// Two updaters of the ownership record must not lose each other's changes.
+	///
+	/// The read-modify-write that six call sites did by hand, run from two
+	/// processes: `ncfg apply` in its own, and the daemon in another. This is
+	/// the defect [`update_owned`] exists for, and it is worse than "one change
+	/// does not stick" -- [`OwnedState::absorb`] folds in only what *this*
+	/// apply did, so a pass with nothing of its own writes back everything it
+	/// read, and a stale read therefore **restores** a record the other process
+	/// had just dropped. Ownership is what decides whether netcfgd may reset a
+	/// qdisc or delete a link, so a restored record is the unsafe direction.
+	///
+	/// Deterministic rather than hopeful. Both threads start together on a
+	/// barrier and hold their change open for long enough that an unlocked
+	/// implementation *must* interleave; with the lock the wait is inside the
+	/// critical section, so the second updater reads what the first wrote.
+	/// Without it this leaves one name where there should be two, every time.
+	#[test]
+	fn two_updaters_do_not_lose_each_others_records() {
+		let dir = netcfgd_testdir::TestDir::new("state-two-updaters");
+		let names = ["veth0", "veth1"];
+		let start = std::sync::Barrier::new(names.len());
+
+		std::thread::scope(|scope| {
+			for name in names {
+				let start = &start;
+				let run = dir.to_path_buf();
+				scope.spawn(move || {
+					start.wait();
+					update_owned(&run, |owned| {
+						owned.qdisc.push(name.to_owned());
+						// Long enough that an unlocked reader has certainly
+						// read, and short enough that a person waits for it.
+						std::thread::sleep(std::time::Duration::from_millis(150));
+					})
+					.expect("the record is updatable");
+				});
+			}
+		});
+
+		let mut recorded = read_owned(&dir).qdisc;
+		recorded.sort();
+		assert_eq!(recorded, names, "an update was lost");
 	}
 
 	/// The example from `docs/interface-report.md`, verbatim. If this test and that

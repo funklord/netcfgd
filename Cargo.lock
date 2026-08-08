@@ -109,6 +109,7 @@ dependencies = [
  "netcfgd-observe",
  "netcfgd-plan",
  "netcfgd-proto",
+ "netcfgd-sys",
  "netcfgd-testdir",
  "serde",
  "serde_json",

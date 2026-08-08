@@ -2494,6 +2494,7 @@ gathered here so a new session does not have to find them.
 - **A test double is a claim about the real component, and nothing enforces it stays true.** [0080](docs/decisions/0080-a-socket-outlives-the-process-that-bound-it.md) correctly stopped treating a control socket as proof a supplicant is running — the proof is a pid file whose own path appears in the process's command line. `fake_supplicant.py` offered a socket and nothing else, so netcfgd rightly decided nothing was running and started a **real** `wpa_supplicant`, which bound the same socket and answered scans from a radio that does not exist. Seven wireless checks read blank for as long as 0080 has been in the tree ([0105](docs/decisions/0105-a-fake-that-stopped-being-believable.md)).
 - **`TERM` is unset in every container and most CI runners, and a pty test that inherits it fails fourteen ways for no reason of its own.** `tui.py` opens a pty it controls and decodes xterm's sequences by hand, then handed the child whatever `TERM` the caller happened to have. On a desk that is `xterm` and everything works; in a container ncurses cannot initialise at all. The terminal a test emulates is a property of the test — it sets `TERM=xterm` itself now. Found by running the full suite in a container for the first time, which is also the only way it could have been found.
 - **A daemon watching the config directory reconciles alongside your explicit apply, and a test that then changes kernel state by hand is racing it.** `qdisc.sh` sets a foreign qdisc to prove netcfgd leaves it alone, while the daemon still had a reset pending from the previous config change — planned when netcfgd *did* own that qdisc, and correct when planned. Landing late, it wipes the foreign one and the check reports netcfgd resetting somebody else's queueing. Seen once in a full `make live`, not reproducible in twelve standalone runs across two machines. The setup establishes its precondition by retrying now, rather than assuming it; a sleep would only have made it likely.
+- **A lost update against a merge that only *adds* does not drop a record, it brings one back.** The instinct about a read-modify-write race is that a change fails to stick, and that ownership under-claimed is the safe direction — which is what `read_owned`'s own doc comment says about an unreadable file, correctly. It does not hold for the race. `absorb` folds in what *this* apply did and nothing else, so a pass with no effects of its own writes back everything it read: a stale read **restores** the record the other process had just removed, and netcfgd goes on believing it owns an object it has given up. Ownership is what licenses every destructive thing in a plan. Two properties of one function pointing in opposite directions, and only one of them was written down ([0122](docs/decisions/0122-ownership-is-changed-under-a-lock-because-two-processes-change-it.md)).
 - **"Atomic" through a temporary and a rename is atomic against a *reader*, and says nothing about a second *writer* until the temporary has a name of its own.** Three functions here wrote files that way, none of them shared, and each named the temporary after the target: `<name>.tmp` for every `/run` file, `<stem>.netcfgd.tmp` for `resolv.conf` and the forwarder configs, `.<name>.<pid>` for `/etc` and the secrets. Only the third distinguished writers at all, and only between processes — threads in one share a pid. netcfgd applies from **two** processes, `ncfg apply` and the daemon, and both write `owned.json` and either may deliver DNS: on one shared temporary the second writer's bytes land under the first writer's rename and the loser is told `ENOENT` for a file it wrote perfectly well. All three carry the process and a counter now ([0121](docs/decisions/0121-a-temporary-named-after-its-target-is-one-path-for-every-writer.md)). **The rule was already written down in this repository — for tests.** `netcfgd-testdir` exists because test directories collided and says "the process id alone is not enough … and a fixed name is worse still"; the production path did the worse of the two things its own test harness warns against. Each copy also read as correct, because all three comments give the reader argument for temp-and-rename and none of them mentions a second writer, so there was no sentence to disagree with.
 - **A requirement quoted without its scope is a requirement invented.** Design §10.4 reads *"target < 4 MB RSS steady-state **for nano**"*, and [0021](docs/decisions/0021-no-nano-tier.md) dropped the nano tier — a qualifier three words long, in the same sentence, which survived being copied into a Makefile comment, two decision records and this file in a single session. The measurement was correct every time; nobody checked what the number was *for*. `size-budget.txt` had carried exactly that distinction since M5 and the RSS gate had not.
 - **RSS is mostly somebody else's text, and which C library you use moves it by a third.** netcfgd peaks at ~4.2 MB on glibc and **~2.9 MB on musl** — the platform the size posture targets and the one the apk ships — for the same work. `RssAnon`, what netcfgd actually allocated, is ~520 kB against ~205 kB: glibc's allocator arenas are most of that difference. Pss is little over half of VmHWM either way, because the rest is text shared with every process on the machine. A footprint gate that prints one number invites the reading that number cannot support, so `make rss` prints three and pins the pessimistic one ([0104](docs/decisions/0104-the-four-megabytes-belonged-to-a-tier-that-was-dropped.md)).
@@ -2553,12 +2554,19 @@ gathered here so a new session does not have to find them.
   **the loop only plans, it never applies**, so nothing in it can correct a
   record that is wrong.
 
-  **The mechanism to check first, which is a real finding either way:
-  `state::write_owned` has no locking, and two processes call it.** `ncfg apply`
-  writes it from `netcfgd-cli`, and the daemon writes it from five places. It is
-  a read-modify-write of one file, so a lost update is structurally possible —
-  and `qdisc.sh`'s own comment says the two are running concurrently there, a
-  daemon reconcile started by `write_config` alongside the explicit `apply`.
+  **The mechanism to check first was a real finding, and it is closed**
+  ([0122](docs/decisions/0122-ownership-is-changed-under-a-lock-because-two-processes-change-it.md)).
+  `state::write_owned` had no locking and two processes call it: `ncfg apply`
+  from `netcfgd-cli`, the daemon from five places — and `qdisc.sh`'s own comment
+  says the two run concurrently there, a daemon reconcile started by
+  `write_config` alongside the explicit `apply`. **A lost update here is the
+  unsafe direction, not the safe one**: `absorb` folds in only what *this* apply
+  did, so a pass with nothing of its own writes back everything it read, and a
+  stale read therefore **restores** a record the other process had just dropped.
+  Ownership is what licenses every destructive thing netcfgd does. The six
+  hand-written read-modify-writes are one `update_owned` now, holding a `flock`
+  across the read and the write — demonstrated with a two-thread test that loses
+  a record every time the lock line is removed.
 
   **Reading that path found a second defect underneath the first, and it is
   fixed** ([0121](docs/decisions/0121-a-temporary-named-after-its-target-is-one-path-for-every-writer.md)).
@@ -2575,10 +2583,12 @@ gathered here so a new session does not have to find them.
   copy that had ever distinguished writers — `config::write_atomically`, by pid
   — gained the counter, because two threads in one process share a pid.
 
-  **It is not established that this was the qdisc failure.** Both defects can
-  land stale content in `owned.json` and neither has been caught doing it here.
-  Saying so is the point: two fixes for this failure have already been
-  committed with explanations that turned out to be wrong.
+  **It is not established that either was the qdisc failure**, and that is the
+  sentence to keep. Both can land stale content in `owned.json`; neither has
+  been caught doing it here; two fixes for this failure have already been
+  committed with explanations that turned out to be wrong. What has changed is
+  that the two structural routes to the symptom are gone, so **if it recurs, it
+  is something else** — which is worth more than another sighting.
 
   **The experiment was run three times and did not reproduce.** Full
   instrumented suites in the container passed outright, which makes the count
@@ -2589,13 +2599,16 @@ gathered here so a new session does not have to find them.
   occurrence captures what would settle it instead of being another sighting —
   and it has still never fired.
 
-  If the daemon's pass holds state read *before* the CLI cleared `qdisc`, its
-  write puts `veth0` back into the owned set while the kernel already has
-  `noqueue`. Every later plan then proposes a reset that changes nothing, which
-  is exactly the symptom, and it explains why the host passes: a different
-  interleaving. **This is a hypothesis with the code read but not demonstrated.**
-  The experiment is to dump `/run/netcfgd/`'s owned state at the moment the
-  guard times out and see whether `qdisc` contains `veth0`.
+  The hypothesis this section carried: if the daemon's pass holds state read
+  *before* the CLI cleared `qdisc`, its write puts `veth0` back into the owned
+  set while the kernel already has `noqueue`. Every later plan then proposes a
+  reset that changes nothing, which is exactly the symptom, and it explains why
+  the host passes — a different interleaving. **That interleaving is now
+  demonstrated in a test and prevented**, which is not the same as having caught
+  it happening in `qdisc.sh`. The experiment still stands, and its answer is now
+  more informative than it was: dump `/run/netcfgd/`'s owned state at the moment
+  the guard times out, and if `qdisc` still contains `veth0` the cause is
+  somewhere nobody has looked.
 
   Two earlier explanations were wrong and are recorded above so they are not
   tried again: the observed qdisc was never absent, and `delete_root` already

@@ -335,9 +335,7 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 		return;
 	};
 	let (plan, journal) = state.apply(&PlanOptions::default(), &mut executor);
-	let mut owned = run_state::read_owned(&state.paths.run);
-	owned.absorb(&executor.effects);
-	let _ = run_state::write_owned(&state.paths.run, &owned);
+	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 
 	if let Some(failure) = journal.failure() {
 		eprintln!(
@@ -618,18 +616,18 @@ fn remember_told(state: &State, phase: netcfgd_model::HookPhase, told: &[(String
 	if told.is_empty() {
 		return;
 	}
-	let mut owned = run_state::read_owned(&state.paths.run);
-	for (interface, value) in told {
-		owned
-			.hook_state
-			.retain(|record| &record.interface != interface || record.phase != phase);
-		owned.hook_state.push(netcfgd_model::ObservedHookState {
-			interface: interface.clone(),
-			phase,
-			value: value.clone(),
-		});
-	}
-	let _ = run_state::write_owned(&state.paths.run, &owned);
+	let _ = run_state::update_owned(&state.paths.run, |owned| {
+		for (interface, value) in told {
+			owned
+				.hook_state
+				.retain(|record| &record.interface != interface || record.phase != phase);
+			owned.hook_state.push(netcfgd_model::ObservedHookState {
+				interface: interface.clone(),
+				phase,
+				value: value.clone(),
+			});
+		}
+	});
 }
 
 /// Put back what drifted, but only on interfaces whose policy says to.
@@ -652,9 +650,7 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 		return;
 	};
 	let journal = netcfgd_apply::apply(&restricted, &mut executor);
-	let mut owned = run_state::read_owned(&state.paths.run);
-	owned.absorb(&executor.effects);
-	let _ = run_state::write_owned(&state.paths.run, &owned);
+	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	let _ = run_state::write_journal(&state.paths.run, &journal);
 	state.reobserve();
 
@@ -701,9 +697,7 @@ fn apply_request(
 		Err(message) => return Response::error(message),
 	};
 	let (_, journal) = state.apply(&options, &mut executor);
-	let mut owned = run_state::read_owned(&state.paths.run);
-	owned.absorb(&executor.effects);
-	let _ = run_state::write_owned(&state.paths.run, &owned);
+	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	state.reobserve();
 
 	match (&window, last_good) {

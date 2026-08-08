@@ -17,6 +17,10 @@ netcfgd-model   = { path = "../netcfgd-model" }
 netcfgd-observe = { path = "../netcfgd-observe" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
 netcfgd-proto   = { path = "../netcfgd-proto" }
+# For `flock`, and nothing else. Constraint 4 keeps every syscall in one
+# audited crate; this crate already reaches it through netcfgd-apply and
+# netcfgd-observe, so the edge is a name rather than a new thing in the binary.
+netcfgd-sys     = { path = "../netcfgd-sys" }
 serde.workspace      = true
 serde_json.workspace = true
 
