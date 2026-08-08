@@ -206,6 +206,22 @@ sent. Parsers and the model treat those as bytes and must not assume
 otherwise. The two rules do not conflict: one governs the repository, the
 other governs the wire.
 
+The rule is enforced, not merely stated: `ascii_only = true` in
+`.style-gate.toml`, checked by `make style` over the 206 files the gate
+sees. In Python — the nine scripts under `tests/live/` and `tools/` — it
+means ASCII *outside string literals*, because the gate reads those files
+with `tokenize`. Rust and everything else get a whole-file byte check,
+there being no tokenizer here for them, and so does a Python file that will
+not tokenise: a file nobody can parse is not a file that has been cleared.
+
+That distinction is the rule above expressed mechanically — the text this
+project writes about itself against the data it handles — and it exists
+because a byte scan could not draw it. A sibling project that prints two
+status ticks had to switch the check off for a whole file to keep them,
+which switched it off for that file's comments as well, and an em dash duly
+arrived in one. **An exception wider than its reason is how a rule stops
+being enforced.**
+
 ## 6. Modules and comments
 
 Every module opens with a `//!` doc comment stating its single
