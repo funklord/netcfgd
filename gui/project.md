@@ -411,10 +411,15 @@ Four rules, all of them the same rule:
    5 ask of it: it says which machine it is talking to and what the operator may
    do, it shows a plan with its reasons before applying anything, it consents to
    a refusal one tick at a time, and it keeps up with the machine on its own.
-2. **`wire/` plus `agent/`, LAN only**, with the fuzzing standard from the first
-   commit.
+2. **`wire/` plus `agent/`, LAN first**, with the fuzzing standard from the
+   first commit.
 3. **Android**, which by then is a kit and a transport choice rather than a port.
-4. Anything beyond a LAN, if it is ever wanted.
+4. **Beyond a LAN, which is wanted** (2026-08-08). This read "if it is ever
+   wanted" and is not an *if* any more. It stays last because the staging is
+   right, but it is a destination rather than a maybe -- so item 2 must not
+   bake in an assumption that both endpoints are directly reachable or that the
+   network is friendly. `../docs/remote-access-feasibility.md`, "Beyond the
+   LAN", has the four consequences.
 
 ## 9. Questions to raise rather than answer alone
 

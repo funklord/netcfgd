@@ -205,8 +205,15 @@ to revisit any of them, deliberately.
 1. **C/C++ with Monocypher** for the protocol and the agent, one crypto
    implementation across the family. (The alternative was Rust in its own
    workspace, at the cost of a second implementation of the same primitives.)
-2. **LAN only first.** No rendezvous, no hole punching, no relay — the case a
-   person actually wants is "I am at home, fix the wifi".
+2. **LAN only first**, and *first* is the operative word — no rendezvous, no
+   hole punching, no relay in the first cut, because the case a person actually
+   wants is "I am at home, fix the wifi". **Superseded in intent 2026-08-08:
+   netcfgd is not going to remain LAN-only.** The staging stands; the
+   destination is not a LAN. For the library that means **do not read this item
+   as a permanent constraint** — a design that assumes both endpoints are
+   directly reachable, or that a hostile network is somebody else's problem, is
+   built against a premise that has already expired. See
+   `docs/remote-access-feasibility.md`, "Beyond the LAN".
 3. **The local hop stays JSON**; the agent translates. Section 4.
 4. **`situ` describes the frame**, with Monocypher bound as an extern codec,
    and the hand-written half built to be deleted as situ absorbs chunking and

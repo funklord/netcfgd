@@ -341,7 +341,13 @@ Answered on 2026-08-04, and carried into `gui/project.md`:
 
 1. **C/C++ with Monocypher** for the protocol and the agent, in the sibling
    projects' style -- one crypto implementation across the family.
-2. **LAN only first.** No rendezvous, no hole punching, no relay.
+2. **LAN only first** -- and *first* is now the operative word. No rendezvous,
+   no hole punching, no relay in the first cut. **Superseded in intent on
+   2026-08-08: netcfgd is not going to remain LAN-only.** The staging holds,
+   the destination does not. What that changes is recorded under "Beyond the
+   LAN" below; the short version is that anything designed as if both
+   endpoints were directly reachable, or as if a hostile network were somebody
+   else's problem, is designed against a premise that has already expired.
 3. **The local hop stays JSON**, pinned by `docs/schema/socket.json`; the agent
    translates. Two encodings, one on each side of a seam that already exists.
 4. **Makefiles and qmake only**, no CMake in this tree, even though a sibling
@@ -359,6 +365,41 @@ committed.
 
 Whether this is M8 or a milestone of its own is also still open. It is not
 RESTCONF's replacement and M9 should stay where it is.
+
+### Beyond the LAN, which is now a destination rather than a maybe
+
+Stated 2026-08-08. Decision 2 above staged the work LAN-first, which was and
+remains right; what has changed is that the second stage is intended rather
+than hypothetical, and `gui/project.md` §8's "anything beyond a LAN, if it is
+ever wanted" is no longer an *if*.
+
+Four consequences, none of which needs deciding now and all of which are cheap
+to design around and expensive to retrofit:
+
+- **The threat model is the one this document already half-assumed and should
+  now say outright.** A forged or replayed frame does not leak a message here,
+  it reconfigures infrastructure -- and the machine most likely to be attacked
+  is the one being reconfigured because it is already misbehaving. §5.4's
+  freshness rule stops being hygiene and becomes a security property.
+- **Do not assume both endpoints are directly reachable.** A datagram may cross
+  NAT, reach a device that is asleep, or arrive by way of a relay. That argues
+  for a self-contained frame -- one carrying who is speaking, so a receiver
+  needs no prior session to make sense of it -- which is what `fuzznet` has
+  settled on for exactly this reason. A session handle established by handshake
+  is the optimisation, not the base case.
+- **Metadata in the clear becomes an attacker's index.** Anything the frame
+  exposes before its tag verifies tells an observer which traffic is worth
+  attacking. `fuzznet` moved the capability identifier inside the seal on these
+  grounds; the general rule is that a plaintext header field has to earn its
+  place by being needed *before* a key can be selected.
+- **The agent becomes a service exposed to a hostile network**, not a
+  convenience on the same subnet. `gui/project.md` §9 already asks which
+  package it ships in; that question is now also about who is responsible for
+  its exposure, and constraint 6 -- the daemon never grows a network listener
+  -- is what keeps the answer bounded.
+
+None of this changes what the daemon does. It changes what the agent must
+survive.
 
 ## 9. The verdict
 
