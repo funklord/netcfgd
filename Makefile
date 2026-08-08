@@ -14,11 +14,14 @@
 #                         measure honestly
 #   make live          -- the supplicant tests that need a real
 #                         wpa_supplicant and a privileged netns; not in check
+#   make live-container -- the live suite in a container, with the programs
+#                         and privileges this machine cannot give it
 #   make fuzz          -- the fuzz targets
 #   make conformance   -- the two client implementations, asked the same
 #                         questions
 #   make adapters      -- each adapter, built and checked to the core's bar
 #   make nm-containment -- assert the core's manifest has gained no entry
+#   make linkage       -- what the shipped binary is allowed to link
 #   make style         -- the shared source gate, plus project.md held to the
 #                         tree it describes
 #   make fmt           -- rustfmt, checking only; `fmt-fix` rewrites
@@ -46,7 +49,7 @@
 #   make hooks         -- install the git hooks from tools/hooks/
 #   make clean         -- remove build products
 #   make veryclean     -- clean, plus the build directories
-#   make distclean     -- veryclean, plus editor and tool droppings
+#   make distclean     -- veryclean, plus what the tooling here wrote
 #   make help          -- this list
 #
 
