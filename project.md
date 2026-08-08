@@ -670,6 +670,16 @@ Source, comments and commit messages are **ASCII**; write `--` where prose would
 
 Changing any of the above is a convention change: raise it rather than adjusting the default in passing.
 
+### The bodies were rewrapped, and every hash from `4c8eed0` changed
+
+The 75-column body limit was stated here long before anything enforced it, and only the subject was ever checked — so this log accumulated **58 commits with a body line past 75**, wrapped at 76 to 80 columns. `tools/hooks/commit-msg` checks the body now, and those 58 were rewrapped to match.
+
+**`master` no longer shares history with `origin/master`.** 67 commits were rebuilt, of which 50 were already pushed. A clone taken before this has a history that no longer exists here and must `git reset --hard` to it rather than merge, or git will present the two as parallel work and offer to combine them. **Nothing has been pushed**: `origin/master` still holds the old history, so the divergence is local until somebody force-pushes. The pre-rewrite tip is tagged **`pre-body-rewrap`**.
+
+Line breaks are the only thing that moved, and that is checked rather than asserted. New commits were built with `commit-tree` from the *existing* tree objects rather than by replaying diffs, so a tree cannot drift. Afterwards: all 335 trees identical and in the same order, `git diff` between the old tip and the new one empty, authors and both timestamps identical per commit, subjects byte-identical, and every message identical once whitespace is removed — 126,166 words before and after. The hook refuses 0 of 335 now, against 58 before.
+
+Two details worth keeping. A run of two or more spaces is treated as **unbreakable**, because the three in this history sit inside quoted diagnostics (`qdisc.reset veth0  qdisc: <absent>`) and collapsing one would corrupt the output being quoted. And the rewrapper asks the hook which messages to touch rather than reflowing everything in range: a paragraph already wrapped at 70 is not wrong, and rewriting somebody's line breaks to fill 75 is churn rather than a fix. Without that it reflowed 65 messages instead of 58. The proof paid for itself before either of those was known — it refused the first run outright, on a line 423 columns wide, where the space-gluing had swallowed a whole paragraph into one unbreakable token.
+
 ### `situ` against the control socket, and why the answer splits
 
 Re-evaluated 2026-08-07, while writing `docs/socket-protocol.md`, and the
