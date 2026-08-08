@@ -417,4 +417,59 @@ netcfgd
 # lookup, which is a page. It is here rather than folded into the row above
 # because it is not a feature -- it is what it cost to make `openvpn.sh` test
 # netcfgd on a machine that has openvpn installed (0101).
-total 2267672
+#
+# +68 KB across the one hundred and twenty-four commits since the entry above,
+# measured by building the release binary at thirteen points along that range
+# in a separate worktree rather than attributed by guess:
+#
+#   e98f74f  2267672   the figure this file last recorded
+#   a5eac3a  2267672   +0
+#   973c54d  2267672   +0
+#   3f1e1dc  2267672   +0
+#   cbe6afe  2267672   +0
+#   77d3f5e  2267672   +0
+#   d55f538  2267672   +0
+#   d972479  2279960   +12  a network added over the socket
+#   53a306b  2312728   +32  the reserved group and the typed control policy
+#   6b2e264  2312728   +0
+#   d40eabe  2329112   +16  an uplink's routes withheld on a probe verdict
+#   4a0d120  2337304   +8   the client's privileged half, bounded and tested
+#   6695813  2337304   +0
+#   6e93a6a  2337304   +0
+#   HEAD     2337304   +0   everything since, the two /run concurrency fixes
+#                           (0121, 0122) included
+#
+# **Nothing in `gui/` can be in this number**, which is what makes the four
+# steps attributable at all. Eleven of these commits are the Qt client, and it
+# is a separate build that links none of this -- so each step falls on the one
+# or two Rust commits inside its window, and the windows were chosen small
+# enough to leave no ambiguity about which.
+#
+# The four, in order:
+#
+#   +12 KB, `netcfgd-daemon: add a network from the socket`. A typed request
+#   with its fields, its serde, the daemon handler and the authorisation. The
+#   same finding as nearly every entry in this file: a type that crosses the
+#   wire costs more than the logic behind it.
+#
+#   +32 KB, the reserved `netcfgd` group and the typed control policy, plus
+#   editing the global block in place. The largest of the four and the least
+#   surprising: it is a second configuration writer, with the diagnostics that
+#   make an unprivileged refusal explain itself rather than being a silent no.
+#
+#   +16 KB, withholding an uplink's routes when its probe says the network is
+#   not usable -- the planner pass, the verdict held down in the daemon, and
+#   `explain` naming it. A feature with a decision record (0119) rather than
+#   drift.
+#
+#   +8 KB, bounding and testing the half of the client that runs as root.
+#
+# So this one is *not* the shape the entry above it describes. That was 2.41%
+# accumulated four kilobytes at a time with nothing to point at; this is four
+# named features, each of which would have been recorded here had anybody run
+# `make size` between them. That nobody did is the finding worth carrying:
+# `make check` has been red on this gate for some sixty commits, and a gate
+# that is red for long enough stops being read at all.
+#
+# Recorded at the measured size, as every entry above it is.
+total 2337304
