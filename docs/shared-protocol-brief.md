@@ -215,18 +215,31 @@ to revisit any of them, deliberately.
    built against a premise that has already expired. See
    `docs/remote-access-feasibility.md`, "Beyond the LAN".
 3. **The local hop stays JSON**; the agent translates. Section 4.
-4. **`situ` describes the frame**, with Monocypher bound as an extern codec,
+4. **Makefiles and qmake only** in this tree, no CMake.
+5. **The four directories live at the repository root**, beside `crates/`,
+   `backends/` and `adapters/`: `gui/`, `client/`, `wire/`, `agent/`.
+   **Superseded 2026-08-10 in the `wire/` entry only** — see below. Three, not
+   four.
+6. **`situ` describes the frame**, with Monocypher bound as an extern codec,
    and the hand-written half built to be deleted as situ absorbs chunking and
-   encryption. **Half of that has been corrected since** — see the note below.
-5. **Makefiles and qmake only** in this tree, no CMake.
+   encryption. **Corrected 2026-08-08 and retired 2026-08-10** — see below.
 
-Item 4 is worth flagging: netcfgd's own §9 evaluated `situ` against the control
+**These are the numbers `docs/remote-access-feasibility.md` §8 uses**, and this
+list now matches it. An earlier version of this brief renumbered them, which is
+how "netcfgd's decision 4" came to mean *situ describes the frame* in
+`../fuzznet/project.md` §6 while decision 4 in the source list is about
+Makefiles. The source list is the one to cite. Apologies for the citation that
+no longer resolves; it is worth one edit there rather than two numbers for one
+decision across three repositories.
+
+Item 6 is worth flagging: netcfgd's own §9 evaluated `situ` against the control
 socket and split the answer — the *framing* is describable, and situ's
 `unbounded-scan` rule would have predicted the `MAX_LINE` bound netcfgd reached
 by judgement; the *payload* is not, because a JSON object has no byte layout to
-pin. That split is the same seam as section 4's.
+pin. That split is the same seam as section 4's, and it is also why the split
+does not constrain `fuzznet`: both halves there are binary.
 
-**Correction to item 4, from the library author (2026-08-08).** The phrase "as
+**Correction to item 6, from the library author (2026-08-08).** The phrase "as
 situ absorbs chunking and encryption" bundled two things that have since gone
 opposite ways, and planning around it would put the risk in the wrong place:
 
@@ -245,15 +258,40 @@ opposite ways, and planning around it would put the risk in the wrong place:
   anywhere in that document. Planning around its arrival is still wrong; the
   door is merely not bolted.
 
-The consequence for whoever builds `agent/`: **the chunking state machine is
-permanent code and should be designed as such.** Section 5 of this document
-already calls it the largest and highest-risk piece; it is also the piece that
-was, until now, expected to be temporary. Those two beliefs together are how a
-component ends up under-built.
-
 `docs/remote-access-feasibility.md` §5.0 carries the same correction in longer
-form. Nothing else in this brief changes: the local hop, the tiers, the
-freshness rule and the constraints are untouched.
+form.
+
+**Retirement of item 6 (2026-08-10).** The decision is confirmed in substance
+and is no longer netcfgd's to hold, and those are separate statements.
+
+Confirmed: `../fuzznet` exists and `wire/frame.situ` is in it, so the frame is
+written, in situ, with the crypto inside the schema. Retired: decision 6 was
+taken when `wire/` was going to be netcfgd's own C, and a netcfgd record
+describing how a shared library encodes its frame is a copy of somebody else's
+decision with nothing keeping the two honest — the exact drift this workspace
+has already paid for in three shared files. **netcfgd consumes `fuzznet`'s
+frame and has no opinion on how it is described.** What netcfgd keeps is the
+requirements, which hold whoever writes the code: section 5 here, and the
+constraints in section 3.
+
+Item 5 falls with it — `wire/` is not a netcfgd directory. `project.md` §5's
+layout and `gui/project.md` §§6, 8 and 10 still describe it as one; they are
+named rather than rewritten, since the protocol documents are yours to edit.
+
+**And the advice this brief gave for two days is withdrawn.** It said the
+chunking state machine was permanent code and should be designed as such,
+reasoning from situ describing messages and not protocols. situ's decision 0032
+puts protocol dynamics on a six-rung ladder chosen at `situc build --layer`,
+with `frame` and `drive` covering exactly that work, and situ's maintainer
+overruled the narrower boundary. Whether `fuzznet` consumes those rungs or
+writes its own is open in your tree and is not netcfgd's call — but netcfgd
+should not be telling you it is permanent code when the project that would
+generate it says otherwise. The durable part is the requirement, not the
+prediction: a bound on the memory a half-finished response may hold, and
+retransmission of what is missing, however that code arrives.
+
+Nothing else in this brief changes: the local hop, the tiers, the freshness
+rule and the constraints are untouched.
 
 ---
 

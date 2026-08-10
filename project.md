@@ -471,9 +471,10 @@ netcfgd/
   client/                       # C. The frontend layer under the widgets:
                                 # connections, request matching, models. Shared
                                 # by any client, and C so that anything can use it
-  wire/                         # C. The remote protocol: a `situ` schema for the
-                                # frame, hand-written framing under it, and
-                                # Monocypher bound as the codec
+  wire/                         # NOT OURS as of 2026-08-10, and never built:
+                                # the remote protocol is `fuzznet`'s, frame and
+                                # framing both. See docs/remote-access-
+                                # feasibility.md, "Revisiting decision 6"
   agent/                        # C. On the netcfgd host: terminates the remote
                                 # protocol and holds an ordinary local socket
                                 # connection. The daemon itself is unchanged
@@ -2459,21 +2460,23 @@ gathered here so a new session does not have to find them.
   aligning shared technology is its own deliberate piece of work rather than
   something done from inside one repository.
 
-- **The remote protocol is being authored elsewhere**, and what netcfgd needs
-  from it is written down in
-  [docs/shared-protocol-brief.md](docs/shared-protocol-brief.md). fuzzypickles
-  has been asked to produce the shared IPC and network protocol for itself,
-  netcfgd and a planned `raidcfgd`. **The timing is the whole of the benefit**:
-  `wire/` and `agent/` do not exist, and the 2026-08-04 plan was to *copy* that
-  design into netcfgd's own C — so consuming a library means the second
-  implementation is never written. What this reopens is decision 4 of
-  `docs/remote-access-feasibility.md` §8, and it is the cross-project half of
-  the entry above arriving from the other side. **The local socket is not part
-  of it**: `docs/socket-protocol.md` §3.1 argues why newline-delimited JSON is
-  a stated product property rather than a placeholder, and the brief repeats
-  the argument for a reader who has not read this tree. `raidcfgd` does not
-  exist yet, which is the risk worth watching — two real consumers and one
-  imagined one.
+- **The remote protocol is authored elsewhere, and that part is settled.**
+  `fuzznet` produces the shared IPC and network protocol for fuzzypickles,
+  netcfgd and a planned `raidcfgd`; what netcfgd needs from it is
+  [docs/shared-protocol-brief.md](docs/shared-protocol-brief.md). **The timing
+  was the whole of the benefit**: `wire/` had never been built here, and the
+  2026-08-04 plan was to *copy* that design into netcfgd's own C, so consuming
+  a library means the second implementation is never written. Decision 6 of
+  `docs/remote-access-feasibility.md` §8 is retired accordingly and `wire/`
+  leaves this tree — netcfgd consumes `fuzznet`'s frame and holds no opinion on
+  how it is described, only requirements on it. **The local socket is not part
+  of any of this**: `docs/socket-protocol.md` §3.1 argues why newline-delimited
+  JSON is a stated product property rather than a placeholder.
+
+  What is genuinely still open and is the maintainer's: whether `agent/` ships
+  in netcfgd's own packages, which is now a question about exposing a network
+  service rather than about packaging. And `raidcfgd` still does not exist,
+  which is the risk worth watching — two real consumers and one imagined one.
 
 - **Man pages.** `lintian` reports `no-manual-page` for both binaries. Held
   deliberately until the software is proven: documenting an interface that has

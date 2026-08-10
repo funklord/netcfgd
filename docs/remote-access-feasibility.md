@@ -355,16 +355,89 @@ Answered on 2026-08-04, and carried into `gui/project.md`:
 
 5. **The four directories live at the repository root**, beside `crates/`,
    `backends/` and `adapters/`: `gui/`, `client/`, `wire/`, `agent/`.
+   **Superseded on 2026-08-10, in the `wire/` entry only** -- see "Revisiting
+   decision 6" below. Three directories, not four.
 6. **`situ` describes the frame**, with Monocypher bound to it as an extern
-   codec.
+   codec. **Confirmed in substance and retired as netcfgd's on 2026-08-10** --
+   below.
 
 Still open, and listed in `gui/project.md` §9: whether a remote `apply` may run
 without a confirm window, LAN discovery, the first pairing, whether the agent
 ships in netcfgd's own packages, and whether situc is vendored or its output
-committed.
+committed. That last one is `fuzznet`'s build question now rather than this
+tree's.
+
+**A note on how this list is cited.** `docs/shared-protocol-brief.md` §6
+restated these five-of-six for a reader outside this repository and renumbered
+them in doing so, which is how "netcfgd's decision 4" came to mean *situ
+describes the frame* in `../fuzznet/project.md` §6 while decision 4 here is
+about Makefiles. The brief carries this list's numbers now. This list is the
+one to cite; a decision worth referring to across three repositories should not
+have two numbers.
 
 Whether this is M8 or a milestone of its own is also still open. It is not
 RESTCONF's replacement and M9 should stay where it is.
+
+### Revisiting decision 6: right about situ, and no longer netcfgd's to hold
+
+Asked for on 2026-08-10, on the grounds that the shared library changed the
+premise. It did, three times over, and the three move in different directions
+-- so they are separated rather than summarised.
+
+**The substance is confirmed, and by a stronger route than this document had.**
+`../fuzznet` exists as of 2026-08-08 and `wire/frame.situ` is in it: the frame
+is written, in situ, with the crypto inside the schema rather than beside it.
+What that corrects is this document's *other* half. Decision 6 said Monocypher
+bound as an extern codec with a hand-written remainder "built to be deleted";
+situ's phases 7 and 8 -- extern codecs and the cryptographic model -- both
+record status complete, so the sealed half **should not be written at all**,
+which is a stronger instruction than writing it to be deleted. That correction
+already landed here on 2026-08-09; it is restated because it is the half of
+decision 6 that was wrong rather than merely superseded.
+
+**The choice is no longer netcfgd's.** Decision 6 was taken when `wire/` was
+going to be netcfgd's own C. It is `fuzznet`'s now, and a netcfgd record
+describing how a sibling library encodes its frame is a copy with nothing
+keeping the two honest -- which is the exact shape this workspace has paid for
+three times already in `style_gate.py`, `commit-msg` and `code-style.md`. So
+decision 6 is retired rather than reaffirmed: **netcfgd consumes `fuzznet`'s
+frame and does not have an opinion on how it is described.** What netcfgd keeps
+is the requirements on it, which are requirements whoever writes the code --
+§5.1's chunking bound, §5.4's expiry, and the constraints in
+`docs/shared-protocol-brief.md` §3.
+
+Decision 5 falls with it: **`wire/` leaves this tree.** Three directories at
+the root, not four -- `gui/`, `client/`, `agent/`. `project.md` §5's layout and
+`gui/project.md` §§6, 8 and 10 still describe `wire/` as netcfgd's and are
+stale in that respect; they are named here rather than rewritten, because the
+protocol documents are the shared library author's to edit.
+
+**And the highest-risk row of §7's cost table moved out of this repository**,
+which is the consequence worth reading twice. "Datagram framing, chunking,
+reassembly, retransmit -- **large**, and the highest-risk part" is `fuzznet`'s
+now, and may not be hand-written by anybody: situ's decision 0032 puts protocol
+dynamics on a six-rung ladder selected at `situc build --layer`, with `frame`
+and `drive` covering exactly that work, and situ's maintainer has overruled the
+narrower boundary `fuzznet` proposed. Whether `fuzznet` consumes those rungs or
+writes its own is open there and is not netcfgd's call.
+
+That also retires the advice this document carried for one day. On 2026-08-09
+it concluded the chunking state machine was permanent code and should be
+designed as such; that was reasoned from situ describing messages and not
+protocols, and it stopped being true almost immediately. **The lesson is the
+one already in `project.md`: a reason not to do something has a shelf life, and
+the trigger is any change to the thing the reason was about.** This one turned
+over twice inside three days, which is a rate worth knowing before planning
+around any statement about situ's scope.
+
+**On whether `fuzznet` agreeing with netcfgd is evidence.** It is not, on its
+own: `fuzznet`'s §6 opens by citing this decision, and `docs/shared-protocol-
+brief.md` is named as its source, so the agreement is one witness in two trees
+-- the trap `evidence.md` describes. What *is* worth more than agreement is
+that `fuzznet` checked situ's own tree rather than this document's summary of
+it, and corrected netcfgd twice as a result: encryption is already absorbed,
+and the "out of scope entirely" claim was a line from situ's protobuf importer
+read as a general statement. A copy does not correct its source.
 
 ### Beyond the LAN, which is now a destination rather than a maybe
 
