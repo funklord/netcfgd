@@ -842,29 +842,58 @@ Kept current deliberately: this is the section to read after a break, and the on
 
 **Read this first after a break, and rewrite it rather than appending to it.**
 
-**Where this stands, as of the last rewrite.** The software is built and now
-*checked* in ways it had not been: every parser has a fuzz target and all five
-have been run, the daemon has been built and executed on three architectures,
-and the gates cover what the packages ship rather than what an older
-generation of them shipped. Two real crashes and one real planner defect came
-out of that, all fixed. What has still never happened is the thing §*What
-would prove it* is about — nobody has run netcfgd against a real radio, on a
-real router, or as the network configuration of a machine they depend on.
+**Where this stands, as of the last rewrite.** The software is built, checked
+in ways it had not been — every parser fuzzed, the daemon run on three
+architectures, the gates covering what the packages actually ship — and it has
+now had the first defects found in it that were *concurrency* rather than
+protocol or netlink. What has still never happened is the thing §*What would
+prove it* is about: nobody has run netcfgd against a real radio, on a real
+router, or as the network configuration of a machine they depend on.
 
-**The most useful discovery of that pass was a method, not a defect.** Three
-things this project had recorded as blocked on hardware were blocked on
-*privilege* or on *a toolchain*, and a container supplies both. `systemd-networkd`
-would not start because it drops privileges to a user a namespace cannot map;
-`cargo-fuzz` and cross-compilation both wanted a nightly this machine's distro
-rustc does not have. All three ran in a container, and each found something.
-**Before recording an item as needing hardware, check whether it needs root or
-a rustup.**
+**Two writers of `/run` were the last pass's find, and both were structural.**
+`ncfg apply` and the daemon are separate processes and both record what netcfgd
+owns. The staged write shared one temporary name, so one writer's bytes were
+renamed into place by the other's rename
+([0121](docs/decisions/0121-a-temporary-named-after-its-target-is-one-path-for-every-writer.md));
+the read-modify-write around it took no lock, and because `absorb` only ever
+adds, a stale read **restored** a record the other process had just dropped
+([0122](docs/decisions/0122-ownership-is-changed-under-a-lock-because-two-processes-change-it.md)).
+Ownership licenses every destructive act in a plan, so that is the unsafe
+direction, not the safe one.
+
+**And the method that found them is the thing to carry.** They came from
+*reading the code the open item pointed at*, not from reproducing the failure:
+five container runs of the full suite passed, the instrumentation added to
+catch `qdisc.sh` in the act has still never fired, and the two defects took an
+afternoon of reading the mechanism the brief had already named. **When an
+intermittent failure has a written hypothesis, read the hypothesis before
+re-running the experiment.** Neither fix is claimed to be that failure — but
+both structural routes to its symptom are gone, so a recurrence now means
+something nobody has looked at.
+
+**A gate had been red for about sixty commits and nobody had run it.** `make
+size` was 68 KB over a budget whose whole purpose is to force the conversation
+at the moment the number moves; the growth was four ordinary features, and
+attributing it honestly took thirteen release builds. A ratchet only ratchets
+if somebody turns it. `make check` is green end to end again.
+
+**The remote protocol has left this tree**, which changes what netcfgd is
+responsible for rather than what it does. `fuzznet` authors the shared IPC and
+network protocol for fuzzypickles, netcfgd and a planned `raidcfgd`;
+`wire/` was never built here and is not ours,
+[docs/shared-protocol-brief.md](docs/shared-protocol-brief.md) is what netcfgd
+asks of it, and the local socket is explicitly not part of the bargain.
 
 **Four things are open and named**, with their evidence, further down: the
-`qdisc.sh` container failure (a race, hypothesis recorded, instrumentation now
-in place to catch it), the unreproduced `ingress.sh` one, the licensing gap
-lintian confirms, and three decisions that are the maintainer's rather than a
+`qdisc.sh` container failure (both structural mechanisms now closed, and it has
+not been caught in the act), the unreproduced `ingress.sh` one, the licensing
+gap lintian confirms, and the decisions that are the maintainer's rather than a
 worker's — see *Waiting on a decision* at the end of this section.
+
+**Still true from the pass before, and it keeps paying.** Three things recorded
+as blocked on hardware were blocked on *privilege* or on *a toolchain*, and a
+container supplies both. **Before recording an item as needing hardware, check
+whether it needs root or a rustup.**
 
 Below this line is the accumulated record of earlier passes, kept because the
 findings are durable even where the narrative is long. Their lessons live in
