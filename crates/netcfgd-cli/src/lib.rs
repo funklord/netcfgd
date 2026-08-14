@@ -908,13 +908,30 @@ fn render_stations(report: &netcfgd_proto::StationReport, json: bool) -> Result<
 /// where the kernel says it, and the `wl` prefix is a convention that happens
 /// to hold, in the same way `eth0` is not proof of an ethernet.
 ///
+/// That ordering is the whole rule, and it used to be written as `kind ==
+/// Some("wlan") || name.starts_with("wl")` -- an *or*, which is not a fallback.
+/// The two differ only where the kernel gave a kind that is not `wlan`, and
+/// that is precisely where the name is least trustworthy: `ObservedLink::kind`
+/// is empty for a plain device and holds a word only for a virtual one, so a
+/// non-empty kind means the kernel has already answered. A VLAN on a radio is
+/// named `wlan0.10` and a bridge may be named anything, so the *or* called both
+/// of them radios -- and `tui.rs` picks its radio with `.find()` over a
+/// name-sorted list, where `wl-br0` sorts ahead of `wlan0` and would be shown
+/// as the radio instead of the real one.
+///
 /// `client/`'s `ncfg_link_is_wireless()` is the identical rule in C, because
 /// the GUI needs it and cannot reach this one. Two implementations of one
 /// heuristic is the drift 0116 names and does not fix -- so `make conformance`
 /// feeds both the same table and diffs the answers, which is the cheapest
-/// honest substitute for sharing the code.
+/// honest substitute for sharing the code. What that comparison cannot do is
+/// say whether the shared answer is *right*: both sides were written from each
+/// other, so they are one witness. `a_kind_the_kernel_gave_wins_over_the_name`
+/// is the independent one.
 pub(crate) fn is_radio(kind: Option<&str>, name: &str) -> bool {
-	kind == Some("wlan") || name.starts_with("wl")
+	match kind {
+		Some(kind) if !kind.is_empty() => kind == "wlan",
+		_ => name.starts_with("wl"),
+	}
 }
 
 /// How an access point is named on a screen, for every client that draws one.
@@ -1508,6 +1525,33 @@ mod tests {
 		assert_eq!(access_point_name(None, "ff00ff"), "hex:ff00ff");
 	}
 
+	/// What the radio rule is *for*, which `make conformance` cannot say.
+	///
+	/// That target diffs this implementation against `client/`'s, and both were
+	/// written from each other -- so they agree by construction and would agree
+	/// just as loudly about a wrong answer. This is the second witness, and it
+	/// asserts the ordering rather than the two easy cases: a kind the kernel
+	/// gave decides on its own, and the name is consulted only where there is
+	/// no kind.
+	///
+	/// The last two are the ones that were wrong. A VLAN on a radio inherits
+	/// the radio's name, and `tui.rs` finds its radio with `.find()` over a
+	/// name-sorted list, so `wl-br0` sorting ahead of `wlan0` put a bridge on
+	/// the screen where the radio belonged.
+	#[test]
+	fn a_kind_the_kernel_gave_wins_over_the_name() {
+		// No kind: a plain device, so the name convention is all there is.
+		assert!(is_radio(Some(""), "wlp0s20f3"));
+		assert!(is_radio(None, "wlan0"));
+		assert!(!is_radio(Some(""), "eth0"));
+		assert!(!is_radio(None, "wwan0"));
+
+		// A kind the kernel gave: it answers, and the name is not consulted.
+		assert!(is_radio(Some("wlan"), "enp1s0"));
+		assert!(!is_radio(Some("vlan"), "wlan0.10"));
+		assert!(!is_radio(Some("bridge"), "wl-br0"));
+	}
+
 	/// The hex is kept, not summarised, so two unprintable networks are two
 	/// rows. This is the assertion the old TUI wording could not have passed.
 	#[test]
@@ -1537,13 +1581,17 @@ mod tests {
 	/// Fixed rather than drawn from the witness, because the cases worth
 	/// comparing are the ones no witness line contains: a kind the kernel did
 	/// not give, and a name that only looks wireless. `wl-bridge` is in here
-	/// deliberately -- the name fallback calls a bridge a radio, which is a
+	/// deliberately -- the name fallback called a bridge a radio, which is a
 	/// real false positive of a heuristic nobody had written down, and a table
-	/// that hid it would be agreeing about the easy half.
-	const RADIO_CASES: [(&str, &str); 6] = [
+	/// that hid it would be agreeing about the easy half. `wlan0.10` is the
+	/// same fault in the shape somebody actually meets: a VLAN on a radio is
+	/// named after the radio, so it is the false positive that arrives without
+	/// anybody choosing an odd name.
+	const RADIO_CASES: [(&str, &str); 7] = [
 		("wlan", "wlan0"),
 		("", "wlp0s20f3"),
 		("bridge", "wl-bridge"),
+		("vlan", "wlan0.10"),
 		("", "eth0"),
 		("", "wwan0"),
 		("wlan", "enp1s0"),

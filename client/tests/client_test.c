@@ -1416,9 +1416,34 @@ static const char *const naming_ssids[] = { "686f6d65", "", "ff00ff" };
  * taken from the witness, because the interesting cases -- a kind the kernel
  * did not give, a name that only looks wireless -- are ones no witness line
  * happens to contain. */
-static const char *const radio_kinds[] = { "wlan", "", "bridge", "", "", "wlan" };
+static const char *const radio_kinds[] = { "wlan", "",     "bridge", "vlan",
+	                   "",     "",     "wlan" };
 static const char *const radio_names[] = { "wlan0", "wlp0s20f3", "wl-bridge",
-	                   "eth0",  "wwan0",     "enp1s0" };
+	                   "wlan0.10", "eth0", "wwan0", "enp1s0" };
+
+/* What the radio rule is for, which the conformance diff cannot say.
+ *
+ * That target compares this library against `ncfg tui`'s Rust, and the two were
+ * written from each other -- so they agree by construction and would agree just
+ * as loudly about a wrong answer. This is the second witness on this side, and
+ * it asserts the *ordering* rather than the two easy cases: a kind the kernel
+ * gave decides alone, and the name is reached only where there is no kind.
+ *
+ * The last two are the ones that were wrong before. A VLAN on a radio inherits
+ * the radio's name, so `wlan0.10` needed no odd naming to be called a radio. */
+static void a_kind_the_kernel_gave_wins_over_the_name(void)
+{
+	ok("no kind, wireless name", ncfg_link_is_wireless("", "wlp0s20f3"), NULL);
+	ok("null kind, wireless name", ncfg_link_is_wireless(NULL, "wlan0"), NULL);
+	ok("no kind, wired name", !ncfg_link_is_wireless("", "eth0"), NULL);
+	ok("no kind, wwan is not wlan", !ncfg_link_is_wireless("", "wwan0"), NULL);
+
+	ok("kind wlan beats a wired name", ncfg_link_is_wireless("wlan", "enp1s0"), NULL);
+	ok("a vlan on a radio is not a radio", !ncfg_link_is_wireless("vlan", "wlan0.10"),
+	    "a VLAN inherits the radio's name");
+	ok("a bridge is not a radio", !ncfg_link_is_wireless("bridge", "wl-br0"),
+	    "sorts ahead of wlan0, so the TUI would have picked it");
+}
 
 static void dump_facts(const char *witness, const char *out_path)
 {
@@ -1503,6 +1528,7 @@ int main(int argc, char **argv)
 	the_monitor_hands_over_one_event_at_a_time();
 	a_refused_stream_says_which_tier_it_wanted();
 	freeing_what_was_never_filled_in_is_nothing();
+	a_kind_the_kernel_gave_wins_over_the_name();
 
 	printf("\n");
 	if (failures) {

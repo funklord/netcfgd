@@ -403,12 +403,23 @@ static char *member_text(const ncfg_json_doc_t *doc, uint32_t object, const char
  * every machine anybody has run this on -- the same reason `eth0` is not proof
  * of an ethernet.
  *
+ * This said exactly that and then wrote an *or*, which reaches the name even
+ * when the kernel has spoken. An empty kind is a real NIC, as the parser above
+ * says; a non-empty one is the kernel naming a virtual device, so `bridge` or
+ * `vlan` is an answer rather than a gap to fall through. A VLAN on a radio is
+ * called `wlan0.10` and was reported wireless by the name alone.
+ *
  * `ncfg tui` asks the identical question in Rust. The two are checked against
- * each other by the conformance target rather than trusted to stay in step.
+ * each other by the conformance target rather than trusted to stay in step --
+ * which keeps them identical and cannot say they are correct, both having been
+ * written from each other. Each side pins the intent in its own tests.
  */
 int ncfg_link_is_wireless(const char *kind, const char *name)
 {
-	return (kind && !strcmp(kind, "wlan")) || (name && !strncmp(name, "wl", 2));
+	if (kind && *kind) {
+		return !strcmp(kind, "wlan");
+	}
+	return name && !strncmp(name, "wl", 2);
 }
 
 void ncfg_links_free(ncfg_links_t *links)
