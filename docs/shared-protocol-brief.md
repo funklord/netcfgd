@@ -278,17 +278,34 @@ Item 5 falls with it — `wire/` is not a netcfgd directory. `project.md` §5's
 layout and `gui/project.md` §§6, 8 and 10 still describe it as one; they are
 named rather than rewritten, since the protocol documents are yours to edit.
 
-**And the advice this brief gave for two days is withdrawn.** It said the
-chunking state machine was permanent code and should be designed as such,
-reasoning from situ describing messages and not protocols. situ's decision 0032
-puts protocol dynamics on a six-rung ladder chosen at `situc build --layer`,
-with `frame` and `drive` covering exactly that work, and situ's maintainer
-overruled the narrower boundary. Whether `fuzznet` consumes those rungs or
-writes its own is open in your tree and is not netcfgd's call — but netcfgd
-should not be telling you it is permanent code when the project that would
-generate it says otherwise. The durable part is the requirement, not the
-prediction: a bound on the memory a half-finished response may hold, and
-retransmission of what is missing, however that code arrives.
+**The advice this brief gave for two days was withdrawn, and the withdrawal is
+now itself withdrawn — by measurement.** It said the chunking state machine was
+permanent code and should be designed as such, reasoning from situ describing
+messages and not protocols. situ's decision 0032 puts protocol dynamics on a
+six-rung ladder chosen at `situc build --layer`, and this brief read `frame` and
+`drive` as covering exactly that work.
+
+They do not. The fuzznet session built `wire/frame.situ` at every rung and
+reported the result (its commit `87d1b39`): `view`, `edit` and `relate` emit an
+identical 18746 bytes, `frame`, `converse` and `drive` an identical 24313, and
+the only thing the upper rungs add is a **stream** reader — a byte stream in,
+whole messages out. **No rung emits datagram reassembly at all**, which is the
+problem this protocol actually has. So chunking staying hand-written in fuzznet
+is a finding rather than a temporary arrangement, and the original advice was
+right for a reason nobody had measured when it was given.
+
+**What went wrong here is worth more than the conclusion.** The withdrawal was
+made on the strength of a design document saying which rungs cover protocol
+dynamics, and reversed by somebody running the compiler and reading the byte
+counts. `evidence.md` has the rule and this brief broke it: a document stating
+an intent is not a measurement of what a tool emits, and deferring to the
+project that owns a decision is not the same as checking what its tool does.
+Where this brief says "situ will absorb X", read it as a prediction with no
+measurement behind it unless it names one.
+
+The durable part is the requirement, not the prediction: a bound on the memory
+a half-finished response may hold, and retransmission of what is missing,
+however that code arrives.
 
 Nothing else in this brief changes: the local hop, the tiers, the freshness
 rule and the constraints are untouched.

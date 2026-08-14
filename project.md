@@ -2508,8 +2508,13 @@ gathered here so a new session does not have to find them.
 
   What is genuinely still open and is the maintainer's: whether `agent/` ships
   in netcfgd's own packages, which is now a question about exposing a network
-  service rather than about packaging. And `raidcfgd` still does not exist,
-  which is the risk worth watching — two real consumers and one imagined one.
+  service rather than about packaging. And whether `agent/` exists at all is
+  a separate open question: it is a layout entry and a design, with no
+  directory in the tree, so a sibling planning against it as a consumer is
+  planning against something undecided. `raidcfgd` **does** exist now, which
+  retires the risk this sentence used to name — it said "two real consumers and
+  one imagined one", and the imagined one has a repository, a remote and an
+  entry in the private-project list.
 
 - **Man pages.** `lintian` reports `no-manual-page` for both binaries. Held
   deliberately until the software is proven: documenting an interface that has
