@@ -358,14 +358,26 @@ A checklist, because each line is something an implementation has got wrong:
 they would use it. Re-evaluated for this surface on 2026-08-07, and the answer
 splits:
 
-**The framing, yes in principle.** situ has grown text-protocol support since
-the last evaluation here — `delimited-member`, `unbounded-scan`,
-`scanned-predecessor`, with HTTP as its worked example. A line ending at `\n`
-is exactly its `delimited-member`, and its `unbounded-scan` rule says a
-delimited member with no cap on the scan takes an effect on read. **That is
-`MAX_LINE`**: situ's model would have predicted the bound this protocol needs,
-which is a point in its favour and worth recording even though nothing here
-changes.
+**The framing, yes in principle — and "in principle" is doing real work in
+that sentence.** situ has grown text-protocol support since the last
+evaluation here — `delimited-member`, `unbounded-scan`, `scanned-predecessor`,
+with HTTP as its worked example. A line ending at `\n` is exactly its
+`delimited-member`, and its `unbounded-scan` rule says a delimited member with
+no cap on the scan takes an effect on read. **That is `MAX_LINE`**: situ's
+model would have predicted the bound this protocol needs, which is a point in
+its favour and worth recording even though nothing here changes.
+
+**Read rather than run**, and that is stated because the distinction has
+already cost this tree once. Every claim in the paragraph above comes from
+situ's own documents; no schema for this protocol has been written and no
+`situc` has been invoked on one. The shared-protocol brief made the same move
+about chunking — took a situ decision record as a statement of what the
+compiler emits — and withdrew a correct position on the strength of it, until
+the fuzznet session built the schema at every rung and measured that no rung
+emits what had been assumed. "situ has decided X" is not "X is available for
+this schema", and the distance between them is a compile. Nothing here depends
+on the difference, since the conclusion is that nothing changes; it is marked
+so that a future reader does not promote it to a measurement it never was.
 
 **The payload, no — and not for a reason that will age.** situ describes "data
 that already has a binary representation". A JSON object has no byte layout to
