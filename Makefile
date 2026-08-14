@@ -1025,6 +1025,30 @@ FUZZ_ARGS   ?=
 # unshare -rn gives CAP_NET_ADMIN in a fresh network namespace without root.
 # The suite is built first because the binary has to exist inside it, where
 # there is no network for cargo to fetch anything over.
+# Debian keeps most of what this suite drives -- `tc`, dnsmasq, openvpn,
+# wpa_supplicant, resolvconf -- in /sbin and /usr/sbin, which are on root's
+# PATH and not on an ordinary user's. The suite runs unprivileged, through
+# `unshare -rn`, so `command -v tc` answered differently depending on who
+# typed make.
+#
+# Both directions are wrong and neither is loud. Outside NCFG_LIVE a script
+# skips, so `tunnel.sh` quietly did not run against the openvpn sitting in
+# /sbin -- the vacuous pass this tree keeps finding. Inside it a skip is a
+# failure, so `qdisc.sh` failed with "no tc" on a machine where tc is
+# installed. A suite whose answer depends on whether root started it is not
+# measuring the software.
+#
+# Appended rather than prepended, so a purpose-built binary earlier on PATH
+# still wins -- which is how `tunnel.sh`'s own header tells you to point it at
+# an unpackaged openvpn.
+#
+# Target-scoped, so nothing else in this file gains an sbin it did not ask
+# for. Checked rather than assumed: the same construct in a scratch makefile
+# finds `tc` under this target and does not under a sibling.
+#
+# A script run by hand still has the caller's PATH, which is what the headers
+# in tests/live/ already tell people to set.
+live: export PATH := $(PATH):/sbin:/usr/sbin
 live:
 	$(CARGO) build --workspace
 	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
