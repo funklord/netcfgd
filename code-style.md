@@ -16,8 +16,8 @@ for the detail; where the two ever disagree, project.md wins.
 **Above both sits the global source**, `~/.claude/guidelines/code-style.md`,
 which applies to every private project. Where this file or `project.md`
 disagrees with it, that is **drift to fix, not a local override**. A genuine
-divergence needs a technical reason and is raised rather than decided in
-passing -- and when a conflict between the three actually comes up, stop and
+divergence needs a technical reason and is signalled to the list in `claude-guidelines`' `project.md` rather
+than decided in passing -- and when a conflict between the three actually comes up, stop and
 ask instead of picking a winner.
 
 Everything specific to Rust and to this project -- section 2's `rustfmt`
@@ -38,8 +38,9 @@ say so here.
 3. **Lowercase filenames,** unless a tool demands otherwise.
 
 Everything below is these three rules in detail, plus the exceptions that are
-already settled. **An exception not listed is not yet settled**: raise it
-rather than deciding it in passing.
+already settled. **An exception not listed is not yet settled**: signal it to
+the list in `claude-guidelines`' `project.md` rather than deciding it in
+passing.
 
 ## 1. Naming
 
@@ -191,7 +192,9 @@ field *syntax* rather than indentation, so the rule has nothing to say about
 it and everything past it is alignment.
 
 Anything else that seems to need spaces is **not settled by not being
-mentioned**: raise it, get it settled, and add it here.
+mentioned**: signal it to the list in `claude-guidelines`'
+`project.md`, follow the rule meanwhile, and it gets settled and added
+here in a pass.
 
 ### No formatter for `client/` and `gui/`
 
@@ -218,7 +221,11 @@ Lowercase for everything this project names itself.
 - Config fixtures and test data follow the thing they describe.
 
 The exception is a name a tool will not accept lowercased or in another
-shape: `Cargo.toml`, `Cargo.lock`, `README.md`, `LICENSE`, `Makefile`.
+shape: `Cargo.toml`, `Cargo.lock`, `README.md`, `LICENSE`, `Makefile`, and
+`VERSION`. That last one is this workspace's own rather than the wider
+world's, and is settled by use: thirteen of the fourteen private projects
+track one, and a build reads it for the package version and for whatever
+the program prints, so the number lives in exactly one place.
 
 ## 4. ASCII only in source
 
