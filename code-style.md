@@ -15,10 +15,11 @@ for the detail; where the two ever disagree, project.md wins.
 
 **Above both sits the global source**, `~/.claude/guidelines/code-style.md`,
 which applies to every private project. Where this file or `project.md`
-disagrees with it, that is **drift to fix, not a local override**. A genuine
-divergence needs a technical reason and is signalled to the list in `claude-guidelines`' `project.md` rather
-than decided in passing -- and when a conflict between the three actually comes up, stop and
-ask instead of picking a winner.
+disagrees with it, that is **drift to fix, not a local override**. A
+genuine divergence needs a technical reason and is signalled to the list in
+`claude-guidelines`' `project.md` rather than decided in passing -- and
+when a conflict between the three actually comes up, stop and ask instead
+of picking a winner.
 
 Everything specific to Rust and to this project -- section 2's `rustfmt`
 verdict and sections 4 and 6 through 8 -- is this project's own, and is not
