@@ -297,11 +297,18 @@ rule and the constraints are untouched.
 
 ## 7. What netcfgd cannot tell you
 
-**`raidcfgd` does not exist.** No repository, no directory, and it is not in
-the private-project list. So the shared core risks being designed around two
-real consumers and one imagined one, and an imagined consumer's requirements
-are exactly the kind that turn out wrong after the API is fixed. netcfgd has no
-opinion on what a RAID daemon needs and will not invent one.
+**`raidcfgd` exists, and this section used to say it did not.** It read "no
+repository, no directory, and it is not in the private-project list" -- true
+when written, and false on all three counts now: `~/src/raidcfgd`, a remote at
+`git@github.com:funklord/raidcfgd.git`, and an entry in the private-project
+list. Checked here rather than taken on report.
+
+That retires the risk this paragraph was about. The shared core is no longer
+being designed around two real consumers and one imagined one, and the
+requirements that could not be checked are now stated by the project that has
+them. netcfgd's position is unchanged and its reason is better: it still has no
+opinion on what a RAID daemon needs, and no longer needs to have one, because
+there is somebody to ask.
 
 **Which package the agent ships in is open**, and it matters to you only in
 that it is a daemon that listens on a network — a thing netcfgd has
