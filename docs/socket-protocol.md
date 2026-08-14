@@ -82,9 +82,10 @@ it parses JSON.
 more interesting attack surface than a fixed binary frame -- which is why the
 framing carries a hard bound (section 5) and why both parsers are fuzzed
 (section 12). Messages have no canonical form, so nothing can hash or
-byte-compare one (section 7). And the envelope's unknown-member behaviour is
-an artifact of expressing a tagged union in JSON through serde, which is a
-real inconsistency and is written down as one (section 7).
+byte-compare one (section 7). And the envelope's unknown-member behaviour was
+an artifact of expressing a tagged union in JSON through serde, which is now
+checked against a named member table rather than left to the derive (section
+7).
 
 ### 3.2 It is never transmitted
 
@@ -212,13 +213,27 @@ the third kind of line the C implementation found on its first run.
 These are the rules an implementation gets wrong quietly, so they are stated
 rather than left to be inferred from the witness.
 
-- **Unknown members are refused in a payload and ignored in the envelope, and
-  this is an inconsistency rather than a design.** Measured, not assumed:
-  `{"request":"status","bogus":1}` is **accepted**, while a `ScanEntry`
-  carrying an unknown member is refused. The payload structs are
-  `deny_unknown_fields`; the `Request` and `Response` enums cannot be, because
-  serde does not support that attribute on an internally-tagged enum — the
-  representation this protocol uses.
+- **Unknown members are refused on a request, in the envelope as well as the
+  payload.** `{"request":"status","bogus":1}` is refused with `bogus` named in
+  the message. This used to be the other way round and is recorded because the
+  asymmetry was the wrong way up: the payload structs were
+  `deny_unknown_fields` and the envelope was not, so the strict half was the
+  one reading bytes that had already been parsed and the permissive half was
+  the one facing the socket.
+
+  The `Request` enum still cannot carry `deny_unknown_fields` — serde does not
+  support it on an internally-tagged enum, the representation this protocol
+  uses, because the tag would be the first member refused. `Request::members()`
+  names each variant's members instead, and a test builds every variant fully
+  populated and compares that table against what serde emits, so it cannot
+  drift into refusing a member the protocol has just gained.
+
+- **A response is read leniently, and that is deliberate rather than the same
+  gap surviving.** A client may be older than the daemon it is talking to, so
+  refusing a member it does not recognise is how an upgrade breaks a working
+  client. The asymmetry is now between the two *directions* — strict on what
+  the daemon accepts, tolerant on what a client accepts — rather than between
+  the envelope and the payload of one message.
 
   The consequence is worth stating plainly, because section 2 of `project.md`
   forbids silent field-dropping for the *document* on the grounds that a
@@ -388,11 +403,14 @@ this.
   [0116](decisions/0116-a-client-that-needs-the-model-is-rust.md) settled and
   not a defect, but it means the vocabulary in section 8 is held by a check
   rather than by construction.
-- **An unknown member on a request is silently accepted** (section 7). The
-  payloads refuse one and the envelope cannot, so the surface that reads
-  untrusted bytes is the more permissive half. Found by writing this document
+- ~~**An unknown member on a request is silently accepted**~~ **Closed.** The
+  envelope refuses one now (section 7), so the surface reading untrusted bytes
+  is no longer the more permissive half. It was found by writing this document
   and measuring a claim that was about to be asserted, which is the argument
-  for writing specifications down rather than pointing at a witness.
+  for writing specifications down rather than pointing at a witness -- and the
+  fix needed the specification too: the cheap implementation, refusing whatever
+  a re-serialisation drops, would have refused `{"request":"apply",
+  "confirm":null}`, which item 5 of section 7 entitles a client to send.
 - **`hello` does not negotiate a version.** It reports the tiers a connection
   holds. There is nothing to negotiate while section 1 holds, and this is the
   obvious place for it when that changes.

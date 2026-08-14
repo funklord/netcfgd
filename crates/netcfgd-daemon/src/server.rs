@@ -7,7 +7,7 @@
 //! per client on a socket that will normally have one or two.
 
 use netcfgd_model::Control;
-use netcfgd_proto::{read_message, write_message, Event, Request, Response};
+use netcfgd_proto::{read_request, write_message, Event, Request, Response};
 use netcfgd_sys::peer::{group_id, Peer};
 use std::io::{BufReader, BufWriter};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -167,7 +167,11 @@ fn handle(stream: UnixStream, commands: &Sender<Command>) {
 	let mut writer = BufWriter::new(write_half);
 
 	loop {
-		let request = match read_message::<Request, _>(&mut reader) {
+		// `read_request` and not `read_message`: this is the surface that reads
+		// untrusted bytes, and it refuses a member the protocol does not define.
+		// The client half deliberately stays lenient, so an older client is not
+		// broken by a newer daemon's response.
+		let request = match read_request(&mut reader) {
 			Ok(Some(request)) => request,
 			// A clean disconnect. Not an error, and not worth logging.
 			Ok(None) => return,

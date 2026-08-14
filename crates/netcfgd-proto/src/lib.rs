@@ -14,7 +14,7 @@
 
 pub mod codec;
 
-pub use codec::{read_message, write_message, Framed};
+pub use codec::{read_message, read_request, write_message, Framed};
 
 use netcfgd_apply::Journal;
 use netcfgd_model::{AclPolicy, Document, Observed, Version};
@@ -157,6 +157,55 @@ pub enum Request {
 		/// Which interface runs the access point.
 		interface: String,
 	},
+}
+
+impl Request {
+	/// The members this request carries, beside the `request` tag itself.
+	///
+	/// Named here rather than derived, because serde cannot answer the question
+	/// at the point it matters. `deny_unknown_fields` is unsupported on an
+	/// internally-tagged enum -- the tag would be the first member it refused --
+	/// so the envelope accepted anything, on the one surface that reads
+	/// untrusted bytes into a process holding `CAP_NET_ADMIN`. Section 7 of
+	/// `docs/socket-protocol.md` tells implementers to refuse unknown members,
+	/// and this is the daemon keeping its own rule.
+	///
+	/// The obvious alternative is wrong and was measured before this was
+	/// written: deserialising, re-serialising and refusing any member the round
+	/// trip dropped needs no table and cannot drift -- and it refuses valid
+	/// requests, because `confirm`, `id`, `passphrase`, `proto` and `priority`
+	/// are all `skip_serializing_if = "Option::is_none"`. A client sending
+	/// `{"request":"apply","confirm":null}` would have lost a member it was
+	/// entitled to send, and item 5 of that same checklist is "tell absent from
+	/// null, and from empty". A table that must be maintained is the price of
+	/// not refusing what the protocol permits.
+	///
+	/// It cannot drift silently: `the_member_table_matches_the_struct` builds
+	/// every variant fully populated, so nothing is skipped, and compares what
+	/// serde emits against what this returns.
+	#[must_use]
+	pub fn members(&self) -> &'static [&'static str] {
+		match self {
+			Self::Hello
+			| Self::Status
+			| Self::Plan
+			| Self::Confirm
+			| Self::Revert
+			| Self::Reload
+			| Self::Show
+			| Self::Monitor => &[],
+			Self::Apply { .. } => &["confirm", "allow_disruption", "strand_credentials"],
+			Self::Explain { .. } => &["subject"],
+			Self::WifiScan { .. }
+			| Self::WifiStatus { .. }
+			| Self::WifiDisconnect { .. }
+			| Self::ApStations { .. } => &["interface"],
+			Self::WifiAdd { .. } => {
+				&["ssid", "id", "passphrase", "proto", "hidden", "priority"]
+			}
+			Self::WifiConnect { .. } => &["interface", "network"],
+		}
+	}
 }
 
 /// What `explain` is being asked about.
@@ -449,6 +498,114 @@ impl Response {
 #[cfg(test)]
 mod shape_tests {
 	use super::*;
+
+	/// Every variant, fully populated, so that nothing is skipped.
+	///
+	/// The `skip_serializing_if` fields are the reason this exists: with any of
+	/// them absent, serde emits fewer members than the variant has and the
+	/// comparison below would pass while proving less than it claims.
+	fn every_request_fully_populated() -> Vec<Request> {
+		vec![
+			Request::Hello,
+			Request::Status,
+			Request::Plan,
+			Request::Confirm,
+			Request::Revert,
+			Request::Reload,
+			Request::Show,
+			Request::Monitor,
+			Request::Apply {
+				confirm: Some(30),
+				allow_disruption: vec!["eth0".to_owned()],
+				strand_credentials: vec!["wg0".to_owned()],
+			},
+			Request::Explain {
+				subject: Subject::Interface {
+					name: "eth0".to_owned(),
+				},
+			},
+			Request::WifiScan {
+				interface: "wlan0".to_owned(),
+			},
+			Request::WifiStatus {
+				interface: "wlan0".to_owned(),
+			},
+			Request::WifiAdd {
+				ssid: "686f6d65".to_owned(),
+				id: Some("home".to_owned()),
+				passphrase: Some("secret".to_owned()),
+				proto: Some("wpa3".to_owned()),
+				hidden: true,
+				priority: Some(10),
+			},
+			Request::WifiConnect {
+				interface: "wlan0".to_owned(),
+				network: "home".to_owned(),
+			},
+			Request::WifiDisconnect {
+				interface: "wlan0".to_owned(),
+			},
+			Request::ApStations {
+				interface: "wlan0".to_owned(),
+			},
+		]
+	}
+
+	/// `Request::members` is a hand-written table, so it is checked against the
+	/// only authority there is: what serde emits.
+	///
+	/// A table that drifts is worse than no table, because the envelope check
+	/// would refuse a member the protocol had just gained -- so this compares
+	/// both directions rather than asserting the table is a subset.
+	#[test]
+	fn the_member_table_matches_the_struct() {
+		for request in every_request_fully_populated() {
+			let serde_json::Value::Object(map) =
+				serde_json::to_value(&request).expect("a request serialises")
+			else {
+				panic!("a request is an object");
+			};
+
+			let mut emitted: Vec<String> = map
+				.keys()
+				.filter(|key| key.as_str() != "request")
+				.cloned()
+				.collect();
+			emitted.sort();
+
+			let mut declared: Vec<String> =
+				request.members().iter().map(|m| (*m).to_owned()).collect();
+			declared.sort();
+
+			assert_eq!(
+				emitted, declared,
+				"the member table disagrees with what serde emits for {request:?}"
+			);
+		}
+	}
+
+	/// Every variant is covered above, so a new one cannot arrive unchecked.
+	///
+	/// Without this, adding a request and forgetting to list it here leaves the
+	/// table untested for exactly the variant nobody has thought about yet --
+	/// the vacuous pass, in the test that exists to prevent one.
+	#[test]
+	fn every_variant_is_in_the_fixture() {
+		let tags: std::collections::BTreeSet<String> = every_request_fully_populated()
+			.iter()
+			.map(|request| {
+				serde_json::to_value(request).expect("serialises")["request"]
+					.as_str()
+					.expect("a tag")
+					.to_owned()
+			})
+			.collect();
+		assert_eq!(
+			tags.len(),
+			every_request_fully_populated().len(),
+			"two fixtures share a tag, so one variant is untested"
+		);
+	}
 
 	/// The JSON a client actually reads off the socket.
 	///

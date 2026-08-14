@@ -6,6 +6,7 @@
 //! daemon holds `CAP_NET_ADMIN` and being killed by the OOM killer is a denial
 //! of service with extra steps.
 
+use crate::Request;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::io::{self, BufRead, Read, Write};
@@ -27,6 +28,16 @@ pub const MAX_LINE: usize = 1024 * 1024;
 /// Returns `InvalidData` for a line over [`MAX_LINE`] or one that is not the
 /// expected message, and the underlying `io::Error` otherwise.
 pub fn read_message<T: DeserializeOwned, R: BufRead>(reader: &mut R) -> io::Result<Option<T>> {
+	let Some(line) = read_line(reader)? else {
+		return Ok(None);
+	};
+	let message = serde_json::from_slice(&line)
+		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+	Ok(Some(message))
+}
+
+/// One bounded line, or `None` at a clean end of stream.
+fn read_line<R: BufRead>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
 	let mut line = Vec::new();
 	// A reborrow rather than a bare `read_until`, because `read_until` grows
 	// without bound and the bound is the point. `&mut R` is itself `BufRead`,
@@ -43,9 +54,50 @@ pub fn read_message<T: DeserializeOwned, R: BufRead>(reader: &mut R) -> io::Resu
 			format!("message exceeded {MAX_LINE} bytes without a newline"),
 		));
 	}
-	let message = serde_json::from_slice(&line)
+	Ok(Some(line))
+}
+
+/// Read one request, refusing a member the protocol does not define.
+///
+/// Separate from [`read_message`] because the two directions want opposite
+/// answers. A request is untrusted input to a process holding `CAP_NET_ADMIN`,
+/// and section 7 of `docs/socket-protocol.md` tells every implementation to
+/// refuse unknown members -- a rule the daemon was not keeping, because
+/// `deny_unknown_fields` cannot be applied to an internally-tagged enum, so the
+/// payloads were strict and the envelope was not. A *response* is read by a
+/// client that may be older than the daemon, where refusing a member it does
+/// not know is how a working client breaks on an upgrade. So the strictness is
+/// here and not in the shared path.
+///
+/// # Errors
+///
+/// As [`read_message`], plus `InvalidData` for a member the request's variant
+/// does not define.
+pub fn read_request<R: BufRead>(reader: &mut R) -> io::Result<Option<Request>> {
+	let Some(line) = read_line(reader)? else {
+		return Ok(None);
+	};
+	// The request first, so a malformed message keeps serde's own message
+	// rather than being reported as an unknown member.
+	let request: Request = serde_json::from_slice(&line)
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-	Ok(Some(message))
+
+	// It parsed as a request, so it is an object; a failure here cannot happen
+	// and denies rather than guessing if it somehow does.
+	let map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&line)
+		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+	let allowed = request.members();
+	if let Some(unknown) = map
+		.keys()
+		.find(|key| key.as_str() != "request" && !allowed.contains(&key.as_str()))
+	{
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!("unknown member `{unknown}` on this request"),
+		));
+	}
+	Ok(Some(request))
 }
 
 /// Write one message, terminated and flushed.
@@ -121,6 +173,60 @@ mod tests {
 		write_message(&mut buffer, request).expect("writes");
 		let mut cursor = std::io::Cursor::new(buffer);
 		read_message(&mut cursor).expect("reads").expect("present")
+	}
+
+	/// One line in, through the strict reader.
+	fn strict(line: &str) -> io::Result<Option<Request>> {
+		let mut cursor = std::io::Cursor::new(format!("{line}\n").into_bytes());
+		read_request(&mut cursor)
+	}
+
+	/// Section 7 item 6 of docs/socket-protocol.md, which the daemon was not
+	/// keeping: the payloads refused an unknown member and the envelope did
+	/// not, so the permissive half was the one reading untrusted bytes.
+	#[test]
+	fn an_unknown_member_on_a_request_is_refused() {
+		let error = strict(r#"{"request":"status","bogus":1}"#).expect_err("refused");
+		assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+		assert!(
+			error.to_string().contains("bogus"),
+			"the refusal must name the member: {error}"
+		);
+	}
+
+	/// The case that rules out the cheaper implementation.
+	///
+	/// Refusing any member a re-serialisation drops needs no table and cannot
+	/// drift -- and it would refuse this, because `confirm` is
+	/// `skip_serializing_if = "Option::is_none"`. Item 5 of the same checklist
+	/// is "tell absent from null", so a client is entitled to send it.
+	#[test]
+	fn a_known_member_sent_as_null_is_accepted() {
+		let request = strict(r#"{"request":"apply","confirm":null}"#)
+			.expect("accepted")
+			.expect("present");
+		assert_eq!(
+			request,
+			Request::Apply {
+				confirm: None,
+				allow_disruption: Vec::new(),
+				strand_credentials: Vec::new(),
+			}
+		);
+	}
+
+	/// The other direction stays lenient, deliberately.
+	///
+	/// A response is read by a client that may be older than the daemon, where
+	/// refusing an unknown member is how an upgrade breaks a working client. So
+	/// the strictness is in `read_request` and not in the shared path -- which
+	/// this asserts by sending the same bytes the test above refuses.
+	#[test]
+	fn the_shared_reader_is_still_lenient() {
+		let mut cursor =
+			std::io::Cursor::new(b"{\"request\":\"status\",\"bogus\":1}\n".to_vec());
+		let request: Request = read_message(&mut cursor).expect("reads").expect("present");
+		assert_eq!(request, Request::Status);
 	}
 
 	#[test]
