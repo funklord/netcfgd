@@ -21,8 +21,11 @@ passing -- and when a conflict between the three actually comes up, stop and
 ask instead of picking a winner.
 
 Everything specific to Rust and to this project -- section 2's `rustfmt`
-verdict and sections 4 through 8 -- is this project's own, and is not in
-the source.
+verdict and sections 4 and 6 through 8 -- is this project's own, and is not
+in the source. The numbering skips 5 deliberately: that section was *Line
+length*, withdrawn as a rule nobody had asked for, and the sections after it
+kept their numbers so that the references `project.md` and the decision
+records already carry keep resolving.
 
 Vendored or generated sources are exempt — they keep whatever their
 generator or upstream produces. Nothing is vendored yet; when something is,
@@ -33,6 +36,10 @@ say so here.
 1. **`snake_case`, not `camelCase`,** for identifiers this project defines.
 2. **Tabs for indentation, spaces for alignment.**
 3. **Lowercase filenames,** unless a tool demands otherwise.
+
+Everything below is these three rules in detail, plus the exceptions that are
+already settled. **An exception not listed is not yet settled**: raise it
+rather than deciding it in passing.
 
 ## 1. Naming
 
@@ -65,6 +72,15 @@ lints do not cover is the part that matters:
   planner returns is `Plan`, not `PlanStruct` or `PlanResult`;
   `netcfgd_plan::Plan` already reads correctly at the call site, and
   stuttering only shows up once someone imports it.
+
+**A toolkit whose own API is `camelCase` does not pull your names across.**
+Call the foreign API exactly as it is spelled -- `setParent`, `addWidget`,
+`setEnabled` -- because that is not a violation, it is the API's name. But
+names *you* introduce stay `snake_case` on the same line. This is Rust's rule
+for free and C++'s not at all, so `gui/` is where it has to be held
+deliberately: `ncfg_apply_dialog::build_consent` calling
+`consent_box->setVisible` is both halves correct, and neither half should
+drift toward the other.
 
 ### Prefixes, and visibility
 
@@ -122,6 +138,15 @@ fn plan_for(
 (`→` marks a tab.) Every leading column there is a tab and nothing is
 aligned to a paren, which is the shape to aim for.
 
+**Never mix tabs and spaces within the indent itself.** Tabs come first and
+spaces come after; the reverse, or an alternation between them, is exactly
+what breaks at a different tab width -- which is the one thing the split
+exists to prevent. In the nine Python scripts under `tests/live/` and
+`tools/` it is worse than cosmetic: a space *before* a tab in leading
+whitespace raises `TabError`, so a file that looks right refuses to run.
+Continuation lines inside brackets are not indentation-significant there at
+all, which is why PEP 8's preference for spaces does not reach this rule.
+
 ### rustfmt *is* used here — unlike the sibling projects
 
 The C and Python projects next door ban their formatters outright, because
@@ -165,6 +190,9 @@ SPACE *or* TAB and dpkg round-trips either, but that leading whitespace is
 field *syntax* rather than indentation, so the rule has nothing to say about
 it and everything past it is alignment.
 
+Anything else that seems to need spaces is **not settled by not being
+mentioned**: raise it, get it settled, and add it here.
+
 ### No formatter for `client/` and `gui/`
 
 `clang-format` is **not run here, not even ad hoc on a single file**, for the
@@ -195,9 +223,18 @@ shape: `Cargo.toml`, `Cargo.lock`, `README.md`, `LICENSE`, `Makefile`.
 ## 4. ASCII only in source
 
 Source, comments, doc comments, test fixtures and commit messages are
-**ASCII**. Write `--` where prose would use an em dash. Markdown documents
-are the exception and may use typographic punctuation — `project.md` and
-`netcfgd-design.md` already do throughout.
+**ASCII**. Write `--` where prose would use an em dash. Three things are
+excepted, and they are the rule's shape rather than holes in it:
+
+- **Documentation.** Markdown may use typographic punctuation — `project.md`
+  and `netcfgd-design.md` already do throughout, and so does this file.
+- **User-facing text a program prints.** A glyph in a `gui/` label or a tick
+  in `ncfg` output is output, not prose, and the rule has nothing to say
+  about it.
+- **Anything that genuinely requires Unicode.** `tests/determinism/` carries
+  a deliberately non-ASCII SSID, which is the entire point of the fixture:
+  a document that survives three architectures unchanged has to survive them
+  with its multi-byte characters intact.
 
 This is a rule about the text this project writes, not about the data it
 handles. An SSID is 0..32 arbitrary octets and is explicitly not guaranteed
@@ -207,12 +244,19 @@ otherwise. The two rules do not conflict: one governs the repository, the
 other governs the wire.
 
 The rule is enforced, not merely stated: `ascii_only = true` in
-`.style-gate.toml`, checked by `make style` over the 206 files the gate
-sees. In Python — the nine scripts under `tests/live/` and `tools/` — it
-means ASCII *outside string literals*, because the gate reads those files
-with `tokenize`. Rust and everything else get a whole-file byte check,
-there being no tokenizer here for them, and so does a Python file that will
-not tokenise: a file nobody can parse is not a file that has been cleared.
+`.style-gate.toml`, checked by `make style` over the 209 files the gate
+sees. **In the two languages it can lex, it means ASCII outside string and
+character literals** — the nine Python scripts under `tests/live/` and
+`tools/`, read with `tokenize`, and the C of `client/` and the C++ of `gui/`,
+read with a scanner written for the purpose because nothing in the standard
+library lexes them. That is what makes the UI exception above enforceable
+rather than merely stated: a glyph inside a `gui/` string literal passes and
+an em dash in the comment above it does not.
+
+Rust and everything else get a whole-file byte check, there being no lexer
+here for them, and so does a file in either lexed language that will not
+parse: a file nobody can read is not a file that has been cleared. Markdown
+is out of the check entirely, which is the documentation exception.
 
 That distinction is the rule above expressed mechanically — the text this
 project writes about itself against the data it handles — and it exists
@@ -228,7 +272,7 @@ Every module opens with a `//!` doc comment stating its single
 responsibility. If that comment needs two sentences joined by "and", the
 module wants splitting.
 
-This has teeth here rather than being a nicety. §5 requires
+This has teeth here rather than being a nicety. `project.md` §5 requires
 `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` to be pure and
 hardware-free, which is what makes the entire planner unit-testable against
 fixtures. A module whose stated responsibility has quietly grown a second
