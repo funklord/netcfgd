@@ -24,8 +24,10 @@
 #   make linkage       -- what the shipped binary is allowed to link
 #   make style         -- the shared source gate, plus project.md held to the
 #                         tree it describes
-#   make fmt           -- rustfmt, checking only; `fmt-fix` rewrites
-#   make clippy        -- clippy across the workspace
+#   make fmt           -- rustfmt, checking only; `fmt-fix` rewrites. Skips
+#                         loudly where rustfmt is not installed
+#   make clippy        -- clippy across the workspace; skips loudly where it
+#                         is not installed
 #   make deny          -- supply chain; reports rather than fails where the
 #                         tools are not installed
 #   make size          -- the installed-size ratchet
@@ -54,6 +56,19 @@
 #
 
 CARGO ?= cargo
+
+# Is the optional component here? Asked in three places, so spelled once: the
+# `fmt` and `clippy` gates, and `adapters`, which holds each adapter workspace
+# to the same bar as the core and therefore runs both again. That third one is
+# the easy one to miss -- it is a `cd` into another workspace rather than a
+# gate with the tool's name on it -- and missing it leaves `make check`
+# stopping dead exactly as before, only later and after a full build.
+#
+# Asking cargo whether the subcommand runs, rather than looking for a binary by
+# name: rustup and Debian put the shim in different places, and the only thing
+# being asked is whether the next line will work.
+FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
+CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
 .PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
 
@@ -124,12 +139,20 @@ check-ci: $(PORTABLE_GATES)
 # Separately, because they are separate workspaces. That is the price of
 # dependency containment and it is a small one: a `cd` per adapter, against
 # never having to ask which binary a `cargo deny` result was about.
+#
+# The two optional checks skip here exactly as they do in the core gates, and
+# announced once rather than per adapter. `if cond; then check; fi` is doing
+# real work in the chain: it yields 0 when the tool is absent, and the check's
+# own status when it is present, so a genuine formatting failure still breaks
+# the `&&` rather than being swallowed by the skip.
 adapters:
+	@$(FMT_OK) || echo "adapters: rustfmt not installed, skipping that check"
+	@$(CLIPPY_OK) || echo "adapters: clippy not installed, skipping that check"
 	@for adapter in $(ADAPTERS); do \
 		echo "adapters: $$adapter"; \
 		( cd $$adapter && \
-			$(CARGO) fmt --check && \
-			$(CARGO) clippy --all-targets -- -D warnings && \
+			if $(FMT_OK); then $(CARGO) fmt --check; fi && \
+			if $(CLIPPY_OK); then $(CARGO) clippy --all-targets -- -D warnings; fi && \
 			$(CARGO) test && \
 			$(CARGO) build ) || exit 1; \
 	done
@@ -199,14 +222,51 @@ shell:
 	fi; \
 	echo "shell: ok, $$count scripts parse"
 
+# rustfmt and clippy, skipped loudly rather than failed when absent -- the rule
+# `gui` and `deny` already follow, and for the same reason each states: a gate
+# nobody can run locally is a gate that rots.
+#
+# Neither ships with a distro rustc, and this tree is developed on one (no
+# rustup, per section 10's cross-build note). So `make check` stopped at the
+# second of its seventeen gates with `error: no such command: fmt` and never
+# reached the other fifteen -- which is the failure `.github/workflows/
+# check.yml` names when it installs both by name, "fails in a way that reads
+# like a code problem", solved there and left standing here.
+#
+# Two things keep the skip from being a vacuous pass. CI installs both, so the
+# real check runs where a regression would be published; and `make style`
+# gates indentation in this tree regardless, so a skipped `fmt` is not an
+# unchecked tree -- rustfmt.toml's `hard_tabs` is load-bearing for what the
+# tool *writes*, not for what is verified.
+#
+# The probe asks cargo whether the subcommand runs rather than looking for a
+# binary by name, because rustup and Debian put the shim in different places
+# and the question is only ever "will the next line work".
 fmt:
-	$(CARGO) fmt --check
+	@if $(FMT_OK); then \
+		$(CARGO) fmt --check; \
+	else \
+		echo "fmt: rustfmt not installed, skipping"; \
+		echo "fmt:   apt install rustfmt, or rustup component add rustfmt"; \
+	fi
 
+# Hard failure rather than a skip, matching `apk`: this one is asked for
+# deliberately and its whole purpose is to rewrite files, so doing nothing
+# quietly is the one answer that would be wrong.
 fmt-fix:
+	@$(FMT_OK) || { \
+		echo "fmt-fix: rustfmt is not installed, so there is nothing to rewrite"; \
+		echo "fmt-fix:   apt install rustfmt, or rustup component add rustfmt"; \
+		exit 1; }
 	$(CARGO) fmt
 
 clippy:
-	$(CARGO) clippy --workspace --all-targets -- -D warnings
+	@if $(CLIPPY_OK); then \
+		$(CARGO) clippy --workspace --all-targets -- -D warnings; \
+	else \
+		echo "clippy: not installed, skipping"; \
+		echo "clippy:   apt install rust-clippy, or rustup component add clippy"; \
+	fi
 
 # The C client's test binary, which `conformance` and `test` both need.
 #

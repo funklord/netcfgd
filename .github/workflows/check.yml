@@ -50,6 +50,22 @@ jobs:
       - name: Install Qt
         run: sudo apt-get update && sudo apt-get install -y qt6-base-dev
 
+      # Three gates turn into a skip when their tool is absent -- fmt, clippy
+      # and gui -- which is right on a machine with no rustup and no desktop,
+      # and wrong here. This is the runner that must actually run them, so a
+      # component that failed to install has to fail the job rather than
+      # quietly shorten the gate list: a skip nobody reads is the vacuous pass
+      # this project keeps finding, and the install steps above are the only
+      # thing standing between the two.
+      #
+      # After both installs rather than inside either, so the list is in one
+      # place and is keyed to the gates rather than to the packages.
+      - name: Check the toolchain has what the gates need
+        run: |
+          cargo fmt --version
+          cargo clippy --version
+          command -v qmake6
+
       - uses: actions/cache@v4
         with:
           path: |
