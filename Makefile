@@ -883,6 +883,16 @@ linkage:
 #
 # Per-binary figures are still printed, because "which one grew?" is the next
 # question after "did it grow?" -- but the limit is on the sum.
+#
+# Both verdicts name the ceiling rather than only the limit, because the test
+# is against the ceiling and the messages used to report the limit. A passing
+# run printed "installed 2341400 of 2337304" -- a number larger than the one it
+# was being compared to, beside a green gate -- which reads as a gate that
+# failed to enforce, and cost a reader a detour through this recipe to find the
+# tolerance. The failing message had the mirror of it: an overage measured from
+# the limit, so the arithmetic never explained why a smaller overage had
+# passed. A gate nobody can read the output of is one step from a gate nobody
+# runs.
 size:
 	@$(CARGO) build --release --quiet
 	@$(MAKE) --no-print-directory ncfg-link PROFILE=release
@@ -899,12 +909,19 @@ size:
 	done < size-budget.txt; \
 	ceiling=$$(( limit + limit * tol / 100 )); \
 	if [ "$$total" -gt "$$ceiling" ]; then \
-		printf 'size: installed %s bytes, over its %s limit by %s\n' \
-			"$$total" "$$limit" "$$(( total - limit ))"; \
+		printf 'size: installed %s bytes, over its %s ceiling by %s\n' \
+			"$$total" "$$ceiling" "$$(( total - ceiling ))"; \
+		printf 'size:   the limit is %s, with %s%% tolerance on top\n' \
+			"$$limit" "$$tol"; \
 		echo "size:   raise it in size-budget.txt, and say why in the commit"; \
 		exit 1; \
 	fi; \
-	printf 'size: installed %8s of %s\n' "$$total" "$$limit"
+	if [ "$$total" -gt "$$limit" ]; then \
+		printf 'size: installed %8s of %s, inside the %s%% tolerance (ceiling %s)\n' \
+			"$$total" "$$limit" "$$tol" "$$ceiling"; \
+	else \
+		printf 'size: installed %8s of %s\n' "$$total" "$$limit"; \
+	fi
 
 # Design section 4.6's mechanical test, and constraint 2's enforcement: on a
 # machine that has never used an optional feature, the footprint is exactly the
