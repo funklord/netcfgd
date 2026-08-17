@@ -66,8 +66,48 @@ fn extend(sources: &mut SourceMap, dir: &Path) -> io::Result<()> {
 
 /// Add one file, following any `include` statements it contains.
 fn add_file(sources: &mut SourceMap, path: &Path) -> io::Result<()> {
+	add_file_within(sources, path, &mut Vec::new())
+}
+
+/// The same, carrying the chain of files currently being expanded.
+///
+/// `open` is what stops `include` recursing for ever. A file that includes
+/// itself, or two that include each other, recursed here until the stack
+/// overflowed -- which is not a diagnostic, it is the daemon dying, and
+/// `reload` is a socket request so it could be asked for from outside.
+///
+/// The parser bounds how deeply one file may nest blocks and lists. Nothing
+/// bounded nesting *across* files, which is the same defect one directory up:
+/// a bound that holds inside a document and not between documents is not a
+/// bound on the recursion the program actually performs.
+///
+/// A stack of what is open, rather than a set of everything seen, because the
+/// two differ on a shape that is legal: `a` including `b` and `c`, both of
+/// which include `d`, is a diamond and not a cycle. A seen-set would silently
+/// drop the second `d` and change what the config means; this refuses only a
+/// file that is already being expanded further up its own chain.
+fn add_file_within(
+	sources: &mut SourceMap,
+	path: &Path,
+	open: &mut Vec<PathBuf>,
+) -> io::Result<()> {
+	// Identity by canonical path, so `a.conf`, `./a.conf` and a symlink to it
+	// are one file rather than three. A path that will not canonicalise is
+	// kept as written -- the read below then reports the real reason, which is
+	// a better error than anything this could invent.
+	let identity = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+	if open.contains(&identity) {
+		let mut chain: Vec<String> = open.iter().map(|p| p.display().to_string()).collect();
+		chain.push(identity.display().to_string());
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!("include cycle: {}", chain.join(" -> ")),
+		));
+	}
+
 	let text = fs::read_to_string(path)
 		.map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))?;
+	open.push(identity);
 
 	// Includes are resolved by pulling the included file in ahead of the one
 	// that names it, and stripping the statement. The compiler refuses an
@@ -81,13 +121,22 @@ fn add_file(sources: &mut SourceMap, path: &Path) -> io::Result<()> {
 			} else {
 				path.parent().unwrap_or(Path::new(".")).join(&target)
 			};
-			add_file(sources, &resolved)?;
+			// Popped on the error path as well as the ordinary one. Nothing
+			// depends on it today -- the error propagates out of `load` and
+			// the stack is dropped with it -- but a function that pushes on
+			// one path and pops on some of them is the shape somebody later
+			// reuses and gets wrong.
+			if let Err(error) = add_file_within(sources, &resolved, open) {
+				open.pop();
+				return Err(error);
+			}
 			continue;
 		}
 		body.push_str(line);
 		body.push('\n');
 	}
 
+	open.pop();
 	sources.add(path.display().to_string(), body);
 	Ok(())
 }
@@ -275,6 +324,67 @@ pub fn resolve_dir(explicit: Option<&str>) -> PathBuf {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// A file that includes itself is refused rather than recursed into.
+	///
+	/// Before this, `add_file` followed every include with nothing tracking
+	/// what it was already inside, so this input did not produce a diagnostic
+	/// -- it overflowed the stack and killed the process. `reload` is a socket
+	/// request, so the crash was reachable from outside the daemon.
+	#[test]
+	fn a_file_that_includes_itself_is_refused() {
+		let dir = netcfgd_testdir::TestDir::new("config-self-include");
+		let main = dir.join("netcfgd.conf");
+		fs::write(&main, "include \"netcfgd.conf\"\n").expect("written");
+
+		let error = load(dir.path()).expect_err("a cycle is refused");
+		assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+		assert!(
+			error.to_string().contains("include cycle"),
+			"the error must say what it found: {error}"
+		);
+	}
+
+	/// Two files including each other, which is the same defect one step apart
+	/// and the shape a self-include check alone would miss.
+	#[test]
+	fn two_files_including_each_other_are_refused() {
+		let dir = netcfgd_testdir::TestDir::new("config-mutual-include");
+		fs::write(dir.join("netcfgd.conf"), "include \"other.conf\"\n").expect("written");
+		fs::write(dir.join("other.conf"), "include \"netcfgd.conf\"\n").expect("written");
+
+		let error = load(dir.path()).expect_err("a cycle is refused");
+		assert!(
+			error.to_string().contains("include cycle"),
+			"the error must say what it found: {error}"
+		);
+		// The chain is what makes it actionable: which file, reached how.
+		assert!(
+			error.to_string().contains("other.conf"),
+			"the error must name the files in the cycle: {error}"
+		);
+	}
+
+	/// A diamond is not a cycle, and refusing one would be a regression.
+	///
+	/// `a` includes `b` and `c`, and both include `d`. A set of everything
+	/// seen would drop the second `d` and quietly change what the config
+	/// means; the guard tracks only what is currently open, so this still
+	/// expands exactly as it did before the guard existed.
+	#[test]
+	fn a_diamond_include_is_not_a_cycle() {
+		let dir = netcfgd_testdir::TestDir::new("config-diamond-include");
+		fs::write(
+			dir.join("netcfgd.conf"),
+			"include \"b.conf\"\ninclude \"c.conf\"\n",
+		)
+		.expect("written");
+		fs::write(dir.join("b.conf"), "include \"d.conf\"\n").expect("written");
+		fs::write(dir.join("c.conf"), "include \"d.conf\"\n").expect("written");
+		fs::write(dir.join("d.conf"), "# nothing to declare\n").expect("written");
+
+		load(dir.path()).expect("a diamond is legal");
+	}
 
 	#[test]
 	fn an_include_line_is_recognised() {
