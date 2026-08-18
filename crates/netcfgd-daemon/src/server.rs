@@ -12,7 +12,9 @@ use netcfgd_sys::peer::{group_id, Peer};
 use std::io::{BufReader, BufWriter};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, SyncSender};
+use std::sync::Arc;
 use std::thread;
 
 /// What reaches the event loop.
@@ -69,22 +71,120 @@ pub(crate) fn serve(
 	let listener = UnixListener::bind(path)?;
 	apply_policy_permissions(path, control);
 
+	let connections = Connections::new();
 	thread::Builder::new()
 		.name("control".to_owned())
 		.spawn(move || {
 			for stream in listener.incoming() {
-				let Ok(stream) = stream else {
+				let Ok(mut stream) = stream else {
+					continue;
+				};
+				// Refused with an answer rather than a dropped connection: the
+				// protocol has an error response and section 7 says to return
+				// one, so a client that hits the cap is told which wall it met
+				// instead of seeing an end of stream it has to guess about.
+				let Some(slot) = connections.take() else {
+					let _ = write_message(
+						&mut stream,
+						&Response::error(format!(
+							"too many connections, {MAX_CONNECTIONS} are open"
+						)),
+					);
 					continue;
 				};
 				let commands = commands.clone();
 				// One thread per connection. A client that stops reading
-				// blocks only itself.
-				let _ = thread::Builder::new()
+				// blocks only itself, and `slot` moves into the thread so the
+				// count falls when that thread ends however it ends.
+				if thread::Builder::new()
 					.name("client".to_owned())
-					.spawn(move || handle(stream, &commands));
+					.spawn(move || {
+						let _slot = slot;
+						handle(stream, &commands);
+					})
+					.is_err()
+				{
+					// The slot went with the closure and died with it, so the
+					// count is already correct. Nothing useful is left to do
+					// for this client, and the loop must keep accepting.
+					continue;
+				}
 			}
 		})?;
 	Ok(())
+}
+
+/// How many connections may be open at once.
+///
+/// Generous for what actually connects: a tray, a window, a TUI, a monitor
+/// stream and whatever `ncfg` invocations are in flight is under ten on a busy
+/// desktop. The number exists to bound the damage, not to ration ordinary use,
+/// and a machine that legitimately needs more than this has something else
+/// going on.
+const MAX_CONNECTIONS: usize = 64;
+
+/// How many connections are open, with a slot released when its guard drops.
+///
+/// The socket already bounds one connection: `MAX_LINE` refuses a client that
+/// sends a gigabyte without a newline, and `docs/socket-protocol.md` says why
+/// in as many words -- the daemon holds `CAP_NET_ADMIN`, so making it allocate
+/// its way to being killed is a denial of service with extra steps. Nothing
+/// bounded the *number* of connections, and the same sentence applies to ten
+/// thousand of them: each one is an OS thread, and the accept loop spawned
+/// without counting.
+///
+/// This tree bounds everything else it reads or allocates -- line length,
+/// nesting depth, the event channel at 64, include recursion -- so the absent
+/// bound was conspicuous rather than deliberate. Nothing in the tree recorded
+/// a decision either way.
+#[derive(Debug, Clone)]
+struct Connections(Arc<AtomicUsize>);
+
+/// One open connection. Releases its slot when dropped.
+///
+/// A guard rather than a decrement at the end of `handle`, because the failure
+/// mode of getting this wrong is worse than the defect it fixes: a count that
+/// rises on every accept and falls on only some paths stops the daemon
+/// accepting anything at all once it has served `MAX_CONNECTIONS` in total.
+/// `Drop` runs on the ordinary return and on an unwind, so there is no exit
+/// path left to forget.
+#[derive(Debug)]
+struct Slot(Arc<AtomicUsize>);
+
+impl Connections {
+	fn new() -> Self {
+		Self(Arc::new(AtomicUsize::new(0)))
+	}
+
+	/// Take a slot, or `None` if the cap is reached.
+	///
+	/// `fetch_update` rather than an add followed by a check-and-undo: two
+	/// accepts racing on the latter both see a count under the cap, both add,
+	/// and the cap is briefly exceeded by however many threads were in that
+	/// window. The compare-and-swap has no such window.
+	fn take(&self) -> Option<Slot> {
+		self.0
+			.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |open| {
+				(open < MAX_CONNECTIONS).then_some(open + 1)
+			})
+			.ok()
+			.map(|_| Slot(Arc::clone(&self.0)))
+	}
+
+	/// How many are open.
+	///
+	/// Test-only: nothing in the daemon asks, and an unused method is a
+	/// warning, which CI turns into a failure with `-D warnings`.
+	#[cfg(test)]
+	fn open(&self) -> usize {
+		self.0.load(Ordering::Relaxed)
+	}
+}
+
+impl Drop for Slot {
+	fn drop(&mut self) {
+		self.0.fetch_sub(1, Ordering::Relaxed);
+	}
 }
 
 /// Give the socket permissions that match what the policy promises.
@@ -267,4 +367,69 @@ pub(crate) fn broadcast(subscribers: &mut Vec<SyncSender<Event>>, event: &Event)
 /// netlink messages -- into a single re-read.
 pub(crate) fn drain(commands: &Receiver<Command>) -> Vec<Command> {
 	commands.try_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// The cap holds, and a released slot is reusable.
+	///
+	/// The second half is the one worth having. A counter that only ever rises
+	/// would pass the first assertion and then refuse every connection after
+	/// the daemon had served `MAX_CONNECTIONS` in total -- a worse failure than
+	/// the unbounded accept it replaced, and one no burst test would show.
+	#[test]
+	fn the_cap_holds_and_a_released_slot_comes_back() {
+		let connections = Connections::new();
+		let held: Vec<Slot> = (0..MAX_CONNECTIONS)
+			.map(|_| connections.take().expect("under the cap"))
+			.collect();
+		assert_eq!(connections.open(), MAX_CONNECTIONS);
+		assert!(connections.take().is_none(), "the cap must refuse");
+
+		drop(held);
+		assert_eq!(connections.open(), 0, "every slot releases on drop");
+		assert!(
+			connections.take().is_some(),
+			"the daemon must accept again once connections close"
+		);
+	}
+
+	/// Racing accepts never exceed the cap.
+	///
+	/// This is what `fetch_update` buys over an add followed by a
+	/// check-and-undo: with the latter, every thread in the window sees a count
+	/// under the cap, all of them add, and the daemon holds more threads than
+	/// it agreed to. Asserted rather than reasoned about, because a race that
+	/// is only argued for is one nobody has run.
+	#[test]
+	fn concurrent_takes_never_exceed_the_cap() {
+		let connections = Connections::new();
+		let mut workers = Vec::new();
+		for _ in 0..8 {
+			let connections = connections.clone();
+			workers.push(thread::spawn(move || {
+				let mut mine = Vec::new();
+				for _ in 0..MAX_CONNECTIONS {
+					if let Some(slot) = connections.take() {
+						mine.push(slot);
+					}
+				}
+				mine
+			}));
+		}
+
+		let held: Vec<Slot> = workers
+			.into_iter()
+			.flat_map(|worker| worker.join().expect("a worker finished"))
+			.collect();
+
+		assert_eq!(
+			held.len(),
+			MAX_CONNECTIONS,
+			"eight threads asking for more than the cap must be handed exactly the cap"
+		);
+		assert_eq!(connections.open(), MAX_CONNECTIONS);
+	}
 }

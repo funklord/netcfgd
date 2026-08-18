@@ -184,6 +184,17 @@ which takes an afternoon to trace.
   octets — travel as **lowercase hex strings**, never as mangled text. See
   section 8.
 
+- **At most 64 connections are open at once**, and the 65th is answered with an
+  `error` response and then closed. Same reasoning as `MAX_LINE` and the same
+  threat: each connection is an OS thread in a process holding `CAP_NET_ADMIN`,
+  so a client opening them in a loop makes the daemon allocate its way to being
+  killed just as surely as one that never sends a newline. The bound is
+  generous for what connects — a tray, a window, a TUI, a monitor stream and
+  whatever `ncfg` calls are in flight is under ten.
+
+  A client meeting this should not retry in a tight loop; it has been told the
+  daemon is at its limit, and the answer is to close what it is not using.
+
 ## 6. Message shape
 
 Every message is a JSON object carrying exactly one tag member:
