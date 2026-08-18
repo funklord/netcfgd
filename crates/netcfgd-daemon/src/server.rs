@@ -373,6 +373,127 @@ pub(crate) fn drain(commands: &Receiver<Command>) -> Vec<Command> {
 mod tests {
 	use super::*;
 
+	/// A served socket, with the state loop played by the test.
+	///
+	/// The accept path had no harness at all: only the live scripts drove this
+	/// socket, so `serve` and `handle` were exercised solely by running a real
+	/// daemon. That is why the connection cap was built as a testable type with
+	/// untested wiring -- this closes the gap the wiring sat in, and the cap
+	/// test below now drives real connections rather than a counter.
+	///
+	/// The loop is a thread answering whatever `handle` forwards, because
+	/// `handle` blocks on a reply: without something on the other end, the
+	/// first request would hang rather than fail, which is the slowest possible
+	/// way for a test to be wrong.
+	struct Served {
+		path: std::path::PathBuf,
+		_dir: netcfgd_testdir::TestDir,
+	}
+
+	impl Served {
+		fn new(tag: &str, answer: Response) -> Self {
+			let dir = netcfgd_testdir::TestDir::new(tag);
+			let path = dir.join("netcfgd.sock");
+			let (commands, incoming) = std::sync::mpsc::channel();
+			serve(&path, &Control::default(), commands).expect("the socket binds");
+
+			thread::spawn(move || {
+				for command in incoming {
+					if let Command::Request { reply, .. } = command {
+						let _ = reply.send(answer.clone());
+					}
+				}
+			});
+
+			Self { path, _dir: dir }
+		}
+
+		fn connect(&self) -> UnixStream {
+			// The listener is bound before `serve` returns, so a connection
+			// cannot race the bind. Retried anyway on the accept backlog rather
+			// than assumed, since a refusal here would read as a cap failure.
+			for _ in 0..50 {
+				if let Ok(stream) = UnixStream::connect(&self.path) {
+					return stream;
+				}
+				std::thread::sleep(std::time::Duration::from_millis(10));
+			}
+			panic!("the socket never accepted a connection");
+		}
+	}
+
+	/// One request over a real socket gets one answer.
+	///
+	/// The point is not the answer -- it is that `serve`, `handle`, the codec
+	/// and the reply channel are all on the path, which nothing in this crate
+	/// had asserted before.
+	#[test]
+	fn a_connection_carries_a_request_and_its_answer() {
+		let served = Served::new("server-round-trip", Response::Ok);
+		let mut stream = served.connect();
+
+		write_message(&mut stream, &Request::Status).expect("the request goes out");
+		let mut reader = BufReader::new(stream);
+		let response: Option<Response> =
+			netcfgd_proto::read_message(&mut reader).expect("an answer arrives");
+		assert_eq!(response, Some(Response::Ok));
+	}
+
+	/// The 65th connection is refused with an answer, over a real socket.
+	///
+	/// This is the wiring the cap's unit tests could not reach: that a slot is
+	/// held for as long as the connection is, and released when it closes. A
+	/// counter that never fell would pass every test in this file except this
+	/// one's second half.
+	#[test]
+	fn the_socket_refuses_past_the_cap_and_recovers() {
+		let served = Served::new("server-cap", Response::Ok);
+
+		let held: Vec<UnixStream> = (0..MAX_CONNECTIONS).map(|_| served.connect()).collect();
+
+		// The refusal is an answer, not a dropped connection.
+		let refused = served.connect();
+		let mut reader = BufReader::new(refused);
+		let response: Option<Response> =
+			netcfgd_proto::read_message(&mut reader).expect("the refusal is readable");
+		let Some(Response::Error { message }) = response else {
+			panic!("expected an error response, got {response:?}");
+		};
+		assert!(
+			message.contains("too many connections"),
+			"the refusal must say why: {message}"
+		);
+
+		// And the daemon accepts again once connections close, which is the
+		// half that fails if a slot is taken and never given back.
+		//
+		// Retried rather than asserted once: closing a connection here does not
+		// release its slot, the handler thread waking on the end of stream
+		// does. That is genuinely asynchronous, and a single attempt would be a
+		// test that passes on a quiet machine and fails on a busy one.
+		drop(held);
+		let mut recovered = None;
+		for _ in 0..200 {
+			let mut stream = served.connect();
+			if write_message(&mut stream, &Request::Status).is_err() {
+				std::thread::sleep(std::time::Duration::from_millis(10));
+				continue;
+			}
+			let mut reader = BufReader::new(stream);
+			if let Ok(Some(Response::Ok)) = netcfgd_proto::read_message::<Response, _>(&mut reader)
+			{
+				recovered = Some(Response::Ok);
+				break;
+			}
+			std::thread::sleep(std::time::Duration::from_millis(10));
+		}
+		assert_eq!(
+			recovered,
+			Some(Response::Ok),
+			"the daemon never accepted again after its connections closed"
+		);
+	}
+
 	/// The cap holds, and a released slot is reusable.
 	///
 	/// The second half is the one worth having. A counter that only ever rises
