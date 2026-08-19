@@ -83,6 +83,87 @@ pub fn terminate(pid: i32) -> io::Result<()> {
 	Err(error)
 }
 
+/// Ask a whole process group to terminate.
+///
+/// A hook is a script, and a script that runs `sleep 300` has *forked* it:
+/// the shell is the child netcfgd spawned, and the work is a grandchild.
+/// Signalling the child kills the shell and leaves the grandchild running,
+/// reparented to init -- so the daemon stops waiting and the thing it was
+/// waiting for carries on. Measured, not supposed: two `sleep 300` processes
+/// outlived a run that believed it had killed them.
+///
+/// The caller must have put the child in its own group -- `Command::
+/// process_group(0)` -- or this signals netcfgd's own group, which includes
+/// the daemon.
+///
+/// # Errors
+///
+/// Returns the errno. `ESRCH` means the group is already gone, which is the
+/// outcome that was wanted.
+pub fn terminate_group(pgid: i32) -> io::Result<()> {
+	if pgid <= 0 {
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidInput,
+			"a process group id must be positive; negating it is this function's job",
+		));
+	}
+	// SAFETY: two integers in, one out, no pointers. The negation is what
+	// makes this a group signal, and the guard above is what stops a stray
+	// zero reaching it -- `kill(0, ...)` signals the caller's own group.
+	let result = unsafe { libc::kill(-pgid, libc::SIGTERM) };
+	if result < 0 {
+		return Err(io::Error::last_os_error());
+	}
+	Ok(())
+}
+
+/// Kill a whole process group outright.
+///
+/// The group counterpart of [`kill`], with [`terminate_group`]'s reasoning
+/// about why a group and not a process, and the same guard against zero.
+///
+/// # Errors
+///
+/// Returns the errno. `ESRCH` means the group is already gone.
+pub fn kill_group(pgid: i32) -> io::Result<()> {
+	if pgid <= 0 {
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidInput,
+			"a process group id must be positive; negating it is this function's job",
+		));
+	}
+	// SAFETY: as in `terminate_group`.
+	let result = unsafe { libc::kill(-pgid, libc::SIGKILL) };
+	if result < 0 {
+		return Err(io::Error::last_os_error());
+	}
+	Ok(())
+}
+
+/// Kill a process outright, when asking has not worked.
+///
+/// The last resort and never the first: [`terminate`] says why `SIGTERM` is
+/// the right signal for anything netcfgd starts, and a `SIGKILL` that arrives
+/// before a process has had its chance to clean up is the state that rule
+/// exists to avoid. This is here for the one case where the chance has been
+/// given and refused -- a hook that has ignored a `SIGTERM` through its grace
+/// period, which cannot be waited on for ever because the reconcile loop is
+/// behind it.
+///
+/// # Errors
+///
+/// Returns the errno. `ESRCH` -- no such process -- means it exited between
+/// the check and the signal, which is the outcome that was wanted.
+pub fn kill(pid: i32) -> io::Result<()> {
+	// SAFETY: `kill` takes two integers and returns one. No pointers. `pid` is
+	// positive, so this signals one process rather than a group.
+	let result = unsafe { libc::kill(pid, libc::SIGKILL) };
+	if result < 0 {
+		return Err(io::Error::last_os_error());
+	}
+	Ok(())
+}
+
 /// Ask a process to re-read its configuration.
 ///
 /// `SIGHUP` is the convention and radvd honours it -- `radvd.c` handles it by
