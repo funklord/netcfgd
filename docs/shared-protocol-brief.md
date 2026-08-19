@@ -38,11 +38,30 @@ asserting it.
 Two things, and neither is inside the daemon:
 
 - **`wire/`** — the framed, authenticated datagram protocol: envelope,
-  capabilities, signing, verification, chunking and reassembly. Planned as
-  netcfgd's own C, at the repository root beside `crates/`. **It does not
-  exist yet**, which is why this news arrived at a good moment: the plan was
-  to *copy* fuzzypickles' design into a second implementation, and consuming a
-  library instead means the second implementation is never written.
+  capabilities, signing, verification, chunking and reassembly.
+
+  **Everything in that list is built, in `../fuzznet`** (reported 2026-08-19
+  and checked here file by file): `wire/frame.situ` with its `.wire` and
+  `.map` beside it and `wire/seal.c` to open and seal a frame, `chain/` for
+  minting, delegation and verification against a pinned root, `chunk/split.c`
+  and `chunk/reassembly.c` with a chunk cap and a per-sender quota, and
+  `frame/freshness.c` for section 5's expiry rule. The crypto is a vtable
+  rather than a dependency, so nothing here is forced to take Monocypher.
+
+  This bullet used to read "Planned as netcfgd's own C, at the repository
+  root beside `crates/`. **It does not exist yet**", and that was withdrawn
+  on 2026-08-10 — 180 lines below, in section 7, where a reader of this
+  section would not meet it. **A document that corrects itself downstream of
+  the claim lets the withdrawn text go on reading as current**, which is how
+  the library author read this one as saying their tree was unbuilt. The
+  sentence was about netcfgd's own planned directory, which genuinely does
+  not exist and never will (section 7, item 5) — but being technically true
+  is no defence when the correction is 180 lines away.
+
+  What the old bullet got right is worth keeping: the alternative was to
+  *copy* fuzzypickles' design into a second implementation, and consuming a
+  library instead means that second implementation is never written. That is
+  now a fact rather than a plan.
 - **`agent/`** — a small bridge that terminates the remote protocol, maps a
   remote capability onto a local tier, and then speaks netcfgd's ordinary
   local socket as an unprivileged client. Netcfgd-specific; not yours to
