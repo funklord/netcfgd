@@ -854,6 +854,12 @@ What has still never happened is the thing §*What would prove it* is about:
 nobody has run netcfgd against a real radio, on a real router, or as the
 network configuration of a machine they depend on.
 
+**`make live` has since been run and is green** — 30 scripts pass, 8 skip on
+named missing packages or on needing real root, nothing orphaned, no disk
+moved. It is recorded under the open items below with what it found, and the
+short version is that it verified the one change that had shipped with only a
+mechanism-level check behind it.
+
 **The last pass was about checks that reported the wrong thing, and it started
 with one that could not report at all.** `make check` could not run on this
 machine: it died at gate 2 of 17 because neither rustfmt nor clippy ships with
@@ -938,11 +944,32 @@ see *Waiting on a decision* at the end of this section.
 **Three added by the last pass, and the first is the largest gap in what is
 verified.**
 
-- **`make live` has not been run.** It is where this document says defects are
-  found, and five of the last pass's changes would be exercised there in ways
-  `make check` structurally cannot — the hook group-kill, the connection cap,
-  the include guard, the sbin PATH fix and the envelope check. It drives real
-  daemons, several outside a namespace, so it is a deliberate act.
+- ~~**`make live` has not been run.**~~ **Run, and green**: 30 scripts pass, 8
+  skip, exit 0. Nothing was orphaned to init, `/` did not move off 80%, and
+  the count of deleted-but-open files was identical before and after — the
+  three checks `running-code.md` asks for, and the third is the one that once
+  hid 693 GB here.
+
+  **It paid for the sbin PATH fix immediately**, which is the change that had
+  been verified only at the mechanism level and said so. `tunnel.sh` had never
+  once exercised the real openvpn sitting in `/sbin`; it passes now. `qdisc.sh`
+  and `dhcp.sh` likewise, and `qdisc.sh` would previously have *failed* under
+  `NCFG_LIVE` on a `tc` it could not see rather than skipped. Three scripts
+  that silently did nothing now run.
+
+  The 8 skips each name their own remedy and are worth knowing before reading
+  a green suite as full coverage: `dhcpcd`, `hostapd`, `nmcli`,
+  `wireguard-tools` and `uidmap` are not installed here, and `hwsim`,
+  `pppoe-session` and `delegation` need real root. **`hwsim.sh` is the
+  association test**, so a green `make live` on this machine still says nothing
+  about the radio — which is the same gap §*What would prove it* names, reached
+  from a different direction.
+
+  Two `/tmp/ncfg-*` directories were left behind and neither was the suite's:
+  both came from deliberately killing or crash-aborting a test process during
+  falsification, where `TestDir`'s cleanup on `Drop` cannot run. A property of
+  crash-testing rather than a defect, and worth expecting rather than
+  investigating next time.
 - **`run_as` is the same defect the hook timeout was, unfixed.** `Option` on
   `HookRef`, always `None`, never read. An unread `timeout` merely failed to
   bound; an unread `run_as` means a hook that asked to drop privilege would
