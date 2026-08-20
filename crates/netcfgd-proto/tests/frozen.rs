@@ -88,6 +88,8 @@ fn every_request() -> Vec<Request> {
 		Request::ApStations { .. } => "ap_stations",
 		Request::ConfigPut { .. } => "config_put",
 		Request::SecretPut { .. } => "secret_put",
+		Request::ConfigDelete { .. } => "config_delete",
+		Request::SecretDelete { .. } => "secret_delete",
 	};
 	let mut present: Vec<&str> = all.iter().map(name).collect();
 	present.sort_unstable();
@@ -97,6 +99,7 @@ fn every_request() -> Vec<Request> {
 		[
 			"ap_stations",
 			"apply",
+			"config_delete",
 			"config_put",
 			"confirm",
 			"explain",
@@ -105,6 +108,7 @@ fn every_request() -> Vec<Request> {
 			"plan",
 			"reload",
 			"revert",
+			"secret_delete",
 			"secret_put",
 			"show",
 			"status",
@@ -213,6 +217,14 @@ fn every_request_sample() -> Vec<Request> {
 			name: "cafe".to_owned(),
 			value: "NOT-A-REAL-SECRET".to_owned(),
 			replace: false,
+		},
+		// One each: neither has an optional member, so one sample pins the
+		// whole shape.
+		Request::ConfigDelete {
+			name: "nm-cafe".to_owned(),
+		},
+		Request::SecretDelete {
+			name: "cafe".to_owned(),
 		},
 		Request::ApStations {
 			interface: "wlan0".to_owned(),

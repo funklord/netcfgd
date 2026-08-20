@@ -157,6 +157,101 @@ pub(crate) fn reload(socket: &Path) -> Result<(), String> {
 	}
 }
 
+/// Ask netcfgd to put a configuration drop-in on disk.
+///
+/// 0127: the shim does not write `/etc/netcfgd`. It ran as root and so it
+/// could, which is why it would have kept doing it unnoticed -- a writer with
+/// permission never fails, so nothing here would ever have reported it.
+///
+/// `replace` is always true. The shim is projecting `NetworkManager`'s view of a
+/// connection profile, and a profile being saved again is an edit rather than
+/// a collision: refusing would make `nmcli connection modify` fail the second
+/// time for a reason the operator cannot act on.
+///
+/// # Errors
+///
+/// netcfgd's own message, which for configuration that would not compile is
+/// the diagnostics.
+pub(crate) fn put_config(socket: &Path, name: &str, text: &str) -> Result<(), String> {
+	let request = Request::ConfigPut {
+		name: name.to_owned(),
+		text: text.to_owned(),
+		replace: true,
+	};
+	match ask(socket, &request)? {
+		Response::Ok => Ok(()),
+		other => Err(format!(
+			"asked netcfgd to write `{name}` and got {}",
+			describe(&other)
+		)),
+	}
+}
+
+/// Ask netcfgd to store a credential an agent supplied.
+///
+/// # Errors
+///
+/// netcfgd's own message. Never the value, in the message or anywhere else.
+pub(crate) fn put_secret(
+	socket: &Path,
+	name: &str,
+	value: &str,
+	replace: bool,
+) -> Result<(), String> {
+	let request = Request::SecretPut {
+		name: name.to_owned(),
+		value: value.to_owned(),
+		replace,
+	};
+	match ask(socket, &request)? {
+		Response::Ok => Ok(()),
+		other => Err(format!(
+			"asked netcfgd to store the credential for `{name}` and got {}",
+			describe(&other)
+		)),
+	}
+}
+
+/// Ask netcfgd to remove a drop-in it wrote.
+///
+/// # Errors
+///
+/// netcfgd's own message. An absent file is success there, not an error.
+pub(crate) fn delete_config(socket: &Path, name: &str) -> Result<(), String> {
+	match ask(
+		socket,
+		&Request::ConfigDelete {
+			name: name.to_owned(),
+		},
+	)? {
+		Response::Ok => Ok(()),
+		other => Err(format!(
+			"asked netcfgd to remove `{name}` and got {}",
+			describe(&other)
+		)),
+	}
+}
+
+/// Ask netcfgd to remove a stored credential.
+///
+/// # Errors
+///
+/// netcfgd's own message.
+pub(crate) fn delete_secret(socket: &Path, name: &str) -> Result<(), String> {
+	match ask(
+		socket,
+		&Request::SecretDelete {
+			name: name.to_owned(),
+		},
+	)? {
+		Response::Ok => Ok(()),
+		other => Err(format!(
+			"asked netcfgd to remove the credential for `{name}` and got {}",
+			describe(&other)
+		)),
+	}
+}
+
 /// Join a network the configuration already describes.
 ///
 /// Decision 0013's boundary, unchanged by being reached over D-Bus: this can

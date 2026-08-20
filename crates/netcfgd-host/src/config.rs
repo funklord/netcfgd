@@ -410,6 +410,96 @@ mod tests {
 mod layering {
 	use super::{install_drop_in, load_layered, writable_files};
 
+	/// Writing is atomic and leaves no temporary behind.
+	///
+	/// Moved here from `netcfgd-nm`, which had its own writer until 0127 made
+	/// netcfgd the only one. The property did not stop mattering when the code
+	/// moved -- netcfgd's own inotify watch is the reader that must never see
+	/// half a file -- and deleting the test with the writer would have taken
+	/// the only check of it in the tree.
+	#[test]
+	fn writing_is_atomic_and_leaves_no_temporary_behind() {
+		let directory = netcfgd_testdir::TestDir::new("host-atomic");
+		let path = directory.join("thing.conf");
+		super::write_atomically(&path, b"first\n", 0o644).expect("the first write");
+		super::write_atomically(&path, b"second\n", 0o644).expect("the second");
+		assert_eq!(
+			std::fs::read_to_string(&path).expect("readable"),
+			"second\n"
+		);
+
+		let leftovers: Vec<_> = std::fs::read_dir(&directory)
+			.expect("readable")
+			.filter_map(Result::ok)
+			.map(|entry| entry.file_name().to_string_lossy().into_owned())
+			.filter(|name| name.starts_with('.'))
+			.collect();
+		assert!(leftovers.is_empty(), "{leftovers:?}");
+	}
+
+	/// A stored credential is readable by nobody else, and so is its directory.
+	///
+	/// Also moved from the shim, and widened: the mode is set by the open
+	/// rather than after it, so there is no window in which the file exists
+	/// and is readable, and the directory it sits in is 0700 for the same
+	/// reason. The shim's version checked the file alone because the shim
+	/// created the directory separately.
+	#[test]
+	fn a_stored_credential_is_readable_by_nobody_else() {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let directory = netcfgd_testdir::TestDir::new("host-secret");
+		let config = directory.join("etc");
+		let path =
+			super::install_secret(&config, "credential", "hunter2hunter2", false).expect("stored");
+
+		let mode = std::fs::metadata(&path)
+			.expect("readable")
+			.permissions()
+			.mode();
+		assert_eq!(mode & 0o777, 0o600, "the file is {mode:o}");
+
+		let parent = std::fs::metadata(config.join("secrets"))
+			.expect("readable")
+			.permissions()
+			.mode();
+		assert_eq!(parent & 0o777, 0o700, "the directory is {parent:o}");
+	}
+
+	/// An empty value is refused, and a name that is a path is too.
+	#[test]
+	fn a_secret_needs_a_usable_name_and_a_value() {
+		let directory = netcfgd_testdir::TestDir::new("host-secret-bad");
+		let config = directory.join("etc");
+		assert!(super::install_secret(&config, "vpn", "", false).is_err());
+		assert!(super::install_secret(&config, "../escape", "value", false).is_err());
+	}
+
+	/// Removing is idempotent, and removing a drop-in that others rely on is
+	/// refused with the file put back.
+	#[test]
+	fn removing_is_idempotent_and_a_removal_that_breaks_the_config_is_undone() {
+		let directory = netcfgd_testdir::TestDir::new("host-remove");
+		let config = directory.join("etc");
+		let factory = directory.join("factory");
+		std::fs::create_dir_all(config.join("conf.d")).expect("a config directory");
+
+		// Absent is success: the state asked for is the state that holds.
+		assert!(super::remove_drop_in(&config, &factory, "never-existed").is_ok());
+		assert!(super::remove_secret(&config, "never-existed").is_ok());
+
+		install_drop_in(
+			&config,
+			&factory,
+			"thing",
+			"interface eth1 {\n\tconfig = \"dhcp\"\n}\n",
+			false,
+		)
+		.expect("written");
+		assert!(super::remove_drop_in(&config, &factory, "thing").is_ok());
+		assert!(!config.join("conf.d/thing.conf").exists());
+	}
+
 	/// A drop-in that compiles is kept, and one that does not is not.
 	///
 	/// The pair, and the second half is the reason the function exists: a file
@@ -786,4 +876,69 @@ pub fn install_secret(
 	write_atomically(&path, value.as_bytes(), 0o600)
 		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
 	Ok(path)
+}
+
+/// Remove a drop-in, and prove what is left still compiles.
+///
+/// The mirror of [`install_drop_in`], and it needs the same check for the same
+/// reason: removing a file can break the configuration as surely as adding one
+/// -- a drop-in another file's `override` refers to, say -- and a machine whose
+/// configuration stopped compiling is one where the next reload changes
+/// nothing.
+///
+/// **An absent file is success.** The state being asked for is the state that
+/// holds.
+///
+/// # Errors
+///
+/// A name that cannot be used, a removal that failed, or a configuration that
+/// would no longer compile -- in which case the file is put back.
+pub fn remove_drop_in(config_dir: &Path, factory_dir: &Path, name: &str) -> Result<(), String> {
+	crate::wifi_profile::usable_id(name)
+		.map_err(|why| format!("`{name}` cannot be used as a name here: {why}"))?;
+
+	let path = config_dir.join("conf.d").join(format!("{name}.conf"));
+	let Ok(previous) = std::fs::read(&path) else {
+		return Ok(());
+	};
+	std::fs::remove_file(&path)
+		.map_err(|error| format!("could not remove {}: {error}", path.display()))?;
+
+	let compiles = load_layered(factory_dir, config_dir)
+		.map_err(|error| format!("could not read {}: {error}", config_dir.display()))
+		.and_then(|sources| {
+			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
+				.map(|_| ())
+				.map_err(|diagnostics| diagnostics.render(&sources))
+		});
+	if let Err(rendered) = compiles {
+		restore(&path, Some(&previous));
+		return Err(format!(
+			"removing that would stop the configuration compiling, so it was put \
+			 back:\n{rendered}"
+		));
+	}
+	Ok(())
+}
+
+/// Remove a stored credential.
+///
+/// No compile check: a secret is read when a backend needs it rather than
+/// compiled into the document, so removing one cannot make the configuration
+/// invalid. It can make it *fail later*, which is a different thing and one
+/// `ncfg plan` reports as a stranded credential.
+///
+/// # Errors
+///
+/// A name that cannot be used, or a removal that failed. Absent is success.
+pub fn remove_secret(config_dir: &Path, name: &str) -> Result<(), String> {
+	crate::wifi_profile::usable_id(name)
+		.map_err(|why| format!("`{name}` cannot be used as a secret name: {why}"))?;
+
+	let path = config_dir.join("secrets").join(name);
+	match std::fs::remove_file(&path) {
+		Ok(()) => Ok(()),
+		Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+		Err(error) => Err(format!("could not remove {}: {error}", path.display())),
+	}
 }

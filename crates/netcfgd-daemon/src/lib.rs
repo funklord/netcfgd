@@ -904,6 +904,25 @@ fn answer(
 			value,
 			replace,
 		} => put_secret_request(state, name, value, *replace),
+		Request::ConfigDelete { name } => {
+			match netcfgd_host::config::remove_drop_in(
+				&state.paths.config,
+				&state.paths.factory,
+				name,
+			) {
+				Ok(()) => {
+					state.reload();
+					Response::Ok
+				}
+				Err(message) => Response::error(message),
+			}
+		}
+		Request::SecretDelete { name } => {
+			match netcfgd_host::config::remove_secret(&state.paths.config, name) {
+				Ok(()) => Response::Ok,
+				Err(message) => Response::error(message),
+			}
+		}
 	}
 }
 

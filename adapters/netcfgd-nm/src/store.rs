@@ -5,6 +5,19 @@
 //! a record in a store only this program understands. Delete `netcfgd-nm` and
 //! the file is still there and still valid.
 //!
+//! # Who writes them
+//!
+//! **netcfgd does, since 0127.** This module used to write the files itself,
+//! and it could, because the shim runs as root to own `NetworkManager`'s bus
+//! name -- which is exactly why it would have gone on doing so unnoticed: a
+//! writer with permission never fails, so nothing here would ever have
+//! reported the problem. It was the last of four programs with root's write
+//! access to the file netcfgd treats as its only authority.
+//!
+//! What it sends now is `config_put`, `secret_put` and their removals. The
+//! paths below still say where the files land, because that is worth knowing
+//! and is still true -- what changed is who puts them there.
+//!
 //! # Where the files go
 //!
 //! Section 9.4 says `/etc/netcfgd/conf.d/nm/`, a directory. It is
@@ -26,8 +39,7 @@
 
 use crate::emit::Emitted;
 use netcfgd_model::Principal;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Where the configuration directory is.
 #[must_use]
@@ -149,16 +161,29 @@ fn user_id(name: &str) -> Option<u32> {
 /// that may write the operator's configuration, which is a deployment problem
 /// with a specific answer.
 pub(crate) fn write(emitted: &Emitted) -> Result<PathBuf, String> {
+	// The secret first, and then the block that refers to it. That order is
+	// the one `wifi_profile::install` takes and it matters for the same
+	// reason: a block naming a credential that is not there yet is a
+	// configuration netcfgd will try to apply and fail, while a credential
+	// nothing refers to is inert.
 	if let Some((name, value)) = &emitted.secret {
-		write_secret(name, value)?;
+		save_secret(name, value)?;
 	}
 
-	let path = path_for(&emitted.id);
-	let directory = path.parent().unwrap_or_else(|| Path::new("."));
-	create_dir(directory)?;
-	write_atomically(&path, emitted.text.as_bytes(), 0o644)
-		.map_err(|error| explain(&path, &error))?;
-	Ok(path)
+	let socket = crate::client::socket_path();
+	crate::client::put_config(&socket, &drop_in_name(&emitted.id), &emitted.text)?;
+	Ok(path_for(&emitted.id))
+}
+
+/// The name netcfgd files this profile under.
+///
+/// `path_for` builds the whole path and is still what says where it lands;
+/// this is the part that crosses the socket, because a request carries a name
+/// and never a path (0127).
+fn drop_in_name(id: &str) -> String {
+	let path = path_for(id);
+	path.file_stem()
+		.map_or_else(|| id.to_owned(), |stem| stem.to_string_lossy().into_owned())
 }
 
 /// Remove a profile and its secret.
@@ -168,22 +193,13 @@ pub(crate) fn write(emitted: &Emitted) -> Result<PathBuf, String> {
 /// Returns a message naming the file. An absent file is success: the state
 /// being asked for is the state that holds.
 pub(crate) fn remove(id: &str) -> Result<(), String> {
-	let path = path_for(id);
-	match std::fs::remove_file(&path) {
-		Ok(()) => {}
-		Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-		Err(error) => return Err(explain(&path, &error)),
-	}
+	let socket = crate::client::socket_path();
+	crate::client::delete_config(&socket, &drop_in_name(id))?;
 
 	// The credential goes with it. Leaving it behind would leave a passphrase
 	// on disk for a network nothing refers to any more, which is the sort of
 	// thing nobody ever notices to clean up.
-	let secret = secret_path(id);
-	match std::fs::remove_file(&secret) {
-		Ok(()) => Ok(()),
-		Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-		Err(error) => Err(explain(&secret, &error)),
-	}
+	crate::client::delete_secret(&socket, id)
 }
 
 /// Where the `file` secret provider looks.
@@ -198,78 +214,11 @@ fn secret_path(name: &str) -> PathBuf {
 ///
 /// Returns a message naming the file.
 pub(crate) fn save_secret(name: &str, value: &str) -> Result<(), String> {
-	write_secret(name, value)
-}
-
-fn write_secret(name: &str, value: &str) -> Result<(), String> {
-	let path = secret_path(name);
-	create_dir(path.parent().unwrap_or_else(|| Path::new(".")))?;
-	// 0600, and set by the open rather than after it. The same reasoning as the
-	// hostapd configuration in decision 0026: a mode applied afterwards is a
-	// mode that was wrong once, and the window is exactly when the passphrase
-	// is on disk and readable.
-	write_atomically(&path, value.as_bytes(), 0o600).map_err(|error| explain(&path, &error))
-}
-
-fn create_dir(directory: &Path) -> Result<(), String> {
-	std::fs::create_dir_all(directory).map_err(|error| explain(directory, &error))
-}
-
-/// Write, or leave what was there.
-///
-/// Through a temporary file in the same directory and a rename, so a reader --
-/// and netcfgd's inotify watch is one -- sees either the old file or the new
-/// one and never half of either. The temporary carries the final mode from the
-/// moment it exists, so a secret is never briefly world-readable under another
-/// name.
-fn write_atomically(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
-	use std::io::Write as _;
-	use std::os::unix::fs::OpenOptionsExt as _;
-
-	let directory = path.parent().unwrap_or_else(|| Path::new("."));
-	let temporary = directory.join(format!(
-		".{}.{}",
-		path.file_name().map_or_else(
-			|| "tmp".to_owned(),
-			|name| name.to_string_lossy().into_owned()
-		),
-		std::process::id()
-	));
-
-	let mut file = std::fs::OpenOptions::new()
-		.write(true)
-		.create(true)
-		.truncate(true)
-		.mode(mode)
-		.open(&temporary)?;
-	file.write_all(bytes)?;
-	// Durable before it is visible. A rename that beats the data to disk is a
-	// truncated config file after a power cut, which on a router is the failure
-	// that needs a serial cable.
-	file.sync_all()?;
-	drop(file);
-
-	match std::fs::rename(&temporary, path) {
-		Ok(()) => Ok(()),
-		Err(error) => {
-			let _ = std::fs::remove_file(&temporary);
-			Err(error)
-		}
-	}
-}
-
-/// An io error, as something an operator can act on.
-fn explain(path: &Path, error: &io::Error) -> String {
-	if error.kind() == io::ErrorKind::PermissionDenied {
-		format!(
-			"cannot write {}: {error}. netcfgd-nm writes a GUI's networks into the \
-			 operator's configuration (design section 9.4), so it needs write access to \
-			 that directory -- which it does not have here",
-			path.display()
-		)
-	} else {
-		format!("cannot write {}: {error}", path.display())
-	}
+	// Replacing, because an agent supplying a credential is answering a
+	// request for one -- 0031's bridge -- and refusing because a stale value
+	// is already there would leave the network unjoinable with no way for the
+	// agent to say "no, this one".
+	crate::client::put_secret(&crate::client::socket_path(), name, value, true)
 }
 
 #[cfg(test)]
@@ -332,40 +281,5 @@ mod tests {
 			may_write(1000, &Principal::Group("netdev".to_owned())).expect_err("cannot tell");
 		assert!(refusal.contains("not guess"), "{refusal}");
 		assert!(refusal.contains("ncfg"), "{refusal}");
-	}
-
-	#[test]
-	fn writing_is_atomic_and_leaves_no_temporary_behind() {
-		let directory = netcfgd_testdir::TestDir::new("nm-store");
-		let path = directory.join("thing.conf");
-		write_atomically(&path, b"first\n", 0o644).expect("the first write");
-		write_atomically(&path, b"second\n", 0o644).expect("the second");
-		assert_eq!(
-			std::fs::read_to_string(&path).expect("readable"),
-			"second\n"
-		);
-
-		let leftovers: Vec<_> = std::fs::read_dir(&directory)
-			.expect("readable")
-			.filter_map(Result::ok)
-			.map(|entry| entry.file_name().to_string_lossy().into_owned())
-			.filter(|name| name.starts_with('.'))
-			.collect();
-		assert!(leftovers.is_empty(), "{leftovers:?}");
-		let _ = std::fs::remove_dir_all(&directory);
-	}
-
-	#[test]
-	fn a_secret_is_never_readable_by_anybody_else() {
-		use std::os::unix::fs::PermissionsExt as _;
-		let directory = netcfgd_testdir::TestDir::new("nm-secret");
-		let path = directory.join("credential");
-		write_atomically(&path, b"hunter2hunter2", 0o600).expect("the write");
-		let mode = std::fs::metadata(&path)
-			.expect("readable")
-			.permissions()
-			.mode();
-		assert_eq!(mode & 0o777, 0o600, "{mode:o}");
-		let _ = std::fs::remove_dir_all(&directory);
 	}
 }
