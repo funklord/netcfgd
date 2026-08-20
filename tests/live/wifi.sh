@@ -154,11 +154,20 @@ check "the priority carried through" \
 check "the passphrase resolved from the secrets directory" \
 	"$("$cli" -p "$work/ctrl" -i lo get_network 0 psk)" "*"
 
-# The permission boundary, from the outside: the wifi tier joins what the
-# config describes and cannot be talked into anything else.
+# The boundary, from the outside: `connect` joins what the config describes
+# and cannot be talked into anything else.
+#
+# What it used to assert was that the refusal names the *admin tier*, which is
+# where adding a network lived until 0124 moved it to `wifi`. The message was
+# corrected with that decision and this was not, because live scripts are not
+# in `make check` -- so the suite that would have caught it is the one nobody
+# runs before committing. It is the same boundary either way; what changed is
+# that naming a network nobody configured is now a missing name rather than a
+# permission you do not hold, and the refusal has to point at the verb that
+# fixes it.
 unknown=$("$ncfg" wifi connect Neighbour 2>&1 || true)
 contains "an unconfigured network is refused" "$unknown" "no \`network\` block"
-contains "and the refusal explains the boundary" "$unknown" "admin tier"
+contains "and the refusal names the verb that adds one" "$unknown" "ncfg wifi add"
 contains "and lists what is available" "$unknown" "Cafe, HomeFiber"
 
 contains "disconnect works" "$("$ncfg" wifi disconnect)" "disconnected"
