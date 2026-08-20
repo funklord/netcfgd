@@ -472,4 +472,31 @@ netcfgd
 # that is red for long enough stops being read at all.
 #
 # Recorded at the measured size, as every entry above it is.
-total 2337304
+#
+# 2026-08-20: 2337304 -> 2406936, +69632 bytes, for 0127's collapse and what
+# it needed.
+#
+#   +~20 KB, `netcfgd-compile`'s `privilege` module and the classification it
+#   carries. The daemon now parses text a client sent and answers what each
+#   production grants before writing it, which is what makes an open `admin`
+#   tier survivable rather than equivalent to handing out root.
+#
+#   +~18 KB, four socket requests and their handlers -- `config_put`,
+#   `secret_put`, `config_delete`, `secret_delete` -- plus the drop-in writer
+#   in `netcfgd-host`, which compiles the whole directory back and restores
+#   what was there when the result would not compile.
+#
+#   +~16 KB, `ncfg config put|rm`. The client half, without which the four
+#   requests above were reachable only by a program somebody wrote themselves.
+#
+#   +~16 KB, the local/remote split (0128): a second origin, a second policy
+#   in the model, and a second socket bound when a remote policy opens
+#   anything.
+#
+# Recorded because the gate had 487 bytes of tolerance left, which is the
+# state this file's own header warns about: the 3% is for compiler-version
+# noise, and a feature that spends it makes the *next* feature fail for a
+# reason that is not its own. Ratcheting now is what stops that, and it is
+# what the entry above this one was written after failing to do for sixty
+# commits.
+total 2406936
