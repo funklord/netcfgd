@@ -2696,6 +2696,31 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 Not work anybody should do unasked. Each is recorded where it arose; they are
 gathered here so a new session does not have to find them.
 
+- ~~**Whether clients send typed documents or config text.**~~ **Both, with
+  the models going binary later** -- which §2 already provides for, JSON for
+  humans and CBOR for compact storage, so the wire gains an encoding rather
+  than a schema. What made either safe is the classification
+  ([0127](docs/decisions/0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)),
+  now built in `netcfgd-compile`'s `privilege` module: given parsed text it
+  returns every production granting more than "configure this machine's
+  network", so a caller who is not root is refused with the reason.
+
+  **The inventory found a seventh production the audit had missed.** Six were
+  enumerated by reading the compiler; `tun { owner, group }` was found by
+  reviewing the generated list of all 163 keys, and it is netcfgd as root
+  handing a tunnel device to a principal the caller chose. It is neither a
+  path nor a command, which is why an audit looking for those walked past it.
+  `vxlan { group }` is a multicast address and nothing to do with it -- the
+  same word twice, which is the second reason the table is keyed on the block
+  and not the key. The first is `config`: an addressing list in an interface,
+  an `.ovpn` path in an `openvpn` block, and a key-only table would classify
+  one of them wrongly and silently.
+
+  `tools/privilege_gate.py` ties the classification to the compiler's own key
+  set, so a key added later is classified or the build fails. That is the
+  `tier_of` construction reproduced for a language whose keys are strings and
+  cannot be an enum to be exhaustive over.
+
 - ~~**Whether netcfgd coexists with NetworkManager or displaces it.**~~
   **Settled by the holder: displace, and the drop-in is not enabled by
   default.** What "displace" means is

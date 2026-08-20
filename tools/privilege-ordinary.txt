@@ -1,0 +1,183 @@
+# Config keys reviewed and found ordinary -- safe for a client that is not
+# root to send, under decision 0127.
+#
+# This file is an acknowledgement, not a permission list. Nothing reads it at
+# run time; `privilege.rs` decides what is privileged and everything else is
+# ordinary by construction. What this exists for is the gap that leaves: a key
+# added to the compiler later would be ordinary because nobody looked at it.
+# `tools/privilege_gate.py` refuses a key that is in neither this file nor
+# PRIVILEGED, so adding one costs somebody a decision.
+#
+# Review it as a list of things a desktop user may set on this machine's
+# network. The question for each is not "is this sensitive" but "does this
+# grant more than configuring the network" -- a wifi passphrase is sensitive
+# and ordinary; `tun { owner }` is neither sensitive nor ordinary, because it
+# hands a device to somebody.
+#
+# Keys that are privileged in ANY block are absent here and live in
+# PRIVILEGED instead, even where the same word is ordinary elsewhere:
+# `config` is an addressing list in an interface and an .ovpn path in an
+# openvpn block, and the gate matches on the name. `privilege.rs` keeps the
+# block-sensitive answer; this file keeps the coverage.
+#
+# `exec` is here and is not a config key at all: it is a secret provider name
+# that the extractor picks up from a neighbouring match. Over-inclusion is the
+# safe direction for a coverage gate -- it asks for a decision that was not
+# needed -- and the provider itself is caught at the value level by
+# `secret_exec`, not by any key.
+
+ac
+action
+admin
+ageing_time
+allow
+allowed_ips
+anonymous_identity
+auto
+autoconnect
+autoneg
+backend
+band
+bandwidth
+blackhole
+bridge
+bssid
+channel
+confirm
+default
+deny
+dev
+device
+dns
+dns_domains
+dns_mode
+dns_search
+domains
+down_after
+dummy
+duplex
+eap
+enabled
+endpoint
+exec
+family
+forward_delay
+forwarding
+from
+fwmark
+fwmask
+geneve
+gre
+gretap
+gro
+gso
+guard
+hello_time
+hidden
+hold_down
+hostname
+id
+identity
+iif
+inet
+inet6
+ingress_bandwidth
+interval
+ip6gre
+ip6tnl
+ipip
+ipv4
+ipv6
+ipv6_token
+iwd
+keepalive
+key
+keyring
+kind
+l3mdev
+lifetime
+listen_port
+local
+lookup
+mac
+mac_policy
+managed
+master
+members
+metered
+miimon
+mode
+mtu
+nat
+observe
+off
+oif
+on
+on_drift
+open
+other
+other_config
+owe
+parent
+pass
+passthru
+password
+peap
+peer
+phase2
+physical
+port
+portal_check
+powersave
+preference
+prefix
+prefixes
+preshared_key
+priority
+private
+private_key
+prohibit
+proto
+protocol
+psk
+public_key
+pwd
+qdisc
+regdom
+remote
+routes
+rx_checksum
+rx_ring
+scan_randomization
+search
+servers
+service
+signal
+sit
+slow_interval
+speed
+ssid
+stp
+suppress_prefixlength
+table
+timeout
+tls
+to
+tso
+ttl
+ttls
+tx_checksum
+tx_ring
+unreachable
+up_after
+user
+username
+vepa
+vlan_filtering
+vlans
+vni
+wifi
+wol
+wpa2
+wpa3
+wpa_supplicant
