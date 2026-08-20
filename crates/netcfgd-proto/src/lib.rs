@@ -147,6 +147,39 @@ pub enum Request {
 		interface: String,
 	},
 
+	/// Put a configuration drop-in on disk, which netcfgd writes.
+	///
+	/// **0127's general case**, where `WifiAdd` is the specialisation that came
+	/// first. A client cannot write `/etc/netcfgd` -- it is root's, and system
+	/// configuration does not live under a user -- so configuration a client
+	/// wants netcfgd to have arrives here and netcfgd puts it on disk.
+	///
+	/// **A name, never a path.** netcfgd decides where it goes; the name is
+	/// checked by the same rule a wifi profile's id is, so it cannot contain a
+	/// separator, traverse upwards or begin with a dot. A request that could
+	/// name a path would be a request that could write anywhere root can.
+	///
+	/// **The text is classified before it lands.** `netcfgd-compile`'s
+	/// `privilege` module answers what a production grants, and anything
+	/// granting more than configuring a network is refused unless the caller is
+	/// root on this machine. That is 0117's principle, which survived 0127
+	/// intact: the line was never socket-versus-file, it was whether a payload
+	/// can express code.
+	ConfigPut {
+		/// What to call it. `conf.d/<name>.conf`, chosen by netcfgd.
+		name: String,
+		/// The configuration, in the language `docs/netcfgd.conf.example`
+		/// documents.
+		text: String,
+		/// Overwrite a drop-in of this name that already exists.
+		///
+		/// Absent means refuse, because the alternative is silently replacing
+		/// something an operator wrote by hand -- the rule `ncfg secret set`
+		/// already follows.
+		#[serde(skip_serializing_if = "std::ops::Not::not", default)]
+		replace: bool,
+	},
+
 	/// Who is associated with an access point this machine runs.
 	///
 	/// A live query rather than a field of [`Response::Status`]: there is no
@@ -202,6 +235,7 @@ impl Request {
 			| Self::ApStations { .. } => &["interface"],
 			Self::WifiAdd { .. } => &["ssid", "id", "passphrase", "proto", "hidden", "priority"],
 			Self::WifiConnect { .. } => &["interface", "network"],
+			Self::ConfigPut { .. } => &["name", "text", "replace"],
 		}
 	}
 }

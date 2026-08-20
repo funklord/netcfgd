@@ -141,7 +141,7 @@ reach.
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations` |
 | `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add` |
-| `admin` | `apply`, `confirm`, `revert`, `reload` |
+| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put` |
 
 Two placements are deliberate and worth knowing, because both look wrong at
 first glance:
@@ -166,6 +166,45 @@ first glance:
   exists". 0117's typed request is what exists. Adding is still not applying:
   a wifi-tier caller writes a network and joins it, and cannot apply anything
   else.
+
+- **`config_put` is `admin`, and the tier is not the whole answer for it.**
+  It carries configuration, and the same request can hold a wifi network or a
+  shell script, so a second gate runs after the tier one: the text is parsed
+  and classified, and any production granting more than configuring a network
+  needs **root on this machine** -- not the `admin` tier, which a site may have
+  opened to a group. That is what makes opening `admin` survivable rather than
+  equivalent to handing out root, and it is 0117's principle surviving 0127
+  intact. The productions and their reasons are in `netcfgd-compile`'s
+  `privilege` module; `tools/privilege_gate.py` refuses a config key that is
+  classified nowhere.
+
+  It carries a **name, never a path**. netcfgd decides where the drop-in goes,
+  and the name is checked by the rule a wifi profile's id follows, so it cannot
+  contain a separator, traverse upwards or begin with a dot.
+
+## Local and remote
+
+**Which socket a connection arrived on decides which policy judges it**
+([0128](decisions/0128-origin-is-which-socket-you-arrived-on.md)). Origin is
+observed, not claimed: there is no field for a caller to set.
+
+`/run/netcfgd/netcfgd.sock` is local and is judged by `global { control }`
+above. A second socket carries what `agent/` terminates, and is judged by
+`global { remote }` -- booleans over the same three tiers, because every
+remote caller arrives as the agent and a principal would be a sentence the
+daemon cannot evaluate. **The remote socket exists only when a remote policy
+opens something**, so a machine that has never configured remote access has
+nothing listening for it.
+
+Two rules follow, and neither is negotiable by the remote policy:
+
+- **A remote caller's peer credentials are not consulted.** Its uid is the
+  agent's, so checking it would be checking the wrong thing while appearing to
+  check the right one.
+- **Privileged configuration never crosses the network.** `config_put` from a
+  remote caller is refused for any production needing root, whatever `remote`
+  says, because there is no version of "is this root" to ask about a caller
+  the agent terminated.
 
 **The socket's mode follows the policy**, so that a config claiming
 `group:netdev` does not sit behind a root-only socket: `0666` where any tier is

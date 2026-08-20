@@ -86,6 +86,7 @@ fn every_request() -> Vec<Request> {
 		Request::WifiConnect { .. } => "wifi_connect",
 		Request::WifiDisconnect { .. } => "wifi_disconnect",
 		Request::ApStations { .. } => "ap_stations",
+		Request::ConfigPut { .. } => "config_put",
 	};
 	let mut present: Vec<&str> = all.iter().map(name).collect();
 	present.sort_unstable();
@@ -95,6 +96,7 @@ fn every_request() -> Vec<Request> {
 		[
 			"ap_stations",
 			"apply",
+			"config_put",
 			"confirm",
 			"explain",
 			"hello",
@@ -181,6 +183,20 @@ fn every_request_sample() -> Vec<Request> {
 		},
 		Request::WifiDisconnect {
 			interface: "wlan0".to_owned(),
+		},
+		// Two samples, for `wifi_add`'s reason: `replace` is
+		// skip_serializing_if, so one that sets it pins only the present form.
+		// The absent one is what a client sends when it means "do not
+		// overwrite anything", which is the shape that must stay the default.
+		Request::ConfigPut {
+			name: "from-a-client".to_owned(),
+			text: "interface eth0 {\n\tconfig = \"dhcp\"\n}\n".to_owned(),
+			replace: true,
+		},
+		Request::ConfigPut {
+			name: "cafe".to_owned(),
+			text: "network \"Cafe\" {\n\twifi { open = true }\n}\n".to_owned(),
+			replace: false,
 		},
 		Request::ApStations {
 			interface: "wlan0".to_owned(),

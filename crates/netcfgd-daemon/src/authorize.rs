@@ -71,9 +71,17 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// only thing in the plan is a wifi association: a tier that could call
 		// Apply could apply any config change at all, which would make the
 		// wifi tier Admin wearing a hat.
-		Request::Apply { .. } | Request::Confirm | Request::Revert | Request::Reload => {
-			Tier::Admin
-		}
+		// Writing configuration is what `admin` names, and `ConfigPut` writes
+		// arbitrary configuration -- which is why the tier is not the whole
+		// answer for it. `check_content` runs afterwards and refuses anything
+		// in the text granting more than configuring a network, so opening
+		// `admin` to a group is survivable rather than equivalent to handing
+		// it root.
+		Request::Apply { .. }
+		| Request::Confirm
+		| Request::Revert
+		| Request::Reload
+		| Request::ConfigPut { .. } => Tier::Admin,
 	}
 }
 
@@ -167,6 +175,81 @@ pub(crate) fn check(
 	} else {
 		Err(refusal(tier, principal))
 	}
+}
+
+/// The second gate: may this caller send *this content*?
+///
+/// [`check`] answers whether a caller may make a request of this kind.
+/// Configuration is the one payload where that is not enough, because the same
+/// request can carry a wifi network or a shell script. So the text is parsed
+/// and classified, and a production granting more than configuring a network
+/// needs more than the `admin` tier.
+///
+/// **Root on this machine, and nothing else.** Not the `admin` tier, which a
+/// site may have opened to a group -- that is the whole point, since 0127's
+/// architecture only survives an open local policy if opening it cannot grant
+/// root. And never from off the machine, whatever the remote policy says: a
+/// remote caller has no uid the daemon can check, so there is no version of
+/// "is this root" to ask, and inventing one would be trusting the agent for
+/// the one thing the split exists to avoid.
+///
+/// # Errors
+///
+/// Returns a sentence naming the production and what it grants. Both, because
+/// "not permitted" sends the reader to the source and the reason is usually
+/// something they did not know their configuration could do.
+pub(crate) fn check_content(origin: Origin, peer: &Peer, request: &Request) -> Result<(), String> {
+	let Request::ConfigPut { text, .. } = request else {
+		return Ok(());
+	};
+	// Unparseable text is not this gate's to refuse: the writer compiles it
+	// and reports diagnostics that point at the line. Refusing here would
+	// answer a syntax error with a sentence about privilege.
+	let Ok(file) = netcfgd_compile::parse::parse(netcfgd_compile::SourceId(0), text) else {
+		return Ok(());
+	};
+	let findings = netcfgd_compile::privilege::findings(&file);
+	let Some(first) = findings.first() else {
+		return Ok(());
+	};
+	if origin == Origin::Local && peer.is_root() {
+		return Ok(());
+	}
+	Err(format!(
+		"`{}` needs root on this machine: {}. {}",
+		first.what,
+		first.reason.why(),
+		if findings.len() > 1 {
+			format!("{} such productions in this configuration.", findings.len())
+		} else {
+			"Send it as root, or leave it out.".to_owned()
+		}
+	))
+}
+
+/// May this caller do this, all of it?
+///
+/// The module's opening claim is that one function answers "who may do this?",
+/// so there is one place to read and one place a mistake can be. 0127 gave it
+/// a second gate and briefly made that untrue -- the caller had to remember to
+/// ask both, and forgetting the second one is invisible: every test of
+/// [`check_content`] calls it directly and passes whether or not anything in
+/// the daemon does.
+///
+/// So this is the one place, and the daemon calls nothing else.
+///
+/// # Errors
+///
+/// Whichever gate refused, with its own sentence.
+pub(crate) fn permitted(
+	control: &Control,
+	remote: &RemotePolicy,
+	origin: Origin,
+	peer: &Peer,
+	request: &Request,
+) -> Result<(), String> {
+	check(control, remote, origin, peer, request)?;
+	check_content(origin, peer, request)
 }
 
 /// Every tier this peer satisfies.
@@ -278,6 +361,119 @@ mod tests {
 			}
 		)
 		.is_err());
+	}
+
+	fn put(text: &str) -> Request {
+		Request::ConfigPut {
+			name: "from-a-client".to_owned(),
+			text: text.to_owned(),
+			replace: false,
+		}
+	}
+
+	/// Both gates are in the path a request actually takes.
+	///
+	/// Written after removing the content gate from the daemon and watching
+	/// every test still pass: they called `check_content` directly, so they
+	/// proved the function right and proved nothing about it being called. A
+	/// correct function nobody invokes is the shape this tree keeps finding,
+	/// and it is why the daemon now calls one function rather than two.
+	#[test]
+	fn permitted_asks_both_gates() {
+		let member = peer(1000, 1000, &[]);
+		let control = Control {
+			admin: Principal::Any,
+			..Control::default()
+		};
+		let remote = RemotePolicy::default();
+		let hook = put("interface eth0 {\n\tpost_up {\n\t\tid\n\t}\n}\n");
+
+		// The tier gate alone admits it.
+		assert!(check(&control, &remote, Origin::Local, &member, &hook).is_ok());
+		// The one the daemon calls does not.
+		assert!(permitted(&control, &remote, Origin::Local, &member, &hook).is_err());
+
+		// And the tier gate still refuses what it always refused, so this is
+		// both gates rather than the second one wearing both hats.
+		let closed = Control::default();
+		assert!(permitted(&closed, &remote, Origin::Local, &member, &Request::Reload).is_err());
+		assert!(permitted(&control, &remote, Origin::Local, &member, &Request::Reload).is_ok());
+	}
+
+	/// 0127: opening `admin` to a group does not hand that group root.
+	///
+	/// The property the whole classification exists for. `admin` is what
+	/// writing configuration needs, and a site that opens it -- which is the
+	/// stated intent for local -- would be granting root outright if config
+	/// text could carry a hook, because a hook with no `run_as` runs as the
+	/// daemon's user. So the tier lets the request through and the content
+	/// gate stops it.
+	#[test]
+	fn an_admin_group_member_may_send_config_but_not_a_hook() {
+		let member = peer(1000, 1000, &[]);
+		let ordinary = put("interface eth0 {\n\tconfig = \"dhcp\"\n}\n");
+		let with_hook = put("interface eth0 {\n\tconfig = \"dhcp\"\n\tpost_up {\n\t\tid\n\t}\n}\n");
+
+		// The tier says yes to both: it is the same kind of request.
+		let control = Control {
+			admin: Principal::Any,
+			..Control::default()
+		};
+		for request in [&ordinary, &with_hook] {
+			assert!(
+				check(
+					&control,
+					&RemotePolicy::default(),
+					Origin::Local,
+					&member,
+					request
+				)
+				.is_ok(),
+				"the admin tier should admit the request itself"
+			);
+		}
+
+		// The content gate is what tells them apart.
+		assert!(check_content(Origin::Local, &member, &ordinary).is_ok());
+		let refusal = check_content(Origin::Local, &member, &with_hook)
+			.expect_err("a hook from a non-root caller must be refused");
+		assert!(
+			refusal.contains("root") && refusal.contains("shell"),
+			"the refusal must name what it grants: {refusal}"
+		);
+	}
+
+	/// Root on this machine may send it, or the gate would forbid the
+	/// configuration rather than bounding who writes it.
+	#[test]
+	fn root_may_send_a_hook() {
+		let with_hook = put("interface eth0 {\n\tpost_up {\n\t\tid\n\t}\n}\n");
+		assert!(check_content(Origin::Local, &peer(0, 0, &[]), &with_hook).is_ok());
+	}
+
+	/// And never from off the machine, whatever the remote policy says.
+	///
+	/// A remote caller has no uid the daemon can check, so there is no version
+	/// of "is this root" to ask. The peer here *is* root -- `agent/` running
+	/// as root is a plausible deployment -- which is exactly the case that
+	/// would pass if the check asked about the peer before asking about the
+	/// origin.
+	#[test]
+	fn a_hook_never_arrives_from_off_the_machine() {
+		let with_hook = put("interface eth0 {\n\tpost_up {\n\t\tid\n\t}\n}\n");
+		assert!(check_content(Origin::Remote, &peer(0, 0, &[]), &with_hook).is_err());
+	}
+
+	/// Text that does not parse is not this gate's to refuse.
+	///
+	/// The writer compiles it and reports diagnostics pointing at the line.
+	/// Answering a syntax error with a sentence about privilege would send the
+	/// reader looking for a permission problem they do not have.
+	#[test]
+	fn unparseable_text_is_left_to_the_compiler() {
+		assert!(
+			check_content(Origin::Local, &peer(1000, 1000, &[]), &put("interface {{{")).is_ok()
+		);
 	}
 
 	/// 0128: a wide-open local policy does not reach the network.
