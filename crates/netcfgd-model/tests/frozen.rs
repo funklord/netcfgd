@@ -45,8 +45,8 @@ use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{EapConfig, EapMethod, PskConfig, PskProto, Security};
 use netcfgd_model::{
 	AddressSource, Control, Dhcp4, Dhcp6, Document, DriftPolicy, Globals, HostnamePolicy,
-	Interface, InterfaceKind, Key, Principal, QdiscKind, QdiscPolicy, SecretProvider, SecretRef,
-	Ssid, WifiNetwork,
+	Interface, InterfaceKind, Key, Principal, QdiscKind, QdiscPolicy, RemotePolicy, SecretProvider,
+	SecretRef, Ssid, WifiNetwork,
 };
 use std::path::PathBuf;
 
@@ -626,6 +626,14 @@ fn witness() -> Document {
 				observe: Principal::Any,
 				wifi: Principal::Group("netdev".to_owned()),
 				admin: Principal::User("root".to_owned()),
+			},
+			// Not the default, and mixed rather than uniform: a witness that
+			// pinned three falses would serialise the same whether the field
+			// carried a policy or a placeholder.
+			remote: RemotePolicy {
+				observe: true,
+				wifi: true,
+				admin: false,
 			},
 		},
 		devices: vec![Device {

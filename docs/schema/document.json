@@ -42,6 +42,11 @@
       "admin": {
         "user": "root"
       }
+    },
+    "remote": {
+      "observe": true,
+      "wifi": true,
+      "admin": false
     }
   },
   "devices": [

@@ -145,8 +145,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		.as_ref()
 		.map(|document| document.globals.control.clone())
 		.unwrap_or_default();
-	server::serve(&socket_path, &control, commands.clone())
-		.map_err(|error| format!("could not bind {}: {error}", socket_path.display()))?;
+	bind_sockets(&socket_path, &control, &state, &commands)?;
 	spawn_kernel_watcher(&commands);
 	spawn_roam_watcher(&commands, netcfgd_supplicant::ctrl_dir());
 	spawn_rfkill_watcher(
@@ -207,8 +206,9 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 				Command::Request {
 					request,
 					peer,
+					origin,
 					reply,
-				} => requests.push((request, peer, reply)),
+				} => requests.push((request, peer, origin, reply)),
 			}
 		}
 
@@ -378,17 +378,36 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 /// permission check on a document nobody is running.
 fn serve_requests(
 	state: &mut State,
-	requests: Vec<(Request, netcfgd_sys::peer::Peer, SyncSender<Response>)>,
+	requests: Vec<(
+		Request,
+		netcfgd_sys::peer::Peer,
+		authorize::Origin,
+		SyncSender<Response>,
+	)>,
 	subscribers: &mut Vec<SyncSender<Event>>,
 	commands: &Sender<Command>,
 ) {
-	for (request, peer, reply) in requests {
+	for (request, peer, origin, reply) in requests {
 		let policy = state
 			.desired
 			.as_ref()
 			.map(|document| document.globals.control.clone())
 			.unwrap_or_default();
-		let response = authorized(state, &policy, &peer, &request, subscribers, commands);
+		let remote = state
+			.desired
+			.as_ref()
+			.map(|document| document.globals.remote.clone())
+			.unwrap_or_default();
+		let response = authorized(
+			state,
+			&policy,
+			&remote,
+			origin,
+			&peer,
+			&request,
+			subscribers,
+			commands,
+		);
 		// A client that hung up between asking and being answered is ordinary,
 		// not an error.
 		let _ = reply.send(response);
@@ -402,19 +421,82 @@ fn serve_requests(
 /// that, what does it get told. The tiers are worked out whether or not the
 /// request is allowed, because `hello` reports them and `hello` is the request
 /// somebody with no permissions can still make.
+#[allow(clippy::too_many_arguments)]
 fn authorized(
 	state: &mut State,
 	policy: &netcfgd_model::Control,
+	remote: &netcfgd_model::RemotePolicy,
+	origin: authorize::Origin,
 	peer: &netcfgd_sys::peer::Peer,
 	request: &Request,
 	subscribers: &mut Vec<SyncSender<Event>>,
 	commands: &Sender<Command>,
 ) -> Response {
-	let granted = authorize::granted(policy, peer);
-	match authorize::check(policy, peer, request) {
+	let granted = authorize::granted(policy, remote, origin, peer);
+	match authorize::check(policy, remote, origin, peer, request) {
 		Ok(()) => answer(state, request, subscribers, Some(commands), &granted),
 		Err(message) => Response::error(message),
 	}
+}
+
+/// Bind the local socket, and the remote one where a policy asks for it.
+///
+/// Split out because `run` was over its line budget, which is the same reason
+/// `authorized` is its own function. It also reads as one thought: which
+/// sockets this machine offers, and why the second one is usually absent.
+///
+/// **0128: the remote socket exists only when a remote policy does.** A
+/// machine that has never configured remote access has nothing listening for
+/// it -- constraint 2 applied where the difference is a security property
+/// rather than tidiness, since a socket that does not exist is one nothing can
+/// reach through.
+///
+/// Both carry the same `Control`, and that is not an oversight: the local
+/// policy is what `Origin::Local` connections are judged against, and a remote
+/// connection never consults it. Passing it keeps `serve` one function rather
+/// than two that must agree about how a socket is set up.
+fn bind_sockets(
+	socket_path: &std::path::Path,
+	control: &netcfgd_model::Control,
+	state: &State,
+	commands: &Sender<Command>,
+) -> Result<(), String> {
+	server::serve(
+		socket_path,
+		control,
+		authorize::Origin::Local,
+		commands.clone(),
+	)
+	.map_err(|error| format!("could not bind {}: {error}", socket_path.display()))?;
+
+	let remote = state
+		.desired
+		.as_ref()
+		.map(|document| document.globals.remote.clone())
+		.unwrap_or_default();
+	if !remote.is_open() {
+		return Ok(());
+	}
+
+	let remote_path = socket_path.with_file_name("remote.sock");
+	server::serve(
+		&remote_path,
+		control,
+		authorize::Origin::Remote,
+		commands.clone(),
+	)
+	.map_err(|error| format!("could not bind {}: {error}", remote_path.display()))?;
+	// Said out loud, because a listening socket that reaches the network is
+	// the one thing about this daemon an operator should never discover by
+	// finding the file.
+	eprintln!(
+		"netcfgd: remote access is open on {} -- observe {}, wifi {}, admin {}",
+		remote_path.display(),
+		remote.observe,
+		remote.wifi,
+		remote.admin
+	);
+	Ok(())
 }
 
 /// Watch `/dev/rfkill` so a flipped switch is noticed as it happens.

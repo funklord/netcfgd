@@ -83,9 +83,10 @@ pub enum Tier {
 	/// Ask what the network looks like. Reading is not writing, and a status
 	/// display that must run as root is how status displays end up as root.
 	Observe,
-	/// Join, leave and scan wireless networks that the configuration already
-	/// describes. Creating one is `Admin`, because creating a profile means
-	/// writing config and config is the source of truth.
+	/// Join, leave and scan wireless networks, and add one. Adding was `Admin`
+	/// until 0124, on the grounds that creating a profile means writing config
+	/// -- true, and no longer the danger it was once the request that does it
+	/// cannot express a hook.
 	Wifi,
 	/// Change anything else.
 	Admin,
@@ -99,6 +100,55 @@ impl Tier {
 			Self::Observe => "observe",
 			Self::Wifi => "wifi",
 			Self::Admin => "admin",
+		}
+	}
+}
+
+/// Which tiers a caller that arrived on the remote socket may use at all.
+///
+/// **Booleans and not principals**, which is 0128's substance rather than a
+/// simplification. The local policy names `root`, `any`, `user:alice`,
+/// `group:netdev` and checks them against `SO_PEERCRED`; none of that can mean
+/// anything for a connection `agent/` terminated, because every remote caller
+/// arrives as the agent. A remote policy that accepted `user:alice` would be a
+/// sentence the daemon cannot evaluate and an operator would reasonably
+/// believe.
+///
+/// So the daemon bounds what remote can ever reach and the agent decides who
+/// the caller is. That bound holds even when the agent is wrong about
+/// identity, which is the half worth having.
+///
+/// Everything is false by default: a machine that never writes the block is
+/// exactly as reachable as one running the code before 0128.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct RemotePolicy {
+	/// Ask what the network looks like, from off the machine.
+	pub observe: bool,
+	/// Scan, join, leave and add wireless networks, from off the machine.
+	pub wifi: bool,
+	/// Change anything else, from off the machine.
+	pub admin: bool,
+}
+
+impl RemotePolicy {
+	/// Whether any tier is reachable remotely.
+	///
+	/// What decides whether the remote socket exists at all: with nothing
+	/// open, no file is created and a machine that has never configured remote
+	/// access has nothing listening for it.
+	#[must_use]
+	pub fn is_open(&self) -> bool {
+		self.observe || self.wifi || self.admin
+	}
+
+	/// Whether this tier is reachable remotely.
+	#[must_use]
+	pub fn allows(&self, tier: Tier) -> bool {
+		match tier {
+			Tier::Observe => self.observe,
+			Tier::Wifi => self.wifi,
+			Tier::Admin => self.admin,
 		}
 	}
 }

@@ -42,7 +42,7 @@ pub use address::{
 	derive_from_delegation, AddressSource, Delegated, Dhcp4, Dhcp6, PdRequest, PrefixRef, Reported,
 	Slaac, SlaacPrivacy, Static,
 };
-pub use control::{Control, Principal, Tier};
+pub use control::{Control, Principal, RemotePolicy, Tier};
 pub use device::{
 	normalize_station, AccessControl, AccessPoint, AclPolicy, Device, DeviceMatch, MacPolicy,
 	OnUnmanage, WifiDevicePolicy,
@@ -150,6 +150,12 @@ pub struct Globals {
 	pub hostname_policy: HostnamePolicy,
 	/// Who may do what over the control socket.
 	pub control: Control,
+	/// What a caller that arrived over the network may reach (0128).
+	///
+	/// Separate from `control` because the two cannot be one sentence: the
+	/// local policy is principals checked against peer credentials, and a
+	/// remote caller has none the daemon can see.
+	pub remote: RemotePolicy,
 }
 
 /// The whole-host desired state.
