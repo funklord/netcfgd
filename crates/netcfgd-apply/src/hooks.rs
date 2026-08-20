@@ -85,6 +85,57 @@ pub enum Outcome {
 	Noted(String),
 }
 
+/// How many times a spawn is retried when the kernel says the file is busy.
+///
+/// Six attempts over roughly 84 ms. The window being waited out is one
+/// `fork`-to-`exec` in another thread, which is microseconds; anything still
+/// busy after that is somebody genuinely holding the file open for writing,
+/// and that is a fault to report rather than to keep waiting on.
+const ETXTBSY_ATTEMPTS: u32 = 6;
+
+/// `ETXTBSY`, without a libc dependency.
+///
+/// This crate links no libc crate and constraint 3 is why. The value is 26 on
+/// Linux and has been since the first release, and everything this crate does
+/// is netlink, so it is Linux-only by construction.
+const ETXTBSY: i32 = 26;
+
+/// Spawn, retrying while the kernel says the text file is busy.
+///
+/// **`ETXTBSY` here is not a fault in the hook, and it is not rare.** `execve`
+/// refuses a file that any process holds open for writing, and netcfgd is
+/// multithreaded: it materialises hooks under `/run` and spawns backends from
+/// other threads. A `fork` duplicates every open descriptor into the child, so
+/// a hook written a moment earlier can be held open by a child that has not
+/// reached its own `exec` yet. `O_CLOEXEC` does not close that window -- it
+/// closes the descriptor *at* exec, and the window is before it.
+///
+/// **What not retrying costs is not a confusing message.** `pre_up` is a veto
+/// phase, so a spurious failure to start stops the transition: an interface
+/// does not come up, and the reason is a race that nothing in the log
+/// explains.
+///
+/// Found by the suite rather than by a report. `make check` failed once under
+/// the full parallel run with "Text file busy" and passed every time in
+/// isolation -- and a flake is worth chasing to the end when the code under
+/// the test does the same thing the test does, which this one did.
+fn spawn_despite_etxtbsy(command: &mut Command) -> std::io::Result<std::process::Child> {
+	let mut attempt = 0;
+	loop {
+		match command.spawn() {
+			Err(error) if error.raw_os_error() == Some(ETXTBSY) && attempt < ETXTBSY_ATTEMPTS => {
+				attempt += 1;
+				// Linear rather than exponential. The total is bounded by
+				// design, and a doubling backoff would spend most of its
+				// budget on the last attempt -- the one least likely to be
+				// needed, since the window is one fork-to-exec.
+				std::thread::sleep(std::time::Duration::from_millis(u64::from(attempt) * 4));
+			}
+			other => return other,
+		}
+	}
+}
+
 /// Run one hook.
 ///
 /// # Errors
@@ -163,7 +214,7 @@ pub fn run(hook: &HookRef, env: &HookEnv) -> Outcome {
 		command.process_group(0);
 	}
 
-	let mut child = match command.spawn() {
+	let mut child = match spawn_despite_etxtbsy(&mut command) {
 		Ok(child) => child,
 		Err(error) => return fail(hook.phase, format!("could not run {}: {error}", hook.path)),
 	};
@@ -405,6 +456,49 @@ mod tests {
 					.and_then(|value| value.parse().ok())
 			})
 			.unwrap_or(u32::MAX)
+	}
+
+	/// A hook still held open for writing by another process is waited for.
+	///
+	/// Reproduces the race rather than asserting the constant, because a test
+	/// that checked `ETXTBSY_ATTEMPTS == 6` would pass with the retry deleted.
+	/// A second process is made to hold the script open for writing and to let
+	/// go shortly after, which is what a forked child does in the window
+	/// between `fork` and its own `exec` -- so `execve` refuses at first and
+	/// succeeds once the descriptor is gone.
+	///
+	/// The holder is a thread with its own `File`, which is the same thing
+	/// from the kernel's point of view: `ETXTBSY` is about any open write
+	/// descriptor on the inode, not about which process owns it.
+	#[test]
+	fn a_hook_held_open_for_writing_is_waited_for_rather_than_failed() {
+		use std::io::Write as _;
+
+		let dir = netcfgd_testdir::TestDir::new("hook-etxtbsy");
+		let reference = hook(&dir, HookPhase::PostUp, "exit 0", Some(5));
+		let path = dir.join("hook.sh");
+
+		// Held open for writing, then released. 40 ms is inside the retry
+		// budget of ~84 ms and well outside a single attempt, so a run with no
+		// retry fails and a run with one waits.
+		let holder = std::fs::OpenOptions::new()
+			.write(true)
+			.open(&path)
+			.expect("the script is writable");
+		let released = std::thread::spawn(move || {
+			std::thread::sleep(std::time::Duration::from_millis(40));
+			let mut file = holder;
+			let _ = file.flush();
+			drop(file);
+		});
+
+		let outcome = run(&reference, &HookEnv::for_interface("eth0"));
+		released.join().expect("the holder finishes");
+
+		assert!(
+			matches!(outcome, Outcome::Ok),
+			"a hook that was briefly busy should still have run: {outcome:?}"
+		);
 	}
 
 	/// A hook that never finishes is killed, and the phase decides what that
