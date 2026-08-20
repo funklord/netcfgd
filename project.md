@@ -906,9 +906,20 @@ frame therefore survive, on a better footing than they had: they rested on a
 filesystem fact, and they now rest on a property of the configuration
 language.
 
-**What is left is `netcfgd-nm`**, which writes `conf.d/nm-*.conf` itself. It
-runs as root so it can, which is exactly why it will keep doing it until
-somebody changes it -- the failure is invisible from inside the shim.
+**`netcfgd-nm` was the last of the four and is converted too.** It wrote
+`conf.d/nm-*.conf` itself and could, because it runs as root to own
+NetworkManager's bus name -- which is exactly why it would have gone on doing
+so unnoticed: a writer with permission never fails, so nothing inside the shim
+would ever have reported it. Its own atomic writer is deleted rather than left
+unused, so the socket is now the only route it has, and `tests/live/nm.sh`
+proves it with a real `nmcli` against a real daemon: "a static address written
+from a client becomes a config line" can only pass over the socket now.
+
+Removing that writer nearly cost two properties nothing else tested --
+atomicity, and a credential's 0600 mode. Neither had a test in
+`netcfgd-host`, where the code now lives, so the shim's tests moved rather
+than went. A refactor that deletes the last check of something is the way
+coverage disappears without a diff showing it.
 
 **The first real evaluation happened, and the wall it hit was the first three
 minutes.** An operator installed the package, joined the `netcfgd` group, and
