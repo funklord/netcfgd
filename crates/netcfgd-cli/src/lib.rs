@@ -9,6 +9,7 @@
 
 mod client;
 mod control;
+mod drop_in;
 mod secret;
 #[cfg(feature = "tui")]
 mod tui;
@@ -57,6 +58,16 @@ usage:
                                                  alone. Needs root: this is
                                                  what grants a desktop client
                                                  access in the first place
+  ncfg config SUBCOMMAND   configuration netcfgd stores for you. SUBCOMMAND is:
+                             put NAME [FILE]     send a drop-in; FILE or `-`
+                                                 or nothing reads standard
+                                                 input. The name is what
+                                                 netcfgd files it under, never
+                                                 a path. --replace to overwrite
+                             rm NAME             take one away
+                           netcfgd compiles the result before keeping it, so a
+                           drop-in that would break the configuration is
+                           refused with the diagnostics
   ncfg secret SUBCOMMAND   credentials the config refers to. SUBCOMMAND is:
                              set NAME            store the value of
                                                  `@secret:NAME`, asked for at
@@ -192,6 +203,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"monitor" => command_monitor(&options),
 		"wifi" => command_wifi(&positional, &options),
 		"control" => control::run(&positional, &options),
+		"config" => drop_in::run(&positional, &options),
 		"secret" => command_secret(&positional, &options),
 		#[cfg(feature = "tui")]
 		"tui" => tui::run(&options),
