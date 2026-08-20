@@ -929,14 +929,28 @@ work. Both are fixed -- the guard is on both branches and the prompt asks for
 a path -- so the broken case is a sentence rather than a corrupted
 conversation.
 
-**What is still not built is the real answer**, which 0127 already describes:
-`ca_cert` and `client_cert` are classified privileged *only because they are
-paths*, and a client sending the bytes for netcfgd to store would remove them
-from that list rather than guard them. The same mechanism gives EAP-TLS a
-private key without one on the client's disk -- netcfgd materialises it under
-`/run` at 0600 and passes that path, the way hooks and hostapd's config are
-already handled. That is the piece that makes enterprise wifi reachable from
-the GUI and the TUI at all, and it is not started.
+**The real answer is built.** All three certificate fields are now a
+`CertSource`, which is either a path on this machine or a reference to content
+netcfgd holds, and the resolver produces a filesystem path for both -- passing
+a path through and writing stored content under `/run/netcfgd/certs` at 0600
+first. wpa_supplicant opens all three as files, so a path is the only thing
+that ever reaches it.
+
+**The two forms are not equivalent, and the classification draws the line.** A
+path is an instruction to open a file as root, so it stays privileged and a
+caller who is not root cannot send one. A `@secret:` reference names something
+netcfgd already has because a caller gave it, so it grants nothing new and is
+ordinary. That is the entry 0127 predicted would stop being a guarded case and
+become a non-case, and it is the only conditional row in the table -- the
+reason depends on the *value*, not the key.
+
+So an enterprise network is reachable from a desktop client for the first
+time: `ncfg secret set corp-key < client.key` and a `network` block naming
+`@secret:corp-key`, with nothing on the client's disk that root has to read.
+
+`private_key` gained the path form in the same change, which it never had --
+it was a bare `SecretRef`, so an operator with a key already in `/etc/ssl`
+could not name it.
 
 **`config_put` has a client**: `ncfg config put NAME [FILE]` and `ncfg config
 rm NAME`, reading a file or standard input. The name is what netcfgd files it
