@@ -316,6 +316,27 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 }
 
 /// Compile the config, and write the result where `cat` can reach it.
+///
+/// **An empty config directory is not an error**, and used to be one here. It
+/// is the state a fresh install is in: the package ships no configuration and
+/// `debian/postinst` says so, so every `ncfg` command that compiled met a
+/// fatal `no configuration found` on a machine that was working exactly as
+/// designed. The daemon has always disagreed -- [`state::reload`] compiles the
+/// same empty source set to the default document and serves a socket from it --
+/// and so has `ncfg wifi add`, which returns `None` and writes the first file.
+/// Two answers to "what does an empty directory mean" is the drift section 5
+/// created `netcfgd-host` to prevent, and this was the copy that had it wrong.
+///
+/// What it cost was the bootstrap. `ncfg control set` is the one command that
+/// opens the socket to a desktop user, it is the command `debian/postinst`
+/// prints, and it reads the current policy through here -- so the only
+/// documented way out of the root-only default could not run until a
+/// configuration existed, on an install that deliberately ships none. A
+/// zero-byte `netcfgd.conf` was the entire difference.
+///
+/// The diagnostic is not lost, only demoted: `plan` says the directory is
+/// empty rather than refusing to answer, which keeps the case where somebody
+/// pointed `--config-dir` at the wrong place from reading as "nothing to do".
 fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::PathBuf), String> {
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
@@ -325,12 +346,6 @@ fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::Pat
 		&config_dir,
 	)
 	.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
-	if sources.is_empty() {
-		return Err(format!(
-			"no configuration found in {}",
-			config_dir.display()
-		));
-	}
 
 	let mut sink = hooks::RunHooks::new(&run_dir);
 	let (document, provenance) = netcfgd_compile::compile_with_provenance(&sources, &mut sink)
@@ -414,9 +429,43 @@ fn command_plan(options: &Options) -> Result<ExitCode, String> {
 		);
 	} else {
 		print_plan(&plan);
+		note_empty_config(options);
 		warn_about_contention(&document, &observed);
 	}
 	Ok(ExitCode::SUCCESS)
+}
+
+/// Say that the configuration directory is empty, where that explains the plan.
+///
+/// `compile` stopped treating this as fatal, and a bare `nothing to do` is
+/// ambiguous in the one case the old error was right about: somebody who
+/// pointed `--config-dir` at the wrong directory gets the same two words as
+/// somebody whose machine genuinely has nothing to change. So the fact is
+/// still reported, as a note under an answer rather than instead of one.
+///
+/// Not printed for `--json`, which is read by programs, and not for `show`,
+/// whose whole output is a document a parser is meant to consume.
+fn note_empty_config(options: &Options) {
+	let config_dir = config::resolve_dir(options.config_dir.as_deref());
+	let Ok(sources) = config::load_layered(
+		&config::resolve_factory_dir(options.factory_dir.as_deref()),
+		&config_dir,
+	) else {
+		// Unreadable rather than empty. `compile` has already failed with the
+		// real error, so this is unreachable in practice and silent by choice:
+		// a second, vaguer sentence about the same directory helps nobody.
+		return;
+	};
+	if !sources.is_empty() {
+		return;
+	}
+	println!();
+	println!(
+		"there is no configuration in {}, so netcfgd manages nothing here.",
+		config_dir.display()
+	);
+	println!("`ncfg wifi add SSID` writes the first one; docs/first-run.md has the");
+	println!("wired case.");
 }
 
 /// Say so if another daemon manages an interface this plan touches.
