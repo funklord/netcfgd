@@ -177,7 +177,16 @@ pub struct HookRef {
 	/// Content hash at compile time, so drift detection can notice that a
 	/// hook changed underneath the document that references it.
 	pub sha256: String,
-	/// User to run as. Absent means the global default.
+	/// User to run as, dropped to before the script is executed: uid, primary
+	/// gid and supplementary groups, in the order that makes the drop complete.
+	///
+	/// **Absent means the daemon's own user**, which is root. It used to say
+	/// "the global default"; there is no globals key for it and never was, so
+	/// that sentence described a mechanism that did not exist. Design section 9
+	/// wants hooks to "run as a configurable user, not blindly as root" -- the
+	/// runner honours this now, and what is still missing is a way for an
+	/// operator to set it, which needs config grammar and a materialiser that
+	/// writes the script somewhere the target user can read.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub run_as: Option<String>,
 	/// Timeout in seconds.

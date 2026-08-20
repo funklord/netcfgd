@@ -140,6 +140,70 @@ pub fn group_id(name: &str) -> Option<u32> {
 	None
 }
 
+/// Everything needed to become a user: uid, primary gid, supplementary groups.
+///
+/// Separate from [`user_id`] because dropping privilege needs all three and
+/// getting one of them wrong is the classic way to drop it incompletely. A
+/// `setuid` without `setgroups` leaves the process in **root's** supplementary
+/// groups, which on a normal machine includes every group root is in -- so the
+/// hook is no longer root and can still open everything root's groups can.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserIds {
+	/// The user.
+	pub uid: u32,
+	/// Their primary group, from the passwd entry rather than guessed.
+	pub gid: u32,
+	/// Every group naming them as a member, which is what `initgroups` would
+	/// compute. Empty is a legitimate answer and means exactly that: a user in
+	/// no supplementary groups.
+	pub groups: Vec<u32>,
+}
+
+/// Resolve a user name to what is needed to become them.
+///
+/// `/etc/passwd` and `/etc/group` are read directly, for the reason
+/// [`group_id`] gives: no NSS, no getpwnam, nothing that dlopens a module into
+/// a process holding `CAP_NET_ADMIN`.
+///
+/// Returns `None` for a user that does not exist, which the caller must treat
+/// as "do not run this" rather than as "run it as whoever we already are".
+#[must_use]
+pub fn user_ids(name: &str) -> Option<UserIds> {
+	let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+	let mut found = None;
+	for line in passwd.lines() {
+		let mut fields = line.split(':');
+		if fields.next() != Some(name) {
+			continue;
+		}
+		// name:passwd:uid:gid:...
+		let uid = fields.nth(1).and_then(|value| value.parse().ok())?;
+		let gid = fields.next().and_then(|value| value.parse().ok())?;
+		found = Some((uid, gid));
+		break;
+	}
+	let (uid, gid) = found?;
+
+	let mut groups = Vec::new();
+	if let Ok(text) = std::fs::read_to_string("/etc/group") {
+		for line in text.lines() {
+			let fields: Vec<&str> = line.split(':').collect();
+			let [_, _, id, members] = fields[..] else {
+				continue;
+			};
+			if members.split(',').any(|member| member == name) {
+				if let Ok(id) = id.parse() {
+					groups.push(id);
+				}
+			}
+		}
+	}
+	groups.sort_unstable();
+	groups.dedup();
+
+	Some(UserIds { uid, gid, groups })
+}
+
 /// The numeric id of a user, by name. Same reasoning as [`group_id`].
 #[must_use]
 pub fn user_id(name: &str) -> Option<u32> {

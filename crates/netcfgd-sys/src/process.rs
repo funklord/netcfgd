@@ -83,6 +83,62 @@ pub fn terminate(pid: i32) -> io::Result<()> {
 	Err(error)
 }
 
+/// Make a command run as somebody else, giving up everything on the way.
+///
+/// Three calls in one order, and the order is the whole of it:
+///
+/// 1. `setgroups` -- **first, because it needs the privilege being dropped**.
+///    After `setuid` it fails, so a version that did it last would leave the
+///    process in root's supplementary groups while looking like it had
+///    dropped. That is the classic incomplete drop: no longer uid 0, still in
+///    every group root belongs to.
+/// 2. `setgid` -- before `setuid`, for the same reason.
+/// 3. `setuid` -- last, because it is the door that only opens outward.
+///
+/// **Any failure fails the exec.** The closure returns the errno, `Command`
+/// turns that into a failed spawn, and the caller reports it -- so a hook that
+/// asked to be unprivileged never runs privileged instead. That is the whole
+/// security property, and it is why this returns nothing to check: there is no
+/// path where the drop is skipped and the program continues.
+///
+/// An empty `groups` is meaningful rather than a no-op: `setgroups(0, ...)`
+/// clears the inherited set, which is what a user in no supplementary groups
+/// must get.
+///
+/// # Safety and ordering with the rest of `Command`
+///
+/// The closure runs in the child between `fork` and `exec`, where only
+/// async-signal-safe work is allowed. It makes three syscalls and allocates
+/// nothing; `groups` is moved in and its buffer is already allocated by the
+/// time the fork happens.
+pub fn run_as(command: &mut std::process::Command, ids: &crate::peer::UserIds) {
+	use std::os::unix::process::CommandExt;
+
+	let uid = ids.uid;
+	let gid = ids.gid;
+	let groups = ids.groups.clone();
+
+	// SAFETY: the closure calls three libc functions and allocates nothing, so
+	// it is safe to run between fork and exec. `groups` is moved in and its
+	// allocation predates the fork. Each result is checked, and an error stops
+	// the exec rather than continuing with privilege half given up.
+	unsafe {
+		command.pre_exec(move || {
+			let count = libc::size_t::try_from(groups.len()).unwrap_or(libc::size_t::MAX);
+			if libc::setgroups(count, groups.as_ptr()) != 0 {
+				return Err(io::Error::last_os_error());
+			}
+			if libc::setgid(gid) != 0 {
+				return Err(io::Error::last_os_error());
+			}
+			if libc::setuid(uid) != 0 {
+				return Err(io::Error::last_os_error());
+			}
+			Ok(())
+		});
+	}
+}
+
 /// Ask a whole process group to terminate.
 ///
 /// A hook is a script, and a script that runs `sleep 300` has *forked* it:

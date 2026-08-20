@@ -297,7 +297,7 @@ HookRef {                             // NEVER inline shell; see §2.2
                    Carrier, Lease, Roam, Portal, Drift }
   path    : string                    // absolute
   sha256  : string                    // content hash at compile time
-  run_as  : string?                   // user; default from globals
+  run_as  : string?                   // user; absent means root (the daemon)
   timeout : u32?                      // seconds
 }
 

@@ -132,6 +132,29 @@ pub fn run(hook: &HookRef, env: &HookEnv) -> Outcome {
 		command.env(key, value);
 	}
 
+	// Design section 9's privilege separation says hooks "run as a
+	// configurable user, not blindly as root", and until this the runner
+	// ignored `run_as` entirely -- so every hook ran as the daemon, which is
+	// root. A field that is read now is the difference between that sentence
+	// being a design property and being a wish.
+	//
+	// Fails closed in both directions. An unknown user does not run at all,
+	// rather than running as whoever the daemon happens to be; and the drop
+	// itself is checked in the child, so a hook that asked to be unprivileged
+	// can never run privileged instead.
+	if let Some(user) = &hook.run_as {
+		let Some(ids) = netcfgd_sys::peer::user_ids(user) else {
+			return fail(
+				hook.phase,
+				format!(
+					"{}: no such user `{user}`; not running {}",
+					hook.path, hook.path
+				),
+			);
+		};
+		netcfgd_sys::process::run_as(&mut command, &ids);
+	}
+
 	// Its own process group, so that killing it kills what it started. A hook
 	// is a script: `sleep 300` in a `#!/bin/sh` file is a *grandchild*, and
 	// signalling only the shell leaves it running and reparented to init.
@@ -145,9 +168,8 @@ pub fn run(hook: &HookRef, env: &HookEnv) -> Outcome {
 		Err(error) => return fail(hook.phase, format!("could not run {}: {error}", hook.path)),
 	};
 
-	let limit = std::time::Duration::from_secs(u64::from(
-		hook.timeout.unwrap_or(DEFAULT_TIMEOUT_SECONDS),
-	));
+	let limit =
+		std::time::Duration::from_secs(u64::from(hook.timeout.unwrap_or(DEFAULT_TIMEOUT_SECONDS)));
 	match wait_within(&mut child, limit) {
 		Ended(Ok(status)) if status.success() => Outcome::Ok,
 		Ended(Ok(status)) => fail(hook.phase, format!("{} exited with {status}", hook.path)),
@@ -261,7 +283,12 @@ mod tests {
 	use netcfgd_model::HookPhase;
 
 	/// Write a hook script and the `HookRef` that names it.
-	fn hook(dir: &netcfgd_testdir::TestDir, phase: HookPhase, body: &str, timeout: Option<u32>) -> HookRef {
+	fn hook(
+		dir: &netcfgd_testdir::TestDir,
+		phase: HookPhase,
+		body: &str,
+		timeout: Option<u32>,
+	) -> HookRef {
 		let path = dir.join("hook.sh");
 		std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("written");
 		#[cfg(unix)]
@@ -292,6 +319,92 @@ mod tests {
 			run(&reference, &HookEnv::for_interface("eth0")),
 			Outcome::Ok
 		));
+	}
+
+	/// A `run_as` naming nobody does not run the hook at all.
+	///
+	/// The direction matters more than the assertion. The wrong answer here is
+	/// not "an error" but "runs anyway, as root": a hook that asked to be
+	/// unprivileged and was handed the daemon's privileges instead is worse
+	/// than one that did not run, because nothing reports it.
+	#[test]
+	fn a_hook_naming_an_unknown_user_does_not_run() {
+		let dir = netcfgd_testdir::TestDir::new("hook-unknown-user");
+		let ran = dir.join("ran");
+		let mut reference = hook(
+			&dir,
+			HookPhase::PreUp,
+			&format!("touch {}", ran.display()),
+			Some(30),
+		);
+		reference.run_as = Some("no-such-user-anywhere-on-this-machine".to_owned());
+
+		let outcome = run(&reference, &HookEnv::for_interface("eth0"));
+		let Outcome::Vetoed(message) = outcome else {
+			panic!("an unrunnable pre_up hook must veto, got {outcome:?}");
+		};
+		assert!(
+			message.contains("no such user"),
+			"the message must say why: {message}"
+		);
+		assert!(
+			!ran.exists(),
+			"the hook must not have run at all, let alone as root"
+		);
+	}
+
+	/// Dropping privilege we do not have fails the hook rather than ignoring
+	/// the request.
+	///
+	/// Run unprivileged, `setgroups` refuses with `EPERM` before `setuid` is
+	/// reached, the exec fails, and the hook is reported as failed. Run as
+	/// root the drop succeeds and this asserts nothing, so it checks the
+	/// outcome it can have rather than pretending to test both.
+	#[test]
+	fn a_drop_that_cannot_happen_is_not_silently_skipped() {
+		let dir = netcfgd_testdir::TestDir::new("hook-drop-denied");
+		let ran = dir.join("ran");
+		let mut reference = hook(
+			&dir,
+			HookPhase::PostUp,
+			&format!("touch {}", ran.display()),
+			Some(30),
+		);
+		// root exists everywhere and is a different user from any test runner
+		// that is not root. Resolving it exercises the lookup as well.
+		reference.run_as = Some("root".to_owned());
+
+		let outcome = run(&reference, &HookEnv::for_interface("eth0"));
+
+		let running_as_root =
+			netcfgd_sys::peer::user_ids("root").is_some_and(|root| current_uid() == root.uid);
+		if running_as_root {
+			assert!(matches!(outcome, Outcome::Ok), "as root the drop succeeds");
+		} else {
+			assert!(
+				matches!(outcome, Outcome::Noted(_)),
+				"an impossible drop must be reported, got {outcome:?}"
+			);
+			assert!(
+				!ran.exists(),
+				"the hook must not have run with the privileges it asked to give up"
+			);
+		}
+	}
+
+	/// The current uid, read from `/proc` rather than by adding a dependency
+	/// or an `unsafe` call to a crate that forbids one.
+	fn current_uid() -> u32 {
+		std::fs::read_to_string("/proc/self/status")
+			.ok()
+			.and_then(|status| {
+				status
+					.lines()
+					.find_map(|line| line.strip_prefix("Uid:"))
+					.and_then(|rest| rest.split_whitespace().next())
+					.and_then(|value| value.parse().ok())
+			})
+			.unwrap_or(u32::MAX)
 	}
 
 	/// A hook that never finishes is killed, and the phase decides what that
