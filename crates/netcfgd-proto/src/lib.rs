@@ -209,6 +209,35 @@ pub enum Request {
 		replace: bool,
 	},
 
+	/// Remove a drop-in netcfgd wrote for a client.
+	///
+	/// Deleting is writing, so it comes here for 0127's reason: a client that
+	/// could remove files from `/etc/netcfgd` would be a client with write
+	/// access to it. Forgetting a network is as ordinary as adding one -- the
+	/// shim does it for `nmcli connection delete` -- so the collapse is
+	/// incomplete without it.
+	///
+	/// **An absent file is success.** The state being asked for is the state
+	/// that holds, and reporting an error for it would make a client retry
+	/// something already true.
+	ConfigDelete {
+		/// The name it was written under.
+		name: String,
+	},
+
+	/// Remove a stored credential.
+	///
+	/// Absent is success, as above. Note the asymmetry with [`Request::SecretPut`],
+	/// which refuses to replace without being asked: replacing is recoverable
+	/// by whoever knows the value, and this is not, so it is the *caller's*
+	/// deliberate act either way and the protocol does not add a second one.
+	/// What guards it is the `admin` tier and nothing else, which is worth
+	/// knowing before a client offers a button for it.
+	SecretDelete {
+		/// The name a `@secret:` reference used.
+		name: String,
+	},
+
 	/// Who is associated with an access point this machine runs.
 	///
 	/// A live query rather than a field of [`Response::Status`]: there is no
@@ -266,6 +295,7 @@ impl Request {
 			Self::WifiConnect { .. } => &["interface", "network"],
 			Self::ConfigPut { .. } => &["name", "text", "replace"],
 			Self::SecretPut { .. } => &["name", "value", "replace"],
+			Self::ConfigDelete { .. } | Self::SecretDelete { .. } => &["name"],
 		}
 	}
 }
