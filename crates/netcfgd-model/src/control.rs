@@ -139,12 +139,62 @@ impl Control {
 	/// Every group named by any tier, for the socket's ownership.
 	#[must_use]
 	pub fn named_groups(&self) -> Vec<&str> {
-		[&self.observe, &self.wifi, &self.admin]
-			.into_iter()
-			.filter_map(|principal| match principal {
-				Principal::Group(name) => Some(name.as_str()),
-				_ => None,
-			})
-			.collect()
+		let mut found: Vec<&str> = Vec::new();
+		for principal in [&self.observe, &self.wifi, &self.admin] {
+			if let Principal::Group(name) = principal {
+				// Deduplicated, because the caller counts what this returns
+				// and warns when there is more than one. The policy
+				// `debian/postinst` prints names the same group for `observe`
+				// and `wifi`, which is the ordinary desktop case -- and it
+				// produced "the control policy names 2 groups (netcfgd,
+				// netcfgd) ... Members of the others will not be able to
+				// connect", warning about others that do not exist. A
+				// diagnostic that fires on the recommended configuration is
+				// one people learn to scroll past.
+				if !found.contains(&name.as_str()) {
+					found.push(name.as_str());
+				}
+			}
+		}
+		found
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// The desktop policy names one group twice, and that is one group.
+	///
+	/// `debian/postinst` prints `--observe group:netcfgd --wifi group:netcfgd`,
+	/// so the ordinary case has the same name in two tiers. The caller counts
+	/// what this returns and warns when there is more than one, which turned
+	/// that into "the control policy names 2 groups (netcfgd, netcfgd) ...
+	/// Members of the others will not be able to connect" -- a warning about
+	/// others that do not exist, printed on the configuration the package
+	/// itself recommends. A diagnostic that fires on the recommended setup is
+	/// one people learn to scroll past, which costs the warnings that are real.
+	#[test]
+	fn one_group_named_twice_is_one_group() {
+		let control = Control {
+			observe: Principal::Group("netcfgd".to_owned()),
+			wifi: Principal::Group("netcfgd".to_owned()),
+			admin: Principal::Root,
+		};
+		assert_eq!(control.named_groups(), vec!["netcfgd"]);
+	}
+
+	/// And two really different groups are still two, in policy order.
+	///
+	/// The pair: deduplicating by collapsing everything would silence the
+	/// warning this exists to produce, which is the failure that matters more.
+	#[test]
+	fn two_different_groups_are_still_two() {
+		let control = Control {
+			observe: Principal::Group("netcfgd".to_owned()),
+			wifi: Principal::Group("netdev".to_owned()),
+			admin: Principal::Root,
+		};
+		assert_eq!(control.named_groups(), vec!["netcfgd", "netdev"]);
 	}
 }

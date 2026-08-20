@@ -709,6 +709,15 @@ FILLED = @VERSION@ @ARCH@ @DEPENDS@ @MAINTAINER@ @PKGVER@
 # gate checked it for as long as it existed, so the scripts dpkg actually ships
 # were never parsed -- and they had already drifted, the group reservation
 # reaching one copy and not the other. That directory is gone.
+# One check inside this deserves its reason up here, where it is a make
+# comment rather than shell: the unit must grant what the daemon actually
+# does. The control socket's group follows the control policy, and giving a
+# file to a group the process is not in needs CAP_CHOWN even as root -- so a
+# bounding set without it produces a socket no group member can open, under
+# systemd only, with everything else looking correct. That is what shipped,
+# and an operator hit it. The check is keyed on the code rather than on a
+# remembered rule: if the chown goes away the requirement goes with it, and
+# if the grep stops matching it says so instead of passing.
 packaging:
 	@# install and uninstall must agree, checked statically so it runs
 	@# everywhere rather than only where a full install works.
@@ -733,6 +742,19 @@ packaging:
 			debian/postrm; do \
 		[ -x "$$script" ] || { echo "packaging: $$script is not executable, so dpkg would not run it"; fail=1; }; \
 	done; \
+	if grep -q 'fn chown_group' crates/netcfgd-daemon/src/server.rs; then \
+		for field in CapabilityBoundingSet AmbientCapabilities; do \
+			if ! grep -q "^$$field=.*CAP_CHOWN" packaging/systemd/netcfgd.service; then \
+				echo "packaging: the daemon chowns the control socket and $$field"; \
+				echo "packaging:   in netcfgd.service does not grant CAP_CHOWN, so the"; \
+				echo "packaging:   policy's group cannot be given the socket"; \
+				fail=1; \
+			fi; \
+		done; \
+	else \
+		echo "packaging: chown_group is gone from server.rs; this check is stale"; \
+		fail=1; \
+	fi; \
 	if command -v systemd-analyze >/dev/null 2>&1; then \
 		out=$$(systemd-analyze verify packaging/systemd/netcfgd.service \
 			packaging/systemd/netcfgd-nm.service 2>&1 \

@@ -37,8 +37,19 @@ RestartSec=2
 # netcfgd needs to configure interfaces and nothing else. CAP_NET_RAW is here
 # for the children rather than for netcfgd: a wpa_supplicant driving a wired
 # 802.1X port opens a packet socket, and it inherits the ambient set.
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+#
+# CAP_CHOWN is for the control socket, and it was missing. The socket's group
+# follows `global { control { ... } }` -- that is how a policy naming
+# `group:netcfgd` becomes reachable by that group -- and giving a file to a
+# group the process is not a member of needs CAP_CHOWN even as root. Without
+# it the daemon set the mode to 0660, failed the chgrp, said so, and left a
+# socket owned by root:root that no group member could open. Section 2.1 calls
+# a policy the socket cannot honour "a lie that costs an afternoon to
+# diagnose"; this unit was manufacturing exactly that, and only under systemd
+# -- run from a shell as root the capability is present and everything works,
+# which is why no test saw it.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN
 NoNewPrivileges=yes
 ProtectHome=yes
 ProtectKernelLogs=yes
