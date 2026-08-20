@@ -26,6 +26,7 @@ pub mod lex;
 pub mod lower;
 pub mod merge;
 pub mod parse;
+pub mod privilege;
 pub mod provenance;
 
 pub use diag::{Diagnostic, Diagnostics, SourceId, SourceMap, Span};
