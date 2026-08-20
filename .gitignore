@@ -30,6 +30,11 @@ debian/.debhelper/
 debian/files
 debian/tmp/
 debian/netcfgd/
+# The second binary package's staging tree. Named rather than globbed as
+# `debian/netcfgd*/`, which would also swallow debian/netcfgd.postinst and any
+# other per-package packaging source somebody adds later -- the rule above
+# exists because debhelper's working state was committed once already.
+debian/netcfgd-nm/
 debian/*.substvars
 # The snippets dh_installsystemd and friends generate into maintainer scripts,
 # as well as the log. `*.debhelper.log` alone missed `*.debhelper`, so

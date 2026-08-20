@@ -278,6 +278,76 @@ the request that adds a network carries an SSID and a passphrase and cannot
 express anything else, so it no longer has to be trusted as though it carried
 a config file.
 
+## 8. Replacing NetworkManager entirely
+
+Steps 1 to 7 leave both daemons installed and running, each owning different
+interfaces. That is the right place to stay for a while. When you want netcfgd
+to *be* the network manager, there are two halves and they are separate
+decisions.
+
+**The daemon.** Copy the drop-in the package ships as documentation:
+
+```
+mkdir -p /etc/systemd/system/netcfgd.service.d
+cp /usr/share/doc/netcfgd/netcfgd-exclusive.conf \
+   /etc/systemd/system/netcfgd.service.d/
+systemctl daemon-reload
+```
+
+It adds `Conflicts=` for NetworkManager, systemd-networkd and connman, so
+starting netcfgd stops them. It is not installed into place by the package,
+deliberately: installing netcfgd must not decide that this machine's other
+network daemons stop.
+
+**The D-Bus interface**, if you want `nmcli`, `nmtui`, `nm-applet` or
+`plasma-nm` to keep working against netcfgd. That is the `netcfgd-nm` package:
+
+```
+apt install netcfgd-nm
+systemctl enable --now netcfgd netcfgd-nm
+systemctl disable NetworkManager
+```
+
+Only one process can own `org.freedesktop.NetworkManager`, so the shim's unit
+carries the conflict itself rather than as an opt-in.
+
+### Getting NetworkManager back
+
+**This is the important half, and it is two commands that need no network:**
+
+```
+systemctl disable --now netcfgd netcfgd-nm
+systemctl enable --now NetworkManager
+```
+
+Why it works, and why each part is there:
+
+- **`Conflicts=` is symmetric.** `systemctl start NetworkManager` stops
+  netcfgd by itself, so you do not have to get the order right.
+- **`disable`, not just `stop`.** `netcfgd.service` has `Restart=on-failure`.
+  A stop from the conflict is not a failure, so starting NetworkManager does
+  win -- but a *crash-looping* netcfgd restarts and takes the bus name back,
+  and "netcfgd is not working" is exactly that case.
+- **Nothing here is a package operation.** No `apt remove`, no diverted files,
+  nothing overwritten. Reinstalling a package is the one recovery step that
+  needs the network you have just lost, so the switch deliberately never
+  requires it.
+- **NetworkManager still knows your networks.** Neither netcfgd nor the shim
+  ever reads or writes `/etc/NetworkManager/system-connections`. Its profiles
+  are exactly as it left them.
+
+If you also copied the exclusive drop-in, remove it, or netcfgd will stop
+NetworkManager again the next time anything starts it:
+
+```
+rm /etc/systemd/system/netcfgd.service.d/netcfgd-exclusive.conf
+systemctl daemon-reload
+```
+
+**Both daemons enabled at once is the one state to avoid.** `Conflicts=`
+carries no ordering, so at boot the winner is whichever systemd reaches
+first. Enable exactly one.
+
 ## When something goes wrong
 
 **Ask what netcfgd thinks it did.** `ncfg status` for what the kernel has,

@@ -35,3 +35,38 @@ Description: network configuration daemon that states what it will do
  Installing this package configures nothing and starts nothing. The systemd
  unit is installed and left disabled: netcfgd takes over an interface only
  when a configuration names it and an operator applies a plan.
+
+Package: netcfgd-nm
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, netcfgd (= ${binary:Version}),
+ dbus-system-bus-common
+Description: NetworkManager-compatible D-Bus interface for netcfgd
+ netcfgd-nm answers org.freedesktop.NetworkManager from netcfgd, so that
+ nmcli, nmtui, nm-applet and plasma-nm show and control what netcfgd is
+ actually doing. It is a read-mostly projection of netcfgd's own
+ desired-state document plus the wifi flows, not a reimplementation of
+ NetworkManager: VPN, modems and the rest are deliberately not projected.
+ .
+ It is a separate package because it is a separate dependency stack. The
+ daemon links no D-Bus, no glib and no polkit and is meant to build and run
+ on machines that have none of them; this brings zbus and its transitive
+ dependencies, and they stop here.
+ .
+ Nothing is enabled or started by installing it. Only one process can own
+ org.freedesktop.NetworkManager, so starting this stops NetworkManager --
+ which is a decision about the whole machine and is left to the operator:
+ .
+   systemctl enable --now netcfgd netcfgd-nm
+ .
+ Going back needs no network and touches no package, which is the property
+ that matters when netcfgd is what has gone wrong:
+ .
+   systemctl disable --now netcfgd netcfgd-nm
+   systemctl enable --now NetworkManager
+ .
+ This package deliberately does not Conflict with network-manager in the
+ dpkg sense. Both may be installed; only one may run. Removing the
+ NetworkManager package to install this one would be the version of the
+ switch that cannot be undone by somebody who has just lost their network.
+ NetworkManager's own connection profiles are never read or written by
+ netcfgd, so it comes back knowing every network it knew.

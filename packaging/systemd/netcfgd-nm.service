@@ -1,0 +1,83 @@
+# netcfgd-nm: answering NetworkManager's D-Bus interfaces from netcfgd.
+#
+# Installed and NOT enabled, like netcfgd's own unit and for the same reason:
+# installing a package must not change how this machine's network works. This
+# one is stronger, though -- starting it takes NetworkManager's bus name and
+# stops NetworkManager, so enabling it is a decision about the whole machine
+# and belongs to whoever is sitting at it.
+#
+# TO SWITCH:            systemctl enable --now netcfgd netcfgd-nm
+# TO GO BACK:           systemctl disable --now netcfgd netcfgd-nm
+#                       systemctl enable --now NetworkManager
+#
+# Both directions work with no network, from a console, and neither touches a
+# package. That matters more than it looks: `apt remove network-manager` would
+# be the version of this that cannot be undone by somebody who has just lost
+# their network, so nothing here removes, diverts or overwrites a file of
+# NetworkManager's. What changes is which daemon is running.
+#
+# NetworkManager's own connection profiles under
+# /etc/NetworkManager/system-connections are never read or written by netcfgd
+# or by this shim. Going back gets a NetworkManager that still knows every
+# network it ever knew.
+
+[Unit]
+Description=netcfgd NetworkManager compatibility shim
+Documentation=file:///usr/share/doc/netcfgd/first-run.md
+
+# Unlike netcfgd's own unit, where the conflict is an opt-in drop-in. Here it
+# is not a policy choice: one process owns org.freedesktop.NetworkManager, so
+# the two genuinely cannot both run. Without this the shim would start, fail to
+# claim the name, and exit -- correctly, but reported as the shim being broken
+# rather than as the machine already having a network manager.
+#
+# Conflicts is symmetric, which is the property the recovery path rests on:
+# `systemctl start NetworkManager` stops this by itself. Use `disable` as well
+# when netcfgd is what has gone wrong, or a restart will take the name back.
+Conflicts=NetworkManager.service
+After=NetworkManager.service
+
+# The shim is an ordinary unprivileged client of netcfgd's socket, and holds no
+# authority of its own -- design section 11.3. Without netcfgd there is nothing
+# for it to report, so it waits rather than answering a bus with empty
+# observations, which is worse than not answering at all.
+Requires=netcfgd.service
+After=netcfgd.service dbus.service
+Requires=dbus.service
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/netcfgd-nm
+Restart=on-failure
+RestartSec=2
+
+# Root, and this is the one thing here that has to be. Owning
+# org.freedesktop.NetworkManager is granted to root by the bus policy and to
+# nobody else, so a shim that dropped privileges could not be reached at the
+# address it exists to answer. It gains no capabilities: it talks to a unix
+# socket and to the system bus, and configures nothing itself.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+# `strict` here where netcfgd's own unit needs `full`: netcfgd writes
+# /etc/resolv.conf and the resolver drop-ins, and this writes nothing at all.
+# It reaches netcfgd's socket under /run and asks the daemon to do the writing,
+# which is 0117's whole shape.
+ReadOnlyPaths=/etc/netcfgd
+
+[Install]
+WantedBy=multi-user.target

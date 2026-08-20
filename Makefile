@@ -447,6 +447,40 @@ install-systemd:
 	@echo "install-systemd:   to make netcfgd the only network daemon, see"
 	@echo "install-systemd:   packaging/systemd/netcfgd-exclusive.conf"
 
+# The NetworkManager shim, built from its own workspace.
+#
+# Release, and separate from `make adapters`, which builds debug and runs the
+# checks. Kept out of `install` for the reason `install-gui` is: the shim is
+# eighty-odd crates of D-Bus that constraint 3 keeps off the daemon's path, and
+# a machine installing netcfgd is not thereby asking for them.
+nm:
+	cd adapters/netcfgd-nm && $(CARGO) build --release
+
+install-nm:
+	@[ -x adapters/netcfgd-nm/target/release/netcfgd-nm ] || { \
+		echo "install-nm: the shim is not built -- run \`make nm\` first"; \
+		exit 1; }
+	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/dbus-1/system.d \
+		$(DESTDIR)/usr/lib/systemd/system
+	install -m 0755 adapters/netcfgd-nm/target/release/netcfgd-nm \
+		$(DESTDIR)$(BINDIR)/netcfgd-nm
+	@# Its own, rather than relying on NetworkManager's. The right to own that
+	@# bus name is granted by NetworkManager's policy file today, so removing
+	@# that package would take the grant with it -- on exactly the machine the
+	@# shim is for. tools/dbus_policy_gate.py keeps the file and the code in
+	@# step.
+	install -m 0644 packaging/dbus/netcfgd-nm.conf \
+		$(DESTDIR)$(DATADIR)/dbus-1/system.d/netcfgd-nm.conf
+	install -m 0644 packaging/systemd/netcfgd-nm.service \
+		$(DESTDIR)/usr/lib/systemd/system/netcfgd-nm.service
+	@echo "install-nm: netcfgd-nm installed, not enabled and not started"
+	@echo "install-nm:   starting it takes NetworkManager's bus name and stops"
+	@echo "install-nm:   NetworkManager, so it is enabled deliberately:"
+	@echo "install-nm:     systemctl enable --now netcfgd netcfgd-nm"
+	@echo "install-nm:   and undone the same way, with no network needed:"
+	@echo "install-nm:     systemctl disable --now netcfgd netcfgd-nm"
+	@echo "install-nm:     systemctl enable --now NetworkManager"
+
 install-openrc:
 	install -d $(DESTDIR)$(SYSCONFDIR)/init.d
 	install -m 0755 packaging/openrc/netcfgd $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
@@ -500,10 +534,57 @@ deb: version-check
 	@test -n "$(DIST)" || { echo "deb: DIST is empty, refusing" >&2; exit 1; }
 	dpkg-buildpackage -b -us -uc
 	@mkdir -p $(DIST)
+	@# Every artifact by name, `-dbgsym` and the shim included. A glob that
+	@# names only the source package leaves a binary package in the parent
+	@# directory for ever -- which is what raidcfgd's rule found, and adding a
+	@# second binary package is exactly when it would have happened again.
 	@for f in ../netcfgd_$(VERSION)_*.deb ../netcfgd-dbgsym_$(VERSION)_*.deb \
+	          ../netcfgd-nm_$(VERSION)_*.deb ../netcfgd-nm-dbgsym_$(VERSION)_*.deb \
 	          ../netcfgd_$(VERSION)_*.buildinfo ../netcfgd_$(VERSION)_*.changes; do \
 		[ -e "$$f" ] && mv -f "$$f" $(DIST)/ || true; \
 	done
+	@# The property the whole packaging rests on, checked on the artifact
+	@# rather than on the recipe that produced it. `debian/postinst` states it
+	@# in a comment, `debian/rules` arranges it with --no-enable --no-start,
+	@# and neither is evidence: the snippets are appended by debhelper at
+	@# build time, so what a package does on install is only readable from the
+	@# package.
+	@#
+	@# Two markers, both learned from watching the check fail to fire when the
+	@# override was removed:
+	@#
+	@#   - ANY `deb-systemd-invoke` in a postinst starts or restarts something.
+	@#     The first version looked for `deb-systemd-invoke.*start` and the
+	@#     generated code says `deb-systemd-invoke $$_dh_action`, with the verb
+	@#     assigned three lines earlier -- so the check could not have failed
+	@#     for the thing it was written to find.
+	@#   - `debian-installed` is what distinguishes the two enable forms. Both
+	@#     carry a `was-enabled` guard, and debhelper's own comment on the
+	@#     default one says "was-enabled defaults to true, so new installations
+	@#     run enable" -- so guarding on that word proves nothing.
+	@#
+	@# Comments are stripped first: this file's prose names the commands it
+	@# looks for, and matched itself.
+	@fail=0; \
+	checked=0; \
+	for deb in $(DIST)/netcfgd_$(VERSION)_*.deb $(DIST)/netcfgd-nm_$(VERSION)_*.deb; do \
+		[ -e "$$deb" ] || continue; \
+		script=$$(dpkg-deb -I "$$deb" postinst 2>/dev/null | sed 's/#.*//'); \
+		[ -n "$$script" ] || { echo "deb: $$deb has no postinst to check"; fail=1; continue; }; \
+		checked=$$(( checked + 1 )); \
+		if printf '%s\n' "$$script" | grep -q 'deb-systemd-invoke'; then \
+			echo "deb: $$deb starts or restarts a service on install"; fail=1; \
+		fi; \
+		if printf '%s\n' "$$script" | grep -q 'deb-systemd-helper enable' && \
+		   ! printf '%s\n' "$$script" | grep -q 'debian-installed'; then \
+			echo "deb: $$deb enables a service on install"; fail=1; \
+		fi; \
+	done; \
+	if [ "$$checked" -eq 0 ]; then \
+		echo "deb: no postinst was inspected, so this checked nothing"; fail=1; \
+	fi; \
+	[ $$fail -eq 0 ] || exit 1; \
+	echo "deb: $$checked packages, none enables or starts anything on install"
 	@ls -1 $(DIST)/*.deb
 
 # VERSION is the source; debian/changelog and Cargo.toml are held to it.
@@ -612,6 +693,11 @@ packaging:
 	@# install and uninstall must agree, checked statically so it runs
 	@# everywhere rather than only where a full install works.
 	@python3 tools/uninstall_gate.py
+	@# The shim's bus policy against the interfaces the shim serves. A missing
+	@# entry is a client method call denied at run time, and only where
+	@# NetworkManager's own policy file is absent -- which is the machine the
+	@# shim exists for.
+	@python3 tools/dbus_policy_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
@@ -628,13 +714,15 @@ packaging:
 		[ -x "$$script" ] || { echo "packaging: $$script is not executable, so dpkg would not run it"; fail=1; }; \
 	done; \
 	if command -v systemd-analyze >/dev/null 2>&1; then \
-		out=$$(systemd-analyze verify packaging/systemd/netcfgd.service 2>&1 \
+		out=$$(systemd-analyze verify packaging/systemd/netcfgd.service \
+			packaging/systemd/netcfgd-nm.service 2>&1 \
 			| grep -v 'is not executable'); \
 		if [ -n "$$out" ]; then echo "$$out"; fail=1; fi; \
 	fi; \
-	installed="$(SBINDIR)/netcfgd $(BINDIR)/ncfg"; \
+	installed="$(SBINDIR)/netcfgd $(BINDIR)/ncfg $(BINDIR)/netcfgd-nm"; \
 	declared=$$( { \
 		sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service; \
+		sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd-nm.service; \
 		sed -n 's/^command="\([^"]*\)".*/\1/p' packaging/openrc/netcfgd; \
 		sed -n 's/.*procd_set_param command \([^ ]*\).*/\1/p' packaging/procd/netcfgd; \
 		sed -n 's/^\t*\(\/[^ ]*ncfg\) .*/\1/p' packaging/procd/netcfgd; \
@@ -1350,6 +1438,9 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
+	rm -f $(DESTDIR)$(BINDIR)/netcfgd-nm
+	rm -f $(DESTDIR)$(DATADIR)/dbus-1/system.d/netcfgd-nm.conf
+	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-nm.service
 	@# This one is ours: `install` wrote it, so `uninstall` takes it away. The
 	@# operator's own configuration beside it is not, and is left alone.
 	rm -f $(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf.example

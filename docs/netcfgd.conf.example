@@ -770,4 +770,17 @@
 # docs/first-run.md walks a laptop from NetworkManager to netcfgd, wired
 # first. `ncfg plan` before every `ncfg apply` is the habit this whole tool
 # is shaped around.
+#
+# IF NETCFGD IS THE PROBLEM AND YOU WANT NETWORKMANAGER BACK, this is the
+# whole of it, and it needs no network:
+#
+#   systemctl disable --now netcfgd netcfgd-nm
+#   systemctl enable --now NetworkManager
+#   rm -f /etc/systemd/system/netcfgd.service.d/netcfgd-exclusive.conf
+#
+# Use `disable` rather than `stop`: netcfgd restarts on failure, and a
+# crash-looping netcfgd would take the bus name back. Nothing about the
+# switch removes or overwrites a file of NetworkManager's, and its own
+# profiles under /etc/NetworkManager/system-connections are never touched by
+# netcfgd, so it comes back knowing every network it knew.
 ##############################################################################
