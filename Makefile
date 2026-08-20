@@ -530,9 +530,21 @@ DIST        ?= dist
 # that changed. dpkg-shlibdeps reads the ELF and gives versioned dependencies.
 # Native Debian packaging. Only the systemd glue goes in the deb; Alpine and
 # OpenWrt have their own packaging under packaging/ and are untouched by this.
+# The daemon, the shim and the desktop client.
+#
+# One source package with a build profile rather than two source packages,
+# because `client/` is shared: the GUI links it and so does `conformance`.
+# A plain `make deb` needs no Qt at all, which is the property that made the
+# separation worth having in the first place. See 0126.
+deb-gui:
+	@command -v qmake6 >/dev/null 2>&1 || { \
+		echo "deb-gui: qmake6 is not installed (apt install qt6-base-dev)"; \
+		exit 1; }
+	$(MAKE) deb DEB_BUILD_PROFILES="pkg.netcfgd.gui"
+
 deb: version-check
 	@test -n "$(DIST)" || { echo "deb: DIST is empty, refusing" >&2; exit 1; }
-	dpkg-buildpackage -b -us -uc
+	DEB_BUILD_PROFILES="$(DEB_BUILD_PROFILES)" dpkg-buildpackage -b -us -uc
 	@mkdir -p $(DIST)
 	@# Every artifact by name, `-dbgsym` and the shim included. A glob that
 	@# names only the source package leaves a binary package in the parent
@@ -540,6 +552,7 @@ deb: version-check
 	@# second binary package is exactly when it would have happened again.
 	@for f in ../netcfgd_$(VERSION)_*.deb ../netcfgd-dbgsym_$(VERSION)_*.deb \
 	          ../netcfgd-nm_$(VERSION)_*.deb ../netcfgd-nm-dbgsym_$(VERSION)_*.deb \
+	          ../netcfgd-gui_$(VERSION)_*.deb ../netcfgd-gui-dbgsym_$(VERSION)_*.deb \
 	          ../netcfgd_$(VERSION)_*.buildinfo ../netcfgd_$(VERSION)_*.changes; do \
 		[ -e "$$f" ] && mv -f "$$f" $(DIST)/ || true; \
 	done
@@ -565,12 +578,19 @@ deb: version-check
 	@#
 	@# Comments are stripped first: this file's prose names the commands it
 	@# looks for, and matched itself.
+	@#
+	@# A package with no unit has no maintainer script and enables nothing by
+	@# construction -- netcfgd-gui is that package. It counts as seen and not
+	@# as inspected, so the "checked nothing" guard still means what it says.
 	@fail=0; \
+	seen=0; \
 	checked=0; \
-	for deb in $(DIST)/netcfgd_$(VERSION)_*.deb $(DIST)/netcfgd-nm_$(VERSION)_*.deb; do \
+	for deb in $(DIST)/netcfgd_$(VERSION)_*.deb $(DIST)/netcfgd-nm_$(VERSION)_*.deb \
+	           $(DIST)/netcfgd-gui_$(VERSION)_*.deb; do \
 		[ -e "$$deb" ] || continue; \
+		seen=$$(( seen + 1 )); \
 		script=$$(dpkg-deb -I "$$deb" postinst 2>/dev/null | sed 's/#.*//'); \
-		[ -n "$$script" ] || { echo "deb: $$deb has no postinst to check"; fail=1; continue; }; \
+		[ -n "$$script" ] || continue; \
 		checked=$$(( checked + 1 )); \
 		if printf '%s\n' "$$script" | grep -q 'deb-systemd-invoke'; then \
 			echo "deb: $$deb starts or restarts a service on install"; fail=1; \
@@ -584,7 +604,7 @@ deb: version-check
 		echo "deb: no postinst was inspected, so this checked nothing"; fail=1; \
 	fi; \
 	[ $$fail -eq 0 ] || exit 1; \
-	echo "deb: $$checked packages, none enables or starts anything on install"
+	echo "deb: $$seen packages, $$checked with a postinst, none enables or starts anything"
 	@ls -1 $(DIST)/*.deb
 
 # VERSION is the source; debian/changelog and Cargo.toml are held to it.

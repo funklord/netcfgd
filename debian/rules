@@ -7,12 +7,29 @@
 # exist for Alpine and OpenWrt, which have their own packaging under
 # packaging/ and must not be dragged into the deb.
 
+# The GUI is behind a build profile rather than in a source package of its
+# own, and the reason is `client/`. That directory is the shared C frontend
+# layer: the GUI links it, and so does the daemon's own `make conformance`
+# gate and `make cross`. A separate source package rooted at gui/ could not
+# see it, so it would have to carry a copy -- and two copies of one thing is
+# the drift this tree keeps finding. One source package, one version, one
+# client. See 0126.
+#
+# A plain build produces the daemon and the shim and needs no Qt.
+GUI_PROFILE := $(filter pkg.netcfgd.gui,$(DEB_BUILD_PROFILES))
+
 %:
 	dh $@
 
 override_dh_auto_build:
 	$(MAKE) build
 	$(MAKE) nm
+ifneq (,$(GUI_PROFILE))
+	@# -C gui rather than the root `gui` target, which also runs the GUI test
+	@# suite. dh_auto_test is a no-op here for the same reason: `make check`
+	@# is the gate, and a package build is not the place to discover it.
+	$(MAKE) -C gui
+endif
 
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/netcfgd PREFIX=/usr
@@ -24,6 +41,9 @@ override_dh_auto_install:
 	@# operator's act, by explicit instruction: installing a package must not
 	@# decide that this machine's other network daemons stop.
 	$(MAKE) install-nm DESTDIR=$(CURDIR)/debian/netcfgd-nm PREFIX=/usr
+ifneq (,$(GUI_PROFILE))
+	$(MAKE) install-gui DESTDIR=$(CURDIR)/debian/netcfgd-gui PREFIX=/usr
+endif
 
 # dh_installsystemd enables the unit and starts it, on first install, unless
 # told otherwise -- and that is precisely what this package must not do.
