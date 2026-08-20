@@ -886,6 +886,30 @@ Three things about it are worth keeping:
   exist. A diagnostic that fires on the configuration the package recommends
   is one people learn to scroll past.
 
+**0127's collapse is done for the CLI and not for the shim.** `ncfg wifi add`
+and `ncfg secret set` ask the daemon when one is listening and write the file
+only when none is -- inverted from what they did, where the local write was
+the rule and the socket the exception, which had it backwards: the ordinary
+case on a running machine is a client with no permission to write system
+files, because that is what a client is. What the local write is still for is
+the machine being configured before netcfgd runs on it, by somebody at a
+console with no network.
+
+**`ncfg control set` keeps its direct write, and that is a consequence of 0127
+rather than an exception to it**
+([0129](docs/decisions/0129-the-administrator-mode-survives-on-a-better-footing.md)).
+The classification made the control policy root-only, so asking the daemon
+reaches the same refusal by a longer route -- and a version requiring the
+daemon could not run before the daemon does, which is the bootstrap deadlock
+this session opened by fixing. 0118's two ways to be allowed and 0120's red
+frame therefore survive, on a better footing than they had: they rested on a
+filesystem fact, and they now rest on a property of the configuration
+language.
+
+**What is left is `netcfgd-nm`**, which writes `conf.d/nm-*.conf` itself. It
+runs as root so it can, which is exactly why it will keep doing it until
+somebody changes it -- the failure is invisible from inside the shim.
+
 **The first real evaluation happened, and the wall it hit was the first three
 minutes.** An operator installed the package, joined the `netcfgd` group, and
 could not configure wifi: the client was refused, `ncfg` reported no
