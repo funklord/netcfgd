@@ -56,8 +56,8 @@ rather than implied:
 > **A request that carries config text is remote code execution. A request that
 > carries an SSID and a passphrase is not.**
 
-A config file may name a hook, and a hook's `run_as` defaults from globals --
-which is root. So *anything* that can write arbitrary config into
+A config file may name a hook, and a hook's `run_as` is absent by default,
+which means root. So *anything* that can write arbitrary config into
 `/etc/netcfgd` can run arbitrary code as root, whatever the file's mode says.
 A typed `wifi_add` cannot express a hook, a path, a `run_as`, or any block but
 `network`, because those are not fields it has. The privilege it grants is

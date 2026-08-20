@@ -854,6 +854,14 @@ What has still never happened is the thing §*What would prove it* is about:
 nobody has run netcfgd against a real radio, on a real router, or as the
 network configuration of a machine they depend on.
 
+**rustfmt and clippy are installed on this machine now**, so `make check`
+runs both for real rather than skipping them. The skip that f4f9007 added was
+right — it took the suite from dying at gate 2 of 17 to running all
+seventeen, which is where five defects came from — and it cost something
+measurable: two files in 7bc6b84 went to the remote with formatting the gate
+could not check, and would have failed CI. **A gate that skips is a gate whose
+burden moves somewhere else**, and here it moved onto nobody.
+
 **`make live` has since been run and is green** — 30 scripts pass, 8 skip on
 named missing packages or on needing real root, nothing orphaned, no disk
 moved. It is recorded under the open items below with what it found, and the
@@ -970,11 +978,31 @@ verified.**
   falsification, where `TestDir`'s cleanup on `Drop` cannot run. A property of
   crash-testing rather than a defect, and worth expecting rather than
   investigating next time.
-- **`run_as` is the same defect the hook timeout was, unfixed.** `Option` on
-  `HookRef`, always `None`, never read. An unread `timeout` merely failed to
-  bound; an unread `run_as` means a hook that asked to drop privilege would
-  not. Nothing sets it today, so nothing is broken — it wants its own change
-  with its own security argument rather than a ride along with another.
+- ~~**`run_as` is the same defect the hook timeout was, unfixed.**~~ **The
+  runner honours it now**, and it was worse than an unread field: design §9
+  states under privilege separation that hooks "run as a configurable user,
+  not blindly as root", and every hook ran blindly as root — a stated security
+  property the code did not have, cited elsewhere in its absence as the reason
+  `wifi_add` may not carry a path or a hook. The drop is `setgroups`, `setgid`,
+  `setuid` **in that order**, because `setgroups` needs the privilege being
+  given up and doing it last leaves a process out of uid 0 but still in every
+  group root belongs to. It fails closed in both directions: an unknown user
+  does not run at all, and the drop happens between fork and exec so a failure
+  there fails the exec.
+
+  **What remains is reachability, and it needs two decisions rather than a
+  worker.** A hook block is `phase { verbatim shell }` — `ast::Hook` carries
+  phase, body and span and the body is captured raw, so there is nowhere to
+  put an attribute without inventing grammar, which
+  [0123](docs/decisions/0123-a-hook-that-never-exits-is-killed.md) argues against for
+  a case nobody has met. And a materialised hook is written 0700 root-owned,
+  so a hook dropping to another user could not read its own script. **Five places
+  promised a "default from globals"** — the model, this file's schema block,
+  `docs/socket-protocol.md`, `netcfgd-proto`'s `WifiAdd` doc and decision 0117
+  — and there is no such globals key and never was. All five now say what is
+  true: absent means the daemon's own user. Correcting two and leaving three
+  was the first attempt, which is the same fix-one-copy failure this document
+  already records against the `raidcfgd` fact.
 - **What a laptop should expect, asked directly.** Wired is the proven half
   and `docs/first-run.md` is the sequence for it. Wifi has never met a real
   radio. Suspend and resume have never been run, and the specific consequence
@@ -2613,7 +2641,7 @@ gathered here so a new session does not have to find them.
 
 ### Things that are true and non-obvious
 
-- **A field the model carries and nothing reads bounds nothing, and reads as though it does.** `HookRef` has had `timeout: Option<u32>` since the model was written. Both construction sites hardcoded it to `None`, no config key lowered one, and `hooks::run` never looked at it — so a hook ran under `Command::status()` with no bound at all, while the type said otherwise. Because the reconcile loop is single threaded and calls the executor inline, a hook that never exits stalled *everything*: no `status`, no `plan`, no reply to any request, in a process holding `CAP_NET_ADMIN` — the two commands an operator reaches for when the network stops are the two that could not answer. Bounded in [0123](docs/decisions/0123-a-hook-that-never-exits-is-killed.md), sixty seconds by default, `SIGTERM` then `SIGKILL`, and the phase decides what the failure means exactly as it does for a non-zero exit. **The first version of that bound killed the wrong process**, and the lesson is its own: a hook is a *script*, so `sleep 300` inside it is a grandchild the shell forked, and signalling the child killed the shell while the work carried on reparented to init. The bound freed the daemon and not the machine — a distinction no assertion about return values can see, and the suite reported exit 0 with two orphans behind it. Found by `running-code.md`'s check for what is still running afterwards; fixed by giving the hook its own process group; asserted by reading `/proc/<pid>/cmdline` for the grandchild, because `kill -0` calls a zombie alive and a grandchild reparented to init is exactly that case. **`run_as` on the same struct has the identical shape and is not fixed**: also always `None`, also never read, and where an unread `timeout` merely fails to bound, an unread `run_as` means a hook that asked to drop privilege would not.
+- **A field the model carries and nothing reads bounds nothing, and reads as though it does.** `HookRef` has had `timeout: Option<u32>` since the model was written. Both construction sites hardcoded it to `None`, no config key lowered one, and `hooks::run` never looked at it — so a hook ran under `Command::status()` with no bound at all, while the type said otherwise. Because the reconcile loop is single threaded and calls the executor inline, a hook that never exits stalled *everything*: no `status`, no `plan`, no reply to any request, in a process holding `CAP_NET_ADMIN` — the two commands an operator reaches for when the network stops are the two that could not answer. Bounded in [0123](docs/decisions/0123-a-hook-that-never-exits-is-killed.md), sixty seconds by default, `SIGTERM` then `SIGKILL`, and the phase decides what the failure means exactly as it does for a non-zero exit. **The first version of that bound killed the wrong process**, and the lesson is its own: a hook is a *script*, so `sleep 300` inside it is a grandchild the shell forked, and signalling the child killed the shell while the work carried on reparented to init. The bound freed the daemon and not the machine — a distinction no assertion about return values can see, and the suite reported exit 0 with two orphans behind it. Found by `running-code.md`'s check for what is still running afterwards; fixed by giving the hook its own process group; asserted by reading `/proc/<pid>/cmdline` for the grandchild, because `kill -0` calls a zombie alive and a grandchild reparented to init is exactly that case. **`run_as` on the same struct had the identical shape and is fixed too**: it was also always `None` and never read, and where an unread `timeout` merely failed to bound, an unread `run_as` meant a hook that asked to drop privilege did not — against a design that says in as many words that hooks "run as a configurable user, not blindly as root". The runner drops with `setgroups`, `setgid`, `setuid` in that order and fails closed both ways. What is left is reachability, which needs config grammar and a materialiser that does not write the script 0700 root-owned.
 
 - **"Needs hardware" is often "needs root" or "needs a toolchain", and a container supplies both.** Three items recorded here as blocked turned out not to be. `systemd-networkd` would not start under `unshare -rn` because it drops privileges to `systemd-network`, a user no user namespace can map — in a privileged container it runs, and checking netcfgd's detection against a real one found a third link state (`pending`) nobody had written down. `cargo-fuzz` and cross-compilation both wanted a nightly toolchain this machine's distro rustc cannot provide; a `rust:1-slim-trixie` image has one, and running the fuzz targets for the first time found two real crashes. **Before recording something as hardware-blocked, ask what specifically is missing.** Real hardware is a short list: a radio's firmware, a modem, a machine that suspends.
 - **A fix verified only against the input that found it is verified against one input.** The config parser's stack overflow was fixed by bounding block nesting, the regression test passed, and all one hundred and sixteen existing tests passed. Re-running the fuzzer against the fix crashed again in under five minutes on `parse_value` → `parse_list` → `parse_value`: the same defect down a path a block counter could not see. **Re-fuzz after fixing, seeded from the corpus that found it** — a fresh search that happens not to look in the same place proves nothing, and the confirming run is only evidence because it started from the corpus that had crashed in seconds.

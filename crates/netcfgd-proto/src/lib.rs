@@ -88,7 +88,7 @@ pub enum Request {
 	///
 	/// **Typed fields, never config text and never a path**, which is the whole
 	/// of decision 0117. A config file may name a hook, and a hook's `run_as`
-	/// defaults from globals -- which is root -- so anything able to write
+	/// is absent by default, which means root -- so anything able to write
 	/// arbitrary config into `/etc/netcfgd` can run arbitrary code as root
 	/// whatever the file's mode says. This request cannot express a hook, a
 	/// path or a `run_as`, because it has no such fields: the privilege it

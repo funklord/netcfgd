@@ -323,7 +323,7 @@ secret provider so the file holds an `@secret:` reference and nothing else
 ([0117](decisions/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)).
 
 The distinction is the point rather than a detail. A config file may name a
-hook, and a hook's `run_as` defaults from globals — which is root — so a
+hook, and a hook's `run_as` is absent by default, which means root — so a
 request carrying config *text* is remote code execution, while one carrying an
 SSID and a passphrase is not. `wifi_add` has no field that could name a hook, a
 path or a `run_as`. **The id is validated inside the writer**, not by the
