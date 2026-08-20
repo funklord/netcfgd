@@ -906,6 +906,21 @@ frame therefore survive, on a better footing than they had: they rested on a
 filesystem fact, and they now rest on a property of the configuration
 language.
 
+**`config_put` has a client**: `ncfg config put NAME [FILE]` and `ncfg config
+rm NAME`, reading a file or standard input. The name is what netcfgd files it
+under and never a path -- the file is read *here*, by whoever ran the command,
+with their own permissions, and what crosses the socket is the text. A request
+carrying a path would be a request to read a file as root, which is a much
+larger permission than "add this to the configuration", and a test asserts the
+path does not cross.
+
+**The size gate had 487 bytes of tolerance left when this landed**, and
+`size-budget.txt` is ratcheted with what the growth bought. That file's own
+header warns about exactly this: the 3% is for compiler-version noise, so a
+feature that spends it makes the *next* feature fail for a reason that is not
+its own. The entry above it in that file exists because nobody ratcheted for
+sixty commits and the gate went red long enough to stop being read.
+
 **`netcfgd-nm` was the last of the four and is converted too.** It wrote
 `conf.d/nm-*.conf` itself and could, because it runs as root to own
 NetworkManager's bus name -- which is exactly why it would have gone on doing
