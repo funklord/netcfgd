@@ -87,6 +87,7 @@ fn every_request() -> Vec<Request> {
 		Request::WifiDisconnect { .. } => "wifi_disconnect",
 		Request::ApStations { .. } => "ap_stations",
 		Request::ConfigPut { .. } => "config_put",
+		Request::SecretPut { .. } => "secret_put",
 	};
 	let mut present: Vec<&str> = all.iter().map(name).collect();
 	present.sort_unstable();
@@ -104,6 +105,7 @@ fn every_request() -> Vec<Request> {
 			"plan",
 			"reload",
 			"revert",
+			"secret_put",
 			"show",
 			"status",
 			"wifi_add",
@@ -196,6 +198,20 @@ fn every_request_sample() -> Vec<Request> {
 		Request::ConfigPut {
 			name: "cafe".to_owned(),
 			text: "network \"Cafe\" {\n\twifi { open = true }\n}\n".to_owned(),
+			replace: false,
+		},
+		// Two, for the reason the others have two: `replace` is
+		// skip_serializing_if. The value is a placeholder and looks like one
+		// on purpose -- a witness is committed, read and diffed, and a sample
+		// that looked like a credential would be copied by somebody.
+		Request::SecretPut {
+			name: "vpn".to_owned(),
+			value: "NOT-A-REAL-SECRET".to_owned(),
+			replace: true,
+		},
+		Request::SecretPut {
+			name: "cafe".to_owned(),
+			value: "NOT-A-REAL-SECRET".to_owned(),
 			replace: false,
 		},
 		Request::ApStations {

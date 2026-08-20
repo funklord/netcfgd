@@ -732,3 +732,58 @@ fn restore(path: &Path, previous: Option<&[u8]>) {
 		}
 	}
 }
+
+/// Store a credential the configuration refers to.
+///
+/// 0127's other half: a client cannot write `/etc/netcfgd/secrets`, so a value
+/// it holds arrives over the socket and netcfgd writes it. The directory is
+/// created at 0700 and the file at 0600, from the moment each exists rather
+/// than created and then tightened -- a file that is briefly world-readable is
+/// briefly world-readable, and this one is a password.
+///
+/// **Nothing here reads a value back**, and no caller of this can. The only
+/// direction credentials travel in netcfgd is inward.
+///
+/// # Errors
+///
+/// A name that cannot be used, a value that is empty, a file that exists when
+/// replacing was not asked for, or a write that failed.
+pub fn install_secret(
+	config_dir: &Path,
+	name: &str,
+	value: &str,
+	replace: bool,
+) -> Result<PathBuf, String> {
+	crate::wifi_profile::usable_id(name)
+		.map_err(|why| format!("`{name}` cannot be used as a secret name: {why}"))?;
+	if value.is_empty() {
+		return Err(format!(
+			"nothing was given for `{name}`, and an empty secret is a secret that fails at \
+			 the moment it is used rather than now"
+		));
+	}
+
+	let path = config_dir.join("secrets").join(name);
+	if path.exists() && !replace {
+		return Err(format!(
+			"{} already exists. Ask to replace it if that is what you mean -- and note \
+			 that a private key nobody has a copy of cannot be got back \
+			 (docs/decisions/0042)",
+			path.display()
+		));
+	}
+
+	if let Some(parent) = path.parent() {
+		use std::os::unix::fs::DirBuilderExt as _;
+		if !parent.is_dir() {
+			std::fs::DirBuilder::new()
+				.recursive(true)
+				.mode(0o700)
+				.create(parent)
+				.map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+		}
+	}
+	write_atomically(&path, value.as_bytes(), 0o600)
+		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
+	Ok(path)
+}

@@ -175,6 +175,31 @@ pub(crate) fn set(positional: &[String], options: &Options) -> Result<ExitCode, 
 			 the moment it is used rather than now"
 		));
 	}
+	// **The daemon first**, for 0127's reason and by the same rule `wifi add`
+	// follows: `/etc/netcfgd/secrets` is root's, a client is not root, and the
+	// channel carries what the client cannot write. The local write stays for
+	// the case the daemon cannot serve -- a machine being configured before
+	// netcfgd runs on it.
+	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
+	if socket.exists() {
+		let request = netcfgd_proto::Request::SecretPut {
+			name: name.clone(),
+			value,
+			replace: options.replace,
+		};
+		return match crate::client::ask(&socket, &request) {
+			Ok(crate::client::Answer::Ok) => {
+				report(&secret, name, replacing, options);
+				Ok(ExitCode::SUCCESS)
+			}
+			// `Error` and a transport failure are one arm on purpose: both
+			// are a sentence naming what went wrong, and the caller does
+			// nothing different for having been told which layer produced it.
+			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
+			Ok(other) => Err(format!("the daemon sent {}", other.describe())),
+		};
+	}
+
 	make_secrets_dir(&secret)?;
 	config::write_atomically(&secret, value.as_bytes(), 0o600)
 		.map_err(|error| format!("could not write {}: {error}", secret.display()))?;

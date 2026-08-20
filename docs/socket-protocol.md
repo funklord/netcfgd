@@ -141,7 +141,7 @@ reach.
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations` |
 | `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add` |
-| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put` |
+| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put` |
 
 Two placements are deliberate and worth knowing, because both look wrong at
 first glance:
@@ -181,6 +181,19 @@ first glance:
   It carries a **name, never a path**. netcfgd decides where the drop-in goes,
   and the name is checked by the rule a wifi profile's id follows, so it cannot
   contain a separator, traverse upwards or begin with a dot.
+
+- **`secret_put` is `admin`, not `wifi`**, even though `wifi_add` carries a
+  passphrase at the wifi tier. The difference is the blast radius of the
+  *name*: `wifi_add` writes a secret it also names, for a network it is
+  creating, while this writes any name the configuration might refer to --
+  including one a `wireguard` block reads, which
+  [0042](decisions/0042-only-a-key-nobody-can-revoke-stops-a-plan.md)
+  calls the one thing on a machine nobody can get back. Replacing an existing
+  one has to be asked for, for the same reason.
+
+  **Inbound only.** There is no request that reads a credential back and there
+  is not going to be: 0031's bridge runs one way, `GetSecrets` refuses, and the
+  document carries references rather than values.
 
 ## Local and remote
 

@@ -886,6 +886,34 @@ fn answer(
 		// Wireless. These reach the supplicant rather than the kernel, and
 		// none of them can create a network -- the `wifi` tier joins what the
 		// configuration already describes and nothing else (decision 0013).
+		// The wireless verbs, split out because `answer` was over its line
+		// budget and these are the group that reads as one subject.
+		Request::WifiScan { .. }
+		| Request::WifiStatus { .. }
+		| Request::WifiConnect { .. }
+		| Request::WifiDisconnect { .. }
+		| Request::WifiAdd { .. }
+		| Request::ApStations { .. } => answer_wifi(state, request),
+		Request::ConfigPut {
+			name,
+			text,
+			replace,
+		} => put_config_request(state, name, text, *replace),
+		Request::SecretPut {
+			name,
+			value,
+			replace,
+		} => put_secret_request(state, name, value, *replace),
+	}
+}
+
+/// The wireless verbs.
+///
+/// Split from [`answer`] for its line budget, and they are the right group to
+/// take: every one of them is about a radio, and none of them touches the
+/// parts of `answer` that are about documents and plans.
+fn answer_wifi(state: &mut State, request: &Request) -> Response {
+	match request {
 		Request::WifiScan { interface } => wifi::scan(state.desired.as_ref(), interface),
 		Request::ApStations { interface } => {
 			wifi::ap_stations(state.desired.as_ref(), &state.paths.run, interface)
@@ -918,11 +946,27 @@ fn answer(
 				priority: *priority,
 			},
 		),
-		Request::ConfigPut {
-			name,
-			text,
-			replace,
-		} => put_config_request(state, name, text, *replace),
+		// Unreachable: the caller matches exactly the variants above. A
+		// panic here would be a dispatcher bug rather than anything a client
+		// can cause, so it says so rather than inventing an error a caller
+		// would try to act on.
+		other => unreachable!("answer_wifi was given {other:?}"),
+	}
+}
+
+/// Store a credential a client sent.
+///
+/// **No reload, unlike its neighbour.** A secret is read when a backend needs
+/// it rather than compiled into the document, so nothing about the desired
+/// state has changed and recompiling would be work that looks like care.
+///
+/// Nothing is reported back but success: not the path, not the length, not
+/// whether it replaced anything. `netcfgd-secret` keeps that rule everywhere
+/// and a socket is not the place to break it.
+fn put_secret_request(state: &State, name: &str, value: &str, replace: bool) -> Response {
+	match netcfgd_host::config::install_secret(&state.paths.config, name, value, replace) {
+		Ok(_) => Response::Ok,
+		Err(message) => Response::error(message),
 	}
 }
 

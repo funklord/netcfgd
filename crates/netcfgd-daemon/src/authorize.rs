@@ -81,7 +81,15 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		| Request::Confirm
 		| Request::Revert
 		| Request::Reload
-		| Request::ConfigPut { .. } => Tier::Admin,
+		| Request::ConfigPut { .. }
+		// Storing a credential is `admin` and not `wifi`, even though
+		// `wifi_add` carries one at the wifi tier. The difference is the
+		// blast radius of the *name*: `wifi_add` writes a secret it also
+		// names, for a network it is creating, and this writes any name the
+		// configuration might refer to -- including one a `wireguard` block
+		// reads, which 0042 calls the one thing on a machine nobody can get
+		// back.
+		| Request::SecretPut { .. } => Tier::Admin,
 	}
 }
 
