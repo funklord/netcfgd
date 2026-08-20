@@ -235,6 +235,51 @@ pub fn render(profile: &Profile) -> String {
 	text
 }
 
+/// Why [`install`] refused.
+///
+/// A string was enough while the only caller was root. It stopped being enough
+/// when 0124 put adding a network in the `wifi` tier: `ncfg wifi add` run by a
+/// group member has the permission and not the access, and has to tell "the
+/// kernel would not let me write this" apart from every other refusal so it
+/// can ask the daemon instead. Matching on the words of the message would have
+/// worked and would stop working the day somebody rewords one -- silently, by
+/// turning the fallback off, which is the failure mode nobody notices.
+///
+/// `Display` renders exactly what this used to return, so no message changes.
+#[derive(Debug, Clone)]
+pub struct InstallError {
+	/// The sentence to print.
+	pub message: String,
+	/// The filesystem refused this process, rather than the request being
+	/// wrong. Set from `ErrorKind::PermissionDenied` and from nothing else.
+	pub denied: bool,
+}
+
+impl std::fmt::Display for InstallError {
+	fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		out.write_str(&self.message)
+	}
+}
+
+impl From<String> for InstallError {
+	fn from(message: String) -> Self {
+		Self {
+			message,
+			denied: false,
+		}
+	}
+}
+
+impl InstallError {
+	/// An error from the filesystem, carrying whether it was a refusal.
+	fn from_io(message: String, error: &std::io::Error) -> Self {
+		Self {
+			message,
+			denied: error.kind() == std::io::ErrorKind::PermissionDenied,
+		}
+	}
+}
+
 /// What [`install`] wrote, so a caller can say so.
 #[derive(Debug, Clone)]
 pub struct Installed {
@@ -249,7 +294,7 @@ pub struct Installed {
 /// 0700 from the moment it exists rather than created and then tightened: a
 /// directory that is briefly world-readable is briefly world-readable, and the
 /// file inside it is a passphrase.
-fn make_secret_dir(secret: &Path) -> Result<(), String> {
+fn make_secret_dir(secret: &Path) -> Result<(), InstallError> {
 	use std::os::unix::fs::DirBuilderExt as _;
 
 	let directory = secret.parent().unwrap_or_else(|| Path::new("."));
@@ -260,7 +305,12 @@ fn make_secret_dir(secret: &Path) -> Result<(), String> {
 		.recursive(true)
 		.mode(0o700)
 		.create(directory)
-		.map_err(|error| format!("could not create {}: {error}", directory.display()))
+		.map_err(|error| {
+			InstallError::from_io(
+				format!("could not create {}: {error}", directory.display()),
+				&error,
+			)
+		})
 }
 
 fn remove(path: &Path) {
@@ -292,7 +342,7 @@ pub fn install(
 	factory_dir: &Path,
 	profile: &Profile,
 	credential: Option<&str>,
-) -> Result<Installed, String> {
+) -> Result<Installed, InstallError> {
 	let id = &profile.id;
 	// First, and inside rather than above: everything below joins this onto a
 	// directory twice.
@@ -305,26 +355,34 @@ pub fn install(
 		return Err(format!(
 			"{} already exists -- refusing to overwrite a file this did not write",
 			file.display()
-		));
+		)
+		.into());
 	}
 	if profile.security.wants_credential() {
 		if credential.is_none() {
-			return Err("this network needs a credential and none was given".to_owned());
+			return Err("this network needs a credential and none was given"
+				.to_owned()
+				.into());
 		}
 		if secret.exists() {
 			return Err(format!(
 				"{} already exists -- refusing to overwrite a stored credential. \
 				 Remove it first if it is stale",
 				secret.display()
-			));
+			)
+			.into());
 		}
 	}
 
 	let stored = match credential {
 		Some(value) if profile.security.wants_credential() => {
 			make_secret_dir(&secret)?;
-			config::write_atomically(&secret, value.as_bytes(), 0o600)
-				.map_err(|error| format!("could not write {}: {error}", secret.display()))?;
+			config::write_atomically(&secret, value.as_bytes(), 0o600).map_err(|error| {
+				InstallError::from_io(
+					format!("could not write {}: {error}", secret.display()),
+					&error,
+				)
+			})?;
 			true
 		}
 		_ => false,
@@ -334,7 +392,10 @@ pub fn install(
 		if stored {
 			remove(&secret);
 		}
-		return Err(format!("could not write {}: {error}", file.display()));
+		return Err(InstallError::from_io(
+			format!("could not write {}: {error}", file.display()),
+			&error,
+		));
 	}
 
 	if let Err(error) = compiles_back(config_dir, factory_dir, profile) {
@@ -342,7 +403,7 @@ pub fn install(
 		if stored {
 			remove(&secret);
 		}
-		return Err(error);
+		return Err(error.into());
 	}
 
 	Ok(Installed {
@@ -517,7 +578,10 @@ mod tests {
 			};
 			let error = install(&config, &dir.join("factory"), &profile, None)
 				.expect_err("a name that is not usable is refused");
-			assert!(error.contains("cannot be used as a name"), "{bad}: {error}");
+			assert!(
+				error.message.contains("cannot be used as a name"),
+				"{bad}: {error}"
+			);
 		}
 	}
 }
