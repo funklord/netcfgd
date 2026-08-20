@@ -36,6 +36,11 @@ debian/netcfgd/
 # exists because debhelper's working state was committed once already.
 debian/netcfgd-nm/
 debian/netcfgd-gui/
+
+# Python's own, beside whatever ran. `tools/` holds three gates now and
+# importing one leaves this; it is not build output anybody named, which is
+# why it is ignored rather than cleaned.
+__pycache__/
 debian/*.substvars
 # The snippets dh_installsystemd and friends generate into maintainer scripts,
 # as well as the log. `*.debhelper.log` alone missed `*.debhelper`, so

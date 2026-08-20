@@ -722,6 +722,9 @@ packaging:
 	@# install and uninstall must agree, checked statically so it runs
 	@# everywhere rather than only where a full install works.
 	@python3 tools/uninstall_gate.py
+	@# Every config key the compiler accepts is classified, so that a key
+	@# added later cannot default to "a client may send this". 0127.
+	@python3 tools/privilege_gate.py
 	@# The shim's bus policy against the interfaces the shim serves. A missing
 	@# entry is a client method call denied at run time, and only where
 	@# NetworkManager's own policy file is absent -- which is the machine the
