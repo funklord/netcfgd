@@ -889,15 +889,15 @@ had been tested hardest.
   is documented as "a config directory with a compilable document and nothing
   else" and writes `netcfgd.conf` before every control test. The one state
   every install passes through was the one state nothing exercised.
-- **The NM shim is not installed by anything.** `netcfgd-nm` has no install
-  target, no unit, no D-Bus system-bus policy, no activation file, and is in
-  no package; `Makefile` names it only in `ADAPTERS`, and `tests/live/nm.sh`
-  runs it on a private `dbus-daemon` it starts itself. So M7's "tier 1 and
-  tier 2 are done" is true about the shim's *behaviour* and says nothing about
-  its *reachability*, and `nmtui` on an installed machine cannot reach it —
-  before even reaching the question of the real NetworkManager owning the bus
-  name. **Not fixed**: packaging it needs a decision about coexisting with or
-  displacing NetworkManager, and is its own piece of work.
+- ~~**The NM shim is not installed by anything.**~~ **Fixed**, and it was the
+  clearest case of a milestone recording the wrong property: `netcfgd-nm` had
+  no install target, no unit, no bus policy and no package, so M7's "tier 1
+  and tier 2 are done" was true about the shim's *behaviour* -- measured
+  against the private bus `tests/live/nm.sh` starts -- and said nothing about
+  whether anything could reach it. `nmtui` on an installed machine never
+  could. It is a `netcfgd-nm` binary package now, with its own bus policy and
+  a unit that carries the conflict, per
+  [0125](docs/decisions/0125-displacing-networkmanager-is-a-runtime-switch-and-nothing-else.md).
 
 **Adding a network is the `wifi` tier now, not `admin`
 ([0124](docs/decisions/0124-adding-a-network-is-the-wifi-tier-because-0117-made-it-safe.md)).**
@@ -2665,6 +2665,17 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 
 Not work anybody should do unasked. Each is recorded where it arose; they are
 gathered here so a new session does not have to find them.
+
+- ~~**Whether netcfgd coexists with NetworkManager or displaces it.**~~
+  **Settled by the holder: displace, and the drop-in is not enabled by
+  default.** What "displace" means is
+  [0125](docs/decisions/0125-displacing-networkmanager-is-a-runtime-switch-and-nothing-else.md)
+  and it is deliberately the smallest reading -- which daemon is running, and
+  nothing about packages or files. The question that shaped it was the
+  holder's: how do you get NetworkManager back when netcfgd is not working.
+  Every property the way back rests on is measured in the record rather than
+  assumed, because a recovery path nobody has checked is one that gets checked
+  on the day it is needed.
 
 - **Licensing.** `Cargo.toml`, `debian/copyright` and the Alpine template all
   declare `MIT OR Apache-2.0`, and the repository states no terms at all: no
