@@ -89,7 +89,13 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// configuration might refer to -- including one a `wireguard` block
 		// reads, which 0042 calls the one thing on a machine nobody can get
 		// back.
-		| Request::SecretPut { .. } => Tier::Admin,
+		| Request::SecretPut { .. }
+		// Deleting is writing. `SecretDelete` in particular is the one verb
+		// here with no way back -- 0042's private key, and no `replace` flag
+		// to make somebody say it twice, because a caller asking to delete has
+		// already said it once. What guards it is this tier and nothing else.
+		| Request::ConfigDelete { .. }
+		| Request::SecretDelete { .. } => Tier::Admin,
 	}
 }
 

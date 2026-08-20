@@ -141,7 +141,7 @@ reach.
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations` |
 | `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add` |
-| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put` |
+| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete` |
 
 Two placements are deliberate and worth knowing, because both look wrong at
 first glance:
@@ -194,6 +194,19 @@ first glance:
   **Inbound only.** There is no request that reads a credential back and there
   is not going to be: 0031's bridge runs one way, `GetSecrets` refuses, and the
   document carries references rather than values.
+
+- **Deleting is writing**, so `config_delete` and `secret_delete` are here for
+  the same reason: a client that could remove files from `/etc/netcfgd` would
+  be a client with write access to it. **An absent file is success** -- the
+  state being asked for is the state that holds, and an error would make a
+  client retry something already true.
+
+  `secret_delete` is the one verb in this protocol with no way back
+  ([0042](decisions/0042-only-a-key-nobody-can-revoke-stops-a-plan.md)), and
+  unlike `secret_put` it has no `replace` flag to make somebody say it twice --
+  a caller asking to delete has said it once already. What guards it is the
+  `admin` tier and nothing else, which is worth knowing before a client offers
+  a button for it.
 
 ## Local and remote
 
