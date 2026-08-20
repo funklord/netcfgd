@@ -253,7 +253,13 @@ pub(crate) fn connect_to(
 	let id = if let Some(id) = existing {
 		id
 	} else {
-		let resolver = Resolver::with_secrets_dir(secrets_dir);
+		// Materialising too, for the reason `netcfgd-apply` does: a network
+		// with a stored certificate has to produce a path here as well, and a
+		// resolver that could read secrets but not write a certificate would
+		// join the same network from the command line and refuse it from a
+		// connect.
+		let resolver = Resolver::with_secrets_dir(secrets_dir)
+			.materialising_into(netcfgd_apply::kernel::certs_dir());
 		// The device's policy, or permanent. Without this a network joined
 		// from the command line would go in with a different address policy
 		// from the same network added at apply time -- quietly leaking the

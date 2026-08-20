@@ -337,7 +337,7 @@ impl KernelExecutor {
 		let Some((_, config)) = self.pppoe.iter().find(|(name, _)| name == iface) else {
 			return Err(format!("no pppoe configuration for {iface}"));
 		};
-		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+		let resolver = resolver();
 		let password = resolver
 			.resolve(&config.password)
 			.map_err(|error| format!("{iface}: {error}"))?;
@@ -503,7 +503,7 @@ impl KernelExecutor {
 		// without a password, so one being present implies the other.
 		let resolved = match (&config.username, &config.password) {
 			(Some(username), Some(reference)) => {
-				let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+				let resolver = resolver();
 				let password = resolver
 					.resolve(reference)
 					.map_err(|error| format!("{iface}: {error}"))?;
@@ -537,7 +537,7 @@ impl KernelExecutor {
 		else {
 			return Err(format!("no access point configuration for {iface}"));
 		};
-		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+		let resolver = resolver();
 		netcfgd_hostapd::start(&self.run_dir, access_point, &resolver)
 	}
 
@@ -571,7 +571,7 @@ impl KernelExecutor {
 			.command("SET update_config 0")
 			.map_err(|error| format!("could not pin update_config on {iface}: {error}"))?;
 
-		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+		let resolver = resolver();
 
 		if let Some((_, eap)) = self.dot1x.iter().find(|(name, _)| name == iface) {
 			netcfgd_supplicant::configure_wired(&client, eap, &resolver)
@@ -687,7 +687,7 @@ impl KernelExecutor {
 		config: &netcfgd_model::interface::WireGuardConfig,
 		parts: WgParts,
 	) -> Result<(), String> {
-		let resolver = netcfgd_secret::Resolver::with_secrets_dir(secrets_dir());
+		let resolver = resolver();
 		let private = match parts {
 			WgParts::Peers => None,
 			WgParts::Whole | WgParts::DeviceOnly => Some(
@@ -3044,7 +3044,6 @@ fn parse_prefix(text: &str) -> Option<(std::net::IpAddr, u8)> {
 ///
 /// Derived from the config directory rather than passed in, because the
 /// executor is handed a run directory and a document, and a secret is neither.
-/// Where the secrets live.
 ///
 /// Public because the observer needs the same answer: it resolves an access
 /// point's passphrase to say whether the running daemon still holds it
@@ -3056,6 +3055,28 @@ pub fn secrets_dir() -> std::path::PathBuf {
 		|| std::path::PathBuf::from(netcfgd_secret::DEFAULT_SECRETS_DIR),
 		|dir| std::path::PathBuf::from(dir).join("secrets"),
 	)
+}
+
+/// Where a stored certificate is materialised for a supplicant to open.
+///
+/// Under `/run` and not `/etc`: it is derived from the secret store and
+/// disposable, so it belongs where the rest of netcfgd's runtime state does --
+/// which also means a reboot clears it, and a certificate that was rotated is
+/// not left behind on a machine that stopped using it.
+#[must_use]
+pub fn certs_dir() -> std::path::PathBuf {
+	run_dir_path().join("certs")
+}
+
+/// A resolver that can both read secrets and materialise certificates.
+///
+/// One constructor rather than six call sites remembering to add the second
+/// half. A resolver without it refuses a stored certificate rather than
+/// guessing a directory, so forgetting would not be silent -- but it would be
+/// six different opportunities to forget.
+#[must_use]
+pub fn resolver() -> netcfgd_secret::Resolver {
+	netcfgd_secret::Resolver::with_secrets_dir(secrets_dir()).materialising_into(certs_dir())
 }
 
 /// Start a `wpa_supplicant` that holds no state.

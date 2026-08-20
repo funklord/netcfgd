@@ -324,7 +324,15 @@ fn eap_settings(
 		out.push(Setting::plain("anonymous_identity", quote(anonymous)));
 	}
 	if let Some(ca_cert) = &eap.ca_cert {
-		out.push(Setting::plain("ca_cert", quote(ca_cert)));
+		// Everything wpa_supplicant is given here is a path, because it opens
+		// all three as files. `path_for` passes a `Path` through and writes a
+		// `Stored` one under /run first -- which is what lets a client that
+		// cannot write /etc supply a certificate at all (0127).
+		let path = resolver.path_for(ca_cert, "ca.pem")?;
+		out.push(Setting::plain(
+			"ca_cert",
+			quote(&path.display().to_string()),
+		));
 	} else {
 		// No CA certificate means the supplicant will accept any server that
 		// speaks the protocol, which is the whole attack. Refusing outright
@@ -334,7 +342,11 @@ fn eap_settings(
 		out.push(Setting::plain("ca_cert", "\"\""));
 	}
 	if let Some(client_cert) = &eap.client_cert {
-		out.push(Setting::plain("client_cert", quote(client_cert)));
+		let path = resolver.path_for(client_cert, "client.pem")?;
+		out.push(Setting::plain(
+			"client_cert",
+			quote(&path.display().to_string()),
+		));
 	}
 	if let Some(phase2) = &eap.phase2 {
 		out.push(Setting::plain("phase2", quote(phase2)));
@@ -348,24 +360,26 @@ fn eap_settings(
 				.ok_or(Unsupported::MissingEapField {
 					field: "private_key",
 				})?;
-			let secret = resolver.resolve(key)?;
-			// **The same guard the password branch has, and this is the branch
-			// that needs it.** wpa_supplicant's `private_key` is a *path* --
-			// its own README says `private_key="/etc/cert/user.prv"` -- so a
-			// secret holding the key material is wrong twice over: it names a
-			// file that does not exist, and a PEM is multi-line, which
-			// terminates the line-based `SET_NETWORK` command in the middle
-			// and corrupts the rest of the conversation with the supplicant.
+			// **A path, always, because wpa_supplicant opens it as a file.**
+			// Its own README says `private_key="/etc/cert/user.prv"`.
 			//
-			// A password is usually one line and this check was there. A
-			// private key never is, and it was not. Refusing turns silent
-			// corruption into a sentence naming the fix; materialising the key
-			// to a file under /run and passing that path is the real answer
-			// and is its own piece of work.
-			if !passphrase_is_sendable(secret.expose()) {
-				return Err(Box::new(Unsupported::PassphraseNotSendable));
-			}
-			out.push(Setting::secret("private_key", quote(secret.expose())));
+			// This used to resolve the secret and send its *value*, which
+			// could not work: key material there is a filename that does not
+			// exist, and a PEM is multi-line, so it terminated the line-based
+			// `SET_NETWORK` command in the middle and corrupted the rest of
+			// the conversation with the supplicant. Nothing caught it because
+			// the only EAP-TLS test asserted a missing-field error and never
+			// looked at what a complete network renders to.
+			//
+			// `path_for` gives a path either way: a `Path` source passes
+			// through, and a `Stored` one is written under /run at 0600 first.
+			// The second is the case that matters -- it is how a client with
+			// no permission to write /etc supplies a key at all.
+			let path = resolver.path_for(key, "client.key")?;
+			out.push(Setting::plain(
+				"private_key",
+				quote(&path.display().to_string()),
+			));
 		}
 		EapMethod::Peap | EapMethod::Ttls | EapMethod::Pwd => {
 			let password = eap

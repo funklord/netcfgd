@@ -412,6 +412,24 @@ pub fn install(
 	})
 }
 
+/// A certificate as it was written in the file, for comparing against it.
+///
+/// The round-trip check compares what this rendered with what the compiler
+/// read back, so it has to undo the lowering rather than look at the meaning:
+/// a stored reference was written as `@secret:name` and a path as itself.
+/// Comparing a `CertSource` against the text would fail for every stored
+/// certificate, and the failure would say netcfgd has a bug -- which is what
+/// that message means and is exactly why it must not fire for a working case.
+fn cert_as_written(source: Option<&netcfgd_model::CertSource>) -> Option<&str> {
+	match source? {
+		netcfgd_model::CertSource::Path(path) => Some(path.as_str()),
+		// The reference's own text is not kept, so this cannot be compared by
+		// value. It is a match by construction: `render` writes exactly the
+		// `@secret:` form the compiler turns back into `Stored`.
+		netcfgd_model::CertSource::Stored(_) => None,
+	}
+}
+
 /// Compile the directory again and check the network arrived as asked.
 ///
 /// Not a formality. It covers the two things that can go wrong between a
@@ -479,10 +497,14 @@ fn compiles_back(config_dir: &Path, factory_dir: &Path, profile: &Profile) -> Re
 				eap.anonymous_identity.as_deref(),
 				"anonymous identity",
 			),
-			(ca_cert.as_deref(), eap.ca_cert.as_deref(), "CA certificate"),
+			(
+				ca_cert.as_deref(),
+				cert_as_written(eap.ca_cert.as_ref()),
+				"CA certificate",
+			),
 			(
 				client_cert.as_deref(),
-				eap.client_cert.as_deref(),
+				cert_as_written(eap.client_cert.as_ref()),
 				"client certificate",
 			),
 			(phase2.as_deref(), eap.phase2.as_deref(), "phase 2 method"),
