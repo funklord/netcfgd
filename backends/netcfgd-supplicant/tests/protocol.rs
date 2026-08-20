@@ -6,7 +6,9 @@
 
 use netcfgd_model::device::MacPolicy;
 use netcfgd_model::security::{PskConfig, PskProto};
-use netcfgd_model::{EapConfig, EapMethod, SecretProvider, SecretRef, Security, Ssid, WifiNetwork};
+use netcfgd_model::{
+	CertSource, EapConfig, EapMethod, SecretProvider, SecretRef, Security, Ssid, WifiNetwork,
+};
 use netcfgd_secret::Resolver;
 use netcfgd_supplicant::network::settings;
 use netcfgd_supplicant::protocol::{
@@ -436,7 +438,7 @@ fn eap_settings_quote_and_redact_the_identity() {
 			provider: SecretProvider::File,
 			name: "password".to_owned(),
 		}),
-		ca_cert: Some("/etc/ssl/certs/corporate.pem".to_owned()),
+		ca_cert: Some(CertSource::Path("/etc/ssl/certs/corporate.pem".to_owned())),
 		client_cert: None,
 		private_key: None,
 		phase2: Some("auth=MSCHAPV2".to_owned()),
@@ -493,7 +495,7 @@ fn an_eap_method_missing_its_credential_says_which() {
 		anonymous_identity: None,
 		password: None,
 		ca_cert: None,
-		client_cert: Some("/etc/ssl/client.pem".to_owned()),
+		client_cert: Some(CertSource::Path("/etc/ssl/client.pem".to_owned())),
 		private_key: None,
 		phase2: None,
 	});
@@ -812,83 +814,150 @@ fn a_connected_event_names_the_access_point() {
 	}
 }
 
-/// A private key that is key material rather than a path is refused.
+/// Stored certificates and a stored key become real files, and paths.
 ///
-/// There was no test for a *complete* EAP-TLS network at all: the only case
-/// asserted a missing-field error, so nothing had looked at what a working one
-/// produces. What it produced was `private_key "-----BEGIN PRIVATE KEY-----`
-/// followed by a newline -- wrong twice, since `wpa_supplicant`'s `private_key`
-/// names a file it opens, and a newline terminates the line-based
-/// `SET_NETWORK` command in the middle and corrupts everything after it.
+/// The point of the whole change. `wpa_supplicant` opens all three as files, so
+/// everything reaching it has to be a path -- and before this the only way to
+/// have one was to put the file there yourself, which a desktop client cannot
+/// do. A `Stored` source is content netcfgd already holds; the resolver writes
+/// it where the supplicant can read it and hands back that path.
 ///
-/// The password branch had the guard against exactly that and this branch did
-/// not, which is the wrong way round: a password is usually one line and a PEM
-/// never is.
+/// The old behaviour is worth remembering: `private_key` was sent as the
+/// secret's *value*, so an EAP-TLS network rendered
+/// `private_key "-----BEGIN PRIVATE KEY-----` followed by a newline -- a
+/// filename that does not exist, and a newline that terminates the line-based
+/// `SET_NETWORK` command in the middle.
 #[test]
-fn an_eap_tls_private_key_that_is_not_a_path_is_refused() {
-	let dir = scratch("tls-material");
-	write_secret(
-		&dir,
-		"key",
-		"-----BEGIN PRIVATE KEY-----\nMIIBVQ==\n-----END PRIVATE KEY-----\n",
-	);
-	let resolver = Resolver::with_secrets_dir(&*dir);
-	let error = settings(
-		&network(
-			"corp",
-			tls_with(SecretRef {
-				provider: SecretProvider::File,
-				name: "key".to_owned(),
-			}),
-		),
-		MacPolicy::Permanent,
-		&resolver,
-	)
-	.expect_err("key material cannot cross the control socket");
-	assert_eq!(
-		error.downcast_ref::<Unsupported>(),
-		Some(&Unsupported::PassphraseNotSendable)
+fn stored_certificates_are_materialised_and_sent_as_paths() {
+	use std::os::unix::fs::PermissionsExt as _;
+
+	let dir = scratch("tls-stored");
+	write_secret(&dir, "corp-ca", "-----BEGIN CERTIFICATE-----\nCA==\n");
+	write_secret(&dir, "corp-crt", "-----BEGIN CERTIFICATE-----\nCRT==\n");
+	write_secret(&dir, "corp-key", "-----BEGIN PRIVATE KEY-----\nKEY==\n");
+
+	let run = scratch("tls-run");
+	let resolver = Resolver::with_secrets_dir(&*dir).materialising_into(run.join("certs"));
+
+	let tls = Security::Eap(EapConfig {
+		method: EapMethod::Tls,
+		identity: "user@corp.example".to_owned(),
+		anonymous_identity: None,
+		password: None,
+		ca_cert: Some(CertSource::Stored(stored("corp-ca"))),
+		client_cert: Some(CertSource::Stored(stored("corp-crt"))),
+		private_key: Some(CertSource::Stored(stored("corp-key"))),
+		phase2: None,
+	});
+	let lines = rendered(&network("corp", tls), &resolver);
+
+	// Every one is a path under /run, and none carries the material.
+	for (field, file) in [
+		("ca_cert", "ca.pem"),
+		("client_cert", "client.pem"),
+		("private_key", "client.key"),
+	] {
+		let wanted = run.join("certs").join(file);
+		assert!(
+			lines
+				.iter()
+				.any(|line| line.contains(&format!("{field} \"{}\"", wanted.display()))),
+			"{field} is not the materialised path: {lines:?}"
+		);
+		assert!(
+			wanted.exists(),
+			"{field} was named but never written: {}",
+			wanted.display()
+		);
+		let mode = std::fs::metadata(&wanted)
+			.expect("readable")
+			.permissions()
+			.mode();
+		assert_eq!(mode & 0o777, 0o600, "{field} is {mode:o}");
+	}
+
+	// And nothing rendered carries the key material itself, which is the
+	// failure the old code had and the one worth asserting against by name.
+	assert!(
+		!lines.iter().any(|line| line.contains("BEGIN PRIVATE KEY")),
+		"key material reached the control socket: {lines:?}"
 	);
 }
 
-/// And a path is sent as it is, so the refusal above bounds the broken case
-/// rather than the feature.
+/// A resolver with nowhere to write refuses rather than choosing a directory.
+///
+/// The safe direction: a resolver that invented somewhere would put key
+/// material in a place its caller did not pick.
 #[test]
-fn an_eap_tls_private_key_that_is_a_path_is_sent() {
-	let dir = scratch("tls-path");
-	write_secret(&dir, "key", "/etc/ssl/private/client.key");
+fn a_stored_certificate_with_nowhere_to_go_is_refused() {
+	let dir = scratch("tls-nowhere");
+	write_secret(&dir, "corp-key", "material");
 	let resolver = Resolver::with_secrets_dir(&*dir);
+	assert!(settings(
+		&network("corp", tls_with(CertSource::Stored(stored("corp-key")))),
+		MacPolicy::Permanent,
+		&resolver,
+	)
+	.is_err());
+}
+
+fn stored(name: &str) -> SecretRef {
+	SecretRef {
+		provider: SecretProvider::File,
+		name: name.to_owned(),
+	}
+}
+
+/// A certificate given as a path is sent unchanged, and nothing is written.
+///
+/// The other half of the pair. An operator with certificates already in
+/// `/etc/ssl` should not have to hand them to netcfgd to use them, so a `Path`
+/// source passes straight through -- and materialising one would be netcfgd
+/// copying a file it was only asked to name.
+///
+/// **This replaces two tests that bounded the old defect** rather than fixing
+/// it: before certificates could be content, a private key holding material
+/// was refused, because sending it was the only other option and sending it
+/// corrupted the control socket. Refusing is no longer right -- stored key
+/// material is the supported case now, and `stored_certificates_are_...` is
+/// where it is checked.
+#[test]
+fn a_certificate_given_as_a_path_is_sent_unchanged() {
+	let dir = scratch("tls-path");
+	let run = scratch("tls-path-run");
+	let resolver = Resolver::with_secrets_dir(&*dir).materialising_into(run.join("certs"));
 	let lines = rendered(
 		&network(
 			"corp",
-			tls_with(SecretRef {
-				provider: SecretProvider::File,
-				name: "key".to_owned(),
-			}),
+			tls_with(CertSource::Path("/etc/ssl/private/client.key".to_owned())),
 		),
 		&resolver,
 	);
+
 	assert!(
 		lines
 			.iter()
 			.any(|line| line.contains("private_key \"/etc/ssl/private/client.key\"")),
 		"{lines:?}"
 	);
-	// The certificates are paths already and are unchanged by this.
 	assert!(lines
 		.iter()
 		.any(|line| line.contains("ca_cert \"/etc/ssl/ca.pem\"")));
+	assert!(
+		!run.join("certs").exists(),
+		"a path source made netcfgd write a file it was only asked to name"
+	);
 }
 
 /// An EAP-TLS network with everything but the key, which the two above vary.
-fn tls_with(private_key: SecretRef) -> Security {
+fn tls_with(private_key: CertSource) -> Security {
 	Security::Eap(EapConfig {
 		method: EapMethod::Tls,
 		identity: "user@corp.example".to_owned(),
 		anonymous_identity: None,
 		password: None,
-		ca_cert: Some("/etc/ssl/ca.pem".to_owned()),
-		client_cert: Some("/etc/ssl/client.pem".to_owned()),
+		ca_cert: Some(CertSource::Path("/etc/ssl/ca.pem".to_owned())),
+		client_cert: Some(CertSource::Path("/etc/ssl/client.pem".to_owned())),
 		private_key: Some(private_key),
 		phase2: None,
 	})

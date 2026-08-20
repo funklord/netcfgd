@@ -137,11 +137,15 @@ const PRIVILEGED: &[(&str, &str, Reason)] = &[
 	// be able to do.
 	("openvpn", "config", Reason::ForeignConfig),
 	("openvpn", "file", Reason::ForeignConfig),
-	// 802.1X certificate paths, opened by a supplicant running as root. Under
-	// 0127 these stop being paths -- a client sends the bytes and netcfgd
-	// chooses where they live -- and until then they are privileged.
+	// 802.1X certificates and the key that goes with them. **Privileged only
+	// when they name a path**, which is the distinction 0127 predicted and
+	// `cert_is_a_path` now draws: a path is an instruction to open a file as
+	// root, and `@secret:name` is a reference to something netcfgd already
+	// holds. So an enterprise network is reachable from a desktop client, and
+	// pointing the supplicant at an arbitrary file still is not.
 	("wifi", "ca_cert", Reason::Path),
 	("wifi", "client_cert", Reason::Path),
+	("wifi", "private_key", Reason::Path),
 	// The authorization policy itself, local and remote. Everything that
 	// decides who may do what is decided by root and nobody else, or the
 	// tiers below it mean nothing.
@@ -165,6 +169,24 @@ fn assignment_reason(block: &str, key: &str) -> Option<Reason> {
 		.iter()
 		.find(|(head, name, _)| *head == block && *name == key)
 		.map(|(_, _, reason)| *reason)
+}
+
+/// Whether a certificate field names a path rather than stored content.
+///
+/// `@secret:name` refers to something netcfgd holds, put there by a caller who
+/// had it already -- so sending it grants nothing new. Anything else is a path,
+/// which is an instruction to open a file as root and is the reason these
+/// fields are on the privileged table at all.
+///
+/// A non-string value is treated as a path, which is the safe direction: it
+/// will fail to compile anyway, and a classification that guessed "ordinary"
+/// for something it could not read would be guessing in the direction that
+/// grants.
+fn cert_is_a_path(value: &Value) -> bool {
+	match value {
+		Value::Str(text) => !text.starts_with("@secret:"),
+		_ => true,
+	}
 }
 
 /// The `@secret:exec:` provider, wherever a value can carry one.
@@ -210,7 +232,11 @@ fn walk(items: &[Item], block: &str, found: &mut Vec<Finding>) {
 				span: path.span,
 			}),
 			Item::Assignment(assignment) => {
-				if let Some(reason) = assignment_reason(block, &assignment.key) {
+				if let Some(reason) = assignment_reason(block, &assignment.key).filter(|reason| {
+					// The one entry in the table that is conditional, and
+					// it is conditional on the value rather than the key.
+					*reason != Reason::Path || cert_is_a_path(&assignment.value.node)
+				}) {
 					found.push(Finding {
 						reason,
 						what: format!("{block}.{}", assignment.key),
@@ -329,15 +355,33 @@ mod tests {
 		);
 	}
 
-	/// Certificate paths, until 0127 turns them into content.
+	/// A certificate path is privileged and stored content is not.
+	///
+	/// The pair 0127 predicted and this is where it lands: a path is an
+	/// instruction to open a file as root, and `@secret:name` refers to
+	/// something netcfgd already holds because a caller sent it. Without the
+	/// second half an enterprise network is unreachable from any client that
+	/// is not root, which is most of them; without the first, a caller could
+	/// point a supplicant running as root at any file on the machine.
 	#[test]
-	fn a_certificate_path_is_privileged() {
-		assert_eq!(
-			reasons(
-				"network \"eduroam\" {\n\twifi {\n\t\teap = \"peap\"\n\t\tca_cert = \"/etc/ssl/x.pem\"\n\t}\n}\n"
-			),
-			vec![Reason::Path]
-		);
+	fn a_certificate_path_is_privileged_and_stored_content_is_not() {
+		let path = "network \"eduroam\" {\n\twifi {\n\t\teap = \"peap\"\n\t\tca_cert = \"/etc/ssl/x.pem\"\n\t}\n}\n";
+		let stored = "network \"eduroam\" {\n\twifi {\n\t\teap = \"peap\"\n\t\tca_cert = \"@secret:corp-ca\"\n\t}\n}\n";
+		assert_eq!(reasons(path), vec![Reason::Path]);
+		assert!(reasons(stored).is_empty(), "{:?}", reasons(stored));
+	}
+
+	/// And the same for the key, which was privileged nowhere before.
+	///
+	/// `private_key` was a `SecretRef` and so always stored, so it was never on
+	/// the table. It can be a path now -- that is what makes an operator's
+	/// existing key usable -- and a path is a path whichever field it is in.
+	#[test]
+	fn a_private_key_path_is_privileged_and_a_stored_key_is_not() {
+		let path = "network \"corp\" {\n\twifi {\n\t\teap = \"tls\"\n\t\tprivate_key = \"/etc/ssl/k.pem\"\n\t}\n}\n";
+		let stored = "network \"corp\" {\n\twifi {\n\t\teap = \"tls\"\n\t\tprivate_key = \"@secret:corp-key\"\n\t}\n}\n";
+		assert_eq!(reasons(path), vec![Reason::Path]);
+		assert!(reasons(stored).is_empty());
 	}
 
 	/// A tun device given to a named user, and the multicast address that
