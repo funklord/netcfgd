@@ -24,3 +24,19 @@ remove | deconfigure)
 	fi
 	;;
 esac
+
+# debhelper's own snippets belong here, and had nowhere to go.
+#
+# Without this token dpkg-buildpackage generates them and drops them: they were
+# written to debian/.debhelper/generated/netcfgd/ on every build and never
+# reached the packaged script, which is why all three maintainer scripts ship
+# byte-identical to their source. debhelper says nothing about it.
+#
+# It was harmless and was not safe. What the systemd snippet does by default is
+# `deb-systemd-helper enable` and `deb-systemd-invoke start`, so anybody adding
+# this token -- which is ordinary, and what Debian policy expects -- would have
+# made `apt install netcfgd` enable and start the daemon, contradicting the
+# header above with no diff to the header. debian/rules passes
+# `--no-enable --no-start` so that the token is now safe to have, which is the
+# order those two changes have to happen in.
+#DEBHELPER#
