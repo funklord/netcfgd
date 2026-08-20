@@ -200,9 +200,7 @@ impl Request {
 			| Self::WifiStatus { .. }
 			| Self::WifiDisconnect { .. }
 			| Self::ApStations { .. } => &["interface"],
-			Self::WifiAdd { .. } => {
-				&["ssid", "id", "passphrase", "proto", "hidden", "priority"]
-			}
+			Self::WifiAdd { .. } => &["ssid", "id", "passphrase", "proto", "hidden", "priority"],
 			Self::WifiConnect { .. } => &["interface", "network"],
 		}
 	}

@@ -223,8 +223,7 @@ mod tests {
 	/// this asserts by sending the same bytes the test above refuses.
 	#[test]
 	fn the_shared_reader_is_still_lenient() {
-		let mut cursor =
-			std::io::Cursor::new(b"{\"request\":\"status\",\"bogus\":1}\n".to_vec());
+		let mut cursor = std::io::Cursor::new(b"{\"request\":\"status\",\"bogus\":1}\n".to_vec());
 		let request: Request = read_message(&mut cursor).expect("reads").expect("present");
 		assert_eq!(request, Request::Status);
 	}
