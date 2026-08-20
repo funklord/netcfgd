@@ -2711,10 +2711,31 @@ gathered here so a new session does not have to find them.
   quieten; the retry belongs where the hook is run. Not fixed, found while
   running the gate for 0128.
 
-- ~~**Whether clients send typed documents or config text.**~~ **Both, with
-  the models going binary later** -- which §2 already provides for, JSON for
-  humans and CBOR for compact storage, so the wire gains an encoding rather
-  than a schema. What made either safe is the classification
+- ~~**Whether clients send typed documents or config text.**~~ **Both, and the
+  text half is built**: `config_put` carries a name and configuration, netcfgd
+  chooses the path, and `authorize::permitted` classifies the text before it
+  lands. The typed half is `wifi_add` and whatever follows it -- the general
+  case and the specialisations, rather than a choice between them.
+
+  **The gate that matters is not the tier.** `config_put` is `admin`, and a
+  site that opens `admin` to a group -- which is the stated intent for local --
+  would be handing out root if config text could carry a hook. So the content
+  gate needs *root on this machine*, never the tier, and never anything from
+  off the machine whatever the remote policy says.
+
+  Two things were found by breaking it deliberately. Removing the content gate
+  from the daemon failed **no test**, because every test called `check_content`
+  directly: a correct function nobody invokes. `authorize` now exposes one
+  `permitted`, which is what its own opening line always claimed -- "one place
+  to read and one place a mistake can be" -- and a test asserts both gates are
+  behind it. And an em dash reached a doc comment, which the `ascii` gate
+  caught; the section sign it replaced had come from a heredoc.
+
+  The binary half is deferred and needs nothing new: §2 already provides for
+  it, JSON for humans and CBOR for compact storage, so the wire gains an
+  encoding rather than a schema.
+
+  What made either safe is the classification
   ([0127](docs/decisions/0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)),
   now built in `netcfgd-compile`'s `privilege` module: given parsed text it
   returns every production granting more than "configure this machine's
