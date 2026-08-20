@@ -906,6 +906,38 @@ frame therefore survive, on a better footing than they had: they rested on a
 filesystem fact, and they now rest on a property of the configuration
 language.
 
+**EAP-TLS could never have worked, and the test that would have shown it did
+not exist.** Writing one -- rendering a *complete* TLS network rather than
+asserting a missing-field error, which was the only EAP-TLS case there was --
+produced this:
+
+```
+SET_NETWORK 0 private_key "-----BEGIN PRIVATE KEY-----
+```
+
+Wrong twice. wpa_supplicant's `private_key` names a **file it opens**, per its
+own README (`private_key="/etc/cert/user.prv"`), so key material there is a
+filename that does not exist. And a PEM is multi-line, which terminates the
+line-based `SET_NETWORK` command in the middle and corrupts everything after
+it on the control socket. The password branch already guarded against exactly
+that with `passphrase_is_sendable`, and the TLS branch did not -- the wrong way
+round, since a password is usually one line and a private key never is.
+
+`ncfg wifi add --eap tls` invited it: the prompt offered "the path
+wpa_supplicant should load, **or the key itself**", and only the first can
+work. Both are fixed -- the guard is on both branches and the prompt asks for
+a path -- so the broken case is a sentence rather than a corrupted
+conversation.
+
+**What is still not built is the real answer**, which 0127 already describes:
+`ca_cert` and `client_cert` are classified privileged *only because they are
+paths*, and a client sending the bytes for netcfgd to store would remove them
+from that list rather than guard them. The same mechanism gives EAP-TLS a
+private key without one on the client's disk -- netcfgd materialises it under
+`/run` at 0600 and passes that path, the way hooks and hostapd's config are
+already handled. That is the piece that makes enterprise wifi reachable from
+the GUI and the TUI at all, and it is not started.
+
 **`config_put` has a client**: `ncfg config put NAME [FILE]` and `ncfg config
 rm NAME`, reading a file or standard input. The name is what netcfgd files it
 under and never a path -- the file is read *here*, by whoever ran the command,
