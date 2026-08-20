@@ -35,6 +35,7 @@ debian/netcfgd/
 # other per-package packaging source somebody adds later -- the rule above
 # exists because debhelper's working state was committed once already.
 debian/netcfgd-nm/
+debian/netcfgd-gui/
 debian/*.substvars
 # The snippets dh_installsystemd and friends generate into maintainer scripts,
 # as well as the log. `*.debhelper.log` alone missed `*.debhelper`, so

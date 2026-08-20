@@ -4,7 +4,8 @@ Priority: optional
 Maintainer: Nabeel Sowan <nabeel@vibes.se>
 Homepage: https://github.com/netcfgd/netcfgd
 Build-Depends: debhelper-compat (= 13), cargo (>= 1.85), rustc (>= 1.85),
- libncurses-dev, pkgconf
+ libncurses-dev, pkgconf,
+ qt6-base-dev <pkg.netcfgd.gui>
 Rules-Requires-Root: no
 
 Package: netcfgd
@@ -27,10 +28,9 @@ Description: network configuration daemon that states what it will do
  resolver it names. netcfgd speaks netlink itself, so it needs no ip, iw or
  nft. Prefix delegation wants odhcp6c, which Debian does not package.
  .
- The Qt client is not in this package and has no package of its own yet:
- building it would put qt6-base-dev in this source package's Build-Depends,
- and the daemon is meant to build on machines that have no toolkit at all.
- `make gui && make install-gui` is how to have it meanwhile.
+ The Qt client is not in this package. It is netcfgd-gui, built from this
+ same source under a build profile, so that a plain build of the daemon
+ needs no toolkit at all.
  .
  Installing this package configures nothing and starts nothing. The systemd
  unit is installed and left disabled: netcfgd takes over an interface only
@@ -70,3 +70,28 @@ Description: NetworkManager-compatible D-Bus interface for netcfgd
  switch that cannot be undone by somebody who has just lost their network.
  NetworkManager's own connection profiles are never read or written by
  netcfgd, so it comes back knowing every network it knew.
+
+Package: netcfgd-gui
+Architecture: any
+Build-Profiles: <pkg.netcfgd.gui>
+Depends: ${shlibs:Depends}, ${misc:Depends}, netcfgd (= ${binary:Version})
+Description: desktop client and tray applet for netcfgd
+ A Qt Widgets client for netcfgd: what the machine's network looks like, what
+ the configuration says, what applying it would change, and the wifi networks
+ in range. It talks to netcfgd over the same unix socket `ncfg` uses and holds
+ no authority of its own, so what it can do is whatever the control policy
+ says the person running it may do.
+ .
+ It is behind a build profile rather than in a source package of its own. The
+ daemon must build on machines with no toolkit at all, so qt6-base-dev cannot
+ be an unconditional build dependency -- and a separate source package, which
+ is the usual answer to that, would have to duplicate the shared C client
+ under client/ that both this and the daemon's own conformance gate build.
+ One copy of that, and one version number, is worth more than the separation.
+ .
+ Build it with:
+ .
+   DEB_BUILD_PROFILES=pkg.netcfgd.gui dpkg-buildpackage -b -us -uc
+ .
+ or `make deb-gui`, which does the same. A plain build produces the daemon
+ and needs no Qt.
