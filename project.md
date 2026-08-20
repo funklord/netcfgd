@@ -2696,6 +2696,21 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 Not work anybody should do unasked. Each is recorded where it arose; they are
 gathered here so a new session does not have to find them.
 
+- **`make check` has one flaky test, and the flake is a real race in the
+  daemon.** `a_hook_that_hangs_is_killed_and_vetoes` failed once under the
+  full parallel workspace run with `could not run .../hook.sh: Text file busy`,
+  and passes every time alone or within its own crate. ETXTBSY here is the
+  fork/exec window: another thread forks while this one still holds the
+  script's write descriptor, and `O_CLOEXEC` does not close that gap because
+  the child has not reached `exec` yet.
+
+  **The same race is in the daemon**, which materialises hooks under `/run`
+  and executes them while other threads spawn backends. In production it
+  means a hook that spuriously fails to start -- and on a `pre_up`, that is a
+  veto that stops a transition for no reason. So this is not a test to
+  quieten; the retry belongs where the hook is run. Not fixed, found while
+  running the gate for 0128.
+
 - ~~**Whether clients send typed documents or config text.**~~ **Both, with
   the models going binary later** -- which §2 already provides for, JSON for
   humans and CBOR for compact storage, so the wire gains an encoding rather
@@ -2746,6 +2761,21 @@ gathered here so a new session does not have to find them.
   button does not, so the two conventions disagree.
   [0120](docs/decisions/0120-the-red-frame-is-a-process-boundary.md) records
   the disagreement without settling it.
+
+- ~~**How local and remote callers are told apart.**~~ **Done:
+  [0128](docs/decisions/0128-origin-is-which-socket-you-arrived-on.md).**
+  Origin is which socket a connection arrived on -- observed, not claimed, so
+  there is no field to forge and nothing to evaluate. The remote socket exists
+  only when a `remote` policy opens something, which is constraint 2 applied
+  where the difference is a security property. Remote policy is booleans over
+  0013's three tiers rather than principals, because every remote caller
+  arrives as the agent and `user:alice` would be a sentence the daemon cannot
+  evaluate. The division it creates: **the agent authenticates, the daemon
+  bounds**, and the bound holds when the agent is wrong.
+
+  It reverses §5's "the daemon itself is unchanged", which was right while
+  remote meant reading state and wrong once 0127 let a remote caller send
+  configuration.
 
 - ~~**Whether the Qt client gets a package.**~~ **Done: `netcfgd-gui`, behind
   the build profile `pkg.netcfgd.gui`
