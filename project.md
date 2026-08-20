@@ -848,11 +848,52 @@ Kept current deliberately: this is the section to read after a break, and the on
 
 **Where this stands, as of the last rewrite.** The software is built, checked
 in ways it had not been — every parser fuzzed, the daemon run on three
-architectures, the gates covering what the packages actually ship — and it has
-now had the first defects found in it that were *concurrency* rather than
-protocol or netlink. What has still never happened is the thing §*What would
-prove it* is about: nobody has run netcfgd against a real radio, on a real
-router, or as the network configuration of a machine they depend on.
+architectures, the gates covering what the packages actually ship — and the
+last pass closed **the two unbounded resources reachable from outside it**.
+What has still never happened is the thing §*What would prove it* is about:
+nobody has run netcfgd against a real radio, on a real router, or as the
+network configuration of a machine they depend on.
+
+**The last pass was about checks that reported the wrong thing, and it started
+with one that could not report at all.** `make check` could not run on this
+machine: it died at gate 2 of 17 because neither rustfmt nor clippy ships with
+a distro rustc, so fifteen gates had no way to be reached. `gui` and `deny`
+already skipped loudly for a missing tool and these two hard-failed instead,
+which was the tree not applying its own settled rule. Everything below was
+found *after* that was fixed, which is the argument for fixing it first.
+
+What the working gates then found, in order of how much it matters:
+
+- **An `include` cycle killed the daemon.** `add_file` followed every include
+  with nothing tracking what it was already inside, so a file including itself
+  overflowed the stack — and `reload` is a socket request, so an admin-tier
+  client could ask for it. Two earlier commits had bounded nesting *inside* a
+  file; nobody had bounded it *across* files, and `MAX_NESTING_DEPTH` existing
+  is probably why: a bound that holds within a document and not between
+  documents is not a bound on the recursion the program performs.
+- **A hook could stall everything.** `hooks::run` waited on `Command::status()`
+  with no bound, on the single-threaded loop, so a hook that never exits took
+  `status` and `plan` with it — the two commands an operator reaches for when
+  the network stops ([0123](docs/decisions/0123-a-hook-that-never-exits-is-killed.md)).
+- **Nothing bounded the connection count.** One OS thread per accept, uncounted,
+  in a process holding `CAP_NET_ADMIN`, while `MAX_LINE` bounded a single
+  connection for exactly that reason.
+- **The daemon accepted request members nobody defined**, while its payload
+  structs refused them — the strict half facing already-parsed bytes and the
+  permissive half facing the socket.
+- **Both clients called a VLAN a radio.** `wlan0.10` inherits its parent's
+  name, and the rule said "kind first, name second" while the code wrote an
+  *or*. `make conformance` could not catch it: both implementations were
+  written from each other, so they agreed about a wrong answer.
+
+**The method that matters more than the list.** Three of those were found by
+reading a comment and checking whether the code did what it said. Three of them
+I got wrong first and caught by running the check rather than trusting it — a
+fmt fix that left `adapters` still stopping the suite, a `tc` reported missing
+when it was in `/sbin`, and a hook timeout that killed the shell and left its
+`sleep` running while the suite reported exit 0 with 815 passing tests. **Every
+assertion about return values can pass while the thing you bounded carries on**;
+`running-code.md`'s look at what is still running afterwards is what saw it.
 
 **Two writers of `/run` were the last pass's find, and both were structural.**
 `ncfg apply` and the daemon are separate processes and both record what netcfgd
@@ -888,11 +929,34 @@ network protocol for fuzzypickles, netcfgd and a planned `raidcfgd`;
 [docs/shared-protocol-brief.md](docs/shared-protocol-brief.md) is what netcfgd
 asks of it, and the local socket is explicitly not part of the bargain.
 
-**Four things are open and named**, with their evidence, further down: the
-`qdisc.sh` container failure (both structural mechanisms now closed, and it has
-not been caught in the act), the unreproduced `ingress.sh` one, the licensing
-gap lintian confirms, and the decisions that are the maintainer's rather than a
-worker's — see *Waiting on a decision* at the end of this section.
+**Open and named**, with their evidence, further down: the `qdisc.sh` container
+failure (both structural mechanisms now closed, and it has not been caught in
+the act), the unreproduced `ingress.sh` one, the licensing gap lintian
+confirms, and the decisions that are the maintainer's rather than a worker's —
+see *Waiting on a decision* at the end of this section.
+
+**Three added by the last pass, and the first is the largest gap in what is
+verified.**
+
+- **`make live` has not been run.** It is where this document says defects are
+  found, and five of the last pass's changes would be exercised there in ways
+  `make check` structurally cannot — the hook group-kill, the connection cap,
+  the include guard, the sbin PATH fix and the envelope check. It drives real
+  daemons, several outside a namespace, so it is a deliberate act.
+- **`run_as` is the same defect the hook timeout was, unfixed.** `Option` on
+  `HookRef`, always `None`, never read. An unread `timeout` merely failed to
+  bound; an unread `run_as` means a hook that asked to drop privilege would
+  not. Nothing sets it today, so nothing is broken — it wants its own change
+  with its own security argument rather than a ride along with another.
+- **What a laptop should expect, asked directly.** Wired is the proven half
+  and `docs/first-run.md` is the sequence for it. Wifi has never met a real
+  radio. Suspend and resume have never been run, and the specific consequence
+  is already known and undecided: the confirm window is an absolute
+  `deadline_epoch`, so a window armed before a long suspend is expired on
+  resume and **the first observation after the lid opens reverts a change the
+  operator has been living with all night**. Until that is decided, the
+  practical advice is to `confirm` promptly and not to suspend with a window
+  open.
 
 **Still true from the pass before, and it keeps paying.** Three things recorded
 as blocked on hardware were blocked on *privilege* or on *a toolchain*, and a
