@@ -186,6 +186,24 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
 
+	// An enterprise network cannot go over the socket, so a caller who cannot
+	// write the file cannot add one at all -- and that has to be said *here*,
+	// under the same rule as the credential below: a refusal that was going to
+	// happen anyway should not happen after somebody has typed a password.
+	//
+	// This one does have to predict, because the alternative is to find out
+	// after the prompt. It predicts by asking the directory the block would go
+	// in rather than the config directory, which is the distinction the
+	// fallback below got wrong first time.
+	if wanted.eap.is_some() && !can_write(&wifi_profile::profile_path(&config_dir, &id)) {
+		return Err(format!(
+			"cannot write {} and an enterprise network cannot be added through \
+			 the daemon: `--eap` carries certificate paths, which the socket \
+			 deliberately does not accept (0117). Add this one as root",
+			config_dir.display()
+		));
+	}
+
 	// The credential last, because it is the only step that stops and waits for
 	// a person: a refusal that was going to happen anyway should not happen
 	// after the passphrase has been typed. `install` refuses an existing file
@@ -209,7 +227,31 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		security: security_of(wanted),
 	};
 	let written =
-		wifi_profile::install(&config_dir, &factory_dir, &profile, credential.as_deref())?;
+		match wifi_profile::install(&config_dir, &factory_dir, &profile, credential.as_deref()) {
+			Ok(written) => written,
+			// `/etc/netcfgd` is root's, so a member of the `netcfgd` group running
+			// this cannot write it and met `Permission denied` on a command the
+			// tier system says is theirs (0124). Ask the daemon instead, which is
+			// what the GUI and the TUI have always done and what `wifi_add` exists
+			// for -- one outcome, reached by whichever route the caller can use.
+			//
+			// `denied` and not a writability probe. The first version of this asked
+			// whether the *config directory* could be written, and a test caught it
+			// answering for the wrong directory: the block goes in `conf.d`, so a
+			// writable `conf.d` under an unwritable parent took the local path and
+			// succeeded where the probe said it could not. The question worth
+			// asking is the one the kernel already answered.
+			Err(error) if error.denied => {
+				return add_over_socket(
+					&profile,
+					credential.as_deref(),
+					wanted,
+					options,
+					&error.message,
+				);
+			}
+			Err(error) => return Err(error.message),
+		};
 
 	report(
 		&written.file,
@@ -220,6 +262,108 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		document.as_ref(),
 	);
 	Ok(ExitCode::SUCCESS)
+}
+
+/// Whether this process could create `target`.
+///
+/// Asked by writing, because that is the only answer that is true: a mode and
+/// an owner have to be read against this process's uid and every supplementary
+/// group, and a filesystem may be read-only or refuse for a reason neither
+/// mentions. The probe is created and removed, so nothing is left behind.
+///
+/// Used for the one case that has to be answered *before* attempting anything,
+/// which is the enterprise refusal above. Everywhere else the write is tried
+/// and `InstallError::denied` carries the kernel's own answer, which is better
+/// evidence than any prediction.
+///
+/// It probes the directory `target` would sit in, not `target` itself, and not
+/// the config directory: the block goes in `conf.d`, and asking about the
+/// parent of that is how the first version of this got a wrong answer.
+fn can_write(target: &Path) -> bool {
+	let Some(directory) = target.parent() else {
+		return false;
+	};
+	if !directory.is_dir() {
+		// `install` would create it, so the question becomes whether *its*
+		// parent allows that.
+		return directory.parent().is_some_and(can_write_dir);
+	}
+	can_write_dir(directory)
+}
+
+/// The probe itself, on a directory that exists.
+fn can_write_dir(directory: &Path) -> bool {
+	let probe = directory.join(".ncfg-write-probe");
+	match std::fs::OpenOptions::new()
+		.write(true)
+		.create_new(true)
+		.open(&probe)
+	{
+		Ok(_) => {
+			let _ = std::fs::remove_file(&probe);
+			true
+		}
+		Err(_) => false,
+	}
+}
+
+/// Add the network through the daemon, for a caller who cannot write the file.
+///
+/// The credential travels inbound in the request, is written by the daemon
+/// through the secret provider at 0600, and the block keeps an `@secret:`
+/// reference -- so the desired-state document stays free of secret material
+/// exactly as it does when this command writes the file itself (0117).
+fn add_over_socket(
+	profile: &wifi_profile::Profile,
+	credential: Option<&str>,
+	wanted: &Wanted,
+	options: &Options,
+	local_error: &str,
+) -> Result<ExitCode, String> {
+	// The socket has no enterprise arm: an 802.1X network carries certificate
+	// *paths*, which are files the daemon would hand to a supplicant running as
+	// root, and 0117 left how to carry those undecided. Saying so beats an
+	// error about a field the reader never named.
+	if wanted.eap.is_some() {
+		return Err(format!(
+			"could not write the configuration ({local_error}), and an enterprise \
+			 network cannot be added through the daemon: `--eap` carries certificate \
+			 paths, which the socket deliberately does not accept. Add this one as \
+			 root, or from a machine where you can write /etc/netcfgd"
+		));
+	}
+
+	let run_dir = crate::state::resolve_dir(options.run_dir.as_deref());
+	let socket = crate::client::socket_path(&run_dir);
+	let request = netcfgd_proto::Request::WifiAdd {
+		ssid: profile.ssid.to_hex(),
+		id: Some(profile.id.clone()),
+		passphrase: credential.map(str::to_owned),
+		proto: wanted.proto.map(str::to_owned),
+		hidden: profile.hidden,
+		priority: profile.priority,
+	};
+
+	match crate::client::ask(&socket, &request) {
+		Ok(crate::client::Answer::Ok) => {
+			println!("added `{}` through netcfgd", profile.id);
+			println!(
+				"the configuration is root's, so this went to the daemon rather than \
+				 straight to a file"
+			);
+			println!("`ncfg wifi connect \"{}\"` joins it now", profile.id);
+			Ok(ExitCode::SUCCESS)
+		}
+		Ok(crate::client::Answer::Error { message }) => Err(message),
+		Ok(other) => Err(format!("the daemon sent {}", other.describe())),
+		// Both halves failed, and reporting only the second sends the reader
+		// after a daemon when the answer may be that they meant to run this as
+		// root. Name what each one could not do.
+		Err(message) => Err(format!(
+			"could not write the configuration ({local_error}), and could not ask \
+			 netcfgd to do it either: {message}"
+		)),
+	}
 }
 
 /// The configuration as it stands, or `None` if there is not one yet.
@@ -655,6 +799,31 @@ mod tests {
 		assert!(check_passphrase(&"x".repeat(63)).is_ok());
 	}
 
+	/// Make the config tree unwritable, and give back what undoes it.
+	///
+	/// **Both directories, not just the top one.** The first version of this
+	/// chmodded `etc` and left `etc/conf.d` writable, which is not a shape any
+	/// real machine has -- `/etc/netcfgd` and its `conf.d` are both root's --
+	/// and it let a write succeed that the test was asserting could not happen.
+	/// A fixture that does not model the situation tests a situation nobody is
+	/// in.
+	fn make_read_only(etc: &Path) -> impl FnOnce() + use<> {
+		use std::os::unix::fs::PermissionsExt;
+
+		let directories = [etc.to_path_buf(), etc.join("conf.d")];
+		for directory in &directories {
+			std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o555))
+				.expect("read-only");
+		}
+		move || {
+			// Deepest first, and always: a fixture left unwritable cannot be
+			// removed, so the temporary directory would outlive the run.
+			for directory in directories.iter().rev() {
+				let _ = std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755));
+			}
+		}
+	}
+
 	/// A config tree with one radio in it and nothing else.
 	///
 	/// A counter as well as the process id: cargo runs these in parallel
@@ -677,6 +846,103 @@ mod tests {
 			..Options::default()
 		};
 		(root, options)
+	}
+
+	/// 0124 put adding a network in the `wifi` tier, and this command is the
+	/// half of it that does not go over the socket: it writes `/etc/netcfgd`,
+	/// which is root's. A group member therefore has the permission and not the
+	/// access, and falls back to asking the daemon.
+	///
+	/// Checked on a directory made read-only rather than by a different uid,
+	/// because a test cannot become one. That is enough for what is being
+	/// asserted -- the *decision* is "can this process create a file here", and
+	/// a read-only directory answers it the same way a root-owned one does for
+	/// somebody who is not root.
+	#[test]
+	fn an_unwritable_config_directory_is_not_written_to() {
+		// Open, so no passphrase is asked for. A PSK network legitimately
+		// prompts before this point, because the credential is needed on
+		// whichever route the add takes -- so prompting first is correct there
+		// and would only obscure what this test is about.
+		let (root, mut options) = fixture("unwritable");
+		options.wifi.open = true;
+		let etc = root.join("etc");
+		let restore = make_read_only(&etc);
+
+		assert!(
+			!can_write(&wifi_profile::profile_path(&etc, "Cafe")),
+			"the probe should not be able to write the block"
+		);
+
+		// No daemon is listening under this fixture's run directory, so the
+		// fallback cannot complete -- and what matters is that it was *tried*
+		// and that the message names both halves. Reporting only the socket
+		// would send a reader after a daemon when the answer is to run this as
+		// root; reporting only the write would hide that there is another way.
+		let error = add(&["Cafe".to_owned()], &options).expect_err("it cannot be added");
+		assert!(
+			error.contains("could not write the configuration"),
+			"the local failure is not named: {error}"
+		);
+		assert!(
+			error.contains("could not ask netcfgd"),
+			"the fallback was not attempted, or its failure is not named: {error}"
+		);
+
+		// Nothing was left behind by either half.
+		assert!(!etc.join("conf.d/wifi-Cafe.conf").exists());
+		assert!(!etc.join("secrets").exists());
+
+		restore();
+	}
+
+	/// An enterprise network cannot cross the socket, so it is refused before
+	/// the passphrase prompt rather than after it.
+	///
+	/// The ordering is the assertion. `--eap` reaches a prompt that stops and
+	/// waits for a person, and a refusal that was always going to happen must
+	/// not happen after they have typed. There is no stdin here, so a prompt
+	/// would fail with a message about a missing password -- which is what this
+	/// distinguishes.
+	#[test]
+	fn an_enterprise_network_is_refused_before_anyone_types_a_password() {
+		let (root, mut options) = fixture("unwritable-eap");
+		let etc = root.join("etc");
+		options.wifi.eap = Some("peap");
+		options.wifi.identity = Some("you@example.ac.uk".to_owned());
+		let restore = make_read_only(&etc);
+
+		let error = add(&["eduroam".to_owned()], &options).expect_err("it cannot be added");
+		assert!(
+			error.contains("cannot be added through the daemon"),
+			"the reason is not the socket's missing enterprise arm: {error}"
+		);
+		assert!(
+			!error.contains("password"),
+			"it got as far as asking for a credential: {error}"
+		);
+
+		restore();
+	}
+
+	/// The ordinary case still writes the file and never asks the daemon.
+	///
+	/// The pair for the two above: a fallback that triggered when it should not
+	/// would send every `ncfg wifi add` through a socket that need not be
+	/// running, on the machine that has no network yet -- which is the case
+	/// this command exists for.
+	#[test]
+	fn a_writable_config_directory_is_written_directly() {
+		let (root, options) = fixture("writable");
+		assert!(can_write(&root.join("etc")));
+		options.config_dir.as_ref().expect("the fixture names one");
+		add(&["Cafe".to_owned()], &{
+			let mut options = options;
+			options.wifi.open = true;
+			options
+		})
+		.expect("it is added");
+		assert!(root.join("etc/conf.d/wifi-Cafe.conf").exists());
 	}
 
 	#[test]
