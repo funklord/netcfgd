@@ -2692,11 +2692,17 @@ gathered here so a new session does not have to find them.
   [0120](docs/decisions/0120-the-red-frame-is-a-process-boundary.md) records
   the disagreement without settling it.
 
-- **Whether the Qt client gets a package.** It builds and installs
-  (`make gui && make install-gui`) and is in no `.deb`. Putting it in one would
-  add `qt6-base-dev` to this source package's `Build-Depends`, so building the
-  *daemon* would need a toolkit on machines that have none. Splitting the source
-  package is the usual answer and is worth doing deliberately.
+- ~~**Whether the Qt client gets a package.**~~ **Done: `netcfgd-gui`, behind
+  the build profile `pkg.netcfgd.gui`
+  ([0126](docs/decisions/0126-the-gui-is-a-build-profile-because-the-client-is-shared.md)).**
+  This entry said splitting the source package was the usual answer, and it
+  is, and it is wrong here: `gui/Makefile` links `../client`, which is the
+  shared C frontend the daemon's own `conformance` and `cross` gates also
+  build. A source package rooted at `gui/` could not see it and would have to
+  carry a copy -- so the packaging separation would have been bought with a
+  duplicated C library, and the gate that compares two client implementations
+  would have been comparing one against a fork of itself. `make deb` still
+  needs no Qt; `make deb-gui` sets the profile.
 
 - **Whether the three clients should share one implementation.**
   [0116](docs/decisions/0116-a-client-that-needs-the-model-is-rust.md) settled
