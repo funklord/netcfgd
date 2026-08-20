@@ -55,6 +55,12 @@ impl Pane {
 /// because this runs for days on a server and the ring is in RAM.
 const EVENT_HISTORY: usize = 200;
 
+/// The width [`App::last_row`] counts rows at.
+///
+/// Any value gives the same count -- see that function -- so this is the
+/// terminal everybody has rather than a number with meaning.
+const ROW_COUNT_WIDTH: usize = 80;
+
 /// Everything drawn, refetched when a pane is entered or `r` is pressed.
 struct App {
 	pane: Pane,
@@ -388,7 +394,12 @@ impl App {
 				self.refresh();
 			}
 			(curses::KEY_DOWN, _) | (_, b'j') => {
-				self.selected = self.selected.saturating_add(1);
+				// Clamped to the last row there is. `saturating_add` alone
+				// only stops at usize::MAX, so holding the key walked the
+				// highlight off the end of the list and into blank space --
+				// where `c` on the wifi pane had nothing to join and the
+				// operator had no way to tell an empty row from a real one.
+				self.selected = self.selected.saturating_add(1).min(self.last_row());
 			}
 			(curses::KEY_UP, _) | (_, b'k') => {
 				self.selected = self.selected.saturating_sub(1);
@@ -436,6 +447,21 @@ impl App {
 			Err(error) => self.message = error,
 		}
 		self.refresh();
+	}
+
+	/// The index of the last row the current pane draws.
+	///
+	/// Asked of [`body`], which is what the renderer draws, so the two cannot
+	/// disagree about how many rows there are -- the alternative is a second
+	/// count per pane, and five of those would drift the first time a pane
+	/// grew a heading.
+	///
+	/// **The width passed here does not affect the answer.** [`fit`] truncates
+	/// and pads and never wraps, so a pane produces one line per thing it has
+	/// to say whatever the terminal is. If that ever stops being true this
+	/// becomes wrong, which is why it is stated rather than assumed.
+	fn last_row(&self) -> usize {
+		body(self, ROW_COUNT_WIDTH).len().saturating_sub(1)
 	}
 
 	/// Join the selected network, if the configuration describes it.
@@ -866,7 +892,7 @@ fn fit(text: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::{body, fit, tabs, App, Pane};
+	use super::{body, curses, fit, tabs, App, Pane, ROW_COUNT_WIDTH};
 	use serde_json::Value;
 	use std::sync::{Arc, Mutex};
 
@@ -960,6 +986,52 @@ mod tests {
 			stations: None,
 			events: Arc::new(Mutex::new(Vec::new())),
 			socket: std::path::PathBuf::from("/nonexistent"),
+		}
+	}
+
+	/// The highlight cannot be moved off the end of the list.
+	///
+	/// Reported from a real terminal: holding the down key selected blank
+	/// rows past the last device. `saturating_add` stops at `usize::MAX`,
+	/// which is not a list length, so nothing bounded it.
+	///
+	/// Every pane, because the bound is one line of code and the reason to
+	/// test all five is that each builds its rows differently -- the one that
+	/// breaks will be the one nobody thought about. Events is included even
+	/// though it draws no highlight: the index still moves, and a pane that
+	/// starts drawing one later should not inherit the bug.
+	#[test]
+	fn the_highlight_stops_at_the_last_row() {
+		let (status, plan) = (status_response(), plan_response());
+		for pane in [
+			Pane::Devices,
+			Pane::Wifi,
+			Pane::Clients,
+			Pane::Plan,
+			Pane::Events,
+		] {
+			let mut app = app(pane, &status, &plan);
+			let rows = body(&app, ROW_COUNT_WIDTH).len();
+
+			// Further than any pane here has rows, so the clamp is what stops
+			// it rather than the loop running out.
+			for _ in 0..(rows + 25) {
+				app.key(curses::KEY_DOWN);
+			}
+			assert!(
+				app.selected < rows.max(1),
+				"{pane:?}: selected {} of {rows} rows",
+				app.selected
+			);
+
+			// And the pair: it still reaches the last row. A clamp that pinned
+			// the highlight at 0 would pass the assertion above and make the
+			// pane useless.
+			assert_eq!(
+				app.selected,
+				rows.saturating_sub(1),
+				"{pane:?}: the last row is not reachable"
+			);
 		}
 	}
 
