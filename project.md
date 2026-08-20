@@ -2746,20 +2746,28 @@ Longer-range direction is in [0036](docs/decisions/0036-the-shim-is-not-the-road
 Not work anybody should do unasked. Each is recorded where it arose; they are
 gathered here so a new session does not have to find them.
 
-- **`make check` has one flaky test, and the flake is a real race in the
-  daemon.** `a_hook_that_hangs_is_killed_and_vetoes` failed once under the
-  full parallel workspace run with `could not run .../hook.sh: Text file busy`,
-  and passes every time alone or within its own crate. ETXTBSY here is the
-  fork/exec window: another thread forks while this one still holds the
-  script's write descriptor, and `O_CLOEXEC` does not close that gap because
-  the child has not reached `exec` yet.
+- ~~**`make check` has one flaky test, and the flake is a real race in the
+  daemon.**~~ **Fixed where the hook is run, not where the test is.** ETXTBSY
+  is the fork/exec window: `execve` refuses a file any process holds open for
+  writing, netcfgd materialises hooks under `/run` and spawns backends from
+  other threads, and a `fork` duplicates every descriptor into a child that
+  has not reached its own `exec` yet. `O_CLOEXEC` does not close that gap --
+  it closes the descriptor *at* exec, and the gap is before it.
 
-  **The same race is in the daemon**, which materialises hooks under `/run`
-  and executes them while other threads spawn backends. In production it
-  means a hook that spuriously fails to start -- and on a `pre_up`, that is a
-  veto that stops a transition for no reason. So this is not a test to
-  quieten; the retry belongs where the hook is run. Not fixed, found while
-  running the gate for 0128.
+  What it cost was not a confusing message: `pre_up` is a veto phase, so a
+  spurious failure to start stops the transition and an interface does not
+  come up for a reason nothing in the log explains.
+
+  The spawn retries for about 84 ms, which is far beyond one fork-to-exec and
+  short of anything a real fault would need. The test reproduces the race --
+  a second holder of a write descriptor, released after 40 ms -- rather than
+  asserting the constant, since a test that checked the number would pass with
+  the retry deleted. Removing it fails with the reported symptom verbatim.
+
+  **Hooks are the only write-then-exec in the tree**, which was checked rather
+  than assumed: every other `Command::new` runs a program netcfgd did not
+  write -- hostapd, dhcpcd, openvpn, a probe the operator named. So one fix
+  covers the class.
 
 - ~~**Whether clients send typed documents or config text.**~~ **Both, and the
   text half is built**: `config_put` carries a name and configuration, netcfgd
