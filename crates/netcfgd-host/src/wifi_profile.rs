@@ -1,8 +1,9 @@
 //! Writing a `network` block, for every caller allowed to.
 //!
-//! This was `ncfg wifi add`'s alone until [0117] gave the socket an
-//! `admin`-tier request that does the same thing for a client with no
-//! permission to write the file itself. Two callers means the rendering, the
+//! This was `ncfg wifi add`'s alone until [0117] gave the socket a typed
+//! request that does the same thing for a client with no permission to write
+//! the file itself. That request is the `wifi` tier since 0124, having been
+//! `admin` until then. Two callers means the rendering, the
 //! paths and the safety sequence have to live in one place or there are two
 //! answers to "what a `network` block looks like" -- which is the shape this
 //! tree keeps finding, most recently as three spellings of one access point's
