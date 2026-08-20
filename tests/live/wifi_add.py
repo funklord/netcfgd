@@ -14,6 +14,14 @@ do it.
 
 No daemon and no namespace. `wifi add` writes a configuration file and talks to
 nothing, which is the point of it -- the machine that needs it has no network.
+
+That is true of the case this drives, and is no longer true unconditionally:
+since 0124 put adding a network in the `wifi` tier, a caller who cannot write
+/etc/netcfgd asks the daemon instead. Here the fixture is writable, so the
+local path is taken and nothing is listening. The fallback is covered by unit
+tests in `netcfgd-cli`, which can make a directory read-only; what it cannot
+do is be a different user, and the privileged half -- a group member reaching
+a daemon running as root -- has still never been exercised end to end.
 """
 
 import os
