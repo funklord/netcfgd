@@ -28,7 +28,6 @@
 
 ac
 action
-admin
 ageing_time
 allow
 allowed_ips
@@ -109,7 +108,6 @@ miimon
 mode
 mtu
 nat
-observe
 off
 oif
 on
@@ -176,7 +174,6 @@ vepa
 vlan_filtering
 vlans
 vni
-wifi
 wol
 wpa2
 wpa3

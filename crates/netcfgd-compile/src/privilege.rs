@@ -51,6 +51,16 @@ pub enum Reason {
 	Path,
 	/// `include` pulls another file into the configuration wholesale.
 	Include,
+	/// Changes who may ask netcfgd for what.
+	///
+	/// The one an audit for paths and commands cannot find, because it is
+	/// neither. `control { admin = "any" }` and `remote { admin = true }` are
+	/// ordinary-looking assignments that widen the authorization policy, so a
+	/// caller able to send either can grant itself -- or the network -- what
+	/// it was not given. Under 0127 that is escalation by configuration, and
+	/// it is the reason this classification is a list of what a *production*
+	/// grants rather than a list of dangerous-looking words.
+	Authorization,
 	/// Hands something netcfgd creates to a named user or group.
 	///
 	/// Found by reviewing the generated inventory rather than by the audit
@@ -86,6 +96,10 @@ impl Reason {
 			Self::Include => {
 				"`include` reads another file into this configuration, and a client \
 				 cannot know what is in it"
+			}
+			Self::Authorization => {
+				"that changes who may ask netcfgd for what, so a caller who could send \
+				 it could widen its own rights"
 			}
 			Self::Principal => {
 				"that hands a device netcfgd creates to a named user or group, which \
@@ -128,6 +142,15 @@ const PRIVILEGED: &[(&str, &str, Reason)] = &[
 	// chooses where they live -- and until then they are privileged.
 	("wifi", "ca_cert", Reason::Path),
 	("wifi", "client_cert", Reason::Path),
+	// The authorization policy itself, local and remote. Everything that
+	// decides who may do what is decided by root and nobody else, or the
+	// tiers below it mean nothing.
+	("control", "observe", Reason::Authorization),
+	("control", "wifi", Reason::Authorization),
+	("control", "admin", Reason::Authorization),
+	("remote", "observe", Reason::Authorization),
+	("remote", "wifi", Reason::Authorization),
+	("remote", "admin", Reason::Authorization),
 	// A tun device handed to a principal the caller chose. Note `vxlan`'s
 	// `group` is a multicast address and is nothing to do with this -- the
 	// same word, two meanings, which is the second time the block qualifier
@@ -331,6 +354,29 @@ mod tests {
 		.is_empty());
 	}
 
+	/// Widening the policy is privileged, in both blocks.
+	///
+	/// Found by adding `remote` and watching the gate pass: `observe`, `wifi`
+	/// and `admin` were already acknowledged ordinary from the `control`
+	/// block, so the new keys inherited an answer nobody had given them. The
+	/// acknowledgement was wrong for both -- an assignment that widens the
+	/// authorization policy is the one thing that must not be ordinary, or
+	/// every tier below it is advisory.
+	#[test]
+	fn changing_who_may_do_what_is_privileged() {
+		assert_eq!(
+			reasons("global {\n\tcontrol {\n\t\tadmin = \"any\"\n\t}\n}\n"),
+			vec![Reason::Authorization]
+		);
+		assert_eq!(
+			reasons("global {\n\tremote {\n\t\tadmin = true\n\t}\n}\n"),
+			vec![Reason::Authorization]
+		);
+		// And the rest of `global` is not, so this is a classification rather
+		// than a refusal of the block.
+		assert!(reasons("global {\n\thostname = \"kitchen-pi\"\n}\n").is_empty());
+	}
+
 	/// Every reason has a sentence, and none of them is empty.
 	#[test]
 	fn every_reason_explains_itself() {
@@ -342,6 +388,7 @@ mod tests {
 			Reason::Path,
 			Reason::Include,
 			Reason::Principal,
+			Reason::Authorization,
 		] {
 			assert!(reason.why().len() > 20, "{reason:?} explains nothing");
 		}

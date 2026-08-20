@@ -407,6 +407,13 @@ fn lower_global_block(document: &mut Document, block: &Block, diags: &mut Diagno
 					}
 				}
 			}
+			Item::Block(inner) if inner.head == "remote" => {
+				for item in &inner.items {
+					if let Item::Assignment(assignment) = item {
+						lower_remote_key(&mut document.globals.remote, assignment, diags);
+					}
+				}
+			}
 			Item::Block(inner) => diags.push(Diagnostic::new(
 				inner.span,
 				format!("`{}` is not valid inside `global`", inner.head),
@@ -481,6 +488,46 @@ fn lower_dns_key(policy: &mut DnsPolicy, assignment: &Assignment, diags: &mut Di
 			format!("unknown dns key `{other}`"),
 		)),
 	}
+}
+
+/// One key of the `remote` block: which tiers reach the machine from off it.
+///
+/// Booleans, where `control` takes principals, and the asymmetry is 0128's
+/// point rather than an omission. A remote caller arrives as `agent/`, so
+/// `user:alice` here would be a sentence the daemon cannot evaluate. The
+/// diagnostic says so rather than saying "unknown value", because somebody
+/// writing it has a reasonable model that happens to be wrong.
+fn lower_remote_key(
+	remote: &mut netcfgd_model::RemotePolicy,
+	assignment: &Assignment,
+	diags: &mut Diagnostics,
+) {
+	let tier = match assignment.key.as_str() {
+		"observe" => &mut remote.observe,
+		"wifi" => &mut remote.wifi,
+		"admin" => &mut remote.admin,
+		other => {
+			diags.push(
+				Diagnostic::new(assignment.span, format!("unknown remote key `{other}`"))
+					.with_help("the tiers are observe, wifi and admin"),
+			);
+			return;
+		}
+	};
+	let Some(flag) = as_bool(&assignment.value, diags) else {
+		if matches!(&assignment.value.node, Value::Str(text) if text.contains(':')) {
+			diags.push(
+				Diagnostic::new(assignment.value.span, "a remote tier is true or false").with_help(
+					"`remote` says which tiers reach this machine from off it, not who \
+						 -- every remote caller arrives as the agent, so netcfgd has no \
+						 principal to check. Who the caller is is the agent's to decide \
+						 (0128)",
+				),
+			);
+		}
+		return;
+	};
+	*tier = flag;
 }
 
 /// One key of the `control` block.

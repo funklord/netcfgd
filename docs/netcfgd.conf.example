@@ -197,6 +197,29 @@
 #	}
 #}
 
+# REACHING THIS MACHINE FROM ANOTHER ONE is a separate block, and separate on
+# purpose. The tiers above name *principals* -- a user, a group -- checked
+# against the credentials of the process on the other end of the socket. A
+# caller from off the machine has none netcfgd can see: it arrives through the
+# agent, so its credentials are the agent's. A remote policy therefore says
+# which tiers reach this machine at all, and not who.
+
+#global {
+#	remote {
+#		observe = true
+#		wifi    = true
+#		admin   = false
+#	}
+#}
+
+# Everything defaults to false, and with all three false netcfgd does not
+# create the remote socket at all -- so a machine that has never configured
+# remote access has nothing listening for it.
+#
+# The division: the agent decides who the caller is, netcfgd decides what
+# remote can ever do. That bound holds even if the agent is wrong about
+# identity, which is the half worth having.
+#
 # `ncfg control set --observe group:netcfgd --wifi group:netcfgd` writes
 # exactly that for you, and `ncfg control show` prints it back. The package
 # creates the `netcfgd` group empty; `usermod -aG netcfgd USER` puts somebody
