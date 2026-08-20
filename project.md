@@ -856,6 +856,36 @@ Kept current deliberately: this is the section to read after a break, and the on
 
 **Read this first after a break, and rewrite it rather than appending to it.**
 
+**Then the packages were installed on a real machine, and the first thing that
+happened was the client being refused anyway.** The policy was set, the group
+joined, and the socket came out `root:root` mode 0660 while the configuration
+said `group:netcfgd`. The mode was right and the group was not, which narrows
+it to the chgrp: giving a file to a group the process is not a member of needs
+**CAP_CHOWN even as root**, and `netcfgd.service` granted only `CAP_NET_ADMIN`
+and `CAP_NET_RAW`. Section 2.1's "lie that costs an afternoon" was being
+manufactured by the unit, on the configuration `debian/postinst` recommends.
+
+Three things about it are worth keeping:
+
+- **Only systemd was affected.** OpenRC and procd restrict no capabilities and
+  running from a shell as root has them all, which is every way netcfgd had
+  ever been exercised. No test ran it as the packaged service, so nothing saw
+  it. `make packaging` checks it now, keyed on `chown_group` being present in
+  the daemon rather than on a rule somebody remembers.
+- **The daemon was right and said so**, and the message was invisible to the
+  person who needed it: under systemd it goes to the journal, which an
+  ordinary user cannot read without `adm` or `systemd-journal`. The one
+  sentence explaining the failure was unreadable by exactly the audience
+  hitting it. Not acted on -- the capability is the fix -- but it is the
+  shape of a real gap for the non-technical audience, who will never run
+  `journalctl`.
+- **A second bug made the first harder to read.** `named_groups` did not
+  deduplicate, so the recommended policy -- one group named for two tiers --
+  reported "the control policy names 2 groups (netcfgd, netcfgd) ... Members
+  of the others will not be able to connect", warning about others that do not
+  exist. A diagnostic that fires on the configuration the package recommends
+  is one people learn to scroll past.
+
 **The first real evaluation happened, and the wall it hit was the first three
 minutes.** An operator installed the package, joined the `netcfgd` group, and
 could not configure wifi: the client was refused, `ncfg` reported no
