@@ -433,7 +433,11 @@ fn authorized(
 	commands: &Sender<Command>,
 ) -> Response {
 	let granted = authorize::granted(policy, remote, origin, peer);
-	match authorize::check(policy, remote, origin, peer, request) {
+	// One call, deliberately. There are two gates behind it -- may this caller
+	// make a request of this kind, and may they send what is in it -- and
+	// asking them separately here is how the second came to be missing while
+	// every test of it passed.
+	match authorize::permitted(policy, remote, origin, peer, request) {
 		Ok(()) => answer(state, request, subscribers, Some(commands), &granted),
 		Err(message) => Response::error(message),
 	}
@@ -914,6 +918,43 @@ fn answer(
 				priority: *priority,
 			},
 		),
+		Request::ConfigPut {
+			name,
+			text,
+			replace,
+		} => put_config_request(state, name, text, *replace),
+	}
+}
+
+/// Put a client's configuration on disk, then read the configuration back.
+///
+/// The reload is here for `add_network_request`'s reason: inotify notices the
+/// file on its own, but a client that wrote configuration and was told by the
+/// very next request that the machine knows nothing about it would be right to
+/// call that a bug.
+///
+/// **What is not here is the privilege check**, and that is deliberate.
+/// Whether this caller may send this content is `authorize::check_content`'s,
+/// asked before the request reaches the dispatcher, because it is an
+/// authorization question and answering it in two places is how the two come
+/// to disagree. By the time execution is here the answer is yes.
+fn put_config_request(state: &mut State, name: &str, text: &str, replace: bool) -> Response {
+	match netcfgd_host::config::install_drop_in(
+		&state.paths.config,
+		&state.paths.factory,
+		name,
+		text,
+		replace,
+	) {
+		Ok(_) => {
+			state.reload();
+			// `Ok` and not a path. The caller named the drop-in and netcfgd
+			// chose where it went, which is 0127's point -- handing the path
+			// back would invite a client to keep it, and the next thing a
+			// client keeps a path for is writing to it.
+			Response::Ok
+		}
+		Err(message) => Response::error(message),
 	}
 }
 

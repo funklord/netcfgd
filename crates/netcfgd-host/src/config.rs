@@ -408,7 +408,130 @@ mod tests {
 
 #[cfg(test)]
 mod layering {
-	use super::{load_layered, writable_files};
+	use super::{install_drop_in, load_layered, writable_files};
+
+	/// A drop-in that compiles is kept, and one that does not is not.
+	///
+	/// The pair, and the second half is the reason the function exists: a file
+	/// that parses on its own can still stop the *configuration* compiling,
+	/// because redefining a block another file already defines is an error by
+	/// design. A machine whose configuration stopped compiling is one where
+	/// the next reload changes nothing and says why in a log nobody reads.
+	#[test]
+	fn a_drop_in_that_would_break_the_configuration_is_not_kept() {
+		let dir = netcfgd_testdir::TestDir::new("drop-in");
+		let config = dir.join("etc");
+		let factory = dir.join("factory");
+		std::fs::create_dir_all(config.join("conf.d")).expect("a config directory");
+		std::fs::write(
+			config.join("netcfgd.conf"),
+			"interface eth0 {\n\tconfig = \"dhcp\"\n}\n",
+		)
+		.expect("a config file");
+
+		let good = install_drop_in(
+			&config,
+			&factory,
+			"ordinary",
+			"interface eth1 {\n\tconfig = \"dhcp\"\n}\n",
+			false,
+		)
+		.expect("it compiles, so it is kept");
+		assert!(good.exists());
+
+		// eth0 is already defined, and redefining it is an error rather than a
+		// silent last-wins.
+		let error = install_drop_in(
+			&config,
+			&factory,
+			"clashing",
+			"interface eth0 {\n\tconfig = \"dhcp\"\n}\n",
+			false,
+		)
+		.expect_err("it must be refused");
+		assert!(
+			error.contains("already defined"),
+			"the refusal should carry the compiler's own diagnostic: {error}"
+		);
+		assert!(
+			!config.join("conf.d/clashing.conf").exists(),
+			"a refused drop-in was left behind"
+		);
+	}
+
+	/// A name is a name, never a path.
+	#[test]
+	fn a_name_that_is_a_path_is_refused() {
+		let dir = netcfgd_testdir::TestDir::new("drop-in-name");
+		let config = dir.join("etc");
+		std::fs::create_dir_all(config.join("conf.d")).expect("a config directory");
+
+		for bad in ["../escape", "sub/dir", ".hidden"] {
+			assert!(
+				install_drop_in(&config, &dir.join("factory"), bad, "", false).is_err(),
+				"`{bad}` was accepted as a name"
+			);
+		}
+	}
+
+	/// Replacing is asked for, and a refused replace leaves the original.
+	#[test]
+	fn an_existing_drop_in_is_kept_unless_replacing_was_asked_for() {
+		let dir = netcfgd_testdir::TestDir::new("drop-in-replace");
+		let config = dir.join("etc");
+		let factory = dir.join("factory");
+		std::fs::create_dir_all(config.join("conf.d")).expect("a config directory");
+
+		let first = "interface eth1 {\n\tconfig = \"dhcp\"\n}\n";
+		install_drop_in(&config, &factory, "thing", first, false).expect("written");
+		assert!(install_drop_in(&config, &factory, "thing", first, false).is_err());
+		assert_eq!(
+			std::fs::read_to_string(config.join("conf.d/thing.conf")).expect("readable"),
+			first
+		);
+
+		let second = "interface eth2 {\n\tconfig = \"dhcp\"\n}\n";
+		install_drop_in(&config, &factory, "thing", second, true).expect("replaced");
+		assert_eq!(
+			std::fs::read_to_string(config.join("conf.d/thing.conf")).expect("readable"),
+			second
+		);
+	}
+
+	/// A replace that would not compile puts the original back.
+	///
+	/// The case the restore exists for: refusing after the write means the
+	/// file on disk is briefly the new one, and leaving it there would be a
+	/// rejected change that took effect anyway.
+	#[test]
+	fn a_replace_that_would_not_compile_restores_what_was_there() {
+		let dir = netcfgd_testdir::TestDir::new("drop-in-restore");
+		let config = dir.join("etc");
+		let factory = dir.join("factory");
+		std::fs::create_dir_all(config.join("conf.d")).expect("a config directory");
+		std::fs::write(
+			config.join("netcfgd.conf"),
+			"interface eth0 {\n\tconfig = \"dhcp\"\n}\n",
+		)
+		.expect("a config file");
+
+		let original = "interface eth1 {\n\tconfig = \"dhcp\"\n}\n";
+		install_drop_in(&config, &factory, "thing", original, false).expect("written");
+		assert!(install_drop_in(
+			&config,
+			&factory,
+			"thing",
+			"interface eth0 {\n\tconfig = \"dhcp\"\n}\n",
+			true
+		)
+		.is_err());
+		assert_eq!(
+			std::fs::read_to_string(config.join("conf.d/thing.conf")).expect("readable"),
+			original,
+			"the original was not put back"
+		);
+	}
+
 	use std::fs;
 	use std::path::Path;
 
@@ -514,5 +637,98 @@ mod layering {
 			.display()
 			.to_string()
 			.replace('\\', "/")
+	}
+}
+
+/// Put a configuration drop-in on disk, and prove the result still compiles.
+///
+/// 0127: netcfgd is the only writer of `/etc/netcfgd`, so this is where
+/// configuration a client sent ends up. `wifi_profile::install` is the same
+/// shape for the one block it renders itself; this is the general case, and
+/// the two agree about the important part -- **nothing is left behind by a
+/// failure.**
+///
+/// The compile-back check is not a formality. A drop-in that parses on its own
+/// can still break the whole configuration: redefining a block that another
+/// file already defines is an error by design (section 3, so that last-wins is never
+/// silent), and a machine whose configuration stopped compiling is one where
+/// the next reload changes nothing and says why in a log nobody is reading.
+/// Refusing costs the caller a diagnostic; accepting costs the operator their
+/// next boot.
+///
+/// # Errors
+///
+/// Returns the sentence to print: a name that cannot be used, a file that
+/// exists when `replace` was not asked for, a write that failed, or the
+/// diagnostics from a configuration that would no longer compile.
+pub fn install_drop_in(
+	config_dir: &Path,
+	factory_dir: &Path,
+	name: &str,
+	text: &str,
+	replace: bool,
+) -> Result<PathBuf, String> {
+	// The same rule a wifi profile's id follows, and shared rather than
+	// restated: this decides whether a client-supplied string can become a
+	// filename, which is the one check standing between a name and a path.
+	crate::wifi_profile::usable_id(name)
+		.map_err(|why| format!("`{name}` cannot be used as a name here: {why}"))?;
+
+	let path = config_dir.join("conf.d").join(format!("{name}.conf"));
+	if path.exists() && !replace {
+		return Err(format!(
+			"{} already exists. Ask to replace it if that is what you mean -- \
+			 quietly overwriting a file somebody wrote by hand is the thing this \
+			 refuses to do",
+			path.display()
+		));
+	}
+
+	let previous = if path.exists() {
+		Some(std::fs::read(&path).map_err(|error| {
+			format!("could not read {} to put it back: {error}", path.display())
+		})?)
+	} else {
+		None
+	};
+
+	if let Some(parent) = path.parent() {
+		std::fs::create_dir_all(parent)
+			.map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+	}
+	write_atomically(&path, text.as_bytes(), 0o644)
+		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
+
+	let sources = match load_layered(factory_dir, config_dir) {
+		Ok(sources) => sources,
+		Err(error) => {
+			restore(&path, previous.as_deref());
+			return Err(format!("could not read {}: {error}", config_dir.display()));
+		}
+	};
+	if let Err(diagnostics) = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks) {
+		let rendered = diagnostics.render(&sources);
+		restore(&path, previous.as_deref());
+		return Err(format!(
+			"that would stop the configuration compiling, so it was not kept:\n{rendered}"
+		));
+	}
+
+	Ok(path)
+}
+
+/// Put back what was there, or take away what was not.
+///
+/// Split out because the failure paths above all need it and each one getting
+/// it slightly wrong is how a rejected write leaves a half-applied change --
+/// the case being guarded against in the first place.
+fn restore(path: &Path, previous: Option<&[u8]>) {
+	match previous {
+		Some(bytes) => {
+			let _ = write_atomically(path, bytes, 0o644);
+		}
+		None => {
+			let _ = std::fs::remove_file(path);
+		}
 	}
 }
