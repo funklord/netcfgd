@@ -44,26 +44,36 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// whatever the radio was doing, and it is one of the things design
 		// section 13 could not express. Decision 0013 puts it here with the
 		// other two.
-		Request::WifiScan { .. } | Request::WifiConnect { .. } | Request::WifiDisconnect { .. } => {
-			Tier::Wifi
-		}
+		//
+		// `WifiAdd` is here too, since 0124. It was `admin` because 0013 wrote
+		// the wifi tier as "join, leave and scan *known* networks" and adding
+		// one is beyond that by definition -- but 0013 named that a gap and
+		// said "until that exists, adding a network is admin", waiting on a
+		// mechanism that could write a network safely. 0117 built one: a typed
+		// request whose privilege is bounded by the shape of the message
+		// rather than by the caller's manners. What kept this in `admin`
+		// afterwards was the old definition rather than the old danger, so
+		// what 0124 changes is the definition.
+		//
+		// What the tier now grants is exactly one `network` block and one
+		// secret at 0600. There is no field here that could name a hook, a
+		// path, a `run_as`, an interface, a device or a control policy, and
+		// nothing outbound: 0031's bridge runs one way and `GetSecrets`
+		// refuses. Adding does not apply -- `Apply` stays `admin` below -- so
+		// a wifi-tier caller writes a network and joins it with `WifiConnect`,
+		// which was already theirs.
+		Request::WifiScan { .. }
+		| Request::WifiConnect { .. }
+		| Request::WifiDisconnect { .. }
+		| Request::WifiAdd { .. } => Tier::Wifi,
 
 		// Everything that changes the machine. Apply is Admin even when the
 		// only thing in the plan is a wifi association: a tier that could call
 		// Apply could apply any config change at all, which would make the
 		// wifi tier Admin wearing a hat.
-		//
-		// `WifiAdd` writes configuration, which is what `admin` names. It is
-		// deliberately not `wifi`: 0013's wifi tier is join, leave and scan
-		// *known* networks, and adding one is beyond that by definition. A
-		// site that wants its users adding networks grants them admin; one
-		// that does not, does not. That is the tier system working rather than
-		// a gap (0117).
-		Request::Apply { .. }
-		| Request::Confirm
-		| Request::Revert
-		| Request::Reload
-		| Request::WifiAdd { .. } => Tier::Admin,
+		Request::Apply { .. } | Request::Confirm | Request::Revert | Request::Reload => {
+			Tier::Admin
+		}
 	}
 }
 
@@ -194,6 +204,72 @@ mod tests {
 			}
 		)
 		.is_err());
+	}
+
+	/// 0124: the wifi tier adds a network, and that is the whole of what it
+	/// gained.
+	///
+	/// Stated as a pair, because one half alone would pass for the wrong
+	/// reason. Moving `WifiAdd` to `wifi` is only correct if `admin` still
+	/// holds everything that changes the machine -- a change that opened the
+	/// tier by widening it, rather than by moving one request into it, would
+	/// satisfy the first assertion and fail every one below it.
+	///
+	/// The policy names `any` rather than `group:netcfgd`, which is the shape
+	/// `debian/postinst` prints. That is deliberate: resolving a group asks
+	/// this machine's `/etc/group`, and on one without a `netcfgd` group --
+	/// a CI runner on a clean checkout, which is exactly where this would be
+	/// read as evidence -- the member would satisfy nothing and the whole test
+	/// would pass for the wrong reason. `any` needs no lookup and cannot.
+	/// That groups resolve at all is
+	/// [`a_supplementary_group_satisfies_a_group_rule`]'s job, and proving it
+	/// twice here would only add the way to be wrong.
+	#[test]
+	fn the_wifi_tier_adds_a_network_and_nothing_else() {
+		let control = Control {
+			wifi: Principal::Any,
+			..Control::default()
+		};
+		let member = peer(1000, 1000, &[]);
+		let add = Request::WifiAdd {
+			ssid: "43616665".to_owned(),
+			id: None,
+			passphrase: Some("hunter2hunter2".to_owned()),
+			proto: None,
+			hidden: false,
+			priority: None,
+		};
+
+		assert_eq!(tier_of(&add), Tier::Wifi);
+		assert!(check(&control, &member, &add).is_ok());
+		// Joining what it just wrote, which is the point of the change: adding
+		// and connecting are one tier, so a new network needs no root shell.
+		assert!(check(
+			&control,
+			&member,
+			&Request::WifiConnect {
+				interface: "wlan0".to_owned(),
+				network: "Cafe".to_owned(),
+			}
+		)
+		.is_ok());
+
+		// And nothing else moved.
+		for denied in [
+			Request::Reload,
+			Request::Confirm,
+			Request::Revert,
+			Request::Apply {
+				confirm: None,
+				allow_disruption: Vec::new(),
+				strand_credentials: Vec::new(),
+			},
+		] {
+			assert!(
+				check(&control, &member, &denied).is_err(),
+				"the wifi tier reached {denied:?}, which is admin's"
+			);
+		}
 	}
 
 	/// Apply is Admin even though a plan may contain nothing but a wifi

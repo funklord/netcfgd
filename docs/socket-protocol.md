@@ -140,8 +140,8 @@ reach.
 | Tier | Requests |
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations` |
-| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect` |
-| `admin` | `apply`, `confirm`, `revert`, `reload`, `wifi_add` |
+| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add` |
+| `admin` | `apply`, `confirm`, `revert`, `reload` |
 
 Two placements are deliberate and worth knowing, because both look wrong at
 first glance:
@@ -157,6 +157,15 @@ first glance:
 - **`apply` is `admin` even when the only thing in the plan is a wifi
   association.** A tier that could call `apply` could apply any config change,
   which would make the `wifi` tier `admin` wearing a hat.
+- **`wifi_add` is `wifi`, and was `admin` until
+  [0124](decisions/0124-adding-a-network-is-the-wifi-tier-because-0117-made-it-safe.md).**
+  It writes configuration, which is what `admin` names -- but it writes
+  exactly one `network` block and one secret, because those are the only
+  fields it has. 0013 put it in `admin` when writing config meant writing a
+  file that could name a hook, called that a gap, and said "until that
+  exists". 0117's typed request is what exists. Adding is still not applying:
+  a wifi-tier caller writes a network and joins it, and cannot apply anything
+  else.
 
 **The socket's mode follows the policy**, so that a config claiming
 `group:netdev` does not sit behind a root-only socket: `0666` where any tier is

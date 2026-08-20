@@ -196,10 +196,13 @@ pub(crate) fn connect_to(
 		return Response::error(message);
 	}
 
-	// The lookup is the permission boundary, not a convenience. A caller in
-	// the `wifi` tier can reach exactly the networks somebody with `admin`
-	// wrote down, and the refusal has to say that plainly or it reads as the
-	// network being missing rather than the operation being out of scope.
+	// The lookup is what makes `connect` mean "join one of these" rather than
+	// "join anything", and the refusal has to say so plainly or it reads as
+	// the network being missing rather than the name being unknown. Since
+	// 0124 the same caller may add a network as well, so this is no longer a
+	// permission boundary between two tiers -- it is the difference between
+	// naming something that exists and naming something that does not, and
+	// the message says what to do about it.
 	let Some(document) = document else {
 		return Response::error("no configuration is loaded, so there is nothing to join");
 	};
@@ -214,9 +217,8 @@ pub(crate) fn connect_to(
 			.map(|network| network.id.as_str())
 			.collect();
 		return Response::error(format!(
-			"no `network` block called `{wanted}`. This can only join networks the \
-			 configuration already describes; adding one means writing config, which needs \
-			 the admin tier (docs/decisions/0013). Configured: {}",
+			"no `network` block called `{wanted}`. This joins networks the configuration \
+			 already describes; `ncfg wifi add` writes a new one. Configured: {}",
 			if known.is_empty() {
 				"none".to_owned()
 			} else {

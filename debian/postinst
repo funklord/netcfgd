@@ -32,11 +32,16 @@ configure)
 	echo "netcfgd:     ncfg apply     # do it"
 	echo "netcfgd:   to run it as a daemon: systemctl enable --now netcfgd"
 	echo "netcfgd:"
+	echo "netcfgd:   every feature, with the syntax to use it, is in"
+	echo "netcfgd:     /etc/netcfgd/netcfgd.conf.example"
+	echo "netcfgd:   which netcfgd never reads. It is there for a machine with"
+	echo "netcfgd:   no network to look anything up with."
+	echo "netcfgd:"
 	echo "netcfgd:   a client run by an ordinary user is refused until you say so:"
 	echo "netcfgd:     ncfg control set --observe group:netcfgd --wifi group:netcfgd"
 	echo "netcfgd:     usermod -aG netcfgd USER   # then log out and back in"
-	echo "netcfgd:   adding a network needs the admin tier; ncfg control show"
-	echo "netcfgd:   prints the policy at any time"
+	echo "netcfgd:   that covers scanning, joining and adding a network. Changing"
+	echo "netcfgd:   anything else stays root; ncfg control show prints the policy"
 	;;
 abort-upgrade | abort-remove | abort-deconfigure) ;;
 esac
