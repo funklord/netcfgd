@@ -16,7 +16,7 @@
 //!   world-readable file is already disclosed; reading it anyway and carrying
 //!   on tells the operator everything is fine.
 
-use netcfgd_model::{SecretProvider, SecretRef};
+use netcfgd_model::{CertSource, SecretProvider, SecretRef};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -150,12 +150,16 @@ pub const DEFAULT_SECRETS_DIR: &str = "/etc/netcfgd/secrets";
 #[derive(Debug, Clone)]
 pub struct Resolver {
 	secrets_dir: PathBuf,
+	/// Where [`Resolver::path_for`] writes stored certificates. `None` means
+	/// it refuses rather than choosing somewhere.
+	materialise_dir: Option<PathBuf>,
 }
 
 impl Default for Resolver {
 	fn default() -> Self {
 		Self {
 			secrets_dir: PathBuf::from(DEFAULT_SECRETS_DIR),
+			materialise_dir: None,
 		}
 	}
 }
@@ -166,7 +170,97 @@ impl Resolver {
 	pub fn with_secrets_dir(dir: impl Into<PathBuf>) -> Self {
 		Self {
 			secrets_dir: dir.into(),
+			materialise_dir: None,
 		}
+	}
+
+	/// Where stored certificates are written when something needs a path.
+	///
+	/// Absent by default, and a [`CertSource::Stored`] then fails rather than
+	/// guessing a directory. A resolver that invented one would write key
+	/// material somewhere its caller did not choose, which is the one thing
+	/// this crate must not do quietly.
+	#[must_use]
+	pub fn materialising_into(mut self, dir: impl Into<PathBuf>) -> Self {
+		self.materialise_dir = Some(dir.into());
+		self
+	}
+
+	/// A filesystem path for a certificate or key, whichever kind it is.
+	///
+	/// **This is the function that made EAP-TLS work.** `wpa_supplicant` opens
+	/// `ca_cert`, `client_cert` and `private_key` as files, so everything
+	/// reaching it has to be a path -- and before 0127 the only way to have
+	/// one was to put the file there yourself, which a desktop client cannot
+	/// do. A `Stored` source is content netcfgd already holds; this writes it
+	/// where the supplicant can read it and hands back that path.
+	///
+	/// **Written at 0600 under a 0700 directory**, and the mode is not chosen
+	/// per kind. A CA certificate is public and could be 0644, but uniform is
+	/// simpler to reason about and gives up nothing: the only reader is a
+	/// process netcfgd started as root. The mode is set by the open rather
+	/// than after it, so there is no instant at which a private key exists and
+	/// is readable -- the rule 0026 states for hostapd's configuration and
+	/// this file is a stronger case for it.
+	///
+	/// **Overwritten every time rather than cached.** The content is what the
+	/// secret store says now, and a stale file would be a certificate that was
+	/// rotated everywhere except on this machine.
+	///
+	/// # Errors
+	///
+	/// A source that cannot be resolved, a resolver with nowhere to write, or
+	/// a write that failed.
+	pub fn path_for(&self, source: &CertSource, name: &str) -> Result<PathBuf, Error> {
+		let reference = match source {
+			CertSource::Path(path) => return Ok(PathBuf::from(path)),
+			CertSource::Stored(reference) => reference,
+		};
+		let secret = self.resolve(reference)?;
+
+		let Some(directory) = self.materialise_dir.as_ref() else {
+			return Err(Error::Failed {
+				name: reference.name.clone(),
+				reason: "this resolver has nowhere to materialise a stored certificate, \
+				         so it cannot produce a path for one"
+					.to_owned(),
+			});
+		};
+
+		Self::write_private(directory, name, secret.expose().as_bytes()).map_err(|reason| {
+			Error::Failed {
+				name: reference.name.clone(),
+				reason,
+			}
+		})
+	}
+
+	/// Write one materialised file, and the directory it needs, tightly.
+	fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+		use std::io::Write as _;
+		use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+
+		if !directory.is_dir() {
+			std::fs::DirBuilder::new()
+				.recursive(true)
+				.mode(0o700)
+				.create(directory)
+				.map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+		}
+
+		let path = directory.join(name);
+		let mut file = std::fs::OpenOptions::new()
+			.write(true)
+			.create(true)
+			.truncate(true)
+			.mode(0o600)
+			.open(&path)
+			.map_err(|error| format!("could not write {}: {error}", path.display()))?;
+		file.write_all(bytes)
+			.map_err(|error| format!("could not write {}: {error}", path.display()))?;
+		file.sync_all()
+			.map_err(|error| format!("could not flush {}: {error}", path.display()))?;
+		Ok(path)
 	}
 
 	/// Resolve a reference.

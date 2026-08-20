@@ -177,11 +177,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -357,11 +363,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -537,11 +549,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -722,11 +740,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -907,11 +931,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -1092,11 +1122,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -1277,11 +1313,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -1464,11 +1506,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -1654,11 +1702,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -1848,11 +1902,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -2033,11 +2093,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -2218,11 +2284,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -2405,11 +2477,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -2596,11 +2674,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -2781,11 +2865,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -2974,11 +3064,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -3162,11 +3258,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -3353,11 +3455,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -3539,11 +3647,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -3727,11 +3841,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -3913,11 +4033,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -4103,11 +4229,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -4309,11 +4441,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -4494,11 +4632,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -4679,11 +4823,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -4864,11 +5014,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -5050,11 +5206,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -5236,11 +5398,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -5422,11 +5590,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -5608,11 +5782,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -5794,11 +5974,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -5980,11 +6166,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -6166,11 +6358,17 @@
           "provider": "file",
           "name": "dot1x"
         },
-        "ca_cert": "/etc/ssl/ca.pem",
-        "client_cert": "/etc/ssl/client.pem",
+        "ca_cert": {
+          "path": "/etc/ssl/ca.pem"
+        },
+        "client_cert": {
+          "path": "/etc/ssl/client.pem"
+        },
         "private_key": {
-          "provider": "exec",
-          "name": "key"
+          "stored": {
+            "provider": "exec",
+            "name": "key"
+          }
         },
         "phase2": "auth=MSCHAPV2"
       },
@@ -6252,8 +6450,10 @@
         "method": "tls",
         "identity": "dave",
         "private_key": {
-          "provider": "file",
-          "name": "k"
+          "stored": {
+            "provider": "file",
+            "name": "k"
+          }
         }
       },
       "priority": 30,

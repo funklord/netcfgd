@@ -44,9 +44,9 @@ use netcfgd_model::route::{Route, RouteScope};
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{EapConfig, EapMethod, PskConfig, PskProto, Security};
 use netcfgd_model::{
-	AddressSource, Control, Dhcp4, Dhcp6, Document, DriftPolicy, Globals, HostnamePolicy,
-	Interface, InterfaceKind, Key, Principal, QdiscKind, QdiscPolicy, RemotePolicy, SecretProvider,
-	SecretRef, Ssid, WifiNetwork,
+	AddressSource, CertSource, Control, Dhcp4, Dhcp6, Document, DriftPolicy, Globals,
+	HostnamePolicy, Interface, InterfaceKind, Key, Principal, QdiscKind, QdiscPolicy, RemotePolicy,
+	SecretProvider, SecretRef, Ssid, WifiNetwork,
 };
 use std::path::PathBuf;
 
@@ -243,9 +243,9 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 			identity: "dave".to_owned(),
 			anonymous_identity: Some("anonymous".to_owned()),
 			password: Some(secret("dot1x", SecretProvider::File)),
-			ca_cert: Some("/etc/ssl/ca.pem".to_owned()),
-			client_cert: Some("/etc/ssl/client.pem".to_owned()),
-			private_key: Some(secret("key", SecretProvider::Exec)),
+			ca_cert: Some(CertSource::Path("/etc/ssl/ca.pem".to_owned())),
+			client_cert: Some(CertSource::Path("/etc/ssl/client.pem".to_owned())),
+			private_key: Some(CertSource::Stored(secret("key", SecretProvider::Exec))),
 			phase2: Some("auth=MSCHAPV2".to_owned()),
 		}),
 		advertise: Some(RaPolicy {
@@ -558,7 +558,7 @@ fn every_network() -> Vec<WifiNetwork> {
 				password: None,
 				ca_cert: None,
 				client_cert: None,
-				private_key: Some(secret("k", SecretProvider::File)),
+				private_key: Some(CertSource::Stored(secret("k", SecretProvider::File))),
 				phase2: None,
 			}),
 		),

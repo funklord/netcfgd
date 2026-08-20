@@ -1481,9 +1481,9 @@ struct WifiKeys {
 	identity: Option<String>,
 	anonymous_identity: Option<String>,
 	password: Option<SecretRef>,
-	ca_cert: Option<String>,
-	client_cert: Option<String>,
-	private_key: Option<SecretRef>,
+	ca_cert: Option<netcfgd_model::CertSource>,
+	client_cert: Option<netcfgd_model::CertSource>,
+	private_key: Option<netcfgd_model::CertSource>,
 	phase2: Option<String>,
 }
 
@@ -1619,13 +1619,13 @@ fn lower_wifi_key(
 	match assignment.key.as_str() {
 		"psk" => keys.psk = as_secret(&assignment.value, diags),
 		"password" => keys.password = as_secret(&assignment.value, diags),
-		"private_key" => keys.private_key = as_secret(&assignment.value, diags),
+		"private_key" => keys.private_key = as_cert_source(&assignment.value, diags),
 		"open" => keys.open = as_bool(&assignment.value, diags).unwrap_or(false),
 		"owe" => keys.owe = as_bool(&assignment.value, diags).unwrap_or(false),
 		"identity" => keys.identity = as_string(&assignment.value, diags),
 		"anonymous_identity" => keys.anonymous_identity = as_string(&assignment.value, diags),
-		"ca_cert" => keys.ca_cert = as_string(&assignment.value, diags),
-		"client_cert" => keys.client_cert = as_string(&assignment.value, diags),
+		"ca_cert" => keys.ca_cert = as_cert_source(&assignment.value, diags),
+		"client_cert" => keys.client_cert = as_cert_source(&assignment.value, diags),
 		"phase2" => keys.phase2 = as_string(&assignment.value, diags),
 		"priority" => {
 			if let Some(value) = as_u32(&assignment.value, diags) {
@@ -1755,6 +1755,28 @@ fn build_security(keys: WifiKeys, block: &Block, diags: &mut Diagnostics) -> Opt
 }
 
 /// `"@secret:NAME"` or `"@secret:provider:NAME"`.
+/// A certificate or key: a path on this machine, or content netcfgd holds.
+///
+/// The two are told apart by the `@secret:` prefix, which is the syntax the
+/// language already has rather than a new one -- so `ca_cert = "/etc/ssl/ca.pem"`
+/// keeps working and `ca_cert = "@secret:corp-ca"` names something a client
+/// sent.
+///
+/// **They are not equivalent and the classification knows it.** A path is an
+/// instruction to open a file as root, so it is privileged and a caller who is
+/// not root cannot send one. A stored reference grants nothing the caller did
+/// not already give netcfgd.
+fn as_cert_source(
+	value: &Spanned<Value>,
+	diags: &mut Diagnostics,
+) -> Option<netcfgd_model::CertSource> {
+	let text = as_string(value, diags)?;
+	if text.starts_with("@secret:") {
+		return as_secret(value, diags).map(netcfgd_model::CertSource::Stored);
+	}
+	Some(netcfgd_model::CertSource::Path(text))
+}
+
 fn as_secret(value: &Spanned<Value>, diags: &mut Diagnostics) -> Option<SecretRef> {
 	let text = as_string(value, diags)?;
 	let Some(rest) = text.strip_prefix("@secret:") else {

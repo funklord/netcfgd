@@ -467,17 +467,48 @@
 #	}
 #}
 
-# Certificate authentication instead of a password.
+# Certificate authentication instead of a password. The three certificate
+# fields each take either a path to a file already on this machine:
 
 #network "corp" {
 #	wifi {
 #		eap          = "tls"
 #		identity     = "you@corp.example"
-#		client_cert  = "/etc/netcfgd/certs/you.pem"
-#		private_key  = "@secret:corp-key"
 #		ca_cert      = "/etc/ssl/certs/ca-certificates.crt"
+#		client_cert  = "/etc/netcfgd/certs/you.pem"
+#		private_key  = "/etc/netcfgd/certs/you.key"
 #	}
 #}
+
+# ...or a reference to content netcfgd holds, stored with `ncfg secret set`:
+
+#network "corp" {
+#	wifi {
+#		eap          = "tls"
+#		identity     = "you@corp.example"
+#		ca_cert      = "@secret:corp-ca"
+#		client_cert  = "@secret:corp-crt"
+#		private_key  = "@secret:corp-key"
+#	}
+#}
+
+# The two are not interchangeable and the difference is who has to be able to
+# read the file.
+#
+# A PATH is an instruction to open a file as root, so netcfgd treats it as
+# privileged: a client that is not root cannot send configuration containing
+# one. It is the right form when the certificates are already on the machine
+# and an operator manages them.
+#
+# STORED CONTENT is something netcfgd already has, because somebody gave it:
+#
+#   ncfg secret set corp-ca   < /path/to/ca.pem
+#   ncfg secret set corp-key  < /path/to/client.key
+#
+# netcfgd writes it under /run at 0600 when wpa_supplicant needs it, and hands
+# over that path. Nothing on your disk has to be readable by root, and a
+# desktop client can set up an enterprise network without being root -- which
+# a path can never allow.
 
 # Pinning one access point, where several share an SSID and one of them is
 # the one you want.
