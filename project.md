@@ -12,6 +12,14 @@ This document is the working brief; `netcfgd-design.md` is the reference design 
 
 **What it is, in one line:** a Linux network configuration daemon whose plain-text config is the single source of truth, whose runtime state is greppable files in `/run`, and whose behaviour is a visible reconcile loop (`plan` then `apply`, like Terraform for interfaces).
 
+**Who this is for, and it is three groups rather than one.** Each has to be intuitive *on its own terms*, and a design that serves one by making another harder has not solved the problem:
+
+- **People who edit the config file**, by hand, possibly over a serial console on a machine with no network. What they need is that the language be readable, that the errors say what to do, and that the documentation be reachable from the machine itself — which is what `/etc/netcfgd/netcfgd.conf.example` is for, and why its examples are compiled rather than trusted.
+- **People who do not understand networking**, using the tray applet or a GUI — netcfgd's own, or NetworkManager's through the shim. They should never meet a permission wall, a tier, or a config file. Joining a network is the whole interaction, and anything they must know about netcfgd to do it is a defect.
+- **People administering fleets**, using the netcfgd tools across many machines. **Deferred, deliberately and currently** — §7 has multi-host management arriving at M9 because conforming to RESTCONF *is* the multi-host answer, and the holder has confirmed that stands: the first two cases have to work first, so that daily use can find what the tests cannot.
+
+**The near-term bar is daily use.** Everything except fleet administration should work well enough for the tool to be somebody's actual network configuration, because that is the only thing that finds what §*What would prove it* is about. That is the ordering to read §10's open items with.
+
 **Getting started:** [docs/first-run.md](docs/first-run.md) — taking a laptop from NetworkManager, wired first.
 
 **Handing a device away:** `device X { managed = false }` stops netcfgd operating on it and changes nothing; adding `on_unmanage = "clear"` removes everything netcfgd owns first, credentials included ([0035](docs/decisions/0035-managed-false-means-it.md), [0037](docs/decisions/0037-clear-then-unmanage.md)).
@@ -49,6 +57,8 @@ Note the crate name and the installed binary name need not match — if anything
 
 1. **Config files are the only authority.** Anything netcfgd does traces to a file under `/etc/netcfgd/`. Runtime state in `/run/netcfgd/` is derived and disposable.
 2. **The filesystem reflects use, not capability.** A default install is `netcfgd.conf` plus `conf.d/`. Nothing else appears until a feature is actually used. CI enforces this against a fixture (§6).
+
+   **One file sits in `/etc/netcfgd` that no feature created**, since 2026-08-20: `netcfgd.conf.example`, installed by `make install` and by the packages. It is netifrc's `net.example` shape — every feature, commented, in the directory being configured — and it is there for the machine this constraint is written for, which has no network and therefore no way to look anything up. The constraint is about *capability*: a directory that appears because a feature exists tells the reader netcfgd might be doing something, and this file cannot, because netcfgd never reads it. The loader takes `netcfgd.conf` by exact name and `conf.d/*.conf` by extension, and it is neither — asserted in `crates/netcfgd-compile/tests/example.rs` rather than left as a property somebody remembers. The footprint gate is unaffected either way: it runs against `tests/footprint/etc`, not against an install.
 3. **Core has no mandatory dependencies** beyond libc and the kernel. No D-Bus, no glib, no polkit, no systemd. Adapters carry their own dependencies in their own packages.
 4. **`#![forbid(unsafe_code)]` everywhere except `netcfgd-sys`**, which is the sole audited exception and carries its own fuzz targets and review bar.
 5. **The desired-state document never contains secret material.** Only `SecretRef` indirections. This is invariant across local files, `/run` state, and any future wire transmission.
@@ -364,7 +374,7 @@ close_line    = "}" , NL ;          (* a line consisting solely of "}" *)
 
 A hook body ends at **the first line consisting solely of `}`**. Unambiguous, requires no shell knowledge, and is trivially explained in documentation. Nested braces inside the shell are irrelevant.
 
-**Top-level blocks:** `interface`, `network`, `device`, `global`.
+**Top-level blocks:** `interface`, `network`, `device`, `access_point`, `rule`, `global`. The first four were the whole list when this section was written; `rule` and `access_point` became top-level when M4's inert features were closed, and this line was not updated with them. Found while writing `docs/netcfgd.conf.example`, whose examples are compiled — the two blocks were documented here as nested and the compiler refused them, which is the gate doing what it was built for.
 **Nested blocks:** `wifi`, `dhcp`, `vlan`, `wireguard`, `peer` (inside `wireguard`), `bridge`, `bond`, plus hook blocks.
 
 **Drop-in precedence:** `/etc/netcfgd/netcfgd.conf` first, then `conf.d/*.conf` in lexical filename order. Later wins for scalar keys. Lists replace rather than append unless the key is declared additive in the schema. An explicit `override` keyword before a block makes replacement intent visible; without it, redefining a block that already exists is a compile **error**, not a silent win. That last rule is deliberate — silent last-wins is where every config system becomes unpredictable.
@@ -845,6 +855,78 @@ Kept current deliberately: this is the section to read after a break, and the on
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
+
+**The first real evaluation happened, and the wall it hit was the first three
+minutes.** An operator installed the package, joined the `netcfgd` group, and
+could not configure wifi: the client was refused, `ncfg` reported no
+configuration in `/etc/netcfgd`, and `nmtui` could not see netcfgd at all.
+Three separate causes, and none of them was in the part of the system that
+had been tested hardest.
+
+- **The bootstrap was deadlocked.** `ncfg control set` is the one command
+  that opens the socket to a desktop user, it is the command `debian/postinst`
+  prints, and it read the current policy through the CLI's `compile`, which
+  refused an empty source set with `no configuration found`. So the only
+  documented way out of the root-only default could not run until a
+  configuration existed, on an install that deliberately ships none. **A
+  zero-byte `netcfgd.conf` was the entire difference**, which is what
+  identified the check as testing "are there files" rather than "is there
+  configuration".
+- **Three callers of `load_layered` disagreed about the empty directory**,
+  which is precisely the drift §5 created `netcfgd-host` to prevent, landing
+  one level above the crate that was meant to prevent it. The daemon compiles
+  an empty source set to the default document and serves a socket from it;
+  `ncfg wifi add` returns `None` and writes the first file, with a comment
+  saying why refusing "would be a fine joke and a useless tool"; `compile`
+  made it fatal for seven of twelve commands. The CLI even disagreed with
+  itself — `compile_with_provenance`, the near-identical sibling, has no such
+  check, so `ncfg explain` answered on an empty directory and `ncfg show`
+  refused. Fixed to match the other two, with the diagnostic demoted rather
+  than deleted: `plan` now says the directory is empty under its answer, so
+  the case the error was right about — somebody pointing `--config-dir` at the
+  wrong place — does not read as "nothing to do".
+- **No test constructed the fresh-install state.** `control.rs`'s test helper
+  is documented as "a config directory with a compilable document and nothing
+  else" and writes `netcfgd.conf` before every control test. The one state
+  every install passes through was the one state nothing exercised.
+- **The NM shim is not installed by anything.** `netcfgd-nm` has no install
+  target, no unit, no D-Bus system-bus policy, no activation file, and is in
+  no package; `Makefile` names it only in `ADAPTERS`, and `tests/live/nm.sh`
+  runs it on a private `dbus-daemon` it starts itself. So M7's "tier 1 and
+  tier 2 are done" is true about the shim's *behaviour* and says nothing about
+  its *reachability*, and `nmtui` on an installed machine cannot reach it —
+  before even reaching the question of the real NetworkManager owning the bus
+  name. **Not fixed**: packaging it needs a decision about coexisting with or
+  displacing NetworkManager, and is its own piece of work.
+
+**Adding a network is the `wifi` tier now, not `admin`
+([0124](docs/decisions/0124-adding-a-network-is-the-wifi-tier-because-0117-made-it-safe.md)).**
+0013 put it in `admin` because writing config meant writing a file that could
+name a hook, called that a gap in the same paragraph, and wrote "until that
+exists, adding a network is `admin`". 0117 built what it was waiting for --
+a typed request that cannot express a hook, a path or a `run_as` -- and then
+kept `admin` on 0013's *definition* of the tier rather than on the danger the
+definition was avoiding. What moved is the definition. `Apply`, `Confirm`,
+`Revert` and `Reload` stay `admin`, so the tier gained exactly one `network`
+block and one secret. The CLI's own `ncfg wifi add` still writes the files
+directly and still needs write access to `/etc/netcfgd`; routing it through
+the daemon is unfinished and 0124 says why it is not free.
+
+**`/etc/netcfgd/netcfgd.conf.example` is installed**, in netifrc's
+`net.example` shape: every feature, commented, in the directory being
+configured, for a machine with no network to look anything up with. netcfgd
+never reads it. **Its examples are compiled by the test suite**, which is the
+half netifrc's cannot do -- a commented example is documentation nothing
+executes, so it goes stale silently and the reader has no way to tell. The
+convention is netifrc's own: `# ` is prose, `#` followed by anything else is
+config, and each contiguous run is compiled on its own. Writing it against
+the compiler rather than from memory **caught fifteen wrong examples in the
+first draft**, including two blocks this document had listed as nested that
+are top-level (§3, now corrected), `ethtool` toggles that are three-valued
+strings rather than booleans, an `advertise` block that needs a prefix
+reference, and a `dhcp` block that does not exist at all. Every one of those
+would have shipped as a manual describing a language netcfgd does not speak,
+to the reader least able to check.
 
 **Where this stands, as of the last rewrite.** The software is built, checked
 in ways it had not been — every parser fuzzed, the daemon run on three
@@ -2192,7 +2274,7 @@ the sentence that disposes of an alternative in half a line.
      ([0030](docs/decisions/0030-a-gui-is-an-editor-of-config-files.md)) and
      netcfgd's own GUI would be the odd one out. **Settled in
      [0117](docs/decisions/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)**:
-     an `admin`-tier `wifi_add` carrying typed fields, never config text and
+     a `wifi_add` carrying typed fields, never config text and
      never a path, because a config file may name a hook whose `run_as`
      defaults to root — so the cheapest option, a group-writable config
      directory, is group-writable root code execution and the obvious answer is
