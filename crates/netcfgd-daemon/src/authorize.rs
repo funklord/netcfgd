@@ -4,7 +4,7 @@
 //! one place a mistake can be. Decision 0013 has the reasoning; this is the
 //! part that runs.
 
-use netcfgd_model::{Control, Principal, Tier};
+use netcfgd_model::{Control, Principal, RemotePolicy, Tier};
 use netcfgd_proto::Request;
 use netcfgd_sys::peer::{group_id, user_id, Peer};
 
@@ -110,13 +110,56 @@ pub(crate) fn refusal(tier: Tier, principal: &Principal) -> String {
 	)
 }
 
+/// Where a connection came from (0128).
+///
+/// Observed rather than claimed: it is which socket the connection arrived on,
+/// so there is no field for a caller to set and nothing for the daemon to
+/// evaluate. A `Local` connection is one on the control socket; a `Remote` one
+/// is on the socket only `agent/` has a reason to open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Origin {
+	/// On this machine, identified by peer credentials.
+	Local,
+	/// Terminated by `agent/`, which arrived from off the machine.
+	Remote,
+}
+
+/// Decide for a remote caller: may this tier be reached from off the machine?
+///
+/// **Peer credentials are not consulted, and that is deliberate.** Every
+/// remote caller arrives as the agent, so its uid says who is running the
+/// agent rather than who is calling -- checking it would be checking the
+/// wrong thing while appearing to check the right one. The agent decides who
+/// the caller is; this decides what remote can ever reach, whoever they are.
+fn check_remote(remote: &RemotePolicy, request: &Request) -> Result<(), String> {
+	let tier = tier_of(request);
+	if remote.allows(tier) {
+		return Ok(());
+	}
+	Err(format!(
+		"not permitted from off this machine: this needs the `{}` tier, which the \
+		 configuration does not open remotely. Change it in the `remote` block of \
+		 netcfgd.conf.",
+		tier.name()
+	))
+}
+
 /// Decide, and say why if the answer is no.
 ///
 /// # Errors
 ///
 /// Returns the refusal text, which names the tier, what the policy says, and
 /// where to change it.
-pub(crate) fn check(control: &Control, peer: &Peer, request: &Request) -> Result<(), String> {
+pub(crate) fn check(
+	control: &Control,
+	remote: &RemotePolicy,
+	origin: Origin,
+	peer: &Peer,
+	request: &Request,
+) -> Result<(), String> {
+	if origin == Origin::Remote {
+		return check_remote(remote, request);
+	}
 	let tier = tier_of(request);
 	let principal = control.principal(tier);
 	if satisfies(peer, principal) {
@@ -136,16 +179,47 @@ pub(crate) fn check(control: &Control, peer: &Peer, request: &Request) -> Result
 /// a ladder. A machine may grant `admin` to a group somebody is in and `wifi`
 /// to one they are not, and reporting a maximum would say they can do something
 /// they cannot.
-pub(crate) fn granted(control: &Control, peer: &Peer) -> Vec<Tier> {
+pub(crate) fn granted(
+	control: &Control,
+	remote: &RemotePolicy,
+	origin: Origin,
+	peer: &Peer,
+) -> Vec<Tier> {
 	[Tier::Observe, Tier::Wifi, Tier::Admin]
 		.into_iter()
-		.filter(|tier| satisfies(peer, control.principal(*tier)))
+		.filter(|tier| match origin {
+			// The same answer `check` gives, reached the same way. 0092 exists
+			// because a client that finds out by being refused puts a button on
+			// a screen that fails when pressed, and a second implementation of
+			// "may I" is how the two come to disagree.
+			Origin::Remote => remote.allows(*tier),
+			Origin::Local => satisfies(peer, control.principal(*tier)),
+		})
 		.collect()
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// The local path, which is what every test below this was written for.
+	///
+	/// Wrapped rather than threaded through each call so that a test naming an
+	/// origin is a test that is *about* origins -- the ones that are not stay
+	/// about what they were about.
+	fn check_local(control: &Control, peer: &Peer, request: &Request) -> Result<(), String> {
+		check(
+			control,
+			&RemotePolicy::default(),
+			Origin::Local,
+			peer,
+			request,
+		)
+	}
+
+	fn granted_local(control: &Control, peer: &Peer) -> Vec<Tier> {
+		granted(control, &RemotePolicy::default(), Origin::Local, peer)
+	}
 
 	fn peer(uid: u32, gid: u32, groups: &[u32]) -> Peer {
 		Peer {
@@ -168,7 +242,7 @@ mod tests {
 		};
 		let root = peer(0, 0, &[]);
 		for request in [Request::Status, Request::Reload] {
-			assert!(check(&control, &root, &request).is_ok());
+			assert!(check_local(&control, &root, &request).is_ok());
 		}
 	}
 
@@ -178,8 +252,8 @@ mod tests {
 	fn the_default_is_root_only() {
 		let control = Control::default();
 		let user = peer(1000, 1000, &[]);
-		assert!(check(&control, &user, &Request::Status).is_err());
-		assert!(check(&control, &user, &Request::Reload).is_err());
+		assert!(check_local(&control, &user, &Request::Status).is_err());
+		assert!(check_local(&control, &user, &Request::Reload).is_err());
 	}
 
 	/// The case the whole design exists for: a user may see the network, may
@@ -191,10 +265,10 @@ mod tests {
 			..Control::default()
 		};
 		let user = peer(1000, 1000, &[]);
-		assert!(check(&control, &user, &Request::Status).is_ok());
-		assert!(check(&control, &user, &Request::Plan).is_ok());
-		assert!(check(&control, &user, &Request::Reload).is_err());
-		assert!(check(
+		assert!(check_local(&control, &user, &Request::Status).is_ok());
+		assert!(check_local(&control, &user, &Request::Plan).is_ok());
+		assert!(check_local(&control, &user, &Request::Reload).is_err());
+		assert!(check_local(
 			&control,
 			&user,
 			&Request::Apply {
@@ -204,6 +278,136 @@ mod tests {
 			}
 		)
 		.is_err());
+	}
+
+	/// 0128: a wide-open local policy does not reach the network.
+	///
+	/// The property the split exists for, and the one that would be worth
+	/// nothing if it held only when local was closed. The holder's intent is
+	/// that a distribution could put every user in the `netcfgd` group, so
+	/// this sets local to the widest thing expressible -- `any` on all three
+	/// tiers -- and asserts that a remote caller still reaches nothing.
+	#[test]
+	fn an_open_local_policy_opens_nothing_remotely() {
+		let control = Control {
+			observe: Principal::Any,
+			wifi: Principal::Any,
+			admin: Principal::Any,
+		};
+		let remote = RemotePolicy::default();
+		let caller = peer(1000, 1000, &[]);
+
+		for request in [Request::Status, Request::Reload] {
+			assert!(
+				check(&control, &remote, Origin::Local, &caller, &request).is_ok(),
+				"local should be wide open here"
+			);
+			assert!(
+				check(&control, &remote, Origin::Remote, &caller, &request).is_err(),
+				"{request:?} reached the machine from off it"
+			);
+		}
+	}
+
+	/// And a remote policy opens exactly what it names.
+	#[test]
+	fn a_remote_policy_opens_the_tiers_it_names_and_no_others() {
+		let remote = RemotePolicy {
+			observe: true,
+			wifi: true,
+			admin: false,
+		};
+		// Local is root-only, so anything that got through did so on the
+		// remote policy rather than by falling back to the local one.
+		let control = Control::default();
+		let caller = peer(1000, 1000, &[]);
+
+		assert!(check(&control, &remote, Origin::Remote, &caller, &Request::Status).is_ok());
+		assert!(check(
+			&control,
+			&remote,
+			Origin::Remote,
+			&caller,
+			&Request::WifiScan {
+				interface: "wlan0".to_owned(),
+			}
+		)
+		.is_ok());
+		assert!(check(&control, &remote, Origin::Remote, &caller, &Request::Reload).is_err());
+	}
+
+	/// Peer credentials are not consulted for a remote caller.
+	///
+	/// The one that would pass by accident if `check` fell through to the
+	/// local path: root satisfies every local principal, so a remote
+	/// connection whose peer happens to be root would reach everything if
+	/// origin were not decided first. `agent/` running as root is a plausible
+	/// deployment, which makes this the case to pin rather than a contrived
+	/// one.
+	#[test]
+	fn a_remote_caller_that_is_root_is_still_bounded_by_the_remote_policy() {
+		let remote = RemotePolicy {
+			observe: true,
+			..RemotePolicy::default()
+		};
+		let root = peer(0, 0, &[]);
+
+		assert!(check(
+			&Control::default(),
+			&remote,
+			Origin::Remote,
+			&root,
+			&Request::Status
+		)
+		.is_ok());
+		assert!(
+			check(
+				&Control::default(),
+				&remote,
+				Origin::Remote,
+				&root,
+				&Request::Reload
+			)
+			.is_err(),
+			"root over the remote socket reached admin"
+		);
+	}
+
+	/// What a remote peer is told it may do is what it may do.
+	///
+	/// 0092's rule, which the split could have broken quietly: `granted`
+	/// answers `hello`, and answering it from the local policy while `check`
+	/// answers from the remote one puts buttons on a screen that fail when
+	/// pressed.
+	#[test]
+	fn a_remote_peer_is_told_what_the_remote_policy_allows() {
+		let remote = RemotePolicy {
+			observe: true,
+			wifi: true,
+			admin: false,
+		};
+		let control = Control {
+			admin: Principal::Any,
+			..Control::default()
+		};
+		let caller = peer(1000, 1000, &[]);
+
+		let told = granted(&control, &remote, Origin::Remote, &caller);
+		assert_eq!(told, vec![Tier::Observe, Tier::Wifi]);
+		for tier in [Tier::Observe, Tier::Wifi, Tier::Admin] {
+			let request = match tier {
+				Tier::Observe => Request::Status,
+				Tier::Wifi => Request::WifiScan {
+					interface: "wlan0".to_owned(),
+				},
+				Tier::Admin => Request::Reload,
+			};
+			assert_eq!(
+				told.contains(&tier),
+				check(&control, &remote, Origin::Remote, &caller, &request).is_ok(),
+				"a remote peer was told the wrong thing about {tier:?}"
+			);
+		}
 	}
 
 	/// 0124: the wifi tier adds a network, and that is the whole of what it
@@ -241,10 +445,10 @@ mod tests {
 		};
 
 		assert_eq!(tier_of(&add), Tier::Wifi);
-		assert!(check(&control, &member, &add).is_ok());
+		assert!(check_local(&control, &member, &add).is_ok());
 		// Joining what it just wrote, which is the point of the change: adding
 		// and connecting are one tier, so a new network needs no root shell.
-		assert!(check(
+		assert!(check_local(
 			&control,
 			&member,
 			&Request::WifiConnect {
@@ -266,7 +470,7 @@ mod tests {
 			},
 		] {
 			assert!(
-				check(&control, &member, &denied).is_err(),
+				check_local(&control, &member, &denied).is_err(),
 				"the wifi tier reached {denied:?}, which is admin's"
 			);
 		}
@@ -307,7 +511,7 @@ mod tests {
 			("an ordinary user", peer(1000, 1000, &[])),
 			("root", peer(0, 0, &[])),
 		] {
-			let told = granted(&control, &peer);
+			let told = granted_local(&control, &peer);
 			for tier in [Tier::Observe, Tier::Wifi, Tier::Admin] {
 				// One request per tier, taken through the same `check` a real
 				// request goes through rather than through `satisfies` again --
@@ -321,7 +525,7 @@ mod tests {
 				};
 				assert_eq!(
 					told.contains(&tier),
-					check(&control, &peer, &request).is_ok(),
+					check_local(&control, &peer, &request).is_ok(),
 					"{who} was told the wrong thing about {tier:?}: {told:?}"
 				);
 			}
@@ -342,7 +546,7 @@ mod tests {
 			wifi: Principal::Group("netdev".to_owned()),
 			admin: Principal::Any,
 		};
-		let told = granted(&control, &peer(1000, 1000, &[]));
+		let told = granted_local(&control, &peer(1000, 1000, &[]));
 
 		assert!(told.contains(&Tier::Observe), "{told:?}");
 		assert!(told.contains(&Tier::Admin), "{told:?}");
@@ -361,7 +565,7 @@ mod tests {
 		// is checked here and `satisfies` is covered separately.
 		let user = peer(1000, 1000, &[44]);
 
-		assert!(check(&control, &user, &Request::Status).is_ok());
+		assert!(check_local(&control, &user, &Request::Status).is_ok());
 		assert_eq!(
 			tier_of(&Request::WifiScan {
 				interface: "wlan0".to_owned()
@@ -376,8 +580,8 @@ mod tests {
 			Tier::Wifi
 		);
 		// And the tier that would let them rewrite the network is not open.
-		assert!(check(&control, &user, &Request::Reload).is_err());
-		assert!(check(
+		assert!(check_local(&control, &user, &Request::Reload).is_err());
+		assert!(check_local(
 			&control,
 			&user,
 			&Request::Apply {
@@ -400,7 +604,7 @@ mod tests {
 		let user = peer(1000, 1000, &[]);
 		let interface = "wlan0".to_owned();
 
-		assert!(check(
+		assert!(check_local(
 			&control,
 			&user,
 			&Request::WifiStatus {
@@ -409,7 +613,7 @@ mod tests {
 		)
 		.is_ok());
 		// But scanning transmits, so it is not.
-		assert!(check(&control, &user, &Request::WifiScan { interface }).is_err());
+		assert!(check_local(&control, &user, &Request::WifiScan { interface }).is_err());
 	}
 
 	/// Supplementary groups count. Checking the primary gid alone would deny

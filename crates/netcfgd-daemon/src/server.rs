@@ -6,6 +6,7 @@
 //! (constraint 4), keeps the daemon's state free of locks, and costs a thread
 //! per client on a socket that will normally have one or two.
 
+use crate::authorize::Origin;
 use netcfgd_model::Control;
 use netcfgd_proto::{read_request, write_message, Event, Request, Response};
 use netcfgd_sys::peer::{group_id, Peer};
@@ -25,6 +26,10 @@ pub(crate) enum Command {
 		request: Request,
 		/// Who asked.
 		peer: Peer,
+		/// Which socket it arrived on (0128). Carried with the request rather
+		/// than looked up, because by the time the loop sees it the connection
+		/// is a channel and the socket is gone.
+		origin: Origin,
 		/// Where to send the answer.
 		reply: SyncSender<Response>,
 	},
@@ -58,6 +63,7 @@ pub(crate) enum Command {
 pub(crate) fn serve(
 	path: &Path,
 	control: &Control,
+	origin: Origin,
 	commands: Sender<Command>,
 ) -> std::io::Result<()> {
 	if let Some(parent) = path.parent() {
@@ -100,7 +106,7 @@ pub(crate) fn serve(
 					.name("client".to_owned())
 					.spawn(move || {
 						let _slot = slot;
-						handle(stream, &commands);
+						handle(stream, origin, &commands);
 					})
 					.is_err()
 				{
@@ -253,7 +259,7 @@ fn chown_group(path: &Path, gid: u32) -> std::io::Result<()> {
 	std::os::unix::fs::chown(path, None, Some(gid))
 }
 
-fn handle(stream: UnixStream, commands: &Sender<Command>) {
+fn handle(stream: UnixStream, origin: Origin, commands: &Sender<Command>) {
 	// Read once, at accept time, rather than per request: the credentials
 	// belong to the connection, and re-reading them would only widen the
 	// window in which the peer's pid could be recycled.
@@ -290,6 +296,7 @@ fn handle(stream: UnixStream, commands: &Sender<Command>) {
 				.send(Command::Request {
 					request: Request::Monitor,
 					peer: peer.clone(),
+					origin,
 					reply: probe,
 				})
 				.is_err()
@@ -325,6 +332,7 @@ fn handle(stream: UnixStream, commands: &Sender<Command>) {
 			.send(Command::Request {
 				request,
 				peer: peer.clone(),
+				origin,
 				reply,
 			})
 			.is_err()
@@ -395,7 +403,7 @@ mod tests {
 			let dir = netcfgd_testdir::TestDir::new(tag);
 			let path = dir.join("netcfgd.sock");
 			let (commands, incoming) = std::sync::mpsc::channel();
-			serve(&path, &Control::default(), commands).expect("the socket binds");
+			serve(&path, &Control::default(), Origin::Local, commands).expect("the socket binds");
 
 			thread::spawn(move || {
 				for command in incoming {
