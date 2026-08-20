@@ -1,0 +1,773 @@
+##############################################################################
+# netcfgd.conf.example -- every feature, with the syntax to use it.
+#
+# THIS FILE IS NEVER READ. netcfgd loads /etc/netcfgd/netcfgd.conf by that
+# exact name, and /etc/netcfgd/conf.d/*.conf by that exact extension. This
+# file is neither, so nothing in it takes effect and you can edit, break or
+# delete it freely.
+#
+# It is here for the case the manual is not: a machine with no network, no
+# browser and no way to look anything up. Copy the lines you want into
+# netcfgd.conf and remove the leading `#`.
+#
+# Two kinds of comment, and the difference is deliberate:
+#
+#   # a sentence, with a space after the hash -- prose, like this one
+#   #key = "value"           <- no space after the hash: a real example
+#
+# Every example of the second kind is compiled by the test suite, so what you
+# read here is a language netcfgd currently speaks rather than one it used to.
+#
+# The plan-then-apply loop is the whole product. Nothing below happens because
+# you wrote it down:
+#
+#   ncfg plan      what would change, and why
+#   ncfg apply     do it
+#   ncfg status    what the machine actually looks like now
+#
+##############################################################################
+
+
+##############################################################################
+# QUICK START
+#
+# A wired machine that takes an address from the network. This is the whole
+# configuration for most laptops and most servers.
+
+#interface eth0 {
+#	config = "dhcp"
+#}
+
+# A fixed address, with a default route through the router. `routes` takes
+# netifrc's phrasing, because it reads correctly out loud.
+
+#interface eth0 {
+#	config = "192.0.2.10/24"
+#	routes = "default via 192.0.2.1"
+#}
+
+# Both families at once. `config` is a list, and every entry contributes --
+# this is composition, not a choice between alternatives.
+
+#interface eth0 {
+#	config = ["dhcp", "2001:db8::10/64"]
+#	routes = ["default via 192.0.2.1", "default via 2001:db8::1"]
+#}
+
+# Wireless, in two halves: the radio is a `device`, and the network is a
+# `network`. They are separate because one is hardware you own and the other
+# is a place you sometimes are.
+
+#device wlan0 {
+#	wifi {
+#		autoconnect = true
+#	}
+#}
+#network "Cafe Wifi" {
+#	wifi {
+#		psk = "@secret:cafe"
+#	}
+#}
+
+# The passphrase itself never appears in a config file. `ncfg secret set cafe`
+# stores it at 0600, and the config keeps only the reference above. That rule
+# has no exceptions anywhere in netcfgd.
+#
+# `ncfg wifi add "Cafe Wifi"` writes both of those for you and asks for the
+# passphrase with the echo off, which is the usual way in.
+
+
+##############################################################################
+# THE LANGUAGE
+#
+# Blocks with braces, `key = value` inside them, `#` to the end of the line
+# for a comment. No indentation rules, no expressions, no variables, no
+# string interpolation. A value is a string, a number, `true`/`false`, a
+# secret reference, or a list of those.
+#
+# Six blocks exist at the top level:
+#
+#   interface NAME       what an interface should look like
+#   device NAME          the hardware under it, and whether netcfgd touches it
+#   network "SSID"       a wireless network you might join, anywhere
+#   access_point "SSID"  a network this machine offers to others
+#   rule NAME            policy routing, which belongs to no one interface
+#   global               settings with no interface to attach to
+#
+# Configuration is /etc/netcfgd/netcfgd.conf, then /etc/netcfgd/conf.d/*.conf
+# in filename order. Later files win for a single key. Two files defining the
+# same block is an ERROR, not a silent last-wins -- say `override` if you mean
+# to replace one wholesale:
+
+#interface eth0 {
+#	config = "192.0.2.10/24"
+#}
+#override interface eth0 {
+#	config = "dhcp"
+#}
+
+# `override` replaces the block ENTIRELY. It does not adjust one key of it.
+# That is the trap worth knowing before you write a drop-in: an `override
+# global` containing only a `control` block silently discards the `dns` block
+# the file it replaced was carrying, and takes name resolution away from the
+# machine in order to change who may open a socket. Edit the block where it
+# lives instead, unless replacing all of it is what you want.
+#
+# `include "/etc/netcfgd/site.conf"` pulls in another file at that point. A
+# cycle is refused rather than followed. It is expanded while the directory is
+# read rather than by the compiler, which is why it is quoted here rather than
+# shown as an example -- the test that compiles everything else in this file
+# opens no files and so could not check it.
+
+
+##############################################################################
+# GLOBAL
+#
+# Name resolution. `mode` decides who writes it; the servers may be set here
+# for the whole machine or per interface, and interface scopes win.
+
+#global {
+#	dns {
+#		mode    = "write_resolv_conf"
+#		servers = ["192.0.2.53", "2001:db8::53"]
+#		search  = ["example.com"]
+#	}
+#}
+
+# The modes, and what each one means:
+#
+#   none                netcfgd does not touch resolution at all
+#   write_resolv_conf   it writes /etc/resolv.conf itself
+#   resolvconf          it hands servers to whatever provides resolvconf
+#   openresolv          openresolv specifically
+#   resolved            systemd-resolved
+#   dnsmasq             dnsmasq, as a local caching resolver
+#   unbound             unbound, likewise
+#
+# `none` is the default, and it is the right answer on a machine where
+# something else already owns /etc/resolv.conf.
+#
+# What to do when the machine stops matching the configuration. `report` says
+# so and changes nothing; it is the default because a daemon that silently
+# undoes your `ip` command while you are debugging is worse than one that
+# tells you.
+
+#global {
+#	on_drift = "report"
+#}
+
+# The hostname, from the DHCP lease or pinned here.
+
+#global {
+#	hostname = "dhcp"
+#}
+
+# Or pinned to a name of your own:
+
+#global {
+#	hostname = "kitchen-pi"
+#}
+
+# Commit-confirm, for when you are configuring a machine you are logged into
+# over the network it is about to reconfigure. An apply arms a timer; if you
+# do not run `ncfg confirm` within it, the machine reverts by itself. The
+# number is seconds.
+
+#global {
+#	confirm = 120
+#}
+
+# WHO MAY ASK NETCFGD FOR WHAT
+#
+# Three independent tiers, not a ladder:
+#
+#   observe   ask what the network looks like
+#   wifi      scan, join, leave, and add a wireless network
+#   admin     change anything else -- apply, reload, revert
+#
+# Everything defaults to `root`, so a fresh install refuses a desktop client
+# and the socket is mode 0600. That is the single most common reason a GUI
+# will not connect. This is what opens it:
+
+#global {
+#	control {
+#		observe = "group:netcfgd"
+#		wifi    = "group:netcfgd"
+#		admin   = "root"
+#	}
+#}
+
+# `ncfg control set --observe group:netcfgd --wifi group:netcfgd` writes
+# exactly that for you, and `ncfg control show` prints it back. The package
+# creates the `netcfgd` group empty; `usermod -aG netcfgd USER` puts somebody
+# in it, and they have to log out and back in before the kernel agrees.
+#
+# A value is `root`, `any`, `user:NAME` or `group:NAME`. The socket's mode
+# follows the most permissive tier, so a policy naming a group netcfgd cannot
+# reach is refused loudly at startup rather than quietly ignored.
+
+
+##############################################################################
+# INTERFACES
+#
+# ADDRESSING. `config` is a list and every entry contributes. Order sets the
+# route metric where it matters, and nothing else.
+#
+# The sources, spelled as netcfgd accepts them:
+#
+#   dhcp, dhcp4         IPv4 from a DHCP server
+#   dhcp6, dhcpv6       IPv6 from a DHCPv6 server
+#   slaac               IPv6 from router advertisements
+#   link-local          169.254/16 or fe80::/10 only
+#   reported            whatever a helper outside netcfgd reported for this
+#                       interface -- a modem, or a tunnel netcfgd started
+#   null                no address at all, which is what a bridge member wants
+#   192.0.2.10/24       a literal address, any number of them
+#
+#   "noop" is deliberately NOT accepted. "keep whatever is there" cannot be
+#   reconciled: there would be no state to converge on.
+
+#interface eth0 {
+#	config = ["dhcp", "slaac", "192.0.2.10/24"]
+#}
+
+# ROUTES. `default via X` or a prefix, optionally with a metric.
+
+#interface eth0 {
+#	config = "192.0.2.10/24"
+#	routes = [
+#		"default via 192.0.2.1",
+#		"10.0.0.0/8 via 192.0.2.254",
+#	]
+#}
+
+# THE REST OF AN INTERFACE.
+
+#interface eth0 {
+#	config      = "dhcp"
+#	mtu         = 1492
+#	mac         = "02:00:5e:10:00:01"
+#	enabled     = true
+#	preference  = 100
+#	forwarding  = true
+#	on_drift    = "report"
+#}
+
+# `preference` is which interface wins when several could carry the default
+# route -- lower is better, and it is how a wired cable takes over from wifi.
+# `enabled = false` keeps the configuration and leaves the link down.
+#
+# PER-INTERFACE DNS, which beats the global block for names in its domains.
+
+#global {
+#	dns { mode = "resolved" }
+#}
+#interface eth0 {
+#	config = "dhcp"
+#	dns {
+#		servers = ["192.0.2.53"]
+#		domains = ["corp.example.com"]
+#	}
+#}
+
+# NAT, for a machine acting as a router. netcfgd owns exactly one nftables
+# table, called `netcfgd`, and does NAT in it and nothing else. It will never
+# touch a table it did not create, and never writes a filtering rule.
+
+#interface eth0 {
+#	config = "dhcp"
+#	nat    = true
+#}
+
+# QUEUEING, which is where bufferbloat is fixed. `cake` with the real
+# upstream bandwidth is the answer for nearly every home connection.
+
+#interface eth0 {
+#	config = "dhcp"
+#	qdisc {
+#		kind      = "cake"
+#		bandwidth = "100mbit"
+#	}
+#}
+
+# A STABLE IPv6 ADDRESS without giving away the hardware address.
+
+#interface eth0 {
+#	config      = "slaac"
+#	ipv6_token  = "::10"
+#}
+
+
+##############################################################################
+# DEVICES -- THE HARDWARE, AND WHETHER NETCFGD TOUCHES IT
+#
+# HANDING AN INTERFACE TO SOMETHING ELSE. This is the polite exit: netcfgd
+# stops operating on the device and changes nothing that is already there.
+
+#device eth1 {
+#	managed = false
+#}
+
+# The other kind of leaving, for hardware going out of your hands: remove
+# everything netcfgd owns first, credentials included, and then let go.
+
+#device eth1 {
+#	managed     = false
+#	on_unmanage = "clear"
+#}
+
+# THE RADIO. `backend` picks the supplicant; `wpa_supplicant` is the one that
+# is implemented and covers both wifi and wired 802.1X.
+
+#device wlan0 {
+#	wifi {
+#		backend             = "wpa_supplicant"
+#		autoconnect         = true
+#		regdom              = "SE"
+#		powersave           = "off"
+#		scan_randomization  = true
+#		mac_policy          = "per_network"
+#		portal_check        = "http://example.com/generate_204"
+#	}
+#}
+
+# `scan_randomization` and `mac_policy = "random"` are the privacy pair: one
+# hides you while looking, the other while connected. `portal_check` is what
+# notices a captive portal instead of reporting a working network that
+# resolves nothing.
+#
+# ETHERNET OFFLOADS AND LINK SETTINGS, for a NIC whose defaults are wrong.
+# Each toggle is "on", "off" or "unmanaged" -- three values rather than two,
+# because "leave this one alone" is a different instruction from "turn it
+# off", and a boolean could not say it.
+
+#interface eth0 {
+#	config = "dhcp"
+#	ethtool {
+#		autoneg      = "on"
+#		gro          = "on"
+#		gso          = "on"
+#		tso          = "on"
+#		rx_checksum  = "on"
+#		tx_checksum  = "on"
+#		wol          = "off"
+#	}
+#}
+
+# AN ACCESS POINT. netcfgd generates hostapd's configuration under /run and
+# runs it; this is the whole of what you write.
+
+#access_point "Home" {
+#	device  = "wlan0"
+#	channel = 36
+#	band    = "5g"
+#	regdom  = "SE"
+#	hidden  = false
+#	wifi {
+#		psk = "@secret:ap"
+#	}
+#}
+
+# Who may associate with it. One list or the other, never both, because
+# hostapd reads one file or the other.
+
+#access_point "Home" {
+#	device = "wlan0"
+#	wifi {
+#		psk = "@secret:ap"
+#	}
+#	access_control {
+#		deny = ["00:11:22:33:44:55"]
+#	}
+#}
+
+# `ncfg wifi clients` lists who is actually associated, and marks a station
+# that is on the deny list and connected anyway -- which happens because
+# hostapd holds the list it read at startup.
+
+
+##############################################################################
+# WIRELESS NETWORKS
+#
+# A `network` block is a place, not a piece of hardware. It applies to
+# whichever radio is in range of it.
+#
+# WPA2 or WPA3 with a passphrase. The passphrase is a reference; the value
+# lives in the secret store.
+
+#network "Home" {
+#	wifi {
+#		psk      = "@secret:home"
+#		priority = 100
+#	}
+#}
+
+# An open network, stated rather than implied -- so that a typo in `psk`
+# cannot quietly produce one.
+
+#network "Airport Free Wifi" {
+#	wifi {
+#		open = true
+#	}
+#	metered = true
+#}
+
+# A hidden network has to be probed for by name.
+
+#network "Backroom" {
+#	wifi {
+#		psk = "@secret:backroom"
+#	}
+#	hidden = true
+#}
+
+# Pinning a generation, where a network offers both and one of them misbehaves.
+
+#network "Home" {
+#	wifi {
+#		psk   = "@secret:home"
+#		proto = "wpa3"
+#	}
+#}
+
+# ENTERPRISE (802.1X), for a campus or a corporate network. The same block
+# works on a wired interface, which is why the supplicant is not wifi-only.
+
+#network "eduroam" {
+#	wifi {
+#		eap                 = "peap"
+#		identity            = "you@example.ac.uk"
+#		anonymous_identity  = "anonymous@example.ac.uk"
+#		password            = "@secret:eduroam"
+#		ca_cert             = "/etc/ssl/certs/ca-certificates.crt"
+#		phase2              = "mschapv2"
+#	}
+#}
+
+# Certificate authentication instead of a password.
+
+#network "corp" {
+#	wifi {
+#		eap          = "tls"
+#		identity     = "you@corp.example"
+#		client_cert  = "/etc/netcfgd/certs/you.pem"
+#		private_key  = "@secret:corp-key"
+#		ca_cert      = "/etc/ssl/certs/ca-certificates.crt"
+#	}
+#}
+
+# Pinning one access point, where several share an SSID and one of them is
+# the one you want.
+
+#network "Home" {
+#	wifi {
+#		psk = "@secret:home"
+#	}
+#	bssid = "00:11:22:33:44:55"
+#}
+
+# ROAMING between access points sharing an SSID. `signal` is the dBm below
+# which it starts looking for something better.
+
+#network "Campus" {
+#	wifi {
+#		psk = "@secret:campus"
+#		roam {
+#			signal        = -75
+#			interval      = 10
+#			slow_interval = 60
+#		}
+#	}
+#}
+
+
+##############################################################################
+# LINK TYPES
+#
+# A BRIDGE. Members take no address of their own; the bridge does.
+
+#interface br0 {
+#	config = "192.0.2.10/24"
+#	routes = "default via 192.0.2.1"
+#	bridge {
+#		members         = ["eth0", "eth1"]
+#		stp             = true
+#		forward_delay   = 4
+#		vlan_filtering  = false
+#	}
+#}
+
+# A BOND, for two cables to one switch.
+
+#interface bond0 {
+#	config = "dhcp"
+#	bond {
+#		members = ["eth0", "eth1"]
+#		mode    = "802.3ad"
+#		miimon  = 100
+#	}
+#}
+
+# A VLAN. The parent is the physical interface; the id is the tag.
+
+#interface vlan10 {
+#	config = "dhcp"
+#	vlan {
+#		parent = "eth0"
+#		id     = 10
+#	}
+#}
+
+# WIREGUARD. The private key is a secret reference like every other
+# credential; the peers each carry a public key, which is not secret.
+
+#interface wg0 {
+#	config = "10.9.0.2/24"
+#	wireguard {
+#		private_key = "@secret:wg0"
+#		listen_port = 51820
+#		peer "office" {
+#			public_key   = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+#			endpoint     = "vpn.example.com:51820"
+#			allowed_ips  = ["10.9.0.0/24", "192.168.50.0/24"]
+#			keepalive    = 25
+#		}
+#	}
+#}
+
+# A VXLAN overlay.
+
+#interface vx0 {
+#	config = "10.20.0.1/24"
+#	vxlan {
+#		id     = 100
+#		parent = "eth0"
+#		local  = "192.0.2.10"
+#		remote = "198.51.100.10"
+#		port   = 4789
+#	}
+#}
+
+# A GRE OR IPIP TUNNEL.
+
+#interface gre0 {
+#	config = "10.30.0.1/30"
+#	tunnel {
+#		mode   = "gre"
+#		local  = "192.0.2.10"
+#		remote = "198.51.100.10"
+#		ttl    = 64
+#	}
+#}
+
+# A MACVLAN, which gives a container its own hardware address on the LAN.
+
+#interface mv0 {
+#	config = "dhcp"
+#	macvlan {
+#		parent = "eth0"
+#		mode   = "bridge"
+#	}
+#}
+
+# A VRF, for keeping one set of routes away from another.
+
+#interface mgmt {
+#	config = "192.0.2.10/24"
+#	vrf {
+#		table = 100
+#	}
+#}
+
+# A DUMMY interface, which is the usual home for a stable service address.
+
+#interface dummy0 {
+#	config = "192.0.2.1/32"
+#	kind   = "dummy"
+#}
+
+# A VETH PAIR, for handing one end to a namespace or a container.
+
+#interface veth0 {
+#	config = "10.40.0.1/24"
+#	veth {
+#		peer = "veth1"
+#	}
+#}
+
+# PPPoE, which is how a good many DSL connections still work.
+
+#interface ppp0 {
+#	config = "reported"
+#	pppoe {
+#		parent   = "eth0"
+#		username = "user@isp.example"
+#		password = "@secret:isp"
+#	}
+#}
+
+# AN OPENVPN TUNNEL, configured by the file OpenVPN already understands.
+# netcfgd starts it and takes the address it reports.
+
+#interface tun0 {
+#	config = "reported"
+#	openvpn {
+#		config   = "/etc/openvpn/client.conf"
+#		username = "you"
+#		password = "@secret:vpn"
+#	}
+#}
+
+
+##############################################################################
+# THE ROUTER SIDE
+#
+# HANDING OUT PREFIXES. A router takes a prefix by DHCPv6 prefix delegation
+# and gives pieces of it to the networks behind it.
+
+#interface eth0 {
+#	config = ["dhcp", "dhcp6 pd"]
+#}
+
+# The inside interface takes a piece of what the outside one was delegated,
+# and advertises it.
+
+#interface br0 {
+#	config = ["192.168.1.1/24", "@pd:0::1/64"]
+#	advertise {
+#		backend  = "radvd"
+#		prefixes = ["@pd:eth0"]
+#		managed  = false
+#		other    = false
+#		lifetime = 1800
+#		dns      = true
+#	}
+#}
+
+# POLICY ROUTING. A rule sends some traffic to a different table -- which is
+# how a second uplink, or a VPN for one subnet only, is expressed.
+
+#rule "vpn-subnet" {
+#	family   = "ipv4"
+#	from     = "192.168.50.0/24"
+#	lookup   = 100
+#	priority = 1000
+#}
+
+# The same shape, refusing traffic rather than redirecting it.
+
+#rule "quarantine" {
+#	family   = "ipv4"
+#	from     = "192.168.99.0/24"
+#	action   = "unreachable"
+#	priority = 1100
+#}
+
+
+##############################################################################
+# DHCP DETAIL
+#
+# The client is dhcpcd or udhcpc, not netcfgd -- there is no DHCP client built
+# in, deliberately, and there is no `dhcp` block either. What a DHCP entry
+# carries are modifiers written after it in the addressing entry, the same way
+# a literal address carries them.
+#
+# On the v6 side those modifiers are what ask for a delegated prefix. `pd`
+# alone takes whatever the ISP offers:
+
+#interface eth0 {
+#	config = ["dhcp", "dhcp6 pd"]
+#}
+
+# Or say what to ask for. Each of these implies `pd`, so a length without it
+# cannot be silently inert:
+
+#interface eth0 {
+#	config = ["dhcp", "dhcp6 pd_length 56"]
+#}
+
+# A literal address takes modifiers in netifrc's phrasing. This build accepts
+# netmask, peer, preferred_lft and valid_lft; `ncfg plan` names any it does
+# not, rather than ignoring one:
+
+#interface eth0 {
+#	config = "192.0.2.10/24 valid_lft 3600 preferred_lft 1800"
+#}
+
+# And SLAAC takes the privacy setting, which is where RFC 4941 temporary
+# addresses are turned on:
+
+#interface eth0 {
+#	config = "slaac privacy prefer_temporary"
+#}
+
+
+##############################################################################
+# HOOKS -- RUNNING SOMETHING WHEN THE NETWORK CHANGES
+#
+# A hook body is shell. It ends at the first line that is nothing but a
+# closing brace, so braces inside the shell do not matter.
+#
+# The phases are pre_up, up, post_up, pre_down, down and post_down.
+#
+# THE ORDERING TRAP, learned from netifrc: `pre_up` runs BEFORE the link is
+# up, so anything in it that needs the network will fail. Use `post_up` for
+# that, which is what almost everybody means.
+
+#interface eth0 {
+#	config = "dhcp"
+#	post_up {
+#		logger -t netcfgd "eth0 is up with $NCFG_ADDRESSES"
+#	}
+#}
+
+# The environment a hook gets is prefixed `NCFG_`.
+#
+# A hook runs as root unless it says otherwise, and `run_as` is how it says
+# otherwise. Anything able to write config into /etc/netcfgd can therefore
+# run code as root, whatever the file's mode says -- which is why the
+# directory is root's, and why `ncfg wifi add` takes typed fields over a
+# socket rather than a file somebody wrote.
+
+#interface eth0 {
+#	config = "dhcp"
+#	post_up {
+#		run_as=nobody
+#		timeout=30
+#		/usr/local/bin/announce-address
+#	}
+#}
+
+
+##############################################################################
+# SECRETS
+#
+# A credential is never written in a config file. `@secret:NAME` is a
+# reference, and the value lives in /etc/netcfgd/secrets/NAME at 0600, put
+# there by:
+#
+#   ncfg secret set NAME
+#
+# which asks with the echo off, or reads standard input. Removing one is
+# `rm`. `@secret:provider:NAME` names a provider other than the default,
+# where one is configured.
+#
+# This holds for every credential netcfgd knows: wifi passphrases, 802.1X
+# passwords and private keys, WireGuard private keys, PPPoE and VPN logins.
+# The desired-state document that `ncfg show` prints and /run/netcfgd holds
+# never contains secret material, only the references.
+
+
+##############################################################################
+# WHERE TO GO NEXT
+#
+#   ncfg plan                 what would change, and why, in full
+#   ncfg explain interface X  why does this interface look like this?
+#   ncfg status               what the machine looks like now
+#   ncfg monitor              watch it change, live
+#   ncfg tui                  all of the above, full screen
+#
+# docs/first-run.md walks a laptop from NetworkManager to netcfgd, wired
+# first. `ncfg plan` before every `ncfg apply` is the habit this whole tool
+# is shaped around.
+##############################################################################

@@ -391,10 +391,25 @@ install:
 	@# dangles inside a DESTDIR staging root and resolves once that root is
 	@# unpacked at /. That is what a package expects.
 	ln -sf $(SBINDIR)/netcfgd $(DESTDIR)$(BINDIR)/ncfg
+	@# netifrc's `net.example` shape: every feature, commented, in the
+	@# directory being configured. It is documentation for the case the manual
+	@# is not reachable -- a machine with no network cannot look anything up,
+	@# and that is exactly the machine somebody is configuring by hand.
+	@#
+	@# Inert by construction rather than by convention: the loader takes
+	@# `netcfgd.conf` by exact name and `conf.d/*.conf` by extension, and this
+	@# is neither. `crates/netcfgd-compile/tests/example.rs` pins that, and
+	@# compiles every example in it so the file cannot describe a language the
+	@# compiler has stopped speaking.
+	install -m 0644 docs/netcfgd.conf.example \
+		$(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf.example
 	@echo "install: netcfgd and ncfg installed; no init glue"
+	@echo "install:   $(SYSCONFDIR)/netcfgd/netcfgd.conf.example documents every feature"
 	@echo "install:   make install-systemd | install-openrc | install-procd"
 	@# Constraint 2: the filesystem reflects use. conf.d/, secrets/ and hooks/
-	@# appear when something needs them, so they are not created here.
+	@# appear when something needs them, so they are not created here. The
+	@# example is not a feature's file and creates no capability, which is why
+	@# it does not breach that -- project.md section 1 records the distinction.
 
 # The reference modem helper. Optional and separate on purpose: decision 0045
 # says the helper is plural, and installing one by default would make it the
@@ -1335,12 +1350,16 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
+	@# This one is ours: `install` wrote it, so `uninstall` takes it away. The
+	@# operator's own configuration beside it is not, and is left alone.
+	rm -f $(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf.example
 	@# Only if the operator left nothing in it. Their configuration is not
 	@# ours to remove, and an empty directory is not worth keeping.
 	@rmdir $(DESTDIR)$(SYSCONFDIR)/netcfgd 2>/dev/null || true
-	@echo "uninstall: removed the programs, the desktop entry and the init glue"
-	@echo "uninstall:   $(SYSCONFDIR)/netcfgd is left alone -- the configuration"
-	@echo "uninstall:   is yours and was never installed by this Makefile"
+	@echo "uninstall: removed the programs, the example, the desktop entry and"
+	@echo "uninstall:   the init glue"
+	@echo "uninstall:   any configuration you wrote in $(SYSCONFDIR)/netcfgd is"
+	@echo "uninstall:   left alone -- it is yours and this Makefile never wrote it"
 
 # The commit-msg hook lives in the tree so it is reviewable, survives a
 # clone, and can be kept in sync. .git/hooks is untracked, so a hook that
