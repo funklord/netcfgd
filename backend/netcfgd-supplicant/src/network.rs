@@ -349,6 +349,22 @@ fn eap_settings(
 					field: "private_key",
 				})?;
 			let secret = resolver.resolve(key)?;
+			// **The same guard the password branch has, and this is the branch
+			// that needs it.** wpa_supplicant's `private_key` is a *path* --
+			// its own README says `private_key="/etc/cert/user.prv"` -- so a
+			// secret holding the key material is wrong twice over: it names a
+			// file that does not exist, and a PEM is multi-line, which
+			// terminates the line-based `SET_NETWORK` command in the middle
+			// and corrupts the rest of the conversation with the supplicant.
+			//
+			// A password is usually one line and this check was there. A
+			// private key never is, and it was not. Refusing turns silent
+			// corruption into a sentence naming the fix; materialising the key
+			// to a file under /run and passing that path is the real answer
+			// and is its own piece of work.
+			if !passphrase_is_sendable(secret.expose()) {
+				return Err(Box::new(Unsupported::PassphraseNotSendable));
+			}
 			out.push(Setting::secret("private_key", quote(secret.expose())));
 		}
 		EapMethod::Peap | EapMethod::Ttls | EapMethod::Pwd => {

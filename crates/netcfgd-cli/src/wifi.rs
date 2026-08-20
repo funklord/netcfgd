@@ -518,8 +518,15 @@ fn read_passphrase(id: &str) -> Result<String, String> {
 fn read_credential(id: &str, wanted: &Wanted) -> Result<String, String> {
 	match wanted.eap {
 		None => read_passphrase(id),
+		// **A path, and not the key.** The prompt used to offer "or the key
+		// itself", which cannot work: wpa_supplicant's `private_key` names a
+		// file it opens, so key material there is a filename that does not
+		// exist -- and a PEM is multi-line, which terminates the control
+		// socket's command in the middle. Offering an option that cannot work
+		// is worse than not offering it, because the failure arrives in
+		// wpa_supplicant's log rather than here.
 		Some("tls") => crate::secret::read_without_echo(&format!(
-			"private key for `{id}` (the path wpa_supplicant should load, or the key itself)"
+			"path to the private key for `{id}`, which wpa_supplicant will open"
 		)),
 		Some(_) => crate::secret::read_without_echo(&format!("EAP password for `{id}`")),
 	}
