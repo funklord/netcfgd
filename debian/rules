@@ -12,12 +12,37 @@
 
 override_dh_auto_build:
 	$(MAKE) build
+	$(MAKE) nm
 
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/netcfgd PREFIX=/usr
 	$(MAKE) install-systemd DESTDIR=$(CURDIR)/debian/netcfgd
 	install -Dm644 packaging/systemd/netcfgd-exclusive.conf \
 		$(CURDIR)/debian/netcfgd/usr/share/doc/netcfgd/netcfgd-exclusive.conf
+	@# The exclusive drop-in ships as documentation and is NOT installed into
+	@# /etc/systemd/system/netcfgd.service.d. Copying it into place is the
+	@# operator's act, by explicit instruction: installing a package must not
+	@# decide that this machine's other network daemons stop.
+	$(MAKE) install-nm DESTDIR=$(CURDIR)/debian/netcfgd-nm PREFIX=/usr
+
+# dh_installsystemd enables the unit and starts it, on first install, unless
+# told otherwise -- and that is precisely what this package must not do.
+#
+# It was doing it. `debian/postinst`'s own header says "The unit is installed
+# and deliberately not enabled, and nothing is started", and the generated
+# snippets appended to that same script by debhelper ran `deb-systemd-helper
+# enable` and `deb-systemd-invoke start`. The claim was in the half a person
+# writes and the behaviour in the half a tool appends, so reading the file
+# top to bottom showed both and agreed with neither.
+#
+# It matters twice over now that netcfgd-nm exists. netcfgd itself with an
+# empty /etc/netcfgd compiles to an empty document and manages nothing, so
+# starting it was harmless in effect if not in intent. Starting the shim is
+# not: it takes org.freedesktop.NetworkManager, which stops NetworkManager --
+# on `apt install`, on a machine whose operator has not asked for anything
+# yet, and possibly over the network being reconfigured.
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start
 
 override_dh_auto_test:
 	# `make check` is the gate; it wants a build tree the packaging keeps no
