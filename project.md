@@ -2736,10 +2736,21 @@ gathered here so a new session does not have to find them.
 
 - **Whether the three clients should share one implementation.**
   [0116](docs/decisions/0116-a-client-that-needs-the-model-is-rust.md) settled
-  that the *shape* harmonises and the language does not. What is unsettled is
-  the cross-project half, and `harmonization.md` is explicit that extracting or
-  aligning shared technology is its own deliberate piece of work rather than
-  something done from inside one repository.
+  that the *shape* harmonises and the language does not, and **deferred the
+  TUI moving with a named trigger**: "wanting the TUI and the GUI to share
+  pane logic rather than merely agree about it". **The holder has now asked
+  for exactly that** -- a Qt-like widget toolkit shared across the terminal
+  and desktop clients, so that complex things like file browsers and edit
+  fields exist once. The deferral has expired on its own terms.
+
+  The choice of toolkit spans this tree and fuzzypickles, so it is signalled
+  to `claude-guidelines`' list rather than picked here. What netcfgd can say
+  is what it costs and buys locally: the TUI is a pure socket client of
+  ~1,230 lines touching no model crate, so it is the one client that could
+  move; `ncfg` links ncurses only because the TUI is a default feature, so
+  moving it out makes the smallest build toolkit-free unconditionally; and
+  §*Names* calls the TUI "a subcommand, not a separate binary", which a
+  toolkit in another language would change.
 
 - **The remote protocol is authored elsewhere, and that part is settled.**
   `fuzznet` produces the shared IPC and network protocol for fuzzypickles,
