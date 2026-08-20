@@ -811,3 +811,85 @@ fn a_connected_event_names_the_access_point() {
 		assert_eq!(event.connected_bssid(), None, "{other}");
 	}
 }
+
+/// A private key that is key material rather than a path is refused.
+///
+/// There was no test for a *complete* EAP-TLS network at all: the only case
+/// asserted a missing-field error, so nothing had looked at what a working one
+/// produces. What it produced was `private_key "-----BEGIN PRIVATE KEY-----`
+/// followed by a newline -- wrong twice, since `wpa_supplicant`'s `private_key`
+/// names a file it opens, and a newline terminates the line-based
+/// `SET_NETWORK` command in the middle and corrupts everything after it.
+///
+/// The password branch had the guard against exactly that and this branch did
+/// not, which is the wrong way round: a password is usually one line and a PEM
+/// never is.
+#[test]
+fn an_eap_tls_private_key_that_is_not_a_path_is_refused() {
+	let dir = scratch("tls-material");
+	write_secret(
+		&dir,
+		"key",
+		"-----BEGIN PRIVATE KEY-----\nMIIBVQ==\n-----END PRIVATE KEY-----\n",
+	);
+	let resolver = Resolver::with_secrets_dir(&*dir);
+	let error = settings(
+		&network(
+			"corp",
+			tls_with(SecretRef {
+				provider: SecretProvider::File,
+				name: "key".to_owned(),
+			}),
+		),
+		MacPolicy::Permanent,
+		&resolver,
+	)
+	.expect_err("key material cannot cross the control socket");
+	assert_eq!(
+		error.downcast_ref::<Unsupported>(),
+		Some(&Unsupported::PassphraseNotSendable)
+	);
+}
+
+/// And a path is sent as it is, so the refusal above bounds the broken case
+/// rather than the feature.
+#[test]
+fn an_eap_tls_private_key_that_is_a_path_is_sent() {
+	let dir = scratch("tls-path");
+	write_secret(&dir, "key", "/etc/ssl/private/client.key");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+	let lines = rendered(
+		&network(
+			"corp",
+			tls_with(SecretRef {
+				provider: SecretProvider::File,
+				name: "key".to_owned(),
+			}),
+		),
+		&resolver,
+	);
+	assert!(
+		lines
+			.iter()
+			.any(|line| line.contains("private_key \"/etc/ssl/private/client.key\"")),
+		"{lines:?}"
+	);
+	// The certificates are paths already and are unchanged by this.
+	assert!(lines
+		.iter()
+		.any(|line| line.contains("ca_cert \"/etc/ssl/ca.pem\"")));
+}
+
+/// An EAP-TLS network with everything but the key, which the two above vary.
+fn tls_with(private_key: SecretRef) -> Security {
+	Security::Eap(EapConfig {
+		method: EapMethod::Tls,
+		identity: "user@corp.example".to_owned(),
+		anonymous_identity: None,
+		password: None,
+		ca_cert: Some("/etc/ssl/ca.pem".to_owned()),
+		client_cert: Some("/etc/ssl/client.pem".to_owned()),
+		private_key: Some(private_key),
+		phase2: None,
+	})
+}
