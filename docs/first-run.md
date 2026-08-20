@@ -262,15 +262,21 @@ than it looks:
 | tier | what a client can then do |
 |---|---|
 | `observe` | see what the network is doing |
-| `wifi` | scan, and join or leave a network **the configuration already describes** |
-| `admin` | everything else, including *adding* a network |
+| `wifi` | scan, join, leave, and **add** a wireless network |
+| `admin` | everything else -- apply, reload, revert |
 
-So with the two tiers above you can watch and switch between networks you
-have already written config for, and a new one still needs `ncfg wifi add`
-from a root shell. Granting `admin` to a group lets a desktop session add
-networks -- and also apply any other configuration change on the machine,
-which is the same permission. That is a choice worth making deliberately
-rather than because a button was greyed out.
+So with the two tiers above a desktop session can watch the network, switch
+between networks, and add the one it is standing in front of -- which is what
+a laptop actually needs. It still cannot apply an unrelated configuration
+change, revert one, or reload the daemon; those are `admin`, which is root
+unless you say otherwise.
+
+Adding a network used to need `admin` as well, which meant granting a desktop
+group the whole machine's networking in order to join a cafe. What changed is
+[0124](decisions/0124-adding-a-network-is-the-wifi-tier-because-0117-made-it-safe.md):
+the request that adds a network carries an SSID and a passphrase and cannot
+express anything else, so it no longer has to be trusted as though it carried
+a config file.
 
 ## When something goes wrong
 
