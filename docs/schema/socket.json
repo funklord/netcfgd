@@ -18,6 +18,8 @@
 {"request":"wifi_disconnect","interface":"wlan0"}
 {"request":"config_put","name":"from-a-client","text":"interface eth0 {\n\tconfig = \"dhcp\"\n}\n","replace":true}
 {"request":"config_put","name":"cafe","text":"network \"Cafe\" {\n\twifi { open = true }\n}\n"}
+{"request":"secret_put","name":"vpn","value":"NOT-A-REAL-SECRET","replace":true}
+{"request":"secret_put","name":"cafe","value":"NOT-A-REAL-SECRET"}
 {"request":"ap_stations","interface":"wlan0"}
 {"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":0},"tiers":["observe","admin"]}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}

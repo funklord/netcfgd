@@ -226,29 +226,42 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		priority: wanted.priority,
 		security: security_of(wanted),
 	};
+	// **The daemon first, and the local write is the exception** -- inverted by
+	// 0127, which makes netcfgd the only writer of /etc/netcfgd. Until then
+	// this wrote the files itself and asked the daemon when the kernel refused,
+	// which had the exception and the rule the wrong way round: the ordinary
+	// case on a running machine is a client with no permission to write
+	// system files, because that is what a client is.
+	//
+	// What the local write is still for is the case this command was written
+	// for and the daemon cannot serve: a machine being configured before
+	// netcfgd runs on it, which has no socket to ask. That is somebody at a
+	// console, as root, with no network -- and they can write the file.
+	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
+	if socket.exists() && wanted.eap.is_none() {
+		return add_over_socket(&profile, credential.as_deref(), wanted, options, "");
+	}
+
+	// An enterprise network cannot cross the socket -- `--eap` carries
+	// certificate *paths*, which 0127 will turn into content and has not yet --
+	// so it takes the local path whether or not a daemon is listening, and
+	// needs the rights to write the file. The refusal above says so before
+	// anybody types a password.
 	let written =
 		match wifi_profile::install(&config_dir, &factory_dir, &profile, credential.as_deref()) {
 			Ok(written) => written,
-			// `/etc/netcfgd` is root's, so a member of the `netcfgd` group running
-			// this cannot write it and met `Permission denied` on a command the
-			// tier system says is theirs (0124). Ask the daemon instead, which is
-			// what the GUI and the TUI have always done and what `wifi_add` exists
-			// for -- one outcome, reached by whichever route the caller can use.
-			//
-			// `denied` and not a writability probe. The first version of this asked
-			// whether the *config directory* could be written, and a test caught it
-			// answering for the wrong directory: the block goes in `conf.d`, so a
-			// writable `conf.d` under an unwritable parent took the local path and
-			// succeeded where the probe said it could not. The question worth
-			// asking is the one the kernel already answered.
+			// Both halves named, because they are two different things to do
+			// about it. The kernel refused this process, *and* there is no
+			// daemon to ask instead -- a reader told only the first goes
+			// looking for a permission to grant, when starting netcfgd would
+			// have done.
 			Err(error) if error.denied => {
-				return add_over_socket(
-					&profile,
-					credential.as_deref(),
-					wanted,
-					options,
-					&error.message,
-				);
+				return Err(format!(
+					"could not write the configuration ({}), and could not ask \
+					 netcfgd to do it either: nothing is listening on {}",
+					error.message,
+					socket.display()
+				))
 			}
 			Err(error) => return Err(error.message),
 		};
@@ -848,10 +861,13 @@ mod tests {
 		(root, options)
 	}
 
-	/// 0124 put adding a network in the `wifi` tier, and this command is the
-	/// half of it that does not go over the socket: it writes `/etc/netcfgd`,
-	/// which is root's. A group member therefore has the permission and not the
-	/// access, and falls back to asking the daemon.
+	/// The case with no way through: no daemon to ask, and no permission to
+	/// write. Since 0127 the daemon is the ordinary path, so reaching the
+	/// local write at all means nothing was listening -- and then the kernel
+	/// refuses too. Both halves have to be named, because they are two
+	/// different things to do about it, and a reader told only about the
+	/// permission goes looking for one to grant when starting netcfgd would
+	/// have done.
 	///
 	/// Checked on a directory made read-only rather than by a different uid,
 	/// because a test cannot become one. That is enough for what is being
@@ -925,14 +941,68 @@ mod tests {
 		restore();
 	}
 
-	/// The ordinary case still writes the file and never asks the daemon.
+	/// With a daemon listening, the request goes to it and no file is written.
 	///
-	/// The pair for the two above: a fallback that triggered when it should not
-	/// would send every `ncfg wifi add` through a socket that need not be
-	/// running, on the machine that has no network yet -- which is the case
-	/// this command exists for.
+	/// The property 0127 inverted, and one nothing tested until now: before,
+	/// the local write was the rule and the socket the exception. The fixture
+	/// stands up a real listener answering `ok`, so this asserts the *route*
+	/// rather than the outcome -- what proves it went to the daemon is that
+	/// `conf.d` is empty afterwards.
 	#[test]
-	fn a_writable_config_directory_is_written_directly() {
+	fn with_a_daemon_listening_the_request_goes_to_it() {
+		use std::io::{BufRead, BufReader, Write};
+
+		let (root, mut options) = fixture("daemon-preferred");
+		options.wifi.open = true;
+		let socket = root.join("run/netcfgd.sock");
+		let listener = std::os::unix::net::UnixListener::bind(&socket).expect("it binds");
+
+		// A channel and not a join, because the first version of this *hung*
+		// when the behaviour regressed: with the local write preferred again
+		// nothing ever connects, `accept` blocks for ever, and `join` blocks
+		// behind it. A test that hangs is worse than one that fails -- it
+		// stalls the suite rather than reporting -- and this is the shape that
+		// does it, so the wait is bounded and the timeout is the assertion.
+		let (sender, asked) = std::sync::mpsc::channel();
+		std::thread::spawn(move || {
+			let Ok((stream, _)) = listener.accept() else {
+				return;
+			};
+			let Ok(clone) = stream.try_clone() else {
+				return;
+			};
+			let mut reader = BufReader::new(clone);
+			let mut line = String::new();
+			let _ = reader.read_line(&mut line);
+			let mut writer = stream;
+			let _ = writer.write_all(b"{\"response\":\"ok\"}\n");
+			let _ = writer.flush();
+			let _ = sender.send(line);
+		});
+
+		add(&["Cafe".to_owned()], &options).expect("the daemon answers ok");
+
+		let asked = asked
+			.recv_timeout(std::time::Duration::from_secs(5))
+			.expect("nothing connected to the socket within 5s, so the daemon was not asked");
+		assert!(
+			asked.contains("wifi_add"),
+			"the daemon was sent something else: {asked}"
+		);
+		assert!(
+			!root.join("etc/conf.d/wifi-Cafe.conf").exists(),
+			"a file was written even though the daemon answered"
+		);
+	}
+
+	/// With no daemon, the file is written locally.
+	///
+	/// The case the command was written for and the one 0127's inversion had
+	/// to keep: a machine being configured before netcfgd runs on it, by
+	/// somebody at a console with no network. The fixture's run directory
+	/// holds no socket, so the local write is the only path left.
+	#[test]
+	fn with_no_daemon_the_file_is_written_locally() {
 		let (root, options) = fixture("writable");
 		assert!(can_write(&root.join("etc")));
 		options.config_dir.as_ref().expect("the fixture names one");

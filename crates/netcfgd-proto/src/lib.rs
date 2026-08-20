@@ -180,6 +180,35 @@ pub enum Request {
 		replace: bool,
 	},
 
+	/// Store a credential the configuration refers to, which netcfgd writes.
+	///
+	/// The other half of 0127's collapse, beside [`Request::ConfigPut`]. A
+	/// client cannot write `/etc/netcfgd/secrets`, so a credential it holds --
+	/// a VPN password, a `WireGuard` key, an 802.1X password -- comes here and
+	/// netcfgd stores it at 0600.
+	///
+	/// **Inbound only, like every other credential path in this protocol.**
+	/// There is no request that reads one back and there is not going to be:
+	/// 0031's bridge runs one way, `GetSecrets` refuses, and the desired-state
+	/// document carries `@secret:` references rather than values (constraint
+	/// 5). What crosses this socket is a value going *in*.
+	///
+	/// **A name, never a path**, checked by the same rule the drop-in's name
+	/// is.
+	SecretPut {
+		/// The name a `@secret:` reference uses.
+		name: String,
+		/// The value. Never logged, never echoed, never read back.
+		value: String,
+		/// Overwrite one that already exists.
+		///
+		/// Absent means refuse. A `WireGuard` private key nobody has a copy of
+		/// cannot be got back (0042), so replacing one is said rather than
+		/// assumed -- the rule `ncfg secret set` already follows.
+		#[serde(skip_serializing_if = "std::ops::Not::not", default)]
+		replace: bool,
+	},
+
 	/// Who is associated with an access point this machine runs.
 	///
 	/// A live query rather than a field of [`Response::Status`]: there is no
@@ -236,6 +265,7 @@ impl Request {
 			Self::WifiAdd { .. } => &["ssid", "id", "passphrase", "proto", "hidden", "priority"],
 			Self::WifiConnect { .. } => &["interface", "network"],
 			Self::ConfigPut { .. } => &["name", "text", "replace"],
+			Self::SecretPut { .. } => &["name", "value", "replace"],
 		}
 	}
 }
