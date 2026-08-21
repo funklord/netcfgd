@@ -97,6 +97,13 @@ pub(crate) fn run(options: &Options) -> Result<ExitCode, String> {
 		return Err("`ncfg tui` needs a terminal; for a pipe use `ncfg status --json`".to_owned());
 	}
 
+	// Installed before the screen is opened, so a panic during setup is
+	// covered too. This is the one exit path `signals` cannot reach: it says
+	// so itself, and under the release profile's `panic = "abort"` no
+	// destructor runs, so without this an aborting client leaves the shell
+	// with echo off and prints the reason into a terminal that cannot show it.
+	curses::restore_on_panic();
+
 	let mut app = App {
 		pane: Pane::Devices,
 		selected: 0,

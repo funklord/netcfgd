@@ -1050,6 +1050,51 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**The TUI left the terminal unusable by two routes, and neither was the one
+that got looked at first.** `q`, `SIGTERM`, `SIGHUP` and `SIGINT` were all
+clean and stayed clean. What was not:
+
+- **`^\` -- `SIGQUIT`.** `cbreak` leaves `ISIG` on, so it arrives as a signal
+  whose default dumps core and dies with nothing run. `signals.rs` blocks
+  `SIGINT` and argues for it on exactly the grounds that apply here -- a key a
+  person can press -- and `SIGQUIT` sits next to it and was missing. It is
+  blocked now, and still terminates: the pending signal is delivered when the
+  mask is restored, after `endwin` has run, so `^\` does what `^\` means and
+  the terminal survives it.
+- **A panic.** `signals.rs` names this hole in its own header -- "the release
+  profile's `panic = "abort"` means a panic does too" -- and nothing closed it.
+  Measured on a release build with a deliberate panic: `SIGABRT`, with `ECHO`,
+  `ICANON`, `ICRNL` and `ONLCR` all still off, so the message explaining the
+  crash was printed into a terminal that could not show it. A panic **hook**
+  fixes what a destructor cannot, because a hook runs before the abort. It
+  restores and then chains to the previous hook, so the panic still reports
+  itself -- onto a terminal that works.
+
+**Two flags were being restored and never checked.** `tui.py` tested `ECHO`
+and `ICANON`; `nonl()` also turns off `ICRNL` and `ONLCR`, and a shell with
+`ONLCR` off prints a staircase. All four are checked now, on all three
+signals.
+
+**What is still dirty is deliberate.** `SIGKILL` cannot be caught. `SIGALRM`,
+`SIGUSR1` and `SIGUSR2` still leave the terminal raw, and blocking them would
+mean ignoring a signal somebody chose on purpose that means nothing to this
+program. The line drawn is *signals a person can produce at this terminal*,
+plus the crash path.
+
+**Two of the three reproductions were measuring the harness, which is the part
+worth remembering.** The first said `^Z` broke the terminal: the probe's child
+was not in the pty's foreground process group, so `^Z` was never turned into a
+signal at all -- it was read as a byte, the TUI carried on, and the probe's own
+`kill()` fallback fired. The fix written on the strength of that -- blocking
+`SIGTSTP` and driving suspend and resume through the event loop -- was reverted
+after a rebuilt binary showed ncurses installs its own `SIGTSTP` handler and
+had been restoring the terminal correctly all along. The second said the TUI
+broke when the daemon died under it; it does not, it stays up and says
+`cannot reach the daemon`, and the probe killed it for still running. **A probe
+that kills the thing it is measuring reports the kill.** The harness prints
+`killed=True` beside each result now, so a case that says nothing cannot be
+read as if it said something.
+
 **The GUI can add an enterprise network, which was the last client that
 could not.** The socket and the CLI carried the whole thing and
 `add_network_dialog` had no EAP field at all, so the answer to "can I join the

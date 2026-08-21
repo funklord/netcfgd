@@ -84,6 +84,46 @@ extern "C" {
 	fn use_env(flag: bool);
 }
 
+/// Put the terminal back, whether or not curses is running.
+///
+/// `endwin` is safe to call when nothing was ever initialised -- it returns
+/// `ERR` and does nothing -- which is what makes it usable from a panic hook
+/// that cannot know how far setup got.
+///
+/// Free rather than a method for the same reason: the hook runs when the
+/// `Screen` is not reachable, and on a path where it will never be dropped.
+pub fn restore() {
+	// SAFETY: takes nothing and returns a status. Calling it without a prior
+	// `initscr`, or twice, is defined and does nothing.
+	unsafe { endwin() };
+}
+
+/// Restore the terminal on the way out of a panic, then panic as usual.
+///
+/// **The hole this closes is named in [`crate::signals`]**: that module routes
+/// termination signals through the event loop so `endwin` runs, and says
+/// plainly that it "does not save a crash ... the release profile's
+/// `panic = "abort"` means a panic does too". Measured on a release build with
+/// a deliberate panic: the process died on `SIGABRT` with `ECHO`, `ICANON`,
+/// `ICRNL` and `ONLCR` all still off, so the operator's shell was handed back
+/// unusable and the message explaining why was printed into a raw terminal.
+///
+/// A hook runs **before** the abort, which is what makes this work under
+/// `panic = "abort"` where a destructor does not. The previous hook is called
+/// afterwards, so the panic still reports itself the way it always did -- and
+/// now onto a terminal that can show it.
+///
+/// Installing it twice would chain two restores, which is harmless but
+/// pointless; call it once, before the screen is opened, so that a panic
+/// during setup is covered too.
+pub fn restore_on_panic() {
+	let previous = std::panic::take_hook();
+	std::panic::set_hook(Box::new(move |info| {
+		restore();
+		previous(info);
+	}));
+}
+
 /// The screen, for as long as this is alive.
 ///
 /// `endwin` runs on drop, which restores the terminal. It is held by value
@@ -317,5 +357,45 @@ impl Drop for Pane {
 		// SAFETY: `self.window` was allocated by `new` and has not been freed
 		// or handed out.
 		unsafe { delwin(self.window) };
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	/// The hook restores the terminal *and* still lets the panic report.
+	///
+	/// Both halves matter and only one is obvious. A hook that restored and
+	/// swallowed the message would turn a crash into a program that vanished,
+	/// which is worse than a raw terminal: at least a raw terminal comes with
+	/// an explanation printed into it.
+	///
+	/// Tests unwind -- the release profile's `panic = "abort"` is overridden
+	/// for them -- so `catch_unwind` can drive this without ending the run.
+	/// What is checked is the wiring rather than the terminal, because a unit
+	/// test has no terminal to leave dirty; that `endwin` restores one is
+	/// measured against a real pty by `tests/live/tui.py`.
+	#[test]
+	fn the_panic_hook_restores_and_then_reports() {
+		use std::sync::atomic::{AtomicUsize, Ordering};
+		use std::sync::Arc;
+
+		let reported = Arc::new(AtomicUsize::new(0));
+		let counter = Arc::clone(&reported);
+		// Stand in for the default hook, so that "the previous hook still
+		// runs" is observable rather than assumed.
+		std::panic::set_hook(Box::new(move |_| {
+			counter.fetch_add(1, Ordering::SeqCst);
+		}));
+
+		super::restore_on_panic();
+		let result = std::panic::catch_unwind(|| panic!("deliberate"));
+		assert!(result.is_err(), "the panic was swallowed");
+		assert_eq!(
+			reported.load(Ordering::SeqCst),
+			1,
+			"the hook did not chain, so a panic would report nothing"
+		);
+
+		let _ = std::panic::take_hook();
 	}
 }
