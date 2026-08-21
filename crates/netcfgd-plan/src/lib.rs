@@ -612,6 +612,38 @@ fn warn_access_points(builder: &mut Builder, desired: &Document) {
 	}
 }
 
+/// The interfaces that are radios netcfgd manages.
+///
+/// **Declared *and* actually a radio**, which is two facts from two places and
+/// neither is enough alone.
+///
+/// The `device` block supplies the first: `managed`, and a `wifi { }` section
+/// saying there is radio policy here at all. It cannot supply the second,
+/// because that section is not a statement that the interface *is* a radio --
+/// `portal_check` lives in it and is meaningful on anything, and
+/// `tests/live/portal.sh` puts exactly that on a dummy interface.
+///
+/// The kernel supplies the second, through `ObservedLink::wireless`. While a
+/// supplicant also required the document to hold a network this never showed:
+/// that fixture has none, so nothing was planned either way. Dropping that
+/// condition made netcfgd try to start a supplicant on a dummy, and the live
+/// suite caught it -- which is the useful shape of that gate, since the
+/// mistake was invisible to every unit test.
+fn radios_of(desired: &Document, observed: &Observed) -> Vec<String> {
+	desired
+		.devices
+		.iter()
+		.filter(|device| device.managed && device.wifi.is_some())
+		.filter(|device| {
+			observed
+				.links
+				.iter()
+				.any(|link| link.name == device.name && link.wireless)
+		})
+		.map(|device| device.name.clone())
+		.collect()
+}
+
 /// Compute what would have to change for `observed` to satisfy `desired`.
 #[must_use]
 pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> Plan {
@@ -632,12 +664,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		})
 		.collect();
 
-	builder.radios = desired
-		.devices
-		.iter()
-		.filter(|device| device.managed && device.wifi.is_some())
-		.map(|device| device.name.clone())
-		.collect();
+	builder.radios = radios_of(desired, observed);
 	builder.has_networks = !desired.networks.is_empty();
 	builder.access_point_devices = desired
 		.access_points
@@ -816,9 +843,25 @@ struct Builder {
 	appearing: Vec<String>,
 	/// Whether the document has any wifi network to join.
 	///
-	/// A managed radio with no networks gets no supplicant. Starting one that
-	/// would be given nothing is a process running for no reason, and it makes
-	/// `ncfg status` report a backend nothing asked for.
+	/// **No longer a condition for running a supplicant, and the reason it was
+	/// is worth keeping.** It said that a managed radio with no networks gets
+	/// none, because "starting one that would be given nothing is a process
+	/// running for no reason". That reasoning holds only if nothing else needs
+	/// the supplicant -- and scanning does. It made a closed loop: no
+	/// supplicant without a network, no scan without a supplicant, and no
+	/// network without a scan to find one. A machine whose wifi was working
+	/// stayed working, and a machine starting from nothing could not begin.
+	///
+	/// It went unnoticed because `NetworkManager` was running: NM adds the
+	/// interface to the system `wpa_supplicant`, which creates the control
+	/// socket, and netcfgd scanned through a supplicant it had not started.
+	/// Stopping NM took the socket away and scanning stopped with it, which is
+	/// how this was found -- from a machine, not from a test.
+	///
+	/// So a declared, managed radio gets a supplicant whether or not there is
+	/// anything to join yet, which is what makes the radio usable for finding
+	/// out. What this is still for is the access-point warning, where "is
+	/// there anything to join" is genuinely the question being asked.
 	has_networks: bool,
 	/// Devices that run an access point, in document order.
 	///
@@ -1232,7 +1275,7 @@ impl Builder {
 				base,
 			);
 		}
-		if self.radios.iter().any(|name| name == &interface.name) && self.has_networks {
+		if self.radios.iter().any(|name| name == &interface.name) {
 			// The field named is the `device` block's, not the interface's,
 			// because that is where somebody would go to turn this off.
 			return self.plan_backend(interface, BackendKind::Supplicant, "wifi", observed, base);
@@ -4036,11 +4079,13 @@ impl Builder {
 
 	/// Whether a running supplicant is one the document asks for.
 	///
-	/// The same two conditions that start one. Getting this wrong in the
-	/// permissive direction leaves a supplicant nobody owns; getting it wrong
-	/// in the other direction makes netcfgd start a supplicant and kill it on
-	/// the next reconcile, forever -- which is what the idempotence gate
-	/// caught when this function did not know the kind existed.
+	/// **The same conditions that start one, and they have to stay the same.**
+	/// Getting this wrong in the permissive direction leaves a supplicant
+	/// nobody owns; getting it wrong in the other direction makes netcfgd
+	/// start a supplicant and kill it on the next reconcile, forever -- which
+	/// is what the idempotence gate caught when this function did not know the
+	/// kind existed. So the `has_networks` condition was dropped from both at
+	/// once; dropping it from one would have produced exactly that flapping.
 	fn supplicant_wanted(&self, desired: &Document, iface: &str) -> bool {
 		let dot1x = desired
 			.interfaces
@@ -4056,7 +4101,7 @@ impl Builder {
 		if self.access_point_devices.iter().any(|name| name == iface) {
 			return false;
 		}
-		self.radios.iter().any(|name| name == iface) && self.has_networks
+		self.radios.iter().any(|name| name == iface)
 	}
 
 	/// Notice a plan that walks away from a key nobody can withdraw.

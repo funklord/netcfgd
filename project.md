@@ -1050,6 +1050,62 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**Scanning needed a supplicant, and a supplicant needed a network to join --
+which is a loop, and it was closed the whole time**
+([0130](docs/decisions/0130-a-radio-gets-a-supplicant-before-it-has-anything-to-join.md)).
+A managed radio with no `network` block got no supplicant, on the reasoning
+that one handed nothing is a process running for no reason. True, and only half
+the question: netcfgd scans over the supplicant's control socket, so with no
+supplicant there is no scan, and with no scan there is no way to find the
+network whose absence is the reason there is no supplicant. A machine whose
+wifi already worked went on working. A machine starting from nothing could
+only begin by hand-writing a `network` block for a network it could not look
+at.
+
+**It went unnoticed because NetworkManager was running.** NM adds the
+interface to the system `wpa_supplicant`, which creates
+`/run/wpa_supplicant/<iface>`, so every scan netcfgd did was borrowing a
+supplicant it had not started and had no opinion about. It surfaced the first
+time somebody stopped NM -- the thing 0125 exists to make possible -- and the
+report was "I stopped NM and after that I couldn't scan any networks". The
+machine had one drop-in in `conf.d`: the `global { control { .. } }` block
+`ncfg control set` writes. No `device` block, no `network` block, so no
+supplicant netcfgd would ever start. **This is the second bootstrap deadlock of
+this shape**; the first was `ncfg control set` refusing to run for want of a
+configuration on an install that ships none.
+
+**Both predicates moved together and that was the whole risk.** The planner
+decides to start a supplicant and `supplicant_wanted` decides whether a running
+one is wanted; they are deliberately the same test, and its comment says that
+disagreeing "makes netcfgd start a supplicant and kill it on the next
+reconcile, forever".
+
+**Dropping the condition exposed a second bug that the first had been hiding,
+and only the live suite could see it.** `radios` was "a `device` block with a
+`wifi { }` section", which is not the same as "an interface that is a radio":
+`portal_check` lives in that section and is meaningful on anything, and
+`tests/live/portal.sh` puts one on a **dummy** interface. While `has_networks`
+was also required nothing was planned there either way; without it netcfgd
+tried to start a supplicant on a dummy. So `ObservedLink` gained `wireless`,
+read from `/sys/class/net/<name>/wireless` -- the same test `start_supplicant`
+already made to choose a driver, moved to where the planner can see it. `kind`
+could not have served: a real radio is a plain device and reports an empty kind,
+exactly like an ethernet port. Every unit test passed throughout.
+
+**The scan failure explains itself now.** "no control socket at ...: is
+wpa_supplicant running?" is true, unhelpful, and points at the wrong program --
+the question is not whether somebody started a supplicant but why netcfgd did
+not, and only the document knows. A radio with no `wifi` policy is told so with
+the block to add; one marked `managed = false` is told that instead.
+
+**What this does not fix is the machine that reported it.** It has no `device`
+block at all, so it is still one step short: the fix covers "declared the radio,
+nothing joined yet". Making netcfgd claim a wireless interface nobody's
+configuration mentions is netcfgd taking ownership of hardware by default --
+which is what displacing NetworkManager implies and is not a thing to start
+doing as a side effect of a bug report. Open, and recorded in 0130 as the
+holder's.
+
 **The TUI left the terminal unusable by two routes, and neither was the one
 that got looked at first.** `q`, `SIGTERM`, `SIGHUP` and `SIGINT` were all
 clean and stayed clean. What was not:

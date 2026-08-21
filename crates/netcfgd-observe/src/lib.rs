@@ -154,6 +154,14 @@ fn observed_link(
 		name: link.name.clone(),
 		index: link.index,
 		kind: link.kind.clone(),
+		// `/sys/class/net/<name>/wireless` exists for a radio and for nothing
+		// else. The same test `start_supplicant` makes to choose a driver,
+		// read here instead so the planner can see it -- cheaper and more
+		// reliable than asking nl80211, and it needs no privilege.
+		wireless: std::path::Path::new("/sys/class/net")
+			.join(&link.name)
+			.join("wireless")
+			.exists(),
 		up: link.up,
 		carrier: link.carrier,
 		// The observer reads the kernel, and no probe result comes from

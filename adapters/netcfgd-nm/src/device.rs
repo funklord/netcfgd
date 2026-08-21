@@ -1020,6 +1020,10 @@ mod tests {
 			name: name.to_owned(),
 			index: 2,
 			kind: kind.to_owned(),
+			// Whether a link is a radio is netcfgd's to say and the shim only
+			// relays it; these fixtures are about how a device is projected
+			// onto NetworkManager's bus.
+			wireless: false,
 			up: true,
 			carrier: true,
 			reachable: None,

@@ -78,6 +78,18 @@ pub struct ObservedLink {
 	/// for a plain device.
 	#[serde(default)]
 	pub kind: String,
+	/// Whether this is a radio.
+	///
+	/// **The kernel's answer, not the document's.** `kind` cannot supply it --
+	/// a real wireless device is a plain device and reports an empty kind, the
+	/// same as an ethernet port -- and the document cannot either, because a
+	/// `device` block's `wifi { }` section carries things like `portal_check`
+	/// that are meaningful on anything. The planner needs the difference to
+	/// decide whether a supplicant belongs on an interface, and reading sysfs
+	/// from the planner would make it untestable against fixtures whose
+	/// interfaces do not exist.
+	#[serde(default)]
+	pub wireless: bool,
 	/// Administrative state.
 	pub up: bool,
 	/// Whether the link has carrier. Distinct from `up`: an interface can be
