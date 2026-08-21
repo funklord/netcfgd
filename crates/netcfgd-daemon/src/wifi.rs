@@ -141,13 +141,76 @@ pub(crate) fn set_radio(
 		netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, &name)
 	};
 
-	match result {
-		Ok(()) => {
-			state.reload();
-			Response::Ok
-		}
-		Err(message) => Response::error(message),
+	if let Err(message) = result {
+		return Response::error(message);
 	}
+	state.reload();
+
+	// **Written is not running.** netcfgd applies nothing on a configuration
+	// change by itself -- `on_drift` defaults to `report`, and `ncfg apply` is
+	// the explicit step -- so activation used to leave a correct plan that
+	// nothing had run, and the operator got "cannot reach the supplicant" from
+	// the very next scan. Reported as "the buttons don't work properly", which
+	// is what a switch that changes a file and nothing else looks like.
+	//
+	// So this applies the radio's own plan before answering, and applies all
+	// of it. netcfgd configures a machine's networking; a switch that changes
+	// a file and leaves the machine alone is not doing that. The daemon would
+	// reach the same state within a tick either way -- what the synchronous
+	// apply buys is a truthful answer, and a client that scans the moment it
+	// is told the radio is netcfgd's does not scan a radio with no supplicant.
+	if activate {
+		if let Err(message) = apply_interface(state, interface) {
+			return Response::error(message);
+		}
+	}
+	Response::Ok
+}
+
+/// Bring one interface to what the document now says, before answering.
+///
+/// Restricted to the interface that was asked about, and otherwise an ordinary
+/// apply: the same guards, the same ownership rules, the same journal. A
+/// disruptive action still needs consent nobody gave here, so it is refused
+/// and recorded rather than done -- which is the property that makes applying
+/// on a request safe at all.
+///
+/// # Errors
+///
+/// A netlink socket that will not open, or an action that failed. The journal
+/// is written either way, so `ncfg status` explains what this only names.
+fn apply_interface(state: &mut crate::State, interface: &str) -> Result<(), String> {
+	let full = state.plan(&netcfgd_plan::PlanOptions::default());
+	let (plan, _dropped) = crate::state::restrict(&full, &[interface.to_owned()]);
+	if plan.actions.is_empty() {
+		// Nothing to do is success: the radio may already be up from a
+		// previous activation, and reporting that as a failure would make a
+		// switch complain about being already on.
+		return Ok(());
+	}
+
+	let mut executor = state.executor()?;
+	let journal = netcfgd_apply::apply(&plan, &mut executor);
+	let _ = crate::run_state::update_owned(&state.paths.run, |owned| {
+		owned.absorb(&executor.effects);
+	});
+	let _ = crate::run_state::write_journal(&state.paths.run, &journal);
+	state.reobserve();
+
+	if !journal.succeeded() {
+		// The executor's own sentence, because it names the action and the
+		// reason -- including the one an operator most needs here, which is
+		// that another manager is still holding the radio.
+		let why = journal
+			.failure()
+			.and_then(|record| record.error.clone())
+			.unwrap_or_else(|| "no reason was recorded".to_owned());
+		return Err(format!(
+			"`{interface}` is netcfgd's in the configuration, and starting its \
+			 supplicant failed: {why}"
+		));
+	}
+	Ok(())
 }
 
 /// Why there is no supplicant on an interface, in words that say what to do.

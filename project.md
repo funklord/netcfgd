@@ -1050,6 +1050,45 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**netcfgd applies its configuration now, and re-applies what has deviated**
+([0132](docs/decisions/0132-netcfgd-applies-its-configuration.md)). Every
+symptom of this milestone was one fault seen from a different angle: a
+configuration written, a plan that was correct, and nothing that ran it.
+"Cannot reach the supplicant" and "the buttons don't work properly" are the
+same sentence -- a wifi pane whose controls are all disabled because the radio
+has no supplicant, on a machine whose configuration says it should have one.
+
+`DriftPolicy::Report` was the default, on the reasoning that "over-claiming
+ownership deletes somebody's manual change, under-claiming only costs
+convenience". Both halves were wrong. The first is a fear the design already
+answers twice -- `Ownership::may_remove` lets netcfgd remove only what netcfgd
+created, and the planner's guards refuse a disruptive action without consent --
+and the second cost the program its purpose: a daemon that watches its own
+configuration go unimplemented is a very careful observer.
+
+**The verification loop was built, documented and unwired.** `TICK_MS`'s
+comment says the tick "catches anything neither netlink nor the config watcher
+reports, and it is what makes a missed event cost seconds rather than forever",
+and the loop matched `Command::Tick => {}`. Consuming it is what makes this
+verify-and-fix rather than apply-and-hope: the plan computed on each pass is
+the verification and its actions are the fix.
+
+**`--no-apply-on-start` had to become a latch**, or it would delay acting by
+one tick and no more -- and the protected *first* apply it exists for could not
+happen. It holds until an explicit apply arrives. **Only the acting is held**:
+the first version gated the observation too, which is worse than not looking,
+because the daemon went on planning against what it saw at startup and answered
+`apply` with work for a machine that had since moved. `hooks.sh` caught it --
+its tampered hook was never reached, because the apply's plan predated the
+tampering.
+
+**Two live checks described a machine that no longer exists.** `nm.sh` deleted
+a dummy and waited for it to leave NetworkManager's device list; netcfgd makes
+it again within a tick, so it hands the interface over with `managed = false`
+first. `confirm.sh` asserts nothing is configured before the first apply, which
+is what the latch preserves. Both are the decision working rather than
+breaking.
+
 **The documented way in works now, and it is one command.** The question
 above is settled by the copyright holder: **the code is right** -- an
 `interface` block is netcfgd's statement that a link's configuration is its to

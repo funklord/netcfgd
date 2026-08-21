@@ -172,13 +172,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 
 	establish_first_last_good(&state);
 
-	if options.apply_on_start && !reverted_at_startup {
-		// A network configuration daemon that starts and configures nothing is
-		// not doing its job; design section 4.4 makes oneshot the alternative
-		// rather than the default. `--no-apply-on-start` exists for anyone who
-		// wants the daemon to observe first and be told when to act.
-		converge(&mut state, &mut Vec::new());
-	}
+	let mut holding = start_up(&mut state, options.apply_on_start, reverted_at_startup);
 
 	let mut subscribers: Vec<SyncSender<Event>> = Vec::new();
 	// `recv` rather than `for .. in incoming`, because the burst-collapsing
@@ -190,6 +184,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		let mut kernel_changed = false;
 		let mut config_changed = false;
 		let mut confirm_expired = false;
+		let mut ticked = false;
 		let mut requests = Vec::new();
 		let mut roamed: Vec<(String, String)> = Vec::new();
 
@@ -198,7 +193,18 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 				Command::KernelChanged => kernel_changed = true,
 				Command::ConfigChanged => config_changed = true,
 				Command::ConfirmExpired => confirm_expired = true,
-				Command::Tick => {}
+				// **The backstop, which used to be discarded.** `TICK_MS`'s own
+				// comment says it "catches anything neither netlink nor the
+				// config watcher reports, and it is what makes a missed event
+				// cost seconds rather than forever" -- and nothing consumed
+				// it, so a machine that drifted in a way netlink did not
+				// announce stayed drifted until something else woke the loop.
+				//
+				// It is what makes this a verification loop rather than an
+				// apply: the plan computed below *is* the verification, and
+				// its actions are the fix. A tick that finds nothing outstanding
+				// costs one observation and stops.
+				Command::Tick => ticked = true,
 				// Not collapsed the way a netlink burst is: two roams are two
 				// events, and a station that moved twice moved twice.
 				Command::Roamed { interface, bssid } => roamed.push((interface, bssid)),
@@ -239,7 +245,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		// round the same path a carrier change does (0119).
 		let probe_changed = state.probes.run_due(state.desired.as_ref());
 
-		if kernel_changed || config_changed || probe_changed {
+		if kernel_changed || config_changed || probe_changed || ticked {
 			state.reobserve();
 			let drift = state.detect_drift();
 			for event in &drift {
@@ -254,7 +260,20 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			// After the drift hooks and before the reconcile, for the same
 			// reason: a script sees the machine as the change left it.
 			remember_told(&state, HookPhase::Portal, &run_portal_checks(&state));
-			reconcile_drift(&mut state, &mut subscribers);
+			// **Observing is not holding.** `--no-apply-on-start` says the
+			// daemon should observe and be told when to act, so only the
+			// acting is held -- everything above still runs. Gating the
+			// observation too left the daemon planning against what it saw at
+			// startup, which is worse than not looking: it answers `apply`
+			// with a plan for a machine that has since moved, and the operator
+			// gets an apply that does the wrong work and reports success.
+			if !holding {
+				reconcile_drift(&mut state, &mut subscribers);
+			}
+		}
+
+		if holding && releases_the_hold(&requests) {
+			holding = false;
 		}
 
 		serve_requests(&mut state, requests, &mut subscribers, &commands);
@@ -329,6 +348,49 @@ fn report_contention(state: &State) {
 }
 
 /// Apply whatever the config asks for, reporting failures to stderr.
+/// Configure the machine at startup, and say whether the loop is held.
+///
+/// **A latch, not a startup skip.** `--no-apply-on-start` says the daemon
+/// should observe and be told when to act, and once the loop reconciles on its
+/// own that has to keep meaning something -- otherwise the flag delays acting
+/// by one tick and no more, and the *protected first apply* it exists for
+/// cannot happen: the window on `ncfg apply` is there because the first apply
+/// after a boot is the one that can take the network away.
+///
+/// So it holds until an explicit apply arrives, and then the machine is
+/// netcfgd's like any other. **Only the acting is held**; the loop goes on
+/// observing, because a daemon planning against what it saw at startup answers
+/// `apply` with work for a machine that has since moved.
+fn start_up(state: &mut State, apply_on_start: bool, reverted: bool) -> bool {
+	if apply_on_start && !reverted {
+		// A network configuration daemon that starts and configures nothing is
+		// not doing its job; design section 4.4 makes oneshot the alternative
+		// rather than the default.
+		converge(state, &mut Vec::new());
+	}
+	!apply_on_start
+}
+
+/// Whether this batch of requests is the operator taking their turn.
+///
+/// `--no-apply-on-start` holds the reconcile loop until somebody applies
+/// deliberately, so that the *first* apply after a boot is the one carrying a
+/// confirm window -- it is the one that can take the network away. An explicit
+/// apply is what the hold was waiting for; nothing else releases it, because
+/// nothing else is the operator saying "go".
+fn releases_the_hold(
+	requests: &[(
+		Request,
+		netcfgd_sys::peer::Peer,
+		authorize::Origin,
+		SyncSender<Response>,
+	)],
+) -> bool {
+	requests
+		.iter()
+		.any(|(request, ..)| matches!(request, Request::Apply { .. }))
+}
+
 fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 	let Ok(mut executor) = state.executor() else {
 		eprintln!("netcfgd: cannot open a netlink socket to apply");
