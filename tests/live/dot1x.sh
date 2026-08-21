@@ -213,6 +213,49 @@ fi
 # supplicant that holds no state (0015) is one netcfgd has to repopulate.
 check "and the network it was configured with is back" "$(get key_mgmt)" "IEEE8021X"
 
+# A LIVE supplicant netcfgd did not start is not netcfgd's to take.
+#
+# The mirror of the case above, and the two are told apart by one thing: whether
+# the socket answers. Above, the process was killed, so it does not, and
+# clearing the leftover is right. Here the process is alive and only netcfgd's
+# record of it is gone -- which is exactly what another manager's supplicant
+# looks like, `NetworkManager` being the one that will. Removing the socket
+# would take away the rendezvous point all of its clients use while leaving the
+# process running, and then bind a second supplicant to the same path.
+#
+# Simulated by taking away netcfgd's memory rather than by installing
+# NetworkManager: what the code has to decide on is "a live socket I have no
+# record of", and forgetting is enough to produce that, without needing a
+# second network manager in the test environment. Both halves are needed --
+# the supplicant's pid file, which is how the socket is matched to a process,
+# and `owned.json`, which is where netcfgd remembers having started it. With
+# the memory intact the plan says "nothing to do" and the code under test is
+# never reached, which is how the first version of this check passed while
+# proving nothing.
+alive=$(cat "$pidfile" 2>/dev/null || echo 0)
+rm -f "$pidfile"
+python3 - "$work/run/owned.json" <<'FORGET' 2>/dev/null || true
+import json, sys
+path = sys.argv[1]
+state = json.load(open(path))
+state["backends"] = []
+json.dump(state, open(path, "w"))
+FORGET
+"$ncfg" apply > "$work/steal.log" 2>&1 || true
+check "a live supplicant netcfgd has no record of is left alone" \
+	"$(still_running "$alive" && echo yes || echo no)" "yes"
+check "and its control socket is not removed" \
+	"$([ -e "$work/ctrl/lo" ] && echo yes || echo no)" "yes"
+# The check that actually discriminates. Without the guard the socket exists
+# too -- netcfgd deletes it and a second supplicant binds the same path, so
+# the file is back a moment later and looks untouched. What differs is that
+# there is now a second supplicant on one radio and the first has been left
+# with no socket. A fresh pid file is netcfgd having started one.
+check "and starts no second supplicant on the same radio" \
+	"$([ -e "$pidfile" ] && echo yes || echo no)" "no"
+contains "and netcfgd says who to stop, rather than failing quietly" \
+	"$(cat "$work/steal.log")" "already running a supplicant"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "dot1x.sh: all checks passed"
