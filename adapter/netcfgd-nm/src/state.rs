@@ -1081,6 +1081,9 @@ mod tests {
 			ssid: "686f6d65".to_owned(),
 			name: Some("home".to_owned()),
 			configured: None,
+			// The shim projects NetworkManager's interfaces and NM has no
+			// notion of a mobility domain, so this is carried and not used.
+			mobility_domain: None,
 		}
 	}
 

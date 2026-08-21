@@ -439,6 +439,21 @@ pub struct ScanEntry {
 	/// than mangled otherwise, so a client can tell "not text" from "empty".
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub name: Option<String>,
+	/// The 802.11r mobility domain this access point advertises, if any.
+	///
+	/// Two access points sharing one are configured as a single roaming
+	/// domain, which is the only *standard* statement that two BSSes belong
+	/// together -- adjacent addresses and a shared manufacturer prefix are
+	/// convention. Present only where the BSS advertises fast transition,
+	/// because that is the only case worth a round trip to ask about.
+	///
+	/// **Diagnostic, never a trust signal.** The element is unauthenticated
+	/// bytes in a beacon, so anything can claim any domain. A client that
+	/// grouped or trusted access points by it would be trusting whoever is
+	/// transmitting.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub mobility_domain: Option<String>,
+
 	/// The id of the `network` block describing it, if the configuration has
 	/// one.
 	///

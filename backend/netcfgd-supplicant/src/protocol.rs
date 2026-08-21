@@ -213,6 +213,45 @@ impl ScanResult {
 	pub fn is_secured(&self) -> bool {
 		self.flags.contains("WPA") || self.flags.contains("WEP") || self.flags.contains("SAE")
 	}
+
+	/// Whether it advertises 802.11r fast transition.
+	///
+	/// Read from the flags, which cost nothing because they are already
+	/// parsed: `wpa_supplicant` spells the key management `FT/PSK`, `FT/SAE`
+	/// or `FT/EAP` when the BSS does it. This is not the mobility *domain* --
+	/// two access points can both do fast transition and belong to different
+	/// domains -- it is the cheap test for whether asking about the domain is
+	/// worth a round trip at all.
+	#[must_use]
+	pub fn does_fast_transition(&self) -> bool {
+		self.flags.contains("FT/")
+	}
+}
+
+/// The mobility domain id from a `BSS <bssid>` reply.
+///
+/// **802.11r, and what it is for.** Access points an operator configured into
+/// one mobility domain advertise the same two-octet id, and a client that has
+/// done the initial handshake with any of them can transition to another
+/// without a full re-authentication. It is the only standard, machine-readable
+/// statement that two BSSes belong to one system -- everything else (adjacent
+/// addresses, a shared manufacturer prefix) is convention.
+///
+/// **It is not a trust signal, and nothing here should treat it as one.** The
+/// element is unauthenticated bytes in a beacon, so anything can advertise any
+/// id. What it is good for is diagnosis: two access points a client will not
+/// roam between, both claiming fast transition, are worth looking at
+/// differently depending on whether they claim the same domain.
+///
+/// Absent rather than guessed when the reply has no `mdid=`, which is the
+/// ordinary case for a BSS that does not do fast transition at all.
+#[must_use]
+pub fn parse_mobility_domain(body: &str) -> Option<String> {
+	body.lines()
+		.find_map(|line| line.strip_prefix("mdid="))
+		.map(str::trim)
+		.filter(|id| !id.is_empty())
+		.map(str::to_owned)
 }
 
 /// Parse `SCAN_RESULTS`.

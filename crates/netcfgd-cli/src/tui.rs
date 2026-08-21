@@ -465,8 +465,20 @@ impl App {
 	}
 
 	/// Join the selected network, if the configuration describes it.
+	///
+	/// The selected *line* rather than the selected entry: since the pane
+	/// groups radios under a network the two are no longer the same number,
+	/// and indexing the entries by the line would join whatever network
+	/// happened to sit at that position. `wifi_rows` says what each line
+	/// stands for, and it is the same grouping the pane drew.
 	fn connect(&mut self) {
-		let Some(entry) = self.scan_entries().get(self.selected).cloned() else {
+		let Some(at) = wifi_rows(self, ROW_COUNT_WIDTH)
+			.get(self.selected)
+			.and_then(|(_, entry)| *entry)
+		else {
+			return;
+		};
+		let Some(entry) = self.scan_entries().get(at).cloned() else {
 			return;
 		};
 		let Some(id) = entry.get("configured").and_then(serde_json::Value::as_str) else {
@@ -695,49 +707,202 @@ fn backends_on(app: &App, interface: &str, width: usize) -> Vec<String> {
 }
 
 fn wifi(app: &App, width: usize) -> Vec<String> {
+	wifi_rows(app, width)
+		.into_iter()
+		.map(|(line, _)| line)
+		.collect()
+}
+
+/// The wifi pane, with the scan entry each line stands for.
+///
+/// **One grouping, not two.** The pane groups radios under a network, so the
+/// nth *line* stopped being the nth *entry* -- and `connect` indexed the
+/// entries by the selected line. Selecting a heading below the first group
+/// would have joined some other network entirely, which is the worst kind of
+/// bug a list can have: it does something, confidently, to the wrong thing.
+///
+/// So the grouping happens once and says what each line means. A heading
+/// carries its group's joinable entry; a detail row carries its own, so
+/// pressing `c` on a radio joins the network that radio belongs to.
+fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
 	let entries = app.scan_entries();
 	if entries.is_empty() {
-		return vec!["(no scan; press r to rescan)".to_owned()];
+		return vec![("(no scan; press r to rescan)".to_owned(), None)];
 	}
-	entries
-		.iter()
-		.map(|entry| {
-			// Was `<not text>`, which named the *condition* and threw away
-			// the network: two unprintable SSIDs drew as one row, and no
-			// key would have told them apart. The shared renderer keeps
-			// the hex, which is the only name such a network has.
-			let name = crate::access_point_name(
-				entry.get("name").and_then(serde_json::Value::as_str),
+
+	// **Grouped by name and security, one heading per network, the radios
+	// under it.** A dual-band access point broadcasts the same SSID from two
+	// radios, and the flat list drew that as two rows differing by a few dBm
+	// -- which is also what an evil twin looks like, and an operator asked
+	// which they were seeing. With fifty networks in range the flat list is
+	// also simply hard to read.
+	//
+	// **Security is part of the key, not just the heading.** Two entries with
+	// the same name and *different* security are not one network: that is the
+	// anomaly worth seeing, and collapsing them would hide the one difference
+	// a person should act on. Same-name-same-security is a network; anything
+	// else stays apart.
+	//
+	// Deliberately *not* grouped by anything cleverer. Adjacent addresses and
+	// a shared manufacturer prefix say "one access point" to a reader and are
+	// convention rather than fact, and the mobility domain is unauthenticated
+	// -- grouping on either would be the display asserting something it
+	// cannot know. The members are shown instead, and the reader draws the
+	// conclusion with the evidence in front of them.
+	let (order, groups, indices) = group_scan(&entries);
+
+	let mut lines: Vec<(String, Option<usize>)> = Vec::new();
+	for key in order {
+		let members = &groups[&key];
+		let (name, secured) = key;
+		// The strongest member speaks for the group, because that is the one
+		// a client would associate with and the number a reader is judging.
+		let signal = members
+			.iter()
+			.filter_map(|entry| entry.get("signal").and_then(serde_json::Value::as_i64))
+			.max()
+			.unwrap_or(0);
+		let configured = members
+			.iter()
+			.find_map(|entry| entry.get("configured").and_then(serde_json::Value::as_str));
+		let known = if configured.is_some() { "c" } else { " " };
+		let block = configured.map_or_else(String::new, |id| format!("  [{id}]"));
+		let radios = if members.len() > 1 {
+			format!("{} radios", members.len())
+		} else {
+			String::new()
+		};
+		// The heading stands for the strongest member, which is the one a
+		// client would associate with.
+		let strongest = members
+			.iter()
+			.enumerate()
+			.max_by_key(|(_, entry)| {
 				entry
-					.get("ssid")
-					.and_then(serde_json::Value::as_str)
-					.unwrap_or(""),
-			);
-			let signal = entry
-				.get("signal")
-				.and_then(serde_json::Value::as_i64)
-				.unwrap_or(0);
-			let secured = entry.get("secured").and_then(serde_json::Value::as_bool) == Some(true);
-			// The marker that makes decision 0013's boundary visible: `c` is
-			// joinable now, blank needs config written first. The id follows
-			// the name as `[block]`, the way `ncfg wifi scan` and the GUI's
-			// column both spell it -- the marker is a fixed column a reader
-			// scans down, not a second concept.
-			let configured = entry.get("configured").and_then(serde_json::Value::as_str);
-			let known = if configured.is_some() { "c" } else { " " };
-			let block = configured.map_or_else(String::new, |id| format!("  [{id}]"));
+					.get("signal")
+					.and_then(serde_json::Value::as_i64)
+					.unwrap_or(i64::MIN)
+			})
+			.map_or(0, |(at, _)| at);
+		lines.push((
 			fit(
 				&format!(
-					"{known} {:<28} {:>4} dBm  {:<7}{}",
+					"{known} {:<28} {:>4} dBm  {:<7}  {:<8}{}",
 					name,
 					signal,
 					if secured { "secured" } else { "open" },
+					radios,
 					block
 				),
 				width,
-			)
-		})
-		.collect()
+			),
+			indices[&(name.clone(), secured)].get(strongest).copied(),
+		));
+
+		// The detail, and only where there is something to tell apart. One
+		// radio adds a line that says what the heading already said.
+		if members.len() < 2 {
+			continue;
+		}
+		for (at, member) in members.iter().enumerate() {
+			let bssid = member
+				.get("bssid")
+				.and_then(serde_json::Value::as_str)
+				.unwrap_or("");
+			let band = band_of(
+				member
+					.get("frequency")
+					.and_then(serde_json::Value::as_u64)
+					.unwrap_or(0),
+			);
+			let member_signal = member
+				.get("signal")
+				.and_then(serde_json::Value::as_i64)
+				.unwrap_or(0);
+			// The mobility domain where the access point claims one. It says
+			// the operator configured these to roam as one, which is worth
+			// knowing when they do not -- and it is unauthenticated, so it is
+			// shown as a claim beside the address rather than used to group.
+			let domain = member
+				.get("mobility_domain")
+				.and_then(serde_json::Value::as_str)
+				.map_or_else(String::new, |id| format!("  ft:{id}"));
+			lines.push((
+				fit(
+					&format!("    {band:<7} {bssid:<17}  {member_signal:>4} dBm{domain}"),
+					width,
+				),
+				indices[&(name.clone(), secured)].get(at).copied(),
+			));
+		}
+	}
+	lines
+}
+
+/// One network's worth of scan entries, and where each came from.
+type Grouped<'a> = (
+	Vec<(String, bool)>,
+	std::collections::HashMap<(String, bool), Vec<&'a serde_json::Value>>,
+	std::collections::HashMap<(String, bool), Vec<usize>>,
+);
+
+/// Group scan entries by name and security, keeping the order they arrived in.
+///
+/// Split from the rendering because they are two thoughts and the function was
+/// over its line budget holding both. The key is the interesting part and it
+/// is deliberately dull: the name, and whether joining needs a credential.
+///
+/// **Nothing cleverer, on purpose.** Adjacent addresses and a shared
+/// manufacturer prefix read as "one access point" and are convention rather
+/// than fact; the mobility domain is unauthenticated. Grouping on either would
+/// be the display asserting something it cannot know, so the members are shown
+/// and the reader draws the conclusion with the evidence in front of them.
+fn group_scan<'a>(entries: &'a [serde_json::Value]) -> Grouped<'a> {
+	let mut order: Vec<(String, bool)> = Vec::new();
+	let mut groups: std::collections::HashMap<(String, bool), Vec<&'a serde_json::Value>> =
+		std::collections::HashMap::new();
+	// The position each grouped member had in `scan_entries`, so a selected
+	// line can name the entry it stands for.
+	let mut indices: std::collections::HashMap<(String, bool), Vec<usize>> =
+		std::collections::HashMap::new();
+
+	for (at, entry) in entries.iter().enumerate() {
+		let name = crate::access_point_name(
+			entry.get("name").and_then(serde_json::Value::as_str),
+			entry
+				.get("ssid")
+				.and_then(serde_json::Value::as_str)
+				.unwrap_or(""),
+		);
+		let secured = entry.get("secured").and_then(serde_json::Value::as_bool) == Some(true);
+		let key = (name, secured);
+		if !groups.contains_key(&key) {
+			order.push(key.clone());
+		}
+		groups.entry(key.clone()).or_default().push(entry);
+		indices.entry(key).or_default().push(at);
+	}
+	(order, groups, indices)
+}
+
+/// The band a centre frequency is in, as a person names it.
+///
+/// Not the channel number, which is what the kernel and every scan tool
+/// report: a reader trying to tell two rows apart wants "these are the two
+/// radios of one access point", and `2.4GHz` beside `5GHz` says that where
+/// `1` beside `44` does not.
+///
+/// An unrecognised frequency is printed as its megahertz rather than guessed
+/// at or blanked. A band this does not know is one worth seeing the number
+/// for, and a blank column would read as missing data.
+fn band_of(frequency: u64) -> String {
+	match frequency {
+		0 => String::new(),
+		2400..=2500 => "2.4GHz".to_owned(),
+		4900..=5895 => "5GHz".to_owned(),
+		5925..=7125 => "6GHz".to_owned(),
+		other => format!("{other}M"),
+	}
 }
 
 /// Who is on the access point.
@@ -987,6 +1152,145 @@ mod tests {
 			events: Arc::new(Mutex::new(Vec::new())),
 			socket: std::path::PathBuf::from("/nonexistent"),
 		}
+	}
+
+	/// Two radios of one access point are one row, with the radios under it.
+	///
+	/// The case that produced this: an operator saw two `OpenPC.se` rows and
+	/// asked whether somebody was spoofing them. Both were real -- one access
+	/// point, 2.4 GHz and 5 GHz -- and the pane had drawn them as two lines
+	/// identical but for a few dBm, which is also what an evil twin looks
+	/// like. Grouping answers the question the flat list raised, and the
+	/// detail rows keep the evidence a reader needs to check it.
+	#[test]
+	fn two_radios_of_one_access_point_group_under_one_heading() {
+		let (status, plan) = (status_response(), plan_response());
+		let mut app = app(Pane::Wifi, &status, &plan);
+		app.scan = Some(two_radio_scan());
+
+		let lines = body(&app, ROW_COUNT_WIDTH);
+		let headings: Vec<&String> = lines
+			.iter()
+			.filter(|line| line.contains("OpenPC.se"))
+			.collect();
+		assert_eq!(headings.len(), 1, "not one heading: {lines:?}");
+		assert!(headings[0].contains("2 radios"), "{:?}", headings[0]);
+
+		// Both radios are still there, each with its band and address, so the
+		// reader can see the shared manufacturer prefix and adjacent
+		// addresses that make it one access point.
+		let detail: Vec<&String> = lines
+			.iter()
+			.filter(|line| line.starts_with("    "))
+			.collect();
+		assert_eq!(detail.len(), 2, "{lines:?}");
+		// In the order the scan gave them, which the fixture deliberately does
+		// not sort.
+		assert!(detail[0].contains("5GHz") && detail[0].contains("f0:9f:c2:7e:bd:7d"));
+		assert!(detail[1].contains("2.4GHz") && detail[1].contains("f0:9f:c2:7d:bd:7d"));
+		// The mobility domain is shown as a claim beside the address.
+		assert!(detail[0].contains("ft:a1b2"), "{:?}", detail[0]);
+	}
+
+	/// Same name, different security, is two networks and stays two.
+	///
+	/// The anomaly worth seeing, and the reason security is part of the
+	/// grouping key rather than just something printed in the heading. An open
+	/// clone of a secured network is the evil twin that can actually take
+	/// your traffic, and collapsing it into the real one would hide the single
+	/// difference a person should act on.
+	#[test]
+	fn the_same_name_with_different_security_is_not_grouped() {
+		let (status, plan) = (status_response(), plan_response());
+		let mut app = app(Pane::Wifi, &status, &plan);
+		app.scan = Some(serde_json::json!({
+			"response": "wifi_scan",
+			"access_points": [
+				{
+					"bssid": "f0:9f:c2:7d:bd:7d", "frequency": 2412, "signal": -40,
+					"secured": true, "ssid": "4f70656e50432e7365", "name": "OpenPC.se"
+				},
+				{
+					"bssid": "00:11:22:33:44:55", "frequency": 2437, "signal": -35,
+					"secured": false, "ssid": "4f70656e50432e7365", "name": "OpenPC.se"
+				}
+			]
+		}));
+
+		let lines = body(&app, ROW_COUNT_WIDTH);
+		let headings: Vec<&String> = lines
+			.iter()
+			.filter(|line| line.contains("OpenPC.se"))
+			.collect();
+		assert_eq!(headings.len(), 2, "an open clone was hidden: {lines:?}");
+		assert!(headings.iter().any(|line| line.contains("secured")));
+		assert!(headings.iter().any(|line| line.contains("open")));
+	}
+
+	/// The selected line joins the network that line is about.
+	///
+	/// Grouping made the nth line stop being the nth entry, and `connect`
+	/// indexed the entries by the line -- so selecting a heading below the
+	/// first group would have joined some other network. That is the worst
+	/// kind of list bug: it acts, confidently, on the wrong thing. This walks
+	/// every line and asserts the entry it names is the one it displays.
+	#[test]
+	fn every_line_names_the_entry_it_is_about() {
+		let (status, plan) = (status_response(), plan_response());
+		let mut app = app(Pane::Wifi, &status, &plan);
+		app.scan = Some(two_radio_scan());
+
+		let rows = super::wifi_rows(&app, ROW_COUNT_WIDTH);
+		let entries = app.scan_entries();
+		assert!(rows.len() >= 3, "{rows:?}");
+
+		for (line, at) in &rows {
+			let Some(at) = at else { continue };
+			let entry = entries.get(*at).expect("the index is in range");
+			let bssid = entry
+				.get("bssid")
+				.and_then(serde_json::Value::as_str)
+				.expect("a bssid");
+			if line.starts_with("    ") {
+				// A detail row names its own radio.
+				assert!(line.contains(bssid), "{line} is not about {bssid}");
+			} else {
+				// A heading stands for its strongest member, which is the one
+				// a client would associate with.
+				assert_eq!(
+					entry.get("signal").and_then(serde_json::Value::as_i64),
+					Some(-40),
+					"the heading points at the weaker radio: {line}"
+				);
+			}
+		}
+	}
+
+	/// One access point, two radios, with a mobility domain on each.
+	///
+	/// **The weaker radio is listed first, deliberately.** The daemon sorts
+	/// strongest-first, so in practice the first member of a group is its
+	/// strongest and taking either would look right -- which is exactly why a
+	/// fixture in that order proves nothing. Replacing the heading's
+	/// strongest-member choice with "the first one" passed against a sorted
+	/// fixture and fails against this, which is the difference between a test
+	/// and a decoration.
+	fn two_radio_scan() -> Value {
+		serde_json::json!({
+			"response": "wifi_scan",
+			"access_points": [
+				{
+					"bssid": "f0:9f:c2:7e:bd:7d", "frequency": 5220, "signal": -45,
+					"secured": true, "ssid": "4f70656e50432e7365", "name": "OpenPC.se",
+					"mobility_domain": "a1b2"
+				},
+				{
+					"bssid": "f0:9f:c2:7d:bd:7d", "frequency": 2412, "signal": -40,
+					"secured": true, "ssid": "4f70656e50432e7365", "name": "OpenPC.se",
+					"mobility_domain": "a1b2"
+				}
+			]
+		})
 	}
 
 	/// The highlight cannot be moved off the end of the list.

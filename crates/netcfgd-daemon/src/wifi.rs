@@ -17,7 +17,7 @@ use netcfgd_model::{Document, Ssid, WifiNetwork};
 use netcfgd_proto::{Response, ScanEntry, ScanReport, StationEntry, StationReport, WifiState};
 use netcfgd_secret::Resolver;
 use netcfgd_supplicant::protocol::{
-	parse_network_list, parse_scan_results, parse_status, status_field,
+	parse_mobility_domain, parse_network_list, parse_scan_results, parse_status, status_field,
 };
 use netcfgd_supplicant::{add_network, Client};
 use std::path::Path;
@@ -131,6 +131,21 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 			name: name_of(&result.ssid),
 			configured: configured_for(document, &result.ssid, &result.bssid)
 				.map(|network| network.id.clone()),
+			// **Asked only where the flags say fast transition.** The domain
+			// lives in `BSS <bssid>` rather than in `SCAN_RESULTS`, so it
+			// costs one round trip per access point -- and with fifty
+			// networks in range, asking every one would make a scan
+			// noticeably slower to serve something almost none of them have.
+			// The flags are already parsed and say which ones can answer.
+			mobility_domain: result
+				.does_fast_transition()
+				.then(|| {
+					client
+						.ask(&format!("BSS {}", result.bssid))
+						.ok()
+						.and_then(|reply| parse_mobility_domain(&reply))
+				})
+				.flatten(),
 			bssid: result.bssid,
 			frequency: result.frequency,
 			signal: result.signal,

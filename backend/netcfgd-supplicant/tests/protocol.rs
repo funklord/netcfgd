@@ -962,3 +962,44 @@ fn tls_with(private_key: CertSource) -> Security {
 		phase2: None,
 	})
 }
+
+/// The mobility domain, read from a `BSS <bssid>` reply.
+///
+/// 802.11r: access points an operator configured into one roaming domain
+/// advertise the same id. It is the only standard, machine-readable statement
+/// that two BSSes belong together -- and it is **not** a trust signal, because
+/// the element is unauthenticated bytes in a beacon. netcfgd shows it and does
+/// not group by it, which is the distinction this pins by existing.
+#[test]
+fn the_mobility_domain_is_read_where_there_is_one() {
+	use netcfgd_supplicant::protocol::parse_mobility_domain;
+
+	let with = "bssid=f0:9f:c2:7d:bd:7d\nfreq=2412\nmdid=a1b2\nssid=OpenPC.se\n";
+	assert_eq!(parse_mobility_domain(with), Some("a1b2".to_owned()));
+
+	// The ordinary case: an access point that does no fast transition has no
+	// element, and absent is the honest answer rather than an empty string a
+	// caller would print.
+	let without = "bssid=00:11:22:33:44:55\nfreq=2437\nssid=Cafe\n";
+	assert_eq!(parse_mobility_domain(without), None);
+	assert_eq!(parse_mobility_domain("mdid=\n"), None);
+}
+
+/// Fast transition is read from the flags, which cost nothing.
+///
+/// The cheap test that decides whether asking for the domain is worth a round
+/// trip. With fifty networks in range, asking every one would make a scan
+/// slower to serve something almost none of them have.
+#[test]
+fn fast_transition_is_visible_in_the_scan_flags() {
+	let results = netcfgd_supplicant::protocol::parse_scan_results(
+		"bssid / frequency / signal level / flags / ssid\n\
+		 f0:9f:c2:7d:bd:7d\t2412\t-40\t[WPA2-FT/PSK-CCMP][ESS]\tOpenPC.se\n\
+		 00:11:22:33:44:55\t2437\t-35\t[WPA2-PSK-CCMP][ESS]\tCafe\n",
+	);
+	assert_eq!(results.len(), 2);
+	assert!(results[0].does_fast_transition(), "{}", results[0].flags);
+	assert!(!results[1].does_fast_transition(), "{}", results[1].flags);
+	// Both are secured, so the new test is not accidentally reading that.
+	assert!(results[0].is_secured() && results[1].is_secured());
+}
