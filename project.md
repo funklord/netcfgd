@@ -1050,6 +1050,43 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**0127's writes had never once worked on a packaged install, and the reason
+was one line in netcfgd's own systemd unit**
+([0131](docs/decisions/0131-the-unit-forbade-what-the-architecture-requires.md)).
+`ReadOnlyPaths=/etc/netcfgd`, under the comment "netcfgd is the only authority
+and netcfgd never writes to it, so the init system enforces what the code
+already promises". That promise was 0069's, and 0127 reversed it: netcfgd is
+the *only* writer now. So `config_put`, `secret_put`, `config_delete`,
+`secret_delete`, `wifi_add`'s block and credential, and `radio_set` were all
+refused by netcfgd's own sandbox -- on every systemd machine, and in no test,
+because every test writes into a temp directory.
+
+**It surfaced as a client appearing to break the rule it was obeying.** The
+GUI reported "cannot write /etc/netcfgd/conf.d/radio-wlp0s20f3.conf: read-only
+file system", which reads as a client writing files behind the socket's back.
+It was not: the request went over the socket exactly as 0127 requires, the
+*daemon* tried to write, and the daemon's error travelled back verbatim.
+That verbatim relay is right and this is the argument for it rather than
+against -- the message named the file and the reason, which is what made the
+fault findable in one step.
+
+**The same file had a second, older copy of the mistake.** It chose
+`ProtectSystem=full` over `strict` on the reasoning that "strict would make
+/etc read-only, and the DNS backends legitimately write there". Backwards:
+`systemd.exec(5)` says `full` is what mounts /etc read-only, and `strict` takes
+the whole hierarchy. The setting delivered exactly the hazard the comment named
+it to avoid, so `/etc/resolv.conf`, `/etc/dnsmasq.d` and `/etc/unbound` were
+unwritable too. Two wrong beliefs about one setting, in one file, neither
+caught by anything.
+
+**`tools/sandbox_gate.py` is the fourth of the "two lists agree" gates** --
+after `uninstall_gate.py`, `dbus_policy_gate.py` and `privilege_gate.py` -- and
+it is the one whose failure was most thoroughly invisible: a test cannot see
+it, because a test writes to a temp directory by construction. It reads every
+`/etc` literal in non-test, non-comment source and requires each to be
+allow-listed or classified read-only, and reports allow-list entries nothing
+uses. Both bugs fail it.
+
 **Both panes offer the switch, and both stop lying about why they are
 empty.** The wifi pane in each client said "no wireless device in the
 configuration" and stopped -- describing the problem to somebody standing in

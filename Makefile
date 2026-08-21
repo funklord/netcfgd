@@ -730,6 +730,11 @@ packaging:
 	@# NetworkManager's own policy file is absent -- which is the machine the
 	@# shim exists for.
 	@python3 tools/dbus_policy_gate.py
+	@# Every /etc path netcfgd writes against what its own systemd unit allows.
+	@# A disagreement is EROFS at run time on a packaged install and in no test,
+	@# because every test writes into a temp directory. 0127's writes were
+	@# refused by netcfgd's own sandbox this way.
+	@python3 tools/sandbox_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
