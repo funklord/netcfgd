@@ -906,6 +906,49 @@ frame therefore survive, on a better footing than they had: they rested on a
 filesystem fact, and they now rest on a property of the configuration
 language.
 
+**An operator asked whether they were being spoofed, and the display was the
+reason.** Two `OpenPC.se` rows in the scan pane: one access point, 2.4 GHz and
+5 GHz, addresses differing by one in the fourth octet -- and the pane drew them
+as two lines identical but for a few dBm, which is also exactly what an evil
+twin looks like. The question was the right one to ask of that display and the
+wrong one for it to have prompted.
+
+The pane groups by **name and security** now, one heading per network with the
+radios under it, each carrying its band, address and mobility domain. Security
+is part of the key rather than only printed in the heading: two entries with
+the same name and different security are not one network, and an open clone of
+a secured one is the evil twin that can actually take traffic. Collapsing that
+pair would hide the single difference worth acting on.
+
+**It groups by nothing cleverer, deliberately.** Adjacent addresses and a
+shared manufacturer prefix read as "one access point" and are convention rather
+than fact; the mobility domain is unauthenticated bytes in a beacon. Grouping
+on either would be the display asserting something it cannot know, so the
+members are shown and the reader draws the conclusion with the evidence in
+front of them.
+
+**The grouping found a worse bug than the one it fixed.** `connect` indexed the
+scan entries by the selected *line*, and once headings and detail rows existed
+the nth line stopped being the nth entry -- so selecting a heading below the
+first group would have joined a different network. There is one grouping now,
+which says what each line stands for, and a test walks every line asserting the
+entry it names is the one it displays.
+
+**And the earlier claim that grouping would be a security loss was wrong.** It
+was put to the holder that a spoofer gains the same either way, which is
+correct: with WPA2/WPA3 an impostor cannot complete the handshake without the
+key, so the security is in the crypto and not in how a list is drawn. The real
+cost of grouping is diagnostic -- detail a person occasionally needs -- and
+that is answered by grouping *and* showing the members.
+
+**The mobility domain is read where there is one** (802.11r). It is asked for
+only where the scan flags already say the access point does fast transition,
+because the id lives in `BSS <bssid>` rather than `SCAN_RESULTS` and costs a
+round trip each -- with fifty networks in range, asking all of them would slow
+every scan to serve something almost none of them have. It is shown as a claim
+beside the address and used for nothing: it says the operator configured these
+to roam as one, which is worth knowing when they do not.
+
 **EAP-TLS could never have worked, and the test that would have shown it did
 not exist.** Writing one -- rendering a *complete* TLS network rather than
 asserting a missing-field error, which was the only EAP-TLS case there was --
