@@ -90,6 +90,8 @@ fn every_request() -> Vec<Request> {
 		Request::SecretPut { .. } => "secret_put",
 		Request::ConfigDelete { .. } => "config_delete",
 		Request::SecretDelete { .. } => "secret_delete",
+		Request::Radios => "radios",
+		Request::RadioSet { .. } => "radio_set",
 	};
 	let mut present: Vec<&str> = all.iter().map(name).collect();
 	present.sort_unstable();
@@ -106,6 +108,8 @@ fn every_request() -> Vec<Request> {
 			"hello",
 			"monitor",
 			"plan",
+			"radio_set",
+			"radios",
 			"reload",
 			"revert",
 			"secret_delete",
@@ -130,6 +134,11 @@ fn every_request_sample() -> Vec<Request> {
 		Request::Hello,
 		Request::Status,
 		Request::Plan,
+		Request::Radios,
+		Request::RadioSet {
+			interface: "wlan0".to_owned(),
+			activate: true,
+		},
 		Request::Apply {
 			confirm: Some(90),
 			allow_disruption: vec!["eth0".to_owned()],
@@ -279,6 +288,7 @@ fn every_response() -> Vec<Response> {
 		Response::WifiScan(_) => "wifi_scan",
 		Response::WifiStatus(_) => "wifi_status",
 		Response::ApStations(_) => "ap_stations",
+		Response::Radios { .. } => "radios",
 		Response::Ok => "ok",
 		Response::Error { .. } => "error",
 	};
@@ -297,6 +307,7 @@ fn every_response() -> Vec<Response> {
 			"journal",
 			"ok",
 			"plan",
+			"radios",
 			"status",
 			"wifi_scan",
 			"wifi_status",
@@ -393,6 +404,22 @@ fn every_response_sample() -> Vec<Response> {
 		// pinned by nothing -- which a second client implementation then
 		// disagreed about without any gate noticing.
 		wifi_scan_sample(),
+		// Both states, because the pair is the point: a radio netcfgd holds
+		// and one another manager does, which a client renders differently.
+		Response::Radios {
+			radios: vec![
+				netcfgd_proto::Radio {
+					interface: "wlan0".to_owned(),
+					activated: true,
+					supplicant: true,
+				},
+				netcfgd_proto::Radio {
+					interface: "wlan1".to_owned(),
+					activated: false,
+					supplicant: true,
+				},
+			],
+		},
 		Response::WifiStatus(Box::new(WifiState {
 			interface: "wlan0".to_owned(),
 			state: "COMPLETED".to_owned(),

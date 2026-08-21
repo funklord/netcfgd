@@ -765,10 +765,35 @@ fn command_secret(positional: &[String], options: &Options) -> Result<ExitCode, 
 	}
 }
 
+/// `ncfg wifi activate|deactivate <radio>`.
+///
+/// **The interface is named rather than defaulted**, unlike `scan` and
+/// `status`. Those act on "the radio", which is unambiguous on a machine with
+/// one. This decides *which* radio netcfgd takes on, and a machine with two is
+/// exactly where that question is being asked -- defaulting would pick one of
+/// them for somebody who has more than one for a reason.
+///
+/// # Errors
+///
+/// A missing name, with the command that lists them.
+fn radio_request(subcommand: &str, rest: &[String]) -> Result<netcfgd_proto::Request, String> {
+	let Some(interface) = rest.first() else {
+		return Err(format!(
+			"`ncfg wifi {subcommand}` needs the name of a radio. `ncfg wifi radios` lists them"
+		));
+	};
+	Ok(netcfgd_proto::Request::RadioSet {
+		interface: interface.clone(),
+		activate: subcommand == "activate",
+	})
+}
+
 fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, String> {
 	let Some(subcommand) = positional.first() else {
 		return Err(
-			"`ncfg wifi` needs a subcommand: scan, status, add, connect or disconnect".to_owned(),
+			"`ncfg wifi` needs a subcommand: radios, activate, deactivate, scan, \
+			 status, add, connect or disconnect"
+				.to_owned(),
 		);
 	};
 	let rest = &positional[1..];
@@ -784,6 +809,8 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 	let socket = client::socket_path(&run_dir);
 
 	let request = match subcommand.as_str() {
+		"radios" => netcfgd_proto::Request::Radios,
+		"activate" | "deactivate" => radio_request(subcommand, rest)?,
 		"scan" => netcfgd_proto::Request::WifiScan {
 			interface: wireless_interface(rest.first(), options)?,
 		},
@@ -830,13 +857,30 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 			render_stations(&report, options.json)?;
 			Ok(ExitCode::SUCCESS)
 		}
+		client::Answer::Radios { radios } => {
+			render_radios(&radios, options.json)?;
+			Ok(ExitCode::SUCCESS)
+		}
 		client::Answer::Ok => {
 			println!(
 				"{}",
-				if matches!(request, netcfgd_proto::Request::WifiConnect { .. }) {
-					"joining; `ncfg wifi status` says whether it worked"
-				} else {
-					"disconnected"
+				match &request {
+					netcfgd_proto::Request::WifiConnect { .. } =>
+						"joining; `ncfg wifi status` says whether it worked".to_owned(),
+					netcfgd_proto::Request::RadioSet {
+						interface,
+						activate,
+					} =>
+						if *activate {
+							format!(
+								"netcfgd manages `{interface}` now, and will run a \
+								 supplicant on it. `ncfg wifi scan {interface}` should \
+								 find something"
+							)
+						} else {
+							format!("`{interface}` is no longer netcfgd's")
+						},
+					_ => "disconnected".to_owned(),
 				}
 			);
 			Ok(ExitCode::SUCCESS)
@@ -1041,6 +1085,42 @@ pub(crate) fn access_point_name(name: Option<&str>, ssid: &str) -> String {
 		Some("") => "(hidden)".to_owned(),
 		Some(text) => text.to_owned(),
 	}
+}
+
+/// The radios, and what netcfgd is doing about each.
+///
+/// Three states rather than two, because the third is the one somebody is
+/// stuck in: a radio nothing has activated but where a supplicant is
+/// answering belongs to another manager, and netcfgd declines those rather
+/// than taking them. Saying "not activated" there and nothing else would
+/// invite an `activate` that changes nothing.
+fn render_radios(radios: &[netcfgd_proto::Radio], json: bool) -> Result<(), String> {
+	if json {
+		let text = serde_json::to_string(radios)
+			.map_err(|error| format!("cannot render radios as json: {error}"))?;
+		println!("{text}");
+		return Ok(());
+	}
+	if radios.is_empty() {
+		println!("no radios on this machine");
+		return Ok(());
+	}
+	for radio in radios {
+		let state = match (radio.activated, radio.supplicant) {
+			(true, true) => "netcfgd's",
+			(true, false) => "netcfgd's, but no supplicant is answering",
+			(false, true) => {
+				"another manager's -- a supplicant is answering that netcfgd \
+			                  did not start"
+			}
+			(false, false) => "not activated",
+		};
+		println!("{:<16} {state}", radio.interface);
+	}
+	if radios.iter().any(|radio| !radio.activated) {
+		println!("\n`ncfg wifi activate <radio>` hands one to netcfgd.");
+	}
+	Ok(())
 }
 
 fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), String> {

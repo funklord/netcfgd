@@ -1050,6 +1050,39 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**Which radios netcfgd manages is now a switch a person can flip, per radio.**
+The alternative considered and rejected was claiming every wireless interface
+not marked `managed = false`, which fixes a fresh machine with no steps at all
+-- and gives an opt-out you must write *before* netcfgd touches the radio,
+which is the wrong way round on a machine with more than one. A laptop with an
+internal radio and a USB dongle for something else is the ordinary case, not
+the exotic one, so the answer has to be positive selection.
+
+The mechanism was already there: a `device <name> { wifi { } }` block is that
+selection, and after the fix above it is sufficient on its own. What was
+missing is that it could only be written by hand. `Request::Radios` lists every
+wireless interface the kernel reports with what netcfgd is doing about each,
+and `Request::RadioSet` takes one on or hands it back by writing or removing a
+`radio-<name>` drop-in.
+
+**Typed, so that it lives in the `wifi` tier.** What activation writes is a
+`device` block, and a client that sent one as *text* would be sending
+configuration -- 0117's remote code execution, and `admin`. An interface name
+and a boolean can name no hook, no path and no `run_as`, so the shape of the
+message is what bounds it, exactly as it does for `wifi_add`: a member of the
+`netcfgd` group can turn on the radio in their own laptop without being able to
+decide who else may.
+
+**Three states, not two.** A radio nothing has activated but where a supplicant
+is answering belongs to another manager, and netcfgd declines those rather than
+taking them -- so reporting only "not activated" would invite an `activate`
+that changes nothing. `supplicant` is netcfgd's answer rather than the
+machine's, and deliberately: the probe is a connect to a control socket that
+`wpa_supplicant` gives to one group, so a daemon running as an ordinary user
+reports `false` for a supplicant plainly there. Measured that way against the
+real radio on the machine that reported the fault. That is the honest answer to
+"can netcfgd reach it", which is the question the field is for.
+
 **netcfgd would take a radio from a supplicant it did not start, and that had
 to be fixed before anything could claim radios more widely.** `start_supplicant`
 read "a control socket with no netcfgd pid file behind it" as "stale, remove

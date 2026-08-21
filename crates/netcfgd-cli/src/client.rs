@@ -37,6 +37,11 @@ pub(crate) enum Answer {
 	WifiStatus(Box<netcfgd_proto::WifiState>),
 	/// Who is associated with an access point.
 	ApStations(Box<netcfgd_proto::StationReport>),
+	/// The radios this machine has.
+	Radios {
+		/// One per wireless interface.
+		radios: Vec<netcfgd_proto::Radio>,
+	},
 	/// The request failed.
 	Error {
 		/// What went wrong.
@@ -59,6 +64,7 @@ impl Answer {
 			Self::WifiScan(_) => "a scan".to_owned(),
 			Self::WifiStatus(_) => "a radio status".to_owned(),
 			Self::ApStations(_) => "a station list".to_owned(),
+			Self::Radios { .. } => "a radio list".to_owned(),
 			Self::Error { message } => format!("an error: {message}"),
 			Self::Unexpected(value) => {
 				let rendered = value.to_string();

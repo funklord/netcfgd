@@ -38,7 +38,13 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// a proximity sensor for anybody granted `observe`. Under the default
 		// policy that is root; a site that opens `observe` to `any` is opening
 		// this too, deliberately.
-		| Request::ApStations { .. } => Tier::Observe,
+		| Request::ApStations { .. }
+		// Listing radios is reading, and it is the list a client needs before
+		// it can offer anything wireless at all. Nothing here is other
+		// people's: an interface name, whether netcfgd was given it, and
+		// whether a supplicant answers. All three are visible to anybody who
+		// can run `ip link` on the machine.
+		| Request::Radios => Tier::Observe,
 
 		// Scanning is not reading: it transmits probe requests, it interrupts
 		// whatever the radio was doing, and it is one of the things design
@@ -65,7 +71,15 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		Request::WifiScan { .. }
 		| Request::WifiConnect { .. }
 		| Request::WifiDisconnect { .. }
-		| Request::WifiAdd { .. } => Tier::Wifi,
+		| Request::WifiAdd { .. }
+		// Taking a radio on is `wifi` for the same reason adding a network is.
+		// What it writes is a `device` block, and a client sending one as
+		// *text* would be sending configuration -- 0117's remote code
+		// execution, and `admin`. An interface name and a boolean can name no
+		// hook, no path and no `run_as`, so the shape of the message is what
+		// bounds it, and a member of the `netcfgd` group can turn on the radio
+		// in their own laptop without being able to decide who else may.
+		| Request::RadioSet { .. } => Tier::Wifi,
 
 		// Everything that changes the machine. Apply is Admin even when the
 		// only thing in the plan is a wifi association: a tier that could call
