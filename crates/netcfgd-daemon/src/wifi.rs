@@ -97,18 +97,59 @@ pub(crate) fn radios(document: Option<&Document>, observed: &netcfgd_model::Obse
 	Response::Radios { radios }
 }
 
-/// The `device` block activation writes.
+/// The configuration activation writes.
 ///
-/// Deliberately the smallest thing that makes netcfgd manage the radio:
-/// `autoconnect` is the one policy an operator turning a radio on has an
-/// opinion about, and everything else in `WifiDevicePolicy` has a default that
-/// is right until somebody says otherwise. A block that wrote out every key
-/// would be netcfgd answering questions on their behalf, and it would freeze
-/// today's defaults into a file that outlives them.
-fn device_block(interface: &str) -> String {
-	format!(
-		"# Written by `ncfg wifi activate`. Ordinary configuration: read it,\n		 # edit it, or delete it -- deleting it hands the radio back.\n\n		 device {interface} {{\n\twifi {{\n\t\tautoconnect = true\n\t}}\n}}\n"
-	)
+/// **Two blocks, and the second one is not optional.** The first draft wrote
+/// only the `device` block, on the reasoning that it is the smallest thing
+/// that says netcfgd manages the radio. It plans nothing at all: the planner
+/// walks `desired.interfaces`, so a device nothing has an `interface` block
+/// for is never visited, and activation reported success for a file that
+/// changed no behaviour. Measured with `ncfg plan` against a real radio --
+/// `device` alone answers "nothing to do", and adding the interface answers
+/// `backend.start wlp0s20f3 wifi: Supplicant`.
+///
+/// The two say different things and both are needed. `device` is policy about
+/// hardware -- which supplicant, whether to autoconnect, whether netcfgd
+/// touches it at all. `interface` is the statement that this link's
+/// configuration is netcfgd's, which is what makes it something to plan.
+///
+/// **`dhcp` is netcfgd choosing, and it is the one choice made here.**
+/// Everything else in `WifiDevicePolicy` has a default that is right until
+/// somebody says otherwise, and writing every key out would freeze today's
+/// defaults into a file that outlives them. Addressing has no such default: a
+/// radio that associates and is never addressed is a radio that does not work,
+/// and a wifi client that is not on DHCP is rare enough to be worth editing a
+/// file for. The comment says so in the file, where somebody will find it.
+fn activation_blocks(interface: &str) -> String {
+	// Built by lines rather than as one format string with continuations.
+	// The first version used `\n\` continuations and the source's own
+	// indentation ended up *inside* the file: every line came out with a tab
+	// and a space in front of it. It compiled -- leading whitespace means
+	// nothing to the config language -- so nothing failed, and the only cost
+	// was a file netcfgd wrote for a person to read that looked like a
+	// mistake.
+	[
+		"# Written by `ncfg wifi activate`. Ordinary configuration: read it,",
+		"# edit it, or delete it -- deleting it hands the radio back.",
+		"#",
+		"# Two blocks, and both are needed. `device` is policy about the",
+		"# hardware; `interface` is what makes this link netcfgd's to",
+		"# configure, and without it nothing is planned for the radio at all.",
+		"#",
+		"# `dhcp` is the assumption. Change it here for a static address.",
+		"",
+		&format!("device {interface} {{"),
+		"\twifi {",
+		"\t\tautoconnect = true",
+		"\t}",
+		"}",
+		"",
+		&format!("interface {interface} {{"),
+		"\tconfig = \"dhcp\"",
+		"}",
+		"",
+	]
+	.join("\n")
 }
 
 /// Take a radio on, or hand it back.
@@ -144,7 +185,7 @@ pub(crate) fn set_radio(
 			&state.paths.config,
 			&state.paths.factory,
 			&name,
-			&device_block(interface),
+			&activation_blocks(interface),
 			// Replacing is right here and is not the general case: this is a
 			// switch, so turning on something already on is the state being
 			// asked for rather than a collision.
@@ -699,5 +740,81 @@ pub(crate) fn configure_network(
 	match wifi_profile::install(config_dir, factory_dir, &profile, passphrase) {
 		Ok(_) => Response::Ok,
 		Err(error) => Response::error(error),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	/// What activation writes must actually plan a supplicant.
+	///
+	/// **The check the first version of this feature did not have, and the
+	/// bug it would have caught.** Activation wrote a `device` block, reported
+	/// success, and planned nothing -- because the planner walks
+	/// `desired.interfaces` and a device nothing has an `interface` block for
+	/// is never visited. Every layer passed: the request was well formed, the
+	/// tier was right, the file was written, the pane redrew. The operator got
+	/// "cannot reach the supplicant" and no reason.
+	///
+	/// So this asserts the *outcome* rather than the text. Comparing the
+	/// written block against an expected string would have passed just as
+	/// happily against the broken one; what makes this test worth having is
+	/// that it compiles the file and asks the planner what it would do.
+	#[test]
+	fn what_activation_writes_plans_a_supplicant() {
+		let mut sources = netcfgd_compile::SourceMap::new();
+		sources.add("radio-wlan0.conf", super::activation_blocks("wlan0"));
+		let document = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
+			.unwrap_or_else(|diagnostics| {
+				panic!(
+					"activation writes something that does not compile:\n{}",
+					diagnostics.render(&sources)
+				)
+			});
+
+		// A radio that exists, because `radios_of` asks the kernel's answer
+		// rather than the document's -- a `wifi { }` section is not a claim
+		// that the interface is one.
+		let observed = netcfgd_model::Observed {
+			links: vec![netcfgd_model::ObservedLink {
+				name: "wlan0".to_owned(),
+				index: 2,
+				kind: String::new(),
+				wireless: true,
+				up: false,
+				carrier: true,
+				reachable: None,
+				mtu: 1500,
+				mac: None,
+				master: None,
+				parent: None,
+				offloads: Vec::new(),
+				ipv6_token: None,
+				qdisc: None,
+				qdisc_bandwidth_bits: None,
+				qdisc_ingress: false,
+				ingress_redirect: None,
+				forwarding: None,
+				privacy: None,
+				accept_ra: None,
+				rfkill: None,
+				ownership: netcfgd_model::Ownership::Unknown,
+				private_key_loaded: false,
+				wireguard: None,
+				bond: None,
+				bridge: None,
+				macvlan: None,
+				vlan: None,
+				tunnel: None,
+				vxlan: None,
+			}],
+			..Default::default()
+		};
+
+		let plan = netcfgd_plan::plan(&document, &observed, &netcfgd_plan::PlanOptions::default());
+		let names: Vec<&str> = plan.actions.iter().map(|action| action.op.name()).collect();
+		assert!(
+			names.contains(&"backend.start"),
+			"activating a radio plans no supplicant, so it would change nothing: {names:?}"
+		);
 	}
 }

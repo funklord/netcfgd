@@ -1050,6 +1050,48 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**Activating a radio wrote half a configuration and reported success.** The
+`device` block alone plans nothing: the planner walks `desired.interfaces`, so
+a device nothing has an `interface` block for is never visited. Every layer
+passed -- the request was well formed, the tier was right, the file was
+written, the pane redrew -- and the operator got "cannot reach the supplicant"
+with no reason. Measured with `ncfg plan` against the real radio: `device`
+alone answers "nothing to do", and adding the interface answers
+`backend.start wlp0s20f3 wifi: Supplicant`.
+
+The test that now guards it asserts the **outcome** rather than the text: it
+compiles what activation writes and asks the planner what it would do.
+Comparing the block against an expected string would have passed just as
+happily against the broken version, which is the whole lesson -- a test of a
+generator that checks what it generated rather than what that does is a test
+of nothing. Commenting the `interface` block out of the generated text fails
+it.
+
+**This is a symptom of something larger that is not settled.** The shipped
+`netcfgd.conf.example` documents wireless as `device` plus `network` and no
+`interface` block, and `ncfg wifi add` writes a `network` block and nothing
+else. Both configure **nothing**: measured, device + network plans "nothing to
+do". So the documented way in has never produced a working radio, which is the
+same wall the original report hit from the other side.
+
+Two readings, and they are materially different:
+
+- **The code is right.** An `interface` block is netcfgd's statement that a
+  link's configuration is its to manage, and a `device` block is policy *about*
+  hardware rather than a claim on it. That fits `managed = false` living on
+  `device`, and it fits netcfgd only ever touching what the configuration
+  names. Then the example is incomplete and `ncfg wifi add` should write an
+  interface block too.
+- **The planner is wrong.** A managed radio with a `wifi { }` section is a
+  claim on it, and requiring a second block is ceremony. Then the planner
+  should visit devices that have no interface block.
+
+`project.md` is authoritative over code and it currently says the first is
+unnecessary, so this is the case the working practice says to flag rather than
+resolve: which one is wrong is a real question, and the person who knows is not
+the one who noticed. Activation writes both blocks meanwhile, because a switch
+that reports success and changes nothing is worse than either answer.
+
 **0127's writes had never once worked on a packaged install, and the reason
 was one line in netcfgd's own systemd unit**
 ([0131](docs/decisions/0131-the-unit-forbade-what-the-architecture-requires.md)).
