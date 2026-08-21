@@ -269,6 +269,32 @@ pub fn settings(
 	Ok(out)
 }
 
+/// The settings for a pre-shared-key network.
+///
+/// # Why the `FT-` variants are named alongside the base ones
+///
+/// `key_mgmt` is a list of key management modes netcfgd is **willing** to use,
+/// not one it demands. The supplicant intersects the list with what the access
+/// point advertises in its RSN element and picks from what is left, so naming
+/// `FT-PSK` beside `WPA-PSK` costs nothing against a BSS that does no fast
+/// transition -- it simply is not in the intersection. Omitting it costs
+/// something real against a BSS that does: 802.11r is negotiated at
+/// association, so a supplicant that never offered it cannot fast-transition
+/// later, and every roam between access points in one mobility domain is a
+/// full reauthentication instead of a four-frame exchange. On an enterprise
+/// network that is a fresh EAP conversation with the authentication server per
+/// roam.
+///
+/// **Fast transition over SAE requires protected management frames**, which is
+/// the one place this could have gone wrong. It does not, because the arm that
+/// names `FT-SAE` alone already sets `ieee80211w=2`, and the transitional arm
+/// names it beside plain `SAE` under `ieee80211w=1` -- where an access point
+/// offering SAE at all requires the protection, so the negotiated result is
+/// the same. `FT-PSK` has no such requirement.
+///
+/// netcfgd is not doing fast transition here and could not: 0016 delegates key
+/// management and roaming to the supplicant permanently. This is the one thing
+/// a configuration writer can do about it, which is to stop excluding it.
 fn psk_settings(passphrase: &Secret, proto: PskProto) -> Result<Vec<Setting>, Unsupported> {
 	let text = passphrase.expose();
 	if !passphrase_is_sendable(text) {
@@ -287,14 +313,16 @@ fn psk_settings(passphrase: &Secret, proto: PskProto) -> Result<Vec<Setting>, Un
 	let mut out = vec![Setting::secret("psk", passphrase_argument(text))];
 	match proto {
 		PskProto::Wpa2 => {
-			out.push(Setting::plain("key_mgmt", "WPA-PSK"));
+			out.push(Setting::plain("key_mgmt", "WPA-PSK FT-PSK"));
 			out.push(Setting::plain("proto", "RSN"));
 			out.push(Setting::plain("ieee80211w", "1"));
 		}
 		PskProto::Wpa3 => {
 			// SAE only, with management frame protection required -- WPA3
-			// personal is not WPA3 without it.
-			out.push(Setting::plain("key_mgmt", "SAE"));
+			// personal is not WPA3 without it. That requirement is also what
+			// makes `FT-SAE` safe to name here: fast transition over SAE needs
+			// protected management frames, and this arm already demands them.
+			out.push(Setting::plain("key_mgmt", "SAE FT-SAE"));
 			out.push(Setting::plain("proto", "RSN"));
 			out.push(Setting::plain("ieee80211w", "2"));
 		}
@@ -302,7 +330,7 @@ fn psk_settings(passphrase: &Secret, proto: PskProto) -> Result<Vec<Setting>, Un
 			// Transitional: offer both and let the access point choose.
 			// `ieee80211w=1` is the only value that works against both, since
 			// 2 excludes WPA2 access points and 0 excludes SAE.
-			out.push(Setting::plain("key_mgmt", "WPA-PSK SAE"));
+			out.push(Setting::plain("key_mgmt", "WPA-PSK SAE FT-PSK FT-SAE"));
 			out.push(Setting::plain("proto", "RSN"));
 			out.push(Setting::plain("ieee80211w", "1"));
 		}
@@ -315,7 +343,7 @@ fn eap_settings(
 	resolver: &Resolver,
 ) -> Result<Vec<Setting>, Box<dyn std::error::Error>> {
 	let mut out = vec![
-		Setting::plain("key_mgmt", "WPA-EAP"),
+		Setting::plain("key_mgmt", "WPA-EAP FT-EAP"),
 		Setting::plain("eap", eap_name(eap.method)),
 		Setting::secret("identity", quote(&eap.identity)),
 	];

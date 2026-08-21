@@ -268,6 +268,51 @@ fn every_security_mode_is_accepted_by_the_real_parser() {
 	});
 }
 
+/// Every `key_mgmt` string netcfgd can emit is one this supplicant accepts.
+///
+/// The fast-transition modes are the reason this exists separately from the
+/// test above. `FT-PSK`, `FT-SAE` and `FT-EAP` are compiled in with
+/// `CONFIG_IEEE80211R`, which is a build option rather than a given -- and
+/// `ieee80211r` is genuinely absent from Debian's *hostapd*, so assuming the
+/// client half is present because the strings look standard is exactly the
+/// assumption worth checking against a real parser. `WPA-EAP FT-EAP` has no
+/// other live coverage at all: the enterprise case needs certificates the
+/// test above does not have, but the parser will accept the mode on its own.
+///
+/// The check is capable of a negative: `a_refused_setting_leaves_no_partial_network`
+/// sends `NOT-A-REAL-MODE` to this same parser and it is refused, so an
+/// acceptance here means something.
+#[test]
+fn every_key_management_mode_is_accepted_by_the_real_parser() {
+	with_supplicant(|supplicant| {
+		let client = supplicant.connect();
+		clear_networks(&client).expect("REMOVE_NETWORK all");
+
+		for mode in [
+			"NONE",
+			"OWE",
+			"WPA-PSK FT-PSK",
+			"SAE FT-SAE",
+			"WPA-PSK SAE FT-PSK FT-SAE",
+			"WPA-EAP FT-EAP",
+			"IEEE8021X",
+		] {
+			let id: u32 = client
+				.ask("ADD_NETWORK")
+				.expect("ADD_NETWORK")
+				.trim()
+				.parse()
+				.expect("an id");
+			client
+				.command(&format!("SET_NETWORK {id} key_mgmt {mode}"))
+				.unwrap_or_else(|error| panic!("this wpa_supplicant refuses `{mode}`: {error}"));
+			client
+				.command(&format!("REMOVE_NETWORK {id}"))
+				.expect("REMOVE_NETWORK");
+		}
+	});
+}
+
 /// The MAC policy has to be a value the real supplicant accepts. `mac_addr`
 /// takes a small integer whose meanings are documented but not obvious, and a
 /// value it rejects is a network that fails to configure at all.
