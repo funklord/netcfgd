@@ -954,6 +954,7 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 			proto,
 			hidden,
 			priority,
+			eap,
 		} => add_network_request(
 			state,
 			&wifi::Wanted {
@@ -963,6 +964,7 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 				proto: proto.as_deref(),
 				hidden: *hidden,
 				priority: *priority,
+				eap: eap.as_deref(),
 			},
 		),
 		// Unreachable: the caller matches exactly the variants above. A

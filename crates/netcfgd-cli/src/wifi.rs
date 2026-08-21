@@ -186,21 +186,47 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
 
-	// An enterprise network cannot go over the socket, so a caller who cannot
-	// write the file cannot add one at all -- and that has to be said *here*,
-	// under the same rule as the credential below: a refusal that was going to
-	// happen anyway should not happen after somebody has typed a password.
-	//
-	// This one does have to predict, because the alternative is to find out
-	// after the prompt. It predicts by asking the directory the block would go
-	// in rather than the config directory, which is the distinction the
-	// fallback below got wrong first time.
+	// An enterprise network *can* go over the socket now, so the refusal that
+	// used to stand here is gone. What replaced it is narrower and is checked
+	// before the prompt for the same reason that one was: a certificate given
+	// as a path cannot cross, and finding that out after somebody has typed a
+	// password is the thing to avoid.
 	if wanted.eap.is_some() && !can_write(&wifi_profile::profile_path(&config_dir, &id)) {
+		for (given, flag) in [
+			(&wanted.ca_cert, "--ca-cert"),
+			(&wanted.client_cert, "--client-cert"),
+		] {
+			if let Some(path) = given {
+				if !path.starts_with("@secret:") {
+					return Err(format!(
+						"`{flag} {path}` names a file, and this cannot write \
+						 {} -- so the network has to go to netcfgd, which does not \
+						 accept a path. Store the contents first:\n  \
+						 ncfg secret set NAME < {path}\n\
+						 then pass `{flag} @secret:NAME`",
+						config_dir.display()
+					));
+				}
+			}
+		}
+	}
+
+	// **Nowhere to send it is a refusal, and it belongs before the prompt.**
+	// Found by a test that hung rather than failed: a network with a stored
+	// certificate reached the credential prompt on a machine with an
+	// unwritable config directory and no daemon, and would have asked for a
+	// password before saying it had nowhere to put the answer. The rule below
+	// says a refusal that was going to happen anyway must not happen after
+	// somebody has typed, and this is that rule applied to the case the
+	// earlier checks did not cover.
+	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
+	if !socket.exists() && !can_write(&wifi_profile::profile_path(&config_dir, &id)) {
 		return Err(format!(
-			"cannot write {} and an enterprise network cannot be added through \
-			 the daemon: `--eap` carries certificate paths, which the socket \
-			 deliberately does not accept (0117). Add this one as root",
-			config_dir.display()
+			"cannot write {} and nothing is listening on {} -- so there is nowhere \
+			 to put this network. Start netcfgd, or run this as somebody who can \
+			 write the configuration",
+			config_dir.display(),
+			socket.display()
 		));
 	}
 
@@ -238,7 +264,7 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 	// netcfgd runs on it, which has no socket to ask. That is somebody at a
 	// console, as root, with no network -- and they can write the file.
 	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
-	if socket.exists() && wanted.eap.is_none() {
+	if socket.exists() {
 		return add_over_socket(&profile, credential.as_deref(), wanted, options, "");
 	}
 
@@ -275,6 +301,20 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		document.as_ref(),
 	);
 	Ok(ExitCode::SUCCESS)
+}
+
+/// A `@secret:name` reference reduced to the name the socket carries.
+///
+/// The two spellings exist for a reason rather than by accident: a
+/// configuration file says `@secret:corp-ca` because that is the language's
+/// syntax for an indirection, and the socket carries `corp-ca` because a
+/// request that could hold the other spelling could hold a path. The prefix
+/// goes back on in the daemon, which is the only place it can.
+fn stored_name(reference: &str) -> String {
+	reference
+		.strip_prefix("@secret:")
+		.unwrap_or(reference)
+		.to_owned()
 }
 
 /// Whether this process could create `target`.
@@ -337,13 +377,25 @@ fn add_over_socket(
 	// *paths*, which are files the daemon would hand to a supplicant running as
 	// root, and 0117 left how to carry those undecided. Saying so beats an
 	// error about a field the reader never named.
-	if wanted.eap.is_some() {
-		return Err(format!(
-			"could not write the configuration ({local_error}), and an enterprise \
-			 network cannot be added through the daemon: `--eap` carries certificate \
-			 paths, which the socket deliberately does not accept. Add this one as \
-			 root, or from a machine where you can write /etc/netcfgd"
-		));
+	// A certificate given as a *path* still cannot cross: the socket carries
+	// the names of stored certificates and has no field a path fits in, which
+	// is what makes accepting an enterprise network safe at all. The way to
+	// use a file already on the machine is to store its contents first.
+	for (given, flag) in [
+		(&wanted.ca_cert, "--ca-cert"),
+		(&wanted.client_cert, "--client-cert"),
+	] {
+		if let Some(path) = given {
+			if !path.starts_with("@secret:") {
+				return Err(format!(
+					"could not write the configuration ({local_error}), and \
+					 `{flag} {path}` names a file, which the socket does not accept: \
+					 a path is an instruction to open a file as root. Store the \
+					 contents instead --\n  ncfg secret set NAME < {path}\n\
+					 and pass `{flag} @secret:NAME`"
+				));
+			}
+		}
 	}
 
 	let run_dir = crate::state::resolve_dir(options.run_dir.as_deref());
@@ -355,6 +407,18 @@ fn add_over_socket(
 		proto: wanted.proto.map(str::to_owned),
 		hidden: profile.hidden,
 		priority: profile.priority,
+		eap: wanted.eap.map(|method| {
+			Box::new(netcfgd_proto::EapRequest {
+				method: method.to_owned(),
+				identity: wanted.identity.clone().unwrap_or_default(),
+				anonymous_identity: wanted.anonymous_identity.clone(),
+				phase2: wanted.phase2.clone(),
+				// Already checked above to be `@secret:` references; the socket
+				// carries the bare name and the daemon puts the prefix back.
+				ca_cert: wanted.ca_cert.as_ref().map(|value| stored_name(value)),
+				client_cert: wanted.client_cert.as_ref().map(|value| stored_name(value)),
+			})
+		}),
 	};
 
 	match crate::client::ask(&socket, &request) {
@@ -903,13 +967,16 @@ mod tests {
 		// would send a reader after a daemon when the answer is to run this as
 		// root; reporting only the write would hide that there is another way.
 		let error = add(&["Cafe".to_owned()], &options).expect_err("it cannot be added");
+		// Both halves, which is the point: two different things to do about
+		// it, and a reader told only about the permission goes looking for one
+		// to grant when starting netcfgd would have done.
 		assert!(
-			error.contains("could not write the configuration"),
-			"the local failure is not named: {error}"
+			error.contains(&etc.display().to_string()),
+			"the directory it cannot write is not named: {error}"
 		);
 		assert!(
-			error.contains("could not ask netcfgd"),
-			"the fallback was not attempted, or its failure is not named: {error}"
+			error.contains("netcfgd.sock"),
+			"the socket nothing is listening on is not named: {error}"
 		);
 
 		// Nothing was left behind by either half.
@@ -919,30 +986,67 @@ mod tests {
 		restore();
 	}
 
-	/// An enterprise network cannot cross the socket, so it is refused before
-	/// the passphrase prompt rather than after it.
+	/// A certificate given as a path is refused before anyone types a password.
 	///
-	/// The ordering is the assertion. `--eap` reaches a prompt that stops and
-	/// waits for a person, and a refusal that was always going to happen must
-	/// not happen after they have typed. There is no stdin here, so a prompt
-	/// would fail with a message about a missing password -- which is what this
-	/// distinguishes.
+	/// **This replaces a test that refused enterprise networks outright.** They
+	/// cross the socket now: a certificate is content netcfgd stores, so
+	/// `EapRequest` carries the *names* of stored ones and has no field a path
+	/// fits in. What is left to refuse is the narrower thing -- a caller who
+	/// cannot write the file and named a file anyway -- and the ordering rule
+	/// is the one the old test was really about: a refusal that was always
+	/// going to happen must not happen after somebody has typed a password.
 	#[test]
-	fn an_enterprise_network_is_refused_before_anyone_types_a_password() {
+	fn a_certificate_path_is_refused_before_anyone_types_a_password() {
 		let (root, mut options) = fixture("unwritable-eap");
 		let etc = root.join("etc");
 		options.wifi.eap = Some("peap");
 		options.wifi.identity = Some("you@example.ac.uk".to_owned());
+		options.wifi.ca_cert = Some("/etc/ssl/certs/corp.pem".to_owned());
 		let restore = make_read_only(&etc);
 
 		let error = add(&["eduroam".to_owned()], &options).expect_err("it cannot be added");
 		assert!(
-			error.contains("cannot be added through the daemon"),
-			"the reason is not the socket's missing enterprise arm: {error}"
+			error.contains("ncfg secret set"),
+			"the refusal does not say how to fix it: {error}"
 		);
 		assert!(
-			!error.contains("password"),
+			!error.contains("password for"),
 			"it got as far as asking for a credential: {error}"
+		);
+
+		restore();
+	}
+
+	/// A stored certificate is not refused, which is what makes the above a
+	/// bound on paths rather than on enterprise networks.
+	#[test]
+	fn a_stored_certificate_is_not_refused_for_being_a_certificate() {
+		let (root, mut options) = fixture("unwritable-eap-stored");
+		let etc = root.join("etc");
+		options.wifi.eap = Some("peap");
+		options.wifi.identity = Some("you@example.ac.uk".to_owned());
+		options.wifi.ca_cert = Some("@secret:corp-ca".to_owned());
+		let restore = make_read_only(&etc);
+
+		// No daemon in this fixture, so it still cannot finish -- but it fails
+		// for want of somewhere to send it, not for naming a certificate, and
+		// it fails *before* the prompt.
+		//
+		// That last part is why this test exists in the form it does: the
+		// first version hung here rather than failing, because the code
+		// reached the credential prompt and blocked on standard input. A test
+		// that hangs stalls the suite instead of reporting, and the fix was in
+		// the code rather than the test -- there is nowhere to put the network,
+		// and saying so after somebody has typed a password is the ordering
+		// this command's own comments forbid.
+		let error = add(&["eduroam".to_owned()], &options).expect_err("no daemon is listening");
+		assert!(
+			!error.contains("ncfg secret set"),
+			"a stored certificate was refused as though it were a path: {error}"
+		);
+		assert!(
+			error.contains("nowhere to put this network"),
+			"the refusal is not the one expected: {error}"
 		);
 
 		restore();

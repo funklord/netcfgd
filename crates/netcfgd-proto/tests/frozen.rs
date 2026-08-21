@@ -125,7 +125,8 @@ fn every_request() -> Vec<Request> {
 }
 
 fn every_request_sample() -> Vec<Request> {
-	vec![
+	let mut samples = enterprise_samples();
+	samples.extend(vec![
 		Request::Hello,
 		Request::Status,
 		Request::Plan,
@@ -178,6 +179,7 @@ fn every_request_sample() -> Vec<Request> {
 			proto: Some("wpa3".to_owned()),
 			hidden: true,
 			priority: Some(10),
+			eap: None,
 		},
 		Request::WifiAdd {
 			ssid: "63616665".to_owned(),
@@ -186,6 +188,7 @@ fn every_request_sample() -> Vec<Request> {
 			proto: None,
 			hidden: false,
 			priority: None,
+			eap: None,
 		},
 		Request::WifiDisconnect {
 			interface: "wlan0".to_owned(),
@@ -228,6 +231,36 @@ fn every_request_sample() -> Vec<Request> {
 		},
 		Request::ApStations {
 			interface: "wlan0".to_owned(),
+		},
+	]);
+	samples
+}
+
+/// The 802.1X requests, in their own function.
+///
+/// Split out because the list above went over its line budget, and these are
+/// the group that reads as one subject.
+fn enterprise_samples() -> Vec<Request> {
+	vec![
+		// The arm that exists because a certificate stopped being a path.
+		// Every certificate here is the *name* of a stored secret and there is
+		// no field a path fits in, so this sample is also the shape of what
+		// cannot be sent.
+		Request::WifiAdd {
+			ssid: "656475726f616d".to_owned(),
+			id: Some("eduroam".to_owned()),
+			passphrase: Some("NOT-A-REAL-SECRET".to_owned()),
+			proto: None,
+			hidden: false,
+			priority: None,
+			eap: Some(Box::new(netcfgd_proto::EapRequest {
+				method: "peap".to_owned(),
+				identity: "you@corp.example".to_owned(),
+				anonymous_identity: Some("anonymous@corp.example".to_owned()),
+				phase2: Some("mschapv2".to_owned()),
+				ca_cert: Some("corp-ca".to_owned()),
+				client_cert: None,
+			})),
 		},
 	]
 }
