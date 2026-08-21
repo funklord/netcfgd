@@ -66,6 +66,46 @@ pub(crate) fn check_backend(document: Option<&Document>, interface: &str) -> Res
 	}
 }
 
+/// Why there is no supplicant on an interface, in words that say what to do.
+///
+/// **The control socket's own message cannot answer this and should not try.**
+/// It says "no control socket at ...: is `wpa_supplicant` running?", which is
+/// true, unhelpful, and points at the wrong program: the question is not
+/// whether somebody started a supplicant, it is why *netcfgd* did not. Only
+/// the document knows, and the document is here.
+///
+/// The case this was written for: a machine with no `device` block at all,
+/// where scanning worked until `NetworkManager` was stopped. NM adds the
+/// interface to the system `wpa_supplicant`, which creates the socket, so
+/// netcfgd was scanning through a supplicant it had not started and had no
+/// opinion about. Stop NM and the socket goes. Nothing in the old message
+/// suggested the fix was three lines of configuration.
+fn why_no_supplicant(document: Option<&Document>, interface: &str) -> Option<String> {
+	// Not a radio at all: the socket's own message is the right one, because
+	// the answer is not about configuration.
+	if !std::path::Path::new("/sys/class/net")
+		.join(interface)
+		.join("wireless")
+		.exists()
+	{
+		return None;
+	}
+
+	let device = document?
+		.devices
+		.iter()
+		.find(|device| device.name == interface);
+	match device {
+		Some(device) if !device.managed => Some(format!(
+			"`{interface}` is a radio, and its `device` block says `managed = false` -- 			 so netcfgd does not touch it and has started no supplicant. That is the 			 documented way to hand an interface to another daemon; remove the line to 			 take it back."
+		)),
+		Some(device) if device.wifi.is_some() => None,
+		_ => Some(format!(
+			"`{interface}` is a radio, and netcfgd has no `wifi` policy for it -- so it 			 does not manage the radio and has started no supplicant, which is why there 			 is nothing to scan with. Add this and netcfgd will run one:\n\n    			 device {interface} {{\n        wifi {{\n            autoconnect = true\n  			      }}\n    }}\n\n`ncfg config put radio -` will take it on standard input. 			 Until then a scan can only work through somebody else's supplicant, which is 			 what NetworkManager was providing."
+		)),
+	}
+}
+
 /// Find the `network` block this scan result belongs to, for labelling a scan.
 ///
 /// By SSID, and by BSSID for a network that has no SSID to match on -- one that
@@ -110,7 +150,11 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 	}
 	let client = match connect(interface) {
 		Ok(client) => client,
-		Err(message) => return Response::error(message),
+		// The document's answer first where it has one: it says what to change
+		// rather than what is missing.
+		Err(message) => {
+			return Response::error(why_no_supplicant(document, interface).unwrap_or(message))
+		}
 	};
 
 	// A scan already in progress answers FAIL, which is not a failure worth

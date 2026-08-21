@@ -29,6 +29,13 @@ fn link(name: &str) -> ObservedLink {
 		name: name.to_owned(),
 		index: 2,
 		kind: String::new(),
+		// A fixture convention: a name beginning `wlan` is a radio. The real
+		// answer comes from `/sys/class/net/<name>/wireless`, which cannot be
+		// consulted for an interface that does not exist -- and every radio
+		// in this file is called `wlan0`. It has to be a property of the link
+		// rather than of the `device` block, because a `wifi { }` section
+		// carries things like `portal_check` that are meaningful on anything.
+		wireless: name.starts_with("wlan"),
 		up: false,
 		carrier: true,
 		reachable: None,
@@ -1353,11 +1360,29 @@ interface wlan0 { config = "dhcp" }
 	settle(&document, &mut observed);
 }
 
-/// A radio with no networks to join gets no supplicant. Starting one that
-/// would be handed nothing is a process running for no reason, and it makes
-/// `ncfg status` report a backend nothing asked for.
+/// A radio with no networks to join **does** get a supplicant, which is the
+/// reverse of what this test used to assert.
+///
+/// It said a supplicant handed nothing is "a process running for no reason,
+/// and it makes `ncfg status` report a backend nothing asked for". That is
+/// true only if nothing else needs it, and scanning does -- so the rule closed
+/// a loop: no supplicant without a network, no scan without a supplicant, and
+/// no network without a scan to find one. A machine whose wifi already worked
+/// stayed working; a machine starting from nothing could not begin, and the
+/// only way out was to hand-write a `network` block for a network you could
+/// not yet see.
+///
+/// **It went unnoticed because `NetworkManager` was running.** NM adds the
+/// interface to the system `wpa_supplicant`, which creates the control socket,
+/// so netcfgd scanned through a supplicant it had not started and had no
+/// opinion about. Stopping NM took the socket away and scanning stopped with
+/// it. Found on a machine, not here.
+///
+/// The declaration that now decides it is the `device` block: an operator who
+/// wrote `wifi { }` for a radio has said netcfgd manages it, and managing a
+/// radio includes being able to look at what is in range.
 #[test]
-fn a_radio_with_no_networks_gets_no_supplicant() {
+fn a_radio_with_no_networks_still_gets_a_supplicant() {
 	let document = document(
 		r#"
 device wlan0 { wifi { backend = "wpa_supplicant" } }
@@ -1370,8 +1395,8 @@ interface wlan0 { config = "null" }
 		&PlanOptions::default(),
 	);
 	assert!(
-		!names(&plan).contains(&"backend.start"),
-		"got {:?}",
+		names(&plan).contains(&"backend.start"),
+		"a declared radio cannot be scanned with: {:?}",
 		names(&plan)
 	);
 }

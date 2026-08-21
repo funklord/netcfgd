@@ -172,6 +172,11 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		name: name.to_owned(),
 		index: 7,
 		kind: "veth".to_owned(),
+		// False even in the maximal sample, because this one is a `veth` and
+		// a veth is not a radio. The field still appears in the witness: it
+		// carries `serde(default)` for reading an older observation back, not
+		// `skip_serializing_if`, so both values are written.
+		wireless: false,
 		up: true,
 		carrier: true,
 		// The decided form, for the reason above: absent is already pinned by

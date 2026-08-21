@@ -1043,6 +1043,10 @@ mod tests {
 			name: name.to_owned(),
 			index: 1,
 			kind: String::new(),
+			// The shim projects what netcfgd observed; whether a link is a
+			// radio is netcfgd's to say, and these fixtures are about
+			// NetworkManager's interfaces rather than about radios.
+			wireless: false,
 			up: true,
 			carrier: true,
 			reachable: None,
