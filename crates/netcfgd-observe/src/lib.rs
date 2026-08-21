@@ -154,14 +154,10 @@ fn observed_link(
 		name: link.name.clone(),
 		index: link.index,
 		kind: link.kind.clone(),
-		// `/sys/class/net/<name>/wireless` exists for a radio and for nothing
-		// else. The same test `start_supplicant` makes to choose a driver,
-		// read here instead so the planner can see it -- cheaper and more
-		// reliable than asking nl80211, and it needs no privilege.
-		wireless: std::path::Path::new("/sys/class/net")
-			.join(&link.name)
-			.join("wireless")
-			.exists(),
+		// The same predicate `start_supplicant` uses to choose a driver and
+		// `ncfg wifi add` uses to pick a radio, shared rather than repeated:
+		// three copies of one fact is how they end up disagreeing.
+		wireless: netcfgd_sys::radio::is_wireless(&netcfgd_sys::radio::class_net(), &link.name),
 		up: link.up,
 		carrier: link.carrier,
 		// The observer reads the kernel, and no probe result comes from

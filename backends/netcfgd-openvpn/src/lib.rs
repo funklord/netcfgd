@@ -338,7 +338,8 @@ fn write_auth(run: &Path, iface: &str, username: &str, password: &str) -> Result
 	// stops one, so it is stopped here.
 	if username.contains('\n') || password.contains('\n') {
 		return Err(format!(
-			"the openvpn credentials for {iface} contain a newline, which would be read 			 as a different field"
+			"the openvpn credentials for {iface} contain a newline, which would be read \
+			 as a different field"
 		));
 	}
 	file.write_all(format!("{username}\n{password}\n").as_bytes())

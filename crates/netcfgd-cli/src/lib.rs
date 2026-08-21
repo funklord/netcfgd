@@ -165,6 +165,13 @@ pub fn main() -> ExitCode {
 #[derive(Default)]
 pub(crate) struct Options {
 	config_dir: Option<String>,
+	/// Where to look for `/sys/class/net`, for tests.
+	///
+	/// A field rather than only an environment variable, because two tests
+	/// setting the same variable in one process while running in parallel is a
+	/// race -- and which one fails would depend on the scheduler, which is the
+	/// worst kind of test to own.
+	sys_class_net: Option<String>,
 	factory_dir: Option<String>,
 	yes: bool,
 	/// `secret set` only: overwrite a credential that is already stored.
@@ -229,6 +236,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String> {
 	let mut options = Options {
 		config_dir: None,
+		sys_class_net: None,
 		factory_dir: None,
 		yes: false,
 		replace: false,
@@ -304,6 +312,11 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 					}
 				});
 			}
+			"--interface" => options.wifi.interface = Some(take_value("--interface")?),
+			// Undocumented on purpose: it exists so a test can supply a radio
+			// without depending on what the developer's machine contains, and
+			// there is no reason for a person to set it.
+			"--sys-class-net" => options.sys_class_net = Some(take_value("--sys-class-net")?),
 			"--identity" => options.wifi.identity = Some(take_value("--identity")?),
 			"--anonymous-identity" => {
 				options.wifi.anonymous_identity = Some(take_value("--anonymous-identity")?);

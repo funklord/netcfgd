@@ -1050,6 +1050,55 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**The documented way in works now, and it is one command.** The question
+above is settled by the copyright holder: **the code is right** -- an
+`interface` block is netcfgd's statement that a link's configuration is its to
+manage, and a `device` block is policy *about* hardware rather than a claim on
+it -- so the example and `ncfg wifi add` were the incomplete halves. Both take
+the interface block now, and `ncfg wifi add` writes whatever the radio is
+missing rather than only the network.
+
+**Which radio, when there are several, is asked rather than guessed.** One
+radio and it is used; two and it refuses, listing them, with `--interface` to
+say which. **No radio at all is not a refusal** -- writing configuration for
+hardware that has not arrived is what this command on a machine being prepared
+is for, and the planner skips an interface that is not there.
+
+**Activation is said, not done quietly.** Adding a network can now hand a radio
+to netcfgd, which is a bigger change than the network that prompted it and not
+what somebody typing `ncfg wifi add` asked for in so many words. The report
+names the radio and the command that hands it back.
+
+**One fact, in one place.** `netcfgd_sys::radio` owns "is this a radio", which
+the observer, the executor and `ncfg wifi add` all needed -- the first two had
+their own copy of the same `Path::exists` and the third would have been a
+third. The root is a *parameter* rather than read from the environment inside
+the predicate, and that was not the first design: an environment variable
+worked until two tests set it at once, which is a race whose loser depends on
+the scheduler. A field on `Options`, beside `config_dir`, has no such problem.
+
+**The test asserts the outcome, and the fixtures stopped reading the
+developer's machine.** `what_add_writes_on_a_fresh_machine_plans_a_supplicant`
+compiles what the command wrote and asks the planner; skipping the activation
+fails it. And `fixture()` grew a radio of its own, because `add` reading the
+host's `/sys/class/net` found a real one no fixture mentioned and activated it
+-- turning one socket request into two and failing a test about *routing* for a
+reason that had nothing to do with routing. A test that passes on a build
+machine and fails on a laptop is not a test.
+
+**Both requests take the socket.** A client that sent the network to the daemon
+and wrote the radio's own blocks itself would be obeying 0127 for half of what
+it does, which is exactly the shape that produced "read-only file system" from
+the other side. `activating_a_radio_goes_over_the_socket_as_well` watches both
+requests cross and asserts `conf.d` is empty afterwards.
+
+**Seven messages had tabs embedded in them.** Multi-line string literals whose
+`\` continuations were lost render the source's own indentation into the text
+-- they compile, nothing fails, and the output has tab runs in the middle of
+sentences. Four came from this session and three date from 2026-08-02. All are
+fixed; the rewrite is mechanical and the rendered text was checked against a
+real run.
+
 **Activating a radio wrote half a configuration and reported success.** The
 `device` block alone plans nothing: the planner walks `desired.interfaces`, so
 a device nothing has an `interface` block for is never visited. Every layer
