@@ -407,6 +407,52 @@ pub(crate) struct Wanted<'a> {
 	pub(crate) proto: Option<&'a str>,
 	pub(crate) hidden: bool,
 	pub(crate) priority: Option<u32>,
+	pub(crate) eap: Option<&'a netcfgd_proto::EapRequest>,
+}
+
+/// The `@secret:` reference a stored certificate name becomes.
+///
+/// **The one place the socket's names turn into configuration**, and the only
+/// form they can take. A request carries a *name*; the configuration written
+/// from it says `@secret:<name>`, which the compiler lowers to a stored source
+/// and never to a path. A caller cannot reach the path form from here because
+/// there is nothing to write it in -- 0117's construction, applied to the
+/// field 0117 refused to accept for exactly this reason.
+fn stored_reference(name: Option<&String>) -> Option<String> {
+	name.map(|name| format!("@secret:{name}"))
+}
+
+/// The security an `eap` request describes.
+///
+/// # Errors
+///
+/// A method netcfgd does not implement, named rather than silently accepted:
+/// the supplicant would refuse the network later and say so only in its log.
+fn eap_security(eap: &netcfgd_proto::EapRequest) -> Result<wifi_profile::Security, String> {
+	match eap.method.as_str() {
+		"peap" | "ttls" | "tls" | "pwd" => {}
+		other => {
+			return Err(format!(
+				"`{other}` is not an EAP method netcfgd implements; it is peap, ttls, \
+				 tls or pwd"
+			))
+		}
+	}
+	if eap.identity.trim().is_empty() {
+		return Err(
+			"an enterprise network needs an `identity`, which is who you are to the \
+			 authentication server -- often a username, often with a realm"
+				.to_owned(),
+		);
+	}
+	Ok(wifi_profile::Security::Eap {
+		method: eap.method.clone(),
+		identity: Some(eap.identity.clone()),
+		anonymous_identity: eap.anonymous_identity.clone(),
+		ca_cert: stored_reference(eap.ca_cert.as_ref()),
+		client_cert: stored_reference(eap.client_cert.as_ref()),
+		phase2: eap.phase2.clone(),
+	})
 }
 
 pub(crate) fn configure_network(
@@ -422,6 +468,7 @@ pub(crate) fn configure_network(
 		proto,
 		hidden,
 		priority,
+		eap,
 	} = *wanted;
 	let Ok(ssid) = Ssid::from_hex(ssid_hex) else {
 		return Response::error(format!(
@@ -456,21 +503,38 @@ pub(crate) fn configure_network(
 		));
 	}
 
-	// An open network with a passphrase is refused rather than quietly
-	// dropping one of the two: the caller believes one of those things and it
-	// is not this function's business to pick.
-	let security = match (passphrase, proto) {
-		(None, None) => wifi_profile::Security::Open,
-		(None, Some(_)) => {
+	// An enterprise network is its own shape and takes the branch before the
+	// personal one: `proto` pins a WPA generation for a passphrase and means
+	// nothing here, and saying so beats writing a network that will not join.
+	let security = if let Some(eap) = eap {
+		if proto.is_some() {
 			return Response::error(
-				"a `proto` was given with no passphrase. An open network has no \
-				 generation to pin"
+				"a `proto` was given with an `eap` block. `proto` pins the generation \
+				 protecting a passphrase, and an enterprise network negotiates its own"
 					.to_owned(),
-			)
+			);
 		}
-		(Some(_), proto) => wifi_profile::Security::Psk {
-			proto: proto.map(ToOwned::to_owned),
-		},
+		match eap_security(eap) {
+			Ok(security) => security,
+			Err(message) => return Response::error(message),
+		}
+	} else {
+		// An open network with a passphrase is refused rather than quietly
+		// dropping one of the two: the caller believes one of those things and
+		// it is not this function's business to pick.
+		match (passphrase, proto) {
+			(None, None) => wifi_profile::Security::Open,
+			(None, Some(_)) => {
+				return Response::error(
+					"a `proto` was given with no passphrase. An open network has no \
+				 generation to pin"
+						.to_owned(),
+				)
+			}
+			(Some(_), proto) => wifi_profile::Security::Psk {
+				proto: proto.map(ToOwned::to_owned),
+			},
+		}
 	};
 	if let Some(proto) = proto {
 		if proto != "wpa2" && proto != "wpa3" {

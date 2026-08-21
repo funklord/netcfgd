@@ -1,3 +1,4 @@
+{"request":"wifi_add","ssid":"656475726f616d","id":"eduroam","passphrase":"NOT-A-REAL-SECRET","eap":{"method":"peap","identity":"you@corp.example","anonymous_identity":"anonymous@corp.example","phase2":"mschapv2","ca_cert":"corp-ca"}}
 {"request":"hello"}
 {"request":"status"}
 {"request":"plan"}
