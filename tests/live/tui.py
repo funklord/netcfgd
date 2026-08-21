@@ -15,7 +15,7 @@ What it covers is what only a terminal can show:
   * the five panes draw, and the tab bar tracks which one is showing;
   * `q` exits cleanly;
   * `a` then `y` runs apply-then-confirm through the daemon;
-  * SIGTERM and SIGHUP restore the terminal.
+  * SIGTERM, SIGHUP and SIGQUIT restore the terminal.
 
 The last is why this file exists. It was written after reading another
 project's TUI, which routes termination through the same wait as the keyboard
@@ -152,6 +152,10 @@ def flags(fd):
 	return {
 	    "ECHO": bool(attrs[3] & termios.ECHO),
 	    "ICANON": bool(attrs[3] & termios.ICANON),
+	    # `nonl` turns these off and nothing was checking them back on. A
+	    # terminal with ONLCR off is the one that prints a staircase.
+	    "ICRNL": bool(attrs[0] & termios.ICRNL),
+	    "ONLCR": bool(attrs[1] & termios.ONLCR),
 	}
 
 
@@ -237,8 +241,23 @@ def panes(session):
 
 
 def signals(session):
-	"""A kill leaves by the same path as the quit key."""
-	for sig, name in ((signal.SIGTERM, "SIGTERM"), (signal.SIGHUP, "SIGHUP")):
+	"""A kill leaves by the same path as the quit key.
+
+	`SIGQUIT` is here because it was the one that did not. `cbreak` leaves
+	`ISIG` on, so `^\\` arrives as a signal whose default dumps core and dies
+	with nothing run -- and measured against this pty it left ECHO, ICANON,
+	ICRNL and ONLCR all off with the alternate screen still up. It is a key a
+	person can press, beside the `^C` this already covered.
+
+	Four flags rather than two, for the same reason: ECHO and ICANON were the
+	two the first version of this checked, and `nonl` turns off two more that
+	nothing would have noticed. A shell with ONLCR off prints a staircase.
+	"""
+	for sig, name in (
+	    (signal.SIGTERM, "SIGTERM"),
+	    (signal.SIGHUP, "SIGHUP"),
+	    (signal.SIGQUIT, "SIGQUIT"),
+	):
 		proc, master, slave = session.spawn()
 		pump(master, 0.8)
 		check(f"the terminal is raw while running ({name})", flags(slave)["ECHO"], False)
@@ -249,8 +268,8 @@ def signals(session):
 			proc.kill()
 			proc.wait()
 		time.sleep(0.2)
-		check(f"{name} restores echo", flags(slave)["ECHO"], True)
-		check(f"{name} restores canonical mode", flags(slave)["ICANON"], True)
+		for flag in ("ECHO", "ICANON", "ICRNL", "ONLCR"):
+			check(f"{name} restores {flag}", flags(slave)[flag], True)
 		os.close(slave)
 		os.close(master)
 

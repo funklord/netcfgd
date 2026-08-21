@@ -25,7 +25,14 @@ use std::os::fd::RawFd;
 /// as a byte: an interrupt can also be sent from elsewhere, and a client that
 /// handled the keystroke but not the signal would be inconsistent about the
 /// same request.
-const BLOCKED: [libc::c_int; 3] = [libc::SIGTERM, libc::SIGHUP, libc::SIGINT];
+///
+/// **`SIGQUIT` is the same argument and was missing.** `cbreak` leaves `ISIG`
+/// on, so `^\` reaches the process as a signal whose default is to dump core
+/// and die -- nothing runs, and measured against a real pty it left `ECHO`,
+/// `ICANON`, `ICRNL` and `ONLCR` all off with the alternate screen still up.
+/// It is a key a person can press, next to the two that were already handled,
+/// and it was the one that broke the terminal.
+const BLOCKED: [libc::c_int; 4] = [libc::SIGTERM, libc::SIGHUP, libc::SIGINT, libc::SIGQUIT];
 
 /// A descriptor that becomes readable when a termination signal arrives.
 ///
