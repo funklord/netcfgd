@@ -754,7 +754,7 @@ fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
 	let mut lines: Vec<(String, Option<usize>)> = Vec::new();
 	for key in order {
 		let members = &groups[&key];
-		let (name, secured) = key;
+		let (name, security) = key;
 		// The strongest member speaks for the group, because that is the one
 		// a client would associate with and the number a reader is judging.
 		let signal = members
@@ -786,17 +786,10 @@ fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
 			.map_or(0, |(at, _)| at);
 		lines.push((
 			fit(
-				&format!(
-					"{known} {:<28} {:>4} dBm  {:<7}  {:<8}{}",
-					name,
-					signal,
-					if secured { "secured" } else { "open" },
-					radios,
-					block
-				),
+				&format!("{known} {name:<28} {signal:>4} dBm  {security:<7}  {radios:<8}{block}"),
 				width,
 			),
-			indices[&(name.clone(), secured)].get(strongest).copied(),
+			indices[&(name.clone(), security)].get(strongest).copied(),
 		));
 
 		// The detail, and only where there is something to tell apart. One
@@ -832,7 +825,7 @@ fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
 					&format!("    {band:<7} {bssid:<17}  {member_signal:>4} dBm{domain}"),
 					width,
 				),
-				indices[&(name.clone(), secured)].get(at).copied(),
+				indices[&(name.clone(), security)].get(at).copied(),
 			));
 		}
 	}
@@ -841,16 +834,22 @@ fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
 
 /// One network's worth of scan entries, and where each came from.
 type Grouped<'a> = (
-	Vec<(String, bool)>,
-	std::collections::HashMap<(String, bool), Vec<&'a serde_json::Value>>,
-	std::collections::HashMap<(String, bool), Vec<usize>>,
+	Vec<(String, &'static str)>,
+	std::collections::HashMap<(String, &'static str), Vec<&'a serde_json::Value>>,
+	std::collections::HashMap<(String, &'static str), Vec<usize>>,
 );
 
 /// Group scan entries by name and security, keeping the order they arrived in.
 ///
 /// Split from the rendering because they are two thoughts and the function was
 /// over its line budget holding both. The key is the interesting part and it
-/// is deliberately dull: the name, and whether joining needs a credential.
+/// is deliberately dull: the name, and the security word shown beside it.
+///
+/// **The word rather than the booleans behind it**, so the key cannot be
+/// coarser than what a reader sees. A key of "is it secured" would merge a
+/// passphrase network and an enterprise one sharing an SSID -- which is a real
+/// arrangement, not a curiosity -- under a heading that then described only
+/// one of them.
 ///
 /// **Nothing cleverer, on purpose.** Adjacent addresses and a shared
 /// manufacturer prefix read as "one access point" and are convention rather
@@ -858,12 +857,12 @@ type Grouped<'a> = (
 /// be the display asserting something it cannot know, so the members are shown
 /// and the reader draws the conclusion with the evidence in front of them.
 fn group_scan<'a>(entries: &'a [serde_json::Value]) -> Grouped<'a> {
-	let mut order: Vec<(String, bool)> = Vec::new();
-	let mut groups: std::collections::HashMap<(String, bool), Vec<&'a serde_json::Value>> =
+	let mut order: Vec<(String, &'static str)> = Vec::new();
+	let mut groups: std::collections::HashMap<(String, &'static str), Vec<&'a serde_json::Value>> =
 		std::collections::HashMap::new();
 	// The position each grouped member had in `scan_entries`, so a selected
 	// line can name the entry it stands for.
-	let mut indices: std::collections::HashMap<(String, bool), Vec<usize>> =
+	let mut indices: std::collections::HashMap<(String, &'static str), Vec<usize>> =
 		std::collections::HashMap::new();
 
 	for (at, entry) in entries.iter().enumerate() {
@@ -875,7 +874,11 @@ fn group_scan<'a>(entries: &'a [serde_json::Value]) -> Grouped<'a> {
 				.unwrap_or(""),
 		);
 		let secured = entry.get("secured").and_then(serde_json::Value::as_bool) == Some(true);
-		let key = (name, secured);
+		let enterprise = entry.get("enterprise").and_then(serde_json::Value::as_bool) == Some(true);
+		// The word itself, not the booleans behind it, so the key and the
+		// heading cannot come apart: a key coarser than what is displayed
+		// merges two networks under a heading describing one of them.
+		let key = (name, crate::access_point_security(secured, enterprise));
 		if !groups.contains_key(&key) {
 			order.push(key.clone());
 		}
@@ -1190,6 +1193,51 @@ mod tests {
 		assert!(detail[1].contains("2.4GHz") && detail[1].contains("f0:9f:c2:7d:bd:7d"));
 		// The mobility domain is shown as a claim beside the address.
 		assert!(detail[0].contains("ft:a1b2"), "{:?}", detail[0]);
+	}
+
+	/// One SSID carrying an open, a passphrase and an enterprise network is
+	/// three rows.
+	///
+	/// A real arrangement rather than a curiosity: a site offering a guest
+	/// network, a staff one and 802.1X under one name is ordinary, and it is
+	/// the case the grouping key was too coarse for. When the key was "is it
+	/// secured" the passphrase network and the enterprise one merged, under a
+	/// heading that said "secured" and described only one of them -- so an
+	/// operator selecting that row got whichever came first.
+	#[test]
+	fn one_ssid_with_three_kinds_of_security_is_three_rows() {
+		let (status, plan) = (status_response(), plan_response());
+		let mut app = app(Pane::Wifi, &status, &plan);
+		app.scan = Some(serde_json::json!({
+			"response": "wifi_scan",
+			"access_points": [
+				{
+					"bssid": "f0:9f:c2:7d:bd:7d", "frequency": 2412, "signal": -40,
+					"secured": true, "enterprise": false,
+					"ssid": "4f70656e50432e7365", "name": "OpenPC.se"
+				},
+				{
+					"bssid": "00:11:22:33:44:55", "frequency": 2437, "signal": -35,
+					"secured": false, "enterprise": false,
+					"ssid": "4f70656e50432e7365", "name": "OpenPC.se"
+				},
+				{
+					"bssid": "00:11:22:33:44:66", "frequency": 5180, "signal": -50,
+					"secured": true, "enterprise": true,
+					"ssid": "4f70656e50432e7365", "name": "OpenPC.se"
+				}
+			]
+		}));
+
+		let lines = body(&app, ROW_COUNT_WIDTH);
+		let headings: Vec<&String> = lines
+			.iter()
+			.filter(|line| line.contains("OpenPC.se"))
+			.collect();
+		assert_eq!(headings.len(), 3, "two were merged: {lines:?}");
+		assert!(headings.iter().any(|line| line.contains("enterprise")));
+		assert!(headings.iter().any(|line| line.contains("secured")));
+		assert!(headings.iter().any(|line| line.contains("open")));
 	}
 
 	/// Same name, different security, is two networks and stays two.

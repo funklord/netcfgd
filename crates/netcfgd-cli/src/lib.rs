@@ -1014,6 +1014,27 @@ pub(crate) fn is_radio(kind: Option<&str>, name: &str) -> bool {
 /// keep saying the same words. Until the socket has a specification (0116) that
 /// agreement is a comment in two languages, which is why it is written down in
 /// both.
+/// The one word a scan row uses for an access point's security.
+///
+/// **Three values, not two.** "secured" on a corporate network sends an
+/// operator looking for a passphrase that does not exist; naming 802.1X says
+/// what will be asked for. The word has to be the same in every client -- the
+/// GUI, the TUI and `ncfg wifi scan` -- for the same reason
+/// [`access_point_name`] exists: three places each choosing their own word is
+/// how they end up disagreeing about one access point.
+///
+/// It is also the TUI's grouping key rather than merely its heading, so a
+/// passphrase network and an enterprise one sharing an SSID stay two rows. A
+/// key coarser than the word displayed would merge them under a heading that
+/// then described only one.
+pub(crate) fn access_point_security(secured: bool, enterprise: bool) -> &'static str {
+	match (secured, enterprise) {
+		(_, true) => "enterprise",
+		(true, false) => "secured",
+		(false, false) => "open",
+	}
+}
+
 pub(crate) fn access_point_name(name: Option<&str>, ssid: &str) -> String {
 	match name {
 		None => format!("hex:{ssid}"),
@@ -1037,7 +1058,7 @@ fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), Str
 	let mut any_unconfigured = false;
 	for entry in &report.access_points {
 		let name = access_point_name(entry.name.as_deref(), &entry.ssid);
-		let security = if entry.secured { "secured" } else { "open" };
+		let security = access_point_security(entry.secured, entry.enterprise);
 		let configured = if let Some(id) = &entry.configured {
 			format!("  [{id}]")
 		} else {

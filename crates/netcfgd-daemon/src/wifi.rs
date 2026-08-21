@@ -127,6 +127,7 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 		.into_iter()
 		.map(|result| ScanEntry {
 			secured: result.is_secured(),
+			enterprise: result.is_enterprise(),
 			ssid: result.ssid.to_hex(),
 			name: name_of(&result.ssid),
 			configured: configured_for(document, &result.ssid, &result.bssid)

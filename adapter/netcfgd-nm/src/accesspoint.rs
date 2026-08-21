@@ -50,13 +50,17 @@ pub(crate) fn strength(dbm: i32) -> u8 {
 ///
 /// Returns `(flags, wpa_flags, rsn_flags)`.
 ///
-/// The security a scan reports is a boolean on netcfgd's socket: an entry is
-/// secured or it is not. The supplicant knows more -- it parses
-/// `[WPA2-PSK-CCMP][ESS]` and keeps the string -- but the daemon collapses it
-/// before the socket, so the shim cannot have it without a socket change.
-/// Constraint 6 forbids making that change for an adapter's benefit, and this
-/// is not the commit to argue it on its own merits, so the shim does two
-/// things instead.
+/// The security a scan reports used to be one boolean on netcfgd's socket, and
+/// is now two: secured, and whether the credential is 802.1X. The supplicant
+/// knows more still -- it parses `[WPA2-PSK-CCMP][ESS]` and keeps the string
+/// -- and the daemon collapses that before the socket.
+///
+/// **`enterprise` did not arrive for the shim's benefit**, which is the reason
+/// it may be used here. Constraint 6 forbids changing the socket for an
+/// adapter, and this comment previously said so while guessing PSK for every
+/// unconfigured secured network. netcfgd's own graphical client needed to know
+/// which credential to ask an operator for, so the field crossed for that, and
+/// the shim reads what is there.
 ///
 /// For a network the *configuration* describes, the answer is exact: the
 /// document says whether it is `psk` with which generation, `eap`, or `owe`,
@@ -64,12 +68,17 @@ pub(crate) fn strength(dbm: i32) -> u8 {
 /// covers the case that matters most, since it is the network an applet is
 /// about to be asked to join.
 ///
-/// For everything else, WPA2-PSK with CCMP: the overwhelmingly common shape of
-/// a secured network, and the one an applet handles by prompting for a
-/// passphrase. A wrong guess here costs a prompt for the wrong credential
-/// type; refusing to answer costs the network not appearing at all.
+/// For an unconfigured one, 802.1X where the scan says enterprise and WPA2-PSK
+/// with CCMP otherwise -- the overwhelmingly common shape of a secured
+/// network, and the one an applet handles by prompting for a passphrase. That
+/// prompt is what the distinction buys: an applet told PSK about a corporate
+/// network asks for a passphrase nobody has.
 #[must_use]
-pub(crate) fn security_flags(secured: bool, configured: Option<&Security>) -> (u32, u32, u32) {
+pub(crate) fn security_flags(
+	secured: bool,
+	enterprise: bool,
+	configured: Option<&Security>,
+) -> (u32, u32, u32) {
 	let ciphers = ap_security::PAIR_CCMP | ap_security::GROUP_CCMP;
 	match configured {
 		Some(Security::Psk(psk)) => {
@@ -98,7 +107,12 @@ pub(crate) fn security_flags(secured: bool, configured: Option<&Security>) -> (u
 		None if secured => (
 			ap_flag::PRIVACY,
 			ap_security::NONE,
-			ciphers | ap_security::KEY_MGMT_PSK,
+			ciphers
+				| if enterprise {
+					ap_security::KEY_MGMT_802_1X
+				} else {
+					ap_security::KEY_MGMT_PSK
+				},
 		),
 		// An open network, whether the document says so or the scan does.
 		Some(Security::Open) | None => (ap_flag::NONE, ap_security::NONE, ap_security::NONE),
@@ -163,7 +177,7 @@ impl AccessPoint {
 		let Some(entry) = self.entry() else {
 			return (ap_flag::NONE, ap_security::NONE, ap_security::NONE);
 		};
-		security_flags(entry.secured, self.configured().as_ref())
+		security_flags(entry.secured, entry.enterprise, self.configured().as_ref())
 	}
 }
 
@@ -311,7 +325,7 @@ mod tests {
 	/// 1416.
 	#[test]
 	fn a_transition_network_matches_what_a_real_daemon_reports() {
-		let (flags, wpa, rsn) = security_flags(true, Some(&psk(PskProto::Wpa2Wpa3)));
+		let (flags, wpa, rsn) = security_flags(true, false, Some(&psk(PskProto::Wpa2Wpa3)));
 		assert_eq!(flags, ap_flag::PRIVACY);
 		assert_eq!(wpa, ap_security::NONE);
 		assert_eq!(rsn, 1416);
@@ -320,15 +334,15 @@ mod tests {
 	#[test]
 	fn each_generation_asks_for_the_key_management_it_uses() {
 		assert_eq!(
-			security_flags(true, Some(&psk(PskProto::Wpa2))).2,
+			security_flags(true, false, Some(&psk(PskProto::Wpa2))).2,
 			ap_security::PAIR_CCMP | ap_security::GROUP_CCMP | ap_security::KEY_MGMT_PSK
 		);
 		assert_eq!(
-			security_flags(true, Some(&psk(PskProto::Wpa3))).2,
+			security_flags(true, false, Some(&psk(PskProto::Wpa3))).2,
 			ap_security::PAIR_CCMP | ap_security::GROUP_CCMP | ap_security::KEY_MGMT_SAE
 		);
 		assert_eq!(
-			security_flags(true, Some(&Security::Owe)).2,
+			security_flags(true, false, Some(&Security::Owe)).2,
 			ap_security::PAIR_CCMP | ap_security::GROUP_CCMP | ap_security::KEY_MGMT_OWE
 		);
 	}
@@ -340,11 +354,11 @@ mod tests {
 	#[test]
 	fn owe_is_private_without_being_a_prompt() {
 		assert_eq!(
-			security_flags(true, Some(&Security::Owe)).0,
+			security_flags(true, false, Some(&Security::Owe)).0,
 			ap_flag::PRIVACY
 		);
 		assert_eq!(
-			security_flags(false, Some(&Security::Open)).0,
+			security_flags(false, false, Some(&Security::Open)).0,
 			ap_flag::NONE
 		);
 	}
@@ -354,13 +368,35 @@ mod tests {
 	/// answering costs the network not being shown at all.
 	#[test]
 	fn an_unconfigured_secured_network_is_assumed_to_want_a_passphrase() {
-		let (flags, _, rsn) = security_flags(true, None);
+		let (flags, _, rsn) = security_flags(true, false, None);
 		assert_eq!(flags, ap_flag::PRIVACY);
 		assert_eq!(rsn & ap_security::KEY_MGMT_PSK, ap_security::KEY_MGMT_PSK);
 
-		let (open_flags, _, open_rsn) = security_flags(false, None);
+		let (open_flags, _, open_rsn) = security_flags(false, false, None);
 		assert_eq!(open_flags, ap_flag::NONE);
 		assert_eq!(open_rsn, ap_security::NONE);
+	}
+
+	/// An unconfigured *enterprise* network is 802.1X rather than the guess.
+	///
+	/// The case the guess used to get wrong, and the cost is the one that
+	/// comment names: an applet told PSK about a corporate network prompts for
+	/// a passphrase nobody has, and there is nothing the operator can type to
+	/// make it work. The scan now says which, so nothing is guessed here.
+	#[test]
+	fn an_unconfigured_enterprise_network_is_802_1x() {
+		let (flags, _, rsn) = security_flags(true, true, None);
+		assert_eq!(flags, ap_flag::PRIVACY);
+		assert_eq!(
+			rsn & ap_security::KEY_MGMT_802_1X,
+			ap_security::KEY_MGMT_802_1X
+		);
+		assert_eq!(
+			rsn & ap_security::KEY_MGMT_PSK,
+			0,
+			"a corporate network was also offered as PSK, which is the prompt \
+			 this distinction exists to prevent"
+		);
 	}
 
 	/// The configuration outranks the scan. A network the operator wrote down
@@ -368,7 +404,7 @@ mod tests {
 	#[test]
 	fn the_configuration_wins_over_the_boolean() {
 		assert_eq!(
-			security_flags(true, Some(&psk(PskProto::Wpa3))).2 & ap_security::KEY_MGMT_SAE,
+			security_flags(true, false, Some(&psk(PskProto::Wpa3))).2 & ap_security::KEY_MGMT_SAE,
 			ap_security::KEY_MGMT_SAE
 		);
 	}

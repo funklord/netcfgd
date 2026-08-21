@@ -215,7 +215,12 @@ void ncfg_wifi_view::scan()
 		const QString cells[column_count] = {
 			QStringLiteral("%1 dBm").arg(point.signal),
 			point.display,
-			point.secured ? QStringLiteral("secured") : QStringLiteral("open"),
+			/* Three words, not two. "secured" on a corporate network
+			 * tells an operator to look for a passphrase they do not
+			 * have; naming 802.1X says what will be asked for. */
+			point.enterprise ? QStringLiteral("enterprise")
+			         : point.secured ? QStringLiteral("secured")
+			                 : QStringLiteral("open"),
 			/* Empty rather than "no": the column answers "which network
 			 * block is this" and a word invented for the absent case
 			 * would read as a block called "no". */
@@ -322,14 +327,17 @@ void ncfg_wifi_view::add()
 	 * radio actually saw, and a network whose name does not render as text is
 	 * exactly the one somebody would type wrongly. */
 	const QTableWidgetItem *shown = table->item(row, 1);
-	const QTableWidgetItem *security = table->item(row, 2);
 	if (!shown || row >= scanned.size()) {
 		return;
 	}
-	const bool secured = security && security->text() == QStringLiteral("secured");
+	/* From the scan row rather than from the cell it was rendered into. The
+	 * text is display vocabulary and reading it back is a comparison that
+	 * breaks the moment the word changes -- which it just did, when
+	 * `enterprise` became a third value the column can hold. */
+	const ncfg_access_point_row &point = scanned.at(row);
 
-	ncfg_add_network_dialog dialog(connection, scanned.at(row).ssid, shown->text(), secured,
-	                   this);
+	ncfg_add_network_dialog dialog(connection, point.ssid, shown->text(), point.secured,
+	                   point.enterprise, this);
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}

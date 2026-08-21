@@ -320,7 +320,7 @@ unsigned ncfg_connection::confirm_default()
 
 bool ncfg_connection::wifi_add(const QString &ssid, const QString &id,
                    const QString &passphrase, const QString &proto, bool hidden,
-                   QString *error)
+                   const eap_request *eap, QString *error)
 {
 	if (!client) {
 		if (error) {
@@ -347,6 +347,38 @@ bool ncfg_connection::wifi_add(const QString &ssid, const QString &id,
 	network.proto = proto.isEmpty() ? nullptr : proto_bytes.constData();
 	network.hidden = hidden ? 1 : 0;
 	network.priority = -1;
+
+	/* Held at this scope for the same reason as the members above: the C
+	 * layer reads the pointers during the call, and a QByteArray built inside
+	 * the `if` would be gone before it did. */
+	QByteArray  method_bytes;
+	QByteArray  identity_bytes;
+	QByteArray  anonymous_bytes;
+	QByteArray  phase2_bytes;
+	QByteArray  ca_cert_bytes;
+	QByteArray  client_cert_bytes;
+	ncfg_eap_t  eap_fields = {};
+	if (eap) {
+		method_bytes = eap->method.toUtf8();
+		identity_bytes = eap->identity.toUtf8();
+		anonymous_bytes = eap->anonymous_identity.toUtf8();
+		phase2_bytes = eap->phase2.toUtf8();
+		ca_cert_bytes = eap->ca_cert.toUtf8();
+		client_cert_bytes = eap->client_cert.toUtf8();
+
+		eap_fields.method = method_bytes.constData();
+		eap_fields.identity = identity_bytes.constData();
+		/* Empty means "not given" rather than "given as empty", the same
+		 * distinction the members above draw: an empty string sent as a
+		 * value is this window answering on the operator's behalf. */
+		eap_fields.anonymous_identity =
+		    eap->anonymous_identity.isEmpty() ? nullptr : anonymous_bytes.constData();
+		eap_fields.phase2 = eap->phase2.isEmpty() ? nullptr : phase2_bytes.constData();
+		eap_fields.ca_cert = eap->ca_cert.isEmpty() ? nullptr : ca_cert_bytes.constData();
+		eap_fields.client_cert =
+		    eap->client_cert.isEmpty() ? nullptr : client_cert_bytes.constData();
+		network.eap = &eap_fields;
+	}
 
 	if (!ncfg_client_wifi_add(client, &network, message, sizeof(message))) {
 		if (error) {
@@ -393,6 +425,7 @@ bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_poin
 		row.frequency = point.frequency;
 		row.signal = point.signal;
 		row.secured = point.secured != 0;
+		row.enterprise = point.enterprise != 0;
 		/* Rendered below the seam, not here. The three cases -- text,
 		 * `(hidden)`, `hex:<ssid>` -- are vocabulary every client has to
 		 * share, and this file held a fourth spelling of them until it
