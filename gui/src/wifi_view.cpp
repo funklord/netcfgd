@@ -63,10 +63,13 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	join_button = new QPushButton(QStringLiteral("join"), this);
 	add_button = new QPushButton(QStringLiteral("add"), this);
 	leave_button = new QPushButton(QStringLiteral("disconnect"), this);
+	activate_button = new QPushButton(QStringLiteral("activate radio"), this);
+	activate_button->setObjectName(QStringLiteral("activate_radio"));
 	controls->addWidget(scan_button);
 	controls->addWidget(join_button);
 	controls->addWidget(add_button);
 	controls->addWidget(leave_button);
+	controls->addWidget(activate_button);
 	controls->addStretch();
 	layout->addLayout(controls);
 
@@ -93,6 +96,7 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	connect(join_button, &QPushButton::clicked, this, &ncfg_wifi_view::join);
 	connect(add_button, &QPushButton::clicked, this, &ncfg_wifi_view::add);
 	connect(leave_button, &QPushButton::clicked, this, &ncfg_wifi_view::leave);
+	connect(activate_button, &QPushButton::clicked, this, &ncfg_wifi_view::activate);
 	connect(table, &QTableWidget::itemSelectionChanged, this,
 	    &ncfg_wifi_view::selection_changed);
 	connect(interfaces, &QComboBox::currentTextChanged, this, [this]() { update_status(); });
@@ -143,9 +147,34 @@ void ncfg_wifi_view::refresh()
 		table->setRowCount(0);
 		/* The same sentence the TUI uses, deliberately: one condition, one
 		 * wording, whichever client the operator happens to be in. */
-		const QString none = QStringLiteral("no wireless device in the configuration");
+		const QString none = QStringLiteral("no wireless device on this machine");
 		status->setText(none);
 		emit reported(none);
+		chosen_radio = ncfg_radio_row();
+		selection_changed();
+		return;
+	}
+
+	/* Which radios netcfgd has been given, which is not the same question as
+	 * which radios exist. A radio nobody has activated used to leave this
+	 * view saying "no wireless device in the configuration" and stopping,
+	 * which described the problem to somebody standing in front of the fix. */
+	QList<ncfg_radio_row> known;
+	chosen_radio = ncfg_radio_row();
+	if (connection->radios(&known, &error)) {
+		for (const ncfg_radio_row &radio : known) {
+			if (radio.name == chosen_interface()) {
+				chosen_radio = radio;
+			}
+		}
+	}
+
+	if (!chosen_radio.activated) {
+		table->setRowCount(0);
+		const QString line =
+		    QStringLiteral("%1: %2").arg(chosen_interface(), chosen_radio.state());
+		status->setText(line);
+		emit reported(line);
 		selection_changed();
 		return;
 	}
@@ -304,17 +333,55 @@ void ncfg_wifi_view::selection_changed()
 	const int row = table->currentRow();
 	const QTableWidgetItem *configured = row >= 0 ? table->item(row, 3) : nullptr;
 
-	scan_button->setEnabled(have_radio);
-	leave_button->setEnabled(have_radio);
+	/* Everything wireless needs a radio netcfgd has been *given*, not merely
+	 * one that exists: scanning goes over a supplicant's control socket, and
+	 * netcfgd runs no supplicant on a radio nobody activated. Enabling these
+	 * anyway would teach the boundary one failure at a time, which is what the
+	 * `join` button below already refuses to do. */
+	const bool usable = have_radio && chosen_radio.activated;
+
+	/* Offered only where activating could work. A radio another manager holds
+	 * is one netcfgd declines to take while that manager runs, so the button
+	 * would do nothing -- the status line says who to stop instead. */
+	activate_button->setVisible(have_radio && !chosen_radio.activated);
+	activate_button->setEnabled(have_radio && !chosen_radio.activated
+	                && !chosen_radio.supplicant);
+
+	scan_button->setEnabled(usable);
+	leave_button->setEnabled(usable);
 	/* Enabled only for a row that names a `network` block. The button is the
 	 * honest place to express 0013's boundary: offering it and answering with
 	 * a refusal would teach the operator the rule one failure at a time. */
 	const bool joinable = configured && !configured->text().isEmpty();
-	join_button->setEnabled(have_radio && joinable);
+	join_button->setEnabled(usable && joinable);
 	/* The mirror image: `add` is for a row that has *no* block yet. A row with
 	 * one is already configured, and offering to add it again would be
 	 * offering the refusal the daemon gives by name. */
-	add_button->setEnabled(have_radio && row >= 0 && !joinable);
+	add_button->setEnabled(usable && row >= 0 && !joinable);
+}
+
+/* Hand the chosen radio to netcfgd, and look at what it can see.
+ *
+ * The scan follows immediately because activating is only ever a step towards
+ * it -- an operator who pressed this wants the list, not a second button. */
+void ncfg_wifi_view::activate()
+{
+	const QString interface = chosen_interface();
+	if (interface.isEmpty()) {
+		return;
+	}
+
+	QString error;
+	if (!connection->set_radio(interface, true, &error)) {
+		status->setText(error);
+		emit reported(error);
+		return;
+	}
+
+	refresh();
+	if (chosen_radio.activated) {
+		scan();
+	}
 }
 
 void ncfg_wifi_view::add()

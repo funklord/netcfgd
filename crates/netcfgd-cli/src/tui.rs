@@ -71,6 +71,12 @@ struct App {
 	status: Option<serde_json::Value>,
 	plan: Option<serde_json::Value>,
 	scan: Option<serde_json::Value>,
+	/// The radios this machine has, and what netcfgd is doing about each.
+	///
+	/// Fetched with the scan rather than once at startup: a USB radio can be
+	/// plugged in while the pane is open, and a list taken at startup would go
+	/// on saying it is not there.
+	radios: Option<serde_json::Value>,
 	stations: Option<serde_json::Value>,
 	events: Arc<Mutex<Vec<String>>>,
 	socket: std::path::PathBuf,
@@ -112,6 +118,7 @@ pub(crate) fn run(options: &Options) -> Result<ExitCode, String> {
 		plan: None,
 		stations: None,
 		scan: None,
+		radios: None,
 		events: Arc::new(Mutex::new(Vec::new())),
 		socket: socket.clone(),
 	};
@@ -320,10 +327,18 @@ impl App {
 				// Status first: the scan needs an interface name, and the
 				// operator should not have to supply one they can see.
 				self.status = self.fetch(&Request::Status);
+				self.radios = self.fetch(&Request::Radios);
 				if let Some(interface) = self.radio() {
 					self.scan = self.fetch(&Request::WifiScan { interface });
 				} else {
-					"no wireless device in the configuration".clone_into(&mut self.message);
+					// **Not an error any more, and that is the point.** A
+					// machine with a radio nobody has activated is the
+					// ordinary starting state, not a misconfiguration -- and
+					// the pane can now do something about it, so saying "no
+					// wireless device in the configuration" and stopping would
+					// be describing the problem to somebody standing in front
+					// of the fix.
+					self.scan = None;
 				}
 			}
 			Pane::Clients => {
@@ -431,6 +446,29 @@ impl App {
 		self.refresh();
 	}
 
+	/// Hand a radio to netcfgd.
+	///
+	/// The same key as joining a network, because it is the same intent from
+	/// the operator's side: use this one. What differs is which row the
+	/// highlight is on, and the pane says so on the row itself.
+	fn activate(&mut self, interface: &str) {
+		let request = Request::RadioSet {
+			interface: interface.to_owned(),
+			activate: true,
+		};
+		match client::ask(&self.socket, &request) {
+			Ok(client::Answer::Error { message }) => self.message = message,
+			Ok(_) => {
+				self.message = format!("{interface} is netcfgd's now; scanning");
+				// Straight into a scan rather than waiting for `r`: activating
+				// is only ever a step towards looking at what is in range, and
+				// the supplicant needs a moment either way.
+				self.refresh();
+			}
+			Err(error) => self.message = error,
+		}
+	}
+
 	/// Apply, always inside a confirm window.
 	///
 	/// Section 7.2 is explicit that this is the context where you are one bad
@@ -479,11 +517,13 @@ impl App {
 	/// happened to sit at that position. `wifi_rows` says what each line
 	/// stands for, and it is the same grouping the pane drew.
 	fn connect(&mut self) {
-		let Some(at) = wifi_rows(self, ROW_COUNT_WIDTH)
+		let row = wifi_rows(self, ROW_COUNT_WIDTH)
 			.get(self.selected)
-			.and_then(|(_, entry)| *entry)
-		else {
-			return;
+			.map_or(Row::Nothing, |(_, row)| row.clone());
+		let at = match row {
+			Row::Nothing => return,
+			Row::Radio(interface) => return self.activate(&interface),
+			Row::Network(at) => at,
 		};
 		let Some(entry) = self.scan_entries().get(at).cloned() else {
 			return;
@@ -529,6 +569,7 @@ impl App {
 			status: self.status.clone(),
 			plan: self.plan.clone(),
 			scan: self.scan.clone(),
+			radios: self.radios.clone(),
 			stations: self.stations.clone(),
 			events: Arc::clone(&self.events),
 			socket: self.socket.clone(),
@@ -557,15 +598,16 @@ impl App {
 /// The footer. Always on screen, because a full-screen client that hides its
 /// keys behind a keystroke is one nobody finds their way out of.
 const KEYS: &str =
-	"d devices  w wifi  p plan  e events | j/k move  r refresh  a apply  c connect  q quit";
+	"d devices  w wifi  p plan  e events | j/k move  r refresh  a apply  c use  q quit";
 
 /// What `?` adds: the things the footer cannot say in one line.
 ///
 /// Not a repeat of `KEYS`. A help key that prints what is already on the
 /// screen teaches the operator that help is useless.
 const HELP: &str = "d w s p e switch panes (s is clients). a applies with a 60s window: \
-	 y keeps it, n undoes it now, nothing reverts it. `c` marks networks the config can \
-	 join; `!` marks a station the access point should not be talking to.";
+	 y keeps it, n undoes it now, nothing reverts it. `c` uses the selected row: it joins \
+	 a network the config can join (marked `c`), or hands netcfgd a radio nobody has \
+	 given it. `!` marks a station the access point should not be talking to.";
 
 fn devices(app: &App, width: usize) -> Vec<String> {
 	let Some(links) = app
@@ -713,6 +755,87 @@ fn backends_on(app: &App, interface: &str, width: usize) -> Vec<String> {
 	out
 }
 
+/// What a line in the wifi pane stands for.
+///
+/// Two kinds, because the pane now shows two: the radios netcfgd could be
+/// given, and the networks it can see with the ones it has. `c` acts on the
+/// selected line, and what it does follows the **row** rather than the pane --
+/// activating a radio and joining a network are the same intent ("use this
+/// one"), so making them the same key is the honest arrangement rather than a
+/// shortcut.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Row {
+	/// A heading, a blank, or an explanation. `c` does nothing.
+	Nothing,
+	/// A radio, by interface name, that `c` would activate.
+	Radio(String),
+	/// A network, by its index in the scan, that `c` would join.
+	Network(usize),
+}
+
+/// The radios worth showing, which is not always all of them.
+///
+/// **Only when there is something to do about one.** A machine whose radios
+/// are all activated and answering wants its wifi pane to be networks, and a
+/// list of hardware above them is clutter that pushes the useful part down the
+/// screen. A radio that is not activated, or activated with nothing answering,
+/// is a reason the pane is emptier than expected -- and that is exactly when it
+/// has to be visible.
+fn radio_rows(app: &App) -> Vec<(String, Row)> {
+	let radios = app
+		.radios
+		.as_ref()
+		.and_then(|value| value.get("radios"))
+		.and_then(serde_json::Value::as_array)
+		.map(Vec::as_slice)
+		.unwrap_or_default();
+
+	let unfinished: Vec<&serde_json::Value> = radios
+		.iter()
+		.filter(|radio| {
+			let activated =
+				radio.get("activated").and_then(serde_json::Value::as_bool) == Some(true);
+			let supplicant =
+				radio.get("supplicant").and_then(serde_json::Value::as_bool) == Some(true);
+			!activated || !supplicant
+		})
+		.collect();
+	if unfinished.is_empty() {
+		return Vec::new();
+	}
+
+	let mut out = vec![("radios".to_owned(), Row::Nothing)];
+	for radio in unfinished {
+		let name = radio
+			.get("interface")
+			.and_then(serde_json::Value::as_str)
+			.unwrap_or("?");
+		let activated = radio.get("activated").and_then(serde_json::Value::as_bool) == Some(true);
+		let supplicant = radio.get("supplicant").and_then(serde_json::Value::as_bool) == Some(true);
+		let (state, row) = match (activated, supplicant) {
+			// The one a person gets stuck in: another manager holds this
+			// radio, so activating changes nothing until that stops. Said
+			// here rather than discovered by pressing `c` and waiting.
+			(false, true) => (
+				"another manager's -- stop it first".to_owned(),
+				Row::Nothing,
+			),
+			(false, false) => (
+				"not activated -- press c".to_owned(),
+				Row::Radio(name.to_owned()),
+			),
+			(true, false) => (
+				"activated, no supplicant answering".to_owned(),
+				Row::Nothing,
+			),
+			(true, true) => (String::new(), Row::Nothing),
+		};
+		out.push((format!("  {name:<16} {state}"), row));
+	}
+	out.push((String::new(), Row::Nothing));
+	out
+}
+
 fn wifi(app: &App, width: usize) -> Vec<String> {
 	wifi_rows(app, width)
 		.into_iter()
@@ -731,10 +854,21 @@ fn wifi(app: &App, width: usize) -> Vec<String> {
 /// So the grouping happens once and says what each line means. A heading
 /// carries its group's joinable entry; a detail row carries its own, so
 /// pressing `c` on a radio joins the network that radio belongs to.
-fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
+fn wifi_rows(app: &App, width: usize) -> Vec<(String, Row)> {
+	let mut rows = radio_rows(app);
 	let entries = app.scan_entries();
 	if entries.is_empty() {
-		return vec![("(no scan; press r to rescan)".to_owned(), None)];
+		rows.push((
+			if rows.is_empty() {
+				"(no scan; press r to rescan)".to_owned()
+			} else {
+				// With radios listed above, an empty scan is explained by
+				// them rather than being a second mystery.
+				"(nothing scanned yet)".to_owned()
+			},
+			Row::Nothing,
+		));
+		return rows;
 	}
 
 	// **Grouped by name and security, one heading per network, the radios
@@ -758,7 +892,7 @@ fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
 	// conclusion with the evidence in front of them.
 	let (order, groups, indices) = group_scan(&entries);
 
-	let mut lines: Vec<(String, Option<usize>)> = Vec::new();
+	let mut lines = rows;
 	for key in order {
 		let members = &groups[&key];
 		let (name, security) = key;
@@ -796,7 +930,10 @@ fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
 				&format!("{known} {name:<28} {signal:>4} dBm  {security:<7}  {radios:<8}{block}"),
 				width,
 			),
-			indices[&(name.clone(), security)].get(strongest).copied(),
+			indices[&(name.clone(), security)]
+				.get(strongest)
+				.copied()
+				.map_or(Row::Nothing, Row::Network),
 		));
 
 		// The detail, and only where there is something to tell apart. One
@@ -832,7 +969,10 @@ fn wifi_rows(app: &App, width: usize) -> Vec<(String, Option<usize>)> {
 					&format!("    {band:<7} {bssid:<17}  {member_signal:>4} dBm{domain}"),
 					width,
 				),
-				indices[&(name.clone(), security)].get(at).copied(),
+				indices[&(name.clone(), security)]
+					.get(at)
+					.copied()
+					.map_or(Row::Nothing, Row::Network),
 			));
 		}
 	}
@@ -1158,6 +1298,7 @@ mod tests {
 			status: Some(status.clone()),
 			plan: Some(plan.clone()),
 			scan: None,
+			radios: None,
 			stations: None,
 			events: Arc::new(Mutex::new(Vec::new())),
 			socket: std::path::PathBuf::from("/nonexistent"),
@@ -1282,6 +1423,88 @@ mod tests {
 		assert!(headings.iter().any(|line| line.contains("open")));
 	}
 
+	/// A radio nobody has activated is offered, and the offer is actionable.
+	///
+	/// The state the machine that reported this was in: a radio, no `device`
+	/// block, and a wifi pane that said "no wireless device in the
+	/// configuration" and stopped -- describing the problem to somebody
+	/// standing in front of the fix.
+	#[test]
+	fn an_unactivated_radio_is_offered_on_the_wifi_pane() {
+		let (status, plan) = (status_response(), plan_response());
+		let mut app = app(Pane::Wifi, &status, &plan);
+		app.radios = Some(serde_json::json!({
+			"response": "radios",
+			"radios": [{ "interface": "wlan0", "activated": false, "supplicant": false }]
+		}));
+
+		let rows = super::wifi_rows(&app, ROW_COUNT_WIDTH);
+		let offered = rows
+			.iter()
+			.find(|(_, row)| matches!(row, super::Row::Radio(name) if name == "wlan0"))
+			.expect("the radio is not offered: {rows:?}");
+		assert!(offered.0.contains("wlan0"), "{:?}", offered.0);
+		assert!(
+			offered.0.contains("press c"),
+			"the row does not say how to act on it: {:?}",
+			offered.0
+		);
+	}
+
+	/// A radio another manager holds is shown and is *not* actionable.
+	///
+	/// The state that wastes somebody's afternoon: pressing `c` would ask
+	/// netcfgd to take a radio it declines to take while the other manager is
+	/// running, so the row says who to stop instead of offering an action that
+	/// cannot work.
+	#[test]
+	fn a_radio_another_manager_holds_is_named_and_not_offered() {
+		let (status, plan) = (status_response(), plan_response());
+		let mut app = app(Pane::Wifi, &status, &plan);
+		app.radios = Some(serde_json::json!({
+			"response": "radios",
+			"radios": [{ "interface": "wlan0", "activated": false, "supplicant": true }]
+		}));
+
+		let rows = super::wifi_rows(&app, ROW_COUNT_WIDTH);
+		let line = rows
+			.iter()
+			.find(|(line, _)| line.contains("wlan0"))
+			.expect("the radio is not shown");
+		assert!(line.0.contains("another manager"), "{:?}", line.0);
+		assert!(
+			!matches!(line.1, super::Row::Radio(_)),
+			"a radio that cannot be taken was offered anyway: {:?}",
+			line.1
+		);
+	}
+
+	/// A machine whose radios are all working shows networks and nothing else.
+	///
+	/// The other half, and the reason the list is conditional: hardware above
+	/// the networks on every machine that is already working would push the
+	/// useful part down the screen for ever.
+	#[test]
+	fn a_working_radio_is_not_listed_above_the_networks() {
+		let (status, plan) = (status_response(), plan_response());
+		let mut app = app(Pane::Wifi, &status, &plan);
+		app.radios = Some(serde_json::json!({
+			"response": "radios",
+			"radios": [{ "interface": "wlan0", "activated": true, "supplicant": true }]
+		}));
+		app.scan = Some(two_radio_scan());
+
+		let rows = super::wifi_rows(&app, ROW_COUNT_WIDTH);
+		assert!(
+			!rows.iter().any(|(line, _)| line.contains("wlan0")),
+			"a working radio is cluttering the pane: {rows:?}"
+		);
+		assert!(
+			!rows.iter().any(|(line, _)| line == "radios"),
+			"an empty radio section was drawn: {rows:?}"
+		);
+	}
+
 	/// The selected line joins the network that line is about.
 	///
 	/// Grouping made the nth line stop being the nth entry, and `connect`
@@ -1299,8 +1522,10 @@ mod tests {
 		let entries = app.scan_entries();
 		assert!(rows.len() >= 3, "{rows:?}");
 
-		for (line, at) in &rows {
-			let Some(at) = at else { continue };
+		for (line, row) in &rows {
+			let super::Row::Network(at) = row else {
+				continue;
+			};
 			let entry = entries.get(*at).expect("the index is in range");
 			let bssid = entry
 				.get("bssid")

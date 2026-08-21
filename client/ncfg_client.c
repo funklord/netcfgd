@@ -1039,6 +1039,106 @@ char *ncfg_access_point_display(int named, const char *name, const char *ssid)
 	return dup_string(name);
 }
 
+void ncfg_radios_free(ncfg_radios_t *radios)
+{
+	if (!radios) {
+		return;
+	}
+	for (size_t i = 0; i < radios->count; i++) {
+		free(radios->items[i].interface);
+	}
+	free(radios->items);
+	memset(radios, 0, sizeof(*radios));
+}
+
+int ncfg_client_radios(ncfg_client_t *client, ncfg_radios_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no output");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"radios\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t root = ncfg_json_root(doc);
+	uint32_t list = ncfg_json_member(doc, root, "radios");
+	uint32_t count = ncfg_json_count(doc, list);
+	if (!count) {
+		/* A machine with no radio is a real answer, and calloc(0) may return
+		 * NULL without failing -- which the free path would then read as an
+		 * allocation that went wrong. Same trap convert_links() documents. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, list, i);
+		out->items[i].interface = member_text(doc, entry, "interface");
+		out->items[i].activated =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "activated"), 0);
+		out->items[i].supplicant =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "supplicant"), 0);
+		if (!out->items[i].interface) {
+			set_error(err, err_size, "out of memory");
+			ncfg_radios_free(out);
+			ncfg_json_free(doc);
+			return 0;
+		}
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
+int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int activate, char *err,
+              size_t err_size)
+{
+	if (!interface) {
+		set_error(err, err_size, "a radio needs a name");
+		return 0;
+	}
+
+	char request[512];
+	int head = snprintf(request, sizeof(request), "{\"request\":\"radio_set\",\"interface\":");
+	if (head < 0 || (size_t)head >= sizeof(request)) {
+		return 0;
+	}
+	size_t at = (size_t)head;
+	if (!ncfg_client_quote(interface, request + at, sizeof(request) - at)) {
+		set_error(err, err_size, "that interface name does not fit in one request");
+		return 0;
+	}
+	at += strlen(request + at);
+	int span = snprintf(request + at, sizeof(request) - at, ",\"activate\":%s}",
+	            activate ? "true" : "false");
+	if (span < 0 || (size_t)span >= sizeof(request) - at) {
+		set_error(err, err_size, "that interface name does not fit in one request");
+		return 0;
+	}
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
 static int convert_scan(const ncfg_json_doc_t *doc, ncfg_scan_t *out, char *err, size_t err_size)
 {
 	uint32_t root = ncfg_json_root(doc);

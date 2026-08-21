@@ -982,6 +982,67 @@ static void storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer(void)
 	staged_close(&staged);
 }
 
+/*
+ * The radio list, and taking one on.
+ *
+ * The three states are the reason this is worth a test of its own: a client
+ * that renders "activated" and "not activated" and nothing else sends somebody
+ * to press a button that cannot work, because the radio belongs to another
+ * manager and netcfgd declines those.
+ */
+static void radios_carry_the_three_states_a_client_has_to_tell_apart(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[1024];
+
+	char answers[1024];
+	snprintf(answers, sizeof(answers), "%s%s",
+	     "{\"response\":\"radios\",\"radios\":["
+	     "{\"interface\":\"wlan0\",\"activated\":true,\"supplicant\":true},"
+	     "{\"interface\":\"wlan1\",\"activated\":false,\"supplicant\":true},"
+	     "{\"interface\":\"wlan2\",\"activated\":false,\"supplicant\":false}]}\n",
+	     "{\"response\":\"ok\"}\n");
+	if (!staged_open(&staged, "a radio list can be staged", answers)) {
+		return;
+	}
+
+	ncfg_radios_t radios;
+	if (ncfg_client_radios(staged.client, &radios, err, sizeof(err))) {
+		(void)received(staged.server, sent, sizeof(sent));
+		ok("three radios come back", radios.count == 3, err);
+		if (radios.count == 3) {
+			ok("netcfgd's radio is activated and answering",
+			   radios.items[0].activated && radios.items[0].supplicant, "");
+			ok("another manager's is not activated and is answering",
+			   !radios.items[1].activated && radios.items[1].supplicant, "");
+			ok("a free radio is neither",
+			   !radios.items[2].activated && !radios.items[2].supplicant, "");
+			equals("and the name survives", radios.items[2].interface, "wlan2");
+		}
+		ncfg_radios_free(&radios);
+	} else {
+		ok("three radios come back", 0, err);
+	}
+
+	if (ncfg_client_radio_set(staged.client, "wlan2", 1, err, sizeof(err))) {
+		equals("activating names the radio and says which way",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"radio_set\",\"interface\":\"wlan2\",\"activate\":true}\n");
+	} else {
+		ok("activating names the radio and says which way", 0, err);
+	}
+
+	/* Freeing a list that was never filled in is nothing, which is the trap
+	 * calloc(0) sets: a machine with no radio at all takes this path. */
+	ncfg_radios_t empty;
+	memset(&empty, 0, sizeof(empty));
+	ncfg_radios_free(&empty);
+	ok("freeing an empty radio list is nothing", 1, "");
+
+	staged_close(&staged);
+}
+
 static void joining_names_a_network_and_never_a_secret(void)
 {
 	struct staged staged;
@@ -1650,6 +1711,7 @@ int main(int argc, char **argv)
 	adding_a_network_sends_typed_fields_only();
 	an_enterprise_network_sends_a_nested_eap_object();
 	storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer();
+	radios_carry_the_three_states_a_client_has_to_tell_apart();
 	an_apply_becomes_a_journal();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
 	the_handshake_says_what_this_connection_may_do();

@@ -535,6 +535,58 @@ int ncfg_client_secret_put(ncfg_client_t *client, const char *name, const char *
  * 0031). Joining something new is writing a config file (0069) and is not a
  * socket operation at all.
  */
+/*
+ * One radio, and whether netcfgd has been given it.
+ *
+ * `activated` is a `device` block with a `wifi` section and no
+ * `managed = false`: netcfgd's own record of being asked to manage the radio.
+ * `supplicant` is whether a supplicant answers on it.
+ *
+ * THE THIRD STATE IS THE ONE THAT MATTERS
+ *   Not activated with a supplicant answering means **another manager holds
+ *   this radio** -- NetworkManager, most often. netcfgd declines those rather
+ *   than taking them, so offering an "activate" that cannot work would waste
+ *   somebody's afternoon. A client showing these should say who to stop.
+ *
+ * `supplicant` is netcfgd's answer rather than the machine's: the probe is a
+ * connect to a socket wpa_supplicant gives to one group, so a daemon running
+ * as an ordinary user reports 0 for one that is plainly there. That is the
+ * right answer to "can netcfgd reach it", which is what a client needs.
+ */
+typedef struct {
+	char *interface;
+	int   activated;
+	int   supplicant;
+} ncfg_radio_t;
+
+typedef struct {
+	ncfg_radio_t *items;
+	size_t        count;
+} ncfg_radios_t;
+
+void ncfg_radios_free(ncfg_radios_t *radios);
+
+/*
+ * The radios this machine has, whether or not netcfgd manages them.
+ *
+ * Every wireless interface the kernel reports, because the list exists so that
+ * somebody can turn one on: a list of only the ones already on could not offer
+ * that. Needs `observe`.
+ */
+int ncfg_client_radios(ncfg_client_t *client, ncfg_radios_t *out, char *err, size_t err_size);
+
+/*
+ * Take a radio on, or hand it back.
+ *
+ * Needs the `wifi` tier rather than `admin`, and the reason is the shape of
+ * this call. What activation writes is a `device` block, and a client that
+ * sent one as *text* would be sending configuration -- which is remote code
+ * execution and is `admin`. An interface name and a flag can name no hook, no
+ * path and no `run_as`, so the message bounds what it can ask for.
+ */
+int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int activate, char *err,
+              size_t err_size);
+
 int ncfg_client_wifi_scan(ncfg_client_t *client, const char *interface, ncfg_scan_t *out,
               char *err, size_t err_size);
 int ncfg_client_wifi_status(ncfg_client_t *client, const char *interface,

@@ -415,6 +415,60 @@ bool ncfg_connection::secret_put(const QString &name, const QString &value, bool
 	return true;
 }
 
+bool ncfg_connection::radios(QList<ncfg_radio_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_radios_t radios = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_radios(client, &radios, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < radios.count; i++) {
+		ncfg_radio_row row;
+		row.name = QString::fromUtf8(radios.items[i].interface);
+		row.activated = radios.items[i].activated != 0;
+		row.supplicant = radios.items[i].supplicant != 0;
+		out->append(row);
+	}
+	ncfg_radios_free(&radios);
+	return true;
+}
+
+bool ncfg_connection::set_radio(const QString &interface, bool activate, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray name = interface.toUtf8();
+	if (!ncfg_client_radio_set(client, name.constData(), activate ? 1 : 0, message,
+	              sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out,
                 QString *error)
 {
