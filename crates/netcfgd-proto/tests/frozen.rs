@@ -571,6 +571,38 @@ fn the_socket_api_matches_its_witness() {
 	}
 }
 
+/// The exact bytes the C client emits are bytes this decoder accepts.
+///
+/// **The one seam neither side's tests cover.** `client/tests/client_test.c`
+/// asserts the JSON its encoder produces, character for character, against a
+/// staged server that answers `ok` to anything -- so it proves what the C
+/// client *writes* and nothing about whether netcfgd can read it. This side's
+/// witness proves what Rust emits and accepts. Between them sits the question
+/// that actually matters, and until a real daemon is on the other end of a
+/// real C client, nothing asks it.
+///
+/// So these are copied from the C test's expectations verbatim. A member
+/// renamed on either side breaks one of the two, and a member renamed on both
+/// breaks this -- which is the case the two independent suites would otherwise
+/// agree about while netcfgd refused every request.
+#[test]
+fn the_c_client_writes_requests_this_decoder_accepts() {
+	for line in [
+		r#"{"request":"wifi_add","ssid":"686f6d65","id":"home","passphrase":"hunter2","proto":"wpa3","hidden":true,"priority":10}"#,
+		r#"{"request":"wifi_add","ssid":"63616665"}"#,
+		r#"{"request":"wifi_add","ssid":"656475726f616d","id":"eduroam","passphrase":"hunter2","eap":{"method":"peap","identity":"you@corp.example","phase2":"mschapv2","ca_cert":"corp-ca"}}"#,
+		r#"{"request":"secret_put","name":"corp-ca","value":"hunter2"}"#,
+		r#"{"request":"secret_put","name":"corp-ca","value":"hunter2","replace":true}"#,
+	] {
+		let parsed: Result<Request, _> = serde_json::from_str(line);
+		assert!(
+			parsed.is_ok(),
+			"netcfgd would refuse what the C client sends: {line}\n{:?}",
+			parsed.err()
+		);
+	}
+}
+
 /// Every message has to survive the round trip a client performs.
 #[test]
 fn every_message_round_trips() {

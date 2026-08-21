@@ -285,6 +285,22 @@ public:
 	          const QString &proto, bool hidden, const eap_request *eap,
 	          QString *error);
 
+	/*
+	 * Store a credential under a name, which is how a certificate gets to
+	 * where an `eap` block can refer to it.
+	 *
+	 * **`admin`, while wifi_add() is `wifi`**, so a window may be able to add
+	 * a network and not to do this. The difference is the blast radius of the
+	 * name: an add writes a secret it also names and refuses if either the
+	 * network file or the secret is already there, and this writes any name
+	 * the configuration might refer to. Ask tiers() before offering it --
+	 * a refusal after the operator has chosen a file is a refusal that wasted
+	 * their time.
+	 *
+	 * Inbound only. Nothing here reads a secret back (0029, 0031).
+	 */
+	bool secret_put(const QString &name, const QString &value, bool replace, QString *error);
+
 	bool wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out, QString *error);
 	bool wifi_status(const QString &interface, ncfg_wifi_status_row *out, QString *error);
 	bool wifi_connect(const QString &interface, const QString &network, QString *error);

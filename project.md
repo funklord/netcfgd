@@ -1079,15 +1079,62 @@ word itself comes from one function all three clients call. Proved by removing
 it: with `enterprise` mapped back to `secured` the new test fails and prints
 the merged row.
 
-**Certificates are named, never chosen from disk, and the GUI says so.** Each
-names a secret the daemon already holds; a path in a request would be an
-instruction to open a file as root. Putting one there is `ncfg secret set NAME
-< file` at a terminal, because the C client has no `secret_put` call -- so a
-graphical client can *name* a stored certificate and cannot *store* one. That
-is a real gap for EAP-TLS and not for PEAP or TTLS against the system's CA
-store, and the TLS arm of the dialog prints the two commands rather than
-leaving an operator to discover it. Closing it means a `secret_put` in the C
-client and a file chooser, which is its own piece of work.
+**Certificates are named, never chosen from disk -- and a `Choose...` button
+now bridges that, which is 0127 in one control.** The file is read *here*, by
+whoever is running the window, with their own permissions; what crosses the
+socket is the content, under a name derived from the file. The daemon never
+learns the path, so nothing asks root to open a file chosen by somebody who is
+not root.
+
+`ncfg_client_secret_put()` is the call that was missing, and it is the one
+request in the C library whose buffer is **sized rather than fixed**. Every
+other request builds into 2048 bytes on the stack; a certificate is what this
+one exists for and a PEM is kilobytes, so a fixed buffer would have refused
+exactly the case worth having -- and refused it as "does not fit in one
+request", which reads like a protocol limit rather than a client's own.
+
+**The tier is the interesting part, and it is not the one the dialog operates
+in.** Storing a secret is `admin`; adding a network is `wifi`. The difference
+is the blast radius of the *name*: `wifi_add` writes a secret it also names,
+for a network it is creating, and `wifi_profile::install` refuses outright if
+either the network file or the secret already exists -- so it cannot touch
+anything that was already there. `secret_put` writes any name the
+configuration might refer to, including one a `wireguard` block reads, which
+0042 calls the one thing on a machine nobody can get back.
+
+So the button is **present and disabled** where the connection holds only
+`wifi`, with a tooltip naming the tier and the command somebody who has it
+would run. Absent would have told the operator nothing; enabled would have
+failed after they had chosen a file. The field still takes a typed name, which
+is the case where an administrator stored the certificate already.
+
+**Replacing is asked, never assumed**, and the daemon is what asks: only it
+knows the name is taken, so the refusal comes back and becomes the question.
+That is 0042's rule reaching the GUI without the GUI having to know it.
+
+**The name derivation had a bug the test caught.** `corp ca (1).pem` became
+`corp-ca-1-`: the trailing `)` was replaced by a separator that nothing
+stripped. `usable_id` would have accepted it, so this was not a refusal
+waiting to happen -- it was a secret stored under a name nobody would
+recognise as that file.
+
+**And the check on it is deliberately not the one that was easy to write.**
+The C++ probe derives a name and compares it against a restatement of
+`usable_id`'s rules written in C++ by the same hand, which is one witness
+wearing two hats and would go on passing if both halves were wrong together.
+So the exact strings it expects are also put to the *real* `usable_id` in
+`netcfgd-host`, which judges them. A rule change fails one, a derivation
+change fails the other, and neither drifts quietly.
+
+**One seam neither suite covered is closed too.** The C client's test asserts
+the bytes it writes against a staged server that answers `ok` to anything, and
+the Rust witness asserts what Rust emits and accepts. Between them sat the
+question that matters -- whether netcfgd can read what the C client writes --
+and nothing asked it. `frozen.rs` now parses the C test's expected strings
+verbatim. Proved by changing only the *wire* name of `secret_put`'s `value`
+with `serde(rename)`, which leaves every construction site compiling and fails
+this test alone; renaming the Rust field instead breaks compilation before any
+test runs, so that control could not have discriminated.
 
 **A comment naming a function that does not exist got written and caught.** The
 first draft of the C client's header said certificates were put there "with

@@ -410,10 +410,10 @@ int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size
  *   cannot send it. A name refers to content somebody already gave the daemon,
  *   so it grants nothing new.
  *
- *   Putting it there is `ncfg secret set NAME < file`, which is a **terminal
- *   command**: this library has no secret_put call, so a graphical client can
- *   name a stored certificate and cannot store one. That is a real gap for
- *   EAP-TLS and not for PEAP or TTLS with the system's own CA store.
+ *   Putting it there is ncfg_client_secret_put(), or `ncfg secret set NAME <
+ *   file` at a terminal. Note the tier: storing a secret is `admin` and adding
+ *   a network is `wifi`, so a client may well be able to do the second and not
+ *   the first. Ask ncfg_client_tiers() before offering it.
  *
  *   There is no field here a path could be written in. That is the difference
  *   between a rule and a property: nothing has to remember to check.
@@ -481,6 +481,40 @@ typedef struct {
  */
 int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, char *err,
              size_t err_size);
+
+/*
+ * Store a credential the configuration refers to, under a name.
+ *
+ * The general form of what ncfg_client_wifi_add() does for one network: a
+ * client cannot write `/etc/netcfgd/secrets`, so a value it holds -- a
+ * certificate, a VPN password, an 802.1X password -- comes here and netcfgd
+ * writes it at 0600.
+ *
+ * WHICH TIER, AND WHY IT IS NOT THE WIFI ONE
+ *   `admin`, while ncfg_client_wifi_add() is `wifi`, and the difference is the
+ *   blast radius of the **name**. An add writes a secret it also names, for a
+ *   network it is creating, and refuses outright if either the network file or
+ *   the secret already exists -- so it cannot touch anything that was already
+ *   there. This writes any name the configuration might refer to, including
+ *   one a `wireguard` block reads, which 0042 calls the one thing on a machine
+ *   nobody can get back.
+ *
+ *   So a client may hold `wifi` and not `admin`, and offering this without
+ *   asking ncfg_client_tiers() first produces a refusal after the operator has
+ *   already done the work of choosing a file.
+ *
+ * `name` is a name and never a path, checked by the same rule a network id is.
+ * `replace` opens the overwrite that the paragraph above is about: without it
+ * an existing secret is refused rather than replaced.
+ *
+ * Inbound only. There is no call here that reads a secret back and there is
+ * not going to be (0029, 0031): what crosses this socket is a value going in.
+ *
+ * The request buffer is wiped before returning, which is not a guarantee about
+ * the caller's own copy of the value.
+ */
+int ncfg_client_secret_put(ncfg_client_t *client, const char *name, const char *value,
+               int replace, char *err, size_t err_size);
 
 /*
  * The wireless half, on one named interface.

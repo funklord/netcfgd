@@ -389,6 +389,32 @@ bool ncfg_connection::wifi_add(const QString &ssid, const QString &id,
 	return true;
 }
 
+bool ncfg_connection::secret_put(const QString &name, const QString &value, bool replace,
+                QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	/* Held so the pointers outlive the call, as wifi_add() does, and one of
+	 * them is a credential. */
+	const QByteArray name_bytes = name.toUtf8();
+	const QByteArray value_bytes = value.toUtf8();
+
+	if (!ncfg_client_secret_put(client, name_bytes.constData(), value_bytes.constData(),
+	              replace ? 1 : 0, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out,
                 QString *error)
 {

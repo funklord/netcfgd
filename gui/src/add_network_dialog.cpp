@@ -8,11 +8,46 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QVBoxLayout>
+
+/*
+ * A field with its `Choose...` button, as one widget for the form row.
+ *
+ * The button is created and *disabled* rather than omitted where the
+ * connection cannot store a secret. A control that is absent tells an operator
+ * nothing; one that is present and greyed, with a tooltip saying which tier is
+ * missing, tells them what to ask for -- and it is the same choice the wifi
+ * tab's join button already makes.
+ */
+static QWidget *with_chooser(QLineEdit *field, bool may_store, QPushButton **out)
+{
+	auto *row = new QWidget(field->parentWidget());
+	auto *layout = new QHBoxLayout(row);
+	layout->setContentsMargins(0, 0, 0, 0);
+	layout->addWidget(field);
+
+	auto *button = new QPushButton(QStringLiteral("Choose..."), row);
+	button->setObjectName(field->objectName() + QStringLiteral("_choose"));
+	button->setEnabled(may_store);
+	if (!may_store) {
+		button->setToolTip(QStringLiteral(
+		    "Storing a certificate needs the admin tier, and this connection has "
+		    "the wifi tier. Somebody who has it can store one with "
+		    "`ncfg secret set NAME < file`, and its name goes in the field."));
+	}
+	layout->addWidget(button);
+	*out = button;
+	return row;
+}
 
 ncfg_add_network_dialog::ncfg_add_network_dialog(ncfg_connection *connection,
                          const QString &ssid_hex, const QString &shown,
@@ -20,7 +55,8 @@ ncfg_add_network_dialog::ncfg_add_network_dialog(ncfg_connection *connection,
     : QDialog(parent), connection(connection), ssid_hex(ssid_hex), secured(secured),
       enterprise(enterprise), eap_method(nullptr), eap_identity(nullptr),
       eap_anonymous(nullptr), eap_phase2(nullptr), eap_ca_cert(nullptr),
-      eap_client_cert(nullptr), passphrase_label(nullptr), client_cert_label(nullptr)
+      eap_client_cert(nullptr), passphrase_label(nullptr), client_cert_label(nullptr),
+      ca_cert_button(nullptr), client_cert_button(nullptr)
 {
 	setWindowTitle(QStringLiteral("Add a network"));
 
@@ -82,21 +118,29 @@ ncfg_add_network_dialog::ncfg_add_network_dialog(ncfg_connection *connection,
 		eap_phase2->setPlaceholderText(QStringLiteral("optional; often mschapv2"));
 		form->addRow(QStringLiteral("inner method"), eap_phase2);
 
-		/* Named, not chosen from disk. A path in the request would be an
-		 * instruction to open a file as root, so there is no field for
-		 * one -- the note below says how a certificate gets there. */
+		/* What crosses the socket is a *name*: a path would be an
+		 * instruction to open a file as root. `Choose...` reads the file
+		 * here, with this operator's own permissions, and sends the
+		 * content -- which is 0127 in one control. Storing is `admin`
+		 * while adding is `wifi`, so the button appears only where the
+		 * connection holds it and the field still takes a typed name
+		 * where it does not. */
+		const bool may_store = connection->tiers().admin != 0;
+
 		eap_ca_cert = new QLineEdit(this);
 		eap_ca_cert->setObjectName(QStringLiteral("eap_ca_cert"));
 		eap_ca_cert->setPlaceholderText(
 		    QStringLiteral("optional; the name of a stored certificate"));
-		form->addRow(QStringLiteral("server certificate"), eap_ca_cert);
+		form->addRow(QStringLiteral("server certificate"),
+		         with_chooser(eap_ca_cert, may_store, &ca_cert_button));
 
 		eap_client_cert = new QLineEdit(this);
 		eap_client_cert->setObjectName(QStringLiteral("eap_client_cert"));
 		eap_client_cert->setPlaceholderText(
 		    QStringLiteral("the name of a stored certificate"));
 		client_cert_label = new QLabel(QStringLiteral("your certificate"), this);
-		form->addRow(client_cert_label, eap_client_cert);
+		form->addRow(client_cert_label,
+		         with_chooser(eap_client_cert, may_store, &client_cert_button));
 	} else if (secured) {
 		passphrase = new QLineEdit(this);
 		/* Never echoed, and never put in a placeholder, a tooltip or a
@@ -146,6 +190,10 @@ ncfg_add_network_dialog::ncfg_add_network_dialog(ncfg_connection *connection,
 		    &ncfg_add_network_dialog::revalidate);
 		connect(eap_method, &QComboBox::currentIndexChanged, this,
 		    &ncfg_add_network_dialog::method_changed);
+		connect(ca_cert_button, &QPushButton::clicked, this,
+		    &ncfg_add_network_dialog::choose_ca_certificate);
+		connect(client_cert_button, &QPushButton::clicked, this,
+		    &ncfg_add_network_dialog::choose_client_certificate);
 		method_changed();
 	}
 	revalidate();
@@ -161,7 +209,9 @@ void ncfg_add_network_dialog::method_changed()
 	 * fill in the one that cannot work. */
 	passphrase->setVisible(!tls);
 	passphrase_label->setVisible(!tls);
-	eap_client_cert->setVisible(tls);
+	/* The button lives in the same row widget, so hiding the field alone
+	 * would leave a Choose button beside nothing. */
+	eap_client_cert->parentWidget()->setVisible(tls);
 	client_cert_label->setVisible(tls);
 
 	/* Cleared rather than merely hidden. A hidden field that still holds
@@ -172,14 +222,136 @@ void ncfg_add_network_dialog::method_changed()
 		eap_client_cert->clear();
 	}
 
-	note->setText(
-	    tls ? QStringLiteral(
-	              "TLS needs a certificate and a key the daemon already holds. "
-	              "Store them at a terminal first, with `ncfg secret set NAME < file` "
-	              "for the certificate and `ncfg secret set <the name above> < key` "
-	              "for the key -- this window can name them and cannot put them there.")
-	        : QString());
+	/* The key is not a field: for TLS it *is* the credential, so it goes in
+	 * the password box the same way a passphrase does and is stored under the
+	 * network's own name. Saying so is the difference between a form somebody
+	 * can fill in and one where the obvious field is missing. */
+	note->setText(tls ? QStringLiteral(
+	                "TLS presents a certificate instead of a password. Choose "
+	                "the certificate, and put the private key that goes with "
+	                "it in the password box -- it is stored under this "
+	                "network's own name.")
+	              : QString());
 	revalidate();
+}
+
+/*
+ * A secret name derived from a file name.
+ *
+ * `usable_id` refuses a name with a path separator, a quote, a backslash, a
+ * control character, a leading dot or `..`, and anything over 64 bytes. So the
+ * basename is stripped of its suffix and of everything outside a small safe
+ * set rather than passed through and refused: a file called `corp ca (1).pem`
+ * is an ordinary thing to have chosen, and being told the name is unusable
+ * teaches an operator nothing they can act on.
+ */
+QString ncfg_secret_name_for(const QString &path)
+{
+	const QString base = QFileInfo(path).completeBaseName();
+	QString name;
+	for (const QChar &character : base) {
+		if (character.isLetterOrNumber() || character == QLatin1Char('-')
+		    || character == QLatin1Char('_') || character == QLatin1Char('.')) {
+			name.append(character);
+		} else if (!name.endsWith(QLatin1Char('-'))) {
+			name.append(QLatin1Char('-'));
+		}
+	}
+	/* A leading dot would name a hidden file and `..` would leave the
+	 * directory; both are refused, so neither is offered. Trailing separators
+	 * go for a different reason: `corp ca (1).pem` ends in a character that
+	 * became a dash, and `corp-ca-1-` is not what anybody would call that
+	 * file. Truncation happens first, so a name cut at 64 bytes cannot be
+	 * left ending in one either. */
+	name.replace(QStringLiteral(".."), QStringLiteral("."));
+	name.truncate(64);
+	while (!name.isEmpty()
+	       && (name.startsWith(QLatin1Char('.')) || name.startsWith(QLatin1Char('-')))) {
+		name.remove(0, 1);
+	}
+	while (!name.isEmpty()
+	       && (name.endsWith(QLatin1Char('.')) || name.endsWith(QLatin1Char('-')))) {
+		name.chop(1);
+	}
+	return name;
+}
+
+QString ncfg_add_network_dialog::store_certificate(const QString &role)
+{
+	const QString path = QFileDialog::getOpenFileName(this,
+	    QStringLiteral("Choose the %1").arg(role), QString(),
+	    QStringLiteral("Certificates (*.pem *.crt *.cer *.der);;All files (*)"));
+	if (path.isEmpty()) {
+		return QString();
+	}
+
+	/* Read **here**, as whoever is running this window, with their own
+	 * permissions. That is the whole of 0127 in one operation: the daemon
+	 * never learns the path, so nothing asks root to open a file chosen by
+	 * somebody who is not root. */
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		note->setText(QStringLiteral("could not read %1: %2").arg(path, file.errorString()));
+		return QString();
+	}
+	const QByteArray content = file.readAll();
+	file.close();
+	if (content.isEmpty()) {
+		note->setText(QStringLiteral("%1 is empty, and an empty certificate fails at the "
+		                 "moment it is used rather than now")
+		              .arg(path));
+		return QString();
+	}
+
+	const QString name = ncfg_secret_name_for(path);
+	if (name.isEmpty()) {
+		note->setText(QStringLiteral("no usable name could be made from %1 -- store it at a "
+		                 "terminal with `ncfg secret set NAME < file` and type "
+		                 "the name here")
+		              .arg(QFileInfo(path).fileName()));
+		return QString();
+	}
+
+	QString error;
+	if (connection->secret_put(name, QString::fromUtf8(content), false, &error)) {
+		note->setText(QStringLiteral("stored as `%1`").arg(name));
+		return name;
+	}
+
+	/* Said rather than assumed, which is 0042's rule: a stored credential
+	 * nobody has another copy of cannot be got back, so replacing one is a
+	 * question and never a default. The daemon's own refusal is what asks
+	 * it, because only the daemon knows the name is taken. */
+	const QMessageBox::StandardButton answer = QMessageBox::question(this,
+	    QStringLiteral("Replace `%1`?").arg(name),
+	    QStringLiteral("%1\n\nReplace what is stored under `%2`?").arg(error, name),
+	    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (answer != QMessageBox::Yes) {
+		note->setText(error);
+		return QString();
+	}
+	if (connection->secret_put(name, QString::fromUtf8(content), true, &error)) {
+		note->setText(QStringLiteral("replaced `%1`").arg(name));
+		return name;
+	}
+	note->setText(error);
+	return QString();
+}
+
+void ncfg_add_network_dialog::choose_ca_certificate()
+{
+	const QString name = store_certificate(QStringLiteral("server certificate"));
+	if (!name.isEmpty()) {
+		eap_ca_cert->setText(name);
+	}
+}
+
+void ncfg_add_network_dialog::choose_client_certificate()
+{
+	const QString name = store_certificate(QStringLiteral("client certificate"));
+	if (!name.isEmpty()) {
+		eap_client_cert->setText(name);
+	}
 }
 
 void ncfg_add_network_dialog::revalidate()
