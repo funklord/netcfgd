@@ -326,6 +326,25 @@ fi
 # A device that goes away must leave the object tree, not linger as a path
 # whose properties quietly stop changing. Removing the link is the check;
 # nmcli asks libnm's cache, which is only correct if InterfacesRemoved fired.
+#
+# **Handed over first.** Deleting the link used to be enough and stopped being
+# so when netcfgd began reconciling by default: a dummy the document says
+# should exist is one netcfgd creates again, within a tick, so the device never
+# left the list. `managed = false` is the documented way to say an interface is
+# somebody else's, and it is what makes "gone" stay gone -- which is the state
+# this check is about.
+cat >> "$work/etc/netcfgd.conf" <<'UNMANAGE'
+
+device quiet0 {
+	managed = false
+}
+UNMANAGE
+waited=0
+until [ "$("$ncfg" plan 2>&1 | grep -c 'quiet0' || true)" = "0" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 60 ] && break
+	sleep 0.1
+done
 ip link del quiet0
 waited=0
 until [ -z "$(field quiet0)" ]; do

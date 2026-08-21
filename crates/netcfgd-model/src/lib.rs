@@ -111,12 +111,31 @@ pub struct Version {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftPolicy {
-	/// Say so and change nothing. The default, deliberately: over-claiming
+	/// Say so and change nothing.
+	///
+	/// **This used to be the default**, on the reasoning that "over-claiming
 	/// ownership deletes somebody's manual change, under-claiming only costs
-	/// convenience.
-	#[default]
+	/// convenience". Both halves turned out to be wrong.
+	///
+	/// The first is a fear the design already answers twice over, in the two
+	/// places that exist for it: [`Ownership::may_remove`] lets netcfgd remove
+	/// only what netcfgd created, and the planner's guards refuse a disruptive
+	/// action without explicit consent. A reconciling daemon cannot delete a
+	/// hand-added address, because the ownership model does not let it.
+	///
+	/// The second cost more than convenience. netcfgd exists to configure a
+	/// machine's networking, and a daemon that watches its configuration go
+	/// unimplemented is not doing that -- it is a very careful observer. Every
+	/// symptom of this milestone was the same shape: a configuration written,
+	/// a plan that was correct, and nothing that ran it. "Cannot reach the
+	/// supplicant" was the operator's name for it.
 	Report,
 	/// Put it back the way the config says.
+	///
+	/// **The default**, by the copyright holder's decision: apart from an
+	/// explicit `config -> apply` cycle netcfgd applies its settings, and
+	/// re-applies one that has deviated. That is what the program is for.
+	#[default]
 	Reconcile,
 	/// Do not even look.
 	Ignore,
