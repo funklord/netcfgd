@@ -60,17 +60,43 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 
-# `full`, not `strict`. Strict would make /etc read-only, and the DNS backends
-# legitimately write there -- /etc/resolv.conf in the default mode,
-# /etc/dnsmasq.d/netcfgd.conf and /etc/unbound/... in the others. A unit that
-# looked more locked down and broke DNS would be worse than one that says what
-# it needs.
+# `full`: /usr, the boot directories **and /etc** read-only. Not `strict`,
+# which would take the whole hierarchy including /run and /var and leave
+# netcfgd unable to write its own runtime state.
+#
+# The comment that used to sit here had this backwards. It said "strict would
+# make /etc read-only, and the DNS backends legitimately write there", and
+# chose `full` to avoid that -- but `full` is precisely what mounts /etc
+# read-only (systemd.exec(5): "If set to 'full', the /etc/ directory is
+# mounted read-only, too"). So the setting delivered the exact hazard the
+# comment named it to avoid, and every write netcfgd makes under /etc had been
+# failing with EROFS on any systemd machine.
 ProtectSystem=full
 
-# /etc/netcfgd is the only authority and netcfgd never writes to it, so the
-# init system enforces what the code already promises. This binds netcfgd's own
-# namespace, so it does not stop an operator editing the files.
-ReadOnlyPaths=/etc/netcfgd
+# What netcfgd genuinely writes under /etc, named one by one. This is the half
+# `ProtectSystem=full` leaves to the unit: harden everything, then say what
+# must stay writable.
+#
+# **/etc/netcfgd is load-bearing since 0127**, which made netcfgd the *only*
+# writer of its own configuration -- a client cannot write there, so it sends
+# what it has over the socket and netcfgd writes it. The unit used to carry
+# `ReadOnlyPaths=/etc/netcfgd` with the comment "netcfgd never writes to it,
+# so the init system enforces what the code already promises". That promise was
+# reversed by 0127 and the unit was not. The result is that `wifi_add`,
+# `config_put`, `secret_put`, `config_delete`, `secret_delete` and `radio_set`
+# were all refused by netcfgd's own sandbox -- the entire collapse 0127 built,
+# unreachable on every packaged install. Reported from a desktop: the GUI
+# relayed "read-only file system" naming a path the *daemon* had tried to
+# write, which reads as though the client had gone behind the socket's back.
+#
+# The DNS paths are the ones the comment above was always about. `-` on the
+# three optional ones: dnsmasq and unbound are packages a machine need not
+# have, and a unit that refuses to start for want of a directory belonging to
+# software nobody installed would be worse than the fault it prevents.
+ReadWritePaths=/etc/netcfgd
+ReadWritePaths=-/etc/resolv.conf
+ReadWritePaths=-/etc/dnsmasq.d
+ReadWritePaths=-/etc/unbound/unbound.conf.d
 
 RuntimeDirectory=netcfgd
 RuntimeDirectoryMode=0755
