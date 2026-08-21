@@ -307,6 +307,65 @@ fn every_response() -> Vec<Response> {
 	all
 }
 
+/// The scan response, lifted out of [`every_response_sample`] so that list
+/// stays inside its line budget.
+///
+/// It is the longest sample by a distance, and for a reason worth keeping: the
+/// fields that matter here are the ones where two entries differ, so a
+/// single-entry sample would pin none of them.
+fn wifi_scan_sample() -> Response {
+	Response::WifiScan(Box::new(ScanReport {
+		interface: "wlan0".to_owned(),
+		access_points: vec![
+			ScanEntry {
+				bssid: "00:11:22:33:44:55".to_owned(),
+				frequency: 2412,
+				signal: -40,
+				secured: true,
+				enterprise: false,
+				ssid: "686f6d65".to_owned(),
+				name: Some("home".to_owned()),
+				configured: Some("home".to_owned()),
+				// One sample carries a mobility domain and the others do
+				// not, which pins both forms: the field is
+				// skip_serializing_if, so a witness where every entry had
+				// one would never show its absence.
+				mobility_domain: Some("a1b2".to_owned()),
+			},
+			// Hidden: the SSID is not broadcast, so it arrives empty
+			// and the name arrives *present and empty*. Not the same
+			// answer as absent, and a client that renders them alike
+			// merges two networks.
+			ScanEntry {
+				bssid: "00:11:22:33:44:66".to_owned(),
+				frequency: 5180,
+				signal: -58,
+				secured: false,
+				enterprise: false,
+				ssid: String::new(),
+				name: Some(String::new()),
+				configured: None,
+				mobility_domain: None,
+			},
+			// An SSID that is not UTF-8: no `name` at all, and the hex
+			// is the only name it has.
+			ScanEntry {
+				bssid: "00:11:22:33:44:77".to_owned(),
+				frequency: 2437,
+				signal: -71,
+				secured: true,
+				// The one enterprise entry, so the witness pins all
+				// three combinations: passphrase, open, and 802.1X.
+				enterprise: true,
+				ssid: "ff00ff".to_owned(),
+				name: None,
+				configured: None,
+				mobility_domain: None,
+			},
+		],
+	}))
+}
+
 fn every_response_sample() -> Vec<Response> {
 	vec![
 		Response::Hello {
@@ -333,51 +392,7 @@ fn every_response_sample() -> Vec<Response> {
 		// nobody has written config for, and until these arrived it was
 		// pinned by nothing -- which a second client implementation then
 		// disagreed about without any gate noticing.
-		Response::WifiScan(Box::new(ScanReport {
-			interface: "wlan0".to_owned(),
-			access_points: vec![
-				ScanEntry {
-					bssid: "00:11:22:33:44:55".to_owned(),
-					frequency: 2412,
-					signal: -40,
-					secured: true,
-					ssid: "686f6d65".to_owned(),
-					name: Some("home".to_owned()),
-					configured: Some("home".to_owned()),
-					// One sample carries a mobility domain and the others do
-					// not, which pins both forms: the field is
-					// skip_serializing_if, so a witness where every entry had
-					// one would never show its absence.
-					mobility_domain: Some("a1b2".to_owned()),
-				},
-				// Hidden: the SSID is not broadcast, so it arrives empty
-				// and the name arrives *present and empty*. Not the same
-				// answer as absent, and a client that renders them alike
-				// merges two networks.
-				ScanEntry {
-					bssid: "00:11:22:33:44:66".to_owned(),
-					frequency: 5180,
-					signal: -58,
-					secured: false,
-					ssid: String::new(),
-					name: Some(String::new()),
-					configured: None,
-					mobility_domain: None,
-				},
-				// An SSID that is not UTF-8: no `name` at all, and the hex
-				// is the only name it has.
-				ScanEntry {
-					bssid: "00:11:22:33:44:77".to_owned(),
-					frequency: 2437,
-					signal: -71,
-					secured: true,
-					ssid: "ff00ff".to_owned(),
-					name: None,
-					configured: None,
-					mobility_domain: None,
-				},
-			],
-		})),
+		wifi_scan_sample(),
 		Response::WifiStatus(Box::new(WifiState {
 			interface: "wlan0".to_owned(),
 			state: "COMPLETED".to_owned(),

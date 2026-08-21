@@ -133,6 +133,10 @@ struct ncfg_access_point_row {
 	int     frequency = 0;
 	int     signal = 0;
 	bool    secured = false;
+	/* The credential is 802.1X rather than a passphrase. Decides which
+	 * fields the add dialog shows, so that a corporate network is not met
+	 * with a box asking for a password it does not have. */
+	bool    enterprise = false;
 
 	bool joinable() const { return !configured.isEmpty(); }
 };
@@ -237,19 +241,49 @@ public:
 	 * is writing a file (0069) and is not available here at all.
 	 */
 	/*
+	 * The 802.1X half of an add, in this layer's own types.
+	 *
+	 * Every certificate is the **name of a secret the daemon already holds**
+	 * and never a path: a path would be an instruction to open a file as
+	 * root, which is privileged, and there is no field here one could go in.
+	 * Storing one is `ncfg secret set NAME < file` at a terminal -- the C
+	 * client has no secret_put call, so this window can name a certificate
+	 * and cannot put one there.
+	 *
+	 * Empty means "not given". `method` and `identity` are the two the daemon
+	 * requires.
+	 */
+	struct eap_request {
+		QString method;
+		QString identity;
+		QString anonymous_identity;
+		QString phase2;
+		QString ca_cert;
+		QString client_cert;
+	};
+
+	/*
 	 * Add a network, and store its credential through the daemon.
 	 *
 	 * The only call here that carries a secret, and it carries it one way:
 	 * the daemon writes it through the provider and the config keeps an
 	 * `@secret:` reference, so nothing reads one back (0029, 0031). Needs
-	 * the `admin` tier; a refusal says so.
+	 * the `wifi` tier, which 0124 moved it to: a request carrying an SSID
+	 * and a credential is not what `admin` exists to bound. A refusal names
+	 * the tier that would have been needed.
 	 *
 	 * `ssid` is lowercase hex because an SSID is arbitrary octets --
 	 * `ncfg_access_point_row::ssid` is exactly this, so a row from a scan
 	 * can be handed straight in.
+	 *
+	 * `eap` is null for an ordinary network. With one, `proto` must be empty:
+	 * it pins the generation protecting a passphrase and an enterprise
+	 * network negotiates its own, and the daemon refuses the pair rather
+	 * than picking.
 	 */
 	bool wifi_add(const QString &ssid, const QString &id, const QString &passphrase,
-	          const QString &proto, bool hidden, QString *error);
+	          const QString &proto, bool hidden, const eap_request *eap,
+	          QString *error);
 
 	bool wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out, QString *error);
 	bool wifi_status(const QString &interface, ncfg_wifi_status_row *out, QString *error);

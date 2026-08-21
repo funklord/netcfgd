@@ -214,6 +214,23 @@ impl ScanResult {
 		self.flags.contains("WPA") || self.flags.contains("WEP") || self.flags.contains("SAE")
 	}
 
+	/// Whether joining it means 802.1X rather than a passphrase.
+	///
+	/// `wpa_supplicant` spells the key management `WPA2-EAP-CCMP`, or
+	/// `WPA2-EAP+FT/EAP-CCMP` where it also does fast transition, so the
+	/// substring is the whole test. Both are `is_secured()` as well -- an
+	/// enterprise network needs a credential; what differs is which kind, and
+	/// a client that cannot tell asks for the wrong one.
+	///
+	/// **Unauthenticated, like everything else in a beacon.** It says what to
+	/// put in a dialog, not what to trust: the supplicant checks what the
+	/// access point actually is during the handshake, and a network that lied
+	/// here fails there.
+	#[must_use]
+	pub fn is_enterprise(&self) -> bool {
+		self.flags.contains("EAP")
+	}
+
 	/// Whether it advertises 802.11r fast transition.
 	///
 	/// Read from the flags, which cost nothing because they are already

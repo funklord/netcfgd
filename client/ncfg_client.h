@@ -329,6 +329,7 @@ typedef struct {
 	int   frequency;  /* MHz */
 	int   signal;     /* dBm, closer to zero is stronger */
 	int   secured;    /* joining it needs a credential */
+	int   enterprise; /* that credential is 802.1X, not a passphrase */
 } ncfg_access_point_t;
 
 typedef struct {
@@ -400,13 +401,49 @@ int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_
 int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size_t err_size);
 
 /*
+ * The 802.1X half of a network, for an enterprise one.
+ *
+ * WHY THE CERTIFICATES ARE NAMES
+ *   Each of these is the **name of a secret the daemon already holds** and
+ *   never a path. A path is an instruction to open a file as root, so
+ *   configuration containing one is privileged and a client that is not root
+ *   cannot send it. A name refers to content somebody already gave the daemon,
+ *   so it grants nothing new.
+ *
+ *   Putting it there is `ncfg secret set NAME < file`, which is a **terminal
+ *   command**: this library has no secret_put call, so a graphical client can
+ *   name a stored certificate and cannot store one. That is a real gap for
+ *   EAP-TLS and not for PEAP or TTLS with the system's own CA store.
+ *
+ *   There is no field here a path could be written in. That is the difference
+ *   between a rule and a property: nothing has to remember to check.
+ *
+ *   This is why the header used to say there was no enterprise arm at all --
+ *   "because those carry certificate paths". They no longer do.
+ *
+ * WHY THERE IS NO private_key
+ *   It is the field a reader looks for first. For `tls` the private key *is*
+ *   the credential: it travels in ncfg_network_t's `passphrase`, is stored
+ *   under the network's own id, and the config file gets
+ *   `private_key = "@secret:<id>"` from that. A second field naming a
+ *   different stored secret would be a second answer to one question.
+ */
+typedef struct {
+	const char *method;   /* "peap", "ttls", "tls" or "pwd"; required */
+	const char *identity; /* who you are to the authentication server */
+	const char *anonymous_identity; /* who you are outside the tunnel; NULL to omit */
+	const char *phase2;             /* the inner method, such as "mschapv2" */
+	const char *ca_cert;            /* name of a stored certificate; NULL to omit */
+	const char *client_cert;        /* name of a stored certificate; NULL to omit */
+} ncfg_eap_t;
+
+/*
  * A network to add to the configuration.
  *
  * Typed fields and nothing else, which is decision 0117's whole point: a
  * config file may name a hook, and a hook's `run_as` defaults to root, so a
  * request able to carry config *text* would be remote code execution. There is
- * no field here that could name a hook, a path or a `run_as`, and there is no
- * enterprise arm because those carry certificate paths.
+ * no field here that could name a hook, a path or a `run_as`.
  *
  * `ssid` is lowercase hex and required -- an SSID is 0..32 arbitrary octets, so
  * hex is the only form that always works. Everything else may be NULL or
@@ -420,6 +457,12 @@ typedef struct {
 	const char *proto;      /* NULL, "wpa2" or "wpa3" */
 	int         hidden;
 	int         priority; /* negative to leave it out */
+	/*
+	 * NULL for an ordinary network. With one, `proto` must be NULL: it pins
+	 * the generation protecting a passphrase, and an enterprise network
+	 * negotiates its own. The daemon refuses the pair rather than picking.
+	 */
+	const ncfg_eap_t *eap;
 } ncfg_network_t;
 
 /*
@@ -428,8 +471,10 @@ typedef struct {
  * The **only** call in this library that carries a secret, and it carries it
  * one way: the daemon writes it through the secret provider and the config
  * file keeps an `@secret:` reference, so nothing reads one back out (0029,
- * 0031). Needs the `admin` tier, because writing configuration is what admin
- * names -- a refusal will say so.
+ * 0031). Needs the `wifi` tier: 0124 moved it there, because a request
+ * carrying an SSID and a credential is not the thing `admin` exists to
+ * bound -- that is a request carrying config *text*. A refusal names the
+ * tier that would have been needed.
  *
  * The request buffer is wiped before returning. That is not a guarantee about
  * the caller's own copy of the passphrase, which this cannot reach.

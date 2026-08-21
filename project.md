@@ -1050,6 +1050,51 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**The GUI can add an enterprise network, which was the last client that
+could not.** The socket and the CLI carried the whole thing and
+`add_network_dialog` had no EAP field at all, so the answer to "can I join the
+corporate network from the tray" was no and nothing said so. It has a method,
+an identity, a password, an outer identity and an inner method now, and the
+`proto` control is *absent* rather than disabled on that arm -- it pins the
+generation protecting a passphrase, an enterprise network negotiates its own,
+and the daemon refuses the pair. A control that cannot be used is a question
+the operator still has to read.
+
+**The scan says which kind of credential, because the daemon knew and was not
+telling.** `ScanEntry` gains `enterprise`, read from the flags the supplicant
+already parses (`WPA2-EAP-CCMP`), and without it a client had no way to tell a
+corporate network from a home one -- so it asked for a passphrase the operator
+does not have, and gave them nothing to do. The C client carries it, the GUI's
+security column says `enterprise` as a third word beside `secured` and `open`,
+and the dialog decides its fields from it.
+
+**That third word found a real defect in the TUI, not just a wording gap.** The
+grouped pane keyed on `(name, is-it-secured)`, so an SSID carrying both a
+passphrase network and an 802.1X one -- an ordinary arrangement at a site with
+staff and guest access -- merged them into one row reading `secured  2 radios`.
+The enterprise access point was presented as a second radio of the passphrase
+network, and selecting the row got whichever came first. The key is the
+displayed *word* now, so it cannot be coarser than what a reader sees, and the
+word itself comes from one function all three clients call. Proved by removing
+it: with `enterprise` mapped back to `secured` the new test fails and prints
+the merged row.
+
+**Certificates are named, never chosen from disk, and the GUI says so.** Each
+names a secret the daemon already holds; a path in a request would be an
+instruction to open a file as root. Putting one there is `ncfg secret set NAME
+< file` at a terminal, because the C client has no `secret_put` call -- so a
+graphical client can *name* a stored certificate and cannot *store* one. That
+is a real gap for EAP-TLS and not for PEAP or TTLS against the system's CA
+store, and the TLS arm of the dialog prints the two commands rather than
+leaving an operator to discover it. Closing it means a `secret_put` in the C
+client and a file chooser, which is its own piece of work.
+
+**A comment naming a function that does not exist got written and caught.** The
+first draft of the C client's header said certificates were put there "with
+`ncfg_client_secret_put()`", which is not in the library -- the failure of
+pointing a reader somewhere and having them conclude they misread something.
+Found by grepping for the name before believing it.
+
 **The client half of 802.11r is not the half §10 already had a note about.**
 That note says `ieee80211r` is absent from Debian's hostapd, and it is -- but
 that is hostapd, and this is wpa_supplicant, a different build option in a

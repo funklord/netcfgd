@@ -1078,6 +1078,7 @@ mod tests {
 			frequency: 2412,
 			signal,
 			secured: true,
+			enterprise: false,
 			ssid: "686f6d65".to_owned(),
 			name: Some("home".to_owned()),
 			configured: None,

@@ -1081,6 +1081,11 @@ static int convert_scan(const ncfg_json_doc_t *doc, ncfg_scan_t *out, char *err,
 		item->frequency = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "frequency"), 0);
 		item->signal = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "signal"), 0);
 		item->secured = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "secured"), 0);
+		/* Defaults to 0, which is what a daemon older than the field sends:
+		 * an absent member reads as "not enterprise", so a client asks for a
+		 * passphrase exactly as it did before rather than showing nothing. */
+		item->enterprise =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "enterprise"), 0);
 		if (!item->bssid || !item->ssid || !item->name || !item->configured
 		    || !item->display) {
 			set_error(err, err_size, "out of memory");
@@ -1190,6 +1195,48 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
 		built = span >= 0 && (size_t)span < sizeof(request) - at;
 		if (built) {
 			at += (size_t)span;
+		}
+	}
+	if (built && network->eap) {
+		const ncfg_eap_t *eap = network->eap;
+		/* Required by the daemon, and refused here so the message names the
+		 * missing field rather than arriving as a round trip that says the
+		 * request would not deserialise. */
+		if (!eap->method || !eap->identity) {
+			wipe(request, sizeof(request));
+			set_error(err, err_size,
+			      "an enterprise network needs a method and an identity");
+			return 0;
+		}
+		int span = snprintf(request + at, sizeof(request) - at, ",\"eap\":{");
+		built = span >= 0 && (size_t)span < sizeof(request) - at;
+		if (built) {
+			at += (size_t)span;
+		}
+		/* `method` opens the object, so it is written without the leading
+		 * comma append_member() adds and the rest follow it. */
+		built = built
+		    && snprintf(request + at, sizeof(request) - at, "\"method\":") > 0;
+		if (built) {
+			at += strlen(request + at);
+			built = ncfg_client_quote(eap->method, request + at,
+			                  sizeof(request) - at) > 0;
+		}
+		if (built) {
+			at += strlen(request + at);
+		}
+		built = built
+		    && append_member(request, sizeof(request), &at, "identity", eap->identity)
+		    && append_member(request, sizeof(request), &at, "anonymous_identity",
+		               eap->anonymous_identity)
+		    && append_member(request, sizeof(request), &at, "phase2", eap->phase2)
+		    && append_member(request, sizeof(request), &at, "ca_cert", eap->ca_cert)
+		    && append_member(request, sizeof(request), &at, "client_cert",
+		               eap->client_cert);
+		if (built && at + 1 < sizeof(request)) {
+			request[at++] = '}';
+		} else {
+			built = 0;
 		}
 	}
 	if (!built || at + 2 > sizeof(request)) {

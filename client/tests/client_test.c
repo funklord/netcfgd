@@ -855,6 +855,73 @@ static void adding_a_network_sends_typed_fields_only(void)
 	staged_close(&staged);
 }
 
+/*
+ * The enterprise arm, which is the one that has to produce a nested object.
+ *
+ * Worth a test of its own because the encoder writes this one by hand: every
+ * other member goes through append_member(), which prefixes a comma, and the
+ * first member inside `eap` must not have one. An extra comma is a request the
+ * daemon rejects as malformed, and the message it would send back says nothing
+ * about which client wrote it.
+ */
+static void an_enterprise_network_sends_a_nested_eap_object(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[1024];
+
+	char answers[512];
+	snprintf(answers, sizeof(answers), "%s%s", "{\"response\":\"ok\"}\n",
+	     "{\"response\":\"ok\"}\n");
+	if (!staged_open(&staged, "an enterprise add can be staged", answers)) {
+		return;
+	}
+
+	const ncfg_eap_t eap = {
+		.method = "peap",
+		.identity = "you@corp.example",
+		.anonymous_identity = NULL,
+		.phase2 = "mschapv2",
+		.ca_cert = "corp-ca",
+		.client_cert = NULL,
+	};
+	const ncfg_network_t corp = {
+		.ssid = "656475726f616d",
+		.id = "eduroam",
+		.passphrase = "hunter2",
+		.proto = NULL,
+		.hidden = 0,
+		.priority = -1,
+		.eap = &eap,
+	};
+	if (ncfg_client_wifi_add(staged.client, &corp, err, sizeof(err))) {
+		equals("an enterprise add nests the eap object",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"wifi_add\",\"ssid\":\"656475726f616d\","
+		       "\"id\":\"eduroam\",\"passphrase\":\"hunter2\",\"eap\":{"
+		       "\"method\":\"peap\",\"identity\":\"you@corp.example\","
+		       "\"phase2\":\"mschapv2\",\"ca_cert\":\"corp-ca\"}}\n");
+	} else {
+		ok("an enterprise add nests the eap object", 0, err);
+	}
+
+	/* Refused here rather than at the daemon: a round trip that answers "the
+	 * request would not deserialise" names no field, and this one does. */
+	const ncfg_eap_t nameless = {
+		.method = "peap",
+		.identity = NULL,
+	};
+	const ncfg_network_t incomplete = {
+		.ssid = "656475726f616d",
+		.priority = -1,
+		.eap = &nameless,
+	};
+	ok("an enterprise network with no identity is refused before it is sent",
+	   !ncfg_client_wifi_add(staged.client, &incomplete, err, sizeof(err)), err);
+
+	staged_close(&staged);
+}
+
 static void joining_names_a_network_and_never_a_secret(void)
 {
 	struct staged staged;
@@ -1521,6 +1588,7 @@ int main(int argc, char **argv)
 	a_scan_becomes_access_points();
 	joining_names_a_network_and_never_a_secret();
 	adding_a_network_sends_typed_fields_only();
+	an_enterprise_network_sends_a_nested_eap_object();
 	an_apply_becomes_a_journal();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
 	the_handshake_says_what_this_connection_may_do();

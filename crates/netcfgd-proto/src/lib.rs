@@ -496,6 +496,16 @@ pub struct ScanEntry {
 	pub signal: i32,
 	/// Whether joining it needs a credential.
 	pub secured: bool,
+	/// Whether that credential is 802.1X rather than a passphrase.
+	///
+	/// Sent because the daemon knows and a client cannot work it out: the
+	/// scan flags do not cross the socket, so without this a client asking
+	/// for a passphrase on a corporate network has no way to know it is
+	/// asking the wrong question. Diagnostic in the same sense
+	/// `mobility_domain` is -- it decides which fields a dialog shows, and
+	/// the supplicant is what decides whether the network is really that.
+	#[serde(default)]
+	pub enterprise: bool,
 	/// The network name as hex, which is the canonical form and the only one
 	/// that is always available -- an SSID is 32 arbitrary octets.
 	pub ssid: String,
