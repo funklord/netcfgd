@@ -262,6 +262,33 @@ pub enum Request {
 		/// Which interface runs the access point.
 		interface: String,
 	},
+
+	/// Which radios this machine has, and which of them netcfgd manages.
+	///
+	/// The list a client needs before it can offer anything wireless at all,
+	/// and the reason it is a request rather than something read out of a scan
+	/// is that a radio netcfgd does not manage **cannot be scanned with** --
+	/// so it has to be nameable before there is anything to name it in.
+	Radios,
+
+	/// Take a radio on, or hand it back.
+	///
+	/// **Typed, so that it lives in the `wifi` tier.** What activation writes
+	/// is a `device` block, and a client that sent one as *text* would be
+	/// sending configuration -- which is 0117's remote code execution and is
+	/// `admin`. An interface name and a boolean cannot name a hook, a path or
+	/// a `run_as`, so this is bounded the way `wifi_add` is and a member of
+	/// the `netcfgd` group can turn their own radio on.
+	///
+	/// Deactivating removes the block netcfgd wrote and does not touch one
+	/// somebody else edited: the point is a switch a person can flip, not a
+	/// way to delete configuration through a narrower door than `config_rm`.
+	RadioSet {
+		/// The radio.
+		interface: String,
+		/// On, or off.
+		activate: bool,
+	},
 }
 
 impl Request {
@@ -298,7 +325,8 @@ impl Request {
 			| Self::Revert
 			| Self::Reload
 			| Self::Show
-			| Self::Monitor => &[],
+			| Self::Monitor
+			| Self::Radios => &[],
 			Self::Apply { .. } => &["confirm", "allow_disruption", "strand_credentials"],
 			Self::Explain { .. } => &["subject"],
 			Self::WifiScan { .. }
@@ -318,8 +346,42 @@ impl Request {
 			Self::ConfigPut { .. } => &["name", "text", "replace"],
 			Self::SecretPut { .. } => &["name", "value", "replace"],
 			Self::ConfigDelete { .. } | Self::SecretDelete { .. } => &["name"],
+			Self::RadioSet { .. } => &["interface", "activate"],
 		}
 	}
+}
+
+/// One radio, and whether netcfgd has been given it.
+///
+/// **Every wireless interface the kernel reports**, managed or not, because
+/// the list exists so that somebody can turn one on -- a list of only the ones
+/// already on could not offer that.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Radio {
+	/// The interface name.
+	pub interface: String,
+	/// Whether netcfgd manages it: a `device` block with a `wifi` section and
+	/// no `managed = false`.
+	pub activated: bool,
+	/// Whether a supplicant is answering on it.
+	///
+	/// Distinct from `activated`, and the gap between them is the interesting
+	/// state: activated with nothing answering means netcfgd has been asked
+	/// and has not managed it yet, which is a fault to show rather than a
+	/// spinner. Not activated with something answering means another manager
+	/// holds this radio -- netcfgd declines those rather than taking them, so
+	/// a client can say why activating it will not help until that stops.
+	///
+	/// **It is netcfgd's answer, not the machine's.** The probe is a connect
+	/// to the control socket, and `wpa_supplicant` gives that socket to one
+	/// group -- `netdev` on Debian. A daemon running as root sees every one; a
+	/// daemon running as somebody else reports `false` for a supplicant that
+	/// is plainly there. That is the honest answer to "can netcfgd reach it",
+	/// which is the question this field is for, and it is what netcfgd itself
+	/// will act on. Measured: a daemon run as an ordinary user reported
+	/// `false` on a radio `NetworkManager` was holding.
+	pub supplicant: bool,
 }
 
 /// The 802.1X half of [`Request::WifiAdd`].
@@ -427,6 +489,11 @@ pub enum Response {
 	Event(Box<Event>),
 	/// What a scan found.
 	WifiScan(Box<ScanReport>),
+	/// The radios this machine has, in answer to [`Request::Radios`].
+	Radios {
+		/// One per wireless interface the kernel reports.
+		radios: Vec<Radio>,
+	},
 	/// What a radio is doing.
 	WifiStatus(Box<WifiState>),
 	/// Who is associated with an access point.

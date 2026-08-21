@@ -66,6 +66,104 @@ pub(crate) fn check_backend(document: Option<&Document>, interface: &str) -> Res
 	}
 }
 
+/// The radios this machine has, and what netcfgd is doing about each.
+///
+/// **From the kernel, not from the document.** A list built out of `device`
+/// blocks would show only the radios already taken on, and this list exists so
+/// that somebody can take one on -- it has to name the ones netcfgd is not
+/// managing, because those are the interesting ones.
+///
+/// `supplicant` is asked separately from `activated` because the gap between
+/// them is what a person needs to see. Activated with nothing answering is a
+/// fault. Not activated with something answering is another manager holding
+/// this radio, which netcfgd declines to take rather than fighting over -- so
+/// a client can say that activating it will change nothing until that stops.
+pub(crate) fn radios(document: Option<&Document>, observed: &netcfgd_model::Observed) -> Response {
+	let dir = netcfgd_supplicant::ctrl_dir();
+	let radios = observed
+		.links
+		.iter()
+		.filter(|link| link.wireless)
+		.map(|link| netcfgd_proto::Radio {
+			activated: document.is_some_and(|document| {
+				document.devices.iter().any(|device| {
+					device.name == link.name && device.managed && device.wifi.is_some()
+				})
+			}),
+			supplicant: netcfgd_supplicant::answers(&dir, &link.name),
+			interface: link.name.clone(),
+		})
+		.collect();
+	Response::Radios { radios }
+}
+
+/// The `device` block activation writes.
+///
+/// Deliberately the smallest thing that makes netcfgd manage the radio:
+/// `autoconnect` is the one policy an operator turning a radio on has an
+/// opinion about, and everything else in `WifiDevicePolicy` has a default that
+/// is right until somebody says otherwise. A block that wrote out every key
+/// would be netcfgd answering questions on their behalf, and it would freeze
+/// today's defaults into a file that outlives them.
+fn device_block(interface: &str) -> String {
+	format!(
+		"# Written by `ncfg wifi activate`. Ordinary configuration: read it,\n		 # edit it, or delete it -- deleting it hands the radio back.\n\n		 device {interface} {{\n\twifi {{\n\t\tautoconnect = true\n\t}}\n}}\n"
+	)
+}
+
+/// Take a radio on, or hand it back.
+///
+/// # Errors
+///
+/// Named rather than silent for an interface that is not a radio: activating
+/// `eth0` is a mistake worth a sentence, and the alternative is a `device`
+/// block that quietly does nothing.
+pub(crate) fn set_radio(
+	state: &mut crate::State,
+	observed: &netcfgd_model::Observed,
+	interface: &str,
+	activate: bool,
+) -> Response {
+	if !observed
+		.links
+		.iter()
+		.any(|link| link.name == interface && link.wireless)
+	{
+		return Response::error(format!(
+			"`{interface}` is not a radio on this machine. `ncfg wifi radios` lists the \
+			 ones there are"
+		));
+	}
+
+	// One drop-in per radio, named for it. So activating a second radio does
+	// not rewrite the first one's file, and so `ncfg config rm` can undo this
+	// by a name somebody can guess.
+	let name = format!("radio-{interface}");
+	let result = if activate {
+		netcfgd_host::config::install_drop_in(
+			&state.paths.config,
+			&state.paths.factory,
+			&name,
+			&device_block(interface),
+			// Replacing is right here and is not the general case: this is a
+			// switch, so turning on something already on is the state being
+			// asked for rather than a collision.
+			true,
+		)
+		.map(|_| ())
+	} else {
+		netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, &name)
+	};
+
+	match result {
+		Ok(()) => {
+			state.reload();
+			Response::Ok
+		}
+		Err(message) => Response::error(message),
+	}
+}
+
 /// Why there is no supplicant on an interface, in words that say what to do.
 ///
 /// **The control socket's own message cannot answer this and should not try.**

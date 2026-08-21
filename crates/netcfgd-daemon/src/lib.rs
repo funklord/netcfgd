@@ -893,7 +893,9 @@ fn answer(
 		| Request::WifiConnect { .. }
 		| Request::WifiDisconnect { .. }
 		| Request::WifiAdd { .. }
-		| Request::ApStations { .. } => answer_wifi(state, request),
+		| Request::ApStations { .. }
+		| Request::Radios
+		| Request::RadioSet { .. } => answer_wifi(state, request),
 		Request::ConfigPut {
 			name,
 			text,
@@ -933,6 +935,16 @@ fn answer(
 /// parts of `answer` that are about documents and plans.
 fn answer_wifi(state: &mut State, request: &Request) -> Response {
 	match request {
+		Request::Radios => wifi::radios(state.desired.as_ref(), &state.observed),
+		Request::RadioSet {
+			interface,
+			activate,
+		} => {
+			// Cloned because the write borrows `state` mutably while the check
+			// reads the observation. A radio list is a handful of names.
+			let observed = state.observed.clone();
+			wifi::set_radio(state, &observed, interface, *activate)
+		}
 		Request::WifiScan { interface } => wifi::scan(state.desired.as_ref(), interface),
 		Request::ApStations { interface } => {
 			wifi::ap_stations(state.desired.as_ref(), &state.paths.run, interface)

@@ -2,6 +2,8 @@
 {"request":"hello"}
 {"request":"status"}
 {"request":"plan"}
+{"request":"radios"}
+{"request":"radio_set","interface":"wlan0","activate":true}
 {"request":"apply","confirm":90,"allow_disruption":["eth0"],"strand_credentials":["wg0"]}
 {"request":"confirm"}
 {"request":"revert"}
@@ -27,6 +29,7 @@
 {"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":0},"tiers":["observe","admin"]}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"enterprise":false,"ssid":"686f6d65","name":"home","mobility_domain":"a1b2","configured":"home"},{"bssid":"00:11:22:33:44:66","frequency":5180,"signal":-58,"secured":false,"enterprise":false,"ssid":"","name":""},{"bssid":"00:11:22:33:44:77","frequency":2437,"signal":-71,"secured":true,"enterprise":true,"ssid":"ff00ff"}]}
+{"response":"radios","radios":[{"interface":"wlan0","activated":true,"supplicant":true},{"interface":"wlan1","activated":false,"supplicant":true}]}
 {"response":"wifi_status","interface":"wlan0","state":"COMPLETED","ssid":"686f6d65","name":"home","bssid":"00:11:22:33:44:55","network":"home"}
 {"response":"wifi_status","interface":"wlan0","state":"SCANNING"}
 {"response":"status","links":[],"addresses":[],"routes":[],"backends":[],"dns":[],"rules":[],"bridge_vlans":[],"delegations":[],"reports":[],"qdisc_applied":[],"ingress_applied":[],"privacy_applied":[],"backend_restarts":[],"accept_ra_applied":[],"forwarding_applied":[],"nat":[],"nat_conflicts":[],"hook_state":[],"address_proto_supported":false}

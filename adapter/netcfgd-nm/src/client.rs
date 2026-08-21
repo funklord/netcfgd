@@ -310,6 +310,7 @@ fn describe(response: &Response) -> &'static str {
 		Response::WifiScan(_) => "a scan",
 		Response::WifiStatus(_) => "a radio status",
 		Response::ApStations(_) => "a station list",
+		Response::Radios { .. } => "a radio list",
 		Response::Ok => "ok",
 		Response::Error { .. } => "an error",
 	}
