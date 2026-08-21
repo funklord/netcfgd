@@ -25,7 +25,7 @@
 {"request":"ap_stations","interface":"wlan0"}
 {"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":0},"tiers":["observe","admin"]}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
-{"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"ssid":"686f6d65","name":"home","configured":"home"},{"bssid":"00:11:22:33:44:66","frequency":5180,"signal":-58,"secured":false,"ssid":"","name":""},{"bssid":"00:11:22:33:44:77","frequency":2437,"signal":-71,"secured":true,"ssid":"ff00ff"}]}
+{"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"ssid":"686f6d65","name":"home","mobility_domain":"a1b2","configured":"home"},{"bssid":"00:11:22:33:44:66","frequency":5180,"signal":-58,"secured":false,"ssid":"","name":""},{"bssid":"00:11:22:33:44:77","frequency":2437,"signal":-71,"secured":true,"ssid":"ff00ff"}]}
 {"response":"wifi_status","interface":"wlan0","state":"COMPLETED","ssid":"686f6d65","name":"home","bssid":"00:11:22:33:44:55","network":"home"}
 {"response":"wifi_status","interface":"wlan0","state":"SCANNING"}
 {"response":"status","links":[],"addresses":[],"routes":[],"backends":[],"dns":[],"rules":[],"bridge_vlans":[],"delegations":[],"reports":[],"qdisc_applied":[],"ingress_applied":[],"privacy_applied":[],"backend_restarts":[],"accept_ra_applied":[],"forwarding_applied":[],"nat":[],"nat_conflicts":[],"hook_state":[],"address_proto_supported":false}

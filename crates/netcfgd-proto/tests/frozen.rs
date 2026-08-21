@@ -311,6 +311,11 @@ fn every_response_sample() -> Vec<Response> {
 					ssid: "686f6d65".to_owned(),
 					name: Some("home".to_owned()),
 					configured: Some("home".to_owned()),
+					// One sample carries a mobility domain and the others do
+					// not, which pins both forms: the field is
+					// skip_serializing_if, so a witness where every entry had
+					// one would never show its absence.
+					mobility_domain: Some("a1b2".to_owned()),
 				},
 				// Hidden: the SSID is not broadcast, so it arrives empty
 				// and the name arrives *present and empty*. Not the same
@@ -324,6 +329,7 @@ fn every_response_sample() -> Vec<Response> {
 					ssid: String::new(),
 					name: Some(String::new()),
 					configured: None,
+					mobility_domain: None,
 				},
 				// An SSID that is not UTF-8: no `name` at all, and the hex
 				// is the only name it has.
@@ -335,6 +341,7 @@ fn every_response_sample() -> Vec<Response> {
 					ssid: "ff00ff".to_owned(),
 					name: None,
 					configured: None,
+					mobility_domain: None,
 				},
 			],
 		})),
