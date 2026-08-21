@@ -652,6 +652,7 @@ mod tests {
 			proto: None,
 			hidden: false,
 			priority: None,
+			eap: None,
 		};
 
 		assert_eq!(tier_of(&add), Tier::Wifi);

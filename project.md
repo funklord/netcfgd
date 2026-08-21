@@ -995,6 +995,39 @@ time: `ncfg secret set corp-key < client.key` and a `network` block naming
 it was a bare `SecretRef`, so an operator with a key already in `/etc/ssl`
 could not name it.
 
+**`wifi_add` carries the enterprise half now, so an enterprise network is a
+typed request rather than a document.** Certificates as content made the
+credentials reachable; the request did not, so a client with them still had to
+send `config_put` -- a `network` block written as text -- and that is the
+admin tier. The distinction is 0117's: a request carrying configuration text
+is remote code execution and a request carrying an SSID, a method and an
+identity is not, so the second belongs in the `wifi` tier a distribution can
+give every desktop user and the first does not. A member of the `netcfgd`
+group can join the corporate network without being able to decide who else
+may.
+
+Every certificate in the block is **the name of a stored secret and never a
+path**, and there is no field a path could be written in -- which is what
+makes it a property of the protocol rather than a rule somebody enforces. The
+CLI refuses a path before it prompts, so the operator who types one is told
+`ncfg secret set` rather than discovering later that root read a file for
+them.
+
+**There is deliberately no `private_key` field, and it is the one a reader
+looks for first.** The first cut had one, and it was dead on both ends: for
+`tls` the private key *is* the credential, stored under the network's own id,
+and the profile writes `private_key = "@secret:<id>"` from that. A second
+field naming a different stored secret would be a second answer to one
+question. The interesting case is not the caller who fills in one of them, it
+is the caller who fills in both and disagrees with themselves, leaving the
+daemon to pick -- so the field is gone and a comment in its place says why,
+which is cheaper than freezing it into the wire and finding out.
+
+Verified end to end rather than in a fixture: a non-root caller in the
+`netcfgd` group ran `ncfg wifi add eduroam --eap peap --identity
+you@corp.example --phase2 mschapv2` against a running daemon, and the daemon
+wrote the `network` block with `password = "@secret:eduroam"`.
+
 **`config_put` has a client**: `ncfg config put NAME [FILE]` and `ncfg config
 rm NAME`, reading a file or standard input. The name is what netcfgd files it
 under and never a path -- the file is read *here*, by whoever ran the command,

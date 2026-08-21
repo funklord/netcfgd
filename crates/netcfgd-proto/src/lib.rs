@@ -95,11 +95,15 @@ pub enum Request {
 	/// grants is bounded by the shape of the message rather than by the
 	/// caller's good manners.
 	///
-	/// That is also why there is no enterprise (802.1X) arm here. Those carry
-	/// certificate *paths*, which is a file the daemon would hand to a
-	/// supplicant running as root, and 0117 leaves how to carry them undecided.
-	/// `ncfg wifi add --eap` is the way to configure one, from a machine where
-	/// somebody already has the rights to write the file.
+	/// **The enterprise arm is [`EapRequest`]**, and it exists because
+	/// certificates stopped being paths. 0117 left it out for a reason that
+	/// was true then: an enterprise network named certificate *files*, which
+	/// the daemon would hand to a supplicant running as root, so accepting one
+	/// over the socket meant accepting an instruction to read an arbitrary
+	/// file. A certificate is content netcfgd stores now, and `EapRequest`
+	/// carries the *names* of stored secrets and has no field a path could go
+	/// in -- the same construction as this request itself, where the privilege
+	/// granted is bounded by the shape of the message.
 	///
 	/// The credential travels **inbound only**, is written through the secret
 	/// provider, and the block keeps an `@secret:` reference -- so the
@@ -127,6 +131,16 @@ pub enum Request {
 		/// Higher wins when several are in range.
 		#[serde(skip_serializing_if = "Option::is_none", default)]
 		priority: Option<u32>,
+		/// 802.1X, for a campus or corporate network.
+		///
+		/// Absent for an ordinary personal network, which is what the rest of
+		/// these fields describe. Present, `passphrase` carries the EAP
+		/// password rather than a WPA passphrase -- one credential field,
+		/// because a network has one and the method decides what it is called.
+		#[serde(skip_serializing_if = "Option::is_none", default)]
+		/// Boxed so that one uncommon arm does not widen every request. Serde
+		/// sees through it, so the wire form is unchanged.
+		eap: Option<Box<EapRequest>>,
 	},
 	/// Join a network **that is already in the configuration**.
 	///
@@ -291,13 +305,63 @@ impl Request {
 			| Self::WifiStatus { .. }
 			| Self::WifiDisconnect { .. }
 			| Self::ApStations { .. } => &["interface"],
-			Self::WifiAdd { .. } => &["ssid", "id", "passphrase", "proto", "hidden", "priority"],
+			Self::WifiAdd { .. } => &[
+				"ssid",
+				"id",
+				"passphrase",
+				"proto",
+				"hidden",
+				"priority",
+				"eap",
+			],
 			Self::WifiConnect { .. } => &["interface", "network"],
 			Self::ConfigPut { .. } => &["name", "text", "replace"],
 			Self::SecretPut { .. } => &["name", "value", "replace"],
 			Self::ConfigDelete { .. } | Self::SecretDelete { .. } => &["name"],
 		}
 	}
+}
+
+/// The 802.1X half of [`Request::WifiAdd`].
+///
+/// **Every certificate here is the name of a stored secret, never a path.**
+/// That is the whole reason this can exist at all: a path is an instruction to
+/// open a file as root, so configuration containing one is privileged and a
+/// client that is not root cannot send it. A name refers to content netcfgd
+/// already holds because a caller put it there with
+/// [`Request::SecretPut`], so it grants nothing new -- and there is no field
+/// here a path could be written in, which is the difference between a rule and
+/// a property.
+///
+/// So an enterprise network is added in two steps, and the order matters: the
+/// certificates go first, and then the network that refers to them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EapRequest {
+	/// `peap`, `ttls`, `tls` or `pwd`.
+	pub method: String,
+	/// Who you are to the authentication server, often with a realm.
+	pub identity: String,
+	/// Who you are *outside* the tunnel, which is all the radio sees.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub anonymous_identity: Option<String>,
+	/// The inner method, such as `mschapv2`.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub phase2: Option<String>,
+	/// The stored certificate the server is checked against.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ca_cert: Option<String>,
+	/// The stored certificate presented, for `tls`.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub client_cert: Option<String>,
+	// There is deliberately no `private_key` here, and it is the field a
+	// reader will look for first. For `tls` the private key *is* the
+	// credential: it travels the way a passphrase does, is stored under the
+	// network's own id, and the profile writes `private_key = "@secret:<id>"`.
+	// A second field naming a different stored secret would be a second answer
+	// to one question, and the interesting case is not the caller who fills in
+	// one of them -- it is the caller who fills in both and disagrees with
+	// themselves, leaving the daemon to pick.
 }
 
 /// What `explain` is being asked about.
@@ -644,6 +708,19 @@ mod shape_tests {
 				proto: Some("wpa3".to_owned()),
 				hidden: true,
 				priority: Some(10),
+				// Populated, because this list exists so that serde emits
+				// every member and the table can be compared against it. A
+				// `None` here would leave `eap` out of the emitted keys and
+				// the gate would report the table as wrong rather than the
+				// sample as incomplete.
+				eap: Some(Box::new(EapRequest {
+					method: "peap".to_owned(),
+					identity: "you@corp.example".to_owned(),
+					anonymous_identity: Some("anonymous@corp.example".to_owned()),
+					phase2: Some("mschapv2".to_owned()),
+					ca_cert: Some("corp-ca".to_owned()),
+					client_cert: Some("corp-crt".to_owned()),
+				})),
 			},
 			Request::WifiConnect {
 				interface: "wlan0".to_owned(),
