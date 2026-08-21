@@ -802,6 +802,7 @@ The packages are `cargo rust ncurses-dev make git iproute2 python3 util-linux pr
 - **hostapd reads its configuration once, at startup.** There is no reload that keeps clients associated, so changing an `access_point` block — an SSID, a channel — means restarting hostapd, which deauthenticates everyone on the radio. The **station list is the exception**: it converges over the control socket with `DENY_ACL`/`ACCEPT_ACL` `ADD_MAC`/`DEL_MAC`, no restart and no `DEAUTHENTICATE` ([0041](docs/decisions/0041-a-station-list-converges-over-the-control-socket.md)). Three things in hostapd 2.10's source decided that shape, and each would have been a defect taken from the documentation: `DENY_ACL ADD_MAC` **disconnects the station itself** (`hostapd_disassoc_deny_mac`); `SET deny_mac_file` **appends rather than replaces**, so re-pointing hostapd at the regenerated file would leave every past entry denied forever; and `hostapd_check_acl` **consults the accept list first and the deny list second whatever `macaddr_acl` says**, so the list the policy does not name is not inert and is converged to empty too.
 - **`macaddr_acl` is the one field that cannot converge in place.** It is settable over the socket, but nothing disassociates on the change and nothing reports it back, so netcfgd would be converging a value it could never confirm — and converging the *lists* without it would apply a `deny` → `allow` edit as an open network. So netcfgd records the policy it started hostapd with, as a `# netcfgd policy: deny` line in the generated station list that `hostapd_config_read_maclist` skips, and a changed policy restarts the access point with a warning saying what that costs. The record has to sit at column zero and fit hostapd's 128-byte `fgets` buffer; a longer line is split, parsed as an address, and takes the access point down at startup. Checked against a real hostapd in both directions.
 - **~~Nothing notices that an access point's *other* configuration changed.~~ Closed** ([0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md)), passphrase included. The observation reads back what hostapd was started with, and an edited SSID, channel or stated band restarts it with the deauthentication warning. The secret is compared **in the observer**, which is the one place both halves are in hand, and what travels is a boolean -- the value is in neither the document nor the observation, and must not be in either. Two limits are left and both are deliberate: a **band the document does not state** is not compared, because an absent `band` means "work it out from the channel" and comparing what hostapd worked out would restart the radio on every reconcile; and a daemon **netcfgd did not start** has no record to compare against at all, which 0053 names as the next thing of this shape.
+- **`ieee80211r` is absent from Debian's hostapd — the *access point* half.** The station half is a different build option in a different program, and it is present: a real wpa_supplicant 2.10 here accepts `FT-PSK`, `FT-SAE` and `FT-EAP` as `key_mgmt` values, checked against its parser rather than inferred from the strings looking standard. So netcfgd can *join* a fast-transition network on a distribution that cannot *serve* one, and the two questions must not be answered together.
 - **`ieee80211r` is absent from Debian's hostapd.** Checked directly: not in the binary, and its parser rejects the option. OpenWrt's build generally includes it. So 802.11r fast transition is a per-distribution packaging question before it is a netcfgd feature, and any support has to detect it rather than assume — as [0026](docs/decisions/0026-an-access-point-is-a-file-hostapd-reads.md) handles hostapd's other optional pieces.
 - **There is no client hostname to show.** hostapd knows hardware addresses; a friendly name would have to come from DHCP leases, and netcfgd runs no DHCP server. `ncfg wifi clients` shows a MAC rather than inventing a label.
 - **`wwan_hwsim` cannot test a modem protocol, which is what decided the modem design.** Read out of the running kernel's source: one `wwan_create_port` call, `WWAN_PORT_AT`, and its emulator does not parse commands — it looks for `A`, then `T`, echoes the line and appends `OK`. The core knows `MBIM`, `QMI`, `QCDM`, `FIREHOSE`, `XMMRPC` and `FASTBOOT` and the simulator creates none of them. So an MBIM backend would have been the first thing here with no live test, and [0044](docs/decisions/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md) supersedes [0043](docs/decisions/0043-mbim-is-ours-and-the-quirks-are-a-table.md) on that basis.
@@ -1027,6 +1028,39 @@ Verified end to end rather than in a fixture: a non-root caller in the
 `netcfgd` group ran `ncfg wifi add eduroam --eap peap --identity
 you@corp.example --phase2 mschapv2` against a running daemon, and the daemon
 wrote the `network` block with `password = "@secret:eduroam"`.
+
+**Fast transition is offered wherever it can be, which it never was before.**
+`key_mgmt` is a list of modes netcfgd is *willing* to use rather than one it
+demands: the supplicant intersects it with what the access point advertises and
+picks from what is left. netcfgd named only the base mode, so 802.11r was
+excluded from every network it configured -- and because 802.11r is negotiated
+at association, a supplicant that did not offer it cannot change its mind at
+the first roam. Every roam between access points in one mobility domain was a
+full reauthentication, which on an enterprise network is a fresh EAP
+conversation with the authentication server. The `FT-` variant is now named
+beside each base mode, and a BSS that does no fast transition is unaffected
+because the mode simply is not in the intersection.
+
+**The failure this could have caused is a network that will not join at all,
+which is worse than a slow roam**, and the place it would have come from is
+management frame protection: fast transition over SAE requires it. It does not
+happen here, and the reason is that the arms were already right. `wpa3` sets
+`ieee80211w=2` and is the arm that names `FT-SAE` alone; the transitional arm
+names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
+offering SAE at all requires the protection and negotiates the same result.
+`FT-PSK` imposes no such requirement.
+
+**The client half of 802.11r is not the half §10 already had a note about.**
+That note says `ieee80211r` is absent from Debian's hostapd, and it is -- but
+that is hostapd, and this is wpa_supplicant, a different build option in a
+different program. Asked directly of a real one: 2.10 here accepts all three
+`FT-` modes. The first probe used said otherwise and was worthless -- `strings`
+on the binary found no `FT-PSK`, and no `WPA-PSK` either, which is a mode that
+demonstrably works. A probe incapable of a positive returns a negative that
+reads exactly like a finding. What settled it is a live test that sends every
+`key_mgmt` string netcfgd can emit to a real parser, next to an existing one
+that sends `NOT-A-REAL-MODE` to the same parser and is refused -- so the
+acceptance means something.
 
 **`config_put` has a client**: `ncfg config put NAME [FILE]` and `ncfg config
 rm NAME`, reading a file or standard input. The name is what netcfgd files it

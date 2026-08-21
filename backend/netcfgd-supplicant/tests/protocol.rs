@@ -296,13 +296,37 @@ fn wpa3_is_sae_with_protected_management_frames() {
 	let (resolver, security, dir) = psk("hunter2hunter2", PskProto::Wpa3);
 	let commands = rendered(&network("home", security), &resolver);
 
-	assert!(commands.contains(&"SET_NETWORK 0 key_mgmt SAE".to_owned()));
+	assert!(commands.contains(&"SET_NETWORK 0 key_mgmt SAE FT-SAE".to_owned()));
 	assert!(commands.contains(&"SET_NETWORK 0 ieee80211w 2".to_owned()));
 	assert!(
 		!commands.iter().any(|line| line.contains("WPA-PSK")),
 		"WPA3 must not offer the WPA2 key management: {commands:?}"
 	);
 	let _ = fs::remove_dir_all(&dir);
+}
+
+/// Every mode that can fast-transition offers it, and the open one does not.
+///
+/// The property is easy to lose by accident, because losing it breaks nothing:
+/// a network with no `FT-` mode in its `key_mgmt` associates exactly as well
+/// and roams slowly, so the only thing that would notice is this test. 802.11r
+/// is negotiated at association, so a supplicant that did not offer it cannot
+/// change its mind at the first roam.
+#[test]
+fn fast_transition_is_offered_wherever_it_can_be() {
+	for (proto, expected) in [
+		(PskProto::Wpa2, "WPA-PSK FT-PSK"),
+		(PskProto::Wpa3, "SAE FT-SAE"),
+		(PskProto::Wpa2Wpa3, "WPA-PSK SAE FT-PSK FT-SAE"),
+	] {
+		let (resolver, security, dir) = psk("hunter2hunter2", proto);
+		let commands = rendered(&network("home", security), &resolver);
+		assert!(
+			commands.contains(&format!("SET_NETWORK 0 key_mgmt {expected}")),
+			"{proto:?} did not offer fast transition: {commands:?}"
+		);
+		let _ = fs::remove_dir_all(&dir);
+	}
 }
 
 /// Transitional mode has to work against both, and `ieee80211w` is the field
@@ -312,7 +336,7 @@ fn transitional_mode_can_reach_both_generations() {
 	let (resolver, security, dir) = psk("hunter2hunter2", PskProto::Wpa2Wpa3);
 	let commands = rendered(&network("home", security), &resolver);
 
-	assert!(commands.contains(&"SET_NETWORK 0 key_mgmt WPA-PSK SAE".to_owned()));
+	assert!(commands.contains(&"SET_NETWORK 0 key_mgmt WPA-PSK SAE FT-PSK FT-SAE".to_owned()));
 	assert!(
 		commands.contains(&"SET_NETWORK 0 ieee80211w 1".to_owned()),
 		"2 excludes WPA2 access points and 0 excludes SAE: {commands:?}"
@@ -447,7 +471,7 @@ fn eap_settings_quote_and_redact_the_identity() {
 	let all = settings(&network("corp", eap), MacPolicy::Permanent, &resolver).expect("settings");
 	let commands: Vec<String> = all.iter().map(|setting| setting.command(0)).collect();
 
-	assert!(commands.contains(&"SET_NETWORK 0 key_mgmt WPA-EAP".to_owned()));
+	assert!(commands.contains(&"SET_NETWORK 0 key_mgmt WPA-EAP FT-EAP".to_owned()));
 	assert!(commands.contains(&"SET_NETWORK 0 eap PEAP".to_owned()));
 	assert!(commands.contains(&r#"SET_NETWORK 0 phase2 "auth=MSCHAPV2""#.to_owned()));
 

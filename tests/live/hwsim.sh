@@ -396,8 +396,11 @@ if [ "$state" = COMPLETED ]; then
 	# Transitional mode has to actually negotiate one of the two, and which
 	# one is the thing no fixture could ever tell us.
 	keymgmt=$(printf '%s\n' "$status" | sed -n 's/^key_mgmt=//p')
+	# `FT-*` is a success rather than a surprise: netcfgd offers fast
+	# transition beside each base mode now, so an access point that does
+	# 802.11r may select it, and that is the outcome the offer is for.
 	case "$keymgmt" in
-	SAE | WPA2-PSK* | WPA-PSK*)
+	SAE | WPA2-PSK* | WPA-PSK* | FT-SAE* | FT-PSK*)
 		echo "ok   negotiated $keymgmt from the transitional offer"
 		;;
 	*)

@@ -145,8 +145,13 @@ contains "a scan serialises" "$("$ncfg" wifi scan --json)" '"access_points"'
 "$ncfg" wifi connect HomeFiber >/dev/null
 check "the SSID arrived intact" \
 	"$("$cli" -p "$work/ctrl" -i lo get_network 0 ssid)" '"HomeFiber"'
-check "WPA3 means SAE" \
-	"$("$cli" -p "$work/ctrl" -i lo get_network 0 key_mgmt)" "SAE"
+# Read back out of a running supplicant rather than asserted against the
+# renderer, which is what makes this worth having: it says the supplicant
+# accepted both modes and kept them. `FT-SAE` is the offer of fast transition,
+# and it is an offer rather than a demand -- an access point that does no
+# 802.11r is simply not in the intersection.
+check "WPA3 means SAE, and offers fast transition" \
+	"$("$cli" -p "$work/ctrl" -i lo get_network 0 key_mgmt)" "SAE FT-SAE"
 check "WPA3 means protected management frames" \
 	"$("$cli" -p "$work/ctrl" -i lo get_network 0 ieee80211w)" "2"
 check "the priority carried through" \
