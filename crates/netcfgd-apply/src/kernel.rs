@@ -3118,6 +3118,26 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 		if netcfgd_sys::process::pid_of(&pidfile, &pidfile.to_string_lossy()).is_some() {
 			return Ok(());
 		}
+		// **A socket with no netcfgd pid file behind it is not automatically
+		// stale.** It is stale only if nothing answers it. If something does,
+		// another manager is running a supplicant on this radio --
+		// `NetworkManager` is the one that will -- and removing the file would
+		// take away the rendezvous point every one of its clients uses while
+		// leaving the process running, then bind a second supplicant to the
+		// same path. Two supplicants on one radio is worse than either.
+		//
+		// So netcfgd declines the interface and says so. That keeps 0080
+		// intact, because the case 0080 is about is a supplicant that *died*:
+		// a dead one does not answer, falls through, and is cleared exactly as
+		// before. It also makes displacement the honest thing it claims to be
+		// (0125) -- netcfgd takes a radio over when the other manager stops,
+		// not by pulling it out from under a running one.
+		if netcfgd_supplicant::answers(&dir, iface) {
+			return Err(format!(
+				"something else is already running a supplicant on `{iface}` -- its 				 control socket at {} answers, and netcfgd did not start it. netcfgd 				 will not take a radio from a manager that is still running: stop the 				 other one (`systemctl stop NetworkManager`, most often) and netcfgd 				 will pick the radio up on the next reconcile. Or set 				 `managed = false` on this device to leave it alone for good",
+				dir.join(iface).display()
+			));
+		}
 		let _ = std::fs::remove_file(dir.join(iface));
 		let _ = std::fs::remove_file(&pidfile);
 	}

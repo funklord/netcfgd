@@ -1050,6 +1050,36 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**netcfgd would take a radio from a supplicant it did not start, and that had
+to be fixed before anything could claim radios more widely.** `start_supplicant`
+read "a control socket with no netcfgd pid file behind it" as "stale, remove
+it". Stale is only one of the two things it can be: the other is another
+manager's supplicant, which is what `NetworkManager` runs. Removing the file
+takes away the rendezvous point every one of that supplicant's clients uses,
+leaves the process running with no socket, and then binds a second supplicant
+to the same path -- two supplicants on one radio, which is worse than either.
+
+It is nearly unreachable today, because netcfgd only manages radios the
+document declares and such a machine is not usually running NM as well. Any
+scheme where netcfgd claims radios more freely makes it the **default** path on
+every desktop.
+
+The two cases are told apart by asking: a socket that answers has a live
+supplicant behind it. So a live one is declined with a sentence naming what to
+stop, and a dead one falls through and is cleared exactly as before --
+[0080](docs/decisions/0080-a-control-socket-outlives-the-process-that-bound-it.md)
+is about a supplicant that *died*, and a dead one does not answer.
+
+**The test for it took three attempts, and the first two proved nothing.** The
+first deleted the supplicant's pid file, which is not where netcfgd remembers
+having started a backend -- that is `owned.json` -- so the plan said "nothing
+to do" and the code under test never ran. The second forgot both, reached the
+code, and checked that the socket still existed: it does either way, because
+without the guard netcfgd deletes it and a second supplicant binds the same
+path a moment later, so the file is back and looks untouched. What
+discriminates is that **no second supplicant is started**, which is the harm
+itself rather than a trace of it.
+
 **Scanning needed a supplicant, and a supplicant needed a network to join --
 which is a loop, and it was closed the whole time**
 ([0130](docs/decisions/0130-a-radio-gets-a-supplicant-before-it-has-anything-to-join.md)).
