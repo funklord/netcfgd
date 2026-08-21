@@ -24,12 +24,18 @@
  *   them nothing to do. So which fields appear follows the scan, which now
  *   says whether the credential is 802.1X.
  *
- *   Certificates are named, never chosen from disk. Each names a secret the
- *   daemon already holds, put there with `ncfg secret set NAME < file` at a
- *   terminal -- a path in a request would be an instruction to open a file as
- *   root. That is a real gap for EAP-TLS, which this dialog says out loud
- *   rather than leaving an operator to find out, and not a gap for PEAP or
- *   TTLS against the system's own CA store.
+ *   Certificates are named, never chosen from disk -- but a `Choose...` button
+ *   beside each one bridges the gap, and the way it does is decision 0127 in a
+ *   single control. The file is read **here**, by whoever is running this
+ *   window, with their own permissions; what crosses the socket is the
+ *   **content**, under a name derived from the file. A request naming a path
+ *   would be an instruction to open a file as root, which is a far larger
+ *   permission than "remember this certificate".
+ *
+ *   Storing one is the `admin` tier while adding a network is `wifi`, so the
+ *   button is offered only where the connection holds it. Where it does not,
+ *   the field still takes a name somebody else stored -- and says so, rather
+ *   than presenting a button that fails after the operator picked a file.
  *
  * WHAT IT DOES WITH THE PASSPHRASE
  *   Sends it, once, and forgets it. The daemon writes it through the secret
@@ -57,6 +63,18 @@ class QPushButton;
 
 class ncfg_connection;
 
+/*
+ * A secret name derived from a chosen file's name.
+ *
+ * Free rather than a member because it is a pure string rule with a great many
+ * ways to be wrong, and a test can reach it here. The daemon refuses a name
+ * with a path separator, a quote, a backslash, a control character, a leading
+ * dot or `..`, and anything over 64 bytes; this produces one that passes, so
+ * that an operator who chose `corp ca (1).pem` -- an ordinary thing to have on
+ * disk -- is not told their file name is unusable.
+ */
+QString ncfg_secret_name_for(const QString &path);
+
 class ncfg_add_network_dialog : public QDialog {
 	Q_OBJECT
 
@@ -76,6 +94,11 @@ private slots:
 	 * method decides which of the two the dialog asks for. Changing it after
 	 * typing must not leave the wrong field filled in and hidden. */
 	void method_changed();
+	/* Read a certificate from disk and hand its content to the daemon. Two
+	 * buttons share one slot, distinguished by which field is being filled,
+	 * because the difference between them is a name and nothing else. */
+	void choose_ca_certificate();
+	void choose_client_certificate();
 
 private:
 	ncfg_connection *connection;
@@ -102,6 +125,14 @@ private:
 	 * client-certificate row shown only for `tls`. */
 	QLabel     *passphrase_label;
 	QLabel     *client_cert_label;
+	/* Null where the connection does not hold `admin`, which is the same
+	 * test the constructor makes once rather than each time. */
+	QPushButton *ca_cert_button;
+	QPushButton *client_cert_button;
+
+	/* Read a certificate and store it, returning the name it went under, or
+	 * an empty string if nothing was stored. */
+	QString store_certificate(const QString &role);
 };
 
 #endif /* NCFG_ADD_NETWORK_DIALOG_H */

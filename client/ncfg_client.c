@@ -1259,6 +1259,79 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
 	return done;
 }
 
+/*
+ * The buffer this needs is sized rather than fixed, which is the one way it
+ * differs from every other request here.
+ *
+ * A certificate is the value this exists for and a PEM is kilobytes, so the
+ * 2048-byte stack buffer the other requests use would refuse exactly the case
+ * worth having. Worst case for JSON escaping is six bytes out per byte in
+ * (\u00XX for a control character), plus the fixed text and the name.
+ */
+int ncfg_client_secret_put(ncfg_client_t *client, const char *name, const char *value,
+               int replace, char *err, size_t err_size)
+{
+	if (!name || !value) {
+		set_error(err, err_size, "a secret needs a name and a value");
+		return 0;
+	}
+	if (!*value) {
+		/* Refused here rather than at the daemon, which refuses it too: an
+		 * empty secret fails at the moment it is used rather than now, and
+		 * the round trip would not say which file was empty. */
+		set_error(err, err_size, "an empty secret is one that fails when it is used");
+		return 0;
+	}
+
+	const size_t name_len = strlen(name);
+	const size_t value_len = strlen(value);
+	/* 64 covers the fixed text and the `replace` member with room over. */
+	const size_t need = 64 + name_len * 6 + value_len * 6;
+	char *request = malloc(need);
+	if (!request) {
+		set_error(err, err_size, "that secret does not fit in memory");
+		return 0;
+	}
+
+	int head = snprintf(request, need, "{\"request\":\"secret_put\",\"name\":");
+	int built = head > 0 && (size_t)head < need;
+	size_t at = built ? (size_t)head : 0;
+	if (built) {
+		built = ncfg_client_quote(name, request + at, need - at) > 0;
+	}
+	if (built) {
+		at += strlen(request + at);
+		built = append_member(request, need, &at, "value", value);
+	}
+	if (built && replace) {
+		int span = snprintf(request + at, need - at, ",\"replace\":true");
+		built = span >= 0 && (size_t)span < need - at;
+		if (built) {
+			at += (size_t)span;
+		}
+	}
+	if (!built || at + 2 > need) {
+		wipe(request, need);
+		free(request);
+		set_error(err, err_size, "that secret does not fit in one request");
+		return 0;
+	}
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	/* Before anything else, including the error path: the value has been
+	 * written to the socket and has no further business in this process. */
+	wipe(request, need);
+	free(request);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
 int ncfg_client_wifi_scan(ncfg_client_t *client, const char *interface, ncfg_scan_t *out,
               char *err, size_t err_size)
 {

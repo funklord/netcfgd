@@ -922,6 +922,66 @@ static void an_enterprise_network_sends_a_nested_eap_object(void)
 	staged_close(&staged);
 }
 
+/*
+ * Storing a secret, and specifically storing one too big for the buffer every
+ * other request uses.
+ *
+ * The size is the point. A certificate is what this call exists for and a PEM
+ * is kilobytes, so a fixed 2048-byte request buffer would refuse exactly the
+ * case worth having -- and would refuse it as "does not fit in one request",
+ * which reads like a protocol limit rather than a client's own.
+ */
+static void storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	static char sent[65536];
+
+	char answers[512];
+	snprintf(answers, sizeof(answers), "%s%s%s", "{\"response\":\"ok\"}\n",
+	     "{\"response\":\"ok\"}\n", "{\"response\":\"ok\"}\n");
+	if (!staged_open(&staged, "a secret can be staged", answers)) {
+		return;
+	}
+
+	if (ncfg_client_secret_put(staged.client, "corp-ca", "hunter2", 0, err, sizeof(err))) {
+		equals("a secret carries a name and a value",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"secret_put\",\"name\":\"corp-ca\",\"value\":\"hunter2\"}\n");
+	} else {
+		ok("a secret carries a name and a value", 0, err);
+	}
+
+	/* Asked for rather than assumed, because a private key nobody has a copy
+	 * of cannot be got back. */
+	if (ncfg_client_secret_put(staged.client, "corp-ca", "hunter2", 1, err, sizeof(err))) {
+		equals("and says so when it means to replace one",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"secret_put\",\"name\":\"corp-ca\",\"value\":\"hunter2\","
+		       "\"replace\":true}\n");
+	} else {
+		ok("and says so when it means to replace one", 0, err);
+	}
+
+	/* Larger than the 2048-byte buffer the other requests use, which is the
+	 * ordinary size for a certificate rather than an edge case. */
+	static char pem[4096];
+	memset(pem, 'A', sizeof(pem) - 1);
+	pem[sizeof(pem) - 1] = '\0';
+	if (ncfg_client_secret_put(staged.client, "corp-ca", pem, 1, err, sizeof(err))) {
+		const char *got = received(staged.server, sent, sizeof(sent));
+		ok("a certificate-sized value is not refused for its size",
+		   got && strstr(got, pem) != NULL, got ? "the value did not arrive whole" : err);
+	} else {
+		ok("a certificate-sized value is not refused for its size", 0, err);
+	}
+
+	ok("an empty secret is refused before it is sent",
+	   !ncfg_client_secret_put(staged.client, "corp-ca", "", 0, err, sizeof(err)), err);
+
+	staged_close(&staged);
+}
+
 static void joining_names_a_network_and_never_a_secret(void)
 {
 	struct staged staged;
@@ -1589,6 +1649,7 @@ int main(int argc, char **argv)
 	joining_names_a_network_and_never_a_secret();
 	adding_a_network_sends_typed_fields_only();
 	an_enterprise_network_sends_a_nested_eap_object();
+	storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer();
 	an_apply_becomes_a_journal();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
 	the_handshake_says_what_this_connection_may_do();

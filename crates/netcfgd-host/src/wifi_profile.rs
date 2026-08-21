@@ -522,6 +522,37 @@ fn compiles_back(config_dir: &Path, factory_dir: &Path, profile: &Profile) -> Re
 
 #[cfg(test)]
 mod tests {
+	/// The names the GUI's file chooser derives are ones this rule accepts.
+	///
+	/// **The point is that this side judges them.** `gui/tests/
+	/// add_network_enterprise.cpp` derives a secret name from a chosen file
+	/// and then checks it against a restatement of the rules below, written in
+	/// C++ by the same hand -- which is one witness wearing two hats, and
+	/// would go on passing if both were wrong together. These are the exact
+	/// strings that test expects, put to the real [`usable_id`]: a rule change
+	/// here fails this, and a derivation change there fails that, and the two
+	/// cannot drift quietly in the same direction.
+	///
+	/// Keep the list in step with the probe. It is short on purpose -- one
+	/// case per rule the derivation has to satisfy, not a corpus.
+	#[test]
+	fn the_names_the_file_chooser_derives_are_usable() {
+		for name in [
+			"corp-ca",       // the ordinary case
+			"corp-ca-1",     // spaces and brackets replaced
+			"hidden",        // a leading dot stripped
+			"escape",        // `..` cannot survive
+			"quote-slash",   // a quote and a backslash
+			&"a".repeat(64), // exactly the length limit
+		] {
+			assert!(
+				super::usable_id(name).is_ok(),
+				"the file chooser would produce `{name}`, which this refuses: {:?}",
+				super::usable_id(name)
+			);
+		}
+	}
+
 	use super::*;
 
 	/// The round-trip check reads the enterprise fields back and compares them.

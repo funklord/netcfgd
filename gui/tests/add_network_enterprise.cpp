@@ -34,6 +34,7 @@
 #include <QComboBox>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QStringList>
 
 #include <cstdio>
 
@@ -138,6 +139,63 @@ int main(int argc, char **argv)
 	method->setCurrentIndex(method->findData(QStringLiteral("peap")));
 	check(client_cert->text().isEmpty(), "switching back clears the certificate");
 	check(!add->isEnabled(), "and Add waits for the password again");
+
+	/* The Choose buttons, and the tier that decides whether they work.
+	 * Nothing is connected here, so the connection holds nothing -- which is
+	 * the interesting case: a window that cannot store a secret must say so
+	 * on the control rather than after a file has been chosen. */
+	QPushButton *ca_choose = dialog.findChild<QPushButton *>(QStringLiteral("eap_ca_cert_choose"));
+	QPushButton *cert_choose =
+	    dialog.findChild<QPushButton *>(QStringLiteral("eap_client_cert_choose"));
+	check(ca_choose != nullptr && cert_choose != nullptr,
+	      "each certificate field has a Choose button");
+	if (!ca_choose || !cert_choose) {
+		return 1;
+	}
+	check(!ca_choose->isEnabled(),
+	      "which is disabled without the admin tier rather than absent");
+	check(ca_choose->toolTip().contains(QStringLiteral("admin")),
+	      "and says which tier is missing");
+	check(ca_choose->toolTip().contains(QStringLiteral("ncfg secret set")),
+	      "and what somebody who has it would run");
+
+	/* The name a chosen file is stored under. The daemon refuses a name with
+	 * a separator, a quote, a leading dot, `..`, or over 64 bytes, so each of
+	 * those has to come out of an ordinary file name rather than be reported
+	 * back to the operator as their problem. */
+	struct {
+		const char *path;
+		const char *expected;
+	} names[] = {
+		{ "/home/me/corp-ca.pem", "corp-ca" },
+		{ "/home/me/corp ca (1).pem", "corp-ca-1" },
+		{ "/home/me/.hidden.pem", "hidden" },
+		{ "/home/me/../escape.pem", "escape" },
+		{ "/home/me/quote\"slash\\.pem", "quote-slash" },
+	};
+	for (const auto &probe : names) {
+		const QString got = ncfg_secret_name_for(QString::fromUtf8(probe.path));
+		const bool same = got == QString::fromUtf8(probe.expected);
+		if (!same) {
+			fprintf(stderr, "add_network_enterprise: %s -> \"%s\", wanted \"%s\"\n",
+			    probe.path, got.toUtf8().constData(), probe.expected);
+		}
+		check(same, "a chosen file becomes a name the daemon accepts");
+	}
+
+	/* Every rule the daemon states, checked on the results rather than on the
+	 * inputs: a name that passes each of these is one it will not refuse. */
+	for (const auto &probe : names) {
+		const QString got = ncfg_secret_name_for(QString::fromUtf8(probe.path));
+		check(!got.isEmpty() && got.size() <= 64 && !got.contains(QLatin1Char('/'))
+		          && !got.contains(QLatin1Char('"')) && !got.contains(QLatin1Char('\\'))
+		          && !got.startsWith(QLatin1Char('.')) && !got.contains(QStringLiteral("..")),
+		      "and one that breaks none of usable_id's rules");
+	}
+
+	const QString long_name = ncfg_secret_name_for(
+	    QStringLiteral("/home/me/") + QString(200, QLatin1Char('a')) + QStringLiteral(".pem"));
+	check(long_name.size() == 64, "a very long file name is cut to the 64 bytes allowed");
 
 	if (failures) {
 		fprintf(stderr, "add_network_enterprise: %d failed\n", failures);
