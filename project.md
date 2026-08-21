@@ -1050,6 +1050,39 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**Both panes offer the switch, and both stop lying about why they are
+empty.** The wifi pane in each client said "no wireless device in the
+configuration" and stopped -- describing the problem to somebody standing in
+front of the fix, on a machine whose radio is sitting right there.
+
+The TUI lists radios above the networks, but **only when there is something to
+do about one**: a machine whose radios are all activated and answering gets its
+pane back, because hardware above the networks on every working machine is
+clutter that pushes the useful part down the screen. `c` acts on the selected
+row and what it does follows the *row* rather than the pane -- activating a
+radio and joining a network are the same intent from the operator's side, so
+the footer says `c use` and the row says which. That needed the row tag to grow
+from `Option<usize>` into a `Row` enum; a line that stands for nothing, a
+radio, or a network is three cases, and the previous shape could only say two.
+
+The GUI gets an `activate radio` button that is **shown only when activating
+could work** and disabled when it could not, with the reason on the status
+line. Scan, join, add and disconnect are now gated on the radio being
+*netcfgd's* rather than merely existing, which is the same boundary the join
+button already drew for 0013.
+
+**The wording lives in one place**, `ncfg_radio_row::state()`, for the reason
+`display` exists on a scan row: three clients each formatting their own
+sentence is how they end up disagreeing about one radio. The GUI probe checks
+the four states there rather than the button wiring, which needs a daemon.
+
+**The third state is the one the tests are about.** Not activated with a
+supplicant answering means another manager holds the radio, and netcfgd
+declines those -- so a client that renders only "activated" and "not
+activated" sends somebody to press a button that cannot work. Both panes name
+who to stop instead, and both suites assert the two unactivated states are not
+the same sentence.
+
 **Which radios netcfgd manages is now a switch a person can flip, per radio.**
 The alternative considered and rejected was claiming every wireless interface
 not marked `managed = false`, which fixes a fresh machine with no steps at all

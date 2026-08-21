@@ -125,6 +125,27 @@ struct ncfg_record_row {
  * can join and one that needs a config file written first (0013, 0069) -- shown
  * rather than discovered by pressing a button and being refused.
  */
+/* One radio, as the daemon reports it. */
+struct ncfg_radio_row {
+	QString name;
+	bool    activated = false;
+	bool    supplicant = false;
+
+	/* The sentence a view shows, so that the three clients say the same
+	 * thing about the same condition -- the reason `display` exists on a
+	 * scan row rather than being formatted per widget. */
+	QString state() const
+	{
+		if (activated) {
+			return supplicant ? QStringLiteral("netcfgd's")
+			          : QStringLiteral("netcfgd's, but no supplicant is answering");
+		}
+		return supplicant
+		    ? QStringLiteral("another manager's -- stop it before activating this radio")
+		    : QStringLiteral("not activated");
+	}
+};
+
 struct ncfg_access_point_row {
 	QString bssid;
 	QString ssid; /* hex, the canonical name */
@@ -300,6 +321,22 @@ public:
 	 * Inbound only. Nothing here reads a secret back (0029, 0031).
 	 */
 	bool secret_put(const QString &name, const QString &value, bool replace, QString *error);
+
+	/*
+	 * The radios this machine has, and what netcfgd is doing about each.
+	 *
+	 * Three states rather than two, and the third is the one that traps
+	 * somebody: not activated with a supplicant answering means another
+	 * manager holds the radio -- netcfgd declines those rather than taking
+	 * them, so an Activate button on that row would do nothing and say
+	 * little. A view showing these should say who to stop.
+	 */
+	bool radios(QList<ncfg_radio_row> *out, QString *error);
+
+	/* Take a radio on, or hand it back. `wifi` tier: what it writes is a
+	 * `device` block, but what crosses is a name and a flag, which can name
+	 * no hook, no path and no `run_as`. */
+	bool set_radio(const QString &interface, bool activate, QString *error);
 
 	bool wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out, QString *error);
 	bool wifi_status(const QString &interface, ncfg_wifi_status_row *out, QString *error);

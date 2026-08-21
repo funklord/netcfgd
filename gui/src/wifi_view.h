@@ -60,6 +60,7 @@ private slots:
 	void join();
 	void add();
 	void leave();
+	void activate();
 	void selection_changed();
 
 private:
@@ -73,6 +74,13 @@ private:
 	QPushButton     *join_button;
 	QPushButton     *add_button;
 	QPushButton     *leave_button;
+	/* Hands the chosen radio to netcfgd. Shown only when that is a thing
+	 * that could be done: a radio already netcfgd's needs no button, and one
+	 * another manager holds cannot be taken while that manager runs. */
+	QPushButton     *activate_button;
+	/* The chosen radio's state, kept so `scan` and `join` can be disabled
+	 * without asking the daemon again. */
+	ncfg_radio_row   chosen_radio;
 	QTableWidget    *table;
 	/* The rows as the daemon sent them, because the table holds rendered text
 	 * and `add` needs the exact SSID octets as hex. Re-drawing from a QString
