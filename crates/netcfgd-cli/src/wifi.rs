@@ -31,6 +31,14 @@ use std::process::ExitCode;
 /// wants (`priority`).
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Wanted {
+	/// `--interface`: which radio, on a machine with more than one.
+	///
+	/// Absent is the ordinary case and means "the one radio there is". A
+	/// laptop has one, and making every invocation on every such machine name
+	/// it would be ceremony for the common case to serve the rare one. Two
+	/// radios is where the question is real, and there this is required rather
+	/// than guessed -- one of the two is often somebody else's.
+	pub(crate) interface: Option<String>,
 	/// `--id`: the block's label, when the SSID is not usable as one.
 	pub(crate) id: Option<String>,
 	/// `--priority`: higher wins, and 0 is the model's default.
@@ -134,6 +142,177 @@ fn check_enterprise(wanted: &Wanted) -> Result<(), String> {
 	Ok(())
 }
 
+/// Refuse a certificate given as a path when the network must go to netcfgd.
+///
+/// Split out of [`add`] for its line budget, and it is the right piece to
+/// take: every line of it is about one question, asked before the prompt for
+/// the reason the rest of that function keeps repeating -- a refusal that was
+/// going to happen anyway must not happen after somebody has typed a password.
+///
+/// # Errors
+///
+/// Names the flag, the path, and the two commands that fix it.
+fn cert_paths_can_cross(wanted: &Wanted, config_dir: &Path, id: &str) -> Result<(), String> {
+	// An enterprise network *can* go over the socket now, so the refusal that
+	// used to stand here is gone. What replaced it is narrower and is checked
+	// before the prompt for the same reason that one was: a certificate given
+	// as a path cannot cross, and finding that out after somebody has typed a
+	// password is the thing to avoid.
+	if wanted.eap.is_some() && !can_write(&wifi_profile::profile_path(config_dir, id)) {
+		for (given, flag) in [
+			(&wanted.ca_cert, "--ca-cert"),
+			(&wanted.client_cert, "--client-cert"),
+		] {
+			if let Some(path) = given {
+				if !path.starts_with("@secret:") {
+					return Err(format!(
+						"`{flag} {path}` names a file, and this cannot write \
+					 {} -- so the network has to go to netcfgd, which does not \
+					 accept a path. Store the contents first:\n  \
+					 ncfg secret set NAME < {path}\n\
+					 then pass `{flag} @secret:NAME`",
+						config_dir.display()
+					));
+				}
+			}
+		}
+	}
+	Ok(())
+}
+
+/// The radios netcfgd has already been given, according to the document.
+///
+/// The document's answer *and* the kernel's, both: a `device` block naming an
+/// interface that is not a radio says nothing about hardware that is here, and
+/// a radio with no block is not netcfgd's yet.
+fn activated_radios(root: &Path, document: Option<&netcfgd_model::Document>) -> Vec<String> {
+	document.map_or_else(Vec::new, |document| {
+		document
+			.devices
+			.iter()
+			.filter(|device| device.managed && device.wifi.is_some())
+			.filter(|device| netcfgd_sys::radio::is_wireless(root, &device.name))
+			.map(|device| device.name.clone())
+			.collect()
+	})
+}
+
+/// Which radio this network needs handed over, if any.
+///
+/// **Adding a network to a machine whose radio nobody activated writes a
+/// configuration that does nothing**, which is what this exists to stop: a
+/// `network` block alone plans nothing at all, and with only an `interface`
+/// block it plans a DHCP client on a radio that never associates. Both were
+/// measured, and the second is the worse of the two because it looks
+/// configured.
+///
+/// Returns the radio to activate, or `None` when there is nothing to do.
+///
+/// **Decides and writes nothing**, so that it can run before the credential
+/// prompt. This file's rule is that a refusal which was going to happen anyway
+/// must not happen after somebody has typed a passphrase -- and refusing to
+/// choose between two radios is exactly such a refusal. The write happens
+/// afterwards, next to the one that adds the network.
+///
+/// # Errors
+///
+/// A machine with no radio, or one with several and no `--interface` to say
+/// which. The second is refused rather than guessed: one of two radios is
+/// often somebody else's, and picking it would take hardware nobody offered.
+fn choose_radio(
+	root: &Path,
+	document: Option<&netcfgd_model::Document>,
+	wanted: &Wanted,
+) -> Result<Option<String>, String> {
+	let already = activated_radios(root, document);
+
+	if let Some(named) = &wanted.interface {
+		// Present and not a radio is a mistake worth refusing: somebody named
+		// the wrong interface. **Absent is not**, and the difference matters
+		// here more than anywhere else in this command -- writing
+		// configuration for hardware that is not plugged in yet is what
+		// `ncfg wifi add` on a machine being prepared is for, and the planner
+		// skips an interface that is not there.
+		if root.join(named).exists() && !netcfgd_sys::radio::is_wireless(root, named) {
+			return Err(format!(
+				"`{named}` is an interface on this machine and is not a radio. The \
+				 radios are: {}",
+				list(&netcfgd_sys::radio::wireless_links(root))
+			));
+		}
+		if already.iter().any(|name| name == named) {
+			return Ok(None);
+		}
+		return Ok(Some(named.clone()));
+	}
+
+	// Something is already netcfgd's, so this command has no reason to choose.
+	// That matters most on the machine that would otherwise be refused: two
+	// radios, one already activated, and nothing ambiguous about it.
+	if !already.is_empty() {
+		return Ok(None);
+	}
+
+	let radios = netcfgd_sys::radio::wireless_links(root);
+	match radios.as_slice() {
+		// **Not a refusal.** A machine with no radio is one being prepared
+		// before the hardware arrives, which is the case this command was
+		// written for -- somebody at a console with no network. The network
+		// block is written, and the report says nothing will use it yet.
+		[] => Ok(None),
+		[only] => Ok(Some(only.clone())),
+		several => Err(format!(
+			"this machine has {} radios ({}), and none of them is netcfgd's yet -- so \
+		 this cannot tell which one the network is for. Say which with \
+		 `--interface`, or hand one over first with `ncfg wifi activate <radio>`",
+			several.len(),
+			list(several)
+		)),
+	}
+}
+
+/// Interface names as a person reads them.
+fn list(names: &[String]) -> String {
+	if names.is_empty() {
+		return "none".to_owned();
+	}
+	names.join(", ")
+}
+
+/// Hand a radio to netcfgd, by whichever route is open.
+///
+/// The daemon where one is listening, because 0127 makes it the writer; the
+/// files directly where none is, because that is the machine `ncfg wifi add`
+/// was written for -- somebody at a console, as root, with no network. Both
+/// write the same text, from `netcfgd-host`, so the two routes cannot drift.
+fn activate(interface: &str, options: &Options) -> Result<(), String> {
+	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
+	if socket.exists() {
+		let request = netcfgd_proto::Request::RadioSet {
+			interface: interface.to_owned(),
+			activate: true,
+		};
+		return match crate::client::ask(&socket, &request) {
+			Ok(crate::client::Answer::Ok) => Ok(()),
+			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
+			Ok(other) => Err(format!("the daemon sent {}", other.describe())),
+		};
+	}
+
+	let config_dir = netcfgd_host::config::resolve_dir(options.config_dir.as_deref());
+	let factory_dir = netcfgd_host::config::resolve_factory_dir(options.factory_dir.as_deref());
+	netcfgd_host::config::install_drop_in(
+		&config_dir,
+		&factory_dir,
+		&netcfgd_host::config::radio_drop_in(interface),
+		&netcfgd_host::config::radio_blocks(interface),
+		// Replacing is right: this is a switch, so turning on something
+		// already on is the state being asked for rather than a collision.
+		true,
+	)
+	.map(|_| ())
+}
+
 /// Add a network to the configuration.
 ///
 /// # Errors
@@ -186,30 +365,7 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
 
-	// An enterprise network *can* go over the socket now, so the refusal that
-	// used to stand here is gone. What replaced it is narrower and is checked
-	// before the prompt for the same reason that one was: a certificate given
-	// as a path cannot cross, and finding that out after somebody has typed a
-	// password is the thing to avoid.
-	if wanted.eap.is_some() && !can_write(&wifi_profile::profile_path(&config_dir, &id)) {
-		for (given, flag) in [
-			(&wanted.ca_cert, "--ca-cert"),
-			(&wanted.client_cert, "--client-cert"),
-		] {
-			if let Some(path) = given {
-				if !path.starts_with("@secret:") {
-					return Err(format!(
-						"`{flag} {path}` names a file, and this cannot write \
-						 {} -- so the network has to go to netcfgd, which does not \
-						 accept a path. Store the contents first:\n  \
-						 ncfg secret set NAME < {path}\n\
-						 then pass `{flag} @secret:NAME`",
-						config_dir.display()
-					));
-				}
-			}
-		}
-	}
+	cert_paths_can_cross(wanted, &config_dir, &id)?;
 
 	// **Nowhere to send it is a refusal, and it belongs before the prompt.**
 	// Found by a test that hung rather than failed: a network with a stored
@@ -229,6 +385,16 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 			socket.display()
 		));
 	}
+
+	// Which radio, before the prompt and for the same reason as the refusal
+	// above: a machine with two radios and neither activated cannot be chosen
+	// for, and being told so after typing a passphrase is the thing this file
+	// keeps refusing to do. Nothing is written yet.
+	let sys_class_net = options
+		.sys_class_net
+		.as_deref()
+		.map_or_else(netcfgd_sys::radio::class_net, std::path::PathBuf::from);
+	let hand_over = choose_radio(&sys_class_net, document.as_ref(), wanted)?;
 
 	// The credential last, because it is the only step that stops and waits for
 	// a person: a refusal that was going to happen anyway should not happen
@@ -252,6 +418,15 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		priority: wanted.priority,
 		security: security_of(wanted),
 	};
+
+	// **The radio before the network, because it is the prerequisite.** If
+	// this fails there is an unactivated radio and no network, which is the
+	// state the machine was already in; the other order would leave a network
+	// nothing can join, which looks configured and is not. Both routes write
+	// the same text, from `netcfgd-host`, so they cannot drift.
+	if let Some(interface) = &hand_over {
+		activate(interface, options)?;
+	}
 	// **The daemon first, and the local write is the exception** -- inverted by
 	// 0127, which makes netcfgd the only writer of /etc/netcfgd. Until then
 	// this wrote the files itself and asked the daemon when the kernel refused,
@@ -265,7 +440,14 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 	// console, as root, with no network -- and they can write the file.
 	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
 	if socket.exists() {
-		return add_over_socket(&profile, credential.as_deref(), wanted, options, "");
+		return add_over_socket(
+			&profile,
+			credential.as_deref(),
+			wanted,
+			options,
+			"",
+			hand_over.as_deref(),
+		);
 	}
 
 	// An enterprise network cannot cross the socket -- `--eap` carries
@@ -299,6 +481,7 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		wanted,
 		written.secret.is_some(),
 		document.as_ref(),
+		hand_over.as_deref(),
 	);
 	Ok(ExitCode::SUCCESS)
 }
@@ -372,6 +555,7 @@ fn add_over_socket(
 	wanted: &Wanted,
 	options: &Options,
 	local_error: &str,
+	activated: Option<&str>,
 ) -> Result<ExitCode, String> {
 	// The socket has no enterprise arm: an 802.1X network carries certificate
 	// *paths*, which are files the daemon would hand to a supplicant running as
@@ -423,6 +607,7 @@ fn add_over_socket(
 
 	match crate::client::ask(&socket, &request) {
 		Ok(crate::client::Answer::Ok) => {
+			say_activated(activated);
 			println!("added `{}` through netcfgd", profile.id);
 			println!(
 				"the configuration is root's, so this went to the daemon rather than \
@@ -510,6 +695,22 @@ fn security_of(wanted: &Wanted) -> wifi_profile::Security {
 }
 
 /// Say what happened, and what it does not yet do.
+/// What activating a radio did, said the same way by both routes.
+///
+/// **Said rather than done quietly.** Adding a network can now hand a radio to
+/// netcfgd, which is a change to what hardware netcfgd owns -- a bigger thing
+/// than the network that prompted it, and not what somebody typing
+/// `ncfg wifi add` asked for in so many words. A command that takes hardware
+/// silently is one whose next surprise is worse.
+fn say_activated(interface: Option<&str>) {
+	if let Some(interface) = interface {
+		println!(
+			"activated `{interface}`: netcfgd manages that radio now, which is what \
+			 lets it join anything. `ncfg wifi deactivate {interface}` hands it back"
+		);
+	}
+}
+
 fn report(
 	file: &Path,
 	secret: &Path,
@@ -517,6 +718,7 @@ fn report(
 	wanted: &Wanted,
 	stored: bool,
 	before: Option<&netcfgd_model::Document>,
+	activated: Option<&str>,
 ) {
 	println!("wrote {}", file.display());
 	if stored {
@@ -530,16 +732,23 @@ fn report(
 	}
 
 	// A network profile is not bound to a device, so a configuration with no
-	// radio in it compiles perfectly and joins nothing. Saying so here is
-	// decision 0061's rule -- a thing that compiles either does something or
-	// says it does not -- applied to the file this just wrote.
+	// radio in it compiles perfectly and joins nothing. Decision 0061's rule
+	// -- a thing that compiles either does something or says it does not --
+	// applied to the file this just wrote.
+	//
+	// **It used to end here, with advice.** It said "no device in this
+	// configuration has a `wifi` block. Add one" and left the operator to
+	// write it, which is the wall the whole of this milestone was spent
+	// against: the advice was correct, incomplete (an `interface` block is
+	// needed too), and given by a command that could have done it. Now the
+	// radio is handed over above and this says which.
+	say_activated(activated);
 	let radio =
 		before.is_some_and(|document| document.devices.iter().any(|device| device.wifi.is_some()));
-	if !radio {
+	if !radio && activated.is_none() {
 		println!(
 			"nothing will use it yet: no device in this configuration has a \
-			 `wifi` block. Add one -- `device wlan0 {{ wifi {{ }} }}` -- and the \
-			 radio can associate"
+			 `wifi` block, and no radio was activated for it"
 		);
 	}
 
@@ -626,6 +835,104 @@ fn check_passphrase(passphrase: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
 
+	/// What `ncfg wifi add` writes on a fresh machine plans a supplicant.
+	///
+	/// **The end of the chain this milestone was spent on.** A `network` block
+	/// alone plans nothing; with an `interface` block it plans a DHCP client on
+	/// a radio that never associates; only with the `device` block too does a
+	/// supplicant appear. Every one of those compiles, and the middle one looks
+	/// configured, so nothing short of asking the planner tells them apart.
+	///
+	/// The radio is a fixture directory rather than the machine's own: a test
+	/// that read `/sys/class/net` would pass on a laptop and do something else
+	/// on a build machine, which is not a test.
+	#[test]
+	fn what_add_writes_on_a_fresh_machine_plans_a_supplicant() {
+		let root = netcfgd_testdir::TestDir::new("wifi-add-plans");
+		std::fs::create_dir_all(root.join("sys/wlan0/wireless")).expect("a fake radio");
+		std::fs::create_dir_all(root.join("etc/conf.d")).expect("a config directory");
+		std::fs::create_dir_all(root.join("run")).expect("a run directory");
+		std::fs::write(root.join("etc/netcfgd.conf"), "").expect("an empty config");
+
+		let options = Options {
+			config_dir: Some(root.join("etc").display().to_string()),
+			factory_dir: Some(root.join("factory").display().to_string()),
+			run_dir: Some(root.join("run").display().to_string()),
+			// The radio comes from this fixture rather than the machine, so
+			// the test says the same thing on a laptop and on a build host.
+			sys_class_net: Some(root.join("sys").display().to_string()),
+			wifi: Wanted {
+				open: true,
+				..Wanted::default()
+			},
+			..Options::default()
+		};
+		add(&["Cafe".to_owned()], &options).expect("a fresh machine can add a network");
+
+		// Compile what it wrote and ask the planner, rather than comparing the
+		// files against expected text: the broken version wrote perfectly good
+		// text too.
+		let sources = netcfgd_host::config::load_layered(
+			std::path::Path::new(&root.join("factory")),
+			std::path::Path::new(&root.join("etc")),
+		)
+		.expect("the configuration it wrote is readable");
+		let document = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
+			.unwrap_or_else(|d| {
+				panic!(
+					"it wrote something that does not compile:\n{}",
+					d.render(&sources)
+				)
+			});
+
+		let observed = netcfgd_model::Observed {
+			links: vec![radio_link("wlan0")],
+			..Default::default()
+		};
+		let plan = netcfgd_plan::plan(&document, &observed, &netcfgd_plan::PlanOptions::default());
+		let names: Vec<&str> = plan.actions.iter().map(|a| a.op.name()).collect();
+		assert!(
+			names.contains(&"backend.start"),
+			"one `wifi add` on a fresh machine still plans no supplicant: {names:?}"
+		);
+	}
+
+	/// A link the kernel calls a radio, for the planner.
+	fn radio_link(name: &str) -> netcfgd_model::ObservedLink {
+		netcfgd_model::ObservedLink {
+			name: name.to_owned(),
+			index: 2,
+			kind: String::new(),
+			wireless: true,
+			up: false,
+			carrier: true,
+			reachable: None,
+			mtu: 1500,
+			mac: None,
+			master: None,
+			parent: None,
+			offloads: Vec::new(),
+			ipv6_token: None,
+			qdisc: None,
+			qdisc_bandwidth_bits: None,
+			qdisc_ingress: false,
+			ingress_redirect: None,
+			forwarding: None,
+			privacy: None,
+			accept_ra: None,
+			rfkill: None,
+			ownership: netcfgd_model::Ownership::Unknown,
+			private_key_loaded: false,
+			wireguard: None,
+			bond: None,
+			bridge: None,
+			macvlan: None,
+			vlan: None,
+			tunnel: None,
+			vxlan: None,
+		}
+	}
+
 	/// The block these flags produce.
 	///
 	/// The renderer moved to `netcfgd_host::wifi_profile` when the socket
@@ -685,6 +992,7 @@ mod tests {
 			"h",
 			&ssid,
 			&Wanted {
+				interface: None,
 				id: None,
 				priority: Some(30),
 				open: false,
@@ -922,11 +1230,20 @@ mod tests {
 			"device wlan0 {\n\twifi { backend = \"wpa_supplicant\" }\n}\n",
 		)
 		.expect("a config file");
+		// A radio of its own, matching the `device wlan0` above, so these
+		// tests describe "a machine whose radio is already netcfgd's" and not
+		// "whatever hardware the developer has". Without it `add` reads the
+		// host's `/sys/class/net`, finds a real radio that no fixture mentions,
+		// and activates it -- which on a laptop turns one socket request into
+		// two and fails a test about routing for a reason that has nothing to
+		// do with routing.
+		std::fs::create_dir_all(root.join("sys/wlan0/wireless")).expect("a fixture radio");
 
 		let options = Options {
 			config_dir: Some(root.join("etc").display().to_string()),
 			factory_dir: Some(root.join("factory").display().to_string()),
 			run_dir: Some(root.join("run").display().to_string()),
+			sys_class_net: Some(root.join("sys").display().to_string()),
 			..Options::default()
 		};
 		(root, options)
@@ -1050,6 +1367,81 @@ mod tests {
 		);
 
 		restore();
+	}
+
+	/// Activating a radio goes over the socket too, and writes no file.
+	///
+	/// **Two requests now, where there was one**, and both must take the same
+	/// route: 0127 makes netcfgd the only writer, and a client that sent the
+	/// network to the daemon and wrote the radio's own blocks itself would be
+	/// obeying the rule for half of what it does. That is the failure the
+	/// operator saw as "read-only file system" -- from the daemon's side of it
+	/// -- and the shape is easy to reintroduce, because the local write is
+	/// still there for the machine with no daemon.
+	#[test]
+	fn activating_a_radio_goes_over_the_socket_as_well() {
+		use std::io::{BufRead, BufReader, Write};
+
+		let (root, mut options) = fixture("activate-over-socket");
+		options.wifi.open = true;
+		// A radio the configuration does *not* mention, so `add` has to hand
+		// it over before it can add anything for it.
+		std::fs::write(root.join("etc/netcfgd.conf"), "").expect("an empty config");
+		std::fs::create_dir_all(root.join("sys/wlan7/wireless")).expect("a fixture radio");
+		std::fs::remove_dir_all(root.join("sys/wlan0")).expect("only one radio");
+
+		let socket = root.join("run/netcfgd.sock");
+		let listener = std::os::unix::net::UnixListener::bind(&socket).expect("it binds");
+
+		// Two connections, answered in turn. Bounded and reported through a
+		// channel for the reason the sibling test records: a version of this
+		// that joined a thread would *hang* if the second request stopped
+		// being made, and a hanging test stalls the suite instead of failing.
+		let (sender, asked) = std::sync::mpsc::channel();
+		std::thread::spawn(move || {
+			for _ in 0..2 {
+				let Ok((stream, _)) = listener.accept() else {
+					return;
+				};
+				let Ok(clone) = stream.try_clone() else {
+					return;
+				};
+				let mut line = String::new();
+				let _ = BufReader::new(clone).read_line(&mut line);
+				let mut writer = stream;
+				let _ = writer.write_all(b"{\"response\":\"ok\"}\n");
+				let _ = writer.flush();
+				if sender.send(line).is_err() {
+					return;
+				}
+			}
+		});
+
+		add(&["Cafe".to_owned()], &options).expect("the daemon answers ok");
+
+		let first = asked
+			.recv_timeout(std::time::Duration::from_secs(5))
+			.expect("nothing connected within 5s, so the daemon was not asked");
+		let second = asked
+			.recv_timeout(std::time::Duration::from_secs(5))
+			.expect("only one request crossed, so half of this went to a file");
+
+		// The radio first, because it is the prerequisite: a network added
+		// for a radio netcfgd does not have is a network nothing can join.
+		assert!(first.contains("radio_set"), "first request was {first}");
+		assert!(
+			first.contains("wlan7"),
+			"it activated something else: {first}"
+		);
+		assert!(second.contains("wifi_add"), "second request was {second}");
+
+		// The property 0127 exists for, and the one the operator's report was
+		// about: nothing was written here.
+		assert!(
+			!root.join("etc/conf.d/radio-wlan7.conf").exists(),
+			"the client wrote the radio's configuration itself"
+		);
+		assert!(!root.join("etc/conf.d/wifi-Cafe.conf").exists());
 	}
 
 	/// With a daemon listening, the request goes to it and no file is written.

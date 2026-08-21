@@ -54,14 +54,27 @@
 #	routes = ["default via 192.0.2.1", "default via 2001:db8::1"]
 #}
 
-# Wireless, in two halves: the radio is a `device`, and the network is a
-# `network`. They are separate because one is hardware you own and the other
-# is a place you sometimes are.
+# Wireless, in three parts, and all three are needed.
+#
+#   `device`    -- policy about the radio: which supplicant, whether to
+#                  autoconnect, whether netcfgd touches it at all.
+#   `interface` -- the statement that this link's configuration is netcfgd's.
+#                  Without it nothing is planned for the radio, because the
+#                  planner walks interfaces; a `device` block on its own
+#                  compiles and does nothing.
+#   `network`   -- a place you sometimes are, rather than hardware you own,
+#                  which is why it is separate from both.
+#
+# This example used to omit the `interface` block, and a configuration written
+# from it started no supplicant and joined nothing.
 
 #device wlan0 {
 #	wifi {
 #		autoconnect = true
 #	}
+#}
+#interface wlan0 {
+#	config = "dhcp"
 #}
 #network "Cafe Wifi" {
 #	wifi {
@@ -73,8 +86,10 @@
 # stores it at 0600, and the config keeps only the reference above. That rule
 # has no exceptions anywhere in netcfgd.
 #
-# `ncfg wifi add "Cafe Wifi"` writes both of those for you and asks for the
-# passphrase with the echo off, which is the usual way in.
+# `ncfg wifi add "Cafe Wifi"` writes all three for you -- the network, and the
+# `device` and `interface` blocks for the radio if it is not already netcfgd's
+# -- and asks for the passphrase with the echo off. That is the usual way in.
+# On a machine with two radios it asks which, with `--interface`.
 
 
 ##############################################################################

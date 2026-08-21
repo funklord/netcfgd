@@ -97,61 +97,6 @@ pub(crate) fn radios(document: Option<&Document>, observed: &netcfgd_model::Obse
 	Response::Radios { radios }
 }
 
-/// The configuration activation writes.
-///
-/// **Two blocks, and the second one is not optional.** The first draft wrote
-/// only the `device` block, on the reasoning that it is the smallest thing
-/// that says netcfgd manages the radio. It plans nothing at all: the planner
-/// walks `desired.interfaces`, so a device nothing has an `interface` block
-/// for is never visited, and activation reported success for a file that
-/// changed no behaviour. Measured with `ncfg plan` against a real radio --
-/// `device` alone answers "nothing to do", and adding the interface answers
-/// `backend.start wlp0s20f3 wifi: Supplicant`.
-///
-/// The two say different things and both are needed. `device` is policy about
-/// hardware -- which supplicant, whether to autoconnect, whether netcfgd
-/// touches it at all. `interface` is the statement that this link's
-/// configuration is netcfgd's, which is what makes it something to plan.
-///
-/// **`dhcp` is netcfgd choosing, and it is the one choice made here.**
-/// Everything else in `WifiDevicePolicy` has a default that is right until
-/// somebody says otherwise, and writing every key out would freeze today's
-/// defaults into a file that outlives them. Addressing has no such default: a
-/// radio that associates and is never addressed is a radio that does not work,
-/// and a wifi client that is not on DHCP is rare enough to be worth editing a
-/// file for. The comment says so in the file, where somebody will find it.
-fn activation_blocks(interface: &str) -> String {
-	// Built by lines rather than as one format string with continuations.
-	// The first version used `\n\` continuations and the source's own
-	// indentation ended up *inside* the file: every line came out with a tab
-	// and a space in front of it. It compiled -- leading whitespace means
-	// nothing to the config language -- so nothing failed, and the only cost
-	// was a file netcfgd wrote for a person to read that looked like a
-	// mistake.
-	[
-		"# Written by `ncfg wifi activate`. Ordinary configuration: read it,",
-		"# edit it, or delete it -- deleting it hands the radio back.",
-		"#",
-		"# Two blocks, and both are needed. `device` is policy about the",
-		"# hardware; `interface` is what makes this link netcfgd's to",
-		"# configure, and without it nothing is planned for the radio at all.",
-		"#",
-		"# `dhcp` is the assumption. Change it here for a static address.",
-		"",
-		&format!("device {interface} {{"),
-		"\twifi {",
-		"\t\tautoconnect = true",
-		"\t}",
-		"}",
-		"",
-		&format!("interface {interface} {{"),
-		"\tconfig = \"dhcp\"",
-		"}",
-		"",
-	]
-	.join("\n")
-}
-
 /// Take a radio on, or hand it back.
 ///
 /// # Errors
@@ -179,13 +124,13 @@ pub(crate) fn set_radio(
 	// One drop-in per radio, named for it. So activating a second radio does
 	// not rewrite the first one's file, and so `ncfg config rm` can undo this
 	// by a name somebody can guess.
-	let name = format!("radio-{interface}");
+	let name = netcfgd_host::config::radio_drop_in(interface);
 	let result = if activate {
 		netcfgd_host::config::install_drop_in(
 			&state.paths.config,
 			&state.paths.factory,
 			&name,
-			&activation_blocks(interface),
+			&netcfgd_host::config::radio_blocks(interface),
 			// Replacing is right here and is not the general case: this is a
 			// switch, so turning on something already on is the state being
 			// asked for rather than a collision.
@@ -236,11 +181,20 @@ fn why_no_supplicant(document: Option<&Document>, interface: &str) -> Option<Str
 		.find(|device| device.name == interface);
 	match device {
 		Some(device) if !device.managed => Some(format!(
-			"`{interface}` is a radio, and its `device` block says `managed = false` -- 			 so netcfgd does not touch it and has started no supplicant. That is the 			 documented way to hand an interface to another daemon; remove the line to 			 take it back."
+			"`{interface}` is a radio, and its `device` block says `managed = false` -- \
+			 so netcfgd does not touch it and has started no supplicant. That is the \
+			 documented way to hand an interface to another daemon; remove the line to \
+			 take it back."
 		)),
 		Some(device) if device.wifi.is_some() => None,
 		_ => Some(format!(
-			"`{interface}` is a radio, and netcfgd has no `wifi` policy for it -- so it 			 does not manage the radio and has started no supplicant, which is why there 			 is nothing to scan with. Add this and netcfgd will run one:\n\n    			 device {interface} {{\n        wifi {{\n            autoconnect = true\n  			      }}\n    }}\n\n`ncfg config put radio -` will take it on standard input. 			 Until then a scan can only work through somebody else's supplicant, which is 			 what NetworkManager was providing."
+			"`{interface}` is a radio, and netcfgd has no `wifi` policy for it -- so it \
+			 does not manage the radio and has started no supplicant, which is why there \
+			 is nothing to scan with. Add this and netcfgd will run one:\n\n    \
+			 device {interface} {{\n        wifi {{\n            autoconnect = true\n  \
+			      }}\n    }}\n\n`ncfg config put radio -` will take it on standard input. \
+			 Until then a scan can only work through somebody else's supplicant, which is \
+			 what NetworkManager was providing."
 		)),
 	}
 }
@@ -762,7 +716,10 @@ mod tests {
 	#[test]
 	fn what_activation_writes_plans_a_supplicant() {
 		let mut sources = netcfgd_compile::SourceMap::new();
-		sources.add("radio-wlan0.conf", super::activation_blocks("wlan0"));
+		sources.add(
+			"radio-wlan0.conf",
+			netcfgd_host::config::radio_blocks("wlan0"),
+		);
 		let document = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
 			.unwrap_or_else(|diagnostics| {
 				panic!(

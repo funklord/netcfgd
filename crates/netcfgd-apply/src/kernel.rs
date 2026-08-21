@@ -3134,7 +3134,12 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 		// not by pulling it out from under a running one.
 		if netcfgd_supplicant::answers(&dir, iface) {
 			return Err(format!(
-				"something else is already running a supplicant on `{iface}` -- its 				 control socket at {} answers, and netcfgd did not start it. netcfgd 				 will not take a radio from a manager that is still running: stop the 				 other one (`systemctl stop NetworkManager`, most often) and netcfgd 				 will pick the radio up on the next reconcile. Or set 				 `managed = false` on this device to leave it alone for good",
+				"something else is already running a supplicant on `{iface}` -- its \
+				 control socket at {} answers, and netcfgd did not start it. netcfgd \
+				 will not take a radio from a manager that is still running: stop the \
+				 other one (`systemctl stop NetworkManager`, most often) and netcfgd \
+				 will pick the radio up on the next reconcile. Or set \
+				 `managed = false` on this device to leave it alone for good",
 				dir.join(iface).display()
 			));
 		}
@@ -3142,13 +3147,9 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 		let _ = std::fs::remove_file(&pidfile);
 	}
 
-	// `/sys/class/net/<iface>/wireless` exists for a radio and does not for
-	// anything else. Cheaper and more reliable than asking nl80211, and it
-	// needs no privilege.
-	let wireless = std::path::Path::new("/sys/class/net")
-		.join(iface)
-		.join("wireless")
-		.exists();
+	// The same predicate the observer fills `ObservedLink::wireless` from,
+	// shared rather than repeated.
+	let wireless = netcfgd_sys::radio::is_wireless(&netcfgd_sys::radio::class_net(), iface);
 	let driver = if wireless { "nl80211,wext" } else { "wired" };
 
 	let program = supplicant_binary().ok_or_else(|| {

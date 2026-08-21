@@ -2662,7 +2662,8 @@ fn lower_openvpn(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind
 			other => diags.push(
 				Diagnostic::new(assignment.span, format!("unknown openvpn key `{other}`"))
 					.with_help(
-						"an openvpn tunnel takes only `config`, the path to the .ovpn file; 						 everything else belongs in that file (docs/decisions/0046)",
+						"an openvpn tunnel takes only `config`, the path to the .ovpn file; \
+						 everything else belongs in that file (docs/decisions/0046)",
 					),
 			),
 		}
@@ -2671,7 +2672,8 @@ fn lower_openvpn(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind
 	let Some(config) = config else {
 		diags.push(
 			Diagnostic::new(block.span, "an openvpn tunnel needs a `config`").with_help(
-				"the path to the .ovpn file, such as `/etc/openvpn/work.ovpn`; netcfgd 				 hands it to openvpn and does not read it",
+				"the path to the .ovpn file, such as `/etc/openvpn/work.ovpn`; netcfgd \
+				 hands it to openvpn and does not read it",
 			),
 		);
 		return None;
