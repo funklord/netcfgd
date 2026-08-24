@@ -1050,6 +1050,32 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**The add dialog is driven against a real daemon too, which closes the last of
+the wireless surface.** `add_network_enterprise.cpp` checks the *form* -- which
+fields appear, which button is enabled, what a method change does to the
+widgets -- and stops where the socket begins. `live_add_dialog.cpp` presses
+`Add` and asserts **the file on disk afterwards**, because that is the thing a
+network is: `wifi_add` can be well formed and still produce a `network` block
+that says something else, which is precisely what the round-trip check exists
+to catch and what it got wrong.
+
+Both cases, because they take different routes through the dialog: a
+passphrase network must end up with `@secret:` and not the passphrase, and an
+enterprise one must end up with `eap = "peap"`, the identity, the inner method
+and `password = "@secret:<id>"`. Making the dialog stop sending its `eap` block
+fails four of them.
+
+**The `Choose...` button's payload is checked without driving its modal.** A
+file chooser is not something a probe can press through, so what is asserted is
+what the button does *with* the file: the content crosses as a secret under a
+name and the daemon writes it at 0600 -- and a path never crosses, which is the
+property that makes it safe for a client to offer at all.
+
+**The driver finds probes rather than listing them**, the way `gui/Makefile`
+finds the headless ones, so the next one needs no edit; each gets its own build
+directory, because two qmake projects in one directory overwrite each other's
+Makefile.
+
 **The 802.1X path has one too, where the worst fault of the milestone was.**
 `tests/live/enterprise.sh` stores a certificate over the socket, adds an
 enterprise network naming it, joins, and asserts what arrives on the control

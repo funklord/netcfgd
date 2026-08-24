@@ -42,11 +42,20 @@ command -v ip >/dev/null 2>&1 || skip "iproute2 is not installed"
 # run does not otherwise build it.
 make -C "$repo/client" >/dev/null 2>&1 || skip "the C client will not build"
 
-build="$repo/gui/tests/live/build"
-mkdir -p "$build"
-(cd "$build" && qmake6 ../live_wifi.pro >/dev/null && make >/dev/null 2>&1) ||
-	skip "the probe will not build (is qt6-base-dev complete?)"
-[ -x "$build/live_wifi" ] || skip "the probe did not build"
+# Found rather than listed, the way `gui/Makefile` finds the headless probes,
+# so a fourth needs no edit here. Each gets its own build directory: two qmake
+# projects in one directory overwrite each other's Makefile.
+probes=$(ls "$repo"/gui/tests/live/*.pro 2>/dev/null || true)
+[ -n "$probes" ] || skip "no probes found under gui/tests/live"
+
+for project in $probes; do
+	name=$(basename "$project" .pro)
+	build="$repo/gui/tests/live/build/$name"
+	mkdir -p "$build"
+	(cd "$build" && qmake6 "$project" >/dev/null && make >/dev/null 2>&1) ||
+		skip "$name will not build (is qt6-base-dev complete?)"
+	[ -x "$build/$name" ] || skip "$name did not build"
+done
 
 # Short, because a unix socket path has to fit in SUN_LEN.
 work=$(mktemp -d /tmp/ncfg-guiw.XXXXXX)
@@ -92,8 +101,13 @@ while [ ! -e "$work/run/netcfgd.sock" ]; do
 	sleep 0.1
 done
 
-"$build/live_wifi" || {
-	echo "gui_wifi.sh: the view's daemon said:" >&2
-	tail -5 "$work/daemon.log" >&2
+failed=0
+for project in $probes; do
+	name=$(basename "$project" .pro)
+	"$repo/gui/tests/live/build/$name/$name" || failed=1
+done
+if [ "$failed" -ne 0 ]; then
+	echo "gui_wifi.sh: the daemon those probes were talking to said:" >&2
+	tail -8 "$work/daemon.log" >&2
 	exit 1
-}
+fi
