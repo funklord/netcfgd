@@ -167,13 +167,24 @@ pub(crate) fn set_radio(
 	Response::Ok
 }
 
-/// Bring one interface to what the document now says, before answering.
+/// Start the backends one interface now wants, before answering.
 ///
-/// Restricted to the interface that was asked about, and otherwise an ordinary
-/// apply: the same guards, the same ownership rules, the same journal. A
-/// disruptive action still needs consent nobody gave here, so it is refused
-/// and recorded rather than done -- which is the property that makes applying
-/// on a request safe at all.
+/// Restricted twice: to the interface that was asked about, and to *starting a
+/// backend*. The first is `state::restrict`'s job; the second is done here
+/// because no other caller wants it.
+///
+/// **Not the whole interface plan, and the reason is a failure.** It was the
+/// whole plan for a day, on the reasoning that netcfgd applies its
+/// configuration and a switch that half-applies is the fault this milestone
+/// was full of. But addressing is in that plan, and `wifi_journey.sh` found
+/// what it costs: activating a radio ran `dhcpcd`, which cannot get a lease on
+/// a link with nothing behind it, and the activation *failed* -- so handing
+/// netcfgd a radio was refused because DHCP had not finished on it.
+///
+/// The rest is not skipped, only deferred: the reconcile loop applies it on
+/// the next pass, where a DHCP client that will not settle is a report rather
+/// than a refusal. What the synchronous half buys is the property a client
+/// depends on -- told the radio is netcfgd's, it can scan at once.
 ///
 /// # Errors
 ///
@@ -181,7 +192,35 @@ pub(crate) fn set_radio(
 /// is written either way, so `ncfg status` explains what this only names.
 fn apply_interface(state: &mut crate::State, interface: &str) -> Result<(), String> {
 	let full = state.plan(&netcfgd_plan::PlanOptions::default());
-	let (plan, _dropped) = crate::state::restrict(&full, &[interface.to_owned()]);
+	let (restricted, _dropped) = crate::state::restrict(&full, &[interface.to_owned()]);
+	let mut plan = netcfgd_plan::Plan {
+		warnings: restricted.warnings.clone(),
+		refusals: restricted.refusals.clone(),
+		stranded: restricted.stranded.clone(),
+		..netcfgd_plan::Plan::default()
+	};
+	plan.actions = restricted
+		.actions
+		.into_iter()
+		.filter(|action| {
+			// The *supplicant*, not "a backend". `BackendStart` covers the
+			// DHCP client too, and filtering on the op alone still ran
+			// `dhcpcd` -- which cannot get a lease on a radio that has not
+			// associated with anything yet, so activating a radio failed
+			// because addressing had not finished on it. Found by
+			// `wifi_journey.sh` under `make live` and not standalone, because
+			// the suite puts /sbin on PATH and a plain shell does not: the
+			// same code, and whether it broke depended on whether `dhcpcd`
+			// could be found.
+			matches!(
+				action.op,
+				netcfgd_plan::Op::BackendStart {
+					kind: netcfgd_model::BackendKind::Supplicant,
+					..
+				}
+			)
+		})
+		.collect();
 	if plan.actions.is_empty() {
 		// Nothing to do is success: the radio may already be up from a
 		// previous activation, and reporting that as a failure would make a
@@ -230,11 +269,14 @@ fn apply_interface(state: &mut crate::State, interface: &str) -> Result<(), Stri
 fn why_no_supplicant(document: Option<&Document>, interface: &str) -> Option<String> {
 	// Not a radio at all: the socket's own message is the right one, because
 	// the answer is not about configuration.
-	if !std::path::Path::new("/sys/class/net")
-		.join(interface)
-		.join("wireless")
-		.exists()
-	{
+	// The shared predicate, not a fourth copy of the path. This function had
+	// its own `Path::new("/sys/class/net")` -- written before
+	// `netcfgd_sys::radio` collected the other three -- so it asked the real
+	// machine while everything around it asked wherever `NCFG_SYS_CLASS_NET`
+	// pointed. On a test radio it therefore answered "not a radio at all" and
+	// declined to explain anything, which is how `wifi_journey.sh` found it on
+	// the day it was written.
+	if !netcfgd_sys::radio::is_wireless(&netcfgd_sys::radio::class_net(), interface) {
 		return None;
 	}
 

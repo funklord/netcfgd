@@ -3191,6 +3191,21 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 /// anything running it unprivileged would, and the error would say the wrong
 /// thing.
 fn supplicant_binary() -> Option<std::path::PathBuf> {
+	// **The seam a test needs, and it was not reachable.** The fixed
+	// directories are searched before `PATH`, so on any machine that has
+	// wpa_supplicant installed -- which is every machine this runs on -- a
+	// test could not put a stand-in in front of it. That is why the one thing
+	// this function does was only ever exercised by hand: `tests/live` can
+	// fake a radio and fake a supplicant's control socket, and could not fake
+	// the supplicant netcfgd *starts*.
+	//
+	// Named like `NCFG_WPA_CTRL_DIR` and `NCFG_SYS_CLASS_NET`, and for the
+	// same reason: the alternative is a test that reorders production search
+	// paths to make itself possible.
+	if let Some(named) = std::env::var_os("NCFG_WPA_SUPPLICANT") {
+		let path = std::path::PathBuf::from(named);
+		return path.is_file().then_some(path);
+	}
 	for dir in ["/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/bin"] {
 		let path = std::path::Path::new(dir).join("wpa_supplicant");
 		if path.is_file() {

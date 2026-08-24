@@ -1252,6 +1252,11 @@ live:
 	@# The other daemon-driven hook: a roam is wpa_supplicant's decision and
 	@# reaches netcfgd on its event socket, so no apply can exercise it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/roam.sh"
+	@# The wireless journey with nothing configured to begin with, which is
+	@# the state every M8 wifi fault was found in and no test was ever run
+	@# from. It asserts the machine rather than the artifacts: a supplicant
+	@# that is running, a scan that returns, a network that reached it.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi_journey.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"
