@@ -1050,6 +1050,38 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**The 802.1X path has one too, where the worst fault of the milestone was.**
+`tests/live/enterprise.sh` stores a certificate over the socket, adds an
+enterprise network naming it, joins, and asserts what arrives on the control
+socket. The property is the one `private_key` got wrong: wpa_supplicant opens
+`ca_cert`, `client_cert` and `private_key` as **files**, so what must reach it
+is a path -- and content there was a filename that does not exist plus a
+newline through a line-based protocol, corrupting every command after it.
+
+The test asserts the path the supplicant was *actually given*, read back out of
+what it was sent, rather than a filename guessed here -- the first version
+guessed `certs/corp-ca` and the file is `certs/ca.pem`, so it was checking its
+own assumption. And it checks the materialised file is 0600 in a 0700
+directory, holds what was stored, and that the certificate's content never
+appears on the socket at all. Putting the old behaviour back fails six checks,
+including `and the inner method` -- which is the corruption itself, the
+newline breaking the commands that followed.
+
+**It found `--ca-cert @secret:NAME` had never worked.** `cert_as_written`
+returned `None` for a stored reference, with a comment saying the text "cannot
+be compared by value ... it is a match by construction". The caller compares
+`wrote.is_some() && wrote != got`, so `Some("@secret:corp-ca") != None` and the
+write was refused -- with netcfgd's own message blaming the round trip: "did
+not survive being written and read back. This is a bug in netcfgd." It was a
+bug in the *check*, which treated "cannot compare" as "did not survive". The
+`@secret:` form is exactly what `render` writes, so it is rebuilt and compared
+for real now, which is the stronger check as well as the working one.
+
+**And the fixture was logging credentials it exists not to log.**
+`fake_supplicant.py` redacted `psk` and `sae_password` under a comment about
+never writing a passphrase to a log -- and an enterprise network sends
+`password` and `private_key`, neither of which was in the list.
+
 **The GUI has a live test now, which is the client the report was actually
 about.** `tests/live/gui_wifi.sh` builds `gui/tests/live/live_wifi.cpp` and
 drives the real `ncfg_wifi_view` by clicking its real buttons, against a real
