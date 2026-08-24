@@ -1050,6 +1050,37 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**The GUI says when another daemon has the radio, and finding out why it could
+not was the interesting part.** netcfgd has known all along -- `contention.rs`
+reads the files `NetworkManager` and `systemd-networkd` leave in `/run`, and
+the plan warning says "two daemons on one interface will fight ... **so this
+will look like the config working intermittently**", which is the reported
+symptom word for word. But that warning was rendered *client-side by `ncfg
+plan`*: the CLI computed contention itself and printed it beside the daemon's
+warnings, so the one client that read `/run` was the one that needed it least,
+and no other client could see it at all.
+
+It is in the plan the daemon serves now, one warning per interface so a client
+can filter by the one it is showing. The wifi tab carries it as a banner above
+the table -- a standing condition, not a status line, which is where the last
+thing that happened goes -- and repeats it after a failed scan, which is the
+moment it bites: another manager taking the interface out of the supplicant
+makes the control socket vanish for that window, and netcfgd's refusal is then
+"is `wpa_supplicant` running?", which is true and the wrong question.
+
+**The live test invents a contender rather than needing one.** What
+`contention.rs` reads is a file, and writing one is the whole of what a running
+NetworkManager contributes to this question -- so the probe writes it, refreshes,
+and takes it away again, checking the banner appears, names the daemon, carries
+the command that hands the radio over, and goes when the claim does.
+
+**Two things that cost a round each, both worth knowing before writing another
+namespaced test.** `/sys/class/net` is not per-namespace unless `/sys` is
+remounted, so inside `unshare -rn` it still shows the parent's links and the
+dummy created a moment earlier is not there -- the ifindex has to come from
+`ip`. And a widget in a window nobody showed reports `isVisible() == false`
+whatever it was told, so what a probe must ask is whether the view *hid* it.
+
 **The add dialog is driven against a real daemon too, which closes the last of
 the wireless surface.** `add_network_enterprise.cpp` checks the *form* -- which
 fields appear, which button is enabled, what a method change does to the

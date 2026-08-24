@@ -32,6 +32,8 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QDir>
+#include <QFile>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QLabel>
@@ -71,6 +73,23 @@ static QPushButton *button(QWidget *of, const char *label)
 		}
 	}
 	return nullptr;
+}
+
+/* The banner is hidden by `setVisible(false)` rather than removed, and a
+ * widget in a window nobody showed reports `isVisible() == false` whatever it
+ * was told -- so what is asked is whether the view *hid* it, which is
+ * `isHidden()`. The distinction cost a confused half-hour in an earlier probe
+ * and is the reason `isVisible()` is not used anywhere in this file. */
+static bool contention_shown(QWidget *of)
+{
+	const QLabel *label = of->findChild<QLabel *>(QStringLiteral("contention"));
+	return label && !label->isHidden();
+}
+
+static QString contention_text(QWidget *of)
+{
+	const QLabel *label = of->findChild<QLabel *>(QStringLiteral("contention"));
+	return label ? label->text() : QString();
 }
 
 static QTableWidget *table_of(QWidget *of)
@@ -201,6 +220,40 @@ int main(int argc, char **argv)
 	check("selecting an unconfigured network offers to add it", add->isEnabled());
 	check("and does not offer to join what the config does not describe",
 	    !join->isEnabled());
+
+	/* 5. Another manager on the radio, which is the condition that makes
+	 * everything else on this tab behave oddly -- and which the view never
+	 * surfaced. netcfgd works it out for every plan by reading the files other
+	 * daemons leave in /run; the wifi tab simply never looked.
+	 *
+	 * Invented here rather than requiring a real NetworkManager: what
+	 * `contention.rs` reads is a file, and writing one is the whole of what a
+	 * running NM contributes to this question. */
+	check("with no other manager, nothing is claimed", !contention_shown(&view));
+
+	const QByteArray index = qgetenv("NCFG_TEST_RADIO_INDEX");
+	const QString devices = QString::fromUtf8(qgetenv("NCFG_RUN_ROOT")) +
+	    QStringLiteral("/NetworkManager/devices");
+	QDir().mkpath(devices);
+	{
+		QFile claim(devices + "/" + QString::fromUtf8(index));
+		if (claim.open(QIODevice::WriteOnly)) {
+			claim.write("[device]\nmanaged=true\n");
+			claim.close();
+		}
+	}
+	view.refresh();
+	check("a radio another daemon manages is called out", contention_shown(&view));
+	check("by name", contention_text(&view).contains(QStringLiteral("NetworkManager")),
+	    contention_text(&view));
+	check("with the command that hands it over",
+	    contention_text(&view).contains(QStringLiteral("managed no")),
+	    contention_text(&view));
+
+	QFile::remove(devices + "/" + QString::fromUtf8(index));
+	view.refresh();
+	check("and the banner goes when the other manager does",
+	    !contention_shown(&view));
 
 	printf("\n");
 	if (failures) {

@@ -499,4 +499,16 @@ netcfgd
 # reason that is not its own. Ratcheting now is what stops that, and it is
 # what the entry above this one was written after failing to do for sixty
 # commits.
-total 2406936
+#   +~74 KB across M8's wireless work, ratcheted once here rather than six
+#   times: the radio switch (`radios` and `radio_set`, and the `device` plus
+#   `interface` blocks activation writes), the enterprise arm of `wifi_add`,
+#   fast transition beside every base key management mode, `enterprise` on a
+#   scan entry and `wireless` on a link, the panic hook, and the plan carrying
+#   contention so that a client other than `ncfg` can say why a contended
+#   radio behaves oddly.
+#
+#   That last one is the smallest and the reason the gate fired: 1520 bytes
+#   over a ceiling with the 3% already spent. Which is the header's point --
+#   the tolerance is for compiler noise, and a feature that eats it makes the
+#   next one fail for a reason that is not its own.
+total 2480664

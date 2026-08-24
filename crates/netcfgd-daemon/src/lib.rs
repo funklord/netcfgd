@@ -317,6 +317,62 @@ fn establish_first_last_good(state: &State) {
 	}
 }
 
+/// The plan, with what stands in the way of it.
+///
+/// Split from [`answer`] for its line budget, and it is a coherent piece: a
+/// plan a client reads should carry everything netcfgd knows about whether it
+/// can be carried out.
+fn plan_response(state: &State) -> Response {
+	if let Some(diagnostics) = &state.diagnostics {
+		return Response::error(diagnostics.clone());
+	}
+	let mut plan = state.plan(&PlanOptions::default());
+	add_contention_warnings(state, &mut plan);
+	Response::Plan(Box::new(plan))
+}
+
+/// Put "something else manages this interface" into the plan netcfgd serves.
+///
+/// **It was only ever rendered by `ncfg plan`, locally.** The CLI computed
+/// contention itself and printed it beside the daemon's warnings, so the one
+/// client that read `/run` was the one that needed it least -- and every other
+/// client was told nothing. The GUI's wifi tab therefore had no way to say why
+/// scans on a contended radio fail every other attempt, which is the report
+/// this came from: a scan whose control socket vanishes for a moment answers
+/// "is `wpa_supplicant` running?", which is true and the wrong question.
+///
+/// The daemon already works it out at startup for the log. Doing it here as
+/// well puts it where every client can see it, which is what a plan is for --
+/// it is netcfgd's account of what it would do and what stands in the way.
+fn add_contention_warnings(state: &State, plan: &mut netcfgd_plan::Plan) {
+	let Some(desired) = &state.desired else {
+		return;
+	};
+	let claimed: Vec<(String, u32)> = desired
+		.interfaces
+		.iter()
+		.filter_map(|interface| {
+			state
+				.observed
+				.link(&interface.name)
+				.map(|link| (interface.name.clone(), link.index))
+		})
+		.collect();
+
+	for contender in netcfgd_host::contention::contenders(&claimed) {
+		let message = netcfgd_host::contention::describe(&contender);
+		// One warning per interface rather than one naming several: a client
+		// filters by the interface it is showing, and a warning naming three
+		// belongs to none of them.
+		for interface in &contender.interfaces {
+			plan.warnings.push(netcfgd_plan::Warning {
+				message: message.clone(),
+				interface: Some(interface.clone()),
+			});
+		}
+	}
+}
+
 /// Say so at startup if another daemon manages an interface this config
 /// claims.
 ///
@@ -892,12 +948,7 @@ fn answer(
 					.unwrap_or_else(|| "no configuration".to_owned()),
 			),
 		},
-		Request::Plan => {
-			if let Some(diagnostics) = &state.diagnostics {
-				return Response::error(diagnostics.clone());
-			}
-			Response::Plan(Box::new(state.plan(&PlanOptions::default())))
-		}
+		Request::Plan => plan_response(state),
 		Request::Apply {
 			confirm: window,
 			allow_disruption,

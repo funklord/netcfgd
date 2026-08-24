@@ -66,10 +66,21 @@ private slots:
 private:
 	QString chosen_interface() const;
 	void    update_status();
+	/* Warnings the planner raised about the chosen radio, which is where
+	 * netcfgd records that something else is managing it. Read from the plan
+	 * rather than asked for separately: the daemon already works this out for
+	 * every apply, and a second answer in a second place is the drift this
+	 * tree keeps finding. */
+	void    update_contention();
 
 	ncfg_connection *connection;
 	QComboBox       *interfaces;
 	QLabel          *status;
+	/* Another daemon on this radio, shown above the table rather than in the
+	 * status line: it is a standing condition, and a status line is where the
+	 * last thing that happened goes. Hidden when there is none, so a machine
+	 * where netcfgd is the only manager sees nothing. */
+	QLabel          *contention;
 	QPushButton     *scan_button;
 	QPushButton     *join_button;
 	QPushButton     *add_button;
