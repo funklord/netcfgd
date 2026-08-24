@@ -1050,6 +1050,41 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**The GUI has a live test now, which is the client the report was actually
+about.** `tests/live/gui_wifi.sh` builds `gui/tests/live/live_wifi.cpp` and
+drives the real `ncfg_wifi_view` by clicking its real buttons, against a real
+netcfgd on the same fake radio `wifi_journey.sh` uses. The other probes under
+`gui/tests/` are widget logic with no daemon: they check that a state produces
+a rendering, *given the state*. Whether the state ever arrives -- whether
+pressing `scan` fills the table, whether `activate radio` leaves a supplicant
+running -- is a join, and every fault this milestone was in a join.
+
+It asserts the sequence an operator performs: with nothing configured, scan
+and join are refused and activate is offered; pressing activate leaves the
+radio netcfgd's; the table fills; selecting an unconfigured network offers
+`add` and not `join`. `isVisible()` is deliberately never asserted -- a widget
+in a window nobody showed is not visible, and a probe that checked it would be
+checking its own harness.
+
+**It found the thing that would have made every wireless button dead.** The C
+client decided "is this a radio" by guessing from the name and kind --
+`kind == "wlan"`, or a name beginning `wl` -- while the daemon had been putting
+the kernel's answer on the wire since `ObservedLink` gained `wireless`. They
+disagree on any interface whose name does not begin `wl`: a renamed adapter, or
+a radio a test invented. The GUI's interface list was therefore empty on a
+machine netcfgd was managing perfectly well, and with an empty list every
+wireless control is disabled and nothing says why. The client reads the
+daemon's field now and keeps the guess only as a fallback for a daemon older
+than it. Proved by putting the guess back: five checks fail.
+
+**Two harness traps, both worth the comment they now carry.** The probe links
+`libncfg_client.a` and `make` did not consider it a dependency, so it ran
+against a stale client and reported a fault that was no longer in the tree --
+`PRE_TARGETDEPS` fixes that. And `make -C gui test` globs `tests/*.pro` and ran
+the live probe with no daemon, which fails at "the view can reach netcfgd" and
+says nothing about the view; it lives in `gui/tests/live/` for that reason
+alone.
+
 **Every wifi fault this milestone was found by hand, and now there is a test
 that would have found them.** `tests/live/wifi_journey.sh` runs the journey a
 person takes on a machine with nothing configured -- list the radios, activate

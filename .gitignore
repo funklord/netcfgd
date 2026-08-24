@@ -19,6 +19,10 @@ client/tests/client_test
 gui/build/
 gui/build-*/
 gui/tests/build/
+# The live GUI probe builds beside its own project file, which is in a
+# subdirectory so that `make -C gui test` does not discover and run it without
+# a daemon.
+gui/tests/live/build/
 
 # Built packages. The recipes and the metadata are tracked; the .deb and .apk
 # they produce are not -- a package is a build artifact of a specific commit,
