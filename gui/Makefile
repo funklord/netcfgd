@@ -88,5 +88,5 @@ clean:
 		"" ) echo "clean: BUILD_DIR is empty, refusing"; exit 1 ;; \
 		/* ) echo "clean: BUILD_DIR $(BUILD_DIR) is absolute, refusing"; exit 1 ;; \
 	esac
-	rm -rf $(BUILD_DIR) tests/$(BUILD_DIR)
+	rm -rf $(BUILD_DIR) tests/$(BUILD_DIR) tests/live/$(BUILD_DIR)
 	$(MAKE) -C $(CLIENT_DIR) clean

@@ -589,7 +589,19 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->up = ncfg_json_bool(doc, ncfg_json_member(doc, link, "up"), 0);
 		item->carrier = ncfg_json_bool(doc, ncfg_json_member(doc, link, "carrier"), 0);
 		item->addresses = item->name ? join_addresses(doc, addresses, item->name) : NULL;
-		item->wireless = ncfg_link_is_wireless(item->kind, item->name);
+		// **The daemon's answer where there is one.** netcfgd reads
+		// /sys/class/net/<name>/wireless and puts it on the wire; guessing
+		// from the name was all a client could do before, and it disagrees
+		// with the daemon on any interface whose name does not begin `wl` --
+		// a renamed adapter, or a radio a test invented. `gui_wifi.sh` found
+		// it that way: netcfgd managed the radio, and the GUI's own interface
+		// list was empty, so every wireless button was dead with no
+		// explanation. The heuristic stays as the fallback for a daemon older
+		// than the field, which is the only case that can still need it.
+		const uint32_t wireless = ncfg_json_member(doc, link, "wireless");
+		item->wireless = wireless == NCFG_JSON_NONE
+		    ? ncfg_link_is_wireless(item->kind, item->name)
+		    : ncfg_json_bool(doc, wireless, 0);
 		if (!item->name || !item->kind || !item->mac || !item->addresses) {
 			set_error(err, err_size, "out of memory");
 			ncfg_links_free(out);

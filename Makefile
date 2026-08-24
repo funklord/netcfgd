@@ -1257,6 +1257,10 @@ live:
 	@# from. It asserts the machine rather than the artifacts: a supplicant
 	@# that is running, a scan that returns, a network that reached it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi_journey.sh"
+	@# The same journey through the GUI's own buttons, which is the client the
+	@# "buttons don't work properly" report was about. Skips without Qt, which
+	@# is a dependency a machine may reasonably not have.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/gui_wifi.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"
