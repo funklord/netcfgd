@@ -84,6 +84,21 @@ export NCFG_SYS_CLASS_NET="$work/sys"
 export NCFG_WPA_CTRL_DIR="$work/ctrl"
 export NCFG_WPA_SUPPLICANT="$work/fake_supplicant"
 export QT_QPA_PLATFORM=offscreen
+# Where `contention.rs` looks for the files other managers leave. Pointed at
+# the fixture so a probe can invent a NetworkManager without one being
+# installed -- and, more to the point, without one being *running*, which on a
+# developer's machine it usually is.
+export NCFG_RUN_ROOT="$work/runroot"
+mkdir -p "$work/runroot"
+# The index, because every daemon in `contention.rs` keys its state by ifindex
+# rather than by name: an interface can be renamed and the index cannot.
+# From `ip`, not from /sys: inside `unshare -rn` the /sys/class/net tree still
+# shows the *parent* namespace's links unless /sys is remounted, so the dummy
+# created a moment ago is not there. That is the same reason the fake sysfs
+# override exists at all, and it is worth knowing before writing any test that
+# expects to find a namespaced interface under /sys.
+NCFG_TEST_RADIO_INDEX=$(ip -o link show radio0 | cut -d: -f1 | tr -d ' ')
+export NCFG_TEST_RADIO_INDEX
 
 # Nothing configured, which is the state the report came from.
 : > "$work/etc/netcfgd.conf"

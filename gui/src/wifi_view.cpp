@@ -79,6 +79,18 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	status->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	layout->addWidget(status);
 
+	/* Above the table and hard to miss, because what it says explains every
+	 * other thing on this tab behaving oddly. An operator whose scans fail
+	 * intermittently has no way to guess that two daemons are taking the
+	 * radio in turns, and netcfgd has known it all along -- it says so in
+	 * every plan, where a wifi tab never looks. */
+	contention = new QLabel(this);
+	contention->setObjectName(QStringLiteral("contention"));
+	contention->setWordWrap(true);
+	contention->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	contention->setVisible(false);
+	layout->addWidget(contention);
+
 	table = new QTableWidget(0, column_count, this);
 	QStringList headers;
 	for (int i = 0; i < column_count; i++) {
@@ -151,6 +163,7 @@ void ncfg_wifi_view::refresh()
 		status->setText(none);
 		emit reported(none);
 		chosen_radio = ncfg_radio_row();
+		update_contention();
 		selection_changed();
 		return;
 	}
@@ -175,12 +188,58 @@ void ncfg_wifi_view::refresh()
 		    QStringLiteral("%1: %2").arg(chosen_interface(), chosen_radio.state());
 		status->setText(line);
 		emit reported(line);
+		update_contention();
 		selection_changed();
 		return;
 	}
 
 	update_status();
+	update_contention();
 	selection_changed();
+}
+
+/* What the planner says about this radio, which is where netcfgd records that
+ * something else is managing it.
+ *
+ * Read out of the plan rather than asked for separately. netcfgd works this
+ * out for every apply -- `contention.rs` reads the files NetworkManager and
+ * systemd-networkd leave in /run -- and a second route to the same answer is
+ * the drift this tree keeps finding.
+ *
+ * A failure to read the plan leaves the banner alone rather than clearing it:
+ * "I could not check" is not "there is no other manager", and the second is
+ * what an empty banner says.
+ */
+void ncfg_wifi_view::update_contention()
+{
+	const QString interface = chosen_interface();
+	if (interface.isEmpty()) {
+		contention->setVisible(false);
+		return;
+	}
+
+	ncfg_plan_data plan;
+	QString error;
+	if (!connection->plan(&plan, &error)) {
+		return;
+	}
+
+	for (const ncfg_note_row &warning : plan.warnings) {
+		if (warning.interface != interface) {
+			continue;
+		}
+		/* The planner's own sentence, and its remedy after it. Rewording
+		 * either would put a second description of one condition in a second
+		 * place, and the remedy is the half an operator acts on. */
+		QString text = warning.message;
+		if (!warning.remedy.isEmpty()) {
+			text += QStringLiteral("\n\nTo hand it over: %1").arg(warning.remedy);
+		}
+		contention->setText(text);
+		contention->setVisible(true);
+		return;
+	}
+	contention->setVisible(false);
 }
 
 void ncfg_wifi_view::update_status()
@@ -227,8 +286,21 @@ void ncfg_wifi_view::scan()
 	if (!done) {
 		scanned.clear();
 		table->setRowCount(0);
-		status->setText(error);
-		emit reported(error);
+		/* **The moment contention actually bites.** Another manager taking
+		 * the interface out of the supplicant makes the control socket vanish
+		 * for that window, and netcfgd's refusal is then "is wpa_supplicant
+		 * running?" -- true, and the wrong question. An operator whose scans
+		 * fail every other attempt has no way to guess two daemons are taking
+		 * the radio in turns, so the banner is re-read here and its sentence
+		 * put after the refusal.
+		 */
+		update_contention();
+		QString said = error;
+		if (contention->isVisible()) {
+			said += QStringLiteral("\n\n%1").arg(contention->text());
+		}
+		status->setText(said);
+		emit reported(said);
 		selection_changed();
 		return;
 	}
