@@ -1261,6 +1261,10 @@ live:
 	@# "buttons don't work properly" report was about. Skips without Qt, which
 	@# is a dependency a machine may reasonably not have.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/gui_wifi.sh"
+	@# The 802.1X path, where the worst fault of M8 was and which had no live
+	@# coverage: a certificate must reach the supplicant as a path it can open,
+	@# never as the content of a key.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/enterprise.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"

@@ -420,13 +420,25 @@ pub fn install(
 /// Comparing a `CertSource` against the text would fail for every stored
 /// certificate, and the failure would say netcfgd has a bug -- which is what
 /// that message means and is exactly why it must not fire for a working case.
-fn cert_as_written(source: Option<&netcfgd_model::CertSource>) -> Option<&str> {
+fn cert_as_written(source: Option<&netcfgd_model::CertSource>) -> Option<String> {
 	match source? {
-		netcfgd_model::CertSource::Path(path) => Some(path.as_str()),
-		// The reference's own text is not kept, so this cannot be compared by
-		// value. It is a match by construction: `render` writes exactly the
-		// `@secret:` form the compiler turns back into `Stored`.
-		netcfgd_model::CertSource::Stored(_) => None,
+		netcfgd_model::CertSource::Path(path) => Some(path.clone()),
+		// **Reconstructed, not skipped.** This returned `None` here, on the
+		// reasoning that a reference's own text is not kept so it "cannot be
+		// compared by value -- it is a match by construction". The caller
+		// compares `wrote.is_some() && wrote != got`, so a certificate written
+		// as `@secret:corp-ca` and compiled back to `Stored` was
+		// `Some(..) != None` and the write was refused with "did not survive
+		// being written and read back. This is a bug in netcfgd".
+		//
+		// It was: `ncfg wifi add --eap ... --ca-cert @secret:NAME` could never
+		// succeed, and the message blamed the round trip rather than the check
+		// that could not perform it. Found by `enterprise.sh` on its first run.
+		//
+		// The `@secret:` form is exactly what `render` writes, so rebuilding
+		// it compares the reference for real instead of declining to look --
+		// which is the stronger check as well as the working one.
+		netcfgd_model::CertSource::Stored(stored) => Some(format!("@secret:{}", stored.name)),
 	}
 }
 
@@ -490,24 +502,26 @@ fn compiles_back(config_dir: &Path, factory_dir: &Path, profile: &Profile) -> Re
 				 else, so it was removed again. This is a bug in netcfgd"
 			));
 		};
+		// Owned throughout, because a stored certificate's `@secret:` form is
+		// rebuilt rather than borrowed from anywhere.
 		for (wrote, got, what) in [
-			(identity.as_deref(), Some(eap.identity.as_str()), "identity"),
+			(identity.clone(), Some(eap.identity.clone()), "identity"),
 			(
-				anonymous_identity.as_deref(),
-				eap.anonymous_identity.as_deref(),
+				anonymous_identity.clone(),
+				eap.anonymous_identity.clone(),
 				"anonymous identity",
 			),
 			(
-				ca_cert.as_deref(),
+				ca_cert.clone(),
 				cert_as_written(eap.ca_cert.as_ref()),
 				"CA certificate",
 			),
 			(
-				client_cert.as_deref(),
+				client_cert.clone(),
 				cert_as_written(eap.client_cert.as_ref()),
 				"client certificate",
 			),
-			(phase2.as_deref(), eap.phase2.as_deref(), "phase 2 method"),
+			(phase2.clone(), eap.phase2.clone(), "phase 2 method"),
 		] {
 			if wrote.is_some() && wrote != got {
 				return Err(format!(

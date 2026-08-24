@@ -267,7 +267,15 @@ def serve(ctrl_dir, interface, pidfile):
 			# Secrets are redacted: `SET_NETWORK 0 psk "..."` carries the
 			# passphrase, and a test fixture writing one to a log is the habit
 			# this project refuses to get into.
-			first = command.split(" psk ")[0].split(" sae_password ")[0]
+			# Every keyword that carries key material, not just the two a
+			# passphrase uses. An enterprise network sends `password` and
+			# `private_key`, and a fixture logging one is the habit this
+			# refuses to get into -- the comment above said so while the list
+			# below covered only WPA-Personal.
+			first = command
+			for keyword in (" psk ", " sae_password ", " password ",
+			                " private_key ", " private_key_passwd "):
+				first = first.split(keyword)[0]
 			print(first, flush=True)
 			reply(server, sender, answer(command).encode())
 	except (KeyboardInterrupt, OSError):
