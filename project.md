@@ -1050,6 +1050,44 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**Every wifi fault this milestone was found by hand, and now there is a test
+that would have found them.** `tests/live/wifi_journey.sh` runs the journey a
+person takes on a machine with nothing configured -- list the radios, activate
+one, scan, add a network, join it -- and asserts **the machine** rather than
+the artifacts: is a supplicant running, does a scan return, did the network
+reach it. That is the distinction every one of these faults hid behind. A unit
+test asserts the file, the request or the plan, and each fault was a correct
+file, a correct request and a correct plan that changed nothing.
+
+**The step no test could perform was netcfgd starting a supplicant.** `nm.sh`
+fakes a radio and a control socket, but the *test* starts the fake -- so the
+one action that had broken was the one nothing exercised. Two seams were
+missing and both are now there: `NCFG_WPA_SUPPLICANT`, because
+`supplicant_binary()` searched `/usr/sbin` before `PATH` and could not be stood
+in front of on any machine that has wpa_supplicant installed; and
+`fake_supplicant.py` understanding netcfgd's own command line, so it can *be*
+the supplicant netcfgd starts rather than one a test started first.
+
+**Checked by breaking it, four ways.** Removing `wifi add`'s activation fails
+four checks; dropping the `interface` block fails activation outright;
+restoring the old `report` default with no synchronous apply fails six,
+including "netcfgd started a supplicant" and "a scan returns access points".
+The fourth control -- removing only the synchronous apply -- correctly still
+passes, because the reconcile loop starts the supplicant a moment later and the
+test asserts the outcome rather than the timing.
+
+**And it immediately found two things.** `why_no_supplicant` had a fourth copy
+of `/sys/class/net` hard-coded, written before `netcfgd_sys::radio` collected
+the other three, so it asked the real machine while everything around it asked
+where `NCFG_SYS_CLASS_NET` pointed -- and therefore declined to explain
+anything on a test radio. And activating a radio applied the *whole* interface
+plan, so it ran `dhcpcd` on a link that had not associated yet and **failed**:
+handing netcfgd a radio was refused because DHCP had not finished on it. That
+one only broke under `make live`, which puts `/sbin` on `PATH`, and not in a
+plain shell where `dhcpcd` is not found -- the same code, breaking or not
+depending on whether a binary could be located. Activation starts the
+supplicant and nothing else now; the loop does the rest.
+
 **netcfgd applies its configuration now, and re-applies what has deviated**
 ([0132](docs/decisions/0132-netcfgd-applies-its-configuration.md)). Every
 symptom of this milestone was one fault seen from a different angle: a

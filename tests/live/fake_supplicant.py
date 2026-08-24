@@ -16,7 +16,20 @@ known answers on the other side. It is a fake radio, not a fake supplicant
 protocol: the wire format here is the real one, and if netcfgd's parser changes
 its mind about it, wifi.sh is what notices.
 
-    fake_supplicant.py <ctrl-dir> <interface>
+    fake_supplicant.py <ctrl-dir> <interface> [pidfile]
+
+and, since it also has to be the supplicant netcfgd *starts*, the form netcfgd
+invokes with:
+
+    fake_supplicant.py -B -D<driver> -i <interface> -C <ctrl-dir> -P <pidfile>
+
+That second form is why `NCFG_WPA_SUPPLICANT` exists. Everything a test could
+fake before -- the radio, the control socket, the canned scan -- stopped short
+of the one step that had actually broken: netcfgd deciding to start a
+supplicant and starting it. A test that pre-starts the fake proves nothing
+about that, and since the guard against taking over a live foreign supplicant
+landed it proves less than nothing, because netcfgd correctly declines a socket
+somebody else is already answering.
 
 Speaks the same unix datagram protocol wpa_supplicant does: a client binds its
 own address, sends a command, and gets one reply.
@@ -134,11 +147,64 @@ def _unlink(path):
 		pass
 
 
+def parse_netcfgd_argv(argv):
+	"""netcfgd's own command line, or None if this is the positional form.
+
+	Only the flags netcfgd passes, and it is deliberately not a general
+	getopt: a fake that accepted more than the real caller sends would let a
+	change in that caller go unnoticed here, which is the whole reason this
+	file exists rather than a mock.
+	"""
+	if not any(argument.startswith("-") for argument in argv):
+		return None
+	interface = ctrl_dir = pidfile = None
+	daemonise = False
+	rest = list(argv)
+	while rest:
+		flag = rest.pop(0)
+		if flag == "-B":
+			daemonise = True
+		elif flag == "-i" and rest:
+			interface = rest.pop(0)
+		elif flag == "-C" and rest:
+			ctrl_dir = rest.pop(0)
+		elif flag == "-P" and rest:
+			pidfile = rest.pop(0)
+		elif flag.startswith("-D"):
+			continue  # the driver; a fake radio has none
+		else:
+			print(f"fake_supplicant: unhandled flag {flag}", file=sys.stderr)
+			return False
+	if not interface or not ctrl_dir:
+		print("fake_supplicant: -i and -C are required", file=sys.stderr)
+		return False
+	return (ctrl_dir, interface, pidfile, daemonise)
+
+
 def main():
+	parsed = parse_netcfgd_argv(sys.argv[1:])
+	if parsed is False:
+		return 2
+	if parsed is not None:
+		ctrl_dir, interface, pidfile, daemonise = parsed
+		if daemonise:
+			# `-B` means background, and netcfgd waits for the control socket
+			# to appear rather than for the process -- so the parent must not
+			# exit before the child has bound it. Forking here and letting the
+			# parent return is what a real supplicant does; the socket is
+			# created below, in the child.
+			if os.fork() > 0:
+				return 0
+			os.setsid()
+		return serve(ctrl_dir, interface, pidfile)
+
 	if len(sys.argv) not in (3, 4):
 		print(__doc__.strip().splitlines()[-3], file=sys.stderr)
 		return 2
-	ctrl_dir, interface = sys.argv[1], sys.argv[2]
+	return serve(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else None)
+
+
+def serve(ctrl_dir, interface, pidfile):
 	# An optional pid file, because since 0080 a control socket does not prove a
 	# supplicant is running and netcfgd is right about that: it asks whether the
 	# pid file at $run/supplicant/<iface>.pid names a live process *whose own
@@ -150,7 +216,6 @@ def main():
 	#
 	# Passing the path as an argument is what makes the marker match; writing
 	# the file is what makes the pid real. Both are needed and neither alone.
-	pidfile = sys.argv[3] if len(sys.argv) == 4 else None
 	if pidfile:
 		os.makedirs(os.path.dirname(pidfile), exist_ok=True)
 		with open(pidfile, "w") as handle:
