@@ -231,7 +231,7 @@ the program prints, so the number lives in exactly one place.
 ### Singular, unless somebody else standardised the plural
 
 **Prefer the singular for a directory this project names itself.** `helper/`
-rather than `helpers/`, `doc/` rather than `docs/`, `fixture/` rather than
+rather than `helper/`, `doc/` rather than `docs/`, `fixture/` rather than
 `fixtures/`. The name says what kind of thing lives there, not how many;
 one of them and forty of them go in the same place, and the directory
 should not have to be renamed when the count changes.
@@ -504,7 +504,7 @@ Kernel format. See `~/.claude/guidelines/build-and-commit.md` for the full
 statement; what is specific here is the subsystem name.
 
     netcfgd-plan: fix the ordering edge for a renamed link
-    adapters/nm: rework the containment check as one pass
+    adapter/nm: rework the containment check as one pass
 
 The crate or adapter comes first, followed by a colon, with a slash for
 nesting. `git log --grep '^netcfgd-plan:'` then answers what has happened to

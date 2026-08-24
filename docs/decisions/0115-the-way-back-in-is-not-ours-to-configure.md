@@ -38,7 +38,7 @@ it threatens the core. It is still refused, for three reasons that compound:
   existing consumer. The same information maps onto YANG without inventing
   anything, which is why M9 is RESTCONF and not this.
 
-If it is ever wanted it is `adapters/netcfgd-snmp`, after M9, under constraint
+If it is ever wanted it is `adapter/netcfgd-snmp`, after M9, under constraint
 6 like every other adapter.
 
 ## IPMI passes the tests it ought to fail

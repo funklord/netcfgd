@@ -17,8 +17,8 @@ netcfgd-sys = { path = "../crates/netcfgd-sys" }
 netcfgd-compile = { path = "../crates/netcfgd-compile" }
 netcfgd-model   = { path = "../crates/netcfgd-model" }
 netcfgd-proto   = { path = "../crates/netcfgd-proto" }
-netcfgd-supplicant = { path = "../backends/netcfgd-supplicant" }
-netcfgd-hostapd    = { path = "../backends/netcfgd-hostapd" }
+netcfgd-supplicant = { path = "../backend/netcfgd-supplicant" }
+netcfgd-hostapd    = { path = "../backend/netcfgd-hostapd" }
 
 [[bin]]
 name = "netlink_wire"

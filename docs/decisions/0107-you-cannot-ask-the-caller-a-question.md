@@ -20,7 +20,7 @@ be tested.
 
 ## Watching without touching
 
-`adapters/netcfgd-nm/src/trace.rs` is a ring of checkpoints: a monotonic
+`adapter/netcfgd-nm/src/trace.rs` is a ring of checkpoints: a monotonic
 timestamp and a `&'static str`, into memory, with no formatting, no allocation
 and no syscall on the measured path. A watchdog thread notices a handler that
 has been in flight for ten seconds and dumps the ring **afterwards**, so nothing
@@ -92,7 +92,7 @@ it. That is a feature, not a bug fix, and it should not ride in on this.
 | with it removed | 3 of 8 |
 
 The break needed doing twice: the first attempt edited paths relative to a shell
-still sitting in `adapters/netcfgd-nm` from an earlier `cd`, so nothing was
+still sitting in `adapter/netcfgd-nm` from an earlier `cd`, so nothing was
 modified and eight runs of the *fixed* binary reported a clean break. §9's rule
 about a break that does not apply, in a new disguise.
 

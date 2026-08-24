@@ -70,7 +70,7 @@ requires of one.
 Implementation therefore depends on M3's supplicant work and cannot land
 before it, even though the model lands in M1.
 
-**`backends/netcfgd-wifi/` becomes a misleading name**, since one crate will
+**`backend/netcfgd-wifi/` becomes a misleading name**, since one crate will
 drive the supplicant for both radios and wired ports. Rename it
 `netcfgd-supplicant` now. §0 of the brief is reserving crate names on
 crates.io this week, so the cheap moment to fix this is before the placeholder

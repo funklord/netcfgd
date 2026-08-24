@@ -25,7 +25,7 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-shim="$repo/adapters/netcfgd-nm/target/debug/netcfgd-nm"
+shim="$repo/adapter/netcfgd-nm/target/debug/netcfgd-nm"
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then

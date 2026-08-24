@@ -97,7 +97,7 @@ line for line. **The seam goes below the widgets.**
   client, exactly like the adapters in §9."* It is also what keeps the core's
   twelve-crate dependency budget and its `forbid(unsafe_code)` intact: Monocypher
   and a UDP socket live in a C program, outside the Rust workspace, contained the
-  way `adapters/netcfgd-nm` is.
+  way `adapter/netcfgd-nm` is.
 - **Build integration comes last.** `fuzzypickles/gui` is deliberately not wired
   into its root Makefile; this directory should be the same until it is worth
   doing as its own step. `cd gui && make` builds what it needs.
@@ -316,7 +316,7 @@ Four rules, all of them the same rule:
   repository's existing style — the root `Makefile` is the model for how flags and
   toolchain injection are threaded.
 - The four directories live at the **repository root**, beside `crates/`,
-  `backends/` and `adapters/`: `gui/`, `client/`, `wire/`, `agent/`. The Rust
+  `backend/` and `adapter/`: `gui/`, `client/`, `wire/`, `agent/`. The Rust
   workspace does not gain them -- `Cargo.toml`'s member list stays as it is, and
   `make size` keeps measuring the Rust install alone.
 

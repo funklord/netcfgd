@@ -354,7 +354,7 @@ Answered on 2026-08-04, and carried into `gui/project.md`:
    uses it.
 
 5. **The four directories live at the repository root**, beside `crates/`,
-   `backends/` and `adapters/`: `gui/`, `client/`, `wire/`, `agent/`.
+   `backend/` and `adapter/`: `gui/`, `client/`, `wire/`, `agent/`.
    **Superseded on 2026-08-10, in the `wire/` entry only** -- see "Revisiting
    decision 6" below. Three directories, not four.
 6. **`situ` describes the frame**, with Monocypher bound to it as an extern

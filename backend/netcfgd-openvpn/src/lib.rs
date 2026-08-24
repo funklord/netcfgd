@@ -727,7 +727,7 @@ mod tests {
 	///
 	/// It is written into `/run` and run by openvpn rather than by anything in
 	/// this repository, so `make shell` cannot see it: that gate reads
-	/// `helpers/` and `tests/live/`, and a syntax error here would first be
+	/// `helper/` and `tests/live/`, and a syntax error here would first be
 	/// noticed as a tunnel that reports nothing. `sh -n` costs a fork.
 	#[test]
 	fn the_script_parses() {

@@ -170,7 +170,7 @@ which stops netcfgd operating on it and changes nothing else.
 | `ncfg` | the CLI — `plan`, `apply`, `explain`, `monitor`, `wifi`, `reload`, `reset` |
 | `ncfg tui` | five panes over the public socket; 80x24, no colour required |
 | `crates/` | the Rust workspace: model, compiler, planner, netlink, apply, daemon |
-| `adapters/netcfgd-nm` | a NetworkManager shim, so `nmcli` and desktop applets work |
+| `adapter/netcfgd-nm` | a NetworkManager shim, so `nmcli` and desktop applets work |
 | `gui/` | a Qt Widgets client, desktop and Android, over `client/` |
 | `client/` | the C frontend layer any client can use: connections, models |
 | `packaging/` | systemd, OpenRC and procd glue, plus Alpine packaging |

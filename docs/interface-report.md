@@ -253,7 +253,7 @@ Anything at all. For a cellular bearer, three are known to be possible and none
 of them is privileged by netcfgd:
 
 - **`mbimcli`** from `libmbim-utils`. **There is one in this repository**:
-  `helpers/netcfgd-modem-mbim`, a shell script, installed by
+  `helper/netcfgd-modem-mbim`, a shell script, installed by
   `make install-modem-mbim`. It is a reference rather than a blessed
   implementation -- netcfgd does not know it exists.
 - **`umbim`** on OpenWrt -- `+libubox +kmod-usb-net-cdc-mbim +wwan`, no glib and

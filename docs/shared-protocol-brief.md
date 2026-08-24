@@ -236,7 +236,7 @@ to revisit any of them, deliberately.
 3. **The local hop stays JSON**; the agent translates. Section 4.
 4. **Makefiles and qmake only** in this tree, no CMake.
 5. **The four directories live at the repository root**, beside `crates/`,
-   `backends/` and `adapters/`: `gui/`, `client/`, `wire/`, `agent/`.
+   `backend/` and `adapter/`: `gui/`, `client/`, `wire/`, `agent/`.
    **Superseded 2026-08-10 in the `wire/` entry only** — see below. Three, not
    four.
 6. **`situ` describes the frame**, with Monocypher bound as an extern codec,

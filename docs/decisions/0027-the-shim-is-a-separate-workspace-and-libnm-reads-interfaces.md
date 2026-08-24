@@ -17,7 +17,7 @@ tree, leaving one question explicitly open: where NM's `ObjectManager` lives.
 
 ## Decision, part one: an adapter is its own cargo workspace
 
-**`adapters/netcfgd-nm` is excluded from the root workspace and has its own
+**`adapter/netcfgd-nm` is excluded from the root workspace and has its own
 `Cargo.lock` and its own `deny.toml`.**
 
 Section 9.2 requires the adapter's dependencies to be its package's only, and

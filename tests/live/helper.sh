@@ -4,7 +4,7 @@
 #     unshare -rn sh tests/live/helper.sh
 #
 # modem.sh checks netcfgd's half of the contract by writing the report itself.
-# This checks the other half: the real `helpers/netcfgd-modem-mbim`, driven
+# This checks the other half: the real `helper/netcfgd-modem-mbim`, driven
 # against a fake `mbimcli`, writing a report that netcfgd then reads and
 # applies. Between the two the whole path is covered without a modem.
 #
@@ -62,7 +62,7 @@ export NCFG_RESOLV_CONF="$work/resolv.conf"
 export MBIMCLI="$repo/tests/live/fake_mbimcli.sh"
 export FAKE_MBIMCLI_LOG="$work/mbimcli.log"
 ncfg="$repo/target/debug/ncfg"
-helper="$repo/helpers/netcfgd-modem-mbim"
+helper="$repo/helper/netcfgd-modem-mbim"
 
 failures=0
 check() {

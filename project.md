@@ -493,10 +493,10 @@ netcfgd/
                                 # A dev dependency only: nothing links it into a
                                 # binary, so it is in no tier and costs the size
                                 # budget nothing
-  backends/
+  backend/
     netcfgd-dhcp/  netcfgd-supplicant/  netcfgd-wg/  netcfgd-dns/  netcfgd-ppp/
     netcfgd-hostapd/            # access points, added with M4's last inert feature
-  adapters/
+  adapter/
     netcfgd-nm/                 # milestone M7. Its own workspace and lockfile:
                                 # excluded from the root, so its D-Bus stack
                                 # cannot reach the core's twelve dependencies
@@ -663,7 +663,7 @@ Source, comments and commit messages are **ASCII**; write `--` where prose would
 ### Build and commit conventions
 
 - **`cargo fmt --check` and `cargo clippy -- -D warnings` before committing**, alongside the §6 gates. They are cheap and they are the two that produce noise in someone else's diff when skipped.
-- **Kernel commit format**, stated in full in `code-style.md` §8 and in the global source it copies. The subject is `subsystem: summary`, imperative, no trailing period, 75 columns, where the subsystem is the crate or adapter with a slash for nesting — `netcfgd-plan:`, `adapters/nm:`, `tests/live:`. Body is prose wrapped at 75 explaining *why* the change is right and what was learned making it — including wrong turns, tests that passed for the wrong reason, and numbers that turned out to be guessed. `git diff` already lists what changed.
+- **Kernel commit format**, stated in full in `code-style.md` §8 and in the global source it copies. The subject is `subsystem: summary`, imperative, no trailing period, 75 columns, where the subsystem is the crate or adapter with a slash for nesting — `netcfgd-plan:`, `adapter/nm:`, `tests/live:`. Body is prose wrapped at 75 explaining *why* the change is right and what was learned making it — including wrong turns, tests that passed for the wrong reason, and numbers that turned out to be guessed. `git diff` already lists what changed.
 - **A trailer naming an artifact is content; one naming a person is theirs.** `Fixes:` and `Link:` point at a commit or a URL, assert nothing about anybody, and may be written freely. `Signed-off-by:`, `Reviewed-by:` and `Tested-by:` are statements a person makes about their own involvement, and are added by that person. Tooling or assistant attribution is refused outright, by `tools/hooks/commit-msg` as well as by the rule.
 - **No docs-only commits.** Documentation rides along with the code commit it describes. Folding an accumulated session's findings back into this file is the standing exception.
 - **Stage named paths; never `git add -A`.** That is the mechanism by which local editor state, scratch files and untracked notes end up in history. `.gitignore` covers the predictable cases and is not a substitute for reading `git status --short`.
@@ -750,7 +750,7 @@ what a witness catches rather than about what a test does.
 - **Watch for a check that passes because of a different protection than the one under test.** Breaking the `InQueue` arm of the NM shim's bus-name claim changed nothing, because `DoNotQueue` makes the refusal arrive as an `Err`.
 - **A guard clause no test can make fail is untested code, not defence in depth.** Three shipped and were removed: a `WireGuard` kind check the observation already guaranteed, a `#`-comment branch the key match already handled, and a `>`-prefix skip in the OpenVPN management client that reading-until-an-answer already covered. Apply the break-it method to guard clauses, not only to tests — and where the guarantee is worth keeping, pin it with a test so it survives however the code is later written.
 - **A negative check needs its positive, even when the negative is the interesting half.** The modem monitor's drop detection was checked by dropping the bearer; one character wrong in the label it matches makes it decide the bearer is down on the *first* poll, which satisfies that perfectly. The missing assertion was that it stays up while the bearer is up.
-- **A gate that cannot see part of the tree enforces nothing there.** The `ascii` gate covered neither `helpers/` nor `adapters/` and filtered by extension, so an installed script with none was invisible twice over. The schema witness could not see a new enum variant at all, twice — a witness is a *sample* and a sample cannot notice a variant nobody put in it. Both now fail to compile rather than fail to notice. The third instance was worse and is the one to remember: **`Observed` had no witness at all**, so a field added to the type the control socket actually sends moved nothing — and `socket.json`'s test said in a comment that the payload types were "pinned by their own crates", which was simply untrue. A sentence claiming coverage is not coverage, and it reads exactly like coverage in review.
+- **A gate that cannot see part of the tree enforces nothing there.** The `ascii` gate covered neither `helper/` nor `adapter/` and filtered by extension, so an installed script with none was invisible twice over. The schema witness could not see a new enum variant at all, twice — a witness is a *sample* and a sample cannot notice a variant nobody put in it. Both now fail to compile rather than fail to notice. The third instance was worse and is the one to remember: **`Observed` had no witness at all**, so a field added to the type the control socket actually sends moved nothing — and `socket.json`'s test said in a comment that the payload types were "pinned by their own crates", which was simply untrue. A sentence claiming coverage is not coverage, and it reads exactly like coverage in review.
 
 **Prefer a real kernel and a reference tool over fixtures.** Every netlink bug here was found by writing to a kernel and reading it back, never by reading the encoder more carefully. Cross-check against `tc`, `ip rule`, `ip token`, `nft`, `nmcli`, `hostapd` — a round trip through netcfgd alone proves nothing when the same mistake is made in both directions.
 
@@ -1124,7 +1124,7 @@ finding the two disagreeing should read 0049 before making them agree.
 connects the bearer and writes a report, netcfgd installs what it says and
 withdraws it when the report empties. The helper is deliberately plural
 ([0045](docs/decisions/0045-the-contract-is-the-decision-and-the-helper-is-plural.md))
-— `helpers/netcfgd-modem-mbim` is a reference, and `umbim` or ModemManager are
+— `helper/netcfgd-modem-mbim` is a reference, and `umbim` or ModemManager are
 equally valid writers. netcfgd never speaks MBIM, QMI or D-Bus
 ([0044](docs/decisions/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)).
 Nothing here has met hardware.
@@ -1896,7 +1896,7 @@ empty: the notes that say what *would* happen, the reasons for a deferral, and
 the sentence that disposes of an alternative in half a line.
 
 1. **Run the modem path against a real modem.** Everything is written and
-   nothing has met hardware: `helpers/netcfgd-modem-mbim` drives `mbimcli`
+   nothing has met hardware: `helper/netcfgd-modem-mbim` drives `mbimcli`
    against a fake whose output is copied from libmbim's own `g_print` calls.
    What no test can reach is a modem that does not behave — the 43 vendor
    plugins ModemManager carries are the measure of how common that is

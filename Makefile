@@ -75,7 +75,7 @@ CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
 # `nm-containment` below, and design section 9.2.
-ADAPTERS = adapters/netcfgd-nm
+ADAPTERS = adapter/netcfgd-nm
 
 all: build
 
@@ -211,7 +211,7 @@ nm-containment:
 # that exact failure in a `make packaging` check before.
 shell:
 	@count=0; \
-	for script in helpers/* tests/live/*.sh; do \
+	for script in helper/* tests/live/*.sh; do \
 		[ -f "$$script" ] || continue; \
 		sh -n "$$script" || exit 1; \
 		count=$$((count + 1)); \
@@ -303,7 +303,7 @@ FORCE:
 # than by trusting that nobody removed the attribute, since its absence is
 # silent -- the code still compiles, it just stops being checked.
 # Every crate root in the workspace, not just the ones under crates/. This
-# globbed `crates/*` alone until M5, so `backends/netcfgd-supplicant` went
+# globbed `crates/*` alone until M5, so `backend/netcfgd-supplicant` went
 # unchecked from the day it was written -- and it was missing the attribute. A
 # policy gate that cannot see half the tree enforces nothing, so it now counts
 # what it found and fails if that number collapses.
@@ -401,7 +401,7 @@ install:
 # blessed one. It also needs `mbimcli`, which most machines have no use for.
 install-modem-mbim:
 	install -d $(DESTDIR)$(BINDIR)
-	install -m 0755 helpers/netcfgd-modem-mbim $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
+	install -m 0755 helper/netcfgd-modem-mbim $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
 	@echo "install-modem-mbim:   docs/interface-report.md is the contract -- write"
 	@echo "install-modem-mbim:   your own helper if this one does not fit"
@@ -650,7 +650,7 @@ packaging:
 # `backends` and `tests` are in the list for the reason the unsafe-policy gate
 # learned the hard way: a gate that cannot see half the tree enforces nothing.
 # This globbed `crates` alone until access points were written, so every line of
-# `backends/` had gone unchecked since M2 -- it happened to be clean, which is
+# `backend/` had gone unchecked since M2 -- it happened to be clean, which is
 # luck rather than evidence. Shell scripts count as source; markdown does not,
 # and project.md section 9 says so.
 # Every directory that holds source, not just the ones that existed when this

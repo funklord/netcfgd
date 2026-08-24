@@ -23,8 +23,8 @@ netcfgd-observe = { path = "../netcfgd-observe" }
 netcfgd-plan    = { path = "../netcfgd-plan" }
 netcfgd-proto   = { path = "../netcfgd-proto" }
 netcfgd-secret  = { path = "../netcfgd-secret" }
-netcfgd-supplicant = { path = "../../backends/netcfgd-supplicant" }
-netcfgd-hostapd    = { path = "../../backends/netcfgd-hostapd" }
+netcfgd-supplicant = { path = "../../backend/netcfgd-supplicant" }
+netcfgd-hostapd    = { path = "../../backend/netcfgd-hostapd" }
 serde_json.workspace = true
 
 [dev-dependencies]

@@ -102,7 +102,7 @@ class and HE parameters that the document cannot express.
 hostapd parses its configuration before it touches a driver, and it says which
 line it disliked. That makes it usable as a reference tool on a machine with no
 wireless hardware at all, which is what
-`backends/netcfgd-hostapd/tests/reference.rs` does: every security variant,
+`backend/netcfgd-hostapd/tests/reference.rs` does: every security variant,
 every band, an SSID that is not text, all rendered and all fed to a real
 hostapd, asserting it found nothing to complain about. The test next to it
 feeds hostapd a deliberately wrong `wpa_key_mgmt` and requires the check to

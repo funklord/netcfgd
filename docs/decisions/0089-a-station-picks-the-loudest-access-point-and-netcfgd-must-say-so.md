@@ -72,7 +72,7 @@ which goes through `wpa_config_set` against a table of settable fields. A key th
 file parser takes and the socket rejects would leave roaming silently off with
 the daemon reporting a configured network.
 
-Asked, in `backends/netcfgd-supplicant/tests/live.rs`, against a real
+Asked, in `backend/netcfgd-supplicant/tests/live.rs`, against a real
 `wpa_supplicant` on the `wired` driver: `SET_NETWORK <id> bgscan
 "simple:20:-68:240"` is accepted, and `GET_NETWORK` reads it back — which is the
 half that says it was stored rather than accepted and dropped.

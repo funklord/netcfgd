@@ -18,11 +18,11 @@ netcfgd-sys = { path = "../netcfgd-sys" }
 # control lists. `netcfgd-apply` already links this to start and stop one.
 netcfgd-secret  = { path = "../netcfgd-secret" }
 netcfgd-apply   = { path = "../netcfgd-apply" }
-netcfgd-openvpn = { path = "../../backends/netcfgd-openvpn" }
-netcfgd-ra      = { path = "../../backends/netcfgd-ra" }
-netcfgd-hostapd = { path = "../../backends/netcfgd-hostapd" }
+netcfgd-openvpn = { path = "../../backend/netcfgd-openvpn" }
+netcfgd-ra      = { path = "../../backend/netcfgd-ra" }
+netcfgd-hostapd = { path = "../../backend/netcfgd-hostapd" }
 # And the second question of that shape: does a running supplicant still answer?
-netcfgd-supplicant = { path = "../../backends/netcfgd-supplicant" }
+netcfgd-supplicant = { path = "../../backend/netcfgd-supplicant" }
 
 [dev-dependencies]
 netcfgd-testdir = { path = "../netcfgd-testdir" }
