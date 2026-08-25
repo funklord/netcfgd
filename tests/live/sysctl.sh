@@ -131,6 +131,54 @@ check "with the record gone, netcfgd plans no change to it" \
 check "and leaves it on rather than reverting what it cannot prove is its own" \
 	"$(forwarding net0)" "1"
 
+# ---------------------------------------------------------------------------
+# 4. A record from a previous boot is worse than no record, and is discarded.
+#
+#    Everything else netcfgd owns is marked in the kernel now, so a stale
+#    record cannot mislead it about an address, a route, a link or a qdisc.
+#    The sysctls have no mark and no way to get one, which makes this the one
+#    place a record outliving its boot can do harm: it would have netcfgd
+#    revert a `forwarding` that `sysctl.d` set at boot, on the strength of
+#    having set one itself before the machine restarted. Decision 0138.
+#
+#    A reboot cannot be had inside a test, so the boot id is forged. That is
+#    the whole mechanism -- netcfgd compares the recorded id against
+#    /proc/sys/kernel/random/boot_id -- so forging it exercises the real path.
+#
+#    Step 3 left forwarding on with no record, so asking for it again would
+#    plan nothing and write nothing -- the precondition has to be established
+#    rather than assumed, or the forge below has no file to edit.
+echo 0 > /proc/sys/net/ipv4/conf/net0/forwarding
+asking_for_forwarding
+"$ncfg" apply >/dev/null 2>&1 || true
+check "forwarding is on once more" "$(forwarding net0)" "1"
+
+python3 -c 'import json,sys
+path = sys.argv[1]
+owned = json.load(open(path))
+owned["boot"] = "00000000-0000-0000-0000-000000000000"
+json.dump(owned, open(path, "w"))' "$work/run/owned.json"
+
+no_longer_asking
+said=$("$ncfg" apply 2>&1 || true)
+check "netcfgd says it is discarding a record from another boot" \
+	"$(printf '%s' "$said" | grep -ic 'different boot')" "1"
+check "and holds the sysctl rather than reverting it on a stale claim" \
+	"$(forwarding net0)" "1"
+
+# The other half: a record from *this* boot is still believed. Without this,
+# a netcfgd that discarded every record would pass the two checks above.
+#
+# Reset first, for the reason above: netcfgd records having set a sysctl only
+# when setting it was an action, and it is not one where the value is already
+# right.
+echo 0 > /proc/sys/net/ipv4/conf/net0/forwarding
+asking_for_forwarding
+"$ncfg" apply >/dev/null 2>&1 || true
+no_longer_asking
+"$ncfg" apply >/dev/null 2>&1 || true
+check "a record from this boot is still acted on" "$(forwarding net0)" "0"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "sysctl.sh: all checks passed"

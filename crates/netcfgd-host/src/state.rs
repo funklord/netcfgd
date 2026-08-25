@@ -38,6 +38,26 @@ pub fn resolve_dir(explicit: Option<&str>) -> PathBuf {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct OwnedState {
+	/// The boot this record was written during, from
+	/// `/proc/sys/kernel/random/boot_id`.
+	///
+	/// **A record that outlives its boot describes objects that no longer
+	/// exist**, and the danger is not that it is useless -- it is that parts
+	/// of it can match something new. It says netcfgd owns `10.0.0.5/24` on
+	/// `eth0`; after the reboot an initramfs or an operator put that address
+	/// there; netcfgd now believes it installed an address it did not, and
+	/// may remove it. Decision 0138.
+	///
+	/// The marks in the kernel make this moot for addresses, routes, links
+	/// and `tc` objects (0002, 0136, 0137), because none of them consults the
+	/// record first. **The sysctls are why this field exists**: they have no
+	/// mark and no way to get one, so a stale record is the only thing that
+	/// could make netcfgd revert a `forwarding` that `sysctl.d` set at boot.
+	///
+	/// Empty where it could not be read, and empty in a file written before
+	/// this existed. Both mean "do not judge", never "discard".
+	#[serde(default)]
+	pub boot: String,
 	/// Links netcfgd created.
 	pub created_links: Vec<String>,
 	/// Addresses netcfgd installed.
@@ -549,10 +569,46 @@ fn remember(list: &mut Vec<String>, interface: &str, ours: bool) {
 #[must_use]
 pub fn read_owned(run_dir: &Path) -> OwnedState {
 	let path = run_dir.join("owned.json");
-	fs::read_to_string(path)
+	let owned: OwnedState = fs::read_to_string(path)
 		.ok()
 		.and_then(|text| serde_json::from_str(&text).ok())
-		.unwrap_or_default()
+		.unwrap_or_default();
+
+	// A record from a previous boot is not stale information, it is wrong
+	// information: every object it names is gone, and anything that has taken
+	// the same name since would be adopted by a claim that never applied to
+	// it. Decision 0138.
+	//
+	// Both unknowns mean "do not judge". An empty field is a file written
+	// before this existed, and an unreadable `boot_id` is a kernel that does
+	// not expose one -- discarding on either would throw ownership away for a
+	// reason that has nothing to do with a reboot.
+	if let (false, Some(now)) = (owned.boot.is_empty(), boot_id()) {
+		if owned.boot != now {
+			eprintln!(
+				"netcfgd: the ownership record in {} was written during a different boot, so it is being discarded",
+				run_dir.display()
+			);
+			eprintln!(
+				"netcfgd:   objects netcfgd installed before that reboot are gone; anything matching them now belongs to somebody else"
+			);
+			return OwnedState::default();
+		}
+	}
+	owned
+}
+
+/// This boot's id, or `None` where the kernel does not offer one.
+///
+/// `/proc/sys/kernel/random/boot_id` is a UUID the kernel generates once per
+/// boot. It is read rather than derived from uptime because uptime is a moving
+/// number and this needs an identity: two runs of netcfgd during one boot must
+/// agree, and the same run either side of a reboot must not.
+#[must_use]
+pub fn boot_id() -> Option<String> {
+	let text = fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+	let id = text.trim();
+	(!id.is_empty()).then(|| id.to_owned())
 }
 
 /// Write recorded state.
@@ -562,6 +618,14 @@ pub fn read_owned(run_dir: &Path) -> OwnedState {
 /// Returns an `io::Error` if the directory cannot be created or the file
 /// cannot be written.
 pub fn write_owned(run_dir: &Path, state: &OwnedState) -> io::Result<()> {
+	// Stamped on the way out rather than asked for by every caller: a record
+	// that forgot to say which boot it belongs to is one `read_owned` cannot
+	// judge, and it would fail open.
+	let stamped = OwnedState {
+		boot: boot_id().unwrap_or_default(),
+		..state.clone()
+	};
+	let state = &stamped;
 	let text = serde_json::to_string_pretty(state)
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 	write_atomic(&run_dir.join("owned.json"), &text)
@@ -761,6 +825,65 @@ pub fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// A record from this boot is believed; one from another boot is not.
+	///
+	/// The round trip matters as much as the discard: `write_owned` stamps the
+	/// boot id itself, so a caller cannot forget to, and a record that forgot
+	/// would be one `read_owned` cannot judge -- failing open.
+	#[test]
+	fn a_record_from_another_boot_is_discarded() {
+		let Some(now) = boot_id() else {
+			// No boot id to compare against means the check cannot run, and
+			// saying so beats a green result that inspected nothing.
+			eprintln!("no boot_id on this kernel; the discard was not exercised");
+			return;
+		};
+		let dir = std::env::temp_dir().join(format!("ncfg-boot-test-{}", std::process::id()));
+		let _ = fs::create_dir_all(&dir);
+
+		let mut owned = OwnedState::default();
+		owned.forwarding.push("eth0".to_owned());
+		write_owned(&dir, &owned).expect("write");
+
+		let back = read_owned(&dir);
+		assert_eq!(back.boot, now, "write_owned stamps this boot");
+		assert_eq!(
+			back.forwarding,
+			vec!["eth0".to_owned()],
+			"and it is believed"
+		);
+
+		let mut stale = back;
+		stale.boot = "00000000-0000-0000-0000-000000000000".to_owned();
+		let text = serde_json::to_string(&stale).expect("encode");
+		fs::write(dir.join("owned.json"), text).expect("forge");
+
+		let after = read_owned(&dir);
+		assert!(
+			after.forwarding.is_empty(),
+			"a record from another boot names objects that no longer exist"
+		);
+
+		let _ = fs::remove_dir_all(&dir);
+	}
+
+	/// An unstamped record is from a netcfgd that predates the field, and
+	/// discarding it would throw ownership away for a reason unrelated to a
+	/// reboot.
+	#[test]
+	fn a_record_with_no_boot_recorded_is_kept() {
+		let dir = std::env::temp_dir().join(format!("ncfg-boot-old-{}", std::process::id()));
+		let _ = fs::create_dir_all(&dir);
+		fs::write(
+			dir.join("owned.json"),
+			r#"{"forwarding":["eth0"],"created_links":[],"addresses":[],"routes":[],"backends":[],"dns":[],"privacy":[],"qdisc":[],"ingress":[]}"#,
+		)
+		.expect("write");
+
+		assert_eq!(read_owned(&dir).forwarding, vec!["eth0".to_owned()]);
+		let _ = fs::remove_dir_all(&dir);
+	}
 
 	/// Two writers of one `/run` file must not tread on each other.
 	///

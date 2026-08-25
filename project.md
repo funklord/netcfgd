@@ -944,7 +944,42 @@ control socket, or as an argument to a stop path -- and netcfgd writes what it
 was told beside its state, so the copy that starts next can read it. That also
 answers the reboot case, since an intent recorded in `/run` is gone after a
 reboot and its absence is itself the answer: nothing announced anything, so
-this is a cold start rather than a handover. **And the last two rows are closed: a `tc` handle is a field netcfgd was not
+this is a cold start rather than a handover. **The reboot case was an assumption about a filesystem, and is now a check**
+([0138](docs/decisions/0138-a-record-outliving-its-boot-is-wrong-not-stale.md)).
+0135, 0136 and 0137 each closed by saying a reboot clears `/run` and the kernel
+state together. That is true because `/run` is conventionally a tmpfs -- a
+convention, not a property netcfgd verifies, and `NCFG_RUN_DIR` can point the
+whole thing at a persistent directory by an ordinary mistake.
+
+**What a surviving record costs is not staleness.** A claim about an object
+that is gone is harmless; the danger is that parts of it *match something new*.
+The record says netcfgd owns `10.0.0.5/24` on `eth0`, the machine reboots, an
+initramfs or an operator puts that address there, and netcfgd believes it
+installed an address it did not. That is the hazard 0135 cited when rejecting
+`StateDirectory`, and a `/run` that merely happens to persist is
+indistinguishable from one that was meant to.
+
+**For addresses, routes, links and `tc` this is already moot** -- all four carry
+kernel marks now and none consults the record first. **The sysctls are why the
+decision exists**: no mark, no way to get one, so a surviving record is the one
+thing that could make netcfgd revert a `forwarding` that `sysctl.d` set at boot.
+
+So `owned.json` records `/proc/sys/kernel/random/boot_id`, stamped by
+`write_owned` rather than by its callers -- a record that forgot which boot it
+belongs to is one that fails open. Both unknowns mean *do not judge*: an empty
+field is a file from a netcfgd predating this, and an unreadable `boot_id` is a
+kernel that offers none, and discarding on either would lose ownership for a
+reason unrelated to a reboot. Discarding is holding, per 0134.
+
+**Tested by forging the boot id**, which is not a shortcut around the mechanism
+but the mechanism itself. Both halves asserted, since a netcfgd that discarded
+every record would pass the first two checks. One precondition had to be
+established rather than assumed, and it is the kind that makes a test lie:
+netcfgd records having set a sysctl only when setting it was an *action*, so a
+test that asks for `forwarding = true` where forwarding is already on writes no
+record and every check after it measures nothing.
+
+**And the last two rows are closed: a `tc` handle is a field netcfgd was not
 using** ([0137](docs/decisions/0137-a-handle-is-a-field-netcfgd-was-not-using.md)).
 The root qdisc takes handle `6e:` and the ingress redirect's `matchall` filter
 takes handle `110`, both read back and merged with the record. That is the third
