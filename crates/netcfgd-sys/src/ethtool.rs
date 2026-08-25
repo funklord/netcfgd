@@ -53,8 +53,9 @@ const ETHTOOL_A_BITSET_BITS_BIT: u16 = 1;
 const ETHTOOL_A_BITSET_BIT_NAME: u16 = 2;
 const ETHTOOL_A_BITSET_BIT_VALUE: u16 = 3;
 
-/// `NLA_F_NESTED`, which the ethtool family's parsers require.
-const NLA_F_NESTED: u16 = 0x8000;
+/// `NLA_F_NESTED`, which the ethtool family's parsers require -- and which
+/// `RTM_NEWLINKPROP` turned out to require too, so it lives in `wire` now.
+use crate::wire::NLA_F_NESTED;
 
 /// An ethtool connection.
 ///

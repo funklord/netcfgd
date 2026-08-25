@@ -40,6 +40,14 @@ pub mod msg_type {
 	pub const RTM_NEWLINK: u16 = 16;
 	/// Delete a link.
 	pub const RTM_DELLINK: u16 = 17;
+	/// Add properties to a link -- an alternative name, for netcfgd.
+	///
+	/// A separate message type rather than an attribute on `RTM_NEWLINK`,
+	/// because the kernel treats the property list as add-and-remove rather
+	/// than as set: sending `IFLA_PROP_LIST` on an `RTM_NEWLINK` is ignored.
+	pub const RTM_NEWLINKPROP: u16 = 108;
+	/// Remove properties from a link.
+	pub const RTM_DELLINKPROP: u16 = 109;
 	/// Request links.
 	pub const RTM_GETLINK: u16 = 18;
 	/// Set link attributes.
@@ -103,7 +111,33 @@ pub mod ifla {
 	pub const CARRIER: u16 = 33;
 	/// Link kind, inside a `LINKINFO` nest.
 	pub const INFO_KIND: u16 = 1;
+	/// A link's alternative names, as a nest of [`ALT_IFNAME`].
+	///
+	/// netcfgd stamps one on every link it creates, so that "netcfgd made
+	/// this" is a fact the kernel holds rather than one `/run` remembers --
+	/// the same argument decision 0002 made for addresses and routes, applied
+	/// to the one object kind that had no field to carry it. Read back in the
+	/// ordinary link dump; written with [`msg_type::RTM_NEWLINKPROP`].
+	pub const PROP_LIST: u16 = 52;
+	/// One alternative name, inside a [`PROP_LIST`] nest.
+	pub const ALT_IFNAME: u16 = 53;
 }
+
+/// `NLA_F_NESTED`, set on an attribute whose value is itself a list.
+///
+/// Old rtnetlink parsers ignore it; the strict ones reject a nest without it
+/// with `EINVAL`. `IFLA_LINKINFO` on `RTM_NEWLINK` goes through the lenient
+/// path and works either way, which is why netcfgd sent nests unflagged for a
+/// long time and only met this on `RTM_NEWLINKPROP` -- a newer message type,
+/// parsed strictly. The error says nothing about nesting, so the flag is worth
+/// setting on every nest rather than discovering per message type.
+pub const NLA_F_NESTED: u16 = 0x8000;
+
+/// The longest an alternative name may be, from `ALTIFNAMSIZ` in `linux/if.h`.
+///
+/// Eight times `IFNAMSIZ`, which is what makes a prefixed marker fit
+/// comfortably where a second interface name would not.
+pub const ALT_IFNAME_MAX: usize = 128;
 
 /// `IFA_*` attribute types, verified against `linux/if_addr.h`.
 pub mod ifa {

@@ -23,6 +23,13 @@ pub struct LinkRecord {
 	/// Link kind from the `LINKINFO` nest: `bridge`, `vlan`, and so on. Empty
 	/// for a plain device.
 	pub kind: String,
+	/// Alternative names, from the `IFLA_PROP_LIST` nest.
+	///
+	/// netcfgd stamps one on every link it creates, which is how a link's
+	/// ownership survives losing `/run` (0136). Repeated attributes rather
+	/// than one, so this is a list -- a device may carry names from several
+	/// sources and netcfgd must not assume its own is the only one.
+	pub altnames: Vec<String>,
 	/// Whether `IFF_UP` is set.
 	pub up: bool,
 	/// Whether the kernel reports carrier.
@@ -192,6 +199,18 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 		.get(ifla::MTU)
 		.and_then(|attr| attr.u32())
 		.unwrap_or(0);
+	// `IFLA_ALT_IFNAME` repeats inside the nest, so this iterates rather than
+	// asking for one: `Attrs::get` stops at the first match and would read a
+	// device with three names as a device with one.
+	let altnames = attrs
+		.get(ifla::PROP_LIST)
+		.map(|nest| {
+			wire::Attrs::new(nest.value)
+				.filter(|attr| attr.kind == ifla::ALT_IFNAME)
+				.filter_map(|attr| attr.string())
+				.collect()
+		})
+		.unwrap_or_default();
 	let mac = attrs.get(ifla::ADDRESS).and_then(|attr| attr.mac());
 	let master = attrs.get(ifla::MASTER).and_then(|attr| attr.u32());
 	let outer_parent = attrs.get(ifla::LINK).and_then(|attr| attr.u32());
@@ -266,6 +285,7 @@ pub fn decode_link(payload: &[u8]) -> Option<LinkRecord> {
 	let parent = outer_parent.or_else(|| vxlan.and_then(|vxlan| vxlan.link));
 
 	Some(LinkRecord {
+		altnames,
 		index: u32::try_from(info.index).unwrap_or(0),
 		name,
 		kind,

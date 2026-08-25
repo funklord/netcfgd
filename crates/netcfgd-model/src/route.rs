@@ -15,6 +15,37 @@ use std::net::IpAddr;
 /// ordinary knob.
 pub const NETCFGD_PROTO: u8 = 110;
 
+/// The prefix on the alternative name netcfgd gives every link it creates.
+///
+/// A link has no protocol field, so [`NETCFGD_PROTO`] has nothing to stamp
+/// and link ownership was the one kind that lived only in `/run` -- lost on
+/// every restart, per decision 0136. An alternative name is the kernel-held
+/// marker that field would have been.
+///
+/// **The full name is this prefix and the link's name at creation**, because
+/// alternative names share the lookup namespace with real ones and a constant
+/// would collide the moment netcfgd created a second link. Keeping the
+/// original name in it also records what netcfgd made the link *as*, which
+/// survives a later rename.
+///
+/// A colon, matching `@secret:` elsewhere in this project, and verified
+/// against the kernel rather than assumed: `dev_valid_name` was expected to
+/// reject one and does not.
+pub const NETCFGD_ALTNAME_PREFIX: &str = "netcfgd:";
+
+/// The alternative name netcfgd marks a link it creates with.
+///
+/// Returns `None` where the result would not fit `ALTIFNAMSIZ`, which cannot
+/// happen for a name the kernel already accepted as an interface name -- 8
+/// bytes of prefix and at most 15 of name against a limit of 128 -- but is
+/// checked rather than reasoned about, because the caller treats a marker it
+/// cannot write as non-fatal and should treat one it cannot build the same way.
+#[must_use]
+pub fn netcfgd_altname(link: &str) -> Option<String> {
+	let name = format!("{NETCFGD_ALTNAME_PREFIX}{link}");
+	(!link.is_empty() && name.len() < 128).then_some(name)
+}
+
 /// `RT_TABLE_MAIN`: the table a route goes into when the config names none.
 ///
 /// The kernel always reports a table, so an absent `table` in the desired

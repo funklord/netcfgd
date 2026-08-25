@@ -747,6 +747,54 @@ impl Netlink {
 		Ok(())
 	}
 
+	/// Give a link an alternative name.
+	///
+	/// netcfgd uses this to mark the links it creates, so that ownership is
+	/// legible from the kernel rather than only from `/run` -- decision 0136,
+	/// which is decision 0002's argument applied to the object kind that has
+	/// no protocol field to stamp.
+	///
+	/// The property list is add-and-remove rather than set, so this takes its
+	/// own message type: `IFLA_PROP_LIST` sent on an ordinary `RTM_NEWLINK` is
+	/// ignored, which is the kind of silence that produces a marker nobody
+	/// notices is missing.
+	///
+	/// # Errors
+	///
+	/// Returns the errno the kernel replied with. `EEXIST` means the name is
+	/// already taken -- alternative names share the lookup namespace with real
+	/// ones -- and the caller decides whether that is fatal. For netcfgd it is
+	/// not: an unmarked link falls back to the recorded state, which is where
+	/// it was before this existed.
+	pub fn add_altname(&mut self, index: u32, altname: &str) -> io::Result<()> {
+		if altname.is_empty() || altname.len() >= wire::ALT_IFNAME_MAX {
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidInput,
+				format!(
+					"an alternative name must be 1 to {} bytes, not {}",
+					wire::ALT_IFNAME_MAX - 1,
+					altname.len()
+				),
+			));
+		}
+
+		let mut props = AttrBuf::new();
+		props.push_str(ifla::ALT_IFNAME, altname);
+
+		let mut attrs = AttrBuf::new();
+		attrs.push(ifla::PROP_LIST | wire::NLA_F_NESTED, props.as_bytes());
+
+		let mut body = Vec::new();
+		wire::IfInfo {
+			index: i32::try_from(index).unwrap_or(0),
+			..wire::IfInfo::default()
+		}
+		.encode(&mut body);
+
+		self.request(msg_type::RTM_NEWLINKPROP, ack_flags(), &body, &attrs)?;
+		Ok(())
+	}
+
 	/// Re-send a kind's own settings to a device that already exists.
 	///
 	/// The same nest [`Netlink::create_link`] builds, through the same function,

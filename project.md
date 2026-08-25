@@ -944,7 +944,29 @@ control socket, or as an argument to a stop path -- and netcfgd writes what it
 was told beside its state, so the copy that starts next can read it. That also
 answers the reboot case, since an intent recorded in `/run` is gone after a
 reboot and its absence is itself the answer: nothing announced anything, so
-this is a cold start rather than a handover. **Which parts of the network are netcfgd's own survives a restart, because the
+this is a cold start rather than a handover. **And a link carries its own mark now, which was the last piece of ownership
+living only in `/run`** ([0136](docs/decisions/0136-a-link-carries-its-own-mark.md)).
+A link has no protocol field for 0002's tag to stamp, so every link netcfgd
+creates gets an alternative name instead -- `netcfgd:<name>`, written with
+`RTM_NEWLINKPROP` and read back from the ordinary link dump. Matched by prefix
+rather than whole string, because the suffix records what the link was called
+when netcfgd made it and a rename must not read as a change of owner. Marking
+is best-effort and its failure is printed rather than propagated: an unmarked
+link falls back to the record, which is where every link was before.
+
+**Two things that cost an afternoon each and are worth not re-learning.**
+`dev_valid_name` was expected to reject a colon in an alternative name and does
+not -- `netcfgd:nc0` is accepted by a 6.12 kernel and resolves without shadowing
+the real name. And `RTM_NEWLINKPROP` parses its nest **strictly**: a container
+attribute without `NLA_F_NESTED` is refused with a bare `EINVAL` that says
+nothing about nesting. `IFLA_LINKINFO` on `RTM_NEWLINK` goes through the
+lenient path, which is why netcfgd had sent unflagged nests since it was
+written and had never met this. The constant already existed in `netcfgd-sys`,
+private to the ethtool module under a comment saying that family's parsers
+require it -- the same discovery made once before, where the second discoverer
+could not see it. It is in `wire` now with both callers using it.
+
+**Which parts of the network are netcfgd's own survives a restart, because the
 kernel holds the answer** ([0135](docs/decisions/0135-the-kernel-holds-the-ownership-record.md)).
 `RuntimeDirectory=netcfgd` with the default `RuntimeDirectoryPreserve=no` means
 systemd deletes `/run/netcfgd` on every stop, so the restarted daemon had the

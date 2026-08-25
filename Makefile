@@ -1299,6 +1299,10 @@ live:
 	@# restart does to it. Holding is safe and is not enough: a netcfgd that
 	@# cannot recognise its own work can never remove it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/adopt.sh"
+	@# The mark netcfgd leaves on a link it creates, which is the one object
+	@# kind with no protocol field to stamp -- so it was the last piece of
+	@# ownership that lived only in the record a restart deletes.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/altname.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"

@@ -860,6 +860,32 @@ impl Executor for KernelExecutor {
 				// The index map is stale the moment a link appears.
 				self.indices.clear();
 
+				// Mark it as netcfgd's in the kernel, so that ownership does
+				// not live only in `/run` -- which a restart deletes (0136).
+				//
+				// **Deliberately not fatal.** Alternative names share the
+				// lookup namespace with real ones, so a machine that already
+				// has an interface by this name refuses it with EEXIST; and a
+				// kernel that does not know `RTM_NEWLINKPROP` refuses it too.
+				// Neither is a reason to fail creating a link that was created
+				// perfectly well. An unmarked link falls back to the recorded
+				// state, which is exactly where every link was before this.
+				if let Some(altname) = netcfgd_model::route::netcfgd_altname(name) {
+					if let Ok(index) = self.index_of(name) {
+						if let Err(error) = self.socket.add_altname(index, &altname) {
+							// Said rather than swallowed: the link works, and
+							// the thing that was lost is only visible later,
+							// as a restart that fails to reconcile it.
+							eprintln!(
+								"netcfgd: could not mark {name} as netcfgd's with the alternative name {altname}: {error}"
+							);
+							eprintln!(
+								"netcfgd:   its ownership is recorded in /run instead, which a restart loses"
+							);
+						}
+					}
+				}
+
 				// A bridge's own settings cannot ride along with creation: the
 				// kernel takes IFLA_INFO_DATA there, but changing them later
 				// has to be a separate RTM_NEWLINK anyway, and having one path

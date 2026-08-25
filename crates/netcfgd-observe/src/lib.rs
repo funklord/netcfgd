@@ -199,11 +199,7 @@ fn observed_link(
 		// `/sys`, so `host::augment` again -- and the one thing in the observation
 		// that is not netlink, a sysctl or a file netcfgd wrote itself.
 		rfkill: None,
-		ownership: if prior.created_links.contains(&link.name) {
-			Ownership::Ours
-		} else {
-			Ownership::Unknown
-		},
+		ownership: link_ownership(&link.altnames, prior.created_links.contains(&link.name)),
 		// Generic netlink rather than the link dump, so these are filled in by
 		// `host::augment` for the same reason `forwarding` and `offloads` are.
 		private_key_loaded: false,
@@ -388,6 +384,39 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 /// Split out and given its own name because it is the one judgement in this
 /// crate that can lose a user their address, and it should be reviewable on
 /// its own.
+/// Whether a link is netcfgd's, from the kernel first and the record second.
+///
+/// **A link has no protocol field**, so decision 0002's tag had nothing to
+/// stamp and link ownership lived only in `/run` -- which a restart deletes.
+/// 0136 gives every link netcfgd creates an alternative name instead, and this
+/// reads it back.
+///
+/// The marker is matched by its prefix rather than by the whole name, because
+/// the name carries what the link was *called* when netcfgd made it and a link
+/// can be renamed afterwards. Matching the whole string would make a rename
+/// look like a change of owner.
+///
+/// **A recorded link with no marker is still ours**, which is what keeps this
+/// additive: a link created by an older netcfgd carries no alternative name,
+/// and a kernel that refused `RTM_NEWLINKPROP` left one unmarked on purpose.
+/// Neither should stop being netcfgd's on the day this ships.
+///
+/// **An unmarked, unrecorded link is `Unknown` rather than `Foreign`**, the
+/// same as before. netcfgd did not make `eth0`, and saying so positively would
+/// claim to know something about every physical device on the machine.
+fn link_ownership(altnames: &[String], recorded: bool) -> Ownership {
+	if altnames
+		.iter()
+		.any(|name| name.starts_with(netcfgd_model::route::NETCFGD_ALTNAME_PREFIX))
+	{
+		return Ownership::Ours;
+	}
+	if recorded {
+		return Ownership::Ours;
+	}
+	Ownership::Unknown
+}
+
 /// The origin an object's kernel tag implies, when nothing was recorded.
 ///
 /// **netcfgd's tag has exactly one producer, and that is what makes this
@@ -476,6 +505,9 @@ mod tests {
 
 	fn link(index: u32, name: &str) -> LinkRecord {
 		LinkRecord {
+			// Unmarked: the fixture stands for a link netcfgd did not create,
+			// and the tests that want one of netcfgd's say so explicitly.
+			altnames: Vec::new(),
 			bond: None,
 			bridge: None,
 			macvlan: None,
@@ -514,6 +546,59 @@ mod tests {
 			netcfgd_model::route::MAIN_TABLE,
 			netcfgd_sys::ops::RT_TABLE_MAIN
 		);
+	}
+
+	#[test]
+	fn a_link_wearing_our_alternative_name_is_ours_with_no_record() {
+		// The whole point: a restart deletes the record, and this must not
+		// change the answer.
+		assert_eq!(
+			link_ownership(&["netcfgd:br0".to_owned()], false),
+			Ownership::Ours
+		);
+	}
+
+	#[test]
+	fn a_renamed_link_is_still_ours() {
+		// The mark carries the name the link had when netcfgd created it, and
+		// a link can be renamed afterwards -- so the two disagree and the
+		// answer must not. Written with a suffix that matches nothing, since
+		// the property is that the suffix is not consulted at all.
+		assert_eq!(
+			link_ownership(&["netcfgd:whatever-it-was-called".to_owned()], false),
+			Ownership::Ours
+		);
+	}
+
+	#[test]
+	fn a_recorded_link_with_no_mark_is_still_ours() {
+		// Additive: a link an older netcfgd created carries no alternative
+		// name, and must not stop being netcfgd's on the day this ships.
+		assert_eq!(link_ownership(&[], true), Ownership::Ours);
+	}
+
+	#[test]
+	fn somebody_elses_alternative_name_does_not_make_a_link_ours() {
+		assert_eq!(
+			link_ownership(&["prettyname".to_owned(), "enp0s1".to_owned()], false),
+			Ownership::Unknown
+		);
+	}
+
+	#[test]
+	fn an_unmarked_unrecorded_link_is_unknown_rather_than_foreign() {
+		// netcfgd did not make eth0, and saying so positively would be a claim
+		// about every physical device on the machine.
+		assert_eq!(link_ownership(&[], false), Ownership::Unknown);
+	}
+
+	#[test]
+	fn the_mark_is_built_from_the_prefix_and_the_name() {
+		use netcfgd_model::route::netcfgd_altname;
+		assert_eq!(netcfgd_altname("br0").as_deref(), Some("netcfgd:br0"));
+		assert_eq!(netcfgd_altname(""), None);
+		// Longer than ALTIFNAMSIZ once the prefix is on it.
+		assert_eq!(netcfgd_altname(&"x".repeat(200)), None);
 	}
 
 	#[test]
