@@ -11,7 +11,7 @@
 # Decision 0047 makes a tunnel's routes netcfgd's and leaves its address with
 # the daemon. Decision 0048 says what that costs and how it is done: the daemon
 # is started with `--route-noexec` and a `--route-up` script that writes
-# `docs/interface-report.md`, and netcfgd installs what the script reported with
+# `doc/interface-report.md`, and netcfgd installs what the script reported with
 # a metric derived from `preference`.
 #
 # There is no VPN server here and there does not need to be one. Static-key

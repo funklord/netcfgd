@@ -9,7 +9,7 @@ use std::net::IpAddr;
 /// 110 sits mid-gap in the 100..=185 run, the largest unallocated range in
 /// `linux/rtnetlink.h`, which is the de facto registry. Anything not carrying
 /// this tag is somebody else's object and is reported as foreign rather than
-/// reconciled away (`docs/decisions/0002`).
+/// reconciled away (`doc/decision/0002`).
 ///
 /// Changing this orphans every route already installed, so it is not an
 /// ordinary knob.

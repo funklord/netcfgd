@@ -80,7 +80,7 @@ question is a poor fit for this project regardless of how cheap it is.
 **And it inverts the safety model.** The BMC is the way back into a machine you
 have locked yourself out of. Everything netcfgd does about that risk assumes
 the way back in is *outside* what netcfgd touches: commit-confirm arms a window
-and reverts on a timer, `docs/first-run.md` opens by telling the operator to
+and reverts on a timer, `doc/first-run.md` opens by telling the operator to
 have a second way onto the machine or physical access to the console, and
 [0010](0010-interface-guards.md)'s guard exists so an operator can say
 "something depends on this interface" out loud.
@@ -120,7 +120,7 @@ is **not** a core feature: the contained helper of
 the core learns nothing about the protocol and the contract is the decision.
 
 One correction to make in advance, because it is the obvious wrong turn:
-`docs/interface-report.md` is the wrong contract. It is **inbound** -- a DHCP
+`doc/interface-report.md` is the wrong contract. It is **inbound** -- a DHCP
 client, a pppd script or a VPN helper reporting addressing it obtained. A BMC
 is **outbound**, something configured rather than something reporting. Reusing
 the report contract for it would put a writer and a reader on the same file in

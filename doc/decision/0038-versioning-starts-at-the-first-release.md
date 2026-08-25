@@ -36,7 +36,7 @@ this reset changes exactly two lines of code and two of witness.
 ## What is not being relaxed
 
 **The schema is not free to change quietly.** That was never the version's job.
-The two witnesses under `docs/schema/` are what make a change visible: every
+The two witnesses under `doc/schema/` are what make a change visible: every
 one of them moves, and `make schema-bless` has to be run deliberately, so a
 schema change is a reviewable diff in the same commit as the code that caused
 it (decision 0020). That mechanism is untouched and remains the thing to be

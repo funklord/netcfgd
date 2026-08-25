@@ -33,7 +33,7 @@ touches nothing.
 
 ## Getting started
 
-**[docs/first-run.md](docs/first-run.md)** takes a laptop from NetworkManager,
+**[doc/first-run.md](doc/first-run.md)** takes a laptop from NetworkManager,
 wired first, with every command checked.
 
 ```sh
@@ -189,12 +189,12 @@ audited exception and carries its own fuzz targets.
   authoritative record of intent. It wins over the code.
 - **[netcfgd-design.md](netcfgd-design.md)** — the reference design, and where
   the rationale lives.
-- **[docs/decisions/](docs/decisions/)** — 116 decision records, each one a
+- **[doc/decision/](doc/decision/)** — 116 decision records, each one a
   question that was settled and the measurement that settled it.
-- **[docs/socket-protocol.md](docs/socket-protocol.md)** — the control
+- **[doc/socket-protocol.md](doc/socket-protocol.md)** — the control
   socket: what a client sends, what the daemon answers, and what an
   implementation has to get right.
-- **[docs/interface-report.md](docs/interface-report.md)** — the contract a
+- **[doc/interface-report.md](doc/interface-report.md)** — the contract a
   DHCP client, pppd script or VPN helper writes into.
 - **[code-style.md](code-style.md)** — tabs, `snake_case`, lowercase filenames,
   and the kernel commit format.

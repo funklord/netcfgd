@@ -929,7 +929,7 @@ pub fn install_secret(
 		return Err(format!(
 			"{} already exists. Ask to replace it if that is what you mean -- and note \
 			 that a private key nobody has a copy of cannot be got back \
-			 (docs/decisions/0042)",
+			 (doc/decision/0042)",
 			path.display()
 		));
 	}

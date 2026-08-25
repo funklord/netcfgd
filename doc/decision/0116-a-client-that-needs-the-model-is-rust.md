@@ -82,14 +82,14 @@ GUI to share pane logic rather than merely agree about it.
 
 Two implementations are only two witnesses if there is a specification to be
 independent *against*. When this was written there was not:
-`docs/schema/socket.json` was 3 KB of example messages, there was no prose
-protocol document in `docs/`, and nothing ran both clients against one server
+`doc/schema/socket.json` was 3 KB of example messages, there was no prose
+protocol document in `doc/`, and nothing ran both clients against one server
 and compared. The second implementation was not a check on the first, it was a
 guess about it -- and 0082 found its defect by accident rather than by any
 gate.
 
 **Both halves exist now**: `make conformance` diffs what the two clients
-extract, and `docs/socket-protocol.md` says in prose what they are agreeing
+extract, and `doc/socket-protocol.md` says in prose what they are agreeing
 to -- written afterwards, and it immediately found that the daemon accepts a
 request member nobody defined. **The specification and a conformance test
 come before any third implementation**, and before the harmonisation above is

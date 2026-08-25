@@ -132,7 +132,7 @@ const MAX_CONNECTIONS: usize = 64;
 /// How many connections are open, with a slot released when its guard drops.
 ///
 /// The socket already bounds one connection: `MAX_LINE` refuses a client that
-/// sends a gigabyte without a newline, and `docs/socket-protocol.md` says why
+/// sends a gigabyte without a newline, and `doc/socket-protocol.md` says why
 /// in as many words -- the daemon holds `CAP_NET_ADMIN`, so making it allocate
 /// its way to being killed is a denial of service with extra steps. Nothing
 /// bounded the *number* of connections, and the same sentence applies to ten

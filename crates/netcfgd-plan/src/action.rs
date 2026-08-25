@@ -548,7 +548,7 @@ impl Op {
 
 	/// Whether this action can interrupt traffic on the interface it touches.
 	///
-	/// A guard blocks the disruptive ones (`docs/decisions/0010`). The list is
+	/// A guard blocks the disruptive ones (`doc/decision/0010`). The list is
 	/// wider than "removes the link" on purpose: changing the address on an
 	/// interface carrying an NFS mount breaks it exactly as thoroughly as
 	/// downing it, and enslaving an interface to a bridge moves its addresses.

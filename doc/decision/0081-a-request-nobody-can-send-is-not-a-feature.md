@@ -7,7 +7,7 @@ Milestone: M2, closing a gap found while building the GUI's event pane
 ## Context
 
 `Request::Reload` has been in the protocol since M2. It is in
-`crates/netcfgd-proto`, it is pinned in `docs/schema/socket.json` line 7, it has
+`crates/netcfgd-proto`, it is pinned in `doc/schema/socket.json` line 7, it has
 an authorisation tier (`Tier::Admin`, with three tests in `authorize.rs`), and
 the daemon has handled it since the socket existed.
 

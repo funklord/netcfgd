@@ -26,7 +26,7 @@ Each is a one-line diff that a reviewer approves. Each breaks a consumer.
 ## Decision
 
 **The frozen surface is written down as data and checked, not described in
-prose.** Two witnesses under `docs/schema/`:
+prose.** Two witnesses under `doc/schema/`:
 
 - `document.json` -- one document with every field populated and every enum
   variant present, canonically serialised.
@@ -91,7 +91,7 @@ by construction. The field is `mode` now. Had the freeze been a paragraph, that
 would have been frozen in.
 
 **Adding a model field is now a three-file change**: the type, the witness, and
-`docs/schema/document.json`. That is friction on purpose, and it is the
+`doc/schema/document.json`. That is friction on purpose, and it is the
 cheapest of the three that matters -- the witness is where somebody reads the
 field next to its neighbours and notices it does not belong.
 

@@ -33,7 +33,7 @@ pub enum Op {
 `rename_all = "snake_case"` is gone from the container, and `Action::op_name`
 is gone with it -- one name means nothing to carry beside the op.
 
-`docs/schema/plan.json`: 96 changed, 144 removed. **Major.** Any client reading
+`doc/schema/plan.json`: 96 changed, 144 removed. **Major.** Any client reading
 an op tag reads a different string from this release on.
 
 ## What it found
@@ -48,7 +48,7 @@ let op = action.get("op").and_then(|op| op.get("op"))
 which was `link_create`, while `ncfg plan` beside it printed `link.create`. Its
 unit test did not catch that, because the fixture is hand-written and says
 `"op": {"op": "addr.add"}` -- a fixture agreeing with itself about a spelling
-nothing produced. That is precisely the failure `docs/schema/` exists to
+nothing produced. That is precisely the failure `doc/schema/` exists to
 prevent, in the one crate whose tests predate the witness.
 
 Both are now true without anything else changing: the TUI reads the tag, the

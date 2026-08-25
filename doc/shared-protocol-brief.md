@@ -11,8 +11,8 @@ cannot tell you. Written 2026-08-08, on being told the library is being
 authored.
 
 You do not have to read this repository to use this. Where more detail exists,
-it is named — `docs/remote-access-feasibility.md` is the long form and
-`docs/socket-protocol.md` specifies what exists today.
+it is named — `doc/remote-access-feasibility.md` is the long form and
+`doc/socket-protocol.md` specifies what exists today.
 
 ---
 
@@ -125,7 +125,7 @@ You will want to know this early, because fuzzypickles' own core deliberately
 does the opposite — one canonical encoding for local and remote, so there is
 one parser — and that is a good rule that netcfgd does not follow.
 
-The full argument is `docs/socket-protocol.md` §3.1 and §3.2. In summary:
+The full argument is `doc/socket-protocol.md` §3.1 and §3.2. In summary:
 
 - **A protocol needing generated bindings rebuilds the bargain netcfgd exists
   to refuse.** Constraint 3 is no mandatory D-Bus, glib, polkit or systemd, and
@@ -185,7 +185,7 @@ None is true today.
 
 ## 5. Two requirements a messaging protocol gets wrong
 
-Both are recorded in `docs/remote-access-feasibility.md` §5 and both are places
+Both are recorded in `doc/remote-access-feasibility.md` §5 and both are places
 where inheriting fuzzypickles' instincts inherits a bug.
 
 **Freshness: commands expire, grants do not.** fuzzypickles is built so a
@@ -232,7 +232,7 @@ to revisit any of them, deliberately.
    as a permanent constraint** — a design that assumes both endpoints are
    directly reachable, or that a hostile network is somebody else's problem, is
    built against a premise that has already expired. See
-   `docs/remote-access-feasibility.md`, "Beyond the LAN".
+   `doc/remote-access-feasibility.md`, "Beyond the LAN".
 3. **The local hop stays JSON**; the agent translates. Section 4.
 4. **Makefiles and qmake only** in this tree, no CMake.
 5. **The four directories live at the repository root**, beside `crates/`,
@@ -243,7 +243,7 @@ to revisit any of them, deliberately.
    and the hand-written half built to be deleted as situ absorbs chunking and
    encryption. **Corrected 2026-08-08 and retired 2026-08-10** — see below.
 
-**These are the numbers `docs/remote-access-feasibility.md` §8 uses**, and this
+**These are the numbers `doc/remote-access-feasibility.md` §8 uses**, and this
 list now matches it. An earlier version of this brief renumbered them, which is
 how "netcfgd's decision 4" came to mean *situ describes the frame* in
 `../fuzznet/project.md` §6 while decision 4 in the source list is about
@@ -277,7 +277,7 @@ opposite ways, and planning around it would put the risk in the wrong place:
   anywhere in that document. Planning around its arrival is still wrong; the
   door is merely not bolted.
 
-`docs/remote-access-feasibility.md` §5.0 carries the same correction in longer
+`doc/remote-access-feasibility.md` §5.0 carries the same correction in longer
 form.
 
 **Retirement of item 6 (2026-08-10).** The decision is confirmed in substance
@@ -371,7 +371,7 @@ a protocol design tool for exactly that."
 The maintainer has said the protocol parts of this repository are yours to edit.
 Two requests, both about keeping the seam visible rather than about ownership:
 
-- **`docs/schema/socket.json` is generated**, and `make schema-bless` is the
+- **`doc/schema/socket.json` is generated**, and `make schema-bless` is the
   only way it moves. If a change makes it move, that is intended to be
   reviewable — do not hand-edit it.
 - **`make check` is green**, and `make conformance` specifically diffs what the

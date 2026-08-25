@@ -36,7 +36,7 @@ Neither is configured by anyone; both are emergent."
 ## Decision
 
 **A report may name servers. It may not name routing domains.** There is no key
-for one in `docs/interface-report.md` and there will not be, because constraint
+for one in `doc/interface-report.md` and there will not be, because constraint
 1 says the config files are the only authority and a routing domain is
 authority over where queries go.
 

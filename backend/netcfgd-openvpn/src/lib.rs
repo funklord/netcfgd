@@ -121,7 +121,7 @@ pub fn script_path(run: &Path, iface: &str) -> PathBuf {
 /// operator's, so netcfgd cannot read what the server pushed. It can be *told*:
 /// `--route-noexec` stops the daemon installing routes, and `--route-up` runs
 /// this with every route in the environment. What comes back goes through
-/// `docs/interface-report.md`, the same contract a modem helper writes -- which
+/// `doc/interface-report.md`, the same contract a modem helper writes -- which
 /// is why decision 0047 took the modem's name off it.
 ///
 /// ## What the environment holds, measured rather than assumed
@@ -152,7 +152,7 @@ pub fn script_path(run: &Path, iface: &str) -> PathBuf {
 /// which `--route-noexec` skips entirely, and the `redirect_gateway` variable
 /// is set in the same skipped branch. The IPv6 half *does* survive, because
 /// those four prefixes are appended to the option list before the route list is
-/// built. Measured both ways; `docs/decisions/0048` says what to do about it.
+/// built. Measured both ways; `doc/decision/0048` says what to do about it.
 #[must_use]
 pub fn report_script(iface: &str, report: &Path) -> String {
 	let report = report.display();
@@ -166,7 +166,7 @@ pub fn report_script(iface: &str, report: &Path) -> String {
 		 #\n\
 		 # Called twice over a tunnel's life: as --route-up once the routes\n\
 		 # openvpn was told not to install are known, and as --down when the\n\
-		 # tunnel goes. docs/interface-report.md is the format.\n\
+		 # tunnel goes. doc/interface-report.md is the format.\n\
 		 set -u\n\
 		 \n\
 		 target='{report}'\n\

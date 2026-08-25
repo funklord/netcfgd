@@ -6,7 +6,7 @@
 # Decisions 0044 and 0045 put modem support in a helper that netcfgd does not
 # start, supervise or speak to: it writes a file, netcfgd reads it. Decision
 # 0047 takes the modem's name off that contract, because a tunnel daemon
-# reports through it too. The whole interface is `docs/interface-report.md`.
+# reports through it too. The whole interface is `doc/interface-report.md`.
 #
 # So this test *is* a writer, in the sense that matters. It writes the file the
 # way the document tells somebody to write it -- a shell script wrapped around
@@ -104,7 +104,7 @@ check "a machine with nothing reporting shows no report" "$(seen)" "no report"
 
 # ------------------------------------------------- the documented example
 
-# Verbatim from docs/interface-report.md. If this stops matching the document, one
+# Verbatim from doc/interface-report.md. If this stops matching the document, one
 # of the two is wrong and it is not the document.
 report <<'EOF'
 # wwan0, connected 2026-07-31T14:02:11Z via three.co.uk

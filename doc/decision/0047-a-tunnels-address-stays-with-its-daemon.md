@@ -2,8 +2,8 @@
 
 Status: accepted; both things it deferred are done. The routes half is built by
 [0048](0048-a-tunnels-routes-arrive-through-the-report.md), and the rename this
-record left crooked has happened -- `docs/modem-report.md` below is now
-[docs/interface-report.md](../interface-report.md), `/run/netcfgd/modem/` is
+record left crooked has happened -- `doc/modem-report.md` below is now
+[doc/interface-report.md](../interface-report.md), `/run/netcfgd/modem/` is
 `/run/netcfgd/reported/`, and the config word is `reported`
 Date: 2026-08-02
 Milestone: answers what 0046 deferred
@@ -14,7 +14,7 @@ Decision 0046 named this and did not settle it: OpenVPN and `pppd` both
 configure their own interface, so netcfgd is the single writer everywhere
 *except* the two places where a daemon got there first. The obvious repair is
 `--route-noexec --ifconfig-noexec` plus a script reporting through `/run` --
-the contract `docs/modem-report.md` already defines, which says nothing
+the contract `doc/modem-report.md` already defines, which says nothing
 modem-specific.
 
 0046 also guessed that answering it for both tunnel types at once was worth
@@ -86,7 +86,7 @@ the mechanism, so that whoever builds it is not also deciding it. What the work
 needs:
 
 - `--route-up` for OpenVPN and `/etc/ppp/ip-up` for `pppd`, each writing the
-  report format `docs/modem-report.md` already defines -- which is why that
+  report format `doc/modem-report.md` already defines -- which is why that
   document was written without a modem in it.
 - A metric for a tunnel's default route that composes with `preference`
   (decision 0006 rule 3), rather than whatever the server pushed.
@@ -99,7 +99,7 @@ Nothing, which is the point. `openvpn` and `pppd` configure their own tunnels
 and netcfgd observes, as both already do -- and that is now a decision with a
 reason rather than the state nobody had got to yet.
 
-One thing is left crooked deliberately. `docs/modem-report.md` and
+One thing is left crooked deliberately. `doc/modem-report.md` and
 `/run/netcfgd/modem/<interface>` are named for a modem, and the contract is not
 a modem's -- it is the contract for *anything* that knows an interface's
 addressing and is not netcfgd, which is why that document contains nothing

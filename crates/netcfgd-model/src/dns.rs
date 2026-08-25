@@ -7,7 +7,7 @@ use std::net::IpAddr;
 ///
 /// A mode is a contract with a specific tool, not a preference. There is
 /// deliberately no `Auto`: the mode decides where queries go, and that is not
-/// something to pick by heuristic (`docs/decisions/0007`).
+/// something to pick by heuristic (`doc/decision/0007`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DnsMode {
@@ -134,7 +134,7 @@ pub enum DnsTransport {
 /// A per-interface policy is a scope in its own right. It is never merged into
 /// a single global server list at compile time, because doing so destroys the
 /// per-link structure at the earliest and least recoverable moment
-/// (`docs/decisions/0007`).
+/// (`doc/decision/0007`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct DnsPolicy {

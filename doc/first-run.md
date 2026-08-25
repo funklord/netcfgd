@@ -273,7 +273,7 @@ unless you say otherwise.
 
 Adding a network used to need `admin` as well, which meant granting a desktop
 group the whole machine's networking in order to join a cafe. What changed is
-[0124](decisions/0124-adding-a-network-is-the-wifi-tier-because-0117-made-it-safe.md):
+[0124](decision/0124-adding-a-network-is-the-wifi-tier-because-0117-made-it-safe.md):
 the request that adds a network carries an SSID and a passphrase and cannot
 express anything else, so it no longer has to be trusted as though it carried
 a config file.

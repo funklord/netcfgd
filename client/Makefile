@@ -76,14 +76,14 @@ $(LIB): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # The witness is the fixture. tests/client_test.c reads every line of
-# docs/schema/socket.json -- the daemon's own frozen surface -- so this goes red
+# doc/schema/socket.json -- the daemon's own frozen surface -- so this goes red
 # when the protocol changes, which is the whole reason for pointing at it rather
 # than at a copy.
 tests/client_test: tests/client_test.c $(LIB) $(HEADERS) .build-flags
 	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
 test: tests/client_test
-	./tests/client_test ../docs/schema/socket.json
+	./tests/client_test ../doc/schema/socket.json
 
 clean:
 	rm -f $(OBJS) $(LIB) tests/client_test .build-flags

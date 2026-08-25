@@ -24,7 +24,7 @@ not inferred.
 
 **Both clients run a netcfgd-generated script that writes the lease's nameservers
 into the interface report.** The report contract
-([docs/interface-report.md](../interface-report.md)) already has a `dns` key, and
+([doc/interface-report.md](../interface-report.md)) already has a `dns` key, and
 [0049](0049-a-server-may-name-resolvers-not-where-queries-go.md) already has the
 gate, so **no new mechanism and no new gate** were needed -- only the reporting half
 that 0049 left for later. udhcpc's script gained a `report` function; dhcpcd gets a

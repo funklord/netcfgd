@@ -3,7 +3,7 @@
  *
  * WHY THIS EXISTS AT ALL
  *   netcfgd speaks newline-delimited JSON on its control socket, pinned by
- *   docs/schema/socket.json, and this layer is below the widgets (gui/
+ *   doc/schema/socket.json, and this layer is below the widgets (gui/
  *   project.md sec 3) so it is C. That leaves the choice between a dependency
  *   and a few hundred lines, and this is the few hundred lines: the family's
  *   other trees are dependency-light by policy, and a JSON reader that only

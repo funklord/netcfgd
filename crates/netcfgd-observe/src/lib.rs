@@ -69,7 +69,7 @@ pub struct PriorState {
 	/// Prior state for the same reason a delegation is: the configuration a
 	/// cellular bearer or a tunnel comes up with is known to whatever negotiated
 	/// it, and netcfgd negotiates neither (decisions 0044, 0045 and 0047). The
-	/// contract is `docs/interface-report.md`.
+	/// contract is `doc/interface-report.md`.
 	pub reports: Vec<netcfgd_model::ObservedReport>,
 }
 

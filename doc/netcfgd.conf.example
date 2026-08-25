@@ -836,7 +836,7 @@
 #   ncfg monitor              watch it change, live
 #   ncfg tui                  all of the above, full screen
 #
-# docs/first-run.md walks a laptop from NetworkManager to netcfgd, wired
+# doc/first-run.md walks a laptop from NetworkManager to netcfgd, wired
 # first. `ncfg plan` before every `ncfg apply` is the habit this whole tool
 # is shaped around.
 #

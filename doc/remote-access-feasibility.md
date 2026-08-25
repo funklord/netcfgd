@@ -124,7 +124,7 @@ Read from its `project.md` (§§1-9, 13) and its `core/` tree.
 
 - **One parser for both hops.** fuzzypickles reuses its canonical binary encoding
   on the local socket. netcfgd's local protocol is newline-delimited JSON, pinned
-  by `docs/schema/socket.json` and consumed by `ncfg`, the TUI and (soon) a GUI.
+  by `doc/schema/socket.json` and consumed by `ncfg`, the TUI and (soon) a GUI.
   Replacing it to share one encoder would be a large, disruptive change to a
   frozen surface; keeping two means the agent translates. **Recommendation:
   translate.** The agent is the natural place -- it is already the thing that
@@ -214,7 +214,7 @@ detail.
 Versioning is this repository's job and situ supplies the tools rather than a
 scheme: version as a *field*, `[since = N]` enforced append-only, `variant` where
 a revision re-lays the bytes, and a committed `wire` signature whose change is a
-change somebody reviews -- which is `docs/schema/` and `make schema-bless` in
+change somebody reviews -- which is `doc/schema/` and `make schema-bless` in
 another language.
 
 ### 5.1 Payload size, which is the one nobody expects
@@ -348,7 +348,7 @@ Answered on 2026-08-04, and carried into `gui/project.md`:
    LAN" below; the short version is that anything designed as if both
    endpoints were directly reachable, or as if a hostile network were somebody
    else's problem, is designed against a premise that has already expired.
-3. **The local hop stays JSON**, pinned by `docs/schema/socket.json`; the agent
+3. **The local hop stays JSON**, pinned by `doc/schema/socket.json`; the agent
    translates. Two encodings, one on each side of a seam that already exists.
 4. **Makefiles and qmake only**, no CMake in this tree, even though a sibling
    uses it.
@@ -367,7 +367,7 @@ ships in netcfgd's own packages, and whether situc is vendored or its output
 committed. That last one is `fuzznet`'s build question now rather than this
 tree's.
 
-**A note on how this list is cited.** `docs/shared-protocol-brief.md` §6
+**A note on how this list is cited.** `doc/shared-protocol-brief.md` §6
 restated these five-of-six for a reader outside this repository and renumbered
 them in doing so, which is how "netcfgd's decision 4" came to mean *situ
 describes the frame* in `../fuzznet/project.md` §6 while decision 4 here is
@@ -404,7 +404,7 @@ decision 6 is retired rather than reaffirmed: **netcfgd consumes `fuzznet`'s
 frame and does not have an opinion on how it is described.** What netcfgd keeps
 is the requirements on it, which are requirements whoever writes the code --
 §5.1's chunking bound, §5.4's expiry, and the constraints in
-`docs/shared-protocol-brief.md` §3.
+`doc/shared-protocol-brief.md` §3.
 
 Decision 5 falls with it: **`wire/` leaves this tree.** Three directories at
 the root, not four -- `gui/`, `client/`, `agent/`. `project.md` §5's layout and
@@ -431,7 +431,7 @@ over twice inside three days, which is a rate worth knowing before planning
 around any statement about situ's scope.
 
 **On whether `fuzznet` agreeing with netcfgd is evidence.** It is not, on its
-own: `fuzznet`'s §6 opens by citing this decision, and `docs/shared-protocol-
+own: `fuzznet`'s §6 opens by citing this decision, and `doc/shared-protocol-
 brief.md` is named as its source, so the agreement is one witness in two trees
 -- the trap `evidence.md` describes. What *is* worth more than agreement is
 that `fuzznet` checked situ's own tree rather than this document's summary of

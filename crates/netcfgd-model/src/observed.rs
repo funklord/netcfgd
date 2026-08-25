@@ -1,6 +1,6 @@
 //! What the kernel and the backends currently say is true.
 //!
-//! The other half of the desired/observed pair (`docs/decisions/0005`). This
+//! The other half of the desired/observed pair (`doc/decision/0005`). This
 //! lives in the model rather than in `netcfgd-observe` because both the
 //! producer and the planner depend on it, and because it is written to
 //! `/run/netcfgd/observed/` where it is as much a documented artifact as the
@@ -25,7 +25,7 @@ pub enum Ownership {
 	/// The kernel could not tell us. Pre-5.18 kernels have no `IFA_PROTO`, so
 	/// address ownership falls back to recorded prior state, which cannot
 	/// distinguish our address from an identical one added by hand
-	/// (`docs/decisions/0002`). Treated as [`Ownership::Foreign`] for any
+	/// (`doc/decision/0002`). Treated as [`Ownership::Foreign`] for any
 	/// decision that would remove something.
 	#[default]
 	Unknown,
@@ -725,7 +725,7 @@ pub struct Delegation {
 ///
 /// Not kernel state, and not netcfgd's own record either: the configuration a
 /// cellular bearer or a tunnel comes up with is known to whatever negotiated it,
-/// and netcfgd is told through a file (`docs/interface-report.md`). The same
+/// and netcfgd is told through a file (`doc/interface-report.md`). The same
 /// shape and the same reason as [`Delegation`] -- decision 0004 delegates the
 /// client and design section 9.2 keeps the arrow pointing inward.
 ///
@@ -754,7 +754,7 @@ pub struct ObservedReport {
 	/// **Not routing domains, and netcfgd will never make them into any.** A search
 	/// suffix says what to append to a bare name; a routing domain says which
 	/// resolver answers for a zone, and
-	/// [0049](../../../docs/decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)
+	/// [0049](../../../doc/decision/0049-a-server-may-name-resolvers-not-where-queries-go.md)
 	/// refuses one from a report and has no key for it. These land in
 	/// [`crate::DnsPolicy::search`] and nowhere else (0067).
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1097,7 +1097,7 @@ pub struct Observed {
 	///
 	/// `ncfg explain` reports this, because an operator deciding whether to
 	/// trust a drift report needs to know which mechanism produced it
-	/// (`docs/decisions/0002`).
+	/// (`doc/decision/0002`).
 	pub address_proto_supported: bool,
 }
 

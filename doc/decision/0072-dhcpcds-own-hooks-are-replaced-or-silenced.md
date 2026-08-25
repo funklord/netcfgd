@@ -95,7 +95,7 @@ covers stopping an odhcp6c, and nothing had stopped a `dhcpcd -6`.
 - A `DHCPv6` lease's nameservers still reach nothing, and that is now a deliberate
   gap rather than an accident: the report cannot carry two clients, and making it
   able to is a change to a contract other people write to
-  ([docs/interface-report.md](../interface-report.md)).
+  ([doc/interface-report.md](../interface-report.md)).
 - `+0 KB`: two flags and an enum.
 
 ## What is still open

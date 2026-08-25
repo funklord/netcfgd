@@ -182,7 +182,7 @@ pub enum Request {
 	ConfigPut {
 		/// What to call it. `conf.d/<name>.conf`, chosen by netcfgd.
 		name: String,
-		/// The configuration, in the language `docs/netcfgd.conf.example`
+		/// The configuration, in the language `doc/netcfgd.conf.example`
 		/// documents.
 		text: String,
 		/// Overwrite a drop-in of this name that already exists.
@@ -299,7 +299,7 @@ impl Request {
 	/// internally-tagged enum -- the tag would be the first member it refused --
 	/// so the envelope accepted anything, on the one surface that reads
 	/// untrusted bytes into a process holding `CAP_NET_ADMIN`. Section 7 of
-	/// `docs/socket-protocol.md` tells implementers to refuse unknown members,
+	/// `doc/socket-protocol.md` tells implementers to refuse unknown members,
 	/// and this is the daemon keeping its own rule.
 	///
 	/// The obvious alternative is wrong and was measured before this was

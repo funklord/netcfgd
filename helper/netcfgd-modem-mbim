@@ -17,7 +17,7 @@
 # netcfgd does not start this, supervise it or speak to it. It connects a
 # cellular bearer and writes what the network gave it to
 # `/run/netcfgd/reported/<interface>`; netcfgd reads that file and configures the
-# interface from it. `docs/interface-report.md` is the whole contract between the
+# interface from it. `doc/interface-report.md` is the whole contract between the
 # two, and this script is one implementation of the writing half -- decision
 # 0045 is explicit that it is not a privileged one. `umbim` on OpenWrt is the
 # other obvious way, on hardware where libmbim does not fit.

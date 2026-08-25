@@ -2119,7 +2119,7 @@ fn dhcp6_client(delegating: bool, has_odhcp6c: bool, iface: &str) -> Result<&'st
 			 dhcpcd never reports the prefix itself to a script -- it reports the \
 			 addresses it derived from one, and netcfgd does that deriving -- so \
 			 the lease would arrive and nothing would come of it. Install odhcp6c, \
-			 or drop the delegation from this interface. See docs/decisions/0050"
+			 or drop the delegation from this interface. See doc/decision/0050"
 		)),
 	}
 }
@@ -2417,7 +2417,7 @@ fn write_udhcpc_script(iface: &str) -> Result<(std::path::PathBuf, std::path::Pa
 	let dir = run.join("udhcpc");
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
 	// The report the script writes its nameservers into, which netcfgd reads back
-	// through the contract in `docs/interface-report.md` rather than through
+	// through the contract in `doc/interface-report.md` rather than through
 	// anything specific to DHCP.
 	let reported = run.join("reported");
 	std::fs::create_dir_all(&reported)
@@ -2527,7 +2527,7 @@ fn write_ppp_scripts(iface: &str) -> Result<(std::path::PathBuf, std::path::Path
 ///
 /// Generated into `/run` rather than installed, for the reason the `OpenVPN`
 /// one is: nothing packages it, and it carries the interface name and the
-/// report path. `docs/interface-report.md` is the format.
+/// report path. `doc/interface-report.md` is the format.
 ///
 /// **Only nameservers.** A PPP link's address is IPCP's result and stays with
 /// `pppd` (decision 0047: `noip` disables IP entirely, so there is no
@@ -2559,7 +2559,7 @@ pub fn ppp_script(iface: &str, report: &std::path::Path, going_up: bool) -> Stri
 		 # Written by netcfgd for {iface}. Do not edit; it is rewritten on apply,\n\
 		 # and pppd is the only thing that runs it.\n\
 		 #\n\
-		 # pppd's {when}-script. docs/interface-report.md is the format; only the\n\
+		 # pppd's {when}-script. doc/interface-report.md is the format; only the\n\
 		 # nameservers are reported, because the address is IPCP's and the routes\n\
 		 # are the document's.\n\
 		 set -u\n\
@@ -2800,7 +2800,7 @@ pub fn udhcpc_script(iface: &str, state: &std::path::Path, report: &std::path::P
 		 }}\n\
 		 \n\
 		 # What the server offered, for netcfgd to read: the nameservers, and the\n\
-		 # domain as a comment. docs/interface-report.md is the format and decision\n\
+		 # domain as a comment. doc/interface-report.md is the format and decision\n\
 		 # 0049 is why a domain is a comment -- a server may name resolvers, and\n\
 		 # which names use them is the operator's to write down.\n\
 		 #\n\
@@ -2888,7 +2888,7 @@ pub fn pd_hook_script(iface: &str, target: &std::path::Path) -> String {
 		 # One per line; an empty file means the lease is gone.\n\
 		 #\n\
 		 # Run by odhcp6c. dhcpcd cannot report a delegated prefix to a script\n\
-		 # at all -- see docs/decisions/0050 -- so netcfgd refuses that pairing\n\
+		 # at all -- see doc/decision/0050 -- so netcfgd refuses that pairing\n\
 		 # rather than leaving a variable here that would never be set.\n\
 		 set -u\n\
 		 out={}\n\
@@ -2934,7 +2934,7 @@ fn netcfgd_host_prefixes(run_dir: &std::path::Path) -> Vec<(String, Vec<String>)
 /// The one definition of this path. `netcfgd-host` reads reports and this crate
 /// hands the path to whatever writes one, and the two crates cannot be allowed
 /// to spell it differently -- so the reader calls this rather than joining
-/// `reported` for itself. `docs/interface-report.md` is the contract, and this
+/// `reported` for itself. `doc/interface-report.md` is the contract, and this
 /// is the sentence in it that says *where*.
 #[must_use]
 pub fn report_dir(run_dir: &std::path::Path) -> std::path::PathBuf {
@@ -2997,7 +2997,7 @@ pub fn is_staging(name: &str) -> bool {
 /// `/run/netcfgd/reported.d/<interface>/<source>`, read together with the single
 /// file above and after it.
 ///
-/// **The single file is the contract** (`docs/interface-report.md`) and stays
+/// **The single file is the contract** (`doc/interface-report.md`) and stays
 /// exactly what it was: one file, one interface, written by something that is
 /// not netcfgd. It has one writer by construction, because the thing writing it
 /// is the thing that brought the interface up.

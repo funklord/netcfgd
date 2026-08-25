@@ -150,7 +150,7 @@ pub fn read_delegations(run_dir: &Path) -> Vec<netcfgd_model::Delegation> {
 /// modem, or handed its values in the environment by `openvpn` or `pppd`.
 ///
 /// **The format is a documented contract**, not an internal detail --
-/// `docs/interface-report.md` is the whole of it, and decision 0045 says why the
+/// `doc/interface-report.md` is the whole of it, and decision 0045 says why the
 /// writer is deliberately plural. Changing what is parsed here changes what
 /// somebody else's script has to write.
 ///
@@ -975,7 +975,7 @@ mod tests {
 		assert_eq!(recorded, names, "an update was lost");
 	}
 
-	/// The example from `docs/interface-report.md`, verbatim. If this test and that
+	/// The example from `doc/interface-report.md`, verbatim. If this test and that
 	/// document ever disagree, the document is right: it is what somebody else
 	/// wrote their helper against.
 	const REPORT: &str = "# wwan0, connected 2026-07-31T14:02:11Z via three.co.uk\n\

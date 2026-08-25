@@ -1,11 +1,11 @@
 //! What a configuration asks for beyond configuring a network.
 //!
-//! [0127](../../../docs/decisions/0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)
+//! [0127](../../../doc/decision/0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)
 //! makes netcfgd the only writer of `/etc/netcfgd`: a client cannot write
 //! system files and system configuration cannot live under a user, so
 //! everything a client wants netcfgd to have arrives over the socket. That
 //! settles the architecture and inherits
-//! [0117](../../../docs/decisions/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)'s
+//! [0117](../../../doc/decision/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)'s
 //! obligation whole, because 0117's line was never *socket versus file*:
 //!
 //! > A request that carries config text is remote code execution. A request

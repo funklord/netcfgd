@@ -66,7 +66,7 @@ The binding constraint that comes with it is negative rather than positive, and 
 - **Not** a firmware manager, image builder, or device lifecycle platform — ever, at any scale.
 - **Not** a configuration management system. netcfgd is not Ansible, Puppet, or Salt, and must never acquire their filesystem shape. If §11 is ever built, it does not change this.
 - **Not** a bug-for-bug NM clone; the compat layer is explicitly tiered and lossy (§9.5).
-- **Not** a home for virtual networking features that are not directly useful for real-world networking, or are not very common use cases. Those are deferred indefinitely: an overgrown VM topology is not a use case, it is a failure, and a tool with a size budget and an embedded tier does not carry features whose users mostly built something they should not have. Open vSwitch is the case this rule was stated about; `ifb`, `veth`, `dummy`, `vrf` and `macvlan` are already here and earn their places ([0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md)).
+- **Not** a home for virtual networking features that are not directly useful for real-world networking, or are not very common use cases. Those are deferred indefinitely: an overgrown VM topology is not a use case, it is a failure, and a tool with a size budget and an embedded tier does not carry features whose users mostly built something they should not have. Open vSwitch is the case this rule was stated about; `ifb`, `veth`, `dummy`, `vrf` and `macvlan` are already here and earn their places ([0036](doc/decision/0036-the-shim-is-not-the-roadmap.md)).
 
 ---
 
@@ -468,7 +468,7 @@ Per principle 12, `conf.d/nm/` does not exist until a GUI actually creates somet
 - **Tier 2 (best effort):** GNOME/KDE settings panels — profile editing, static IP, per-connection options.
 - **Tier 3 (out of scope *for the shim*, reported as unsupported):** NM's VPN plugin architecture, ModemManager specifics, Wi-Fi P2P, team, OVS. Unmanaged features are exposed as `unmanaged`/`unavailable` — the honest NM idiom — rather than as broken managed objects.
 
-**Tier 3 is a statement about the adapter, not about netcfgd** ([0036](docs/decisions/0036-the-shim-is-not-the-roadmap.md)). netcfgd is expected to grow VPN support, modem support and complete wifi — including forced-AP roaming of the pre-802.11k/v/r kind, which is still needed because standardised devices are not everywhere. NM's interfaces for those are not the shape netcfgd wants, and §9.2's one-way rule forbids letting an adapter's model reach inward, so the honest end state is a netcfgd that does considerably more than the shim projects. Reading this list as a roadmap is a mistake that has already been made once.
+**Tier 3 is a statement about the adapter, not about netcfgd** ([0036](doc/decision/0036-the-shim-is-not-the-roadmap.md)). netcfgd is expected to grow VPN support, modem support and complete wifi — including forced-AP roaming of the pre-802.11k/v/r kind, which is still needed because standardised devices are not everywhere. NM's interfaces for those are not the shape netcfgd wants, and §9.2's one-way rule forbids letting an adapter's model reach inward, so the honest end state is a netcfgd that does considerably more than the shim projects. Reading this list as a roadmap is a mistake that has already been made once.
 
 The `Version` property is a hazard since clients gate behaviour on it, so the shim reports a plausible recent NM version while exposing `org.netcfgd.Compat` (identity, real version, tier support map) for anything that wants the truth. **Mutual exclusion is free:** only one process can own a well-known bus name, so the shim and a real NM daemon cannot both run.
 
@@ -516,7 +516,7 @@ So it is closer to "XML Schema plus database constraints plus RPC plus pub/sub" 
 
 ### 10.1 What "embedded" concretely means here
 
-**The 1 MB figure below is superseded.** Measured at M5 and found unreachable without giving up either the compiler or derived serialization; the install is 1.75 MB with every feature in, and that is the ratcheted budget. See [0024](docs/decisions/0024-one-binary-and-what-a-megabyte-would-actually-cost.md).
+**The 1 MB figure below is superseded.** Measured at M5 and found unreachable without giving up either the compiler or derived serialization; the install is 1.75 MB with every feature in, and that is the ratcheted budget. See [0024](doc/decision/0024-one-binary-and-what-a-megabyte-would-actually-cost.md).
 
 The reference target is an OpenWrt-class device: 16 MB flash (a built image leaves only single-digit megabytes free), 64 MB RAM, a slow MIPS or modest ARM core, frequently a **read-only squashfs root with a writable overlay**. 4 MB-flash devices are past end-of-life in OpenWrt and are explicitly not a target. The bar to clear is credibility against `netifd`, which is small, fast and already there.
 

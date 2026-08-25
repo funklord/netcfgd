@@ -2595,7 +2595,7 @@ fn a_report_without_the_source_installs_no_route() {
 }
 
 /// The point of the source. Something reported an address; netcfgd installs it,
-/// because the writer deliberately does not (`docs/interface-report.md`).
+/// because the writer deliberately does not (`doc/interface-report.md`).
 #[test]
 fn a_reported_address_is_installed() {
 	let desired = reported_document();

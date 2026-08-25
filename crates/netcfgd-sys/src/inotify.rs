@@ -4,7 +4,7 @@
 //! `netcfgd-sys` as the single crate permitted `unsafe`, so what defines
 //! it is the audit, not the protocol -- a second crate making raw syscalls
 //! would mean a second thing to review to the same bar, which is exactly what
-//! the constraint exists to prevent. See `docs/decisions/0012`.
+//! the constraint exists to prevent. See `doc/decision/0012`.
 //!
 //! The split is the same as for netlink: the syscalls are here with SAFETY
 //! comments, and the parsing of what comes back is entirely safe code in

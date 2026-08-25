@@ -56,7 +56,7 @@ That is an argument for enriching `ScanEntry` **on its own merits, for local
 users**, and it would pass the one-way rule cleanly.
 
 It is deliberately not made here. It is a socket API change after the M4 freeze
-and would move `docs/schema/socket.json`, which is a reviewable act that
+and would move `doc/schema/socket.json`, which is a reviewable act that
 deserves its own commit and its own argument -- not a paragraph inside an
 adapter's. Recorded so the next person does not have to rediscover that the
 information exists two layers down.

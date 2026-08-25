@@ -489,7 +489,7 @@ fn note_empty_config(options: &Options) {
 		"there is no configuration in {}, so netcfgd manages nothing here.",
 		config_dir.display()
 	);
-	println!("`ncfg wifi add SSID` writes the first one; docs/first-run.md has the");
+	println!("`ncfg wifi add SSID` writes the first one; doc/first-run.md has the");
 	println!("wired case.");
 }
 
@@ -1014,7 +1014,7 @@ fn render_stations(report: &netcfgd_proto::StationReport, json: bool) -> Result<
 			"An arrow means hostapd's live list does not match the document yet: it reads \n\
 			 the file once at startup and netcfgd converges the difference over the control \n\
 			 socket. `ncfg apply` does it now; if an arrow survives that, `ncfg plan` says \n\
-			 why (docs/decisions/0041)."
+			 why (doc/decision/0041)."
 		);
 	}
 	Ok(())
@@ -1438,7 +1438,7 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 		// What something outside netcfgd reported, shown as reported rather than
 		// as applied -- because it is not applied. netcfgd reads this file and
 		// does nothing with it until an `addressing` source asks (0044, 0045,
-		// `docs/interface-report.md`), and an operator who cannot see the
+		// `doc/interface-report.md`), and an operator who cannot see the
 		// difference between "the bearer is up" and "netcfgd configured the
 		// interface" would have no way to tell which half was broken.
 		if let Some(report) = observed
@@ -1587,7 +1587,7 @@ mod tests {
 	/// Every command the help text offers has an arm to dispatch it.
 	///
 	/// `reload` drifted the other way for a whole milestone: the request was in
-	/// the protocol, in `docs/schema/socket.json` and in the authorisation
+	/// the protocol, in `doc/schema/socket.json` and in the authorisation
 	/// table, and no shipped client could send it. Nothing was red, because
 	/// nothing compared the two lists.
 	///
@@ -1860,7 +1860,7 @@ mod tests {
 	#[test]
 	fn both_client_implementations_extract_the_same_facts() {
 		let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-		let witness_path = root.join("docs/schema/socket.json");
+		let witness_path = root.join("doc/schema/socket.json");
 		let binary = root.join("client/tests/client_test");
 
 		assert!(

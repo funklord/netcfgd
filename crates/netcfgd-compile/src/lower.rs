@@ -2663,7 +2663,7 @@ fn lower_openvpn(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind
 				Diagnostic::new(assignment.span, format!("unknown openvpn key `{other}`"))
 					.with_help(
 						"an openvpn tunnel takes only `config`, the path to the .ovpn file; \
-						 everything else belongs in that file (docs/decisions/0046)",
+						 everything else belongs in that file (doc/decision/0046)",
 					),
 			),
 		}
@@ -3070,7 +3070,7 @@ fn qdisc_kind(name: &str, span: Span, diags: &mut Diagnostics) -> Option<QdiscKi
 		)
 		.with_help(format!(
 			"one of {}; netcfgd sets the root qdisc only, so classful \
-				 schedulers like `htb` are out of scope (docs/decisions/0023)",
+				 schedulers like `htb` are out of scope (doc/decision/0023)",
 			names.join(", ")
 		)),
 	);
@@ -3673,7 +3673,7 @@ fn address_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Opt
 		// Whatever something outside netcfgd reported for this interface -- a
 		// modem helper, or the tunnel daemon netcfgd itself started. There is no
 		// backend to name and no value to carry: the report is the value, and
-		// `docs/interface-report.md` is where it comes from.
+		// `doc/interface-report.md` is where it comes from.
 		//
 		// Spelled `reported` rather than `modem` because the writer is not a
 		// modem's (decision 0047), and there is deliberately no second spelling:

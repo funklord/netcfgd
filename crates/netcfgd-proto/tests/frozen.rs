@@ -6,7 +6,7 @@
 //! be reshaped by whatever is written against it next.
 //!
 //! Same mechanism as `netcfgd-model`'s witness: every request, response and
-//! event serialised into `docs/schema/socket.json`, and any change to the wire
+//! event serialised into `doc/schema/socket.json`, and any change to the wire
 //! form moves those bytes.
 //!
 //! Only the envelope is pinned here, for the payloads that are pinned
@@ -14,7 +14,7 @@
 //! repeating them would mean two witnesses to update for one change, with the
 //! second eventually being the one nobody did -- so those variants appear with
 //! an empty payload, which pins the tag and the framing and leaves the contents
-//! to `docs/schema/observed.json`, `plan.json` and `document.json`. A payload
+//! to `doc/schema/observed.json`, `plan.json` and `document.json`. A payload
 //! *nothing else* pins carries a real sample: a journal record and a station
 //! report are only ever described here.
 //!
@@ -31,7 +31,7 @@
 //! pinned an `Observed`, so a field could be added to the thing this socket
 //! actually sends and no gate anywhere moved -- which is how
 //! `ObservedReport::routes` arrived. Both are pinned now, at
-//! `docs/schema/observed.json` and `docs/schema/plan.json`, and the sentence is
+//! `doc/schema/observed.json` and `doc/schema/plan.json`, and the sentence is
 //! true because those files exist rather than because it says so.
 //!
 //! **And the same disease had a second host, in this file.** The header above
@@ -55,7 +55,7 @@ use std::path::PathBuf;
 fn witness_path() -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.join("../..")
-		.join("docs/schema/socket.json")
+		.join("doc/schema/socket.json")
 }
 
 /// Every request, so none can be added or renamed unnoticed.

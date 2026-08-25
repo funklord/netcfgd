@@ -61,7 +61,7 @@ fn read_line<R: BufRead>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
 ///
 /// Separate from [`read_message`] because the two directions want opposite
 /// answers. A request is untrusted input to a process holding `CAP_NET_ADMIN`,
-/// and section 7 of `docs/socket-protocol.md` tells every implementation to
+/// and section 7 of `doc/socket-protocol.md` tells every implementation to
 /// refuse unknown members -- a rule the daemon was not keeping, because
 /// `deny_unknown_fields` cannot be applied to an internally-tagged enum, so the
 /// payloads were strict and the envelope was not. A *response* is read by a
@@ -181,7 +181,7 @@ mod tests {
 		read_request(&mut cursor)
 	}
 
-	/// Section 7 item 6 of docs/socket-protocol.md, which the daemon was not
+	/// Section 7 item 6 of doc/socket-protocol.md, which the daemon was not
 	/// keeping: the payloads refused an unknown member and the envelope did
 	/// not, so the permissive half was the one reading untrusted bytes.
 	#[test]

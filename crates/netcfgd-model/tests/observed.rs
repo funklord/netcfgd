@@ -1,7 +1,7 @@
 //! The other half of the freeze: what netcfgd says it can see.
 //!
-//! `docs/schema/document.json` pins the desired state and
-//! `docs/schema/socket.json` pins the request and response envelopes. Between
+//! `doc/schema/document.json` pins the desired state and
+//! `doc/schema/socket.json` pins the request and response envelopes. Between
 //! them sat a hole: a `Status` response carries an `Observed`, the socket
 //! witness says so and adds that it is "pinned by their own crates", and no
 //! crate pinned it. A field could be added, renamed or dropped from the
@@ -31,7 +31,7 @@ use std::path::PathBuf;
 fn witness_path() -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.join("../..")
-		.join("docs/schema/observed.json")
+		.join("doc/schema/observed.json")
 }
 
 /// Every ownership, so none can be renamed unnoticed.

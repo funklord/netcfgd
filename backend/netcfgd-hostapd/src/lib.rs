@@ -320,7 +320,7 @@ pub fn start(
 	let program = binary().ok_or_else(|| {
 		format!(
 			"no hostapd found for {device}; an access point needs the hostapd package. \
-			 netcfgd does not implement one itself (docs/decisions/0026)"
+			 netcfgd does not implement one itself (doc/decision/0026)"
 		)
 	})?;
 

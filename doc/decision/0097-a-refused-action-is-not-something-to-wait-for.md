@@ -16,7 +16,7 @@ Grepping every consumer:
 
 - the **executor does not**. It runs the list in order and stops at the first
   failure;
-- `docs/schema/plan.json` pins it, so every client can read it;
+- `doc/schema/plan.json` pins it, so every client can read it;
 - exactly one code path acts on it: `restrict` in the daemon, which filters a
   plan to a set of interfaces and drops an action whose dependency was not kept.
 

@@ -31,7 +31,7 @@ ascii_only = true
 # are repeated deliberately -- dropping `target` would put a cargo build
 # tree in front of every check.
 #
-# `schema` is `docs/schema`, generated output whose bytes are pinned:
+# `schema` is `doc/schema`, generated output whose bytes are pinned:
 # netcfgd writes those four witnesses and `make check` compares them byte
 # for byte against what the model produces. code-style.md exempts generated
 # sources for exactly this reason, and adopting the gate here without the
@@ -39,7 +39,7 @@ ascii_only = true
 # writes -- leaving `make check` red on master with "the document schema has
 # changed" and a difference at the end of a file nobody had edited.
 #
-# A bare component name rather than `docs/schema`, because the gate matches
+# A bare component name rather than `doc/schema`, because the gate matches
 # entries against each path component and a multi-segment prefix therefore
 # never matches anything. `schema` is the only directory of that name in this
 # tree, so the two are equivalent here -- but the gate accepting a path that

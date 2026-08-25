@@ -1,6 +1,6 @@
 //! `ncfg control`: who may ask netcfgd for what.
 //!
-//! The bootstrap [0118](../../../docs/decisions/0118-two-ways-to-be-allowed-and-one-of-them-is-visible.md)
+//! The bootstrap [0118](../../../doc/decision/0118-two-ways-to-be-allowed-and-one-of-them-is-visible.md)
 //! describes. Every tier defaults to root, so a default install refuses its own
 //! GUI -- and the fix cannot go over the socket, because that would be asking
 //! the daemon for permission to ask the daemon. It goes through this, run once
@@ -281,7 +281,7 @@ const MAX_COMMAND: usize = 4096;
 /// silently did nothing would otherwise produce a red frame around an
 /// unprivileged process, which is the one thing the frame must never mean.
 ///
-/// [0120]: ../../../docs/decisions/0120-the-red-frame-is-a-process-boundary.md
+/// [0120]: ../../../doc/decision/0120-the-red-frame-is-a-process-boundary.md
 fn helper(options: &Options) -> Result<ExitCode, String> {
 	use std::io::{BufRead, Read, Write};
 

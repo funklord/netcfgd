@@ -14,7 +14,7 @@
  *
  * WHAT IT SPEAKS
  *   netcfgd's control socket: one JSON object per line, over AF_UNIX. The
- *   vocabulary is pinned by docs/schema/socket.json, which exists so that a
+ *   vocabulary is pinned by doc/schema/socket.json, which exists so that a
  *   second implementation is legitimate rather than a fork -- this is that
  *   second implementation, and the test beside it parses every line of that
  *   witness rather than a fixture somebody wrote to match.

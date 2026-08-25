@@ -17,7 +17,7 @@ global { confirm = 90 }
 ```
 
 compiles to `Globals::confirm_default`, is carried in the compiled document, is
-pinned in `docs/schema/document.json`, and appears in `project.md`'s config
+pinned in `doc/schema/document.json`, and appears in `project.md`'s config
 listing as *"seconds; commit-confirm default window"*. Grepping every crate for
 a read finds the definition, the line in the compiler that writes it, and a test
 fixture. Nothing else.

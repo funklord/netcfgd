@@ -2,7 +2,7 @@
  * client_test.c -- the reader and the connection, checked against real bytes.
  *
  * THE FIXTURE IS NOT A FIXTURE
- *   Every line of docs/schema/socket.json is fed to the reader. That file is
+ *   Every line of doc/schema/socket.json is fed to the reader. That file is
  *   the daemon's own frozen witness -- `make schema-bless` moves it and a
  *   change to it is a change somebody reviews -- so this is not a copy of what
  *   netcfgd sends, it is what netcfgd sends. A fixture written by hand to match
@@ -448,8 +448,8 @@ static void a_refusal_is_an_answer_not_a_failure(void)
 
 /* ------------------------------------------------------------------ models
  *
- * The fixtures below are copied out of docs/schema/plan.json and
- * docs/schema/socket.json rather than written to suit the code -- same reason
+ * The fixtures below are copied out of doc/schema/plan.json and
+ * doc/schema/socket.json rather than written to suit the code -- same reason
  * as the witness above, and the same failure mode if they were not: a plan
  * fixture invented here would agree with this implementation about a shape
  * neither of them had checked with the daemon.
@@ -556,7 +556,7 @@ static int staged_open(struct staged *staged, const char *what, const char *answ
 }
 
 /*
- * A plan, in the shapes docs/schema/plan.json pins.
+ * A plan, in the shapes doc/schema/plan.json pins.
  *
  * Three actions on purpose: one with an inverse, one whose inverse is an
  * explicit null, and one with no inverse member at all. netcfgd omits the field
@@ -1695,7 +1695,7 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	const char *witness = (argc > 1) ? argv[1] : "../docs/schema/socket.json";
+	const char *witness = (argc > 1) ? argv[1] : "../doc/schema/socket.json";
 
 	reader_accepts_the_witness(witness);
 	reader_reads_what_it_should();

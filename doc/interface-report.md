@@ -12,10 +12,10 @@ This document is the whole interface. If you are writing something that reports,
 you should not need to read netcfgd's source, and if you find you did, that is a
 bug in this page.
 
-Decisions [0044](decisions/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)
-and [0045](decisions/0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
+Decisions [0044](decision/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)
+and [0045](decision/0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
 say why it is shaped this way, and
-[0047](decisions/0047-a-tunnels-address-stays-with-its-daemon.md) says why it is
+[0047](decision/0047-a-tunnels-address-stays-with-its-daemon.md) says why it is
 not called the modem report even though a modem helper wrote the first one:
 nothing in it is a modem's, and a name that says otherwise sends the next writer
 looking for a document that does not exist.
@@ -48,7 +48,7 @@ and in name order. It is where netcfgd's *own* generated writers go when there
 can be more than one of them on an interface -- a dual-stack link has a `DHCPv4`
 client and a `DHCPv6` client, both with nameservers to report, and one file means
 the second overwrites the first on every renewal
-([0086](decisions/0086-two-clients-on-one-interface-need-two-files.md)).
+([0086](decision/0086-two-clients-on-one-interface-need-two-files.md)).
 
 A helper may write there too, if it genuinely has more than one source for one
 interface. Nothing stops it and netcfgd will merge it. If you have one source --
@@ -58,7 +58,7 @@ and is what the rest of this document describes.
 **netcfgd generates three writers itself**: the scripts it hands `dhcpcd -c`
 (one per family) and `udhcpc -s`, which report a lease's nameservers because
 netcfgd never sees the protocol
-([0066](decisions/0066-a-lease-reports-its-nameservers.md)). They are worth reading
+([0066](decision/0066-a-lease-reports-its-nameservers.md)). They are worth reading
 as worked examples -- they are the shortest writers there are, and each one reports
 exactly one key.
 
@@ -197,7 +197,7 @@ nothing is delivered.
 
 **`search=`** is delivered on exactly the same terms as `dns=`, and the reason is
 worth reading before changing either
-([0067](decisions/0067-a-suffix-is-not-a-routing-domain.md)). A suffix is only used
+([0067](decision/0067-a-suffix-is-not-a-routing-domain.md)). A suffix is only used
 where that report's resolvers are already answering -- and a party answering every
 query gains nothing by also getting to append a suffix. Where an operator kept their
 own resolvers, a report that could set the search list would make `wiki` resolve as
@@ -210,7 +210,7 @@ information netcfgd could not have had, and a suffix says what to append to a ba
 name -- but *which resolver answers for a zone* is a decision about where every
 query on the machine goes, and a remote server does not get to make that one by
 connecting
-([0049](decisions/0049-a-server-may-name-resolvers-not-where-queries-go.md)).
+([0049](decision/0049-a-server-may-name-resolvers-not-where-queries-go.md)).
 Write it in the document instead, where it can be read, diffed and deleted:
 
 ```
@@ -233,7 +233,7 @@ asked of different documents:
   generated, run by a process netcfgd started, on an interface the document
   named. There is nothing left to opt into, and requiring the word anyway would
   mean a tunnel that silently kept none of its routes until somebody added it
-  ([0048](decisions/0048-a-tunnels-routes-arrive-through-the-report.md)).
+  ([0048](decision/0048-a-tunnels-routes-arrive-through-the-report.md)).
 
 **Nameservers and search suffixes are gated more narrowly than addresses and
 routes**, and only these two reasons apply to them: the addressing comes from the
@@ -266,9 +266,9 @@ netcfgd does not start, supervise or speak to any of them. It reads a file.
 **And netcfgd writes three of these itself**, which are the shortest worked examples
 there are: the scripts it hands `dhcpcd -c` and `udhcpc -s`, which report a lease's
 nameservers and search suffixes because netcfgd never sees DHCP
-([0066](decisions/0066-a-lease-reports-its-nameservers.md)), and the `--route-up`
+([0066](decision/0066-a-lease-reports-its-nameservers.md)), and the `--route-up`
 script it hands `openvpn`, which reports a tunnel's routes and resolvers
-([0048](decisions/0048-a-tunnels-routes-arrive-through-the-report.md)). Each reports
+([0048](decision/0048-a-tunnels-routes-arrive-through-the-report.md)). Each reports
 only the keys it has values for and touches nothing else.
 
 A tunnel and a DSL line are the other half, and there netcfgd *does* start the

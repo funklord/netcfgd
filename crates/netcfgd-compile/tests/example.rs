@@ -62,7 +62,7 @@ impl HookSink for FakeHooks {
 /// to remember. `installed_name_is_not_one_the_loader_reads` pins that.
 const EXAMPLE: &str = concat!(
 	env!("CARGO_MANIFEST_DIR"),
-	"/../../docs/netcfgd.conf.example"
+	"/../../doc/netcfgd.conf.example"
 );
 
 /// One example: the line it starts on, and its text with the hashes removed.

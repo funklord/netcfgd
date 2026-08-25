@@ -95,7 +95,7 @@ warning on every machine with a DHCP client. A second test covers `running:
 false` with a stale `answering`, which is reachable because the liveness pass
 runs *after* the round trip.
 
-**In the witness.** `docs/schema/observed.json` carries both verdicts -- an access
+**In the witness.** `doc/schema/observed.json` carries both verdicts -- an access
 point that answered, and `wedged0`, which is running, not answering, and has no
 list. The second is the shape this decision is about, and a witness with only the
 first would pin a field that never disagrees with itself.

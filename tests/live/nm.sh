@@ -1131,7 +1131,7 @@ PYEOF
 			echo "       NCFG_NM_TRACE=1 adds a checkpoint ring inside the shim,"
 			echo "       dumped by its watchdog when a handler stalls (0107)"
 			echo "       if the agent log stops at \`registered\`, the shim never"
-			echo "       asked it -- see docs/decisions/0106"
+			echo "       asked it -- see doc/decision/0106"
 			failures=$((failures + 1))
 		else
 			echo "ok   a cancelled prompt is reported as such"

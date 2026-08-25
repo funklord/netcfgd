@@ -158,7 +158,7 @@ pub(crate) fn set(positional: &[String], options: &Options) -> Result<ExitCode, 
 	if secret.exists() && !options.replace {
 		return Err(format!(
 			"{} already exists. Pass --replace to overwrite it -- and note that a private \
-			 key nobody has a copy of cannot be got back (docs/decisions/0042)",
+			 key nobody has a copy of cannot be got back (doc/decision/0042)",
 			secret.display()
 		));
 	}

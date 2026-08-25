@@ -18,7 +18,7 @@
 //! a logging framework, and it is meant to be removed when the question is
 //! answered.
 //!
-//! [0106]: ../../../docs/decisions/0106-two-twenty-five-second-timers-racing.md
+//! [0106]: ../../../doc/decision/0106-two-twenty-five-second-timers-racing.md
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};

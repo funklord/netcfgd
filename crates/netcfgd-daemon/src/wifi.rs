@@ -61,7 +61,7 @@ pub(crate) fn check_backend(document: Option<&Document>, interface: &str) -> Res
 			"`{interface}` asks for the iwd backend, which this build does not have. iwd keeps \
 			 its own network database and writes to it, which conflicts with netcfgd's \
 			 configuration being the only authority, so supporting it needs iwd to grow a \
-			 stateless mode (docs/decisions/0014). Use `backend = \"wpa_supplicant\"`."
+			 stateless mode (doc/decision/0014). Use `backend = \"wpa_supplicant\"`."
 		)),
 	}
 }

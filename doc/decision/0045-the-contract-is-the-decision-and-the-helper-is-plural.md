@@ -80,6 +80,6 @@ carried too far.
 The first thing to build is the reporting contract and netcfgd's side of it,
 which is a file reader and a fixture that writes one -- unchanged from 0044.
 What changes is that the contract must be written down as a contract, in
-`docs/`, so that a second helper can be written by somebody who has never read
+`doc/`, so that a second helper can be written by somebody who has never read
 netcfgd's source. That is the difference between an interface and an
 implementation detail that happens to be in `/run`.

@@ -25,7 +25,7 @@ pub enum EapMethod {
 ///   there was anything else, and it stays: an operator with a certificate in
 ///   `/etc/ssl` should not have to hand it to netcfgd to use it.
 /// - `Stored` is content netcfgd holds, put there by a client that cannot
-///   write system files ([0127](../../../docs/decisions/0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)).
+///   write system files ([0127](../../../doc/decision/0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)).
 ///   netcfgd materialises it under `/run` when a supplicant needs it and hands
 ///   over that path.
 ///
@@ -48,7 +48,7 @@ pub enum CertSource {
 ///
 /// Top-level, not nested under wifi security, because 802.1X is port-based
 /// access control that predates its use on radios and is ordinary on wired
-/// campus and corporate networks (`docs/decisions/0008`). Nesting it under an
+/// campus and corporate networks (`doc/decision/0008`). Nesting it under an
 /// SSID profile made the wired case inexpressible.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

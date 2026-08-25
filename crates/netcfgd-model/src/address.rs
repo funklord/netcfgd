@@ -27,7 +27,7 @@ pub struct Static {
 /// [`crate::SecretRef`] applies to secrets, and for the same reason: a
 /// document that embedded a runtime value would stop being a pure function of
 /// the config files, and two compiles of one config would differ
-/// (`docs/decisions/0009`).
+/// (`doc/decision/0009`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrefixRef {
@@ -69,7 +69,7 @@ pub enum HostnameMode {
 /// `Builtin` is recognised and unimplemented. It exists before the M4 freeze
 /// because adding a variant afterwards is a major version bump, and a build
 /// without the client must fail with "this build has no built-in DHCP client"
-/// rather than "unknown value" (`docs/decisions/0004`).
+/// rather than "unknown value" (`doc/decision/0004`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Dhcp4Backend {
@@ -173,7 +173,7 @@ pub struct Slaac {
 /// Addressing something outside netcfgd reported for this interface.
 ///
 /// The value is decided by whatever negotiated it -- a cellular network, a VPN
-/// server -- and told to netcfgd through a file. `docs/interface-report.md` is
+/// server -- and told to netcfgd through a file. `doc/interface-report.md` is
 /// the contract; decisions 0044 and 0045 say why netcfgd neither connects a
 /// bearer nor speaks a modem protocol, and 0047 says why the contract is not a
 /// modem's even though a modem helper wrote the first one.
@@ -196,7 +196,7 @@ pub struct Reported {}
 /// The list of these on an interface is a composition, not a set of
 /// alternatives -- dual-stack alone requires it. Order is significant for
 /// exactly two things, default route metrics and DNS merge precedence, and is
-/// not an execution sequence (`docs/decisions/0006`).
+/// not an execution sequence (`doc/decision/0006`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum AddressSource {

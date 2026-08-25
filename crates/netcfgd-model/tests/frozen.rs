@@ -13,7 +13,7 @@
 //!
 //! So the frozen surface is written down as a *witness*: one document with
 //! every field populated and every variant present, serialised and checked in
-//! at `docs/schema/document.json`. Any change to the schema changes those
+//! at `doc/schema/document.json`. Any change to the schema changes those
 //! bytes, and the diff is the review.
 //!
 //! Regenerate deliberately with `make schema-bless`, and say why in the commit.
@@ -53,7 +53,7 @@ use std::path::PathBuf;
 fn witness_path() -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.join("../..")
-		.join("docs/schema/document.json")
+		.join("doc/schema/document.json")
 }
 
 fn secret(name: &str, provider: SecretProvider) -> SecretRef {

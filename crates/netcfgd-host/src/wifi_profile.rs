@@ -15,7 +15,7 @@
 //! `@secret:` reference in the block -- so the *document* stays free of secret
 //! material (constraint 5) whichever caller asked.
 //!
-//! [0117]: ../../../docs/decisions/0117-adding-a-network-is-a-typed-request-not-a-written-file.md
+//! [0117]: ../../../doc/decision/0117-adding-a-network-is-a-typed-request-not-a-written-file.md
 
 use crate::config;
 use netcfgd_model::Ssid;

@@ -12,7 +12,7 @@
 //! constraint 4 -- it is the single place `unsafe` is permitted, so every raw
 //! syscall netcfgd makes lives here whether or not it is netlink. A second
 //! crate making syscalls would mean a second thing to audit to the same bar,
-//! which is what the constraint exists to prevent (`docs/decisions/0012`).
+//! which is what the constraint exists to prevent (`doc/decision/0012`).
 //!
 //! Depends on libc and the kernel and nothing else, which is why its record
 //! types are its own rather than `netcfgd-model`'s -- turning them into an

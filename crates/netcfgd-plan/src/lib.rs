@@ -97,7 +97,7 @@ pub struct Warning {
 /// First-class rather than a warning string, because "what did it decline?"
 /// is a question a script has to answer as well as a human, and because
 /// burying it among warnings is how it gets ignored
-/// (`docs/decisions/0010`).
+/// (`doc/decision/0010`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Refusal {
@@ -123,7 +123,7 @@ pub struct Refusal {
 /// outstanding.
 ///
 /// **Only for credentials that cannot be revoked from this host** -- see
-/// `docs/decisions/0042` for the test and why the other secrets an unmanaged
+/// `doc/decision/0042` for the test and why the other secrets an unmanaged
 /// device holds do not meet it. A notice that fires for everything is one
 /// people learn to pass over, which would cost the one case that matters.
 ///
@@ -2521,7 +2521,7 @@ impl Builder {
 	/// The third source whose value comes from outside the document, and the
 	/// only one netcfgd installs itself. A `Dhcp4` source starts a client and
 	/// the client installs the address; whatever writes a report deliberately
-	/// does not (`docs/interface-report.md` forbids it, because two writers on
+	/// does not (`doc/interface-report.md` forbids it, because two writers on
 	/// one interface is the failure this project is arranged around). So the
 	/// report is read and the addresses are netcfgd's to add, tagged as
 	/// netcfgd's.
@@ -2549,7 +2549,7 @@ impl Builder {
 				format!(
 					"`{name}` takes its addresses from whatever reports them, and nothing \
 					 has -- there is no file at /run/netcfgd/reported/{name}. Addresses are \
-					 planned when a report arrives; see docs/interface-report.md"
+					 planned when a report arrives; see doc/interface-report.md"
 				),
 			);
 			return Vec::new();

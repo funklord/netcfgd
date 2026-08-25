@@ -93,7 +93,7 @@ and removing it in the same plan is a loop, not a convergence.
 
 `Device` gains `on_unmanage`, so the document schema goes from 1.1 to **1.2 --
 a minor bump**, which is what section 2 says adding a field is. Both witnesses
-under `docs/schema/` moved by three lines between them, which is the freeze
+under `doc/schema/` moved by three lines between them, which is the freeze
 machinery doing its job: the change is visible, small, and had to be blessed
 deliberately.
 

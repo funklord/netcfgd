@@ -22,7 +22,7 @@ interface probe0 { kind = "dummy"; config = "10.5.5.1/24" }
   2  addr.add probe0     addressing[0]: 10.5.5.1/24 (was <absent>)
 ```
 
-This is the escape hatch `docs/first-run.md` tells people to reach for when
+This is the escape hatch `doc/first-run.md` tells people to reach for when
 handing an interface to another daemon, and the mechanism by which two network
 managers are kept off each other's interfaces. It silently did nothing.
 

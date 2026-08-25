@@ -109,7 +109,7 @@ line for line. **The seam goes below the widgets.**
 | | local | remote |
 |---|---|---|
 | carries | `AF_UNIX` stream, newline-delimited JSON | encrypted datagrams over UDP |
-| pinned by | `docs/schema/socket.json` | this tree's own format |
+| pinned by | `doc/schema/socket.json` | this tree's own format |
 | authenticated by | the socket's peer credentials, `SO_PEERCRED` | a signed envelope, verified by the agent |
 | authorised by | the daemon, against 0013's `observe`/`wifi`/`admin` tiers | the same tiers, reached through the capability the envelope carries |
 
@@ -131,7 +131,7 @@ things that must be visible in the UI rather than hidden by the abstraction:
 
 ## 5. What the daemon already offers
 
-Fifteen requests and twelve responses, pinned by `docs/schema/socket.json` — which
+Fifteen requests and twelve responses, pinned by `doc/schema/socket.json` — which
 exists precisely so a second implementation is legitimate rather than a fork:
 
 ```
@@ -276,7 +276,7 @@ and says so; it is not a compatibility linter and does not claim to be.
 
 That is the same shape netcfgd already uses on its own surfaces. `situc wire`
 emits a byte-level contract to commit; a change to it is a change somebody
-reviews -- which is `docs/schema/` and `make schema-bless` in another language.
+reviews -- which is `doc/schema/` and `make schema-bless` in another language.
 **The envelope carries a version discriminant from the first commit**, and the
 growth path is `[since = N]` before it is anything else.
 
@@ -332,7 +332,7 @@ Four rules, all of them the same rule:
    Three things about it worth knowing before adding to it:
 
    - **The test's fixture is the daemon's own witness.** `client/tests/` reads
-     every line of `docs/schema/socket.json`, so a protocol change turns this red
+     every line of `doc/schema/socket.json`, so a protocol change turns this red
      at build time rather than on somebody's laptop. It also found the third kind
      of line on the first run: the witness pins `event` payloads *on their own*
      as well as wrapped in `{"response":"event",...}`, because a monitor stream
@@ -374,7 +374,7 @@ Four rules, all of them the same rule:
      reason.
 
    ~~What is not there yet: **consent**.~~ **Done**
-   ([0088](../docs/decisions/0088-consent-is-a-tick-per-refusal-never-a-switch.md)):
+   ([0088](../doc/decision/0088-consent-is-a-tick-per-refusal-never-a-switch.md)):
    a checkbox per refused thing, each naming the one interface or device it
    covers, and never a single "override refusals" switch -- both wire flags are
    repeatable and "deliberately not a blanket --force", and one control would be
@@ -384,7 +384,7 @@ Four rules, all of them the same rule:
    off the action list disabled Apply on exactly the plan consent exists for.
 
    ~~What is not there yet: **nothing asks the operator's tier**~~ **Done**
-   ([0092](../docs/decisions/0092-a-client-is-told-what-it-may-do.md)): `hello`
+   ([0092](../doc/decision/0092-a-client-is-told-what-it-may-do.md)): `hello`
    reports the tiers a connection satisfies, three independent answers and not
    a level, and the Apply button is disabled with the reason in its tooltip
    where `admin` is absent. A daemon too old to answer leaves the button
@@ -402,7 +402,7 @@ Four rules, all of them the same rule:
    showing stays stale until the next event.
 
    ~~`globals.confirm_default` is unreachable, so the dialog offers 60s.~~
-   **Done** ([0094](../docs/decisions/0094-a-confirm-default-nobody-read.md)),
+   **Done** ([0094](../doc/decision/0094-a-confirm-default-nobody-read.md)),
    and going to fix it found that **nothing anywhere read that key**: a machine
    whose config said `global { confirm = 90 }` armed no window on any apply. The
    dialog asks the machine now, and the planner honours it.
@@ -418,7 +418,7 @@ Four rules, all of them the same rule:
    wanted" and is not an *if* any more. It stays last because the staging is
    right, but it is a destination rather than a maybe -- so item 2 must not
    bake in an assumption that both endpoints are directly reachable or that the
-   network is friendly. `../docs/remote-access-feasibility.md`, "Beyond the
+   network is friendly. `../doc/remote-access-feasibility.md`, "Beyond the
    LAN", has the four consequences.
 
 ## 9. Questions to raise rather than answer alone

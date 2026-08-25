@@ -44,7 +44,7 @@ v4 lease's nameservers precede a v6 lease's -- and the order is the same on ever
 machine and every boot, rather than whatever `read_dir` hands over.
 
 The single file is untouched on purpose. It is what
-[docs/interface-report.md](../interface-report.md) documents, what a modem helper
+[doc/interface-report.md](../interface-report.md) documents, what a modem helper
 and a `pppd` script and an `openvpn --route-up` write, and it has exactly one
 writer by construction: the thing writing it is the thing that brought the
 interface up. The problem was never that file. It was netcfgd starting a *second*

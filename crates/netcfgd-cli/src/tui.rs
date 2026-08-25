@@ -1211,21 +1211,21 @@ mod tests {
 	use serde_json::Value;
 	use std::sync::{Arc, Mutex};
 
-	/// A witness from `docs/schema/`, which is the daemon's own bytes.
+	/// A witness from `doc/schema/`, which is the daemon's own bytes.
 	///
 	/// These tests used to carry fixtures written by hand, and one of them was
 	/// wrong for as long as it existed. The plan fixture said
 	/// `"op": {"op": "addr.add"}`; the wire said `addr_add` until 0083, so the
 	/// pane drew a word this test never saw and the test passed anyway. A
 	/// fixture written to match what somebody believed agrees with itself and
-	/// proves nothing -- which is the whole argument for `docs/schema/`, and
+	/// proves nothing -- which is the whole argument for `doc/schema/`, and
 	/// this is the last crate that was not taking it.
 	///
 	/// It is also not hypothetical twice over: the wifi pane read `entries`
 	/// where the daemon sends `access_points`, for the same reason.
 	fn witness(name: &str) -> Value {
 		let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-			.join("../../docs/schema")
+			.join("../../doc/schema")
 			.join(name);
 		let text = std::fs::read_to_string(&path)
 			.unwrap_or_else(|error| panic!("{}: {error}", path.display()));
@@ -1240,7 +1240,7 @@ mod tests {
 	/// used here exactly as they are.
 	fn socket_witness(response: &str) -> Value {
 		let path =
-			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/schema/socket.json");
+			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../doc/schema/socket.json");
 		let text = std::fs::read_to_string(&path)
 			.unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 

@@ -29,7 +29,7 @@ The script is **generated** into `/run/netcfgd/openvpn/<iface>.report`, the same
 way a `DHCPv6` client's prefix hook already is. Nothing packages it, nothing has
 to exist under `/usr`, and it carries the interface name and the report path so
 it is rewritten on every start. What it writes is
-[`docs/interface-report.md`](../interface-report.md) -- the contract a modem
+[`doc/interface-report.md`](../interface-report.md) -- the contract a modem
 helper writes, which is why 0047 took the modem's name off it.
 
 `--script-security 2` is not decoration. **The default in OpenVPN 2.6 is

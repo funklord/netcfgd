@@ -298,7 +298,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 /// providing. If a device was handed over from `NetworkManager` and netcfgd's
 /// config is wrong, reverting leaves the device unconfigured rather than back
 /// on `NetworkManager` -- that is what "the way it was" means once the handover
-/// has happened, and docs/first-run.md says so.
+/// has happened, and doc/first-run.md says so.
 ///
 /// Written before the startup apply and only when absent, so the ordinary
 /// reboot case is untouched: `converge` overwrites it with the real document a

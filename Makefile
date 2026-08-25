@@ -412,7 +412,7 @@ install:
 	@# is neither. `crates/netcfgd-compile/tests/example.rs` pins that, and
 	@# compiles every example in it so the file cannot describe a language the
 	@# compiler has stopped speaking.
-	install -m 0644 docs/netcfgd.conf.example \
+	install -m 0644 doc/netcfgd.conf.example \
 		$(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf.example
 	@echo "install: netcfgd and ncfg installed; no init glue"
 	@echo "install:   $(SYSCONFDIR)/netcfgd/netcfgd.conf.example documents every feature"
@@ -429,7 +429,7 @@ install-modem-mbim:
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 0755 helper/netcfgd-modem-mbim $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
-	@echo "install-modem-mbim:   docs/interface-report.md is the contract -- write"
+	@echo "install-modem-mbim:   doc/interface-report.md is the contract -- write"
 	@echo "install-modem-mbim:   your own helper if this one does not fit"
 
 # The Qt client, opt-in the way install-modem-mbim is.
@@ -674,7 +674,7 @@ apk-source:
 		"$(DIST)/$(PKG_NAME)-$(APK_VERSION).tar.gz"
 
 # M4 froze the document schema and the socket API. The freeze is enforced by
-# two witnesses under docs/schema/: one document with every field and variant
+# two witnesses under doc/schema/: one document with every field and variant
 # populated, and one of every socket message. Any change to either wire form
 # moves those bytes, and the diff is the review.
 #
@@ -687,7 +687,7 @@ schema-bless:
 	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-model --test observed >/dev/null
 	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-plan --test frozen >/dev/null
 	@NCFG_BLESS=1 $(CARGO) test -q -p netcfgd-proto --test frozen >/dev/null
-	@echo "schema-bless: witnesses rewritten; `git diff --stat docs/schema | tail -1`"
+	@echo "schema-bless: witnesses rewritten; `git diff --stat doc/schema | tail -1`"
 	@echo "schema-bless: say in the commit whether this is a minor or a major bump"
 
 # The init glue is data, so nothing compiles it and a typo would be found by

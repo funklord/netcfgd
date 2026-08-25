@@ -10,7 +10,7 @@
 //! fresh `Observed` every time, so a verdict written into one would be gone on
 //! the next tick; this keeps the tally across ticks and stamps it on.
 //!
-//! [0119]: ../../../docs/decisions/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md
+//! [0119]: ../../../doc/decision/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md
 
 use netcfgd_model::{Document, Observed, ProbePolicy};
 use std::collections::HashMap;

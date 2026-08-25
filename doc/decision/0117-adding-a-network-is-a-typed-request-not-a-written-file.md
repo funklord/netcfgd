@@ -86,7 +86,7 @@ structurally beats closing it by policy.
   `ncfg wifi add` already runs, moved somewhere both reach. Two implementations
   of "what a `network` block looks like" is the shape this tree keeps finding,
   most recently as three spellings of one access point's name.
-- **The specification changes.** `docs/socket-protocol.md` currently says no
+- **The specification changes.** `doc/socket-protocol.md` currently says no
   passphrase crosses this socket in either direction. That becomes: inbound
   only, in one request, and never outbound.
 

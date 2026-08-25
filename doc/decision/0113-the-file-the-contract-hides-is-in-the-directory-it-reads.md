@@ -15,7 +15,7 @@ that `ncfg reset` removes exactly what the loader reads. The rfkill scan reads
 sysfs, whose names the kernel controls.
 
 The interface report is different, and it is the one that matters most, because
-`docs/interface-report.md` is a **contract with writers netcfgd did not write**.
+`doc/interface-report.md` is a **contract with writers netcfgd did not write**.
 
 ## What it found
 

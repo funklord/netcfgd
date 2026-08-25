@@ -543,7 +543,7 @@ pub struct OpenVpnConfig {
 ///
 /// Implemented by pppd. Present because a large share of DSL and fibre
 /// services still attach this way, and a tool that cannot configure the WAN of
-/// the device it targets is unfinished (`docs/decisions/0009`).
+/// the device it targets is unfinished (`doc/decision/0009`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PppoeConfig {
@@ -708,7 +708,7 @@ pub enum RaBackend {
 ///
 /// Policy only. netcfgd does not send router advertisements, because it
 /// configures and does not serve; the implementation is odhcpd or radvd
-/// (`docs/decisions/0009`).
+/// (`doc/decision/0009`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct RaPolicy {
@@ -733,7 +733,7 @@ pub struct RaPolicy {
 /// Something outside netcfgd depends on this interface -- an NFS root, a
 /// replicating database, the session the operator is connected over. netcfgd
 /// refuses to plan a disruptive action against it, and reports what it
-/// declined instead (`docs/decisions/0010`).
+/// declined instead (`doc/decision/0010`).
 ///
 /// The reason is a string rather than a boolean because the refusal text is
 /// the whole value: "eth0 is critical" sends the reader looking for what is
@@ -796,7 +796,7 @@ pub struct ProbePolicy {
 	/// machine that names no dwell behaves exactly as it did. A dwell is
 	/// something an operator adds when they have watched a link misbehave, and
 	/// it is measured in the period of the flapping they saw
-	/// ([0119](../../../docs/decisions/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)).
+	/// ([0119](../../../doc/decision/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)).
 	#[serde(skip_serializing_if = "is_zero", default)]
 	pub hold_down: u32,
 }
@@ -952,7 +952,7 @@ pub struct Interface {
 	/// no carrier, because a route down an unplugged cable is a black hole and
 	/// its better metric would beat the wifi that works. A link that fails a
 	/// probe is a black hole for the same reason, so it gets the same answer
-	/// ([0119](../../../docs/decisions/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)).
+	/// ([0119](../../../doc/decision/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)).
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub probe: Option<ProbePolicy>,
 	/// VLANs this interface carries, as a bridge port or as a bridge.

@@ -83,7 +83,7 @@ pub(crate) fn default_true() -> bool {
 /// that measures how much work happened rather than what anybody can rely on.
 ///
 /// This is not a licence to change the schema quietly. The two witnesses under
-/// `docs/schema/` still move on every change and still have to be blessed
+/// `doc/schema/` still move on every change and still have to be blessed
 /// deliberately (decision 0020), which is the mechanism that was ever doing
 /// the work -- the version was a weaker second signal alongside it.
 ///
@@ -159,7 +159,7 @@ pub enum HostnamePolicy {
 #[serde(deny_unknown_fields, default)]
 pub struct Globals {
 	/// The fallback DNS scope. Per-interface policies are scopes in their own
-	/// right rather than overlays on this one; see `docs/decisions/0007`.
+	/// right rather than overlays on this one; see `doc/decision/0007`.
 	pub dns: DnsPolicy,
 	/// Drift behaviour for interfaces that do not state their own.
 	pub on_drift_default: DriftPolicy,
@@ -261,7 +261,7 @@ pub enum Error {
 		key: String,
 	},
 	/// An interface names more than one of an addressing source that may
-	/// appear at most once. See `docs/decisions/0006` rule 1.
+	/// appear at most once. See `doc/decision/0006` rule 1.
 	RepeatedAddressSource {
 		/// The interface.
 		interface: String,
@@ -269,7 +269,7 @@ pub enum Error {
 		source: &'static str,
 	},
 	/// A DNS mode was asked for routing domains it cannot express. See
-	/// `docs/decisions/0007`.
+	/// `doc/decision/0007`.
 	DnsModeCannotRoute {
 		/// Where the policy came from: an interface name, or `globals`.
 		scope: String,

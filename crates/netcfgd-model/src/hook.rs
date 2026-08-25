@@ -17,7 +17,7 @@ pub enum HookPhase {
 	/// This is where netcfgd differs from netifrc, which runs `up; preup; up`
 	/// precisely so that its `preup` can check link. A netifrc `preup` that
 	/// aborts on "no link" deadlocks here: it refuses the bring-up that would
-	/// have produced the carrier it wanted. See `docs/decisions/0011`.
+	/// have produced the carrier it wanted. See `doc/decision/0011`.
 	///
 	/// Use [`HookPhase::Up`] for anything that needs the link live and the
 	/// interface still bare, and [`HookPhase::PostUp`] for anything needing an
@@ -94,7 +94,7 @@ pub enum HookPhase {
 	/// Where a link-state check belongs. Note that netcfgd does not currently
 	/// gate addressing on carrier -- it brings a link up and addresses it
 	/// whether or not a cable is present -- so this reports rather than
-	/// defers (`docs/decisions/0011`).
+	/// defers (`doc/decision/0011`).
 	Carrier,
 	/// A lease was acquired, renewed or lost.
 	Lease,

@@ -1,6 +1,6 @@
 //! The third thing the socket sends, and the last one nothing was pinning.
 //!
-//! `docs/schema/document.json` pins the desired state, `observed.json` pins
+//! `doc/schema/document.json` pins the desired state, `observed.json` pins
 //! what netcfgd can see, and `socket.json` pins the envelopes. A `Status`
 //! response carries a `Plan` too, and the socket witness said so while pinning
 //! only the envelope -- so an `Op` variant could be renamed, or gain a field,
@@ -27,7 +27,7 @@ use std::path::PathBuf;
 fn witness_path() -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.join("../..")
-		.join("docs/schema/plan.json")
+		.join("doc/schema/plan.json")
 }
 
 fn route() -> Route {

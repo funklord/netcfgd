@@ -182,7 +182,7 @@ land in `/etc/netcfgd` on the writable overlay, and `ncfg reset` returns the
 device to the shipped configuration without reflashing.
 
 That landed with read-only-root support (design section 10.4,
-`docs/read-only-root.md`). It is the whole mass-provisioning story, and uci is
+`doc/read-only-root.md`). It is the whole mass-provisioning story, and uci is
 not in it at any point.
 
 ### What this costs

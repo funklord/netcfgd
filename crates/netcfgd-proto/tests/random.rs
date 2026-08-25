@@ -18,7 +18,7 @@
 //! - **Seeded with real frames, then mutated.** Synthetic bytes almost never
 //!   form a valid message, so a purely generated run spends itself on the
 //!   outermost checks. The seeds here are the witness -- every line of
-//!   `docs/schema/socket.json` is a real frame -- so a mutation lands on real
+//!   `doc/schema/socket.json` is a real frame -- so a mutation lands on real
 //!   structure.
 //! - **The acceptance rate is asserted, not just printed.** A mutation scheme
 //!   that degenerates into garbage still passes every "does not panic" check
@@ -51,7 +51,7 @@ impl Rng {
 fn witness() -> Vec<String> {
 	let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.join("../..")
-		.join("docs/schema/socket.json");
+		.join("doc/schema/socket.json");
 	let text = std::fs::read_to_string(path).expect("the witness is readable");
 	text.lines()
 		.map(str::trim_end)

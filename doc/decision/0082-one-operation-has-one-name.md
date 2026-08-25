@@ -70,7 +70,7 @@ through. `#[serde(default)]` so that a plan written before this field still
 deserialises -- `Action` has `deny_unknown_fields`, and a struct that refuses
 the future is only half the problem.
 
-Additive: 48 lines in `docs/schema/plan.json`, no field changed or removed. A
+Additive: 48 lines in `doc/schema/plan.json`, no field changed or removed. A
 **minor** bump.
 
 ## What was rejected, and then taken
@@ -104,5 +104,5 @@ say what it is about to do is not a plan.
 
 `crates/netcfgd-plan/tests/frozen.rs` went red on the witness the moment the
 field appeared, before any of this was written down. That is the gate working:
-a protocol change that did not reach `docs/schema/plan.json` is a protocol
+a protocol change that did not reach `doc/schema/plan.json` is a protocol
 change nobody reviewed.
