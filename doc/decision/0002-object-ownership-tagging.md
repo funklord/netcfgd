@@ -108,6 +108,6 @@ that the system is inspectable with ordinary tools.
 - [`if_addr.h` at v5.18](https://raw.githubusercontent.com/torvalds/linux/v5.18/include/uapi/linux/if_addr.h)
   and [at v5.17](https://raw.githubusercontent.com/torvalds/linux/v5.17/include/uapi/linux/if_addr.h).
 - [iproute2 `rt_protos`](https://github.com/iproute2/iproute2/blob/main/etc/iproute2/rt_protos)
-  and [FRR's `rt_protos.d` drop-in](https://github.com/FRRouting/frr/blob/master/tool/etc/iproute2/rt_protos.d/frr.conf).
+  and [FRR's `rt_protos.d` drop-in](https://github.com/FRRouting/frr/blob/master/tools/etc/iproute2/rt_protos.d/frr.conf).
 - [OpenWrt 24.10 release notes](https://www.cnx-software.com/2025/02/08/openwrt-24-10-released/)
   for the kernel-version mapping.
