@@ -1050,6 +1050,30 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**"Why not just use a library?" has a measured answer now, and it needed one**
+([0133](docs/decisions/0133-reuse-was-never-the-question-the-form-of-reuse-was.md)).
+0016 marked key management and EAP never ours on the strength of implementation
+risk -- KRACK, Dragonblood, the cost of a TLS stack -- and that argument is weak
+against reuse, because it is aimed at writing code nobody proposed writing. The
+question actually put to the project was why not link what exists.
+
+**Reuse was never the question; the form of reuse was.** netcfgd already reuses
+wpa_supplicant -- that is what 0014, 0015 and 0091 are. The choice is a process
+behind a control socket versus code linked into the daemon, and two measurements
+settle it. `wpasupplicant` 2:2.10-24 ships no shared library, no archive and no
+headers, so reuse in library form is not on offer: the real comparison is a
+vendored fork of hostap against a distribution package that somebody else
+patches. And the dependency set travels with the code -- wpa_supplicant links
+libnl x3, libssl, libcrypto, libdbus and libpcsclite, against netcfgd's libc,
+libgcc_s and an ncurses that `--no-default-features` removes. Constraint 3 names
+D-Bus, and `make linkage` would refuse it.
+
+**What it weakens is worth knowing.** 0016's middle rows -- scan and BSS
+selection -- were marked "could be ours" partly on effort, and available
+libraries reduce effort. What still blocks that path is behavioural rather than
+practical: pinning a BSSID defeats 802.11r fast transition, and no library
+changes that.
+
 **A supplicant that dies under an activated radio comes back, and that is
 tested too.** `tests/live/revive.sh` is written against the symptom directly:
 the GUI said "cannot reach supplicant for wlp0s20f3" with dead buttons while

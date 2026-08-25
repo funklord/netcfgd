@@ -3,6 +3,7 @@
 Status: accepted
 Date: 2026-07-29
 Milestone: not scheduled; the boundary applies from M3
+Extended by: [0133](0133-reuse-was-never-the-question-the-form-of-reuse-was.md), which answers the question this record does not: not whether to write a supplicant, but whether to link one.
 
 ## Context
 
