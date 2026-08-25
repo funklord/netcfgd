@@ -158,6 +158,29 @@ across two processes with the security-relevant half in the one that has
 `forbid(unsafe_code)` and no business holding it. 0008 already puts wired
 802.1X through wpa_supplicant for the same reason.
 
+## If netcfgd stops being Rust
+
+The copyright holder has said a rewrite in C or C++ is possible. Three of the
+arguments above are language-independent and one is not, and the split matters
+because the wrong half is the memorable one.
+
+**Independent, and they carry the decision on their own:** there is no library
+to link, so reuse in library form is not on offer whatever netcfgd is written
+in; the dependency set travels with the source, and `make linkage` reads an ELF
+rather than a crate graph, so constraint 3 is enforced identically; and the
+process boundary is a property of processes, not of languages.
+
+**Not independent:** the alternatives section says a linked TLS stack would put
+certificate validation "in the one that has `forbid(unsafe_code)`". In a C or
+C++ netcfgd that clause is simply gone.
+
+**It makes the conclusion stronger, not weaker, and this is the part to get
+right.** The reason to keep a TLS stack and a 4-way handshake behind a process
+boundary is that a memory-safety defect there cannot reach the daemon. A daemon
+with no memory-safety guarantee of its own needs that boundary *more*, because
+it is then the only thing standing between a malformed EAP frame and everything
+netcfgd holds. A rewrite is a reason to restate this record, never to reopen it.
+
 **Edit 0016 to add this reasoning.** Rejected on the standing rule that an
 accepted record is not edited: a later record supersedes or extends it and
 says so. The gap between the two dates is itself information -- it says the
