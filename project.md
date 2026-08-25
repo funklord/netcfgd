@@ -944,9 +944,15 @@ control socket, or as an argument to a stop path -- and netcfgd writes what it
 was told beside its state, so the copy that starts next can read it. That also
 answers the reboot case, since an intent recorded in `/run` is gone after a
 reboot and its absence is itself the answer: nothing announced anything, so
-this is a cold start rather than a handover. **Whether the default for an
-unannounced stop is "hold" or "release" is the decision to make deliberately**,
-and it is the one that decides how this behaves when something crashes.
+this is a cold start rather than a handover. **The default for an unannounced stop is settled:
+it holds** ([0134](docs/decisions/0134-an-unannounced-stop-holds.md)). netcfgd
+leaves the network as it is and the next copy adopts it; releasing happens only
+when something says so. The argument is asymmetry, not preference -- holding
+when release was wanted leaves a configured machine nobody manages, which is
+visible and recoverable, while releasing when hold was wanted takes down the
+connection the operator would have used to put it back. A crash cannot announce
+itself, so the unannounced default *is* the crash behaviour, and a daemon that
+tears down on exit converts every one of its own bugs into an outage.
 
 **Not started, and not to be started without a plan.**
 
