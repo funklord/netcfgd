@@ -13,7 +13,7 @@ So this ties three things together:
     diagnostics, which is the compiler describing itself;
   * `PRIVILEGED` in `privilege.rs`, the ones that grant more than configuring
     a network;
-  * `tools/privilege-ordinary.txt`, where every other key is acknowledged by
+  * `tool/privilege-ordinary.txt`, where every other key is acknowledged by
     name.
 
 A key in none of them fails the build. That is the `tier_of` construction --
@@ -36,7 +36,7 @@ import pathlib
 
 LOWER = pathlib.Path("crates/netcfgd-compile/src/lower.rs")
 PRIVILEGE = pathlib.Path("crates/netcfgd-compile/src/privilege.rs")
-ORDINARY = pathlib.Path("tools/privilege-ordinary.txt")
+ORDINARY = pathlib.Path("tool/privilege-ordinary.txt")
 
 
 def accepted():

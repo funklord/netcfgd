@@ -5,7 +5,7 @@
 # run time; `privilege.rs` decides what is privileged and everything else is
 # ordinary by construction. What this exists for is the gap that leaves: a key
 # added to the compiler later would be ordinary because nobody looked at it.
-# `tools/privilege_gate.py` refuses a key that is in neither this file nor
+# `tool/privilege_gate.py` refuses a key that is in neither this file nor
 # PRIVILEGED, so adding one costs somebody a decision.
 #
 # Review it as a list of things a desktop user may set on this machine's

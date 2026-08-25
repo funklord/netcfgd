@@ -17,7 +17,7 @@ the header itself the de-facto registry. Currently allocated there: 0–18, 42
 (Babel), 99 (Open/R), 186–189 (BGP, ISIS, OSPF, RIP), 192 (EIGRP). Everything
 else is unassigned, and the established practice for a daemon that wants one
 is to pick from a gap and ship a drop-in for `ip route show` to name it —
-FRR does exactly this with `tools/etc/iproute2/rt_protos.d/frr.conf`.
+FRR does exactly this with `tool/etc/iproute2/rt_protos.d/frr.conf`.
 
 **Addresses.** `IFA_PROTO` is the equivalent for addresses. It was added by
 commit `47f0bd503210` ("net: Add new protocol attribute to IP addresses",
@@ -108,6 +108,6 @@ that the system is inspectable with ordinary tools.
 - [`if_addr.h` at v5.18](https://raw.githubusercontent.com/torvalds/linux/v5.18/include/uapi/linux/if_addr.h)
   and [at v5.17](https://raw.githubusercontent.com/torvalds/linux/v5.17/include/uapi/linux/if_addr.h).
 - [iproute2 `rt_protos`](https://github.com/iproute2/iproute2/blob/main/etc/iproute2/rt_protos)
-  and [FRR's `rt_protos.d` drop-in](https://github.com/FRRouting/frr/blob/master/tools/etc/iproute2/rt_protos.d/frr.conf).
+  and [FRR's `rt_protos.d` drop-in](https://github.com/FRRouting/frr/blob/master/tool/etc/iproute2/rt_protos.d/frr.conf).
 - [OpenWrt 24.10 release notes](https://www.cnx-software.com/2025/02/08/openwrt-24-10-released/)
   for the kernel-version mapping.

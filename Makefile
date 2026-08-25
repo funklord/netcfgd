@@ -48,7 +48,7 @@
 #   make schema-bless  -- re-bless the frozen document and socket witnesses
 #   make version-check -- VERSION is the source; debian/changelog and
 #                         Cargo.toml are held to it
-#   make hooks         -- install the git hooks from tools/hooks/
+#   make hooks         -- install the git hooks from tool/hooks/
 #   make clean         -- remove build products
 #   make veryclean     -- clean, plus the build directories
 #   make distclean     -- veryclean, plus what the tooling here wrote
@@ -478,7 +478,7 @@ install-nm:
 	@# Its own, rather than relying on NetworkManager's. The right to own that
 	@# bus name is granted by NetworkManager's policy file today, so removing
 	@# that package would take the grant with it -- on exactly the machine the
-	@# shim is for. tools/dbus_policy_gate.py keeps the file and the code in
+	@# shim is for. tool/dbus_policy_gate.py keeps the file and the code in
 	@# step.
 	install -m 0644 packaging/dbus/netcfgd-nm.conf \
 		$(DESTDIR)$(DATADIR)/dbus-1/system.d/netcfgd-nm.conf
@@ -732,24 +732,24 @@ FILLED = @VERSION@ @ARCH@ @DEPENDS@ @MAINTAINER@ @PKGVER@
 packaging:
 	@# install and uninstall must agree, checked statically so it runs
 	@# everywhere rather than only where a full install works.
-	@python3 tools/uninstall_gate.py
+	@python3 tool/uninstall_gate.py
 	@# Every config key the compiler accepts is classified, so that a key
 	@# added later cannot default to "a client may send this". 0127.
-	@python3 tools/privilege_gate.py
+	@python3 tool/privilege_gate.py
 	@# The shim's bus policy against the interfaces the shim serves. A missing
 	@# entry is a client method call denied at run time, and only where
 	@# NetworkManager's own policy file is absent -- which is the machine the
 	@# shim exists for.
-	@python3 tools/dbus_policy_gate.py
+	@python3 tool/dbus_policy_gate.py
 	@# Every /etc path netcfgd writes against what its own systemd unit allows.
 	@# A disagreement is EROFS at run time on a packaged install and in no test,
 	@# because every test writes into a temp directory. 0127's writes were
 	@# refused by netcfgd's own sandbox this way.
-	@python3 tools/sandbox_gate.py
+	@python3 tool/sandbox_gate.py
 	@# The tag-implies-origin inference in netcfgd-observe is sound only while
 	@# the tag has one producer. That is a property of the tree, so it is
 	@# checked here rather than trusted there.
-	@python3 tools/tag_producer_gate.py
+	@python3 tool/tag_producer_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
@@ -1483,18 +1483,18 @@ clean:
 	fi
 
 # The shared style gate: one tool, copied verbatim from
-# ~/.claude/tools/style_gate.py into every private project. It refuses to
+# ~/.claude/tool/style_gate.py into every private project. It refuses to
 # run against a collapsed file list, so a pass means it actually looked.
 style: style-source style-docs
 
 style-source:
-	python3 tools/style_gate.py check
+	python3 tool/style_gate.py check
 
 # project.md is authoritative, so it is held to the tree: a heading
 # that appears twice means whichever one you find, the other is the
 # one with the answer.
 style-docs:
-	python3 tools/style_gate.py docs
+	python3 tool/style_gate.py docs
 
 # The clean ladder, matching the sibling projects: `clean` removes build
 # products, `veryclean` adds the build directories themselves, `distclean`
@@ -1563,8 +1563,8 @@ uninstall:
 # a fresh clone.
 hooks:
 	@test -d .git || { echo "hooks: not a git repository" >&2; exit 1; }
-	@install -m 0755 tools/hooks/commit-msg .git/hooks/commit-msg
-	@echo "hooks: commit-msg installed from tools/hooks/"
+	@install -m 0755 tool/hooks/commit-msg .git/hooks/commit-msg
+	@echo "hooks: commit-msg installed from tool/hooks/"
 
 # The TARGETS block in the header is the one statement of what the targets
 # are, and this reads it back rather than repeating it: a list written twice

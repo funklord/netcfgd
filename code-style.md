@@ -144,7 +144,7 @@ aligned to a paren, which is the shape to aim for.
 spaces come after; the reverse, or an alternation between them, is exactly
 what breaks at a different tab width -- which is the one thing the split
 exists to prevent. In the nine Python scripts under `tests/live/` and
-`tools/` it is worse than cosmetic: a space *before* a tab in leading
+`tool/` it is worse than cosmetic: a space *before* a tab in leading
 whitespace raises `TabError`, so a file that looks right refuses to run.
 Continuation lines inside brackets are not indentation-significant there at
 all, which is why PEP 8's preference for spaces does not reach this rule.
@@ -251,7 +251,7 @@ name it demands is plural, singular, capitalised or none of those.
 Present here: **Cargo** looks for `tests/`, `examples/` and `benches/` by
 those exact names, and `cargo-fuzz` for `fuzz_targets/`. **GitHub**
 requires `.github/workflows/`. **git** keeps `hooks/`, which is why
-`tools/hooks/` is spelled that way.
+`tool/hooks/` is spelled that way.
 
 **Second: a plural an ecosystem has settled**, which is a convention rather
 than a requirement -- nothing breaks, but a reader would be surprised by
@@ -265,13 +265,13 @@ because it looked like a convention and finds the build no longer works.
 So say which kind is being claimed.
 
 **This rule does not reach the settled inventory.** Three canonical names in
-`harmonization.md` are plural -- `tools/`, `docs/` and `docs/decisions/` --
+`harmonization.md` are plural -- `tool/`, `docs/` and `docs/decisions/` --
 and they stay until the copyright holder says otherwise, because renaming
 them is a cross-project rewrite rather than a spelling change. Measured
 before this was written: the decision records are cited by path 270 times in
-netcfgd and 95 times in situ, and `tools/` is named as a path 161 times in
+netcfgd and 95 times in situ, and `tool/` is named as a path 161 times in
 four projects alone, besides `sync.py`, every Makefile's hook target and the
-`~/.claude/tools/` the copies are spread from. An inventory entry is a name
+`~/.claude/tool/` the copies are spread from. An inventory entry is a name
 other things point at, which is exactly what makes it expensive and exactly
 what makes it worth having.
 
@@ -448,7 +448,7 @@ The rule is enforced, not merely stated: `ascii_only = true` in
 `.style-gate.toml`, checked by `make style` over the 209 files the gate
 sees. **In the two languages it can lex, it means ASCII outside string and
 character literals** — the nine Python scripts under `tests/live/` and
-`tools/`, read with `tokenize`, and the C of `client/` and the C++ of `gui/`,
+`tool/`, read with `tokenize`, and the C of `client/` and the C++ of `gui/`,
 read with a scanner written for the purpose because nothing in the standard
 library lexes them. That is what makes the UI exception above enforceable
 rather than merely stated: a glyph inside a `gui/` string literal passes and
@@ -524,7 +524,7 @@ attribution: a tool is not an author and does not sign anything.
   anything containing real secret material -- not in fixtures, not in test
   data, not "temporarily".
 
-The commit-msg hook is `tools/hooks/commit-msg`, installed with `make hooks`.
+The commit-msg hook is `tool/hooks/commit-msg`, installed with `make hooks`.
 It rejects generator attribution, a subject over 75 columns, and body prose
 over 75 columns. It lives in the tree rather than only in `.git/hooks` so
 that it is reviewable and survives a clone; the copy that runs is installed
