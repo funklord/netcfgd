@@ -944,7 +944,32 @@ control socket, or as an argument to a stop path -- and netcfgd writes what it
 was told beside its state, so the copy that starts next can read it. That also
 answers the reboot case, since an intent recorded in `/run` is gone after a
 reboot and its absence is itself the answer: nothing announced anything, so
-this is a cold start rather than a handover. **There is an intended-state file and it is `/etc`, which is worth saying
+this is a cold start rather than a handover. **The remote protocol is `fuzznet` as it stands, settled 2026-08-25.** Nothing
+is forked and nothing is special-cased for this consumer; where fuzznet lacks
+something, the working version moves across from `fuzzypickles` rather than
+being written a second time here. fuzznet's own section 5 already expected this
+-- it excludes rendezvous, hole punching and relays "on borrowed
+justification", the borrowed justification being netcfgd's LAN-only staging
+that expired on 2026-08-08, and says they stay out only because nobody has
+built them there yet. **So there is no netcfgd-side protocol to design**, and a
+gap found here is reported to fuzznet rather than worked around in `agent/`.
+
+**Named as required the same day: remote logs, chunked file transfer, a remote
+configuration database** -- and they do not sit in one place. Chunked transfer
+is already fuzznet's section 4.4, built against netcfgd's shape because
+netcfgd's responses forced it; but that is chunking of a *message*, where
+fuzzypickles' is content-addressed -- hash-named, pull-based,
+requester-coordinated -- which 4.4 calls a different problem outright. Remote
+logs and a config database read as *command vocabularies*, which fuzznet's
+section 5 excludes by name; the envelope they need is already there and what
+they add is message types. **Where that code lives is fuzznet's scope decision
+and not netcfgd's** -- its section 2 is titled "The scope decision, which is
+the whole design" -- so it is recorded in
+[doc/remote-access-feasibility.md](doc/remote-access-feasibility.md) as a
+requirement carried in, and put to that tree rather than answered from this
+one.
+
+**There is an intended-state file and it is `/etc`, which is worth saying
 because `/run` holds three things that look alike and have opposite rules**
 ([0139](doc/decision/0139-three-kinds-of-state-and-one-that-must-not-survive.md)).
 The config is authoritative by constraint 1 and recompiled at every start, so

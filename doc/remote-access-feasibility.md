@@ -474,6 +474,60 @@ to design around and expensive to retrofit:
 None of this changes what the daemon does. It changes what the agent must
 survive.
 
+### Settled 2026-08-25: fuzznet as it stands, and what it lacks comes from fuzzypickles
+
+**The copyright holder's direction, recorded here because it decides netcfgd's
+side and raises a question on fuzznet's.**
+
+netcfgd takes `fuzznet` **as is**. Nothing is forked, nothing is special-cased
+for this consumer, and where fuzznet is missing something the fix is to move
+the working version across from `fuzzypickles` rather than to write a second
+one here.
+
+**fuzznet's own document already expected this.** Its section 5 lists
+rendezvous, hole punching and relays as excluded "for now, and on borrowed
+justification" -- the borrowed justification being netcfgd's LAN-only staging,
+which expired on 2026-08-08 -- and says plainly that they stay out only
+"because nobody has built it *here* and fuzzypickles has working versions in
+its own tree, which is a statement about sequencing, not about scope. Treat it
+as the next thing likely to move in." This direction is that sequencing being
+settled.
+
+**Named as required on the same day: remote logs, chunked file transfer, and a
+remote configuration database.** Where each of those sits is not uniform, and
+the differences matter more than the list does:
+
+- **Chunked transfer is already fuzznet's, and was built for netcfgd.** Section
+  4.4 is application-level chunking, reassembly, retransmission of missing
+  pieces and a hard bound on half-finished state, and it says it "gets built
+  against netcfgd's shape, since netcfgd is the consumer whose responses force
+  it". What fuzznet has is chunking of a *message*. fuzzypickles' chunking is
+  content-addressed -- hash-named, pull-based, requester-coordinated -- which
+  section 4.4 explicitly calls a different problem. **So "chunked file
+  transfer" is the one place the two existing implementations are not
+  substitutes**, and which is wanted decides whether anything moves at all.
+- **Remote logs and a remote configuration database read as command
+  vocabularies**, and fuzznet's section 5 excludes those by name: "A project's
+  vocabulary is its own, and the library carries the envelope around it."
+  fuzzypickles' `control_codec.c` is 4718 lines of *its* commands and none of
+  it is shared.
+
+  The envelope those two features need is already there -- chunking, freshness
+  (4.3), the per-datagram capability (13), bounded memory. What they would add
+  is message types.
+
+**That is a scope question for fuzznet and not for netcfgd**, and it is the
+central one in that tree: fuzznet's section 2 is called "The scope decision,
+which is the whole design", and its admission test is "two real consumers need
+it, and neither would accept the other's version as a special case of their
+own". Recorded here as the requirement netcfgd carries in; the decision about
+where the code lives belongs in fuzznet's tree, with its holder.
+
+**What this does settle for netcfgd, and it is not nothing:** there is no
+netcfgd-side protocol to design. The remote path consumes fuzznet, and a gap
+found here is reported there rather than worked around in `agent/` -- which is
+the same rule this tree already follows for every dependency.
+
 ## 9. The verdict
 
 **Feasible, and the auth structure is the part worth copying wholesale.** The
