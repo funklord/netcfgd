@@ -1265,6 +1265,10 @@ live:
 	@# coverage: a certificate must reach the supplicant as a path it can open,
 	@# never as the content of a key.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/enterprise.sh"
+	@# Taking a radio over when another manager lets go, which is what
+	@# displacement means and the half no test covered: a guard that declines
+	@# and never stops declining looks exactly like a daemon that does not work.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/displace.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"

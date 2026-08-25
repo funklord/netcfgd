@@ -1050,6 +1050,29 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**Taking a radio over when the other manager lets go is tested now, and it
+works** -- which narrows a report it had been blamed for.
+`tests/live/displace.sh` starts a supplicant netcfgd did not start, checks
+netcfgd declines the radio and says who is holding it, then kills that
+supplicant and checks netcfgd takes over on its own: its own supplicant
+running, matched by the pid file it was told to write, the radio reported as
+netcfgd's, and a scan returning through it. No apply is run in the second half
+on purpose -- the daemon reconciles by default, so taking a free radio is
+something it should do unprompted.
+
+**The half that was missing is the release, not the guard.** `dot1x.sh` covers
+netcfgd declining a live foreign supplicant, and that is the half that protects
+a working machine. Nothing covered the other side, and a guard that declines
+and never stops declining is indistinguishable from a daemon that does not work
+-- which is exactly how it was reported: "netcfgd stops working if I don't have
+NetworkManager running".
+
+**The first negative control for it was unreachable and passed.** Forcing the
+guard to fire always changes nothing once the socket is gone, because the guard
+only runs when the socket exists -- so the control exercised a branch the second
+half of the test never reaches. A control that makes netcfgd start no supplicant
+at all fails five checks, including the one that matters.
+
 **The GUI says when another daemon has the radio, and finding out why it could
 not was the interesting part.** netcfgd has known all along -- `contention.rs`
 reads the files `NetworkManager` and `systemd-networkd` leave in `/run`, and
