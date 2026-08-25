@@ -944,7 +944,49 @@ control socket, or as an argument to a stop path -- and netcfgd writes what it
 was told beside its state, so the copy that starts next can read it. That also
 answers the reboot case, since an intent recorded in `/run` is gone after a
 reboot and its absence is itself the answer: nothing announced anything, so
-this is a cold start rather than a handover. **The reboot case was an assumption about a filesystem, and is now a check**
+this is a cold start rather than a handover. **There is an intended-state file and it is `/etc`, which is worth saying
+because `/run` holds three things that look alike and have opposite rules**
+([0139](doc/decision/0139-three-kinds-of-state-and-one-that-must-not-survive.md)).
+The config is authoritative by constraint 1 and recompiled at every start, so
+netcfgd picks it up after a crash because it never depended on anything else.
+`/run/netcfgd/desired.json` is a projection written by five call sites so `cat`
+can answer what netcfgd decided; **nothing reads it back and nothing should**,
+since a reader would make `/run` a second authority. `owned.json` is a claim
+about objects that exist, boot-scoped by 0138.
+
+**`confirm.json` is the fourth thing and is deliberately not boot-scoped.** It
+asserts that somebody applied a change and never confirmed it, and a reboot does
+not make that false -- the configuration is still in `/etc` waiting to be applied
+again, so if it is the change that takes the network away the reboot has saved
+nobody. Boot-scoping it would remove the protection exactly where the outage was
+worst. `confirm_window` deletes the file on confirmation, so one present at
+startup is by construction unresolved.
+
+**The code was right and the evidence was missing.** `confirm.sh` had eight
+checks and killed the daemon only in cleanup, so `resolve_on_startup` -- the
+recovery path for the recovery path -- rested on reasoning alone. Five checks
+now, with `kill -9` so the daemon gets no chance to tidy up, and a window long
+enough that it cannot expire while the daemon is dead; otherwise the test could
+not tell "reverted because a window was found" from "reverted because it ran
+out". The last check is the one easiest to omit: the revert must still stand a
+reconcile later, since a daemon that reverted and then reconciled back to the
+rejected config would pass everything before it and undo itself a tick later.
+
+**And a fourth class of state has a rule before the code that needs it
+exists.** netcfgd has no ratchet, nonce counter or session key today -- the
+greps that appeared to find some were matching `FnOnce`, and WireGuard's session
+state is the kernel's. The remote protocol with Monocypher is designed and not
+built, so the rule is written now: **for that class, restoring the state is the
+failure and losing it is the remedy** -- the inverse of everything else here.
+Losing a ratchet costs a reconnection; restoring one reuses a nonce under the
+same key. It never enters `/run/netcfgd`, which is world-readable
+(`owned.json` at `0o666` in a `0755` directory) and where constraint 5's rule
+about the *document* has no counterpart for the *record*. Boot-scoping is the
+wrong tool, because a ratchet must die at process exit rather than at reboot.
+And 0134's "hold by default" must not be inherited: for this class the safe
+direction is to lose it.
+
+**The reboot case was an assumption about a filesystem, and is now a check**
 ([0138](doc/decision/0138-a-record-outliving-its-boot-is-wrong-not-stale.md)).
 0135, 0136 and 0137 each closed by saying a reboot clears `/run` and the kernel
 state together. That is true because `/run` is conventionally a tmpfs -- a
@@ -1081,7 +1123,7 @@ exists.** That is sound because the tag has exactly one producer per object
 kind -- `Op::AddrAdd` is the only caller of `add_address`, `Op::RouteAdd` the
 only caller of `add_route`, and both record `Origin::Static`. Being a property
 of the tree rather than of the function relying on it, it is asserted by
-`tools/tag_producer_gate.py`, which fails both on a second producer and on a
+`tool/tag_producer_gate.py`, which fails both on a second producer and on a
 producer that stops recording the origin. `tests/live/adopt.sh` runs the cycle
 with the record deleted, and keeps a foreign address alongside throughout --
 without that, a netcfgd that removed everything would pass every other check.
@@ -1713,7 +1755,7 @@ it to avoid, so `/etc/resolv.conf`, `/etc/dnsmasq.d` and `/etc/unbound` were
 unwritable too. Two wrong beliefs about one setting, in one file, neither
 caught by anything.
 
-**`tools/sandbox_gate.py` is the fourth of the "two lists agree" gates** --
+**`tool/sandbox_gate.py` is the fourth of the "two lists agree" gates** --
 after `uninstall_gate.py`, `dbus_policy_gate.py` and `privilege_gate.py` -- and
 it is the one whose failure was most thoroughly invisible: a test cannot see
 it, because a test writes to a temp directory by construction. It reads every
@@ -3926,7 +3968,7 @@ gathered here so a new session does not have to find them.
   an `.ovpn` path in an `openvpn` block, and a key-only table would classify
   one of them wrongly and silently.
 
-  `tools/privilege_gate.py` ties the classification to the compiler's own key
+  `tool/privilege_gate.py` ties the classification to the compiler's own key
   set, so a key added later is classified or the build fails. That is the
   `tier_of` construction reproduced for a language whose keys are strings and
   cannot be an enum to be exhaustive over.

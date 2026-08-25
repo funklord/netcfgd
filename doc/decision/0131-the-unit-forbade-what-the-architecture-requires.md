@@ -75,7 +75,7 @@ client write now depends on it -- an install missing it should be loud.
 
 ## Why a gate, and what it can check
 
-`tools/sandbox_gate.py`, in `make packaging`. It reads every `/etc` literal in
+`tool/sandbox_gate.py`, in `make packaging`. It reads every `/etc` literal in
 non-test, non-comment source and requires each to be either allow-listed by the
 unit or named in a small read-only list, and it reports an allow-list entry no
 source uses.

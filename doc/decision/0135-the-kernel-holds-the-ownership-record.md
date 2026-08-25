@@ -87,7 +87,7 @@ there is no other way for it to be wearing it. A lease's address belongs to the
 DHCP client, which installs it itself under its own protocol number.
 
 **That is a property of the tree, not of the function that depends on it**, so
-it is asserted by `tools/tag_producer_gate.py` rather than believed. A second
+it is asserted by `tool/tag_producer_gate.py` rather than believed. A second
 producer -- an address built from a delegated prefix, a route some future
 backend path installs -- would wear the same tag, be read back as static, and
 let the planner remove somebody's lease to satisfy a config that never asked

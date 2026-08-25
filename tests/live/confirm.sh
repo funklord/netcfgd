@@ -115,6 +115,37 @@ stop_daemon() {
 	ip link del probe0 2>/dev/null || true
 }
 
+# A crash, and a restart that finds what the crash left behind.
+#
+# Separate from `start_daemon` because that one clears `/run` first, which is
+# right for an independent case and wrong here: the window and the last-good
+# document are exactly what the restarted daemon has to find. And `kill -9`
+# rather than a term, because the point is a daemon that got no chance to
+# tidy up -- one that exits cleanly could have resolved the window on the way
+# out and the test would prove nothing about the startup path.
+crash_daemon() {
+	[ -n "$daemon" ] && kill -9 "$daemon" 2>/dev/null
+	wait "$daemon" 2>/dev/null || true
+	daemon=
+	rm -f "$work/run/netcfgd.sock"
+}
+
+restart_daemon() {
+	# shellcheck disable=SC2086
+	"$repo/target/debug/netcfgd" $1 > "$work/restart.log" 2>&1 &
+	daemon=$!
+	waited=0
+	while [ ! -e "$work/run/netcfgd.sock" ]; do
+		waited=$((waited + 1))
+		if [ "$waited" -gt 60 ]; then
+			cat "$work/restart.log" >&2
+			echo "confirm.sh: the restarted daemon never started" >&2
+			exit 1
+		fi
+		sleep 0.1
+	done
+}
+
 # 1. The gap this file was written for: a protected *first* apply. The daemon
 #    observes and changes nothing, so the operator's own first apply is the one
 #    that carries the window.
@@ -168,6 +199,46 @@ await yes || true
 sleep 4
 check "a normally started daemon reverts to its config, not to nothing" \
 	"$(present)" "yes"
+stop_daemon
+
+# 6. The recovery path for the recovery path: a daemon that died inside the
+#    window.
+#
+#    This is the case commit-confirm exists for, at its worst. The operator
+#    applied something, the machine went away before they could confirm, and
+#    what comes back has to undo it -- with no help from the process that
+#    applied it, which is gone.
+#
+#    `resolve_on_startup` reverts on finding a window at all, without looking
+#    at the deadline, and the reasoning is worth restating because the
+#    alternative sounds reasonable: honouring the remaining time assumes the
+#    operator is still there and can still reach a socket that has been gone
+#    for however long the daemon was down, which is exactly the assumption
+#    commit-confirm exists because you cannot make.
+#
+#    The window here is deliberately long. A short one would expire while the
+#    daemon was dead and the check could not tell "reverted because the window
+#    was found" from "reverted because it ran out".
+start_daemon --no-apply-on-start
+"$ncfg" apply --confirm-within 600 >/dev/null 2>&1
+await yes || true
+check "the change is live, inside a window that will not expire on its own" \
+	"$(present)" "yes"
+
+crash_daemon
+check "and it survives the daemon being killed" "$(present)" "yes"
+
+restart_daemon --no-apply-on-start
+check "the restarted daemon reverts what was never confirmed" "$(present)" "no"
+check "and says why" \
+	"$(grep -ci 'confirm window was open' "$work/restart.log")" "1"
+
+# And it stays reverted. A daemon that reverted and then reconciled straight
+# back to the rejected configuration would satisfy the check above and undo
+# itself a tick later, which is worse than not reverting at all -- the
+# operator watches it work and then watches it fail.
+sleep 6
+check "and does not put it back on the next reconcile" "$(present)" "no"
 stop_daemon
 
 echo

@@ -175,7 +175,7 @@ first glance:
   opened to a group. That is what makes opening `admin` survivable rather than
   equivalent to handing out root, and it is 0117's principle surviving 0127
   intact. The productions and their reasons are in `netcfgd-compile`'s
-  `privilege` module; `tools/privilege_gate.py` refuses a config key that is
+  `privilege` module; `tool/privilege_gate.py` refuses a config key that is
   classified nowhere.
 
   It carries a **name, never a path**. netcfgd decides where the drop-in goes,

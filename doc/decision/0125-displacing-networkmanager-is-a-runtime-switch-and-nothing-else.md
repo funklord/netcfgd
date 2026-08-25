@@ -78,7 +78,7 @@ the real thing.
 
 The send list is the shim's own surface rather than a copy of NetworkManager's,
 which grants sends on interfaces for modems, WiMax, Bluetooth and a dozen VPN
-plugins that this implements none of. `tools/dbus_policy_gate.py` reads the
+plugins that this implements none of. `tool/dbus_policy_gate.py` reads the
 interfaces out of the shim's source and fails in either direction, because the
 failure is otherwise silent: a missing interface is a client method call denied
 at run time, on a machine where NetworkManager's policy is absent, which is the
