@@ -93,6 +93,70 @@ predictable, and it puts the core's dependency budget somewhere it cannot come
 back from. The linkage gate does not care which language the dependency was
 written in.
 
+### Corrected, 2026-08-25: OpenSSL is avoidable, so this argument is weaker than it was written
+
+**The paragraph above overstates, and the correction is the strongest form of
+the question this record answers.** It says adopting hostap's EAP stack means
+adopting OpenSSL. Measured in the 2.10 source rather than inferred from the
+Debian build: hostap's crypto backend is pluggable, and one of the options is
+its own.
+
+    src/crypto/crypto_openssl.c      src/crypto/crypto_internal.c
+    src/crypto/crypto_gnutls.c       src/crypto/crypto_internal-cipher.c
+    src/crypto/crypto_wolfssl.c      src/crypto/crypto_internal-modexp.c
+                                     src/crypto/crypto_internal-rsa.c
+
+`CONFIG_TLS=internal` builds against a bundled LibTomMath and links no TLS
+library at all. What `objdump` shows on `/usr/sbin/wpa_supplicant` is Debian's
+build configuration, not hostap's requirement -- exactly the mistake
+`reject-the-dependency-keep-its-knowledge` warns about, where a distribution's
+`Depends:` was read as a property of the software and the real linkage said
+otherwise. It was made here in the other direction: the linkage was read as a
+property when the build configuration was the variable.
+
+**So a vendored hostap could in principle keep netcfgd's `NEEDED` list at
+libc**, and `make linkage` would not refuse it. The linkage argument does not
+decide this on its own. What decides it is below, and it is a better argument
+because it does not depend on how anybody configures a build.
+
+## What vendoring actually costs, measured
+
+**The size.** The minimum set for EAP and key management, excluding
+`src/drivers` (52,445 lines) and the control interface:
+
+    src/eap_peer, src/eap_common, src/crypto,
+    src/rsn_supp, src/tls, src/common, src/utils     171,885 lines
+
+    netcfgd today, crates + backend + adapter + helper  81,957 lines
+
+**More than twice the size of the project absorbing it.** That is not a
+subsystem netcfgd takes on; it is a codebase netcfgd becomes an accessory to,
+and every argument this project makes about being small enough to read stops
+being true on the day it lands.
+
+**The maintenance, which is the part that decides it.** Debian carries three
+CVE patches on top of 2.10:
+
+    0017-CVE-2023-52160-PEAP-client-Update-Phase-2-authentica.patch
+    CVE-2022-37660.patch
+    CVE-2024-5290-lib_engine_trusted_path.patch
+
+hostap 2.10 was released in January 2022. Those patches are three and a half
+years of somebody whose job it is tracking upstream security traffic and
+backporting it to a frozen base.
+
+**Read the first one's name.** CVE-2023-52160 is the PEAP client's Phase 2
+authentication -- not a peripheral part of the tree, but precisely the code
+path netcfgd would be vendoring it *for*, and precisely the code path
+`tests/live/enterprise.sh` exercises. It is remotely triggerable by a hostile
+access point against a client that merely tries to associate.
+
+**Vendoring moves that job to this project.** Not the writing of the code --
+the *watching* of it: reading hostap's git log for security-relevant commits
+that carry no CVE, deciding which apply to a fork, and doing it for as long as
+netcfgd exists. Running the distribution's build means a machine that takes
+security updates gets the fix without netcfgd knowing there was one.
+
 ## Decision
 
 **The boundary from 0016 stands, on a different argument.**
@@ -105,9 +169,12 @@ longer "this code is hard to write". It is:
    the daemon's address space with them.
 2. **There is nothing to link.** Reuse in library form is not on offer, so the
    real comparison is a vendored fork against a distribution package, and the
-   fork loses.
-3. **Constraint 3 is a promise with a gate behind it.** Linking OpenSSL and
-   libdbus into the core is not a build detail, it is the headline claim.
+   fork loses on the two numbers above: twice netcfgd's size, and a CVE in the
+   exact code path, patched by somebody else three years after the release.
+3. **A fork owns its own security watch, for ever.** This replaces the linkage
+   argument as the load-bearing one, because `CONFIG_TLS=internal` means a
+   vendored hostap need not link OpenSSL at all. Constraint 3 still holds and
+   `make linkage` still enforces it; it simply is not what decides this.
 
 **Reuse is affirmed, not declined.** Nothing here argues for writing a
 supplicant. It argues that running one is the reuse, and that linking one is a
@@ -145,10 +212,24 @@ carries the part it was missing.
 
 ## Alternatives considered
 
-**Vendor hostap's `eap_peer` and `crypto` into the tree.** Rejected: it is a
-fork of security-critical code, with the maintenance burden landing on the
-project least equipped to carry it, in exchange for removing a process
-boundary that is itself the safety property.
+**Vendor hostap's `eap_peer` and `crypto` into the tree, and use it rather
+than run it.** Rejected on the two measurements above: 171,885 lines against
+netcfgd's 81,957, and a security watch this project would then owe in
+perpetuity over code whose defects are reachable from a hostile access point.
+It buys nothing the process boundary does not already give, and it spends the
+boundary to get it. Note that this is *not* rejected for linkage --
+`CONFIG_TLS=internal` would keep `NEEDED` at libc -- which is why the reason of
+record is maintenance rather than dependencies.
+
+**Dig into hostap without taking it.** *Accepted, and it is not the same
+proposal.* Reading it for how it splits the problem costs nothing and is worth
+doing, particularly if netcfgd is ever rewritten in C: its EAP method
+registration and its pluggable `crypto_*` backend are shapes worth copying even
+where the code is not. This is the move 0043 already made with ModemManager --
+reject the dependency, keep its knowledge, and prefer expressing what was
+learned as data rather than as branches. The line that keeps holding: a wire
+protocol is netcfgd's to own, and an accumulated body of security-critical
+implementation is not.
 
 **Link a Rust TLS stack for EAP only, leaving the handshake to
 wpa_supplicant.** Rejected, and it is the most tempting of these because it

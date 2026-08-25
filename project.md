@@ -1065,10 +1065,32 @@ behind a control socket versus code linked into the daemon, and two measurements
 settle it. `wpasupplicant` 2:2.10-24 ships no shared library, no archive and no
 headers, so reuse in library form is not on offer: the real comparison is a
 vendored fork of hostap against a distribution package that somebody else
-patches. And the dependency set travels with the code -- wpa_supplicant links
-libnl x3, libssl, libcrypto, libdbus and libpcsclite, against netcfgd's libc,
-libgcc_s and an ncurses that `--no-default-features` removes. Constraint 3 names
-D-Bus, and `make linkage` would refuse it.
+patches.
+
+**And the fork loses on maintenance, not on dependencies -- the record was
+corrected on 2026-08-25 to say so.** It first argued that vendoring drags
+OpenSSL and libdbus into the core, which `make linkage` would refuse. That
+overstates: hostap's crypto backend is pluggable and `CONFIG_TLS=internal`
+links no TLS library at all, so what `objdump` shows on the shipped binary is
+Debian's build configuration rather than hostap's requirement. Reading a
+distribution's choices as a property of the software is the exact mistake 0043
+recorded about ModemManager, made here in the other direction. What decides it
+instead are two measurements that do not depend on how anyone configures a
+build: the minimum vendored set for EAP and key management is **171,885 lines
+against netcfgd's 81,957**, more than twice the size of the project absorbing
+it; and Debian carries three CVE patches on a release from January 2022, one of
+them **CVE-2023-52160, the PEAP client's Phase 2 authentication** -- the exact
+code path netcfgd would vendor it for, the one `tests/live/enterprise.sh`
+exercises, and one a hostile access point can reach. Vendoring moves that
+security watch to this project in perpetuity; running the distribution's build
+means a machine that takes updates gets the fix without netcfgd knowing there
+was one.
+
+**Digging into hostap without taking it is a different proposal and is
+accepted.** Reading it for how it splits the problem -- EAP method
+registration, the pluggable `crypto_*` backend -- costs nothing and is worth
+more if netcfgd is ever rewritten in C. Reject the dependency, keep its
+knowledge (0043).
 
 **What it weakens is worth knowing.** 0016's middle rows -- scan and BSS
 selection -- were marked "could be ours" partly on effort, and available
