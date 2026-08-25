@@ -944,7 +944,39 @@ control socket, or as an argument to a stop path -- and netcfgd writes what it
 was told beside its state, so the copy that starts next can read it. That also
 answers the reboot case, since an intent recorded in `/run` is gone after a
 reboot and its absence is itself the answer: nothing announced anything, so
-this is a cold start rather than a handover. **And a link carries its own mark now, which was the last piece of ownership
+this is a cold start rather than a handover. **The residue turned out to be one row, not four, and it is bounded on both
+sides.** 0135's table listed sysctls, DNS scopes, qdisc and ingress as
+ownership that could not be re-derived; measuring each corrected two of them.
+
+**DNS is not residue.** `Op::DnsApply` is the only DNS operation in the tree
+and there is no teardown path at all, so `observed.dns` is an idempotence check
+rather than an ownership one -- losing it costs one identical rewrite of a file
+netcfgd was going to keep writing anyway. It had been grouped with the sysctls
+because it sits beside them in `OwnedState`, which is a fact about a struct and
+not about behaviour.
+
+**`RuntimeDirectoryPreserve=restart` was not a systemd-only patch.** Neither
+the OpenRC script nor the procd one removes `/run/netcfgd` -- OpenRC creates it
+with `checkpath` in `start_pre`, procd with `mkdir -p`, and neither has a stop
+hook touching it. systemd was the only init deleting the record, so fixing
+systemd closed the restart exposure everywhere.
+
+**What genuinely cannot be re-derived is the sysctls, with qdisc and ingress
+alongside**, because a value has no field to stamp and no property list to
+mark. Both cases answer, though: a restart keeps the record on all three inits,
+and a reboot clears both sides together -- sysctls return to kernel defaults and
+a qdisc goes with its link, so a netcfgd that has forgotten it set forwarding is
+running where forwarding is no longer set. The same symmetry that makes a reboot
+safe for addresses.
+
+**Measured, because the planner's own comment calls it a one-way door.**
+Dropping `forwarding = true` with the record intact plans one step and turns it
+off; with the record deleted it plans nothing and forwarding stays on for ever.
+`tests/live/sysctl.sh` asserts the working half **and the limit**, so that a
+future change making netcfgd revert an unrecorded sysctl fails a test and gets
+read against 0134 before it ships. Both halves verified by breaking them.
+
+**And a link carries its own mark now, which was the last piece of ownership
 living only in `/run`** ([0136](docs/decisions/0136-a-link-carries-its-own-mark.md)).
 A link has no protocol field for 0002's tag to stamp, so every link netcfgd
 creates gets an alternative name instead -- `netcfgd:<name>`, written with

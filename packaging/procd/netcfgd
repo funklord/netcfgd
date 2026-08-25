@@ -16,8 +16,14 @@ start_service() {
 	procd_open_instance
 	procd_set_param command /usr/sbin/netcfgd
 	# Reload rather than restart when the config changes: netcfgd recompiles
-	# and reconciles, which is the whole point of it, and restarting would
-	# take the network down to do what it does without dropping a packet.
+	# and reconciles, which is the whole point of it, and a reload does that
+	# with no gap at all.
+	#
+	# This used to say restarting "would take the network down". Since 0134
+	# that is not true -- a stop holds, and 0135 and 0136 let the daemon that
+	# comes back recognise what the one before it installed. Reload is still
+	# right and the reason is now that it is free rather than that the
+	# alternative is destructive.
 	procd_set_param file /etc/netcfgd/netcfgd.conf
 	procd_set_param respawn
 	procd_set_param stdout 1

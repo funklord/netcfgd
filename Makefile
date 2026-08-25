@@ -1303,6 +1303,10 @@ live:
 	@# kind with no protocol field to stamp -- so it was the last piece of
 	@# ownership that lived only in the record a restart deletes.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/altname.sh"
+	@# The sysctls netcfgd set, and the limit of what survives losing the
+	@# record -- a value has nothing to stamp, so this is the one part of
+	@# ownership that genuinely depends on /run.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/sysctl.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"

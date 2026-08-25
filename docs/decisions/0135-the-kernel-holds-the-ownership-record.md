@@ -137,6 +137,41 @@ is a hazard: netcfgd leaves a sysctl set rather than putting it back. It is a
 leak rather than a fault, and it is bounded by
 `RuntimeDirectoryPreserve=restart` in the case that matters.
 
+### Corrected, 2026-08-25: the table overstated two rows and understated one fix
+
+**DNS is not residue at all.** The table lists DNS scopes beside the sysctls as
+something netcfgd stops putting back, and there is nothing to put back:
+`Op::DnsApply` is the only DNS operation in the tree and there is no teardown
+path. `observed.dns` is an idempotence check, not an ownership check, so losing
+it costs one identical rewrite of a file netcfgd was going to keep writing
+anyway. It was grouped with the sysctls because it sits beside them in
+`OwnedState`, which is a fact about a struct rather than about behaviour.
+
+**`RuntimeDirectoryPreserve=restart` was not the systemd-only patch this record
+treated it as.** Neither the OpenRC script nor the procd one removes
+`/run/netcfgd` -- OpenRC creates it in `start_pre` with `checkpath`, procd with
+`mkdir -p` in `start_service`, and neither has a stop hook that touches it. So
+systemd was the *only* init deleting the record, and fixing systemd closes the
+restart exposure everywhere rather than on one init.
+
+**Which leaves the sysctls, qdisc and ingress, and their exposure is smaller
+than it looked.** They are genuinely not derivable -- a value has no field to
+stamp and no property list to mark -- but the two cases now both answer:
+
+- **A restart keeps the record** on all three inits, as above.
+- **A reboot clears both sides together.** Sysctls return to their kernel
+  defaults and a qdisc goes with the link it was on, so a netcfgd that has
+  forgotten it set forwarding is running on a machine where forwarding is no
+  longer set. The same symmetry that makes the reboot case safe for addresses.
+
+`tests/live/sysctl.sh` holds this still. It asserts the door closes with the
+record intact, **and asserts the limit** -- that with the record gone netcfgd
+plans nothing and leaves the sysctl alone. Both directions were verified by
+breaking them: forgetting the record fails the first, and reverting regardless
+of ownership fails the second. If a later change makes netcfgd revert an
+unrecorded sysctl, that test fails and the change gets read against 0134 before
+it ships.
+
 **A kernel-visible marker for created links is the obvious next step and is not
 taken here.** An altname would do it, and adding one is a change to what
 netcfgd puts on the machine rather than to how it reads it back. Worth its own
