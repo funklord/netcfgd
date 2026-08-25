@@ -33,6 +33,36 @@ pub const NETCFGD_PROTO: u8 = 110;
 /// reject one and does not.
 pub const NETCFGD_ALTNAME_PREFIX: &str = "netcfgd:";
 
+/// The `tc` handle netcfgd gives the root qdisc it installs: major 110, minor 0.
+///
+/// The third use of the same number, after [`NETCFGD_PROTO`] and
+/// [`NETCFGD_ALTNAME_PREFIX`], and for the third object kind that needed a
+/// mark. A qdisc has no protocol field and no property list, but its handle is
+/// netcfgd's to choose and netcfgd was letting the kernel choose it -- so the
+/// field was there and empty.
+///
+/// A handle is `major << 16 | minor`, and a root qdisc conventionally takes
+/// minor 0.
+///
+/// **The residual risk is the same one 0002 accepted**: somebody who installs
+/// their own qdisc as `handle 6e:` is indistinguishable from netcfgd. That is
+/// a deliberate collision with a number this project documents, and the same
+/// bargain as a route wearing `proto 110`.
+pub const NETCFGD_QDISC_HANDLE: u32 = 110 << 16;
+
+/// The filter handle netcfgd gives its ingress redirect: 110.
+///
+/// netcfgd's redirect is a `matchall` classifier, whose handle is a plain
+/// identifier the caller chooses -- not `u32`'s `htid:hash:node` encoding.
+/// Verified against a 6.12 kernel, which reports it back as `handle 0x6e`.
+///
+/// **The node id and not the priority.** Priority decides the order filters
+/// are evaluated in, and netcfgd's redirect takes 1 because a redirect that
+/// runs after somebody else's filter has already stolen the packet does
+/// nothing. Overloading it with a marker would trade a correctness property
+/// for a bookkeeping one. The node id carries no ordering at all.
+pub const NETCFGD_FILTER_HANDLE: u32 = 110;
+
 /// The alternative name netcfgd marks a link it creates with.
 ///
 /// Returns `None` where the result would not fit `ALTIFNAMSIZ`, which cannot

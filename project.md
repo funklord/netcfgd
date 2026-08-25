@@ -944,7 +944,36 @@ control socket, or as an argument to a stop path -- and netcfgd writes what it
 was told beside its state, so the copy that starts next can read it. That also
 answers the reboot case, since an intent recorded in `/run` is gone after a
 reboot and its absence is itself the answer: nothing announced anything, so
-this is a cold start rather than a handover. **The residue turned out to be one row, not four, and it is bounded on both
+this is a cold start rather than a handover. **And the last two rows are closed: a `tc` handle is a field netcfgd was not
+using** ([0137](docs/decisions/0137-a-handle-is-a-field-netcfgd-was-not-using.md)).
+The root qdisc takes handle `6e:` and the ingress redirect's `matchall` filter
+takes handle `110`, both read back and merged with the record. That is the third
+and fourth use of 110 after the protocol tag and the `netcfgd:` alternative
+name -- one number, four shapes. The handle and **not** the filter's priority:
+priority 1 is load-bearing, because a redirect that runs after another filter
+has stolen the packet does nothing, and overloading it would trade a correctness
+property for a bookkeeping one.
+
+**Merged rather than replacing, unlike addresses.** An unmarked address is
+legible -- somebody else's tag or none, both meaning "not ours" -- and an
+unmarked qdisc is ambiguous, since it may be one an older netcfgd installed
+before it stamped handles. Dropping the record would make every one of those
+foreign on the day this ships.
+
+**What it cost, and it was found by six unrelated checks failing.** Naming a
+handle turns `NLM_F_REPLACE` into a *change* of the qdisc already wearing it,
+and a qdisc cannot change kind -- replacing `fq_codel 6e:` with `cake` at the
+same handle returns `EINVAL`, and `tc` fails identically with "Invalid qdisc
+name", so it is the kernel's rule rather than a netcfgd bug. A rate change on
+the same scheduler works fine; only a change of *scheduler* fails, which is a
+config edit somebody made. `set_root` catches `EINVAL`, removes the root and
+retries, which reopens the window `NLM_F_REPLACE` was chosen to close -- one
+round trip of unshaped traffic, and only on a scheduler change. **That trade is
+the decision**: a qdisc stops being a one-way door and pays with a brief window
+on an operator-initiated change. Worth arguing with if a shaped uplink carrying
+voice makes it the wrong way round.
+
+**The residue turned out to be one row, not four, and it is bounded on both
 sides.** 0135's table listed sysctls, DNS scopes, qdisc and ingress as
 ownership that could not be re-derived; measuring each corrected two of them.
 

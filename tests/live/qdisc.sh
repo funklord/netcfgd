@@ -258,6 +258,55 @@ if [ -n "$tc" ]; then
 	done
 	apply "an apply that says nothing about queueing"
 	check "somebody else's qdisc is left alone" "$(qdisc_of veth0)" "cake"
+
+	# ---------------------------------------------------------------------
+	# And the same two answers after the ownership record is gone, which is
+	# what a restart does to it.
+	#
+	# Until 0137 both answers came out of `/run/netcfgd/owned.json` alone, so
+	# losing it turned the qdisc into a one-way door: netcfgd would set one
+	# and never be able to reset it. netcfgd stamps handle `6e:` on the qdiscs
+	# it installs now, so the kernel carries the answer -- and the foreign
+	# `cake` above, which wears whatever handle tc assigned it, must still be
+	# left alone. Both halves matter: a netcfgd that reset everything would
+	# satisfy the first check and fail nothing else.
+	write_config <<'CONF'
+interface veth0 {
+	config = "10.7.0.1/24"
+	qdisc = "fq_codel"
+}
+CONF
+	apply "asking for fq_codel again"
+	check "netcfgd sets it" "$(qdisc_of veth0)" "fq_codel"
+	check "and stamps its own handle on it" \
+		"$("$tc" qdisc show dev veth0 | grep -c ' 6e: root')" "1"
+
+	rm -f "$work/run/owned.json"
+	write_config <<'CONF'
+interface veth0 {
+	config = "10.7.0.1/24"
+}
+CONF
+	apply "dropping the qdisc with no record of having set it"
+	check "netcfgd still resets the one wearing its handle" \
+		"$(qdisc_of veth0)" "noqueue"
+
+	waited=0
+	while :; do
+		"$tc" qdisc replace dev veth0 root cake bandwidth 30mbit
+		sleep 0.3
+		[ "$(qdisc_of veth0)" = "cake" ] && break
+		waited=$((waited + 1))
+		if [ "$waited" -gt 20 ]; then
+			echo "FAIL could not put a foreign qdisc in place to test with"
+			failures=$((failures + 1))
+			break
+		fi
+	done
+	rm -f "$work/run/owned.json"
+	apply "an apply with no record and somebody else's qdisc in place"
+	check "and still leaves a qdisc that does not wear it" \
+		"$(qdisc_of veth0)" "cake"
 else
 	echo "note: no tc(8); the foreign-qdisc check did not run"
 fi

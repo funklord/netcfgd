@@ -187,8 +187,8 @@ fn observed_link(
 		ingress_redirect: snapshot
 			.redirects
 			.iter()
-			.find(|(index, _)| *index == link.index)
-			.and_then(|(_, target)| link_name(snapshot, *target).map(ToOwned::to_owned)),
+			.find(|(index, _, _)| *index == link.index)
+			.and_then(|(_, target, _)| link_name(snapshot, *target).map(ToOwned::to_owned)),
 		qdisc_bandwidth_bits: root_qdisc(snapshot, link.index)
 			.and_then(|record| record.bandwidth_bits),
 		// Not in the netlink snapshot; filled in by `host::augment`,
@@ -289,6 +289,9 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		.map(|link| observed_link(link, snapshot, prior))
 		.collect();
 
+	let qdisc_marked = qdisc_marked(snapshot, &name_of);
+	let ingress_marked = ingress_marked(snapshot, &name_of);
+
 	let addresses = snapshot
 		.addresses
 		.iter()
@@ -354,8 +357,8 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		// Read in `host::augment` beside the sysctls, for the reason they are:
 		// `build` stays a pure function of a netlink snapshot.
 		hostname: None,
-		ingress_applied: prior.ingress.clone(),
-		qdisc_applied: prior.qdisc.clone(),
+		ingress_applied: marked_or_recorded(&prior.ingress, &ingress_marked),
+		qdisc_applied: marked_or_recorded(&prior.qdisc, &qdisc_marked),
 		links,
 		addresses,
 		routes,
@@ -384,6 +387,60 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 /// Split out and given its own name because it is the one judgement in this
 /// crate that can lose a user their address, and it should be reviewable on
 /// its own.
+/// The interfaces whose root qdisc wears netcfgd's handle.
+///
+/// A qdisc has no protocol field and no property list, but its handle is
+/// netcfgd's to choose -- and until 0137 netcfgd let the kernel choose it, so
+/// ownership lived only in `/run`, which a restart deletes.
+fn qdisc_marked<'a>(snapshot: &Snapshot, name_of: &impl Fn(u32) -> Option<&'a str>) -> Vec<String> {
+	snapshot
+		.qdiscs
+		.roots
+		.iter()
+		.filter(|root| root.handle == netcfgd_model::route::NETCFGD_QDISC_HANDLE)
+		.filter_map(|root| name_of(root.index).map(ToOwned::to_owned))
+		.collect()
+}
+
+/// The interfaces whose ingress redirect wears netcfgd's filter handle.
+///
+/// The handle rather than the priority: the priority has to stay 1 for the
+/// redirect to see the packet at all, so overloading it would trade a
+/// correctness property for a bookkeeping one.
+fn ingress_marked<'a>(
+	snapshot: &Snapshot,
+	name_of: &impl Fn(u32) -> Option<&'a str>,
+) -> Vec<String> {
+	snapshot
+		.redirects
+		.iter()
+		.filter(|(_, _, ours)| *ours)
+		.filter_map(|(index, _, _)| name_of(*index).map(ToOwned::to_owned))
+		.collect()
+}
+
+/// The interfaces a `tc` object is netcfgd's on: what the kernel says, plus
+/// what was recorded.
+///
+/// **A union rather than a replacement**, which is the difference from
+/// `address_ownership`. There the kernel is authoritative and a stale record
+/// must not be able to claim an address back, because an address netcfgd did
+/// not install carries somebody else's tag *or none* and both are legible.
+/// Here an unmarked qdisc is ambiguous: it may be somebody else's, or it may
+/// be one an older netcfgd installed before it stamped handles. Dropping the
+/// record would make every such qdisc foreign on the day this ships, and
+/// netcfgd would stop being able to reset one it had set itself.
+fn marked_or_recorded(recorded: &[String], marked: &[String]) -> Vec<String> {
+	let mut out = recorded.to_vec();
+	for name in marked {
+		if !out.contains(name) {
+			out.push(name.clone());
+		}
+	}
+	out.sort();
+	out
+}
+
 /// Whether a link is netcfgd's, from the kernel first and the record second.
 ///
 /// **A link has no protocol field**, so decision 0002's tag had nothing to
@@ -539,6 +596,27 @@ mod tests {
 	/// The constant is duplicated in `netcfgd-sys`, which cannot depend on
 	/// the model. If the two ever disagree, every route netcfgd installed
 	/// becomes foreign to it and drift detection silently stops working.
+	/// The `tc` marks are duplicated for the same reason the protocol number
+	/// is -- `netcfgd-sys` may not depend on the model -- so they need the
+	/// same check. Disagreement here means netcfgd stamps one handle and looks
+	/// for another, and every qdisc it installs becomes foreign to it.
+	#[test]
+	fn the_two_copies_of_the_tc_marks_agree() {
+		use netcfgd_model::route::{NETCFGD_FILTER_HANDLE, NETCFGD_QDISC_HANDLE};
+		assert_eq!(
+			NETCFGD_QDISC_HANDLE,
+			netcfgd_sys::qdisc::netcfgd_qdisc_handle()
+		);
+		assert_eq!(
+			NETCFGD_FILTER_HANDLE,
+			netcfgd_sys::qdisc::netcfgd_filter_handle()
+		);
+		// And all three marks are the same number wearing three shapes, which
+		// is the property that makes `110` greppable across the tree.
+		assert_eq!(u32::from(NETCFGD_PROTO), NETCFGD_QDISC_HANDLE >> 16);
+		assert_eq!(u32::from(NETCFGD_PROTO), NETCFGD_FILTER_HANDLE);
+	}
+
 	#[test]
 	fn the_two_copies_of_the_protocol_constant_agree() {
 		assert_eq!(NETCFGD_PROTO, netcfgd_sys::wire::netcfgd_proto());

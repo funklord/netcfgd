@@ -78,7 +78,36 @@ const TC_ACT_STOLEN: i32 = 4;
 /// `ETH_P_ALL`, big-endian, as it sits in `tcm_info`.
 const ETH_P_ALL_BE: u32 = 0x0300;
 /// The priority netcfgd's redirect filter takes.
+///
+/// 1, because a redirect that runs after another filter has already stolen
+/// the packet does nothing. That is a correctness constraint, which is why
+/// the ownership mark went in the filter's *handle* instead.
 const FILTER_PRIORITY: u32 = 1;
+
+/// The handle netcfgd stamps on the root qdisc it installs (0137).
+///
+/// Duplicated from `netcfgd-model` rather than depended on, because this
+/// crate must stay free of anything but libc and the kernel -- the same
+/// arrangement `wire::netcfgd_proto` has, and asserted against the model by
+/// a test for the same reason.
+const NETCFGD_QDISC_HANDLE: u32 = 110 << 16;
+
+/// [`NETCFGD_QDISC_HANDLE`], for the test in `netcfgd-observe` that holds
+/// this copy and the model's together.
+#[must_use]
+pub const fn netcfgd_qdisc_handle() -> u32 {
+	NETCFGD_QDISC_HANDLE
+}
+
+/// The handle netcfgd stamps on its ingress redirect filter. Duplicated for
+/// the reason above.
+const NETCFGD_FILTER_HANDLE: u32 = 110;
+
+/// [`NETCFGD_FILTER_HANDLE`], for the same test.
+#[must_use]
+pub const fn netcfgd_filter_handle() -> u32 {
+	NETCFGD_FILTER_HANDLE
+}
 
 /// `struct tcmsg`, which is 20 bytes and has no encoder anywhere else in this
 /// crate because nothing else speaks traffic control.
@@ -133,6 +162,12 @@ pub struct QdiscDump {
 pub struct QdiscRecord {
 	/// Which interface.
 	pub index: u32,
+	/// The `tc` handle, `major << 16 | minor`.
+	///
+	/// netcfgd stamps [`NETCFGD_QDISC_HANDLE`] on the qdiscs it installs, so
+	/// that reading one back says who asked for it (0137). Anything else is
+	/// a handle the kernel assigned or somebody else chose.
+	pub handle: u32,
 	/// The algorithm, as the kernel spells it: `fq_codel`, `cake`, `noqueue`.
 	pub kind: String,
 	/// The shaped rate in **bits** per second, where the qdisc shapes.
@@ -230,6 +265,10 @@ impl<'a> Qdisc<'a> {
 		TcMsg {
 			index: i32::try_from(index).unwrap_or(0),
 			parent: TC_H_ROOT,
+			// netcfgd's mark. The kernel assigns a handle when none is given,
+			// which is what this used to let it do -- and an assigned handle
+			// says nothing about who asked for the qdisc.
+			handle: NETCFGD_QDISC_HANDLE,
 			..TcMsg::default()
 		}
 		.encode(&mut body);
@@ -248,13 +287,36 @@ impl<'a> Qdisc<'a> {
 			attrs.push(TCA_OPTIONS, options.as_bytes());
 		}
 
-		self.socket.request(
-			RTM_NEWQDISC,
-			flags::NLM_F_REQUEST | flags::NLM_F_ACK | flags::NLM_F_CREATE | flags::NLM_F_REPLACE,
-			&body,
-			&attrs,
-		)?;
-		Ok(())
+		let flags =
+			flags::NLM_F_REQUEST | flags::NLM_F_ACK | flags::NLM_F_CREATE | flags::NLM_F_REPLACE;
+		match self.socket.request(RTM_NEWQDISC, flags, &body, &attrs) {
+			Ok(_) => Ok(()),
+			// **Changing the scheduler at a fixed handle is not allowed.**
+			// Naming a handle turns a replace into a change of the qdisc
+			// already wearing it, and a qdisc cannot change kind -- the kernel
+			// answers `EINVAL`, and `tc qdisc replace ... handle 6e: cake`
+			// over an `fq_codel 6e:` fails in exactly the same way, with
+			// "Invalid qdisc name".
+			//
+			// Netcfgd names a handle so that the qdisc carries its own
+			// ownership (0137), so this case has to be met rather than
+			// avoided. Removing the root first and retrying is what `tc` does
+			// when it is not given a handle, and it is confined to here: a
+			// rate change on the same scheduler keeps the handle and takes
+			// this path never.
+			//
+			// **It reopens the window `NLM_F_REPLACE` was chosen to close**,
+			// for as long as one netlink round trip takes, and only when the
+			// scheduler itself changes -- which is a config edit somebody
+			// made, not something netcfgd does on its own. That is the trade,
+			// and it is smaller than the one-way door it buys out of.
+			Err(error) if error.raw_os_error() == Some(libc::EINVAL) => {
+				self.delete_root(index)?;
+				self.socket.request(RTM_NEWQDISC, flags, &body, &attrs)?;
+				Ok(())
+			}
+			Err(error) => Err(error),
+		}
 	}
 
 	/// Remove the root qdisc, which restores whatever the kernel defaults to.
@@ -381,6 +443,10 @@ impl Qdisc<'_> {
 			// has to see ARP and IPv6 as well as IPv4, and a filter installed
 			// for one protocol silently passes the rest unshaped.
 			info: (FILTER_PRIORITY << 16) | ETH_P_ALL_BE,
+			// netcfgd's mark, and the reason it is here rather than in the
+			// priority above: a handle carries no ordering, and the priority
+			// has to stay 1 for the redirect to see the packet at all.
+			handle: NETCFGD_FILTER_HANDLE,
 			..TcMsg::default()
 		}
 		.encode(&mut body);
@@ -436,7 +502,8 @@ impl Qdisc<'_> {
 	/// # Errors
 	///
 	/// Returns the errno the kernel replied with.
-	pub fn redirects_on(&mut self, index: u32) -> io::Result<Vec<u32>> {
+	/// Returns `(target index, whether netcfgd installed it)` per redirect.
+	pub fn redirects_on(&mut self, index: u32) -> io::Result<Vec<(u32, bool)>> {
 		let mut body = Vec::new();
 		TcMsg {
 			index: i32::try_from(index).unwrap_or(0),
@@ -460,7 +527,7 @@ impl Qdisc<'_> {
 			Err(error) => return Err(error),
 		};
 
-		let mut out: Vec<u32> = replies
+		let mut out: Vec<(u32, bool)> = replies
 			.iter()
 			.filter_map(|payload| decode_redirect(payload))
 			.collect();
@@ -476,10 +543,15 @@ impl Qdisc<'_> {
 /// NAT reader ignores a rule that is not the exact shape netcfgd writes: a
 /// `u32` classifier somebody added by hand is not netcfgd's, and reporting it
 /// as one would produce a plan that removed it.
-fn decode_redirect(payload: &[u8]) -> Option<u32> {
-	if TcMsg::decode(payload)?.parent != INGRESS_HANDLE {
+fn decode_redirect(payload: &[u8]) -> Option<(u32, bool)> {
+	let header = TcMsg::decode(payload)?;
+	if header.parent != INGRESS_HANDLE {
 		return None;
 	}
+	// Whose filter this is. netcfgd stamps its own handle (0137); anything
+	// else is a redirect somebody else installed, which is reported and never
+	// cleared.
+	let ours = header.handle == NETCFGD_FILTER_HANDLE;
 	let attrs = wire::Attrs::new(payload.get(TCMSG_LEN..)?);
 	if attrs.get(TCA_KIND)?.string()? != "matchall" {
 		return None;
@@ -497,7 +569,7 @@ fn decode_redirect(payload: &[u8]) -> Option<u32> {
 			.and_then(|attr| wire::Attrs::new(attr.value).get(TCA_MIRRED_PARMS))?;
 		// `ifindex` is the last of the seven words in `struct tc_mirred`.
 		let target = parms.value.get(24..28)?;
-		return Some(u32::from_ne_bytes(target.try_into().ok()?));
+		return Some((u32::from_ne_bytes(target.try_into().ok()?), ours));
 	}
 	None
 }
@@ -527,6 +599,7 @@ fn decode(payload: &[u8]) -> Option<QdiscRecord> {
 	});
 
 	Some(QdiscRecord {
+		handle: header.handle,
 		index: u32::try_from(header.index).unwrap_or(0),
 		kind,
 		bandwidth_bits,

@@ -62,8 +62,11 @@ pub struct Snapshot {
 	pub bridge_vlans: Vec<dump::BridgeVlanRecord>,
 	/// Every interface's root qdisc, plus which carry an ingress hook.
 	pub qdiscs: qdisc::QdiscDump,
-	/// `(interface, target)` for each ingress redirect installed.
-	pub redirects: Vec<(u32, u32)>,
+	/// `(interface, target, ours)` for each ingress redirect installed.
+	///
+	/// `ours` is read from the filter's handle, which netcfgd stamps (0137),
+	/// so a redirect stays recognisable as netcfgd's after `/run` is gone.
+	pub redirects: Vec<(u32, u32, bool)>,
 	/// Every policy routing rule, from the `RTM_GETRULE` dump.
 	pub rules: Vec<rule::RuleRecord>,
 	/// Whether any address in this dump carried `IFA_PROTO`.
@@ -156,8 +159,8 @@ pub fn snapshot_with(socket: &mut Netlink) -> io::Result<Snapshot> {
 	// like on a machine that does no ingress shaping.
 	let mut redirects = Vec::new();
 	for index in &qdiscs.ingress_hooks {
-		for target in qdisc::Qdisc::new(socket).redirects_on(*index)? {
-			redirects.push((*index, target));
+		for (target, ours) in qdisc::Qdisc::new(socket).redirects_on(*index)? {
+			redirects.push((*index, target, ours));
 		}
 	}
 	redirects.sort_unstable();
