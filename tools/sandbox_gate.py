@@ -34,7 +34,7 @@ import re
 import sys
 
 UNIT = pathlib.Path("packaging/systemd/netcfgd.service")
-SOURCES = [pathlib.Path("crates"), pathlib.Path("backends")]
+SOURCES = [pathlib.Path("crates"), pathlib.Path("backend")]
 
 # Paths under /etc that netcfgd reads and never writes. Naming them is the
 # point of the list: an unclassified /etc path is a new one, and a new one is
@@ -97,6 +97,16 @@ def etc_paths_in_sources():
 	"""Every `/etc/...` literal in non-test, non-comment source."""
 	found = {}
 	for root in SOURCES:
+		# A source root that is not there reads as zero paths, and this gate
+		# turns zero paths into "the unit allows something no code needs" --
+		# three false findings, not a quiet pass. Either way it is a gate
+		# reporting on a tree it never read, so it refuses instead. Found when
+		# `backends/` was renamed to `backend/` and the gate blamed the unit.
+		if not root.is_dir():
+			raise SystemExit(
+			    f"sandbox: {root} is not a directory, so this gate would read "
+			    f"no source and blame the unit for every path it allows"
+			)
 		for path in root.rglob("*.rs"):
 			if "/tests/" in str(path):
 				continue

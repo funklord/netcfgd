@@ -307,9 +307,20 @@ FORCE:
 # unchecked from the day it was written -- and it was missing the attribute. A
 # policy gate that cannot see half the tree enforces nothing, so it now counts
 # what it found and fails if that number collapses.
+# The directories every crate root lives under. Named once so that the gate
+# and its existence check cannot disagree about what is being read.
+POLICY_ROOTS = crates backend
+
 unsafe-policy:
+	@for path in $(POLICY_ROOTS); do \
+		[ -d "$$path" ] || { \
+			echo "unsafe-policy: $$path does not exist, so this gate would"; \
+			echo "unsafe-policy:   check only part of the tree and still say ok"; \
+			exit 1; \
+		}; \
+	done
 	@fail=0; \
-	roots=$$(find crates backends -name lib.rs -o -name main.rs | grep '/src/' | sort); \
+	roots=$$(find $(POLICY_ROOTS) -name lib.rs -o -name main.rs | grep '/src/' | sort); \
 	if [ "$$(echo "$$roots" | wc -l)" -lt 10 ]; then \
 		echo "unsafe-policy: found $$(echo "$$roots" | wc -l) crate roots, expected more"; \
 		exit 1; \
@@ -454,15 +465,15 @@ install-systemd:
 # eighty-odd crates of D-Bus that constraint 3 keeps off the daemon's path, and
 # a machine installing netcfgd is not thereby asking for them.
 nm:
-	cd adapters/netcfgd-nm && $(CARGO) build --release
+	cd adapter/netcfgd-nm && $(CARGO) build --release
 
 install-nm:
-	@[ -x adapters/netcfgd-nm/target/release/netcfgd-nm ] || { \
+	@[ -x adapter/netcfgd-nm/target/release/netcfgd-nm ] || { \
 		echo "install-nm: the shim is not built -- run \`make nm\` first"; \
 		exit 1; }
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/dbus-1/system.d \
 		$(DESTDIR)/usr/lib/systemd/system
-	install -m 0755 adapters/netcfgd-nm/target/release/netcfgd-nm \
+	install -m 0755 adapter/netcfgd-nm/target/release/netcfgd-nm \
 		$(DESTDIR)$(BINDIR)/netcfgd-nm
 	@# Its own, rather than relying on NetworkManager's. The right to own that
 	@# bus name is granted by NetworkManager's policy file today, so removing
@@ -810,7 +821,7 @@ packaging:
 # was written. `adapters` and `helpers` were both outside it -- the same shape
 # as the unsafe-policy gate globbing only `crates/*` and missing a whole backend
 # for a milestone.
-ASCII_PATHS  = crates backends adapters helpers tests Cargo.toml Makefile
+ASCII_PATHS  = crates backend adapter helper tests Cargo.toml Makefile
 # `netcfgd-*` catches an installed helper, which is a script with no extension
 # because it ends up on a PATH. Filtering by extension alone would have skipped
 # the entire helpers directory while appearing to cover it.
@@ -822,6 +833,13 @@ ASCII_KINDS  = --include='*.rs' --include='*.toml' --include='*.sh' \
 	--include='netcfgd-*' --exclude-dir=target
 
 ascii:
+	@for path in $(ASCII_PATHS); do \
+		[ -e "$$path" ] || { \
+			echo "ascii: $$path does not exist, so this gate would read less"; \
+			echo "ascii:   than it names and still say ok -- fix ASCII_PATHS"; \
+			exit 1; \
+		}; \
+	done
 	@if grep -rlP '[^\x00-\x7F]' $(ASCII_KINDS) \
 		$(ASCII_PATHS) 2>/dev/null | grep -q .; then \
 		echo "ascii: non-ASCII found in:"; \

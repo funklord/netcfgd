@@ -26,7 +26,7 @@ import sys
 import pathlib
 import xml.parsers.expat
 
-SHIM = pathlib.Path("adapters/netcfgd-nm/src")
+SHIM = pathlib.Path("adapter/netcfgd-nm/src")
 POLICY = pathlib.Path("packaging/dbus/netcfgd-nm.conf")
 
 # The three every D-Bus service answers. They are in the policy and are not in
