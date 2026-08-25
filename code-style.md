@@ -278,6 +278,39 @@ next inventory entry will raise the same question, and the answer stays the
 same: an inventory name moves when its owner says so, at whatever cost was
 measured, and not as a side effect of a style rule.
 
+### netcfgd's plural directories, and which kind each is
+
+The source asks the ecosystem-plural exception to be *measured* and named by
+the project carrying it, so that the next reader does not reopen it. Measured
+2026-08-26 by listing every tracked path component that ends in `s`.
+
+**Required by a tool, so not a name this project chooses:**
+
+| directory | what breaks without it |
+|---|---|
+| `crates/*/tests/` | Cargo's integration-test discovery |
+| `.github/workflows/` | GitHub reads no other path |
+| `tool/hooks/` | mirrors `.git/hooks/`, which git names |
+
+**Settled by an ecosystem, so a convention rather than a requirement:**
+
+| directory | measured against |
+|---|---|
+| `crates/` | the Cargo workspace convention the source already names |
+| `fuzz/fuzz_targets/` | `cargo fuzz add` writes here |
+
+**`fuzz_targets/` is the one worth stating precisely, because it looks like
+the first kind and is the second.** `fuzz/Cargo.toml` names every target with
+an explicit `path = "fuzz_targets/..."`, so nothing in the build breaks if the
+directory is renamed -- but `cargo fuzz add` would write the next target into
+`fuzz_targets/` regardless, leaving a tree with both spellings. The cost of
+renaming it is not a broken build, it is a directory that silently comes back.
+
+**Everything else is singular already**: `adapter/`, `backend/`, `client/`,
+`doc/`, `doc/decision/`, `gui/`, `helper/`, `packaging/`, `tool/`. `debian/`
+and `packaging/dbus/` are not plurals, and `debian/rules` is a file whose name
+Debian requires.
+
 ## ASCII in source
 
 Source and comments are ASCII. Write `--` where prose would use an em dash,
