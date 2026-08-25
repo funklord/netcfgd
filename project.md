@@ -1050,6 +1050,26 @@ names `FT-SAE` beside plain `SAE` under `ieee80211w=1`, where an access point
 offering SAE at all requires the protection and negotiates the same result.
 `FT-PSK` imposes no such requirement.
 
+**A supplicant that dies under an activated radio comes back, and that is
+tested too.** `tests/live/revive.sh` is written against the symptom directly:
+the GUI said "cannot reach supplicant for wlp0s20f3" with dead buttons while
+`ncfg wifi radios` on the same machine answered "netcfgd's". Those two facts
+together are the whole report -- netcfgd believes it owns the radio, and there
+is no socket to reach -- and every client fails identically, because every
+client goes through that socket. The test starts the daemon on a radio it owns,
+kills the supplicant, removes the socket, and checks netcfgd starts another one
+unprompted: a new pid, the pid file naming the live process, the radio reported
+as netcfgd's, and a scan returning.
+
+**The stale pid file is what it actually guards.** netcfgd's handle on its own
+supplicant is the pid file it told it to write, and a pid file outlives the
+process it names -- so the failure is not "netcfgd does nothing" but "netcfgd
+reads a pid file, concludes a supplicant is running, and does nothing", which
+from outside is the same thing. The negative control is that bug exactly:
+dropping the `pid_of` check in `netcfgd-observe`'s `host.rs`, so a pid file's
+existence alone means running, fails the four revival checks and leaves the
+three baseline ones passing.
+
 **Taking a radio over when the other manager lets go is tested now, and it
 works** -- which narrows a report it had been blamed for.
 `tests/live/displace.sh` starts a supplicant netcfgd did not start, checks

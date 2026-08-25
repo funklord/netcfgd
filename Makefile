@@ -1269,6 +1269,10 @@ live:
 	@# displacement means and the half no test covered: a guard that declines
 	@# and never stops declining looks exactly like a daemon that does not work.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/displace.sh"
+	@# A supplicant that died under a radio netcfgd owns, which is the state a
+	@# crash leaves behind and the one every client reports as "cannot reach
+	@# supplicant". The fix loop has to notice without being asked.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/revive.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"
