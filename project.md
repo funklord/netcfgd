@@ -855,6 +855,101 @@ The packages are `cargo rust ncurses-dev make git iproute2 python3 util-linux pr
 
 Kept current deliberately: this is the section to read after a break, and the one to rewrite rather than append to.
 
+### Wanted, not yet designed: restart without dropping the link
+
+**Requested 2026-08-25 by the copyright holder, explicitly to be planned
+before it is implemented.** Nothing here is a design; it is the requirement,
+plus what was measured about the ground it lands on so that the planning does
+not start from zero.
+
+**The requirement.** netcfgd must be updatable -- package upgrade, daemon
+restart -- without tearing down what is running underneath it. The case named
+is the demanding one on purpose: a VPN over wifi, so an EAP association, a
+supplicant, an address, a route table and a tunnel on top, several layers deep
+and every layer someone would notice losing. Two halves: **stop without
+pulling anything down**, and **take over the existing state on startup**
+rather than rebuilding it.
+
+**Half of it already holds, by omission rather than by design.** The daemon
+installs no `SIGTERM` teardown and the unit has no `ExecStop`, so killing
+netcfgd today leaves every link, address, route and backend exactly where it
+was. That is the behaviour the requirement wants, and it is currently an
+absence of code rather than a decision -- which means nothing protects it and
+no test asserts it. **Anybody adding graceful teardown would be removing this
+feature without knowing it existed.** Writing the property down and testing it
+is the cheapest part of the whole job and should come first.
+
+**The startup half is where the work is, and there is one concrete obstacle.**
+`RuntimeDirectory=netcfgd` is set in the unit with no `RuntimeDirectoryPreserve=`.
+Per `systemd.exec(5)`, the default is `no`, and the directories "are always
+removed when the service stops". So `systemctl restart netcfgd` deletes
+`/run/netcfgd` -- **the entire record of what netcfgd started and therefore of
+what netcfgd owns**: the pid files, the observed backends, the ownership marks
+that `Ownership::may_remove` consults. The daemon comes back believing it
+created nothing on this machine. `RuntimeDirectoryPreserve=restart` preserves
+across a restart and still cleans on a real stop, which looks like the answer
+and is not obviously the whole one -- OpenRC and procd manage that directory
+themselves and would each need their own treatment.
+
+**The tension to resolve deliberately, not in passing.** Constraint 1 says
+runtime state in `/run/netcfgd/` is *derived and disposable*. Adoption makes it
+load-bearing across a restart, which is not the same as making it authoritative
+-- the config files stay the only authority for what *should* be true -- but it
+does mean a lost `/run` stops being harmless. What happens after a **reboot**,
+when `/run` is genuinely empty and the machine is configured but unowned, is
+the same question in its hardest form and needs answering in the same pass.
+
+**Related machinery that already exists and should be read before designing:**
+`--no-apply-on-start` and the latch in `start_up`, which already expresses
+"come up and touch nothing"; [0052](docs/decisions/0052-a-daemon-is-compared-to-what-it-was-started-with.md)
+on comparing a daemon to what it was started with;
+[0070](docs/decisions/0070-a-client-is-stopped-the-way-it-was-started.md) on
+stopping a client the way it was started;
+[0079](docs/decisions/0079-netcfgd-stops-restarting-what-will-not-stay-up.md)
+on the restart counter; and `tests/live/revive.sh`, which already proves
+netcfgd recognises its own supplicant by the pid file it wrote -- the
+recognition adoption needs, in the one case where it exists.
+
+**netcfgd should be told which of the two is happening, because the code paths
+will diverge** (added by the copyright holder in the same conversation). Being
+replaced by a newer copy of itself and being stopped for good are different
+intents, and a daemon that treats them alike will eventually get one of them
+wrong -- most likely by holding state for a stop that was meant to be final, or
+by releasing it for a restart that was meant to be seamless.
+
+**A daemon cannot infer this, and should not try.** `SIGTERM` carries no
+reason, and systemd knows the difference internally -- it is what
+`RuntimeDirectoryPreserve=restart` keys on -- without telling the service. So
+the intent has to arrive as *information*, and the design question is which
+channel carries it.
+
+**Two channels already exist and already disagree in the right direction**,
+which is a better starting point than it looks:
+
+- **dpkg tells the maintainer scripts the reason as `$1`.** `prerm` receives
+  `upgrade <version>` against `remove` or `deconfigure`, and `postrm` likewise.
+  netcfgd's `prerm` already acts on it: it stops the service only for
+  `remove | deconfigure`, with a header saying that pulling a package is not
+  an instruction to take the network away. **On an upgrade it does not stop the
+  daemon at all**, and `debian/rules` passes `--no-enable --no-start`, so
+  nothing restarts it either -- the running process stays the old binary until
+  somebody restarts it deliberately. That is a safe default and it is not the
+  requested feature; it defers the problem rather than solving it.
+- **systemd distinguishes restart from stop** for runtime directories, so the
+  distinction the requirement needs is one the init system already models.
+
+**So the shape to design is probably: the stopper says why, netcfgd records
+it.** An operator or a maintainer script announces an intent -- over the
+control socket, or as an argument to a stop path -- and netcfgd writes what it
+was told beside its state, so the copy that starts next can read it. That also
+answers the reboot case, since an intent recorded in `/run` is gone after a
+reboot and its absence is itself the answer: nothing announced anything, so
+this is a cold start rather than a handover. **Whether the default for an
+unannounced stop is "hold" or "release" is the decision to make deliberately**,
+and it is the one that decides how this behaves when something crashes.
+
+**Not started, and not to be started without a plan.**
+
 ### State
 
 **Read this first after a break, and rewrite it rather than appending to it.**
