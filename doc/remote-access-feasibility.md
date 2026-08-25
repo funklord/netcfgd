@@ -509,19 +509,44 @@ the differences matter more than the list does:
 - **Remote logs and a remote configuration database read as command
   vocabularies**, and fuzznet's section 5 excludes those by name: "A project's
   vocabulary is its own, and the library carries the envelope around it."
-  fuzzypickles' `control_codec.c` is 4718 lines of *its* commands and none of
-  it is shared.
 
-  The envelope those two features need is already there -- chunking, freshness
-  (4.3), the per-datagram capability (13), bounded memory. What they would add
-  is message types.
+  **Corrected the same day, by the copyright holder: they are not
+  vocabularies.** Both were named as *generic* features. Content addressing is
+  a bottom layer any file transfer can be built on, not netcfgd shipping a
+  particular file; and distributed logs are useful to any distributed program
+  for information and troubleshooting, not netcfgd answering a `logs` request.
 
-**That is a scope question for fuzznet and not for netcfgd**, and it is the
-central one in that tree: fuzznet's section 2 is called "The scope decision,
-which is the whole design", and its admission test is "two real consumers need
-it, and neither would accept the other's version as a special case of their
-own". Recorded here as the requirement netcfgd carries in; the decision about
-where the code lives belongs in fuzznet's tree, with its holder.
+  That resolves the scope question rather than raising one. Section 5's
+  admission test asks for two real consumers neither of whom would accept the
+  other's version as a special case -- and a generic mechanism does not have
+  to pass it, because it was never one consumer's vocabulary asking to be
+  promoted. **The reading below was wrong, and it was wrong in the direction
+  that costs most**: mistaking infrastructure for vocabulary is how a shared
+  library ends up with each consumer writing its own copy of the same thing.
+
+**The entrypoint for both is `flog`.** That is the holder's own logging library
+-- `github.com/funklord/flog`, vendored as a submodule in fuzzypickles, C99,
+described in its own header as "useful as the main logger of a program or
+embedded system". It already has the shape this needs: a pluggable output
+model, with `flog_output_file` and `flog_output_stdio` in the tree today.
+
+**So fuzznet must not design a logging API**, and this is the part worth
+carrying across repositories. flog is one already, it is the family's, and it
+is in use. What a distributed log needs from fuzznet is *transport* -- and what
+it needs from flog is another output beside the two that exist. A log API
+invented inside fuzznet would be a third thing to learn and a second place for
+the family's diagnostics to diverge.
+
+**What is still fuzznet's to decide** is where the code lives and in what
+order it arrives -- its section 2 is titled "The scope decision, which is the
+whole design". Recorded here as the requirement netcfgd carries in.
+
+**netcfgd uses none of flog today, and that is not an oversight to correct in
+passing.** The daemon is Rust; flog is C99 and does not apply to it. The C that
+netcfgd does have -- `client/`, and the C layer under `gui/` -- logs through
+neither flog nor `fprintf`, having no diagnostics to speak of. Whether the
+family's C converges on flog is a question for a deliberate pass, not for the
+tree that noticed it.
 
 **What this does settle for netcfgd, and it is not nothing:** there is no
 netcfgd-side protocol to design. The remote path consumes fuzznet, and a gap

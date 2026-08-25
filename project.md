@@ -955,19 +955,31 @@ built them there yet. **So there is no netcfgd-side protocol to design**, and a
 gap found here is reported to fuzznet rather than worked around in `agent/`.
 
 **Named as required the same day: remote logs, chunked file transfer, a remote
-configuration database** -- and they do not sit in one place. Chunked transfer
-is already fuzznet's section 4.4, built against netcfgd's shape because
-netcfgd's responses forced it; but that is chunking of a *message*, where
-fuzzypickles' is content-addressed -- hash-named, pull-based,
-requester-coordinated -- which 4.4 calls a different problem outright. Remote
-logs and a config database read as *command vocabularies*, which fuzznet's
-section 5 excludes by name; the envelope they need is already there and what
-they add is message types. **Where that code lives is fuzznet's scope decision
-and not netcfgd's** -- its section 2 is titled "The scope decision, which is
-the whole design" -- so it is recorded in
-[doc/remote-access-feasibility.md](doc/remote-access-feasibility.md) as a
-requirement carried in, and put to that tree rather than answered from this
-one.
+configuration database.** Chunked transfer is already fuzznet's section 4.4,
+built against netcfgd's shape because netcfgd's responses forced it -- but that
+chunks a *message*, where fuzzypickles' is content-addressed: hash-named,
+pull-based, requester-coordinated, which 4.4 calls a different problem
+outright.
+
+**These are generic features, not netcfgd's vocabulary**, and the first reading
+here said otherwise and was corrected by the holder the same day. Content
+addressing is a bottom layer any file transfer builds on; distributed logs
+serve any distributed program. That resolves fuzznet's admission test rather
+than facing it -- a generic mechanism was never one consumer's vocabulary
+asking to be promoted. **The wrong reading was wrong in the expensive
+direction**: mistaking infrastructure for vocabulary is how a shared library
+ends up with every consumer writing its own copy of the same thing.
+
+**The entrypoint for both is `flog`** -- the holder's own logging library,
+vendored in fuzzypickles, C99, with a pluggable output model and
+`flog_output_file` and `flog_output_stdio` already in it. **So fuzznet must not
+design a logging API.** A distributed log needs *transport* from fuzznet and
+one more output from flog; a log API invented inside fuzznet would be a third
+thing to learn and a second place for the family's diagnostics to diverge.
+netcfgd uses no flog today and that is not an oversight to fix in passing: the
+daemon is Rust, and whether the family's C converges on flog belongs to a
+deliberate pass rather than to the tree that noticed it. Detail in
+[doc/remote-access-feasibility.md](doc/remote-access-feasibility.md).
 
 **There is an intended-state file and it is `/etc`, which is worth saying
 because `/run` holds three things that look alike and have opposite rules**
