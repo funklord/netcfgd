@@ -305,7 +305,9 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 					snapshot.address_proto_supported,
 					prior.address_origin(&interface, &cidr).is_some(),
 				),
-				origin: prior.address_origin(&interface, &cidr),
+				origin: prior
+					.address_origin(&interface, &cidr)
+					.or_else(|| tagged_origin(address.proto)),
 				interface,
 				address: cidr,
 				proto: address.proto,
@@ -329,7 +331,9 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 				} else {
 					Ownership::Foreign
 				},
-				origin: prior.route_origin(&interface, &destination),
+				origin: prior
+					.route_origin(&interface, &destination)
+					.or_else(|| tagged_origin(Some(route.protocol))),
 				destination,
 				via: route.gateway,
 				metric: route.metric,
@@ -384,6 +388,38 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 /// Split out and given its own name because it is the one judgement in this
 /// crate that can lose a user their address, and it should be reviewable on
 /// its own.
+/// The origin an object's kernel tag implies, when nothing was recorded.
+///
+/// **netcfgd's tag has exactly one producer, and that is what makes this
+/// sound.** `Op::AddrAdd` is the only call site of `add_address`, and
+/// `Op::RouteAdd` the only call site of `add_route`; both stamp
+/// [`NETCFGD_PROTO`] and both record [`Origin::Static`]. So an object wearing
+/// the tag was put there by netcfgd from config, and there is no other way for
+/// it to be wearing it. A lease's address belongs to the DHCP client, which
+/// installs it itself under its own protocol number and never under this one.
+///
+/// **Why it is needed.** Ownership survives the loss of `/run` because the
+/// kernel carries the tag, but *origin* did not, and every teardown path gates
+/// on `origin == Static` before it gates on anything else. So a netcfgd that
+/// lost its record kept the tag, read the address as `Ours`, and then declined
+/// to touch it because the origin was `None` -- it could tell the address was
+/// its own and not that it was allowed to remove it. Measured: with the record
+/// intact a stale address and route are removed; with the record deleted both
+/// are held.
+///
+/// **The record still wins where it exists**, which is what keeps this a
+/// fallback rather than a replacement: a pre-5.18 kernel has no `IFA_PROTO` to
+/// read, and a DHCP address recorded as `Dhcp4` must stay `Dhcp4` even though
+/// netcfgd's own tag is absent from it.
+///
+/// The uniqueness this rests on is asserted by `tools/tag_producer_gate.py`,
+/// because it is a property of the tree rather than of this function, and a
+/// second producer added later would make the inference wrong here without
+/// changing a line of it.
+fn tagged_origin(proto: Option<u8>) -> Option<Origin> {
+	(proto == Some(NETCFGD_PROTO)).then_some(Origin::Static)
+}
+
 fn address_ownership(proto: Option<u8>, proto_supported: bool, recorded: bool) -> Ownership {
 	if proto_supported {
 		// The kernel is authoritative here. An address with somebody else's

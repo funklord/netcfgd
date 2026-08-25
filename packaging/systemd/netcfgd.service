@@ -100,6 +100,23 @@ ReadWritePaths=-/etc/unbound/unbound.conf.d
 
 RuntimeDirectory=netcfgd
 RuntimeDirectoryMode=0755
+# Keep /run/netcfgd across a restart, so that an upgrade does not throw away
+# the record of what netcfgd installed. The default is `no`, which deletes it
+# whenever the service stops -- systemd.exec(5): the directories "are always
+# removed when the service stops".
+#
+# This is not what makes a restart safe. Addresses and routes carry netcfgd's
+# protocol tag in the kernel and are recognised again with no record at all
+# (0002, and `tests/live/adopt.sh` runs the cycle with the file deleted). What
+# the record still carries is everything the kernel has nowhere to stamp: which
+# sysctls netcfgd changed, which links it created, which DNS scopes it
+# delivered. Losing those means netcfgd stops putting them back, which holds
+# rather than breaks -- but it is avoidable across a restart, so avoid it.
+#
+# `restart` and not `yes`: a real stop should still clean up. An operator who
+# stops the service deliberately is not mid-upgrade, and leaving the directory
+# behind for ever would make the reboot case look like a restart.
+RuntimeDirectoryPreserve=restart
 
 [Install]
 WantedBy=multi-user.target

@@ -746,6 +746,10 @@ packaging:
 	@# because every test writes into a temp directory. 0127's writes were
 	@# refused by netcfgd's own sandbox this way.
 	@python3 tools/sandbox_gate.py
+	@# The tag-implies-origin inference in netcfgd-observe is sound only while
+	@# the tag has one producer. That is a property of the tree, so it is
+	@# checked here rather than trusted there.
+	@python3 tools/tag_producer_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
@@ -1291,6 +1295,10 @@ live:
 	@# crash leaves behind and the one every client reports as "cannot reach
 	@# supplicant". The fix loop has to notice without being asked.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/revive.sh"
+	@# Adopting the network after the ownership record is gone, which is what a
+	@# restart does to it. Holding is safe and is not enough: a netcfgd that
+	@# cannot recognise its own work can never remove it either.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/adopt.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"

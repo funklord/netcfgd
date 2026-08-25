@@ -944,7 +944,39 @@ control socket, or as an argument to a stop path -- and netcfgd writes what it
 was told beside its state, so the copy that starts next can read it. That also
 answers the reboot case, since an intent recorded in `/run` is gone after a
 reboot and its absence is itself the answer: nothing announced anything, so
-this is a cold start rather than a handover. **The default for an unannounced stop is settled:
+this is a cold start rather than a handover. **Which parts of the network are netcfgd's own survives a restart, because the
+kernel holds the answer** ([0135](docs/decisions/0135-the-kernel-holds-the-ownership-record.md)).
+`RuntimeDirectory=netcfgd` with the default `RuntimeDirectoryPreserve=no` means
+systemd deletes `/run/netcfgd` on every stop, so the restarted daemon had the
+network and not the note. Measured: with the record kept, a stale address and
+route are removed; with it deleted, both are held.
+
+**The diagnosis was one field over from where it looked.** Ownership already
+survived -- `address_ownership` is tag-primary exactly as 0002 intended, and
+routes read `rtm_protocol` on every supported kernel. What did not survive is
+`origin`, which came only from the record, and every teardown path gates on
+`origin == Static` *before* it gates on ownership. The restarted daemon could
+tell the address was its own and not that it was allowed to remove it.
+
+**The tag now implies the origin, with the record still winning where it
+exists.** That is sound because the tag has exactly one producer per object
+kind -- `Op::AddrAdd` is the only caller of `add_address`, `Op::RouteAdd` the
+only caller of `add_route`, and both record `Origin::Static`. Being a property
+of the tree rather than of the function relying on it, it is asserted by
+`tools/tag_producer_gate.py`, which fails both on a second producer and on a
+producer that stops recording the origin. `tests/live/adopt.sh` runs the cycle
+with the record deleted, and keeps a foreign address alongside throughout --
+without that, a netcfgd that removed everything would pass every other check.
+
+**The reboot case answered itself and was the easiest, not the hardest.** After
+a reboot `/run` is empty and so is the kernel state: both sides clear together,
+and the machine is a cold start with nothing to adopt. The dangerous case was
+only ever the restart, where the kernel state survives and the record does not.
+`RuntimeDirectoryPreserve=restart` is in the unit as well, for the residue the
+kernel has nowhere to stamp -- sysctls, created links, DNS scopes -- which
+fails toward holding and is a leak rather than a fault.
+
+**The default for an unannounced stop is settled:
 it holds** ([0134](docs/decisions/0134-an-unannounced-stop-holds.md)). netcfgd
 leaves the network as it is and the next copy adopts it; releasing happens only
 when something says so. The argument is asymmetry, not preference -- holding
