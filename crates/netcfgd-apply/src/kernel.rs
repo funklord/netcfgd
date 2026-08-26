@@ -2004,11 +2004,45 @@ fn start_backend(
 			// dhcpcd gets one too, for the nameservers and to stop its own hooks
 			// writing resolv.conf behind netcfgd's back (0066).
 			let hook = write_dhcpcd_script(iface, None)?;
+			let config = write_dhcpcd_config(iface, "4")?;
+
+			// **The one backend netcfgd cannot recognise from its process
+			// image.** dhcpcd's `setproctitle` destroys argv and environment
+			// alike, so `pid_by_marker` -- which recovers the supplicant and
+			// udhcpc -- has nothing to match. What survives is dhcpcd's own
+			// memory of `-f`, recited on its control socket, so netcfgd asks
+			// (0143).
+			//
+			// Adopting rather than starting matters more here than anywhere:
+			// a second `dhcpcd -b` against a running one is a SILENT no-op --
+			// measured, it prints "sending commands to dhcpcd process" and
+			// exits 0 having started nothing -- so without this netcfgd would
+			// report success on every reconcile while the orphan kept the
+			// lease and netcfgd kept no handle on it.
+			match crate::dhcpcd_control::config_file_of(&dhcpcd_run_dir(), iface, "4") {
+				Some(seen) if seen == config.display().to_string() => {
+					// The symlink is re-created above, which is the other half:
+					// the `-f` string in dhcpcd's memory survives the wipe, but
+					// a later `dhcpcd -n` reload would read a dangling path and
+					// silently drop the operator's options.
+					eprintln!(
+						"netcfgd: adopted the dhcp client already running on {iface}; it is netcfgd's, by the `-f {}` it recites",
+						config.display()
+					);
+					return Ok(());
+				}
+				// Somebody else's, or netcfgd could not tell. Neither is a
+				// reason to spawn beside it, and 0141 makes the difference the
+				// caller's to report rather than this function's to guess.
+				Some(_) | None => {}
+			}
+
 			let dhcpcd = dhcpcd_start_args(
 				DHCPCD_V4,
 				iface,
 				metric.as_deref(),
 				&hook.display().to_string(),
+				&config.display().to_string(),
 			);
 			let udhcpc = udhcpc_start_args(iface, &script, &pidfile);
 
@@ -2069,6 +2103,16 @@ fn running_backends(
 /// Named rather than written out at four call sites, because the family is one
 /// decision with two consumers: what dhcpcd does, and which pid file it does it
 /// under. See [`dhcpcd_stop_args`].
+/// Where dhcpcd keeps its pid files and control sockets.
+///
+/// **dhcpcd's, not netcfgd's**, and that is the point: it is compiled in as
+/// `RUNDIR` and survives a netcfgd stop, which is why the control socket is
+/// reachable when everything under `/run/netcfgd` has gone. Overridable for
+/// tests, which run in a namespace with a tmpfs over `/run`.
+fn dhcpcd_run_dir() -> String {
+	std::env::var("NCFG_DHCPCD_RUN_DIR").unwrap_or_else(|_| "/run/dhcpcd".to_owned())
+}
+
 const DHCPCD_V4: &str = "-4";
 const DHCPCD_V6: &str = "-6";
 
@@ -2077,6 +2121,43 @@ const DHCPCD_V6: &str = "-6";
 /// Sorts after the `DHCPv4` client's single file, which is what puts a v4
 /// lease's nameservers before a v6 lease's without anything having to say so.
 const REPORT_DHCPCD6: &str = "dhcpcd6";
+
+/// Where netcfgd points dhcpcd's `-f`, and what it points at.
+///
+/// **A mark netcfgd can ask for back.** dhcpcd destroys its own argv and
+/// environment with `setproctitle`, so it is the one backend whose ownership
+/// cannot be read out of the process image (0143). What it does keep is the
+/// `-f` string, which it recites verbatim on its control socket -- so netcfgd
+/// gives it a path under netcfgd's own run directory and asks later.
+///
+/// **A symlink, not a file of netcfgd's own.** `-f` replaces `/etc/dhcpcd.conf`
+/// outright and dhcpcd has no `include` directive, so writing netcfgd's own
+/// config here would silently drop whatever the operator had -- `duid`,
+/// `persistent`, `require dhcp_server_identifier` and the rest of a stock
+/// Debian file. Pointing at theirs keeps it: measured, dhcpcd reads the
+/// target's options through the symlink and recites the *symlink* path when
+/// asked, which is exactly the pair of properties this needs.
+///
+/// **A dangling symlink is not a failure**, and needs no target created.
+/// Measured: dhcpcd prints `read_config: ...: No such file or directory`, takes
+/// a normal lease and applies its defaults -- byte for byte what it already
+/// does today on a machine with no `/etc/dhcpcd.conf`. The only thing that
+/// changes is the path in the message.
+fn write_dhcpcd_config(iface: &str, family: &str) -> Result<std::path::PathBuf, String> {
+	let dir = run_dir_path().join("dhcpcd");
+	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+	let link = dir.join(format!("{iface}-{family}.conf"));
+	// Replaced rather than left: the operator's file may have moved, and a
+	// symlink netcfgd wrote is netcfgd's to rewrite.
+	let _ = std::fs::remove_file(&link);
+	std::os::unix::fs::symlink("/etc/dhcpcd.conf", &link).map_err(|error| {
+		format!(
+			"cannot point {} at the operator's config: {error}",
+			link.display()
+		)
+	})?;
+	Ok(link)
+}
 
 /// What netcfgd starts dhcpcd with.
 ///
@@ -2099,8 +2180,19 @@ const REPORT_DHCPCD6: &str = "dhcpcd6";
 /// 0086 gave the v6 client a script of its own, so there is no second arm left
 /// and the parameter is a path rather than a choice. Unrepresentable beats
 /// documented.
-fn dhcpcd_start_args(family: &str, iface: &str, metric: Option<&str>, hook: &str) -> Vec<String> {
+fn dhcpcd_start_args(
+	family: &str,
+	iface: &str,
+	metric: Option<&str>,
+	hook: &str,
+	config: &str,
+) -> Vec<String> {
 	let mut args = vec!["-c".to_owned(), hook.to_owned()];
+	// The mark. It has to come before the interface for the same reason `-c`
+	// does -- dhcpcd parses options first -- and it is netcfgd's only handle on
+	// this client after a restart (0143).
+	args.push("-f".to_owned());
+	args.push(config.to_owned());
 	args.push("-b".to_owned());
 	args.push(family.to_owned());
 	if let Some(metric) = metric {
@@ -2207,7 +2299,13 @@ fn start_dhcp6(iface: &str, delegating: Option<&netcfgd_model::PdRequest>) -> Re
 			let hook = write_dhcpcd_script(iface, Some(REPORT_DHCPCD6))?;
 			run_client(
 				"dhcpcd",
-				&dhcpcd_start_args(DHCPCD_V6, iface, None, &hook.display().to_string()),
+				&dhcpcd_start_args(
+					DHCPCD_V6,
+					iface,
+					None,
+					&hook.display().to_string(),
+					&write_dhcpcd_config(iface, "6")?.display().to_string(),
+				),
 				iface,
 			)
 		}
@@ -3480,6 +3578,7 @@ mod tests {
 				"eth0",
 				Some("512"),
 				"/run/netcfgd/dhcpcd/eth0.script",
+				"/run/netcfgd/dhcpcd/eth0.conf",
 			);
 			let stop = super::dhcpcd_stop_args(family, "eth0");
 			let named: Vec<&String> = start
@@ -3503,13 +3602,23 @@ mod tests {
 		// The metric reaches the client rather than being carried and dropped,
 		// and a document that named none passes no flag at all.
 		let hook = "/run/netcfgd/dhcpcd/eth0.script";
-		let ranked = super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", Some("512"), hook);
-		assert!(ranked.windows(2).any(|pair| pair == ["-m", "512"]));
-		assert!(
-			super::dhcpcd_start_args(super::DHCPCD_V4, "eth0", None, hook)
-				.iter()
-				.all(|argument| argument != "-m")
+		let ranked = super::dhcpcd_start_args(
+			super::DHCPCD_V4,
+			"eth0",
+			Some("512"),
+			hook,
+			"/run/netcfgd/dhcpcd/eth0.conf",
 		);
+		assert!(ranked.windows(2).any(|pair| pair == ["-m", "512"]));
+		assert!(super::dhcpcd_start_args(
+			super::DHCPCD_V4,
+			"eth0",
+			None,
+			hook,
+			"/run/netcfgd/dhcpcd/eth0-4.conf"
+		)
+		.iter()
+		.all(|argument| argument != "-m"));
 	}
 
 	/// Every dhcpcd netcfgd starts has its hooks replaced, both families.
@@ -3525,7 +3634,13 @@ mod tests {
 	fn dhcpcds_own_hooks_are_never_left_alone() {
 		for family in [super::DHCPCD_V4, super::DHCPCD_V6] {
 			let hook = format!("/run/netcfgd/dhcpcd/eth0-{family}.script");
-			let args = super::dhcpcd_start_args(family, "eth0", None, &hook);
+			let args = super::dhcpcd_start_args(
+				family,
+				"eth0",
+				None,
+				&hook,
+				"/run/netcfgd/dhcpcd/eth0.conf",
+			);
 
 			assert!(
 				args.windows(2).any(|pair| pair == ["-c", hook.as_str()]),
