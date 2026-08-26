@@ -1967,6 +1967,40 @@ fn start_backend(
 			// nothing at all, and without `-p` there is no way to stop it.
 			// Decision 0065.
 			let (script, pidfile) = write_udhcpc_script(iface)?;
+
+			// **A udhcpc netcfgd already started, whose pid file went with the
+			// run directory.** 0140's case, one backend over: the client keeps
+			// netcfgd's `-p` path as a whole argv element for as long as it
+			// lives -- busybox does not call `setproctitle` -- while the file
+			// that path names sits in `/run/netcfgd`, which
+			// `RuntimeDirectory=` deletes on a stop.
+			//
+			// **Without this netcfgd starts a second client**, and unlike
+			// dhcpcd, udhcpc has no instance lock to refuse it. Measured: both
+			// run, both take the same lease (same MAC, same client id, the
+			// server re-offers), and the second overwrites the pid file -- so
+			// the first becomes permanently unreachable. A later
+			// `backend.stop` then signals only the second, and with `-R` that
+			// RELEASEs the lease and the generated script removes the address,
+			// leaving the interface bare while a live client still believes it
+			// holds the lease and will not re-add it until T1.
+			//
+			// The marker is the pid file path rather than the script path:
+			// both are netcfgd's and absolute, but the script is also named in
+			// the environment of every hook the client forks, while `-p` is
+			// carried by the client alone.
+			if netcfgd_sys::process::pid_of(&pidfile, &pidfile.to_string_lossy()).is_none() {
+				if let Some(pid) = netcfgd_sys::process::pid_by_marker(&pidfile.to_string_lossy()) {
+					std::fs::write(&pidfile, format!("{pid}\n")).map_err(|error| {
+						format!("cannot record the dhcp client on {iface}: {error}")
+					})?;
+					eprintln!(
+						"netcfgd: adopted the dhcp client already running on {iface} (pid {pid}); it is netcfgd's, by the `-p {}` it was started with",
+						pidfile.display()
+					);
+					return Ok(());
+				}
+			}
 			// dhcpcd gets one too, for the nameservers and to stop its own hooks
 			// writing resolv.conf behind netcfgd's back (0066).
 			let hook = write_dhcpcd_script(iface, None)?;

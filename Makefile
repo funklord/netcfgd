@@ -1303,6 +1303,10 @@ live:
 	@# declaration rather than the behaviour, and says so: the defect was an
 	@# absent setting, and an absent setting is what this catches.
 	@sh tests/live/killmode.sh
+	@# The other half of 0140, one backend over: udhcpc keeps netcfgd's marker
+	@# in argv but has no instance lock, so a lost handle means a second client
+	@# and a second lease rather than a refusal.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/udhcpc_orphan.sh"
 	@# Adopting the network after the ownership record is gone, which is what a
 	@# restart does to it. Holding is safe and is not enough: a netcfgd that
 	@# cannot recognise its own work can never remove it either.

@@ -1023,6 +1023,33 @@ wrong tool, because a ratchet must die at process exit rather than at reboot.
 And 0134's "hold by default" must not be inherited: for this class the safe
 direction is to lose it.
 
+**udhcpc gets 0140's adoption too, and its version of the fault is worse.**
+The shape is identical -- busybox does not call `setproctitle`, so netcfgd's
+`-p <path>` survives whole in argv while the file it names sits in
+`/run/netcfgd` and goes with a stop. What differs is the consequence: dhcpcd
+refuses a second instance and udhcpc has **no instance lock at all**, so a
+netcfgd that has lost the handle starts a *second* client. Measured: both run,
+both take the same lease (same MAC, same client id, the server re-offers), and
+the second overwrites the pid file -- so the first becomes permanently
+unreachable. A later `backend.stop` then signals only the second, and with `-R`
+that releases the lease and the generated script removes the address, leaving
+the interface bare while a live client still believes it holds the lease and
+will not re-add it until T1.
+
+**The marker is the `-p` pid file path rather than the `-s` script path.** Both
+are netcfgd's and absolute, but the script is also named in the environment of
+every hook the client forks, so matching on it would match a set; `-p` is
+carried by the client alone.
+
+**`tests/live/udhcpc_orphan.sh`'s first version was vacuous and was caught
+before it shipped.** It ran `ncfg plan`, which never starts a backend -- so the
+adoption code was never reached, and the final count read 1 only because the
+script had killed the second client itself. A check that cannot reach the code
+under test passes whatever that code does. It runs a real `ncfg apply` now,
+with a `dhcpcd` that exits 127 so the udhcpc arm is the one taken, and the
+control confirms it: without the adoption branch, two checks go red including
+"exactly one client carries netcfgd's marker".
+
 **0134 was true of netcfgd and false of the machine, and that is corrected**
 ([0142](doc/decision/0142-systemd-kills-what-netcfgd-holds.md)). It said an
 unannounced stop holds, and argued it from netcfgd's own source: no `SIGTERM`
