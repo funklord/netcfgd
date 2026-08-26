@@ -48,6 +48,15 @@ READ_ONLY = {
 	# namespace, which this unit does not bound.
 	"/etc/ssl",
 	"/etc/cert",
+	# The operator's dhcpcd configuration. netcfgd never opens it: it creates a
+	# symlink under its own run directory pointing here and passes that path to
+	# dhcpcd with `-f`, so that a running client can be asked later which
+	# config it was started with (0143). dhcpcd is what opens the target, in
+	# its own privilege-separated sandbox, which this unit does not bound --
+	# the same shape as the supplicant's certificates above. A dangling symlink
+	# is not an error: dhcpcd logs and applies its defaults, measured, which is
+	# exactly what it already does on a machine with no such file.
+	"/etc/dhcpcd.conf",
 }
 
 
