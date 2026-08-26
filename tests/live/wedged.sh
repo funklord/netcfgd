@@ -154,10 +154,27 @@ check "a supplicant that never answers is reported" \
 # "the backend on wlan0" is the least useful true thing available.
 check "and called a supplicant" \
 	"$(grep -c 'the supplicant on wlan0' "$work/wedged.txt" || true)" 1
-# And it is a warning, not a refusal: netcfgd cannot tell a wedged supplicant
-# from a busy one, so acting on this would take working radios off the air.
-check "and nothing is refused over it" \
-	"$(grep -c 'refused' "$work/wedged.txt" || true)" 0
+# **It is a warning AND a refusal now (0141), and this asserted the opposite.**
+#
+# The old rule was "a warning, not a refusal: netcfgd cannot tell a wedged
+# supplicant from a busy one, so acting on this would take working radios off
+# the air". That reasoning is why netcfgd still does not restart it on its own
+# -- it is not why declining should be invisible to a script. The copyright
+# holder's rule is that the default is a loud failure with restart as an
+# option, so the refusal is the loud half and it names the option.
+check "and netcfgd declines to restart it, in the type built for declining" \
+	"$(grep -c '^refused: backend.restart' "$work/wedged.txt" || true)" 1
+check "and names the flag that consents" \
+	"$(grep -c -- '--restart-wedged' "$work/wedged.txt" || true)" 1
+
+# **And the flag is not decorative.** Asked for by interface, netcfgd stops and
+# starts the backend rather than describing it. Without this the option could
+# be accepted and ignored, which passes a test while doing nothing.
+"$ncfg" plan --restart-wedged wlan0 > "$work/consented.txt" 2>&1 || true
+check "with consent it plans a restart instead" \
+	"$(grep -c 'backend.answering' "$work/consented.txt" || true)" 2
+check "and refuses nothing" \
+	"$(grep -c '^refused: backend.restart' "$work/consented.txt" || true)" 0
 
 # Four seconds rather than two: this is wall clock on whatever machine runs the
 # suite, and a gate that goes red under load teaches people to re-run it. Still

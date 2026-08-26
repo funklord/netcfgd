@@ -143,6 +143,7 @@ fn every_request_sample() -> Vec<Request> {
 			confirm: Some(90),
 			allow_disruption: vec!["eth0".to_owned()],
 			strand_credentials: vec!["wg0".to_owned()],
+			restart_wedged: Vec::new(),
 		},
 		Request::Confirm,
 		Request::Revert,

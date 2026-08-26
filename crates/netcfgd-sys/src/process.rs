@@ -307,7 +307,13 @@ mod tests {
 	/// A whole-argument match finds netcfgd's own process.
 	#[test]
 	fn a_marker_in_argv_is_found() {
-		let marker = format!("/run/netcfgd-test-{}/supplicant/x.pid", std::process::id());
+		// The suffix is per test, not per process: tests in one binary share a
+		// pid, so two of them using the same marker race for each other's
+		// child and `pid_by_marker`'s lowest-pid rule picks the wrong one.
+		let marker = format!(
+			"/run/netcfgd-test-{}-found/supplicant/x.pid",
+			std::process::id()
+		);
 		// `sh -c CMD NAME` puts NAME in the shell's own argv and keeps it
 		// there while it waits. `sleep 30 <path>` would not: sleep rejects a
 		// non-numeric argument and the child would be gone before /proc could
@@ -341,7 +347,10 @@ mod tests {
 	/// adopt another manager's supplicant.
 	#[test]
 	fn a_substring_of_an_argument_does_not_match() {
-		let marker = format!("/run/netcfgd-test-{}/supplicant/x.pid", std::process::id());
+		let marker = format!(
+			"/run/netcfgd-test-{}-substr/supplicant/x.pid",
+			std::process::id()
+		);
 		// `sh -c CMD NAME` puts NAME in the shell's own argv and keeps it
 		// there while it waits. `sleep 30 <path>` would not: sleep rejects a
 		// non-numeric argument and the child would be gone before /proc could

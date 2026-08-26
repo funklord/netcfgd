@@ -211,6 +211,7 @@ mod tests {
 				confirm: None,
 				allow_disruption: Vec::new(),
 				strand_credentials: Vec::new(),
+				restart_wedged: Vec::new(),
 			}
 		);
 	}
@@ -238,6 +239,7 @@ mod tests {
 				confirm: Some(120),
 				allow_disruption: vec!["eth0".to_owned()],
 				strand_credentials: vec!["wg0".to_owned()],
+				restart_wedged: Vec::new(),
 			},
 			Request::Confirm,
 			Request::Reload,

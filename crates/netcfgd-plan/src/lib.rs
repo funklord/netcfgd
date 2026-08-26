@@ -71,6 +71,19 @@ pub struct PlanOptions {
 	/// the flag people alias and stop reading, and it consents to disrupting
 	/// the interfaces they had not thought about as well.
 	pub allow_disruption: Vec<String>,
+	/// Interfaces whose wedged backend may be killed and restarted.
+	///
+	/// **The option half of 0141.** netcfgd's job is to understand what it
+	/// invokes, and a daemon holding its socket and answering nothing is not
+	/// something to describe and leave -- but the default is a loud failure and
+	/// a refusal, because a machine too busy to answer in time is
+	/// indistinguishable from a wedged one and killing a healthy daemon is
+	/// worse than saying so. This is how a person says which it is.
+	///
+	/// Per interface, like `allow_disruption`, and for the same reason: consent
+	/// to restarting the supplicant on one radio is not consent to restarting
+	/// every backend on the machine.
+	pub restart_wedged: Vec<String>,
 	/// Devices the operator has explicitly consented to walk away from, keys
 	/// and all.
 	///
@@ -376,15 +389,72 @@ fn warn_wedged_backends(builder: &mut Builder, observed: &Observed) {
 			BackendKind::Supplicant => "supplicant",
 			_ => "backend",
 		};
+		// **A wedged backend fails loudly and is not restarted unless asked**
+		// (0141). netcfgd understands what it invokes and will kill and restart
+		// something misbehaving -- but the copyright holder's rule is that the
+		// default is failure and a loud error, with restart as an option.
+		//
+		// So this says the same thing the old message did and stops saying the
+		// wrong half of it. The old text -- "does not restart it: a busy
+		// machine can miss the deadline too. Check it, and restart it yourself
+		// if it is wedged" -- told an operator to go and fix a daemon netcfgd
+		// started, and named no way to have netcfgd do it. On a headless
+		// machine there is nobody to tell.
+		//
+		// The busy-machine objection stays the reason this is not automatic.
+		// It is a false positive that would kill a healthy daemon, and the
+		// answer is that a person decides, not that netcfgd guesses.
+		//
+		// **`answering` is `Some(false)` here and never `None`.** The caller
+		// filters on that, which is 0074's rule: `None` means netcfgd could not
+		// ask, and reading it as "not answering" would condemn every backend
+		// that has no control socket.
 		builder.warnings.push(Warning {
 			message: format!(
 				"the {what} on {} is running and did not answer its control \
 				 socket. netcfgd cannot configure it while it is like this, and \
-				 does not restart it: a busy machine can miss the deadline too. \
-				 Check it, and restart it yourself if it is wedged",
+				 does not restart it by default -- a busy machine can miss the \
+				 deadline too, and killing a healthy daemon is worse than \
+				 saying so",
 				backend.interface
 			),
 			interface: Some(backend.interface.clone()),
+		});
+		// First-class rather than a second warning line, because "what did
+		// netcfgd decline, and how do I consent?" is a question a script has to
+		// answer as well as a person (0010) -- and because a restart that
+		// drops an association is exactly the kind of act this type exists to
+		// make deliberate.
+		if builder
+			.restart_wedged
+			.iter()
+			.any(|name| name == &backend.interface)
+		{
+			// Asked for, by interface. Bounded by 0079's counter all the same:
+			// consent to restarting a wedged backend is not consent to an
+			// endless loop, and a machine that is merely slow would otherwise
+			// be restarted for ever by a single `--restart-wedged`.
+			builder.restart_wedged_backend(
+				backend.kind,
+				&backend.interface,
+				observed.backend_restarts(backend.kind, &backend.interface),
+			);
+			continue;
+		}
+		builder.refusals.push(Refusal {
+			interface: backend.interface.clone(),
+			op: "backend.restart".to_owned(),
+			guard: format!(
+				"the {what} is running and silent, and netcfgd will not kill a \
+				 daemon that may only be busy"
+			),
+			reason: Reason::differs(
+				&backend.interface,
+				"backend.answering",
+				"answering its control socket".to_owned(),
+				"running and silent".to_owned(),
+			),
+			override_with: format!("ncfg apply --restart-wedged {}", backend.interface),
 		});
 	}
 }
@@ -649,6 +719,7 @@ fn radios_of(desired: &Document, observed: &Observed) -> Vec<String> {
 pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> Plan {
 	let mut builder = Builder {
 		consented: options.allow_disruption.clone(),
+		restart_wedged: options.restart_wedged.clone(),
 		..Builder::default()
 	};
 
@@ -815,6 +886,8 @@ struct Builder {
 	guards: Vec<(String, String)>,
 	/// Interfaces the operator consented to disrupt.
 	consented: Vec<String>,
+	/// Interfaces whose wedged backend the operator consented to restart (0141).
+	restart_wedged: Vec<String>,
 	/// Ids every later action on an interface must wait for: its creation.
 	gates: Vec<(String, u32)>,
 	/// `link.set_master` ids, keyed by the master they enslave to.
@@ -1176,6 +1249,60 @@ impl Builder {
 	///
 	/// A restart drops the tunnel, so the warning says so. `None` restarts
 	/// nothing: no record and an unreadable file are both "could not check".
+	/// Stop and start a backend that is running and has stopped answering.
+	///
+	/// **0141: netcfgd understands what it invokes, and kills what misbehaves.**
+	/// A daemon holding its socket and replying to nothing is the failure 0098
+	/// named and 0074 gave netcfgd the vocabulary for -- and until now netcfgd
+	/// only described it, telling the operator to restart it by hand. On a
+	/// headless machine there is nobody to tell, and the radio stays
+	/// unconfigurable for ever.
+	///
+	/// Modelled on [`Self::restart_stale_tunnel`]: stop, then start ordered
+	/// after the stop, each carrying the other as its inverse.
+	///
+	/// **Bounded rather than trusted.** The caller has already established
+	/// `answering == Some(false)`, never `None`; and `plan_backend_start`
+	/// refuses after `RESTART_LIMIT`, so a machine too busy to answer in time
+	/// costs five restarts and a warning rather than a loop.
+	fn restart_wedged_backend(&mut self, kind: BackendKind, name: &str, restarts: u32) {
+		if restarts >= RESTART_LIMIT {
+			return;
+		}
+		let reason = Reason::differs(
+			name,
+			"backend.answering",
+			"answering its control socket".to_owned(),
+			"running and silent".to_owned(),
+		);
+		let stop = self.push_root(
+			Op::BackendStop {
+				kind,
+				iface: name.to_owned(),
+			},
+			reason.clone(),
+			Some(Op::BackendStart {
+				kind,
+				iface: name.to_owned(),
+			}),
+		);
+		if stop == u32::MAX {
+			return;
+		}
+		self.push(
+			Op::BackendStart {
+				kind,
+				iface: name.to_owned(),
+			},
+			reason,
+			vec![stop],
+			Some(Op::BackendStop {
+				kind,
+				iface: name.to_owned(),
+			}),
+		);
+	}
+
 	fn restart_stale_tunnel(&mut self, interface: &Interface, observed: &Observed) {
 		if !matches!(interface.kind, InterfaceKind::OpenVpn(_)) {
 			return;

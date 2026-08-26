@@ -57,6 +57,16 @@ pub enum Request {
 		/// not agreed to leave a private key loaded on another.
 		#[serde(default)]
 		strand_credentials: Vec<String>,
+		/// Interfaces whose wedged backend the operator consents to restart.
+		///
+		/// **The option half of 0141**, and separate from the two above for the
+		/// reason they are separate from each other: consenting to a brief
+		/// outage on an interface is not consenting to have netcfgd kill a
+		/// daemon that may only be busy. A backend running and answering
+		/// nothing is a loud failure by default; this is how a person says
+		/// which interface may have it killed and started again.
+		#[serde(default)]
+		restart_wedged: Vec<String>,
 	},
 	/// Keep the change made under a confirm window.
 	Confirm,
@@ -327,7 +337,12 @@ impl Request {
 			| Self::Show
 			| Self::Monitor
 			| Self::Radios => &[],
-			Self::Apply { .. } => &["confirm", "allow_disruption", "strand_credentials"],
+			Self::Apply { .. } => &[
+				"confirm",
+				"allow_disruption",
+				"strand_credentials",
+				"restart_wedged",
+			],
 			Self::Explain { .. } => &["subject"],
 			Self::WifiScan { .. }
 			| Self::WifiStatus { .. }
@@ -766,6 +781,7 @@ mod shape_tests {
 				confirm: Some(30),
 				allow_disruption: vec!["eth0".to_owned()],
 				strand_credentials: vec!["wg0".to_owned()],
+				restart_wedged: Vec::new(),
 			},
 			Request::Explain {
 				subject: Subject::Interface {

@@ -875,6 +875,7 @@ fn apply_request(
 	window: Option<u32>,
 	allow_disruption: &[String],
 	strand_credentials: &[String],
+	restart_wedged: &[String],
 	subscribers: &mut Vec<SyncSender<Event>>,
 	timers: Option<&Sender<Command>>,
 ) -> Response {
@@ -895,6 +896,11 @@ fn apply_request(
 		revert_to: last_good.as_ref().map(netcfgd_host::document_hash),
 		allow_disruption: allow_disruption.to_vec(),
 		strand_credentials: strand_credentials.to_vec(),
+		// 0141: a wedged backend is a loud failure by default. Only a client
+		// that named an interface gets it killed and started again -- the
+		// reconcile loop passes nothing here, which is what makes the default
+		// hold on a machine nobody is watching.
+		restart_wedged: restart_wedged.to_vec(),
 	};
 	let mut executor = match state.executor() {
 		Ok(executor) => executor,
@@ -953,11 +959,13 @@ fn answer(
 			confirm: window,
 			allow_disruption,
 			strand_credentials,
+			restart_wedged,
 		} => apply_request(
 			state,
 			*window,
 			allow_disruption,
 			strand_credentials,
+			restart_wedged,
 			subscribers,
 			timers,
 		),

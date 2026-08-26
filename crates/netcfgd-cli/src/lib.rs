@@ -103,6 +103,8 @@ options:
                            config says `global { confirm = N }` arms one
                            without this; `--confirm-within 0` is how to say no
                            window on such a machine
+  --restart-wedged IFACE   kill and restart a backend that is running and
+                           answering nothing on this interface (0141)
   --allow-disruption IFACE consent to disrupting one guarded interface;
                            repeatable, and deliberately not a blanket --force
   --strand-credentials DEV consent to unmanaging one device while leaving a
@@ -180,6 +182,8 @@ pub(crate) struct Options {
 	json: bool,
 	confirm: Option<u32>,
 	allow_disruption: Vec<String>,
+	/// Interfaces whose wedged backend may be killed and restarted (0141).
+	restart_wedged: Vec<String>,
 	strand_credentials: Vec<String>,
 	/// `wifi add` only, and named for what they mean in the config file they
 	/// write rather than for the flag that set them.
@@ -244,6 +248,7 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 		json: false,
 		confirm: None,
 		allow_disruption: Vec::new(),
+		restart_wedged: Vec::new(),
 		strand_credentials: Vec::new(),
 		wifi: wifi::Wanted::default(),
 		control: control::Wanted::default(),
@@ -269,6 +274,7 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 					format!("--confirm-within wants a number of seconds, not `{value}`")
 				})?);
 			}
+			"--restart-wedged" => options.restart_wedged.push(take_value("--restart-wedged")?),
 			"--allow-disruption" => options
 				.allow_disruption
 				.push(take_value("--allow-disruption")?),
@@ -433,6 +439,7 @@ fn build_plan(
 		revert_to: None,
 		allow_disruption: options.allow_disruption.clone(),
 		strand_credentials: options.strand_credentials.clone(),
+		restart_wedged: options.restart_wedged.clone(),
 	};
 	let plan = plan(&document, &observed, &plan_options);
 	Ok((plan, document, observed, run_dir))
@@ -528,6 +535,7 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		let request = netcfgd_proto::Request::Apply {
 			confirm: Some(seconds),
 			allow_disruption: options.allow_disruption.clone(),
+			restart_wedged: options.restart_wedged.clone(),
 			strand_credentials: options.strand_credentials.clone(),
 		};
 		return match client::ask(&client::socket_path(&run_dir), &request)? {
