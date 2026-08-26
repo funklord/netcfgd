@@ -126,11 +126,38 @@ record removes.
 |---|---|---|
 | routes | `rtm_protocol`, every supported kernel | yes |
 | addresses | `IFA_PROTO`, 5.18 and up | yes |
-| backends | pid file plus `/proc/<pid>/cmdline` | yes -- `revive.sh` proves it |
+| backends | pid file plus `/proc/<pid>/cmdline` | **no, as written -- see below** |
 | addresses, pre-5.18 | the record | no |
 | created links | the record | no |
 | sysctls: forwarding, privacy, `accept_ra` | the record | no |
 | DNS scopes, qdisc, ingress | the record | no |
+
+### Corrected, 2026-08-26: the backends row was false, and it was a vacuous pass
+
+**This table said backends survive a wiped `/run` and cited `revive.sh` for
+it. Both halves were wrong**, and the citation is the part worth dwelling on:
+`revive.sh` kills the supplicant and removes its *control socket*, leaving the
+pid file in place. That is 0080's dead-supplicant case. `adopt.sh` removes
+only `owned.json`, again leaving the pid file. **No test in the suite deleted
+the pid file while the process lived**, which is the one thing the row claimed
+to be safe -- so the row was evidence-free in exactly the way `evidence.md`
+warns about, and I wrote it.
+
+The mechanism the row got wrong: a pid file is not a mark on an object, it is
+a **handle to a live process**, and it lives in the directory
+`RuntimeDirectory=` deletes. The process survives the stop (0134 wants that);
+the handle does not. netcfgd then cannot recognise its own supplicant,
+`start_supplicant` falls through to the foreign-supplicant refusal, and it
+blames NetworkManager for a process it started itself -- for ever, because the
+error returns before the restart counter is touched so 0079 never gives up
+either.
+
+Measured on a real machine: an orphaned supplicant and an orphaned `dhcpcd`
+fought NetworkManager for one radio, the DHCP client taking a fresh lease
+roughly once a minute and consuming thirteen addresses.
+
+**Fixed in [0140](0140-a-handle-must-be-recoverable-from-the-process.md)**, and
+`tests/live/orphan.sh` is the test this row should have had.
 
 **The residue fails toward holding, which is 0134's direction**, so none of it
 is a hazard: netcfgd leaves a sysctl set rather than putting it back. It is a

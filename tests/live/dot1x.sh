@@ -242,19 +242,29 @@ state["backends"] = []
 json.dump(state, open(path, "w"))
 FORGET
 "$ncfg" apply > "$work/steal.log" 2>&1 || true
-check "a live supplicant netcfgd has no record of is left alone" \
+check "a live supplicant is left running" \
 	"$(still_running "$alive" && echo yes || echo no)" "yes"
 check "and its control socket is not removed" \
 	"$([ -e "$work/ctrl/lo" ] && echo yes || echo no)" "yes"
-# The check that actually discriminates. Without the guard the socket exists
-# too -- netcfgd deletes it and a second supplicant binds the same path, so
-# the file is back a moment later and looks untouched. What differs is that
-# there is now a second supplicant on one radio and the first has been left
-# with no socket. A fresh pid file is netcfgd having started one.
-check "and starts no second supplicant on the same radio" \
-	"$([ -e "$pidfile" ] && echo yes || echo no)" "no"
-contains "and netcfgd says who to stop, rather than failing quietly" \
-	"$(cat "$work/steal.log")" "already running a supplicant"
+# **This simulation stopped standing for the thing it simulates, and the
+# assertions changed with it (0140).**
+#
+# Removing the pid file used to be a fair stand-in for "somebody else's
+# supplicant", because a missing pid file and a foreign process were the same
+# observation to netcfgd. They are not any more: the process is still carrying
+# `-P <pidfile>` in its own argv, which is netcfgd's mark, and netcfgd now
+# recovers the handle from there. So what this scenario produces is netcfgd's
+# own orphan, and adopting it is the correct answer -- taking netcfgd's memory
+# away no longer makes a process foreign.
+#
+# **The genuine foreign case is `displace.sh`**, which starts a supplicant that
+# never carried the marker, and `orphan.sh` covers the recovery asserted here.
+# What this keeps proving is the half that matters either way: exactly one
+# supplicant ends up on the radio, and the first is not left socketless.
+check "and netcfgd adopts it rather than starting a second" \
+	"$(cat "$pidfile" 2>/dev/null || echo none)" "$alive"
+check "so there is still exactly one supplicant on the radio" \
+	"$(c=0; for d in /proc/[0-9]*; do tr '\0' '\n' < "$d/cmdline" 2>/dev/null | grep -q "^$pidfile$" && c=$((c+1)); done; echo $c)" "1"
 
 echo
 if [ "$failures" -eq 0 ]; then
