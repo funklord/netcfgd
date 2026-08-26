@@ -48,6 +48,58 @@ pub fn pid_of(path: &Path, marker: &str) -> Option<i32> {
 		.then_some(pid)
 }
 
+/// The pid of a process carrying `marker` as a whole argument, if any.
+///
+/// **[`pid_of`]'s recovery path, and it exists because the pid file is an
+/// index into a fact rather than the fact itself.** netcfgd starts its
+/// supplicant with `-P <run>/supplicant/<iface>.pid`, so the process carries
+/// netcfgd's mark in its own `argv` for as long as it lives. The file that
+/// holds the pid does not: `RuntimeDirectory=netcfgd` means systemd deletes
+/// `/run/netcfgd` on a real stop, while the supplicant -- which netcfgd
+/// deliberately does not stop (0134) -- keeps running. netcfgd then cannot
+/// recognise its own child, and the guard against taking another manager's
+/// radio refuses it for ever, naming `NetworkManager` for a process netcfgd
+/// started itself. Decision 0140.
+///
+/// **This is a scan of `/proc`, which the module header above forbids -- and
+/// the exception is the marker, not the need.** That header rules out finding
+/// a process *by name*, because an operator's own `wpa_supplicant` would be
+/// reached along with netcfgd's. This matches an absolute path netcfgd
+/// composed from its own run directory and one interface, as a **whole**
+/// `argv` element, by exactly the test [`pid_of`] applies. No other manager's
+/// command line can carry it. Loosen this to a substring or to a program name
+/// and the rule really is broken -- which is what the negative tests below are
+/// for.
+///
+/// The lowest matching pid, so that the answer is stable across calls when a
+/// caller has somehow produced two.
+#[must_use]
+pub fn pid_by_marker(marker: &str) -> Option<i32> {
+	let mut found: Option<i32> = None;
+	let entries = std::fs::read_dir("/proc").ok()?;
+	for entry in entries.flatten() {
+		let Ok(name) = entry.file_name().into_string() else {
+			continue;
+		};
+		let Ok(pid) = name.parse::<i32>() else {
+			continue;
+		};
+		if pid <= 0 {
+			continue;
+		}
+		let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+			continue;
+		};
+		if cmdline
+			.split(|byte| *byte == 0)
+			.any(|argument| argument == marker.as_bytes())
+		{
+			found = Some(found.map_or(pid, |seen: i32| seen.min(pid)));
+		}
+	}
+	found
+}
+
 /// Ask a process to terminate.
 ///
 /// `SIGTERM` rather than `SIGKILL`, always: `pppd` on a `SIGTERM` hangs up the
@@ -252,6 +304,80 @@ pub fn hangup(pid: i32) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+	/// A whole-argument match finds netcfgd's own process.
+	#[test]
+	fn a_marker_in_argv_is_found() {
+		let marker = format!("/run/netcfgd-test-{}/supplicant/x.pid", std::process::id());
+		// `sh -c CMD NAME` puts NAME in the shell's own argv and keeps it
+		// there while it waits. `sleep 30 <path>` would not: sleep rejects a
+		// non-numeric argument and the child would be gone before /proc could
+		// be asked, which is a test that proves nothing rather than a fix.
+		let mut child = std::process::Command::new("sh")
+			.arg("-c")
+			.arg("sleep 30")
+			.arg(&marker)
+			.spawn()
+			.expect("spawn");
+		// The child may not have exec'd yet; /proc is authoritative only once
+		// it has, so retry rather than sleep once and hope.
+		let mut found = None;
+		for _ in 0..100 {
+			found = pid_by_marker(&marker);
+			if found.is_some() {
+				break;
+			}
+			std::thread::sleep(std::time::Duration::from_millis(20));
+		}
+		let seen = found;
+		let _ = child.kill();
+		let _ = child.wait();
+		assert_eq!(seen, i32::try_from(child.id()).ok());
+	}
+
+	/// **A substring must not match.** This is the whole defensibility of
+	/// scanning `/proc` at all: the module header forbids finding a process by
+	/// name, and what makes this exception narrow is that the marker is an
+	/// absolute path tested as a whole argument. Loosen it and netcfgd would
+	/// adopt another manager's supplicant.
+	#[test]
+	fn a_substring_of_an_argument_does_not_match() {
+		let marker = format!("/run/netcfgd-test-{}/supplicant/x.pid", std::process::id());
+		// `sh -c CMD NAME` puts NAME in the shell's own argv and keeps it
+		// there while it waits. `sleep 30 <path>` would not: sleep rejects a
+		// non-numeric argument and the child would be gone before /proc could
+		// be asked, which is a test that proves nothing rather than a fix.
+		let mut child = std::process::Command::new("sh")
+			.arg("-c")
+			.arg("sleep 30")
+			.arg(&marker)
+			.spawn()
+			.expect("spawn");
+		let mut ready = false;
+		for _ in 0..100 {
+			if pid_by_marker(&marker).is_some() {
+				ready = true;
+				break;
+			}
+			std::thread::sleep(std::time::Duration::from_millis(20));
+		}
+		let prefix = pid_by_marker(&marker[..marker.len() - 4]);
+		let longer = pid_by_marker(&format!("{marker}.more"));
+		let _ = child.kill();
+		let _ = child.wait();
+		assert!(ready, "the child never appeared, so this proved nothing");
+		assert_eq!(prefix, None, "a proper prefix must not match");
+		assert_eq!(longer, None, "a longer string must not match");
+	}
+
+	/// A marker nothing carries returns nothing, rather than a stray pid.
+	#[test]
+	fn an_absent_marker_finds_nothing() {
+		assert_eq!(
+			pid_by_marker("/run/netcfgd-nothing-carries-this-9c1f2e/x.pid"),
+			None
+		);
+	}
+
 	use super::*;
 
 	#[test]

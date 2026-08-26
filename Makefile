@@ -1295,6 +1295,10 @@ live:
 	@# crash leaves behind and the one every client reports as "cannot reach
 	@# supplicant". The fix loop has to notice without being asked.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/revive.sh"
+	@# The supplicant netcfgd left running when it stopped, after the run
+	@# directory took its pid file. The process lives, the handle does not --
+	@# and without recovering it netcfgd refuses its own child for ever.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/orphan.sh"
 	@# Adopting the network after the ownership record is gone, which is what a
 	@# restart does to it. Holding is safe and is not enough: a netcfgd that
 	@# cannot recognise its own work can never remove it either.

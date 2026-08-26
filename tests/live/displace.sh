@@ -141,7 +141,7 @@ check "and its control socket is still there" \
 # The refusal names what to stop, which is the whole value of declining rather
 # than fighting.
 apply=$("$ncfg" apply 2>&1 || true)
-contains "and an apply says who is holding it" "$apply" "already running a supplicant"
+contains "and an apply says who is holding it" "$apply" "netcfgd did not start is answering"
 
 # ---------------------------------------------------------------------------
 # 2. The other manager lets go, and netcfgd takes the radio.

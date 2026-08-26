@@ -3144,6 +3144,32 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 		if netcfgd_sys::process::pid_of(&pidfile, &pidfile.to_string_lossy()).is_some() {
 			return Ok(());
 		}
+		// **The pid file is an index into a fact, not the fact.** netcfgd
+		// starts its supplicant with `-P <pidfile>`, so the process carries
+		// that path in its own argv for as long as it lives -- but the file
+		// sits in `/run/netcfgd`, which `RuntimeDirectory=` deletes on a real
+		// stop while the supplicant netcfgd deliberately did not stop (0134)
+		// keeps running. Without this branch netcfgd loses the handle to its
+		// own child, falls through to the refusal below, and blames
+		// NetworkManager for a process it started itself -- for ever, on every
+		// reconcile, because the error is returned before the restart counter
+		// is touched so 0079 never gives up either. Decision 0140.
+		//
+		// Adopting means rewriting the file, because the file is what the
+		// observer and `stop_backend` key on. Nothing is restarted: the
+		// association the orphan is holding is exactly what 0134 wanted kept.
+		if let Some(pid) = netcfgd_sys::process::pid_by_marker(&pidfile.to_string_lossy()) {
+			if let Some(parent) = pidfile.parent() {
+				std::fs::create_dir_all(parent)
+					.map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+			}
+			std::fs::write(&pidfile, format!("{pid}\n"))
+				.map_err(|error| format!("cannot record the supplicant on {iface}: {error}"))?;
+			eprintln!(
+				"netcfgd: adopted the supplicant already running on {iface} (pid {pid}); it is netcfgd's, by the `-P {}` it was started with"
+			, pidfile.display());
+			return Ok(());
+		}
 		// **A socket with no netcfgd pid file behind it is not automatically
 		// stale.** It is stale only if nothing answers it. If something does,
 		// another manager is running a supplicant on this radio --
@@ -3160,13 +3186,17 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 		// not by pulling it out from under a running one.
 		if netcfgd_supplicant::answers(&dir, iface) {
 			return Err(format!(
-				"something else is already running a supplicant on `{iface}` -- its \
-				 control socket at {} answers, and netcfgd did not start it. netcfgd \
-				 will not take a radio from a manager that is still running: stop the \
-				 other one (`systemctl stop NetworkManager`, most often) and netcfgd \
-				 will pick the radio up on the next reconcile. Or set \
+				"a supplicant netcfgd did not start is answering on `{iface}` -- \
+				 its control socket at {} answers, and no process on this machine \
+				 carries `-P {}`, which is how netcfgd marks its own. netcfgd will \
+				 not take a radio from a manager that is still running: stop the \
+				 other one and netcfgd will pick the radio up on the next reconcile. \
+				 On Debian that is usually BOTH `systemctl stop NetworkManager` and \
+				 `systemctl stop wpa_supplicant` -- the second runs independently of \
+				 the first and keeps this socket answering on its own. Or set \
 				 `managed = false` on this device to leave it alone for good",
-				dir.join(iface).display()
+				dir.join(iface).display(),
+				pidfile.display()
 			));
 		}
 		let _ = std::fs::remove_file(dir.join(iface));
