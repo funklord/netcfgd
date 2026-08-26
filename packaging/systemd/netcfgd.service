@@ -118,5 +118,29 @@ RuntimeDirectoryMode=0755
 # behind for ever would make the reboot case look like a restart.
 RuntimeDirectoryPreserve=restart
 
+# **Declared rather than defaulted, and the value is deliberate (0142).**
+#
+# systemd's default is `control-group`, which kills every process in the unit's
+# cgroup on stop -- including the wpa_supplicant and dhcpcd netcfgd started.
+# Decision 0134 says an unannounced stop *holds*, and reasoned from netcfgd's
+# own source: no SIGTERM teardown in the daemon, no ExecStop in this file. That
+# skipped the init, which does the killing regardless. So 0134 was true of
+# netcfgd and false of the system, and its tests could not have caught it --
+# they run netcfgd as a plain child in a namespace, where no cgroup reaping
+# exists.
+#
+# `process` is what 0134 actually wants, and it is NOT set yet. It would leave
+# every backend running after a stop, and netcfgd cannot yet re-adopt all of
+# them: it recovers its supplicant from the `-P` path in argv (0140), but
+# dhcpcd calls setproctitle and destroys both its argv and its environment, so
+# a held dhcpcd is one nothing can identify or stop. Measured on a real
+# machine: an orphan renewing once a minute for two hours, thirteen addresses
+# consumed.
+#
+# **So the order is: adoption first, then this flips.** Holding what cannot be
+# re-adopted is worse than not holding it, and `control-group` is the honest
+# state until every backend can be recovered.
+KillMode=control-group
+
 [Install]
 WantedBy=multi-user.target
