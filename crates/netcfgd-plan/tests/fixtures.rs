@@ -7050,6 +7050,15 @@ fn a_wedged_daemon_is_named_and_a_silent_one_is_not() {
 			advertised: Vec::new(),
 		});
 
+		// Computed before `plan` the binding shadows `plan` the function.
+		let consented = plan(
+			&desired,
+			&observed,
+			&PlanOptions {
+				restart_wedged: vec!["wlan0".to_owned()],
+				..PlanOptions::default()
+			},
+		);
 		let plan = plan(&desired, &observed, &PlanOptions::default());
 		let said = plan.warnings.iter().any(|warning| {
 			warning
@@ -7061,13 +7070,61 @@ fn a_wedged_daemon_is_named_and_a_silent_one_is_not() {
 			"answering={answering:?} said={said}: {:?}",
 			plan.warnings
 		);
-		// And it is a warning, never a refusal: netcfgd cannot tell a wedged
-		// daemon from a slow one, so it must not be a thing that stops an
-		// apply.
-		assert!(
-			plan.refusals.is_empty(),
-			"a daemon that did not answer refused something: {:?}",
+		// **And it is now a refusal as well as a warning (0141).** This used
+		// to assert the opposite -- "a warning, never a refusal", on the
+		// reasoning that netcfgd cannot tell a wedged daemon from a slow one.
+		// That reasoning is why netcfgd still does not restart it by default;
+		// what changed is that declining is now said in the type built for
+		// declining, which carries the invocation that consents. A refusal
+		// stops no other action, so the old worry about stopping an apply does
+		// not apply to it.
+		let refused = plan
+			.refusals
+			.iter()
+			.any(|refusal| refusal.op == "backend.restart");
+		assert_eq!(
+			refused, expected,
+			"answering={answering:?}: refusals {:?}",
 			plan.refusals
+		);
+		if expected {
+			let refusal = plan
+				.refusals
+				.iter()
+				.find(|refusal| refusal.op == "backend.restart")
+				.expect("checked above");
+			assert!(
+				refusal.override_with.contains("--restart-wedged"),
+				"the refusal must name the option that consents: {refusal:?}"
+			);
+		}
+
+		// **And with consent it restarts instead of refusing.** Without this
+		// half the option could be accepted and ignored, which is the shape
+		// that passes a test while doing nothing.
+		let restarts = consented
+			.actions
+			.iter()
+			.filter(|action| {
+				matches!(
+					action.op,
+					netcfgd_plan::Op::BackendStop { .. } | netcfgd_plan::Op::BackendStart { .. }
+				)
+			})
+			.count();
+		assert_eq!(
+			restarts > 0,
+			expected,
+			"answering={answering:?} with consent: actions {:?}",
+			consented.actions.len()
+		);
+		assert!(
+			consented
+				.refusals
+				.iter()
+				.all(|refusal| refusal.op != "backend.restart"),
+			"consent given and still refused: {:?}",
+			consented.refusals
 		);
 	}
 }

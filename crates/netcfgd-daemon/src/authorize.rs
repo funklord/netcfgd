@@ -385,7 +385,8 @@ mod tests {
 			&Request::Apply {
 				confirm: None,
 				allow_disruption: Vec::new(),
-				strand_credentials: Vec::new()
+				strand_credentials: Vec::new(),
+				restart_wedged: Vec::new()
 			}
 		)
 		.is_err());
@@ -692,6 +693,7 @@ mod tests {
 				confirm: None,
 				allow_disruption: Vec::new(),
 				strand_credentials: Vec::new(),
+				restart_wedged: Vec::new(),
 			},
 		] {
 			assert!(
@@ -709,7 +711,8 @@ mod tests {
 			tier_of(&Request::Apply {
 				confirm: None,
 				allow_disruption: Vec::new(),
-				strand_credentials: Vec::new()
+				strand_credentials: Vec::new(),
+				restart_wedged: Vec::new()
 			}),
 			Tier::Admin
 		);
@@ -812,7 +815,8 @@ mod tests {
 			&Request::Apply {
 				confirm: None,
 				allow_disruption: Vec::new(),
-				strand_credentials: Vec::new()
+				strand_credentials: Vec::new(),
+				restart_wedged: Vec::new()
 			}
 		)
 		.is_err());
