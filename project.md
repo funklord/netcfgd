@@ -1023,6 +1023,52 @@ wrong tool, because a ratchet must die at process exit rather than at reboot.
 And 0134's "hold by default" must not be inherited: for this class the safe
 direction is to lose it.
 
+**And dhcpcd, the one backend whose mark cannot be read from its process at
+all** ([0143](doc/decision/0143-the-one-backend-that-cannot-be-read-from-its-process.md)).
+It calls `setproctitle`, and that consumes the argv block **and the adjacent
+environment block**: measured on a live orphan, `/proc/<pid>/cmdline` reads
+`dhcpcd: wlp0s20f3 [ip4]` and `environ` comes back 4494 bytes with **zero**
+non-NUL, against a control spawned identically that kept 4419 and its marker.
+An environment marker fails twice over anyway, since an environment is
+inherited and every privsep child and hook would carry it -- a scan would match
+a set rather than a client.
+
+**What survives is dhcpcd's memory of its own `-f`**, recited verbatim on its
+control socket. So netcfgd passes `-f <run>/dhcpcd/<iface>-4.conf` and asks for
+it back. That path is a **symlink to `/etc/dhcpcd.conf`**, because `-f`
+replaces the operator's config outright and dhcpcd has no `include`; measured,
+it reads the target's options through the link while reciting the link's path.
+A dangling symlink is not a failure -- dhcpcd logs and applies defaults, exactly
+as it already does where no such file exists. The symlink is re-created on
+adoption, or a later `dhcpcd -n` reload reads a dangling path and silently
+drops the operator's options.
+
+**Three things the obvious implementation gets wrong, all measured.** Use the
+**privileged** socket: 10.5.0 removed the unprivileged one as "a breaking ABI
+change" and Debian sid ships 10.5.2 today. Do **not** parse the length prefix:
+it is a native `size_t`, four bytes on 32-bit ARM and big-endian on MIPS. And
+"read to the first NUL" is wrong too -- the prefix's low byte is printable for
+any ordinary path, so `22 00 00 …` stops the scan after one character. That
+third one was written, caught, and now has a unit test carrying the measured
+bytes.
+
+**The client count cannot prove this fix, and the test says so.** A second
+`dhcpcd -b` against a running one is a silent no-op, so netcfgd reports success
+whether it adopted or blindly re-ran. What proves it is the adoption message
+and, more, **the refusal of a stranger** -- a client started with a config path
+netcfgd did not choose. Both controls bite in opposite directions: removing the
+probe fails adoption, widening the comparison wrongly adopts an operator's
+client.
+
+**The sandbox gate caught the new `/etc` path immediately**, which is what it
+is for. `/etc/dhcpcd.conf` is classified read-only beside the supplicant's
+certificates and for the same reason: netcfgd never opens it, it passes a path
+and another daemon opens it in a sandbox this unit does not bound.
+
+**It is prospective only.** A dhcpcd already running keeps the config path it
+started with, so no existing orphan can be adopted -- this prevents the next
+one rather than curing one that exists.
+
 **udhcpc gets 0140's adoption too, and its version of the fault is worse.**
 The shape is identical -- busybox does not call `setproctitle`, so netcfgd's
 `-p <path>` survives whole in argv while the file it names sits in

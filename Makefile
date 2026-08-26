@@ -1307,6 +1307,10 @@ live:
 	@# in argv but has no instance lock, so a lost handle means a second client
 	@# and a second lease rather than a refusal.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/udhcpc_orphan.sh"
+	@# The backend whose mark cannot be read from the process: dhcpcd destroys
+	@# argv and environ alike, so netcfgd asks it over its control socket which
+	@# config it was started with. Makes its own namespace, like dhcpcd.sh.
+	@NCFG_LIVE=1 sh tests/live/dhcpcd_orphan.sh
 	@# Adopting the network after the ownership record is gone, which is what a
 	@# restart does to it. Holding is safe and is not enough: a netcfgd that
 	@# cannot recognise its own work can never remove it either.
