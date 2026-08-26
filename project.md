@@ -1023,6 +1023,48 @@ wrong tool, because a ratchet must die at process exit rather than at reboot.
 And 0134's "hold by default" must not be inherited: for this class the safe
 direction is to lose it.
 
+**0134 was true of netcfgd and false of the machine, and that is corrected**
+([0142](doc/decision/0142-systemd-kills-what-netcfgd-holds.md)). It said an
+unannounced stop holds, and argued it from netcfgd's own source: no `SIGTERM`
+teardown in the daemon, no `ExecStop` in the unit. Both facts are true and the
+conclusion skips the init. The packaged unit set no `KillMode=` in 122 lines,
+so systemd's `control-group` default reaped every backend on stop -- and with
+`Restart=on-failure`, on crash too, which is the case 0134 calls decisive. The
+VPN-over-wifi that record exists to protect was being dropped by `systemctl
+stop netcfgd` the whole time it stood.
+
+**The tests could not have caught it, and that is the lesson worth keeping.**
+`orphan.sh` and `revive.sh` run netcfgd as a plain child inside `unshare`,
+where there is no systemd and no cgroup. They prove the *daemon* tears nothing
+down; they observe nothing about the *system*. **A true statement about netcfgd
+stood in for a false one about the machine** -- checks that were real,
+discriminating, and measuring one layer below the claim.
+
+**It was found by reading a cgroup.** The orphaned `dhcpcd` that produced this
+whole investigation sits in `session-c1.scope` -- a shell session, not a
+service -- because a diagnostic script had run netcfgd in the foreground. Under
+the unit it would have been reaped. So the orphans that motivated 0140 were an
+artefact of how they were produced, and 0140 fixed a real defect before the
+thing that makes it common was identified.
+
+**The unit declares `KillMode=control-group` now, and `process` is deliberately
+not set.** `process` is what 0134 wants, and it cannot ship until netcfgd can
+re-adopt what it leaves running: the supplicant it can (0140, via the `-P` path
+in argv), `dhcpcd` it cannot, because `setproctitle` destroys both argv and the
+environment block. **Holding what cannot be re-adopted is worse than not
+holding it** -- a held dhcpcd renews on its own schedule against whatever
+manager comes next, measured at one lease a minute for two hours and thirteen
+addresses. Adoption first, then the value flips.
+
+**`tests/live/killmode.sh` checks the declaration, not the behaviour, and says
+so.** The suite runs unprivileged and a root-only test would skip everywhere,
+which reads as coverage while being none. Checking the declaration is still
+worth it because the defect *was* an absent setting. Both controls bite:
+removing the line fails two checks, and a unit that disagrees with the record
+fails a third -- the latter only after the record gained one declarative `Set:`
+line, because the record necessarily discusses the value it does not set and a
+prose grep passed whichever value the unit carried.
+
 **The reboot case was an assumption about a filesystem, and is now a check**
 ([0138](doc/decision/0138-a-record-outliving-its-boot-is-wrong-not-stale.md)).
 0135, 0136 and 0137 each closed by saying a reboot clears `/run` and the kernel

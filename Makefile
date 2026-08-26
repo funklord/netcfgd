@@ -1299,6 +1299,10 @@ live:
 	@# directory took its pid file. The process lives, the handle does not --
 	@# and without recovering it netcfgd refuses its own child for ever.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/orphan.sh"
+	@# What systemd does to the backends when the unit stops. Checks the
+	@# declaration rather than the behaviour, and says so: the defect was an
+	@# absent setting, and an absent setting is what this catches.
+	@sh tests/live/killmode.sh
 	@# Adopting the network after the ownership record is gone, which is what a
 	@# restart does to it. Holding is safe and is not enough: a netcfgd that
 	@# cannot recognise its own work can never remove it either.
