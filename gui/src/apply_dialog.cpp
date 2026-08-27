@@ -24,7 +24,7 @@ namespace {
 
 const char *const journal_titles[] = { "id", "op", "interface", "outcome", "detail" };
 constexpr int journal_column_count =
-	static_cast<int>(sizeof(journal_titles) / sizeof(journal_titles[0]));
+    static_cast<int>(sizeof(journal_titles) / sizeof(journal_titles[0]));
 
 /*
  * The window this offers by default.

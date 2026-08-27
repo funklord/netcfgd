@@ -32,7 +32,7 @@ namespace {
  * that paraphrases a command says no without saying how.
  */
 const char *const note_titles[] = { "severity", "interface",      "message",        "detail",
-		            "reason",   "what to change", "or proceed with" };
+	                "reason",   "what to change", "or proceed with" };
 constexpr int note_column_count = static_cast<int>(sizeof(note_titles) / sizeof(note_titles[0]));
 
 /*
@@ -46,9 +46,9 @@ constexpr int note_column_count = static_cast<int>(sizeof(note_titles) / sizeof(
  * the fields rather than inventing a phrasing of their own.
  */
 const char *const action_titles[] = { "id",       "op",      "interface",  "field",
-		              "observed", "desired", "reversible" };
+	                  "observed", "desired", "reversible" };
 constexpr int action_column_count =
-	static_cast<int>(sizeof(action_titles) / sizeof(action_titles[0]));
+    static_cast<int>(sizeof(action_titles) / sizeof(action_titles[0]));
 
 /* Two shades and a weight, and never on their own -- every row that is styled
  * also says what it is in words, because a theme this program does not choose
@@ -76,7 +76,7 @@ QString reason_of(const ncfg_note_row &note)
 		return QString();
 	}
 	return QStringLiteral("%1: %2 -> %3")
-		.arg(note.field, note.observed, note.desired);
+	    .arg(note.field, note.observed, note.desired);
 }
 
 void emphasise(QTableWidgetItem *item, const QColor &colour)
