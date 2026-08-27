@@ -1120,6 +1120,27 @@ the unit it would have been reaped. So the orphans that motivated 0140 were an
 artefact of how they were produced, and 0140 fixed a real defect before the
 thing that makes it common was identified.
 
+**netcfgd has associated with a network, and until 2026-08-27 it never had.**
+`tests/live/hwsim.sh` drives a real `wpa_supplicant` against simulated radios
+in a private namespace, and it is the only test in the tree that puts a radio
+under the wireless path -- eleven wifi tests use `fake_supplicant.py`, and
+`wifi.sh` and `dot1x.sh` drive a real supplicant with no radio, so they verify
+everything up to joining a network and not the joining. It needs real root, is
+not part of `make live`, and had never been run. The suite had 935 passing
+checks and not one had watched a station associate.
+
+The first run failed at the first action, on netcfgd's own contention guard
+claiming NetworkManager managed a virtual radio NM could not see. See
+[0144](doc/decision/0144-an-ifindex-means-nothing-outside-its-namespace.md):
+an ifindex is issued by a network namespace and means nothing outside it, and
+`/run` is a mount rather than a namespace. The second run associated, took the
+network the document named, negotiated SAE from a transitional offer, and
+`ncfg` agreed.
+
+**This is a lab, not the operator's hardware.** The fault reported there is a
+different one and remains open: netcfgd runs in the host namespace, the guard's
+check passes, and NetworkManager genuinely does hold the radio.
+
 **A test written today could have killed processes on the host, and did try
 to.** `dhcpcd_orphan.sh` finds dhcpcd by its *executable*, because dhcpcd
 destroys its own argv and leaves nothing unique to match on -- every other
