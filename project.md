@@ -1120,6 +1120,23 @@ the unit it would have been reaped. So the orphans that motivated 0140 were an
 artefact of how they were produced, and 0140 fixed a real defect before the
 thing that makes it common was identified.
 
+**A test written today could have killed processes on the host, and did try
+to.** `dhcpcd_orphan.sh` finds dhcpcd by its *executable*, because dhcpcd
+destroys its own argv and leaves nothing unique to match on -- every other
+scanning test here filters on a path under its own `mktemp` directory, which
+nothing outside can carry. Without a pid namespace, `/proc` shows the whole
+machine, so its cleanup trap signalled every dhcpcd on the box, including the
+one holding the operator's default route. Under `unshare -r` those kills failed
+with EPERM against real root; that is luck, not design, and as root they would
+have landed.
+
+It unshares `--pid --fork` and remounts `/proc` now. Measured: the host had
+four dhcpcd processes and the namespace sees zero. **The backend with no marker
+is the one whose test has no safe filter** -- not a coincidence, and the reason
+the isolation has to carry the weight instead. This is `running-code.md`'s
+failure exactly: a script whose job is to break things reaching outside its
+sandbox, written by the session that had just finished citing that document.
+
 **And netcfgd gives back a radio it took before the other manager declared
 itself.** The guard refuses an interface another manager claims, but it learns
 that from files `NetworkManager` writes *once it has decided* it owns a device
