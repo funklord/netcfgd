@@ -1157,6 +1157,37 @@ an ifindex is issued by a network namespace and means nothing outside it, and
 network the document named, negotiated SAE from a transitional offer, and
 `ncfg` agreed.
 
+**The test now runs to a working network rather than to an association**, which
+is the difference the reported fault lives in: it takes a DHCP lease over the
+radio from a real dnsmasq on the access point side, checks the server's own
+lease file agrees, and pings the access point. Association and DHCP had never
+been exercised together -- the wireless tests had no radio and the DHCP tests
+run over veth.
+
+Containing it took three runs and is worth knowing. dhcpcd 10.1.0 has no
+`--dbdir` and its state directory is compiled in, so netcfgd cannot redirect it
+and only a mount namespace can. `ip netns exec` unshares a *fresh* one per
+invocation, and **`ncfg apply` goes through the daemon only when `--confirm` is
+given** -- without it the CLI applies in its own process, so dhcpcd is the
+CLI's child rather than the daemon's. A tmpfs over the daemon's
+`/var/lib/dhcpcd` therefore contained nothing, measured: the daemon sat in
+`mnt:[4026536358]` holding it while dhcpcd ran in `mnt:[4026536361]` and wrote
+into the operator's real directory. The mount goes up in `innc()` now, so every
+invocation gets it.
+
+**The check that caught it was added in the same change that caused it.** The
+test snapshots the host's lease directory before starting and compares
+afterwards, because a tmpfs that fails to mount looks exactly like one that
+worked until the lease lands. It failed twice before it passed, both times
+correctly.
+
+**That `ncfg apply` without `--confirm` spawns backends as children of a
+short-lived CLI is recorded here as an observation, not a fault.** Those
+processes are reparented to init the moment it exits and the daemon never owned
+them, which is presumably why the adoption machinery exists -- but it means
+which process owns dhcpcd depends on whether the operator typed a flag. Raised
+with the holder; unanswered.
+
 **This is a lab, not the operator's hardware.** The fault reported there is a
 different one and remains open: netcfgd runs in the host namespace, the guard's
 check passes, and NetworkManager genuinely does hold the radio.

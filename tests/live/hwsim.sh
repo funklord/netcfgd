@@ -336,11 +336,52 @@ echo "ok   the access point is beaconing"
 
 # `ncfg wifi *` goes over the control socket, so the daemon has to be running
 # inside the namespace -- exporting these here would only affect this shell.
+# **Every invocation gets the tmpfs, not just the daemon's.**
+#
+# `ip netns exec` unshares a *fresh mount namespace per invocation*, and
+# `ncfg apply` goes through the daemon only when `--confirm` is given -- without
+# it the CLI applies in its own process, so dhcpcd is the CLI's child rather
+# than the daemon's. Containing only the daemon therefore contained nothing:
+# measured, the daemon sat in mnt:[4026536358] holding the tmpfs while dhcpcd
+# ran in mnt:[4026536361] and wrote its lease to the operator's real
+# /var/lib/dhcpcd.
+#
+# netcfgd cannot redirect it. dhcpcd 10.1.0 has no --dbdir and its state
+# directory is compiled in, so the only lever is the mount namespace and this
+# is the only place to pull it.
 innc() {
 	inns env NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" \
-		NCFG_WPA_CTRL_DIR="$work/ctrl" "$@"
+		NCFG_WPA_CTRL_DIR="$work/ctrl" sh -c '
+		if [ -d /var/lib/dhcpcd ]; then
+			mount -t tmpfs tmpfs /var/lib/dhcpcd || exit 90
+			# A fresh tmpfs is empty. Anything visible is the host
+			# showing through, and mount(8) returning 0 is not
+			# evidence that the view changed.
+			if [ -n "$(ls -A /var/lib/dhcpcd 2>/dev/null)" ]; then
+				echo "the tmpfs over /var/lib/dhcpcd did not take" >&2
+				exit 91
+			fi
+		fi
+		exec "$@"
+	' sh "$@"
 }
 
+# Taken before anything starts, so the containment above can be checked rather
+# than asserted. A tmpfs that silently failed to mount looks exactly like one
+# that worked, right up until the lease lands in the operator's directory.
+host_leases_before=$(ls /var/lib/dhcpcd 2>/dev/null | sort)
+
+# **A tmpfs over dhcpcd's lease directory, in the namespace netcfgd's children
+# inherit.** netcfgd gives dhcpcd `-c`, `-f`, `-b`, `-m` and the interface and
+# no lease-directory override, so dhcpcd uses its compiled-in /var/lib/dhcpcd
+# -- which, without this, is the *host's*. `ip netns exec` unshares a mount
+# namespace per invocation, so the mount has to happen in the same one that
+# execs the daemon, and every dhcpcd netcfgd spawns then inherits it.
+#
+# This is the failure `dhcpcd_orphan.sh` was fixed for on the same day, in its
+# quieter form: not killing the operator's processes, only writing into their
+# state. A test that leaves a lease file named after a simulated radio in a
+# real /var/lib/dhcpcd has reached outside its sandbox either way.
 innc "$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 # Kept so cleanup can kill this by name rather than only by namespace. `$!` is
 # the *subshell* the background function call forked, not netcfgd, and that is
@@ -352,6 +393,15 @@ while [ ! -e "$work/run/netcfgd.sock" ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 100 ]; then
 		cat "$work/daemon.log" >&2
+		# Exit 90 is the wrapper above failing to mount a tmpfs over
+		# dhcpcd's lease directory. It refuses rather than running
+		# uncontained, so say which of the two happened.
+		case "$(cat "$work/daemon.log" 2>/dev/null)" in
+		*"did not take"* | *"Operation not permitted"*)
+			die "could not contain /var/lib/dhcpcd, so the daemon was \
+not started rather than have dhcpcd write to the host's"
+			;;
+		esac
 		die "the daemon never bound its socket"
 	fi
 	sleep 0.1
@@ -418,6 +468,121 @@ if [ "$state" = COMPLETED ]; then
 
 	scan=$(innc "$ncfg" wifi scan 2>&1 || true)
 	contains "a scan finds the access point" "$scan" "netcfgd-test"
+fi
+
+# --------------------------------------------------------- and then an address
+#
+# **Associating is not having a network, and the gap between them is where the
+# reported fault lived.** "When I start netcfgd, ping stops working" is about
+# the step after joining: everything above proves the radio joins, and nothing
+# above proves a packet can leave. The wireless tests had no radio and the DHCP
+# tests had no radio either -- they run over veth -- so the join and the lease
+# had never been exercised together.
+#
+# dnsmasq serves the access point side. It is optional: a missing one skips
+# this phase and leaves the association result standing, which is the same
+# bargain `ap.sh` makes for hostapd. Not run at all if the station never
+# associated, because a lease that fails for want of an association would be
+# reported as a DHCP fault.
+if [ "$state" = COMPLETED ]; then
+	dnsmasq=$(find_in_sbin dnsmasq || true)
+	client=$(find_in_sbin dhcpcd || true)
+	if [ -z "$dnsmasq" ]; then
+		echo "note: no dnsmasq, so the address half is not run \
+(apt install dnsmasq-base | apk add dnsmasq)"
+	elif [ -z "$client" ]; then
+		echo "note: no dhcpcd, so the address half is not run \
+(apt install dhcpcd-base | apk add dhcpcd)"
+	else
+		inns "$ip" addr add 10.55.0.1/24 dev "$ap_dev"
+		# Left to daemonise rather than backgrounded with `&`. A background
+		# job forks a subshell this script would then have to kill by name,
+		# which is the mistake the comment in cleanup() is about; a process
+		# that puts itself in the namespace is found by `ip netns pids` and
+		# reaped with everything else.
+		inns "$dnsmasq" --log-facility="$work/dnsmasq.log" \
+			--pid-file="$work/dnsmasq.pid" \
+			--dhcp-leasefile="$work/dnsmasq.leases" \
+			--user=root --interface="$ap_dev" --bind-interfaces \
+			--no-resolv --port=0 \
+			--dhcp-range=10.55.0.100,10.55.0.120,255.255.255.0,120 \
+			>> "$work/dnsmasq.out" 2>&1 ||
+			die "dnsmasq would not start: $(cat "$work/dnsmasq.out" 2>/dev/null)"
+
+		# Ask for a lease on the interface that is already associated. The
+		# document is rewritten rather than written this way from the start,
+		# so that a DHCP failure cannot take the association checks with it.
+		sed -i "s|^interface $sta_dev { config = \"null\" }|interface $sta_dev { config = \"dhcp\" }|" \
+			"$work/etc/netcfgd.conf"
+		grep -q "config = \"dhcp\"" "$work/etc/netcfgd.conf" ||
+			die "the document was not rewritten, so this would test nothing"
+
+		out=$(innc "$ncfg" apply 2>&1 || true)
+		waited=0
+		addr=
+		until [ -n "$addr" ]; do
+			addr=$(inns "$ip" -4 -o addr show dev "$sta_dev" 2>/dev/null |
+				sed -n 's/.*inet \(10\.55\.0\.[0-9]*\)\/.*/\1/p')
+			waited=$((waited + 1))
+			if [ "$waited" -gt 300 ]; then
+				echo "FAIL never got an address over the radio"
+				echo "       ncfg apply said: $out"
+				echo "       dnsmasq log:"
+				sed 's/^/         /' "$work/dnsmasq.log" 2>/dev/null | tail -10
+				failures=$((failures + 1))
+				break
+			fi
+			sleep 0.1
+		done
+
+		if [ -n "$addr" ]; then
+			echo "ok   took a DHCP lease over the radio ($addr)"
+			# The server's own record has to agree. An address on the
+			# interface with no lease behind it is what a link-local
+			# autoconfiguration looks like, and it would pass the check above.
+			if grep -q "$addr" "$work/dnsmasq.leases" 2>/dev/null; then
+				echo "ok   and dnsmasq recorded the lease it handed out"
+			else
+				echo "FAIL the address is not in dnsmasq's lease file"
+				failures=$((failures + 1))
+			fi
+			# **And the host's lease directory is untouched.** This is
+			# the check the tmpfs above exists for, and without it the
+			# mount could fail silently and nothing would say so.
+			host_leases_after=$(ls /var/lib/dhcpcd 2>/dev/null | sort)
+			if [ "$host_leases_before" = "$host_leases_after" ]; then
+				echo "ok   and wrote no lease into the host's /var/lib/dhcpcd"
+			else
+				echo "FAIL this test wrote into the host's /var/lib/dhcpcd"
+				echo "       before: $host_leases_before"
+				echo "       after:  $host_leases_after"
+				# **Which namespace did it escape from.** The daemon
+				# verified its own tmpfs before exec'ing, so a lease on
+				# the host means dhcpcd is not in the daemon's mount
+				# namespace -- and the only ways out of one are setns
+				# and unshare. Compare them rather than reason about it.
+				for pid in $("$ip" netns pids "$ns" 2>/dev/null); do
+					comm=$(cat "/proc/$pid/comm" 2>/dev/null)
+					case "$comm" in
+					netcfgd | dhcpcd)
+						echo "       $comm[$pid] mnt=$(readlink "/proc/$pid/ns/mnt" 2>/dev/null)"
+						;;
+					esac
+				done
+				echo "       this shell mnt=$(readlink /proc/$$/ns/mnt)"
+				echo "       daemon said:"
+				sed 's/^/         /' "$work/daemon.log" 2>/dev/null | head -8
+				failures=$((failures + 1))
+			fi
+			# And a packet actually crosses the simulated air.
+			if inns ping -c 1 -W 2 10.55.0.1 >/dev/null 2>&1; then
+				echo "ok   and reaches the access point over the air"
+			else
+				echo "FAIL cannot reach the access point at 10.55.0.1"
+				failures=$((failures + 1))
+			fi
+		fi
+	fi
 fi
 
 echo
