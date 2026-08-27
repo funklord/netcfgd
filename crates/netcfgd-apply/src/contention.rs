@@ -6,13 +6,25 @@
 //! later, and the operator would watch an address appear and disappear with
 //! neither tool saying why.
 //!
-//! Detection is by the files these daemons leave in `/run`, not by D-Bus and
-//! not by scanning process names. Both alternatives are worse: D-Bus is the
-//! dependency decision 0014 declined to take, and a process name tells you
+//! Detection is by the files these daemons leave in `/run`, not by D-Bus:
+//! D-Bus is the dependency decision 0014 declined to take, and the files are
+//! the only per-interface evidence available -- which is the part that matters,
+//! since netcfgd and `NetworkManager` can share a machine perfectly well as
+//! long as they do not share a device.
+//!
+//! **A process name is consulted as well, and only for liveness.** This file
+//! used to rule that out too, on the grounds that a process name tells you
 //! something is running without telling you which interfaces it has opinions
-//! about -- which is the only part that matters, since netcfgd and
-//! `NetworkManager` can share a machine perfectly well as long as they do not
-//! share a device.
+//! about. That is true, and it argues against using process names *instead of*
+//! the files rather than against using both. Reading it as though it forbade
+//! both is what left decision 0145's failure unexamined: `NetworkManager` has
+//! no `RuntimeDirectory=` and no `ExecStop=`, so its device files outlive it
+//! with `managed=true` still in them, and netcfgd declined a radio on behalf of
+//! a daemon systemd had already stopped -- leaving a machine with no network
+//! manager at all.
+//!
+//! So: **the file says which interfaces, and a live process says the claim is
+//! current.** Neither is sufficient alone.
 //!
 //! netcfgd never acts on what it finds here. It reports, and the operator
 //! decides -- the same posture as a guard or a drift report.
@@ -35,6 +47,45 @@ pub struct Contender {
 /// installing `NetworkManager`.
 fn run_root() -> PathBuf {
 	std::env::var_os("NCFG_RUN_ROOT").map_or_else(|| PathBuf::from("/run"), PathBuf::from)
+}
+
+/// Where to look for running processes. `NCFG_PROC` is for the tests, which
+/// otherwise could only assert against whatever this machine happens to run --
+/// and this machine runs `NetworkManager`, so every liveness test would have
+/// passed for the wrong reason.
+fn proc_root() -> PathBuf {
+	std::env::var_os("NCFG_PROC").map_or_else(|| PathBuf::from("/proc"), PathBuf::from)
+}
+
+/// Whether a daemon with one of these `comm` names is running.
+///
+/// `comm` rather than the executable link because `/proc/<pid>/comm` is
+/// world-readable and `/proc/<pid>/exe` is not: netcfgd runs as root, but a
+/// check that silently degrades when it does not is a check that lies. It is
+/// truncated to 15 characters by the kernel, which is why `systemd-networkd`
+/// is listed under its truncation as well as its full name.
+fn daemon_is_running(names: &[&str]) -> bool {
+	let Ok(entries) = fs::read_dir(proc_root()) else {
+		// Unreadable /proc: fall back to believing the files, which is the
+		// direction that keeps the guard rather than the one that starts a
+		// second supplicant on somebody else's radio.
+		return true;
+	};
+	for entry in entries.flatten() {
+		if !entry
+			.file_name()
+			.to_str()
+			.is_some_and(|name| name.bytes().all(|b| b.is_ascii_digit()))
+		{
+			continue;
+		}
+		if let Ok(comm) = fs::read_to_string(entry.path().join("comm")) {
+			if names.contains(&comm.trim()) {
+				return true;
+			}
+		}
+	}
+	false
 }
 
 /// Whether the daemon state under `/run` describes interfaces netcfgd can see.
@@ -124,6 +175,9 @@ pub fn contenders(interfaces: &[(String, u32)]) -> Vec<Contender> {
 /// and checking for the file alone would report a contest with a daemon that
 /// has already stepped aside.
 fn network_manager_claims(root: &Path, interfaces: &[(String, u32)]) -> Vec<String> {
+	if !daemon_is_running(&["NetworkManager"]) {
+		return Vec::new();
+	}
 	let devices = root.join("NetworkManager/devices");
 	let mut claimed: Vec<String> = interfaces
 		.iter()
@@ -162,6 +216,9 @@ fn network_manager_claims(root: &Path, interfaces: &[(String, u32)]) -> Vec<Stri
 /// that a systemd release can move the format; the mitigation is that this
 /// feeds a *warning*, so what breaks is a diagnostic and not a network.
 fn networkd_claims(root: &Path, interfaces: &[(String, u32)]) -> Vec<String> {
+	if !daemon_is_running(&["systemd-network", "systemd-networkd"]) {
+		return Vec::new();
+	}
 	let links = root.join("systemd/netif/links");
 	let mut claimed: Vec<String> = interfaces
 		.iter()
@@ -200,8 +257,17 @@ pub fn describe(contender: &Contender) -> String {
 	format!(
 		"{} also manages {}. Two daemons on one interface will fight, and \
 		 whichever applied last wins until the other notices -- so this will \
-		 look like the config working intermittently. Hand it over with `{}`, \
-		 or set `managed = false` on the device here.",
+		 look like the config working intermittently.\n\n\
+		 Hand over just this device with `{}`, or set `managed = false` on \
+		 the device here.\n\n\
+		 To make netcfgd the only network daemon on the machine instead:\n\n    \
+		 mkdir -p /etc/systemd/system/netcfgd.service.d\n    \
+		 cp /usr/share/doc/netcfgd/netcfgd-exclusive.conf \\\n        \
+		 /etc/systemd/system/netcfgd.service.d/\n    \
+		 systemctl daemon-reload && systemctl restart netcfgd\n\n\
+		 That drop-in conflicts with NetworkManager, systemd-networkd, connman, \
+		 wpa_supplicant and ModemManager, so the init system stops them rather \
+		 than netcfgd killing anything itself.",
 		contender.name,
 		contender.interfaces.join(", "),
 		commands.join("` and `")

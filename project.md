@@ -1120,6 +1120,26 @@ the unit it would have been reaped. So the orphans that motivated 0140 were an
 artefact of how they were produced, and 0140 fixed a real defect before the
 thing that makes it common was identified.
 
+**The wireless fault the operator reports is diagnosed, and it was never an
+association problem.** `netcfgd-exclusive.conf` was active on that machine, so
+starting `netcfgd.service` stopped NetworkManager and `wpa_supplicant.service`
+together -- correctly, that being what the drop-in is for. NetworkManager then
+left `/run/NetworkManager/devices/*` behind with `managed=true` still in it,
+having no `RuntimeDirectory=` and no `ExecStop=`, and netcfgd read those
+abandoned files as a live claim and declined the radio. Every daemon that could
+have configured the network was stopped, netcfgd included, by its own choice.
+That is "when I start netcfgd, ping stops working", in full.
+
+See [0145](doc/decision/0145-a-stopped-daemon-leaves-its-claim-behind.md). A
+file says which interfaces; a live process says the claim is current; neither
+is sufficient alone. `systemd-networkd` leaks the same way and more
+deliberately, setting `RuntimeDirectoryPreserve=yes`.
+
+**Taking the radio from a *running* NetworkManager is still open**, and the
+refusal is correct while NM is up. It now names the whole-machine remedy beside
+the per-device one, since an operator who installed the exclusive drop-in has
+already said which they want.
+
 **netcfgd has associated with a network, and until 2026-08-27 it never had.**
 `tests/live/hwsim.sh` drives a real `wpa_supplicant` against simulated radios
 in a private namespace, and it is the only test in the tree that puts a radio

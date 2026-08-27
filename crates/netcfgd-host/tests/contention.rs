@@ -22,16 +22,46 @@ fn nm_device(root: &std::path::Path, index: u32, body: &str) {
 	fs::write(dir.join(index.to_string()), body).expect("write");
 }
 
-/// Serialised, because they share one process-wide environment variable.
+/// A fake `/proc` with one process per name.
+///
+/// Liveness has to come from the fixture for the same reason `/run` does. This
+/// machine runs `NetworkManager`, so a liveness check read off the real `/proc`
+/// would make every test here pass without testing anything -- and pass for the
+/// opposite reason on a machine that does not.
+///
+/// It also holds the two shapes a `/proc` scan trips over: a non-numeric entry,
+/// and a numeric one with no `comm` at all, which is what a process exiting
+/// mid-scan looks like.
+fn fake_proc(root: &std::path::Path, comms: &[&str]) {
+	for (n, comm) in comms.iter().enumerate() {
+		let dir = root.join("proc").join((100 + n).to_string());
+		fs::create_dir_all(&dir).expect("mkdir");
+		fs::write(dir.join("comm"), format!("{comm}\n")).expect("write");
+	}
+	fs::create_dir_all(root.join("proc/self")).expect("mkdir");
+	fs::create_dir_all(root.join("proc/999")).expect("mkdir");
+}
+
+/// Serialised, because they share process-wide environment variables.
+///
+/// Both daemons are alive unless a test says otherwise, which is what every
+/// test written before liveness mattered assumed.
 fn with_root<T>(root: &std::path::Path, body: impl FnOnce() -> T) -> T {
+	with_root_and_daemons(root, &["NetworkManager", "systemd-network"], body)
+}
+
+fn with_root_and_daemons<T>(root: &std::path::Path, comms: &[&str], body: impl FnOnce() -> T) -> T {
 	use std::sync::Mutex;
 	static LOCK: Mutex<()> = Mutex::new(());
 	let _guard = LOCK
 		.lock()
 		.unwrap_or_else(std::sync::PoisonError::into_inner);
+	fake_proc(root, comms);
 	std::env::set_var("NCFG_RUN_ROOT", root);
+	std::env::set_var("NCFG_PROC", root.join("proc"));
 	let out = body();
 	std::env::remove_var("NCFG_RUN_ROOT");
+	std::env::remove_var("NCFG_PROC");
 	out
 }
 
@@ -212,4 +242,90 @@ fn the_link_file_is_private_data_and_says_so() {
 		"systemd still marks these files private; if this line has gone, the \
 		 format may have moved and the detector is what to check"
 	);
+}
+
+/// The operator's question is "how do I make this stop", and the per-device
+/// answer is not always the one they want.
+///
+/// The holder's instruction is that netcfgd should displace what stands in its
+/// way, and 0125 settled how: a drop-in that has the init system stop the
+/// other daemons. It shipped as documentation and the refusal never mentioned
+/// it, so the only remedy an operator ever saw was the per-device `nmcli` one
+/// -- which is the wrong shape for somebody who wants netcfgd to own the
+/// machine, and which they must then repeat for every device.
+///
+/// The path is asserted literally because it is where `debian/rules` installs
+/// the file, and a message naming a path that is not there is worse than one
+/// naming no path at all.
+#[test]
+fn the_message_also_names_the_whole_machine_remedy() {
+	let root = scratch("machine_remedy");
+	nm_device(&root, 3, "[device]\nmanaged=true\n");
+
+	let found = with_root(&root, || contenders(&[("wlan0".to_owned(), 3)]));
+	let text = describe(&found[0]);
+
+	assert!(
+		text.contains("/usr/share/doc/netcfgd/netcfgd-exclusive.conf"),
+		"got: {text}"
+	);
+	assert!(
+		text.contains("/etc/systemd/system/netcfgd.service.d"),
+		"got: {text}"
+	);
+	// The per-device remedy is still there: this adds an option, it does not
+	// replace the one an operator sharing a machine actually wants.
+	assert!(
+		text.contains("nmcli device set wlan0 managed no"),
+		"got: {text}"
+	);
+	// And it says who stops them, because netcfgd killing daemons itself is
+	// the thing 0125 declined to do.
+	assert!(text.contains("init system"), "got: {text}");
+
+	let _ = fs::remove_dir_all(&root);
+}
+
+/// **A stopped daemon leaves its claim behind, and this is the machine's whole
+/// wireless failure.**
+///
+/// `NetworkManager.service` has no `RuntimeDirectory=` and no `ExecStop=`, so
+/// `/run/NetworkManager/devices/*` outlives the daemon with `managed=true`
+/// still in it. `systemd-networkd` is worse in the same way: it has a
+/// `RuntimeDirectory=` and sets `RuntimeDirectoryPreserve=yes`.
+///
+/// That composes with the `netcfgd-exclusive.conf` drop-in into a machine with
+/// no network at all. The drop-in conflicts with `NetworkManager.service` *and*
+/// `wpa_supplicant.service`, so starting netcfgd stops both -- and then netcfgd
+/// reads NM's abandoned files, believes NM still holds the radio, and declines
+/// to start a supplicant. Every daemon that could have configured the network
+/// is now stopped, including netcfgd by its own choice, and the reported
+/// symptom is exactly "when I start netcfgd, ping stops working".
+///
+/// The file says *which* interfaces. Only a live process says the claim is
+/// *current*. Neither is sufficient alone, which is why this checks both
+/// rather than replacing one with the other.
+#[test]
+fn a_stopped_daemon_has_no_claim_however_much_state_it_left() {
+	let root = scratch("stopped");
+	// Exactly what a real NetworkManager leaves behind when it is stopped.
+	nm_device(&root, 3, "[device]\nmanaged=true\nconnection-uuid=abc\n");
+
+	// Alive: the claim stands. This is the control, and without it the
+	// assertion below would pass just as happily against a broken reader.
+	let alive = with_root_and_daemons(&root, &["NetworkManager"], || {
+		contenders(&[("wlan0".to_owned(), 3)])
+	});
+	assert_eq!(alive.len(), 1, "a running NM still claims: {alive:?}");
+
+	// Stopped, same files: no claim.
+	let stopped = with_root_and_daemons(&root, &["bash", "sshd"], || {
+		contenders(&[("wlan0".to_owned(), 3)])
+	});
+	assert!(
+		stopped.is_empty(),
+		"a stopped NM must not hold the radio: {stopped:?}"
+	);
+
+	let _ = fs::remove_dir_all(&root);
 }
