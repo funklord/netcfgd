@@ -750,6 +750,11 @@ packaging:
 	@# the tag has one producer. That is a property of the tree, so it is
 	@# checked here rather than trusted there.
 	@python3 tool/tag_producer_gate.py
+	@# Conflicts= stops a unit and does not order against it, so netcfgd could
+	@# read another daemon's claim while it was still shutting down and decline
+	@# an interface on behalf of something one second from gone. A race, so it
+	@# failed intermittently. 0145.
+	@python3 tool/conflict_order_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \

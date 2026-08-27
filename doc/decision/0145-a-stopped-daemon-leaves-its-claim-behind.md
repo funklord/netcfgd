@@ -74,6 +74,20 @@ The drop-in now carries an `After=` for each unit it conflicts with. `After=`
 on a unit being stopped orders against the completion of the stop job, which
 is the ordering wanted.
 
+`tool/conflict_order_gate.py` keeps the two lists in step, in `make packaging`
+beside the other gates of that shape. The reason it is a gate rather than a
+comment is the drop-in's own history: `wpa_supplicant.service` was added to
+`Conflicts=` long after the file was written, by somebody solving the problem
+in front of them, because stopping NetworkManager alone left a supplicant
+answering on the radio. The next unit will arrive the same way, and the
+ordering is the half nobody thinks of.
+
+It was checked against its own failure before being believed: removing one
+`After=` makes it exit 1 naming that unit, and it understands both the repeated
+and the space-separated spelling of a systemd directive, so it cannot pass a
+file it has not really read. What it cannot check is that the ordering *works*
+-- that needs systemd, root and the other daemons present.
+
 ## The rule
 
 **A file says which interfaces. A live process says the claim is current.
