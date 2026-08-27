@@ -1120,14 +1120,32 @@ the unit it would have been reaped. So the orphans that motivated 0140 were an
 artefact of how they were produced, and 0140 fixed a real defect before the
 thing that makes it common was identified.
 
-**The unit declares `KillMode=control-group` now, and `process` is deliberately
-not set.** `process` is what 0134 wants, and it cannot ship until netcfgd can
-re-adopt what it leaves running: the supplicant it can (0140, via the `-P` path
-in argv), `dhcpcd` it cannot, because `setproctitle` destroys both argv and the
-environment block. **Holding what cannot be re-adopted is worse than not
-holding it** -- a held dhcpcd renews on its own schedule against whatever
-manager comes next, measured at one lease a minute for two hours and thirteen
-addresses. Adoption first, then the value flips.
+**The unit sets `KillMode=process` now, and the sequence was the decision.** It
+said `control-group` first -- the behaviour the machine already had, made
+explicit rather than inherited -- and stayed there while netcfgd could not
+re-adopt every backend, because **holding what cannot be re-adopted is worse
+than not holding it**: a held dhcpcd renews against whatever manager comes
+next, measured at one lease a minute for two hours and thirteen addresses.
+
+**Every backend answers now**, which is what unblocked the flip. The
+supplicant, udhcpc, openvpn, radvd and hostapd are found by a path netcfgd
+composed sitting in their own `argv`; dhcpcd is asked over its control socket
+(0143). The last three came free: `backend_pid_file` already returned a pid
+file **and the marker that proves the process is netcfgd's**, so one branch in
+`start_backend` covers them rather than three patches.
+
+**The weak markers are excluded by shape, not by a list of names.** The two
+DHCP clients get `iface` as their marker -- `backend_pid_file`'s own words are
+"the weakest marker netcfgd uses" -- and `eth0` is a short string an unrelated
+command line could contain, so scanning `/proc` for it would reach an
+operator's process. Only an absolute path qualifies, which means a backend
+added later is refused by default rather than included by oversight. A unit
+test asserts the shapes both ways, and turning a weak marker into a path fails
+it.
+
+**What the flip buys: `systemctl stop netcfgd`, and therefore every package
+upgrade, stops taking the network down.** That is the whole of 0134, and it was
+false for as long as the line was absent.
 
 **`tests/live/killmode.sh` checks the declaration, not the behaviour, and says
 so.** The suite runs unprivileged and a root-only test would skip everywhere,

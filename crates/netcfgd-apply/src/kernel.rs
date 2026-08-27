@@ -1955,6 +1955,45 @@ fn start_backend(
 	metric: Option<u32>,
 ) -> Result<(), String> {
 	use netcfgd_model::BackendKind;
+
+	// **Adopt anything netcfgd already started, before deciding to start it.**
+	//
+	// 0140 recovered the supplicant this way and 0143 did dhcpcd through its
+	// control socket. Doing it per backend left four that could not be
+	// recovered at all -- hostapd, radvd, openvpn and the v6 client -- which is
+	// what kept `KillMode=process` unshippable (0142): holding what cannot be
+	// re-adopted is worse than not holding it.
+	//
+	// It generalises because `backend_pid_file` already answers the only
+	// question that matters. The pair it returns is a pid file and **the marker
+	// that proves the process is netcfgd's**, and for openvpn, radvd, hostapd
+	// and the supplicant that marker is an absolute path netcfgd composed -- a
+	// management socket, a generated config, a pid file -- which each of those
+	// daemons carries in its own `argv`.
+	//
+	// **The weak markers are excluded by shape rather than by name.** The two
+	// DHCP clients get `iface` as their marker, which `backend_pid_file` itself
+	// calls "the weakest marker netcfgd uses": `eth0` is a short string an
+	// unrelated command line could contain, and scanning `/proc` for it would
+	// reach somebody else's process. So only an absolute path qualifies, and
+	// Dhcp4 keeps the two specific recoveries it already has.
+	if let Some((pidfile, marker)) = backend_pid_file(kind, &run_dir_path(), iface) {
+		if marker.starts_with('/') && netcfgd_sys::process::pid_of(&pidfile, &marker).is_none() {
+			if let Some(pid) = netcfgd_sys::process::pid_by_marker(&marker) {
+				if let Some(parent) = pidfile.parent() {
+					std::fs::create_dir_all(parent)
+						.map_err(|error| format!("{}: {error}", parent.display()))?;
+				}
+				std::fs::write(&pidfile, format!("{pid}\n")).map_err(|error| {
+					format!("cannot record the {kind:?} backend on {iface}: {error}")
+				})?;
+				eprintln!(
+					"netcfgd: adopted the {kind:?} backend already running on {iface} (pid {pid}); it is netcfgd's, by the `{marker}` it was started with"
+				);
+				return Ok(());
+			}
+		}
+	}
 	match kind {
 		BackendKind::Dhcp4 => {
 			// Where the metric goes, and why it is dhcpcd's alone, is on
@@ -3570,6 +3609,47 @@ mod tests {
 	/// until a real dhcpcd was run (0070) -- and the `DHCPv6` half was worse,
 	/// because nothing stopped that client at all (0071). Both families are
 	/// walked here, so neither can be the one nobody checked.
+	/// **What the generic adoption in `start_backend` is allowed to scan for.**
+	///
+	/// That branch takes `backend_pid_file`'s marker and, when it is an absolute
+	/// path, looks for a process carrying it in `argv`. The safety of that rests
+	/// entirely on which markers are paths: `eth0` is a short string an
+	/// unrelated command line could contain, and scanning `/proc` for it would
+	/// reach an operator's process.
+	///
+	/// So the shape is asserted rather than described. A backend that later
+	/// gains a weak marker is excluded by this test failing, not by somebody
+	/// remembering the rule.
+	#[test]
+	fn only_a_path_marker_is_scannable() {
+		use netcfgd_model::BackendKind;
+		let run = std::path::Path::new("/run/netcfgd");
+		for kind in [
+			BackendKind::Supplicant,
+			BackendKind::AccessPoint,
+			BackendKind::OpenVpn,
+			BackendKind::RouterAdvert,
+		] {
+			let (_, marker) = super::backend_pid_file(kind, run, "eth0")
+				.unwrap_or_else(|| panic!("{kind:?} has no pid file"));
+			assert!(
+				marker.starts_with('/'),
+				"{kind:?} is adopted by a /proc scan, so its marker must be a path netcfgd composed, not {marker:?}"
+			);
+		}
+		// The two clients netcfgd cannot identify this way, and must not try to:
+		// each has its own recovery instead -- udhcpc by its `-p` path, dhcpcd by
+		// its control socket (0143).
+		for kind in [BackendKind::Dhcp4, BackendKind::Dhcp6] {
+			let (_, marker) = super::backend_pid_file(kind, run, "eth0")
+				.unwrap_or_else(|| panic!("{kind:?} has no pid file"));
+			assert!(
+				!marker.starts_with('/'),
+				"{kind:?}'s marker became a path, which would put it in the generic /proc scan -- check that is what was meant"
+			);
+		}
+	}
+
 	#[test]
 	fn a_client_is_stopped_the_way_it_was_started() {
 		for family in [super::DHCPCD_V4, super::DHCPCD_V6] {

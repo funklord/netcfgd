@@ -48,10 +48,18 @@ systemd behaviour is the opposite of what 0134 describes.
 
 ## Decision
 
-**The unit sets `KillMode=control-group` explicitly**, rather than inheriting
-the same value from systemd by not saying anything.
+**The unit sets `KillMode=process`.**
 
-    Set: KillMode=control-group
+**It said `control-group` first, and the sequence is the decision.** That was
+the behaviour the machine already had, made explicit rather than inherited,
+and it was kept while netcfgd could still not re-adopt every backend --
+because holding what cannot be recovered is worse than not holding it. Once
+adoption reached all of them (0140 for the argv-marked backends, 0143 for
+dhcpcd, and the generic branch in `start_backend` that covers openvpn, radvd
+and hostapd), the reason to stay was gone and the value flipped by the
+copyright holder's instruction.
+
+    Set: KillMode=process
 
 That line is the one `tests/live/killmode.sh` reads. It exists because this
 record necessarily *discusses* the value it does not set -- `KillMode=process`
@@ -64,26 +72,34 @@ That is the behaviour the machine already had. What changes is that it is
 *chosen*, visible beside a comment saying why, and asserted by
 `tests/live/killmode.sh` so it cannot silently go absent again.
 
-**`process` is what 0134 wants, and it is deliberately not set yet.**
+**`KillMode=process` kills only the main process and leaves the rest**, which
+is exactly "an unannounced stop holds". The gate on shipping it was whether
+netcfgd could re-adopt what it leaves running, and every backend now answers:
 
-`KillMode=process` kills only the main process and leaves the rest, which is
-exactly "an unannounced stop holds". It cannot ship until netcfgd can re-adopt
-what it leaves running:
-
-| backend | recoverable after a stop? |
+| backend | how it is recovered |
 |---|---|
-| `wpa_supplicant` | **yes** -- the `-P` path stays in its `argv` (0140) |
-| `dhcpcd` | **no** -- `setproctitle` destroys argv *and* the environment block |
-| `udhcpc` | not yet, but it can be: it keeps netcfgd's paths in `argv` |
+| `wpa_supplicant` | the `-P` path in its own `argv` (0140) |
+| `udhcpc` | the `-p` path, the same way |
+| `openvpn`, `radvd`, `hostapd` | the marker `backend_pid_file` already returns -- a management socket, a generated config, a pid file -- through the generic branch in `start_backend` |
+| `dhcpcd` | **asked**, over its control socket: `setproctitle` destroys its argv *and* its environment block, so it has no marker to find (0143) |
 
-**Holding what cannot be re-adopted is worse than not holding it.** A dhcpcd
-left running is one netcfgd can neither identify nor stop, renewing on its own
-schedule against whatever manager comes next -- measured on a real machine at
-one lease a minute for two hours and thirteen addresses consumed. Killing it on
-stop costs an outage; leaving it costs an outage *and* an unmanageable process.
+**Holding what cannot be re-adopted would have been worse than not holding
+it.** A dhcpcd left running is one netcfgd can neither identify nor stop,
+renewing against whatever manager comes next -- measured at one lease a minute
+for two hours and thirteen addresses consumed. Killing it on stop costs an
+outage; leaving it would have cost an outage *and* an unmanageable process.
 
-So the order is: **adoption first, then this flips.** `control-group` is the
-honest state until every backend can be recovered.
+**What the flip buys**: `systemctl stop netcfgd`, and therefore every package
+upgrade, stops taking the network down. That is the whole of 0134, and it was
+false for as long as this line was absent.
+
+**The one marker deliberately not used for this.** `backend_pid_file` gives the
+two DHCP clients `iface` as their marker and calls it "the weakest marker
+netcfgd uses". `eth0` is a short string an unrelated command line could
+contain, so scanning `/proc` for it would reach somebody else's process. The
+generic branch takes absolute paths only -- excluded by shape rather than by a
+list of names, so a backend added later is refused by default rather than
+included by oversight.
 
 ## What the test can and cannot do
 

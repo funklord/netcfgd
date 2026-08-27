@@ -129,18 +129,27 @@ RuntimeDirectoryPreserve=restart
 # they run netcfgd as a plain child in a namespace, where no cgroup reaping
 # exists.
 #
-# `process` is what 0134 actually wants, and it is NOT set yet. It would leave
-# every backend running after a stop, and netcfgd cannot yet re-adopt all of
-# them: it recovers its supplicant from the `-P` path in argv (0140), but
-# dhcpcd calls setproctitle and destroys both its argv and its environment, so
-# a held dhcpcd is one nothing can identify or stop. Measured on a real
-# machine: an orphan renewing once a minute for two hours, thirteen addresses
-# consumed.
+# **`process` now, which is what 0134 always wanted** -- and the order that got
+# here matters. This said `control-group` until every backend could be
+# re-adopted, because holding what cannot be recovered is worse than not
+# holding it: an orphan netcfgd can neither identify nor stop was measured on a
+# real machine at one DHCP lease a minute for two hours.
 #
-# **So the order is: adoption first, then this flips.** Holding what cannot be
-# re-adopted is worse than not holding it, and `control-group` is the honest
-# state until every backend can be recovered.
-KillMode=control-group
+# All of them can now. The supplicant, openvpn, radvd, hostapd and udhcpc are
+# found by a path netcfgd composed sitting in their own `argv` (0140); dhcpcd
+# destroys its argv and its environment with `setproctitle`, so it is asked
+# over its control socket which config file it was started with (0143).
+#
+# What this buys: `systemctl stop netcfgd`, and therefore every package
+# upgrade, stops taking the network down. That is the whole of 0134, and it was
+# false for as long as this line was absent.
+#
+# `process` rather than `mixed`: mixed SIGTERMs the main process and then
+# SIGKILLs the rest of the cgroup, which is control-group's behaviour wearing a
+# gentler name. `none` is refused by `tests/live/killmode.sh` -- systemd's own
+# manual calls it not recommended, and netcfgd has no teardown of its own to
+# make up for it.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target
