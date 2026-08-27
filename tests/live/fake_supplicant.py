@@ -80,9 +80,27 @@ def status():
 	)
 
 
+terminating = False
+
+
 def answer(command):
 	if command == "PING":
 		return "PONG\n"
+	# **How netcfgd stops a supplicant, and the fake could not do it.**
+	# `stop_backend` sends TERMINATE over the control socket rather than
+	# signalling a pid -- decision 0014's rule that a daemon is stopped through
+	# its own interface. This fake answered nothing to it, so it never exited,
+	# and no test in the suite could verify that stopping a supplicant works at
+	# all. Found when `displace.sh` asserted a released radio's supplicant was
+	# gone and it was still there.
+	#
+	# Answer first and exit after, because a real supplicant replies OK and
+	# then goes: a client that gets no reply cannot tell "stopped" from
+	# "wedged", which is exactly the distinction 0141 turns on.
+	if command == "TERMINATE":
+		global terminating
+		terminating = True
+		return "OK\n"
 	# A real supplicant answers OK and then sends unsolicited events to this
 	# connection. Answering FAIL -- which is what this fake did before the roam
 	# watcher existed -- makes a client reconnect and attach forever, which is
@@ -278,6 +296,13 @@ def serve(ctrl_dir, interface, pidfile):
 				first = first.split(keyword)[0]
 			print(first, flush=True)
 			reply(server, sender, answer(command).encode())
+			# TERMINATE was answered above; going now is the other half. The
+			# socket is removed on the way out, as a real one does, so a client
+			# that reconnects gets "no such file" rather than a socket nothing
+			# is behind -- which is 0080's case and a different fault to
+			# diagnose.
+			if terminating:
+				break
 	except (KeyboardInterrupt, OSError):
 		pass
 	finally:

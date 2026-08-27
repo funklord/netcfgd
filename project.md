@@ -1120,6 +1120,32 @@ the unit it would have been reaped. So the orphans that motivated 0140 were an
 artefact of how they were produced, and 0140 fixed a real defect before the
 thing that makes it common was identified.
 
+**And netcfgd gives back a radio it took before the other manager declared
+itself.** The guard refuses an interface another manager claims, but it learns
+that from files `NetworkManager` writes *once it has decided* it owns a device
+-- and netcfgd starts `Before=network-pre.target`, so it can reach the guard
+first. The radio looks free, netcfgd takes it, NM declares a moment later, and
+two supplicants on one radio drop the association.
+
+**Nothing was looking again.** Once netcfgd holds a backend the plan says
+"nothing to do" for that interface, and `reconcile_drift` returns early on an
+empty plan -- so the check had to go on the tick itself rather than inside the
+reconcile. `converge` was the wrong place too: it runs only at startup.
+
+**netcfgd stops only its own process**, which is what keeps this inside
+`contention`'s rule that netcfgd reports rather than acts. Nothing here touches
+another daemon; what is given back is a radio netcfgd took in a window where it
+could not have known better, and holding it is the thing making the machine
+unusable.
+
+**The fake supplicant had never handled `TERMINATE`**, which is how netcfgd
+stops one (0014: a daemon is stopped through its own interface). So no test in
+the suite could verify that stopping a supplicant works at all -- found because
+this one asserted a released radio's supplicant was gone and it was still
+there. It answers `OK` and then exits, in that order, because a client that
+gets no reply cannot tell "stopped" from "wedged" and that is exactly the
+distinction 0141 turns on.
+
 **The reported fault, found at last, and it was the guard asking the wrong
 question.** 0125 says netcfgd will not take a radio from a manager that is
 still running, and `start_supplicant` implemented that by looking for a control
