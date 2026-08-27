@@ -37,6 +37,52 @@ fn run_root() -> PathBuf {
 	std::env::var_os("NCFG_RUN_ROOT").map_or_else(|| PathBuf::from("/run"), PathBuf::from)
 }
 
+/// Whether the daemon state under `/run` describes interfaces netcfgd can see.
+///
+/// Every daemon here keys its state by kernel index, and **an index means
+/// nothing outside the network namespace that issued it**. `/run` is a mount
+/// rather than a namespace, so a netcfgd in a private network namespace that
+/// can still see the host's `/run` reads the host's files and matches them
+/// against its own indices. Those collide immediately, because both numberings
+/// start at 1.
+///
+/// **Measured, and it is why this function exists.** `tests/live/hwsim.sh`
+/// puts two simulated radios in a private namespace, where the station is
+/// index 3. On the host, index 3 was the operator's real `wlp0s20f3` with
+/// `managed=true`, so netcfgd refused to start a supplicant on a radio
+/// `NetworkManager` could not see and had never heard of -- naming
+/// `NetworkManager` in a refusal that was entirely fictional. The guard that
+/// exists to stop two daemons fighting over one radio was the only thing
+/// preventing the association it was protecting.
+///
+/// There is nothing in the file to cross-check against: `NetworkManager`'s
+/// device file records neither the interface name nor a permanent MAC. What
+/// can be checked is whether we are in the namespace those files were written
+/// from. Pid 1 is the machine's init, host daemons write `/run` from its
+/// network namespace, and if ours is not that one then their indices are not
+/// about our interfaces.
+///
+/// Unreadable is treated as ours, deliberately. Only a privileged process can
+/// read another's namespace link, and being wrong in that direction costs a
+/// refusal the operator can override, while being wrong in the other lets
+/// netcfgd start a second supplicant on a radio somebody else is holding --
+/// which is the failure this whole module exists to prevent.
+fn run_root_is_ours() -> bool {
+	// An explicit root is a tree somebody pointed at this netcfgd on purpose:
+	// a test fixture or a container with its own state. The question of whose
+	// namespace wrote it does not arise.
+	if std::env::var_os("NCFG_RUN_ROOT").is_some() {
+		return true;
+	}
+	match (
+		fs::read_link("/proc/self/ns/net"),
+		fs::read_link("/proc/1/ns/net"),
+	) {
+		(Ok(ours), Ok(init)) => ours == init,
+		_ => true,
+	}
+}
+
 /// Which other daemons claim any of `interfaces`.
 ///
 /// `interfaces` is `(name, kernel index)`, because every daemon here keys its
@@ -44,6 +90,9 @@ fn run_root() -> PathBuf {
 /// index cannot.
 #[must_use]
 pub fn contenders(interfaces: &[(String, u32)]) -> Vec<Contender> {
+	if !run_root_is_ours() {
+		return Vec::new();
+	}
 	let root = run_root();
 	let mut found = Vec::new();
 
