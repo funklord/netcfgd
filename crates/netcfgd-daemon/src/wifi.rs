@@ -291,7 +291,58 @@ fn why_no_supplicant(document: Option<&Document>, interface: &str) -> Option<Str
 			 documented way to hand an interface to another daemon; remove the line to \
 			 take it back."
 		)),
-		Some(device) if device.wifi.is_some() => None,
+		// **Configured correctly, and still no supplicant.** This arm returned
+		// `None` -- no diagnosis at all -- for the case an operator is most
+		// likely to be in: radio managed, `wifi` policy present, network written
+		// down, and another daemon holding the control socket. The caller then
+		// fell back to a message listing what the cause *might* be, when netcfgd
+		// could say which it was.
+		//
+		// **The question is who bound the socket, not whether it answers.** The
+		// first version of this asked `answers()` and so said nothing in exactly
+		// the reported case: NetworkManager's supplicant is driven over D-Bus and
+		// does not reply on the control interface, so the socket exists, stays
+		// mute, and `answers()` is false. Measured against the real message.
+		Some(device) if device.wifi.is_some() => {
+			let dir = netcfgd_supplicant::ctrl_dir();
+			let socket = dir.join(interface);
+			if !socket.exists() {
+				// Nothing has bound it. That is the ordinary "netcfgd has not
+				// applied yet, or the apply failed" case, and the caller's own
+				// message already says so.
+				return None;
+			}
+			let pidfile = netcfgd_host::state::resolve_dir(None)
+				.join("supplicant")
+				.join(format!("{interface}.pid"));
+			if netcfgd_sys::process::pid_of(&pidfile, &pidfile.to_string_lossy()).is_some() {
+				// netcfgd's own, and not answering: that is the wedged case, which
+				// the planner reports with its own warning and 0141's refusal.
+				return Some(format!(
+					"`{interface}` has a supplicant netcfgd started, and it is not \
+					 answering its control socket at {}. netcfgd does not kill it by \
+					 default, because a busy machine misses the deadline the same \
+					 way. `ncfg apply --restart-wedged {interface}` restarts it.",
+					socket.display()
+				));
+			}
+			// Bound by something netcfgd did not start.
+			Some(format!(
+				"`{interface}` is a radio netcfgd manages and is configured for, but \
+				 another daemon is already running a supplicant on it: the control \
+				 socket at {} was bound by a process netcfgd did not start, so netcfgd \
+				 will not take the radio from it (0125). **Nothing here is \
+				 misconfigured** -- the radio is somebody else's until they let \
+				 go.\n\nHand it over with:\n\n    systemctl stop NetworkManager\n    \
+				 systemctl stop wpa_supplicant\n\nBoth, because wpa_supplicant runs \
+				 independently of NetworkManager and keeps this socket bound on its \
+				 own -- stopping NetworkManager alone leaves netcfgd declining \
+				 forever, which is what \"netcfgd stops working without \
+				 NetworkManager\" actually is. netcfgd picks the radio up on the next \
+				 reconcile. To leave it to them instead, set `managed = false` here.",
+				socket.display()
+			))
+		}
 		_ => Some(format!(
 			"`{interface}` is a radio, and netcfgd has no `wifi` policy for it -- so it \
 			 does not manage the radio and has started no supplicant, which is why there \
@@ -301,6 +352,75 @@ fn why_no_supplicant(document: Option<&Document>, interface: &str) -> Option<Str
 			 Until then a scan can only work through somebody else's supplicant, which is \
 			 what NetworkManager was providing."
 		)),
+	}
+}
+
+#[cfg(test)]
+mod diagnosis_tests {
+	use super::why_no_supplicant;
+
+	/// **The case that produced no diagnosis at all.**
+	///
+	/// A radio netcfgd manages, configured, with another daemon holding the
+	/// control socket -- which is what an operator running `NetworkManager`
+	/// meets. This arm returned `None`, so the caller fell back to a message
+	/// listing what the cause *might* be, and netcfgd kept to itself a fault
+	/// it had already identified.
+	///
+	/// The first fix keyed on whether the socket *answers*, and was silent in
+	/// exactly this case: `NetworkManager` drives its supplicant over D-Bus and
+	/// it does not reply on the control interface, so the socket exists and
+	/// stays mute. The question is who bound it, not whether it talks.
+	#[test]
+	fn a_foreign_supplicant_is_named_rather_than_guessed_at() {
+		let dir = std::env::temp_dir().join(format!("ncfg-diag-{}", std::process::id()));
+		let sys = dir.join("sys");
+		let ctrl = dir.join("ctrl");
+		let _ = std::fs::create_dir_all(sys.join("radio0").join("wireless"));
+		let _ = std::fs::create_dir_all(&ctrl);
+		// SAFETY-adjacent: these are process-wide, and this test is the only
+		// reader of them. The suite runs tests in threads, so the paths are
+		// keyed on the pid to keep two runs apart rather than two threads.
+		std::env::set_var("NCFG_SYS_CLASS_NET", &sys);
+		std::env::set_var("NCFG_WPA_CTRL_DIR", &ctrl);
+		std::env::set_var("NCFG_RUN_DIR", dir.join("run"));
+
+		// Built from JSON rather than a literal: `Device` has no `Default`, and
+		// a literal here would have to be edited every time the struct gains a
+		// field -- which is how a test comes to assert a shape nobody meant.
+		// One device grafted onto a default document: `Device` has no
+		// `Default`, and spelling the whole struct out here would have to be
+		// edited every time it gains a field -- which is how a test comes to
+		// assert a shape nobody meant.
+		let mut document = netcfgd_model::Document::default();
+		let device: netcfgd_model::Device =
+			serde_json::from_str(r#"{"name":"radio0","managed":true,"wifi":{}}"#)
+				.expect("fixture device");
+		document.devices.push(device);
+
+		// No socket: netcfgd has simply not started one, and the caller's own
+		// message is the right one.
+		assert!(
+			why_no_supplicant(Some(&document), "radio0").is_none(),
+			"with nothing bound there is nothing to diagnose"
+		);
+
+		// Somebody else's, bound and mute.
+		let socket = std::os::unix::net::UnixDatagram::bind(ctrl.join("radio0"));
+		assert!(socket.is_ok(), "could not bind a stand-in socket");
+		let said = why_no_supplicant(Some(&document), "radio0")
+			.expect("a bound socket netcfgd did not start must be explained");
+		assert!(
+			said.contains("another daemon is already running a supplicant"),
+			"the diagnosis must name the cause, not list candidates: {said}"
+		);
+		assert!(
+			said.contains("systemctl stop wpa_supplicant"),
+			"and must name BOTH units, since stopping NetworkManager alone \
+			 leaves the socket bound: {said}"
+		);
+
+		let _ = std::fs::remove_dir_all(&dir);
 	}
 }
 
