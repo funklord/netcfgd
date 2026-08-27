@@ -228,6 +228,63 @@ check "netcfgd starts no supplicant on a radio another manager claims" \
 contains "and names the manager rather than guessing" \
 	"$(cat "$work/d3.log")" "already managing"
 
+# ---------------------------------------------------------------------------
+# 4. **The boot race: netcfgd gives back a radio it took before the other
+#    manager had declared itself.**
+#
+#    The guard above refuses an interface another manager claims, and learns
+#    that from files NM writes once it has decided it owns a device. netcfgd
+#    starts `Before=network-pre.target`, so it can reach that guard before NM
+#    has written anything: the radio looks free, netcfgd takes it, and NM
+#    declares a moment later. Two supplicants on one radio drop the
+#    association.
+#
+#    Once netcfgd holds a backend the plan says "nothing to do" for it, so
+#    nothing was looking again. The check belongs on the tick too.
+rm -rf "$work/root/NetworkManager"
+kill "$daemon" 2>/dev/null || true
+wait "$daemon" 2>/dev/null || true
+daemon=
+rm -f "$work/run/netcfgd.sock" "$work/run/owned.json"
+rm -rf "$work/run/supplicant"
+
+"$repo/target/debug/netcfgd" > "$work/d4.log" 2>&1 &
+daemon=$!
+waited=0
+while [ ! -s "$work/run/supplicant/radio0.pid" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 100 ] && break
+	sleep 0.1
+done
+held=$(cat "$work/run/supplicant/radio0.pid" 2>/dev/null || echo '')
+check "with no claim on the radio, netcfgd takes it" \
+	"$([ -n "$held" ] && echo yes || echo no)" "yes"
+
+# NetworkManager declares, the way it does once it has decided.
+mkdir -p "$work/root/NetworkManager/devices"
+printf '[device]\nmanaged=true\n' > "$work/root/NetworkManager/devices/$index"
+
+# No apply: the reconcile loop is what has to notice, which is the whole point.
+waited=0
+while [ -s "$work/run/supplicant/radio0.pid" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 200 ] && break
+	sleep 0.1
+done
+check "and gives it back when that manager declares" \
+	"$([ -s "$work/run/supplicant/radio0.pid" ] && echo held || echo released)" "released"
+# Bounded, because the stop is a TERMINATE over the control socket rather than
+# a signal: the pid file goes first and the process exits when it gets round to
+# it. Reading /proc the instant the file vanished is a race, not a finding.
+waited=0
+while [ -n "$held" ] && [ -e "/proc/$held" ] && [ "$waited" -lt 100 ]; do
+	waited=$((waited + 1))
+	sleep 0.1
+done
+check "the supplicant it started is stopped" \
+	"$([ -n "$held" ] && [ -e "/proc/$held" ] && echo alive || echo gone)" "gone"
+contains "and says whose it is now" "$(cat "$work/d4.log")" "stopping its own"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "displace.sh: all checks passed"

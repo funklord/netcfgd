@@ -267,6 +267,11 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			// startup, which is worse than not looking: it answers `apply`
 			// with a plan for a machine that has since moved, and the operator
 			// gets an apply that does the wrong work and reports success.
+			// Before the reconcile, and not inside it: once netcfgd holds a
+			// backend the plan says "nothing to do" for that interface and
+			// `reconcile_drift` returns early, so a claim that appears after
+			// netcfgd took the radio was never looked at again.
+			release_contended(&mut state);
 			if !holding {
 				reconcile_drift(&mut state, &mut subscribers);
 			}
@@ -445,6 +450,90 @@ fn releases_the_hold(
 	requests
 		.iter()
 		.any(|(request, ..)| matches!(request, Request::Apply { .. }))
+}
+
+/// Give back a radio netcfgd should not be holding.
+///
+/// **The boot race, and the only part of it netcfgd can fix.** The guard in
+/// `start_supplicant` refuses an interface another manager claims, and learns
+/// that from the files `NetworkManager` writes once it has decided it owns a
+/// device. netcfgd starts `Before=network-pre.target`, so it can reach that
+/// guard before NM has written anything -- the radio looks free, netcfgd takes
+/// it, and NM declares a moment later. Two supplicants on one radio drop the
+/// association, which is the fault this whole milestone was about.
+///
+/// The check therefore belongs on the tick as well as at start. Once netcfgd
+/// holds a backend the plan says "nothing to do" for it, so nothing was ever
+/// looking again.
+///
+/// **netcfgd stops only its own process.** That is what keeps this inside
+/// `contention`'s rule that netcfgd reports rather than acts: nothing here
+/// touches another daemon, and what is given back is a radio netcfgd took in a
+/// window where it could not have known better. Holding it is the thing making
+/// the machine unusable, and an operator who wants netcfgd to have the radio
+/// says so by handing it over -- which is what the message names.
+fn release_contended(state: &mut State) {
+	use netcfgd_apply::Executor as _;
+
+	let Some(desired) = &state.desired else {
+		return;
+	};
+	// Only interfaces netcfgd currently runs a backend on: a contended
+	// interface netcfgd is not touching is the ordinary coexistence case, and
+	// saying anything about it here would repeat the warning the plan already
+	// carries.
+	let held: Vec<(String, u32)> = desired
+		.interfaces
+		.iter()
+		.filter(|interface| {
+			state
+				.observed
+				.backends
+				.iter()
+				.any(|backend| backend.interface == interface.name && backend.running)
+		})
+		.filter_map(|interface| {
+			state
+				.observed
+				.link(&interface.name)
+				.map(|link| (interface.name.clone(), link.index))
+		})
+		.collect();
+	if held.is_empty() {
+		return;
+	}
+
+	let Ok(mut executor) = state.executor() else {
+		eprintln!("netcfgd: cannot open a netlink socket to release a contended radio");
+		return;
+	};
+	for contender in netcfgd_host::contention::contenders(&held) {
+		for interface in &contender.interfaces {
+			let kinds: Vec<netcfgd_model::BackendKind> = state
+				.observed
+				.backends
+				.iter()
+				.filter(|backend| &backend.interface == interface && backend.running)
+				.map(|backend| backend.kind)
+				.collect();
+			for kind in kinds {
+				eprintln!(
+					"netcfgd: {} claims {interface}, which netcfgd is running a {kind:?} on -- \
+					 two managers on one interface drop the association, so netcfgd is \
+					 stopping its own and leaving the interface to {}. {}",
+					contender.name,
+					contender.name,
+					netcfgd_host::contention::describe(&contender)
+				);
+				if let Err(error) = executor.execute(&netcfgd_plan::Op::BackendStop {
+					kind,
+					iface: interface.clone(),
+				}) {
+					eprintln!("netcfgd: could not stop the {kind:?} on {interface}: {error}");
+				}
+			}
+		}
+	}
 }
 
 fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
