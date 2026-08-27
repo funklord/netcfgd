@@ -13,6 +13,7 @@
 //! chosen step, which is how the stop-and-resume behaviour is checked without
 //! a network namespace.
 
+pub mod contention;
 pub mod dhcpcd_control;
 pub mod hooks;
 pub mod journal;

@@ -3332,6 +3332,45 @@ pub fn resolver() -> netcfgd_secret::Resolver {
 /// produces a supplicant that starts and never associates, so the wireless
 /// case is detected rather than assumed.
 fn start_supplicant(iface: &str) -> Result<(), String> {
+	// **Ask who claims the interface, not just who left a socket behind.**
+	//
+	// 0125 says netcfgd will not take a radio from a manager that is still
+	// running, and the guard below implements that by looking for a control
+	// socket in `/run/wpa_supplicant`. That is an inadequate way to ask.
+	// NetworkManager drives wpa_supplicant over **D-Bus**, so on a machine where
+	// NM owns the radio there is no per-interface socket file at all -- the
+	// directory is empty, the guard concludes the radio is free, and netcfgd
+	// starts a second supplicant on an interface NM is actively using.
+	//
+	// Measured, and it is the whole reported fault: netcfgd logged "Successfully
+	// initialized wpa_supplicant", the association collapsed one second later
+	// ("carrier lost"), dhcpcd deleted the address and the default route, and
+	// the machine lost the network. netcfgd had *already printed* that
+	// NetworkManager manages the interface, and started anyway -- the finding
+	// was there and nothing acted on it.
+	//
+	// The socket the guard used to find was netcfgd's own, from an earlier run,
+	// which is why this looked guarded while it was not.
+	// The index rather than the name, because every daemon whose state
+	// `contention` reads keys by index -- an interface can be renamed and the
+	// index cannot. Read from sysfs, through the same root the rest of netcfgd
+	// uses, so a test can point it somewhere else.
+	let claimed: Vec<(String, u32)> =
+		std::fs::read_to_string(netcfgd_sys::radio::class_net().join(iface).join("ifindex"))
+			.ok()
+			.and_then(|text| text.trim().parse::<u32>().ok())
+			.map(|index| vec![(iface.to_owned(), index)])
+			.unwrap_or_default();
+	if let Some(contender) = crate::contention::contenders(&claimed).into_iter().next() {
+		return Err(format!(
+			"{} is already managing `{iface}`, so netcfgd will not start a second \
+			 supplicant on it: two on one radio drop the association, which takes the \
+			 address and the default route with it. {}",
+			contender.name,
+			crate::contention::describe(&contender)
+		));
+	}
+
 	let dir = netcfgd_supplicant::ctrl_dir();
 	std::fs::create_dir_all(&dir)
 		.map_err(|error| format!("cannot create {}: {error}", dir.display()))?;

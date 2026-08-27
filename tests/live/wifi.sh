@@ -85,6 +85,15 @@ chmod 600 "$work/etc/secrets/HomeFiber"
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 export NCFG_WPA_CTRL_DIR="$work/ctrl"
+# **Isolated from the host's NetworkManager state.** netcfgd refuses to start a
+# supplicant on an interface another manager claims, and it learns that from the
+# files NM leaves under `/run/NetworkManager/devices/<ifindex>`. On a developer
+# machine those exist for real interfaces -- including `lo`, index 1 -- so
+# without this a test would read the host's NM and be refused for reasons that
+# have nothing to do with what it is testing. `displace.sh` points this at a
+# tree it populates on purpose; everything else points it at an empty one.
+mkdir -p "$work/runroot"
+export NCFG_RUN_ROOT="$work/runroot"
 ncfg="$repo/target/debug/ncfg"
 cli="$supplicant"
 cli="${supplicant%wpa_supplicant}wpa_cli"

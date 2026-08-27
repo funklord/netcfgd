@@ -14,7 +14,13 @@
 
 pub mod config;
 pub mod confirm;
-pub mod contention;
+/// Finding out whether something else is already managing an interface.
+///
+/// **Moved down to `netcfgd-apply` and re-exported here**, because the executor
+/// has to consult it before starting a supplicant and cannot depend on this
+/// crate -- `netcfgd-host` depends on `netcfgd-apply`, so the arrow only goes
+/// one way. The re-export keeps every existing caller spelled as it was.
+pub use netcfgd_apply::contention;
 pub mod explain;
 pub mod hooks;
 pub mod portal;

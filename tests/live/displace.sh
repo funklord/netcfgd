@@ -172,6 +172,62 @@ check "and it is netcfgd's, by the pid file it was told to write" \
 contains "and the radio is netcfgd's" "$("$ncfg" wifi radios 2>&1)" "netcfgd's"
 contains "and scanning works through it" "$("$ncfg" wifi scan radio0 2>&1 || true)" "HomeFiber"
 
+# ---------------------------------------------------------------------------
+# 3. **A manager that leaves no control socket at all.**
+#
+#    The guard above asks whether a supplicant answers at
+#    `<ctrl>/<iface>`. NetworkManager drives wpa_supplicant over D-Bus, so on a
+#    machine where NM owns the radio **there is no per-interface socket file**
+#    -- the directory is empty, that guard concludes the radio is free, and
+#    netcfgd starts a second supplicant on an interface NM is actively using.
+#
+#    Measured on a real machine, and it is the whole of the reported fault:
+#    netcfgd logged "Successfully initialized wpa_supplicant", the association
+#    collapsed a second later with "carrier lost", dhcpcd deleted the address
+#    and the default route, and the machine lost the network. netcfgd had
+#    already printed that NetworkManager manages the interface and started
+#    anyway.
+#
+#    So the guard asks who *claims* the interface, which netcfgd can answer
+#    from NM's own state files, rather than who left a socket behind.
+kill "$daemon" 2>/dev/null || true
+wait "$daemon" 2>/dev/null || true
+daemon=
+rm -f "$work/run/netcfgd.sock" "$work/run/owned.json"
+rm -rf "$work/run/supplicant"
+# No socket anywhere: this is what a D-Bus-driven manager leaves.
+rm -f "$work/ctrl/radio0"
+check "there is no control socket to find" \
+	"$([ -e "$work/ctrl/radio0" ] && echo present || echo none)" "none"
+
+# NetworkManager's own record that it manages this interface, keyed by index
+# exactly as NM writes it.
+# From `ip`, not from /sys/class/net: that tree is not namespaced unless /sys
+# is remounted, so inside `unshare -rn` it shows the host's interfaces and
+# would give the wrong index entirely.
+index=$(ip -o link show radio0 | cut -d: -f1 | tr -d ' ')
+# netcfgd reads the index through NCFG_SYS_CLASS_NET, which points at this
+# tree, so the fake radio needs the file a real one would have.
+echo "$index" > "$work/sys/radio0/ifindex"
+mkdir -p "$work/root/NetworkManager/devices"
+printf '[device]\nmanaged=true\n' > "$work/root/NetworkManager/devices/$index"
+export NCFG_RUN_ROOT="$work/root"
+
+"$repo/target/debug/netcfgd" > "$work/d3.log" 2>&1 &
+daemon=$!
+waited=0
+while [ ! -e "$work/run/netcfgd.sock" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 60 ] && break
+	sleep 0.1
+done
+sleep 2
+
+check "netcfgd starts no supplicant on a radio another manager claims" \
+	"$([ -s "$work/run/supplicant/radio0.pid" ] && echo started || echo declined)" "declined"
+contains "and names the manager rather than guessing" \
+	"$(cat "$work/d3.log")" "already managing"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "displace.sh: all checks passed"

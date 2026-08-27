@@ -1120,6 +1120,36 @@ the unit it would have been reaped. So the orphans that motivated 0140 were an
 artefact of how they were produced, and 0140 fixed a real defect before the
 thing that makes it common was identified.
 
+**The reported fault, found at last, and it was the guard asking the wrong
+question.** 0125 says netcfgd will not take a radio from a manager that is
+still running, and `start_supplicant` implemented that by looking for a control
+socket at `<ctrl>/<iface>`. **NetworkManager drives wpa_supplicant over D-Bus,
+so on a machine where NM owns the radio no per-interface socket file exists at
+all.** The directory is empty, the guard concludes the radio is free, and
+netcfgd starts a second supplicant on an interface NM is actively using.
+
+**Measured from the daemon's own journal**: `Successfully initialized
+wpa_supplicant`, then one second later `wlp0s20f3: carrier lost`, then dhcpcd
+deleting the address and the default route, and the machine off the network.
+netcfgd had **already printed** that NetworkManager manages the interface --
+the finding was there and nothing acted on it. The socket the old guard
+sometimes did find was netcfgd's own, left by an earlier run, which is why this
+looked guarded while it was not.
+
+**So the guard asks who *claims* the interface**, which netcfgd can answer from
+NM's own state files under `/run/NetworkManager/devices/<ifindex>` -- the same
+detection that was already producing the warning. `contention` moved from
+`netcfgd-host` down to `netcfgd-apply` to make that possible, since the
+dependency arrow runs the other way, and is re-exported so no caller changed.
+
+**It also made every supplicant test depend on the host's NetworkManager.**
+`dot1x.sh` uses `lo`, and a developer machine has NM state for index 1, so the
+guard fired for real reasons in a test that meant nothing by it. Eight scripts
+now isolate `NCFG_RUN_ROOT` the way they already isolate the config and run
+directories; `displace.sh` points it at a tree it populates deliberately, and
+that is where the new case is asserted -- a manager that claims the radio and
+leaves **no socket at all**.
+
 **Three of this session's changes composed into a trap, measured on the real
 machine, and both halves are fixed.** netcfgd started, adopted a supplicant
 that `KillMode=process` had left alive, could not reach it, displaced
