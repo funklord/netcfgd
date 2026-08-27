@@ -1977,8 +1977,25 @@ fn start_backend(
 	// unrelated command line could contain, and scanning `/proc` for it would
 	// reach somebody else's process. So only an absolute path qualifies, and
 	// Dhcp4 keeps the two specific recoveries it already has.
+	// **And only what still works.** A process carrying netcfgd's marker that
+	// cannot be reached is not an adoption candidate -- it is a corpse holding a
+	// radio, and taking ownership of it is strictly worse than leaving the radio
+	// to whoever can still use it.
+	//
+	// Measured, on the machine that prompted this: netcfgd adopted a supplicant
+	// left alive by `KillMode=process` (0142), could not talk to it, displaced
+	// NetworkManager's working one in doing so, and then declined to restart it
+	// because 0141 makes that a person's decision. The radio was captured by a
+	// dead process and NetworkManager was locked out too. Three defensible
+	// changes composing into a trap.
+	//
+	// Declining to adopt costs nothing by comparison: netcfgd refuses the radio,
+	// says why, and whoever can drive it keeps it.
 	if let Some((pidfile, marker)) = backend_pid_file(kind, &run_dir_path(), iface) {
-		if marker.starts_with('/') && netcfgd_sys::process::pid_of(&pidfile, &marker).is_none() {
+		if marker.starts_with('/')
+			&& netcfgd_sys::process::pid_of(&pidfile, &marker).is_none()
+			&& backend_is_reachable(kind, iface)
+		{
 			if let Some(pid) = netcfgd_sys::process::pid_by_marker(&marker) {
 				if let Some(parent) = pidfile.parent() {
 					std::fs::create_dir_all(parent)
@@ -2361,6 +2378,26 @@ fn client_pid_path(program: &str, iface: &str) -> Result<std::path::PathBuf, Str
 	let dir = run_dir_path().join(program);
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
 	Ok(dir.join(format!("{iface}.pid")))
+}
+/// Whether a backend of this kind can actually be talked to on this interface.
+///
+/// **The question adoption has to ask and did not.** `backend_pid_file` says
+/// whether a process is netcfgd's; this says whether it is any use. A
+/// supplicant that holds its control socket and answers nothing is netcfgd's by
+/// every marker and worthless to it, and adopting one takes the radio away from
+/// a manager that could have driven it.
+///
+/// Only the supplicant is checked, because it is the only kind where netcfgd
+/// has a cheap, non-destructive question to ask and where the failure is known
+/// to happen. For everything else this answers `true`: the alternative is
+/// inventing a liveness probe per backend on no evidence, and a probe that has
+/// never seen its failure is one nobody should trust.
+#[must_use]
+fn backend_is_reachable(kind: netcfgd_model::BackendKind, iface: &str) -> bool {
+	if kind != netcfgd_model::BackendKind::Supplicant {
+		return true;
+	}
+	netcfgd_supplicant::answers(&netcfgd_supplicant::ctrl_dir(), iface)
 }
 
 /// Where a daemon netcfgd started records its pid, and what marks it as that
@@ -3329,7 +3366,13 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 		// Adopting means rewriting the file, because the file is what the
 		// observer and `stop_backend` key on. Nothing is restarted: the
 		// association the orphan is holding is exactly what 0134 wanted kept.
-		if let Some(pid) = netcfgd_sys::process::pid_by_marker(&pidfile.to_string_lossy()) {
+		// Reachable, as the generic branch above requires for the same reason: a
+		// supplicant that holds its socket and answers nothing is netcfgd's by
+		// every marker and no use to it, and adopting one takes the radio from a
+		// manager that could still drive it.
+		if let Some(pid) = netcfgd_sys::process::pid_by_marker(&pidfile.to_string_lossy())
+			.filter(|_| netcfgd_supplicant::answers(&dir, iface))
+		{
 			if let Some(parent) = pidfile.parent() {
 				std::fs::create_dir_all(parent)
 					.map_err(|error| format!("cannot create {}: {error}", parent.display()))?;

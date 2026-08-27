@@ -48,7 +48,29 @@ RestartSec=2
 # diagnose"; this unit was manufacturing exactly that, and only under systemd
 # -- run from a shell as root the capability is present and everything works,
 # which is why no test saw it.
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN
+#
+# **The last three are dhcpcd's, not netcfgd's.** dhcpcd is built with PRIVSEP
+# and has no flag to turn it off -- `strings` shows the feature compiled in and
+# the option table carries nothing for it -- so on start it chroots into
+# /usr/lib/dhcpcd and drops to an unprivileged user. Without CAP_SYS_CHROOT and
+# the two setuid capabilities the bounding set forbids both, and dhcpcd reports:
+#
+#     ps_dropprivs: chroot: /usr/lib/dhcpcd: Operation not permitted
+#     failed to drop privileges: Operation not permitted
+#     script_runreason: Permission denied
+#
+# It then carries on without privsep and cannot run the hook that installs the
+# lease, so the interface waits for carrier forever and no address arrives.
+# Measured on a real machine; the daemon said all three lines and netcfgd
+# reported success.
+#
+# **This widens the ceiling for the daemons netcfgd spawns, not for netcfgd.**
+# netcfgd calls none of these -- it is already root and never chroots or
+# changes user. What a bounding set does is cap what a child may hold, and
+# capping it below what dhcpcd needs is how a sandbox stops a daemon doing the
+# one thing it was started for. Ambient stays as it was: these are available to
+# be dropped into, not handed out.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN
 NoNewPrivileges=yes
 ProtectHome=yes

@@ -1120,6 +1120,38 @@ the unit it would have been reaped. So the orphans that motivated 0140 were an
 artefact of how they were produced, and 0140 fixed a real defect before the
 thing that makes it common was identified.
 
+**Three of this session's changes composed into a trap, measured on the real
+machine, and both halves are fixed.** netcfgd started, adopted a supplicant
+that `KillMode=process` had left alive, could not reach it, displaced
+NetworkManager's working one in doing so, and then declined to restart it
+because 0141 makes that a person's decision. The radio was captured by a dead
+process and NetworkManager was locked out of it too -- `ping` went from ok to
+FAIL and stayed there. Each change is defensible; together they let a corpse
+hold a radio permanently.
+
+**Adoption now requires reachability.** A process carrying netcfgd's marker
+that cannot be talked to is not an adoption candidate. Declining costs
+nothing by comparison: netcfgd refuses the radio, says why, and whoever can
+still drive it keeps it. Only the supplicant is probed, because it is the one
+kind with a cheap non-destructive question and a known failure -- inventing a
+liveness probe per backend on no evidence would be a check nobody should
+trust.
+
+**The test for it needed two things removed, not one.** Deleting the pid file
+alone leaves `owned.json` saying the backend is running, so the plan is empty
+and the adoption code is never reached -- the first control passed with the
+guard removed, which is a control that could not fail.
+
+**And the sandbox was stopping dhcpcd doing its job**, which netcfgd's own
+journal said three times and nobody had read: `ps_dropprivs: chroot: ...
+Operation not permitted`, `failed to drop privileges`, `script_runreason:
+Permission denied`. dhcpcd is built with PRIVSEP and has no flag to disable
+it, so the bounding set has to allow `CAP_SYS_CHROOT`, `CAP_SETUID` and
+`CAP_SETGID` -- **for the daemons netcfgd spawns, not for netcfgd**, which is
+already root and chroots nothing. Capping a child below what it needs is how a
+sandbox stops a daemon doing the one thing it was started for: without the
+hook, no lease is installed and the interface waits for carrier forever.
+
 **The unit sets `KillMode=process` now, and the sequence was the decision.** It
 said `control-group` first -- the behaviour the machine already had, made
 explicit rather than inherited -- and stayed there while netcfgd could not

@@ -206,6 +206,55 @@ check "and it did not blame another manager for its own process" \
 	"$(grep -ci 'did not start' "$work/d2.log" 2>/dev/null | head -1)" "0"
 contains "and the radio is netcfgd's" "$("$ncfg" wifi radios 2>&1)" "netcfgd's"
 
+# ---------------------------------------------------------------------------
+# 5. **A supplicant that is netcfgd's and no longer answers must NOT be
+#    adopted.**
+#
+#    Measured on a real machine: netcfgd adopted a supplicant left alive by
+#    `KillMode=process`, could not talk to it, displaced NetworkManager's
+#    working one in doing so, and then declined to restart it because 0141
+#    makes that a person's decision. The radio was captured by a dead process
+#    and NetworkManager was locked out with it. Three defensible changes --
+#    hold across a stop, adopt on restart, do not kill what may only be busy --
+#    composing into a trap.
+#
+#    Declining to adopt costs nothing by comparison: netcfgd refuses the radio,
+#    says why, and whoever can still drive it keeps it.
+kill "$daemon" 2>/dev/null || true
+wait "$daemon" 2>/dev/null || true
+daemon=
+rm -f "$work/run/netcfgd.sock"
+# The supplicant stays, and stops answering: its socket is replaced by one that
+# binds and never replies, which is what a wedged wpa_supplicant looks like
+# from outside and what NetworkManager's D-Bus-driven one looks like always.
+kill -STOP "$adopted" 2>/dev/null || true
+rm -f "$work/ctrl/radio0"
+python3 -c "
+import socket, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+s.bind('$work/ctrl/radio0')
+time.sleep(60)" >/dev/null 2>&1 &
+mute=$!
+waited=0
+while [ ! -e "$work/ctrl/radio0" ] && [ "$waited" -lt 50 ]; do
+	waited=$((waited + 1))
+	sleep 0.1
+done
+# Both, or nothing is planned and the adoption code is never reached at all:
+# `owned.json` still saying the backend is running makes the plan empty, and
+# the first version of this check passed with the reachability guard removed --
+# a control that could not fail.
+rm -f "$work/run/supplicant/radio0.pid" "$work/run/owned.json"
+
+start_daemon d3
+sleep 2
+check "a supplicant that answers nothing is not adopted" \
+	"$([ -s "$work/run/supplicant/radio0.pid" ] && echo adopted || echo declined)" "declined"
+check "and netcfgd says the radio is not usable rather than claiming it" \
+	"$(grep -ci 'adopted' "$work/d3.log" 2>/dev/null | head -1)" "0"
+kill -CONT "$adopted" 2>/dev/null || true
+kill "$mute" 2>/dev/null || true
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "orphan.sh: all checks passed"
