@@ -164,11 +164,26 @@ contains() {
 # An advertisement is unsolicited every few seconds and solicited on request, so
 # a wait of a few seconds is generous -- but the interesting case is the one where
 # it never arrives, and that has to be bounded rather than hung.
+# `$2` is how many quarter-seconds to wait, defaulting to fifteen seconds.
+#
+# **Parameterised because one of these waits is load-sensitive and the others
+# are not.** Waiting for an address to leave duplicate address detection is
+# bounded by the kernel; waiting for a *router advertisement* is bounded by
+# another process getting scheduled, and 15 seconds is three advertisements at
+# this script's `--ra-param` interval of 5.
+#
+# Measured rather than guessed at. Run on an idle machine this script passed
+# 6 times out of 6; run as part of `make live` it failed 2 of about 5, always
+# at the advertisement wait and never with the router's link-local still
+# tentative -- so the router was up and the advertisement was late rather than
+# absent. The suite runs dozens of namespaces, and three advertisements' slack
+# is thin against that.
 wait_for() {
 	waited=0
+	limit=${2:-60}
 	while ! eval "$1" >/dev/null 2>&1; do
 		waited=$((waited + 1))
-		if [ "$waited" -gt 60 ]; then
+		if [ "$waited" -gt "$limit" ]; then
 			return 1
 		fi
 		sleep 0.25
@@ -224,7 +239,10 @@ fi
 # anything. So the wire is established first, by hand, with the one sysctl this is
 # all about: `2` accepts advertisements whatever the interface forwards.
 echo 2 > /proc/sys/net/ipv6/conf/wan/accept_ra
-if ! wait_for 'ip -6 addr show wan | grep -q "proto kernel_ra"'; then
+# A minute, which is twelve advertisements rather than three. An intermittent
+# gate is worse than a failing one: the next person to hit it assumes it is
+# their change, which is exactly what it cost here.
+if ! wait_for 'ip -6 addr show wan | grep -q "proto kernel_ra"' 240; then
 	echo "slaac.sh: no advertisement arrived even at accept_ra 2, so this whole" >&2
 	echo "slaac.sh: script would be measuring a router that is not advertising" >&2
 	sed 's/^/  /' "$work/dnsmasq.log" 2>/dev/null >&2

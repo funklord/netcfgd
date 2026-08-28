@@ -40,6 +40,27 @@ class QSystemTrayIcon;
 
 class ncfg_connection;
 
+/*
+ * What a tray icon can honestly claim, from what is observable here.
+ *
+ * **A boolean cannot be faithful, which is why this is not one.** The tray
+ * showed a radio as connected on association alone -- the earliest of the
+ * steps and the least informative, true of a machine that never got a lease.
+ * An operator watching it had no way to tell "joined the network" from "the
+ * network works", which are the two states worth telling apart.
+ *
+ * The ladder is what the machine can answer without sending a packet:
+ * associated, then addressed, then something to route through. Reachability
+ * itself needs a host to ask, and decision 0061 declined to have netcfgd
+ * choose one -- so `routed` is the honest ceiling, and it is deliberately not
+ * called `online`.
+ */
+enum class ncfg_reach {
+	offline, /* no address, or a radio that has joined nothing */
+	local,   /* addressed, with no default route to leave through */
+	routed,  /* a default route in the main table */
+};
+
 class ncfg_tray : public QObject {
 	Q_OBJECT
 
@@ -54,8 +75,8 @@ public:
 	 * is every machine this has been built on. Exposing them is what lets the
 	 * icon be rendered and checked rather than asserted about; see
 	 * gui/tests/tray_icon.cpp. Not otherwise called from outside. */
-	static QIcon painted_icon(bool connected);
-	static QIcon state_icon(bool connected);
+	static QIcon painted_icon(ncfg_reach reach);
+	static QIcon state_icon(ncfg_reach reach);
 
 	void refresh();
 

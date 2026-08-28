@@ -69,8 +69,9 @@ int main(int argc, char **argv)
 {
 	QApplication application(argc, argv);
 
-	const QImage connected = ncfg_tray::painted_icon(true).pixmap(22, 22).toImage();
-	const QImage offline = ncfg_tray::painted_icon(false).pixmap(22, 22).toImage();
+	const QImage connected = ncfg_tray::painted_icon(ncfg_reach::routed).pixmap(22, 22).toImage();
+	const QImage offline = ncfg_tray::painted_icon(ncfg_reach::offline).pixmap(22, 22).toImage();
+	const QImage local = ncfg_tray::painted_icon(ncfg_reach::local).pixmap(22, 22).toImage();
 
 	check(!connected.isNull() && connected.size() == QSize(22, 22),
 	    "connected: a 22x22 pixmap comes back");
@@ -84,6 +85,17 @@ int main(int argc, char **argv)
 
 	/* The property that matters. */
 	check(connected != offline, "the two states are not the same picture");
+	/* **Three states, three pictures.** The middle one exists because a
+	 * boolean could not say "joined a network that goes nowhere", and it
+	 * earns nothing if it draws as either neighbour: an operator would read
+	 * it as the state it resembles. */
+	check(local != offline, "local is not drawn as offline");
+	check(local != connected, "local is not drawn as connected");
+	check(inked(local) > 40, "local: the arcs and the dot are drawn");
+	check(has_colour(local, qRgb(0xcc, 0x88, 0x22)), "local is drawn in its own colour");
+	check(!has_colour(local, qRgb(0x33, 0x99, 0x33)),
+	    "local carries none of the connected colour");
+	check(!has_colour(local, qRgb(0x88, 0x88, 0x88)), "local carries none of the offline colour");
 
 	/* And they differ in the way the source says they do, rather than by some
 	 * incidental pixel: the pen colour is the whole distinction. */
@@ -98,7 +110,8 @@ int main(int argc, char **argv)
 	 * to the painted one. Where a theme exists the theme wins, which is the
 	 * point of that function and is not what this asserts. */
 	if (QIcon::themeName().isEmpty()) {
-		const QImage themed = ncfg_tray::state_icon(true).pixmap(22, 22).toImage();
+		const QImage themed =
+		    ncfg_tray::state_icon(ncfg_reach::routed).pixmap(22, 22).toImage();
 		check(themed == connected, "with no icon theme, state_icon paints its own");
 	}
 

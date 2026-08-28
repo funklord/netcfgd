@@ -124,6 +124,27 @@ typedef struct {
 	int   carrier;   /* up and carrier are separate answers: no cable is not
 	          * the same state as not configured */
 	/*
+	 * Whether a default route leaves through this link, in the main table.
+	 *
+	 * **Three separate answers, and a screen that conflates them lies.** A
+	 * link can be up with no carrier, carry traffic with no address, and hold
+	 * an address with nothing to route through -- so "connected" is not any
+	 * one of `up`, `carrier` or a non-empty `addresses`. The tray showed a
+	 * radio as connected on association alone, which is the earliest of the
+	 * four and the least informative: it is true of a machine that never got
+	 * a lease.
+	 *
+	 * Table 254 (`main`) only. A default route in another table belongs to a
+	 * policy rule and says nothing about where this machine's ordinary
+	 * traffic goes.
+	 *
+	 * Still not a promise that anything answers -- that needs a packet, and
+	 * decision 0061 declined to have netcfgd choose a host to send one to.
+	 * It is the last thing observable without asking the network, which
+	 * makes it the honest ceiling for an icon.
+	 */
+	int   default_route;
+	/*
 	 * Whether this link is a radio, so that a client can offer the wireless
 	 * screens for it.
 	 *
@@ -574,6 +595,82 @@ void ncfg_radios_free(ncfg_radios_t *radios);
  * that. Needs `observe`.
  */
 int ncfg_client_radios(ncfg_client_t *client, ncfg_radios_t *out, char *err, size_t err_size);
+
+/*
+ * A wireless network the configuration describes, in range or not.
+ *
+ * **Distinct from a scan, and that is the whole point.** `ncfg_client_wifi_scan`
+ * answers "what is around me", and every screen built on it can only show a
+ * configured network while it happens to be broadcasting. An operator asking
+ * "which networks do I have saved" is asking about the document, and before
+ * this there was nowhere to read that: no client call, no `ncfg` subcommand
+ * and no pane. The answer came from the compiled document, which is the only
+ * place it is -- the same route `ncfg_client_confirm_default` takes.
+ *
+ * `ssid` is lowercase hex for the reason it is everywhere else here: an SSID
+ * is 0..32 arbitrary octets and need not be text. Pass it through
+ * ncfg_access_point_display() with `named` set from whether `name` is
+ * non-empty, so that one rule spells these for every screen.
+ *
+ * `priority` is the document's, where higher wins -- wpa_supplicant's
+ * convention, and the opposite of a route metric. A screen showing both should
+ * not imply they order the same way.
+ */
+typedef struct {
+	char *id;          /* the network's id in the document; how to name it */
+	char *name;        /* the SSID as text, "" when it is not text */
+	char *ssid;        /* lowercase hex; always present */
+	char *security;    /* "psk", "eap", "open", "owe", or "" if unstated */
+	int   priority;    /* higher wins; 0 when the document names none */
+	int   autoconnect; /* whether it may be joined without being asked */
+	int   hidden;      /* whether the document says it does not broadcast */
+} ncfg_saved_network_t;
+
+typedef struct {
+	ncfg_saved_network_t *items;
+	size_t                count;
+} ncfg_saved_networks_t;
+
+void ncfg_saved_networks_free(ncfg_saved_networks_t *networks);
+
+/*
+ * Every wireless network the configuration describes. Needs `observe`.
+ */
+int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out, char *err,
+    size_t err_size);
+
+/*
+ * What the configuration says about name resolution, and whether it is on.
+ *
+ * **`mode` is `none` unless a document says otherwise, and `none` means
+ * netcfgd does not touch resolution at all.** That default is right -- it is
+ * the correct answer on a machine where something else owns
+ * /etc/resolv.conf -- and it is invisible: a machine whose resolv.conf was
+ * written by a NetworkManager that has since been stopped keeps working off a
+ * stale file, and nothing anywhere says netcfgd is deliberately not managing
+ * it. That was a real report, from an operator whose DHCP was fine and whose
+ * DNS never updated, and the fault was that no screen could show this field.
+ *
+ * `managing` is the observed half rather than the configured one: whether
+ * netcfgd currently holds any resolver state. A `mode` that is not `none`
+ * with `managing` zero is a configuration that has not taken effect yet.
+ */
+typedef struct {
+	char  *mode;         /* "none", "write_resolv_conf", "resolved", ... */
+	char **servers;      /* configured servers, if the document names any */
+	size_t server_count;
+	char **search;
+	size_t search_count;
+	int    managing;     /* netcfgd holds resolver state right now */
+} ncfg_dns_t;
+
+void ncfg_dns_free(ncfg_dns_t *dns);
+
+/*
+ * How name resolution is configured, and whether netcfgd is doing it.
+ * Needs `observe`.
+ */
+int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t err_size);
 
 /*
  * Take a radio on, or hand it back.

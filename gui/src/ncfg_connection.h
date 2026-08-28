@@ -46,6 +46,45 @@ struct ncfg_link_row {
 	/* Whether the wifi tab should offer this one. Answered below the seam so
 	 * that the rule lives with the other models rather than in a table. */
 	bool    wireless = false;
+	/* Whether a default route in the main table leaves through this link.
+	 * The last thing observable without sending a packet, and the reason the
+	 * tray can say "connected" rather than "associated". */
+	bool    default_route = false;
+};
+
+/*
+ * One saved wireless network, as the document describes it.
+ *
+ * Separate from `ncfg_access_point_row`, which is what a scan found: a
+ * configured network out of range appears in this list and in no scan, which
+ * is exactly the case that had nowhere to be shown.
+ */
+struct ncfg_saved_network_row {
+	QString id;
+	QString name;
+	QString ssid;
+	QString security;
+	int     priority = 0;
+	bool    autoconnect = false;
+	bool    hidden = false;
+};
+
+/*
+ * How name resolution is configured, and whether it is in effect.
+ *
+ * `mode` is "none" unless a document says otherwise, and "none" means netcfgd
+ * does not touch resolution -- a correct default that is invisible until a
+ * screen shows it.
+ */
+struct ncfg_dns_row {
+	QString     mode;
+	QStringList servers;
+	QStringList search;
+	bool        managing = false;
+
+	/* One sentence for a screen, composed here so the tray and any pane
+	 * cannot drift into two descriptions of one setting. */
+	QString summary() const;
 };
 
 /*
@@ -342,6 +381,8 @@ public:
 	bool wifi_status(const QString &interface, ncfg_wifi_status_row *out, QString *error);
 	bool wifi_connect(const QString &interface, const QString &network, QString *error);
 	bool wifi_disconnect(const QString &interface, QString *error);
+	bool saved_networks(QList<ncfg_saved_network_row> *out, QString *error);
+	bool dns(ncfg_dns_row *out, QString *error);
 
 	/*
 	 * Apply, with a confirm window in seconds or 0 for none.

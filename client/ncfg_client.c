@@ -551,11 +551,45 @@ static char *join_addresses(const ncfg_json_doc_t *doc, uint32_t addresses, cons
 	return joined;
 }
 
+/*
+ * Does a default route leave through `name`, in the main table?
+ *
+ * Table 254 only. A default route in another table is reached through a policy
+ * rule and says nothing about where this machine's ordinary traffic goes, so
+ * counting it would tell a tray icon that a host with one rule and no uplink
+ * was connected.
+ *
+ * Ownership is deliberately not consulted. A route netcfgd did not install
+ * still carries packets, and an icon that went grey because another daemon put
+ * the route there would be reporting on netcfgd rather than on the machine.
+ */
+static int link_has_default_route(const ncfg_json_doc_t *doc, uint32_t routes, const char *name)
+{
+	uint32_t count = ncfg_json_count(doc, routes);
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, routes, i);
+		uint32_t owner = ncfg_json_member(doc, entry, "interface");
+		uint32_t where = ncfg_json_member(doc, entry, "destination");
+		if (!ncfg_json_string_equals(doc, owner, name)) {
+			continue;
+		}
+		if (!ncfg_json_string_equals(doc, where, "default")) {
+			continue;
+		}
+		if (ncfg_json_int(doc, ncfg_json_member(doc, entry, "table"), 0) != 254) {
+			continue;
+		}
+		return 1;
+	}
+	return 0;
+}
+
 static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *err, size_t err_size)
 {
 	uint32_t root = ncfg_json_root(doc);
 	uint32_t links = ncfg_json_member(doc, root, "links");
 	uint32_t addresses = ncfg_json_member(doc, root, "addresses");
+	uint32_t routes = ncfg_json_member(doc, root, "routes");
 	uint32_t count = ncfg_json_count(doc, links);
 
 	if (!count) {
@@ -589,6 +623,8 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->up = ncfg_json_bool(doc, ncfg_json_member(doc, link, "up"), 0);
 		item->carrier = ncfg_json_bool(doc, ncfg_json_member(doc, link, "carrier"), 0);
 		item->addresses = item->name ? join_addresses(doc, addresses, item->name) : NULL;
+		item->default_route =
+		    item->name ? link_has_default_route(doc, routes, item->name) : 0;
 		// **The daemon's answer where there is one.** netcfgd reads
 		// /sys/class/net/<name>/wireless and puts it on the wire; guessing
 		// from the name was all a client could do before, and it disagrees
@@ -1049,6 +1085,170 @@ char *ncfg_access_point_display(int named, const char *name, const char *ssid)
 		return dup_string("(hidden)");
 	}
 	return dup_string(name);
+}
+
+void ncfg_saved_networks_free(ncfg_saved_networks_t *networks)
+{
+	if (!networks) {
+		return;
+	}
+	for (size_t i = 0; i < networks->count; i++) {
+		free(networks->items[i].id);
+		free(networks->items[i].name);
+		free(networks->items[i].ssid);
+		free(networks->items[i].security);
+	}
+	free(networks->items);
+	networks->items = NULL;
+	networks->count = 0;
+}
+
+int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out, char *err,
+    size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t networks = ncfg_json_member(doc, ncfg_json_root(doc), "networks");
+	uint32_t count = ncfg_json_count(doc, networks);
+	if (!count) {
+		/* A document that configures no wireless network is ordinary --
+		 * a wired machine has none -- and calloc(0, n) may return NULL,
+		 * which the next line would read as being out of memory. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, networks, i);
+		ncfg_saved_network_t *item = &out->items[i];
+
+		item->id = member_text(doc, entry, "id");
+		item->ssid = member_text(doc, entry, "ssid");
+		/* The document holds the SSID as hex and an id beside it. An id
+		 * derived from text is that text, so it doubles as the name --
+		 * but only when it is genuinely the SSID rather than a label
+		 * somebody chose, which is why the name is left empty and the
+		 * hex kept: `ncfg_access_point_display` is the one place that
+		 * decides how these are spelled. */
+		item->name = member_text(doc, entry, "id");
+		item->security = member_text(doc, ncfg_json_member(doc, entry, "security"), "type");
+		item->priority =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "priority"), 0);
+		item->autoconnect =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "autoconnect"), 0);
+		item->hidden = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "hidden"), 0);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
+void ncfg_dns_free(ncfg_dns_t *dns)
+{
+	if (!dns) {
+		return;
+	}
+	free(dns->mode);
+	for (size_t i = 0; i < dns->server_count; i++) {
+		free(dns->servers[i]);
+	}
+	free(dns->servers);
+	for (size_t i = 0; i < dns->search_count; i++) {
+		free(dns->search[i]);
+	}
+	free(dns->search);
+	dns->mode = NULL;
+	dns->servers = NULL;
+	dns->search = NULL;
+	dns->server_count = 0;
+	dns->search_count = 0;
+	dns->managing = 0;
+}
+
+/*
+ * One array of strings out of a JSON list, or NULL for an empty one.
+ *
+ * `*count` is set before the strings go in, so a caller freeing after a partial
+ * failure walks the whole array rather than the finished part of it -- the same
+ * order `convert_links` takes, and for the same reason.
+ */
+static char **string_list(const ncfg_json_doc_t *doc, uint32_t array, size_t *count)
+{
+	*count = 0;
+	uint32_t total = ncfg_json_count(doc, array);
+	if (!total) {
+		return NULL;
+	}
+	char **items = calloc(total, sizeof(*items));
+	if (!items) {
+		return NULL;
+	}
+	*count = total;
+	for (uint32_t i = 0; i < total; i++) {
+		size_t length = 0;
+		const char *text = ncfg_json_string(doc, ncfg_json_at(doc, array, i), &length);
+		items[i] = text ? dup_text(text, length) : dup_string("");
+	}
+	return items;
+}
+
+int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t globals = ncfg_json_member(doc, ncfg_json_root(doc), "globals");
+	uint32_t dns = ncfg_json_member(doc, globals, "dns");
+	out->mode = member_text(doc, dns, "mode");
+	out->servers = string_list(doc, ncfg_json_member(doc, dns, "servers"), &out->server_count);
+	out->search = string_list(doc, ncfg_json_member(doc, dns, "search"), &out->search_count);
+	ncfg_json_free(doc);
+
+	/* The observed half, from a second request: the document says what was
+	 * asked for and the status says what is. A mode that is not `none` with
+	 * nothing observed is a configuration that has not taken effect, which
+	 * is a different thing to report than either one alone. */
+	doc = ncfg_client_request(client, "{\"request\":\"status\"}", err, err_size);
+	if (doc) {
+		if (!took_refusal(doc, err, err_size)) {
+			uint32_t observed = ncfg_json_member(doc, ncfg_json_root(doc), "dns");
+			out->managing = ncfg_json_count(doc, observed) > 0;
+		}
+		ncfg_json_free(doc);
+	}
+	return 1;
 }
 
 void ncfg_radios_free(ncfg_radios_t *radios)

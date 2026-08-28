@@ -165,6 +165,7 @@ bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 		row.state = state_of(link);
 		row.mac = from_c(link.mac);
 		row.addresses = from_c(link.addresses);
+		row.default_route = link.default_route != 0;
 		row.mtu = link.mtu;
 		row.wireless = link.wireless != 0;
 		out->append(row);
@@ -412,6 +413,94 @@ bool ncfg_connection::secret_put(const QString &name, const QString &value, bool
 		}
 		return false;
 	}
+	return true;
+}
+
+QString ncfg_dns_row::summary() const
+{
+	if (mode.isEmpty() || mode == QStringLiteral("none")) {
+		return QStringLiteral(
+		    "not managed by netcfgd -- whatever wrote /etc/resolv.conf still owns it");
+	}
+	if (!managing) {
+		return QStringLiteral("%1, not in effect yet").arg(mode);
+	}
+	QString line = mode;
+	if (!servers.isEmpty()) {
+		line += QStringLiteral(" -- %1").arg(servers.join(QStringLiteral(", ")));
+	}
+	return line;
+}
+
+bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_saved_networks_t networks = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_saved_networks(client, &networks, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < networks.count; i++) {
+		ncfg_saved_network_row row;
+		row.id = QString::fromUtf8(networks.items[i].id ? networks.items[i].id : "");
+		row.name = QString::fromUtf8(networks.items[i].name ? networks.items[i].name : "");
+		row.ssid = QString::fromUtf8(networks.items[i].ssid ? networks.items[i].ssid : "");
+		row.security =
+		    QString::fromUtf8(networks.items[i].security ? networks.items[i].security : "");
+		row.priority = networks.items[i].priority;
+		row.autoconnect = networks.items[i].autoconnect != 0;
+		row.hidden = networks.items[i].hidden != 0;
+		out->append(row);
+	}
+	ncfg_saved_networks_free(&networks);
+	return true;
+}
+
+bool ncfg_connection::dns(ncfg_dns_row *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	*out = ncfg_dns_row();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_dns_t answer = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_dns(client, &answer, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	out->mode = QString::fromUtf8(answer.mode ? answer.mode : "");
+	for (size_t i = 0; i < answer.server_count; i++) {
+		out->servers << QString::fromUtf8(answer.servers[i] ? answer.servers[i] : "");
+	}
+	for (size_t i = 0; i < answer.search_count; i++) {
+		out->search << QString::fromUtf8(answer.search[i] ? answer.search[i] : "");
+	}
+	out->managing = answer.managing != 0;
+	ncfg_dns_free(&answer);
 	return true;
 }
 

@@ -25,16 +25,27 @@
  * question for a drawing nobody will look at closely. Three arcs and a dot is
  * what a wifi indicator is.
  */
-QIcon ncfg_tray::painted_icon(bool connected)
+QIcon ncfg_tray::painted_icon(ncfg_reach reach)
 {
 	QPixmap pixmap(22, 22);
 	pixmap.fill(Qt::transparent);
 
 	QPainter painter(&pixmap);
 	painter.setRenderHint(QPainter::Antialiasing, true);
-	/* Grey when there is nothing, foreground colour when there is. A colour
-	 * of its own would be wrong on half the panels it lands on. */
-	QPen pen(connected ? QColor(0x33, 0x99, 0x33) : QColor(0x88, 0x88, 0x88));
+	/* Grey when there is nothing, amber when the machine is configured but
+	 * has nowhere to send traffic, green when it has. The middle one is the
+	 * state this icon used to draw as connected, and it is the one an
+	 * operator most needs to see: a radio that joined a network and never
+	 * got a usable route looks identical to a working one from every other
+	 * angle. A colour of its own would be wrong on half the panels it lands
+	 * on, so these stay close to the conventional three. */
+	QColor ink(0x88, 0x88, 0x88);
+	if (reach == ncfg_reach::routed) {
+		ink = QColor(0x33, 0x99, 0x33);
+	} else if (reach == ncfg_reach::local) {
+		ink = QColor(0xcc, 0x88, 0x22);
+	}
+	QPen pen(ink);
 	pen.setWidth(2);
 	painter.setPen(pen);
 
@@ -50,14 +61,19 @@ QIcon ncfg_tray::painted_icon(bool connected)
 	return QIcon(pixmap);
 }
 
-QIcon ncfg_tray::state_icon(bool connected)
+QIcon ncfg_tray::state_icon(ncfg_reach reach)
 {
 	QString name = QStringLiteral("network-offline");
-	if (connected) {
+	if (reach == ncfg_reach::routed) {
 		name = QStringLiteral("network-wireless");
+	} else if (reach == ncfg_reach::local) {
+		/* The themed name for "joined, not usable". Falls through to the
+		 * painted icon on a theme without it, which is the common case and
+		 * why the painted one carries three colours of its own. */
+		name = QStringLiteral("network-wireless-acquiring");
 	}
 	const QIcon themed = QIcon::fromTheme(name);
-	return themed.isNull() ? painted_icon(connected) : themed;
+	return themed.isNull() ? painted_icon(reach) : themed;
 }
 
 ncfg_tray *ncfg_tray::create(ncfg_connection *connection, QObject *parent)
@@ -92,7 +108,7 @@ ncfg_tray::ncfg_tray(ncfg_connection *connection, QObject *parent)
 
 	icon = new QSystemTrayIcon(this);
 	icon->setContextMenu(menu);
-	icon->setIcon(state_icon(false));
+	icon->setIcon(state_icon(ncfg_reach::offline));
 	connect(icon, &QSystemTrayIcon::activated, this,
 	    [this](QSystemTrayIcon::ActivationReason reason) { activated(reason); });
 	icon->show();
@@ -111,7 +127,7 @@ void ncfg_tray::refresh()
 		 * says what to do about it. */
 		state_action->setText(error);
 		icon->setToolTip(error);
-		icon->setIcon(state_icon(false));
+		icon->setIcon(state_icon(ncfg_reach::offline));
 		disconnect_action->setEnabled(false);
 		radio.clear();
 		return;
@@ -129,17 +145,35 @@ void ncfg_tray::refresh()
 		/* Wired-only machines are ordinary, so this is a state and not a
 		 * complaint. The addresses are what the operator wants to know. */
 		QStringList addressed;
+		bool routed = false;
 		for (const ncfg_link_row &link : links) {
-			if (!link.addresses.isEmpty() && link.name != QStringLiteral("lo")) {
+			if (link.name == QStringLiteral("lo")) {
+				continue;
+			}
+			if (!link.addresses.isEmpty()) {
 				addressed << QStringLiteral("%1 %2").arg(link.name, link.addresses);
 			}
+			/* Any link with a default route will do: which one carries the
+			 * traffic is the kernel's business and a metric's, and an icon
+			 * that picked one would be answering a question nobody asked. */
+			routed = routed || link.default_route;
 		}
-		const QString line = addressed.isEmpty()
-		                 ? QStringLiteral("no addressed interface")
-		                 : addressed.join(QStringLiteral(", "));
+		const ncfg_reach reach = routed      ? ncfg_reach::routed
+		                     : !addressed.isEmpty() ? ncfg_reach::local
+		                                    : ncfg_reach::offline;
+		QString line = addressed.isEmpty()
+		           ? QStringLiteral("no addressed interface")
+		           : addressed.join(QStringLiteral(", "));
+		if (reach == ncfg_reach::local) {
+			/* Said outright, because this is the state that used to be
+			 * drawn as connected: an address with nothing to route
+			 * through is a machine that will fail every request and look
+			 * configured while it does. */
+			line += QStringLiteral(" -- no default route");
+		}
 		state_action->setText(line);
 		icon->setToolTip(line);
-		icon->setIcon(state_icon(!addressed.isEmpty()));
+		icon->setIcon(state_icon(reach));
 		disconnect_action->setEnabled(false);
 		return;
 	}
@@ -148,17 +182,42 @@ void ncfg_tray::refresh()
 	if (!connection->wifi_status(radio, &state, &error)) {
 		state_action->setText(error);
 		icon->setToolTip(error);
-		icon->setIcon(state_icon(false));
+		icon->setIcon(state_icon(ncfg_reach::offline));
 		disconnect_action->setEnabled(false);
 		return;
 	}
 
+	/* **Association is not connectivity, and this icon used to say it was.**
+	 * `state.network` non-empty means the supplicant has joined something --
+	 * the earliest step, and true of a radio that never got a lease. What the
+	 * operator wants from a tray is whether traffic can leave, so the radio's
+	 * own link row is consulted for an address and a default route, and the
+	 * icon reports the furthest rung actually reached. */
+	bool addressed = false;
+	bool routed = false;
+	for (const ncfg_link_row &link : links) {
+		if (link.name != radio) {
+			continue;
+		}
+		addressed = !link.addresses.isEmpty();
+		routed = link.default_route;
+		break;
+	}
+	const bool joined = !state.network.isEmpty() || !state.display.isEmpty();
+	const ncfg_reach reach = routed ? ncfg_reach::routed
+	                     : (joined || addressed) ? ncfg_reach::local
+	                                     : ncfg_reach::offline;
+
 	/* One spelling, composed on the row, so this and the wifi tab cannot
 	 * drift into two descriptions of one radio. */
-	const QString line = state.summary();
+	QString line = state.summary();
+	if (reach == ncfg_reach::local) {
+		line += addressed ? QStringLiteral(" -- no default route")
+		            : QStringLiteral(" -- joined, no address");
+	}
 	state_action->setText(line);
 	icon->setToolTip(line);
-	icon->setIcon(state_icon(!state.network.isEmpty() || !state.display.isEmpty()));
+	icon->setIcon(state_icon(reach));
 	disconnect_action->setEnabled(true);
 }
 

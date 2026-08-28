@@ -213,6 +213,25 @@ mkdir -p "$work/root/NetworkManager/devices"
 printf '[device]\nmanaged=true\n' > "$work/root/NetworkManager/devices/$index"
 export NCFG_RUN_ROOT="$work/root"
 
+# **And a NetworkManager that is running, because a file alone is not a claim.**
+#
+# 0145: NetworkManager has no `RuntimeDirectory=` and no `ExecStop=`, so its
+# device files outlive it with `managed=true` still in them. netcfgd declining
+# a radio on behalf of a daemon systemd had already stopped is how a machine
+# ended up with no network manager at all, so a claim now needs a live process
+# too.
+#
+# **Without this the test asks the host a question about itself.** Liveness is
+# read from `/proc`, and this script pointed at the real one -- so it passed on
+# a machine running NetworkManager and failed on a machine that had stopped it,
+# which is the same machine on two different days. It passed the day 0145
+# landed for exactly that reason, and failed the first time netcfgd was left
+# holding the radio. A fixture that reads the developer's machine is not a
+# fixture.
+mkdir -p "$work/root/proc/424"
+printf 'NetworkManager\n' > "$work/root/proc/424/comm"
+export NCFG_PROC="$work/root/proc"
+
 "$repo/target/debug/netcfgd" > "$work/d3.log" 2>&1 &
 daemon=$!
 waited=0

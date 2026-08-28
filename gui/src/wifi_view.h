@@ -97,6 +97,20 @@ private:
 	 * and `add` needs the exact SSID octets as hex. Re-drawing from a QString
 	 * would mean parsing back what was formatted for a person. */
 	QList<ncfg_access_point_row> scanned;
+
+	/*
+	 * The networks the document configures, which is a different list from
+	 * what a scan found.
+	 *
+	 * A configured network out of range appears here and in no scan, and
+	 * before this it appeared nowhere at all: the `configured` column marks
+	 * scan rows, so the only saved networks a screen could show were the ones
+	 * that happened to be broadcasting. "Where do I see my saved networks"
+	 * had no answer in this program.
+	 */
+	QTableWidget    *saved_table;
+	QList<ncfg_saved_network_row> saved;
+	void    update_saved();
 };
 
 #endif /* NCFG_WIFI_VIEW_H */

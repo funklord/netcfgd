@@ -232,8 +232,8 @@ int main(int argc, char **argv)
 	check("with no other manager, nothing is claimed", !contention_shown(&view));
 
 	const QByteArray index = qgetenv("NCFG_TEST_RADIO_INDEX");
-	const QString devices = QString::fromUtf8(qgetenv("NCFG_RUN_ROOT")) +
-	    QStringLiteral("/NetworkManager/devices");
+	const QString run_root = QString::fromUtf8(qgetenv("NCFG_RUN_ROOT"));
+	const QString devices = run_root + QStringLiteral("/NetworkManager/devices");
 	QDir().mkpath(devices);
 	{
 		QFile claim(devices + "/" + QString::fromUtf8(index));
@@ -242,6 +242,24 @@ int main(int argc, char **argv)
 			claim.close();
 		}
 	}
+	/*
+	 * **The file alone is no longer a claim, and the running daemon half is
+	 * arranged by `gui_wifi.sh`.** Decision 0145: NetworkManager has no
+	 * `RuntimeDirectory=` and no `ExecStop=`, so its device files outlive it
+	 * with `managed=true` still in them -- and netcfgd declining a radio on
+	 * behalf of a daemon systemd had already stopped left a machine with no
+	 * network manager at all. A claim now needs the file *and* a live
+	 * process.
+	 *
+	 * The process half cannot be faked from here: this banner comes from the
+	 * daemon's plan, so it is the *daemon's* `NCFG_PROC` that decides, not
+	 * this process'. The script exports one before starting it.
+	 *
+	 * This test wrote only the file, so it began asserting that a banner
+	 * appears for a daemon that is not there. It did not fail when 0145
+	 * landed, because `gui_wifi.sh` runs only when the GUI is built and it
+	 * was not. A test that cannot run is a test that cannot disagree.
+	 */
 	view.refresh();
 	check("a radio another daemon manages is called out", contention_shown(&view));
 	check("by name", contention_text(&view).contains(QStringLiteral("NetworkManager")),

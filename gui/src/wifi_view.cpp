@@ -24,6 +24,15 @@ const char *const column_titles[] = {
 };
 constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(column_titles[0]));
 
+/* The document's own columns. `priority` is spelled out as higher-wins in the
+ * cell rather than left as a bare number, because a route metric is the other
+ * way round and both are on screen in this program. */
+const char *const saved_column_titles[] = {
+	"network", "security", "priority", "autoconnect", "in range"
+};
+constexpr int saved_column_count =
+    static_cast<int>(sizeof(saved_column_titles) / sizeof(saved_column_titles[0]));
+
 /*
  * The 2.4 and 5 GHz channel an MHz figure names.
  *
@@ -104,6 +113,27 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	table->horizontalHeader()->setStretchLastSection(true);
 	layout->addWidget(table);
 
+	/* Below the scan and clearly its own list, because the two answer
+	 * different questions: the table above is what is around this machine,
+	 * and this is what the configuration holds. Keeping them in one table
+	 * with a flag would mean a saved network out of range had no row. */
+	auto *saved_label = new QLabel(QStringLiteral("saved networks"), this);
+	layout->addWidget(saved_label);
+
+	saved_table = new QTableWidget(0, saved_column_count, this);
+	QStringList saved_headers;
+	for (int i = 0; i < saved_column_count; i++) {
+		saved_headers << QString::fromLatin1(saved_column_titles[i]);
+	}
+	saved_table->setObjectName(QStringLiteral("saved_networks"));
+	saved_table->setHorizontalHeaderLabels(saved_headers);
+	saved_table->verticalHeader()->setVisible(false);
+	saved_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+	saved_table->setSelectionMode(QAbstractItemView::SingleSelection);
+	saved_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+	saved_table->horizontalHeader()->setStretchLastSection(true);
+	layout->addWidget(saved_table);
+
 	connect(scan_button, &QPushButton::clicked, this, &ncfg_wifi_view::scan);
 	connect(join_button, &QPushButton::clicked, this, &ncfg_wifi_view::join);
 	connect(add_button, &QPushButton::clicked, this, &ncfg_wifi_view::add);
@@ -121,10 +151,62 @@ QString ncfg_wifi_view::chosen_interface() const
 	return interfaces->currentText();
 }
 
+/*
+ * The document's networks, and which of them the last scan saw.
+ *
+ * "In range" is cross-referenced rather than asked for: the daemon already
+ * marks a scanned access point with the network id that configures it, so the
+ * two lists join on that. It is left blank rather than saying "no" when no
+ * scan has been run, because "not in range" and "nobody looked" are different
+ * facts and a table that spelled them the same way would be the sort of
+ * confident wrong answer this program avoids elsewhere.
+ */
+void ncfg_wifi_view::update_saved()
+{
+	QString error;
+	if (!connection->saved_networks(&saved, &error)) {
+		/* Not fatal to the tab: the scan half still works, and a
+		 * refusal here is usually a tier this caller lacks. */
+		saved_table->setRowCount(0);
+		return;
+	}
+
+	saved_table->setRowCount(saved.size());
+	for (int row = 0; row < saved.size(); row++) {
+		const ncfg_saved_network_row &network = saved.at(row);
+
+		QString range;
+		if (!scanned.isEmpty()) {
+			range = QStringLiteral("no");
+			for (const ncfg_access_point_row &point : scanned) {
+				if (!point.configured.isEmpty() && point.configured == network.id) {
+					range = QStringLiteral("yes");
+					break;
+				}
+			}
+		}
+
+		const QString cells[] = {
+			network.name.isEmpty() ? network.id : network.name,
+			network.security,
+			network.priority ? QStringLiteral("%1 (higher wins)").arg(network.priority)
+			           : QString(),
+			network.autoconnect ? QStringLiteral("yes") : QStringLiteral("no"),
+			range,
+		};
+		for (int column = 0; column < saved_column_count; column++) {
+			saved_table->setItem(row, column, new QTableWidgetItem(cells[column]));
+		}
+	}
+	saved_table->resizeColumnsToContents();
+}
+
 void ncfg_wifi_view::refresh()
 {
 	QList<ncfg_link_row> rows;
 	QString error;
+
+	update_saved();
 
 	if (!connection->links(&rows, &error)) {
 		status->setText(error);
@@ -306,6 +388,11 @@ void ncfg_wifi_view::scan()
 	}
 
 	scanned = points;
+	/* The saved list carries an "in range" column derived from this scan, so
+	 * it is stale the moment a new one lands. Recomputed here rather than
+	 * left until the next refresh, because the operator who just pressed
+	 * scan is the one reading it. */
+	update_saved();
 	table->setRowCount(points.size());
 	int joinable = 0;
 	for (int row = 0; row < points.size(); row++) {

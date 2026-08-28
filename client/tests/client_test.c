@@ -1687,6 +1687,145 @@ static void dump_facts(const char *witness, const char *out_path)
 	fclose(out);
 }
 
+/*
+ * The document's networks, which is a different list from a scan's.
+ *
+ * A configured network that is not broadcasting appears here and in no scan,
+ * and that is the whole reason this call exists: every screen was built on
+ * `wifi_scan`, so "which networks have I saved" could only be answered for the
+ * ones in range. The fixture therefore carries a network with no counterpart
+ * anywhere -- if this only ever ran against a document whose networks were all
+ * in range, it would not be testing the case it was written for.
+ */
+static void saved_networks_come_from_the_document_not_a_scan(void)
+{
+	struct staged staged;
+	ncfg_saved_networks_t networks = {};
+	char err[NCFG_ERROR_MAX];
+
+	if (!staged_open(&staged, "a client asking for saved networks connects",
+	    "{\"response\":\"document\",\"schema_version\":1,\"networks\":["
+	    "{\"id\":\"home\",\"ssid\":\"686f6d65\",\"hidden\":false,"
+	    "\"security\":{\"type\":\"psk\"},\"priority\":100,\"autoconnect\":true},"
+	    "{\"id\":\"campus\",\"ssid\":\"63616d707573\",\"hidden\":true,"
+	    "\"security\":{\"type\":\"eap\"},\"priority\":0,\"autoconnect\":false}"
+	    "],\"globals\":{}}\n")) {
+		return;
+	}
+
+	int got = ncfg_client_saved_networks(staged.client, &networks, err, sizeof(err));
+	ok("the saved networks arrive", got == 1, err);
+	if (got == 1) {
+		ok("both of them", networks.count == 2, NULL);
+		if (networks.count == 2) {
+			equals("the first is named by its id", networks.items[0].id, "home");
+			equals("and carries the ssid as hex", networks.items[0].ssid, "686f6d65");
+			equals("and its security type", networks.items[0].security, "psk");
+			ok("and its priority, where higher wins",
+			   networks.items[0].priority == 100, NULL);
+			ok("and whether it joins by itself", networks.items[0].autoconnect == 1,
+			   NULL);
+			/* The second is the one no scan would show: hidden, not
+			 * autoconnecting, and with a priority the document did not
+			 * set. A reader that defaulted these would look right on
+			 * the first row and wrong on this one. */
+			equals("the second is there too", networks.items[1].id, "campus");
+			equals("with a different security type", networks.items[1].security,
+			       "eap");
+			ok("a priority the document did not name is zero, not invented",
+			   networks.items[1].priority == 0, NULL);
+			ok("and autoconnect false is carried rather than defaulted",
+			   networks.items[1].autoconnect == 0, NULL);
+			ok("and hidden is carried", networks.items[1].hidden == 1, NULL);
+		}
+		ncfg_saved_networks_free(&networks);
+	}
+	staged_close(&staged);
+}
+
+/*
+ * `none` is a real answer and the default one.
+ *
+ * A machine whose resolv.conf was written by a NetworkManager that has since
+ * been stopped keeps working off a stale file, with netcfgd deliberately not
+ * touching it and nothing saying so. That was a real report. The mode has to
+ * come back as `none` rather than as an empty string, because a screen cannot
+ * tell "not configured" from "could not read it" otherwise.
+ */
+static void dns_reports_that_it_is_not_managing_resolution(void)
+{
+	struct staged staged;
+	ncfg_dns_t dns = {};
+	char err[NCFG_ERROR_MAX];
+
+	/* Two answers: this call asks for the document and then the status,
+	 * because the configured mode and whether it has taken effect are
+	 * different facts. */
+	if (!staged_open(&staged, "a client asking about dns connects",
+	    "{\"response\":\"document\",\"schema_version\":1,\"globals\":{\"dns\":"
+	    "{\"mode\":\"none\",\"servers\":[],\"search\":[]}}}\n"
+	    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"routes\":[],"
+	    "\"dns\":[]}\n")) {
+		return;
+	}
+
+	int got = ncfg_client_dns(staged.client, &dns, err, sizeof(err));
+	ok("the dns settings arrive", got == 1, err);
+	if (got == 1) {
+		equals("and `none` comes back as itself", dns.mode, "none");
+		ok("with no servers", dns.server_count == 0, NULL);
+		ok("and nothing observed, so it is not managing resolution",
+		   dns.managing == 0, NULL);
+		ncfg_dns_free(&dns);
+	}
+	staged_close(&staged);
+}
+
+/*
+ * A default route is what separates "addressed" from "connected".
+ *
+ * The tray drew a radio as connected on association alone, which is true of a
+ * machine that never got a lease. Table 254 only: a default route in another
+ * table is reached through a policy rule and says nothing about where ordinary
+ * traffic goes, so the fixture carries one of those on a second link to make
+ * sure it is not counted.
+ */
+static void a_link_knows_whether_a_default_route_leaves_through_it(void)
+{
+	struct staged staged;
+	ncfg_links_t links = {};
+	char err[NCFG_ERROR_MAX];
+
+	if (!staged_open(&staged, "a client asking for links connects",
+	    "{\"response\":\"status\",\"links\":["
+	    "{\"name\":\"eth0\",\"kind\":\"\",\"mac\":\"\",\"mtu\":1500,"
+	    "\"up\":true,\"carrier\":true},"
+	    "{\"name\":\"eth1\",\"kind\":\"\",\"mac\":\"\",\"mtu\":1500,"
+	    "\"up\":true,\"carrier\":true}"
+	    "],\"addresses\":[],\"routes\":["
+	    "{\"interface\":\"eth0\",\"destination\":\"default\",\"table\":254},"
+	    "{\"interface\":\"eth1\",\"destination\":\"default\",\"table\":100},"
+	    "{\"interface\":\"eth1\",\"destination\":\"10.0.0.0/8\",\"table\":254}"
+	    "]}\n")) {
+		return;
+	}
+
+	int got = ncfg_client_links(staged.client, &links, err, sizeof(err));
+	ok("the links arrive", got == 1, err);
+	if (got == 1 && links.count == 2) {
+		ok("a link with a default route in the main table says so",
+		   links.items[0].default_route == 1, NULL);
+		/* eth1 has a default route in table 100 and an ordinary route in
+		 * the main one. Either read alone would call it routed. */
+		ok("a default route in another table does not count",
+		   links.items[1].default_route == 0, NULL);
+	} else {
+		ok("two links arrive", 0, "wrong count");
+	}
+	ncfg_links_free(&links);
+	staged_close(&staged);
+}
+
 int main(int argc, char **argv)
 {
 	/* `--facts OUT WITNESS`: the conformance dump, not the test run. */
@@ -1712,6 +1851,9 @@ int main(int argc, char **argv)
 	an_enterprise_network_sends_a_nested_eap_object();
 	storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer();
 	radios_carry_the_three_states_a_client_has_to_tell_apart();
+	saved_networks_come_from_the_document_not_a_scan();
+	dns_reports_that_it_is_not_managing_resolution();
+	a_link_knows_whether_a_default_route_leaves_through_it();
 	an_apply_becomes_a_journal();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
 	the_handshake_says_what_this_connection_may_do();

@@ -103,6 +103,22 @@ export NCFG_TEST_RADIO_INDEX
 # Nothing configured, which is the state the report came from.
 : > "$work/etc/netcfgd.conf"
 
+# **A NetworkManager that is running, for the contention banner to be about.**
+#
+# 0145 made a claim need a live process as well as a state file: NM leaves
+# /run/NetworkManager/devices/* behind with `managed=true` when it stops, and
+# netcfgd declining a radio on behalf of a daemon that had already exited left
+# a machine with no network manager at all.
+#
+# The C++ test writes and removes the *device file* to make the banner appear
+# and go; this supplies the process half for the whole run, because a `comm`
+# that never changes cannot be what makes the banner flicker. It goes here
+# rather than in the test for a mechanical reason: the banner comes out of the
+# daemon's plan, so the daemon's NCFG_PROC is the one consulted.
+mkdir -p "$NCFG_RUN_ROOT/proc/424"
+printf 'NetworkManager\n' > "$NCFG_RUN_ROOT/proc/424/comm"
+export NCFG_PROC="$NCFG_RUN_ROOT/proc"
+
 "$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
