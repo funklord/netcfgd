@@ -1188,6 +1188,47 @@ them, which is presumably why the adoption machinery exists -- but it means
 which process owns dhcpcd depends on whether the operator typed a flag. Raised
 with the holder; unanswered.
 
+**Choosing between saved networks works, and asking that question found two
+faults nothing else had.** `hwsim.sh` stands up a second access point on a
+third simulated radio, declares both networks with `priority = 1` and
+`priority = 100`, and checks netcfgd moves the station to the preferred one and
+still knows the one it left. The preferred network is deliberately the one the
+station is *not* already on: a document that was ignored entirely would leave it
+where it was, so "stayed put" reads as failure rather than as a pass it could
+fall into.
+
+Two findings came out of it, neither visible from reading the code, and both
+open:
+
+- **Networks reach the supplicant only when the supplicant is started.**
+  `populate_supplicant` has exactly one caller, in the `backend.start` handler.
+  A `network` block added to the document afterwards is never pushed, and
+  `ncfg apply` reports "nothing to do" -- correctly, because the planner has no
+  operation for it. Measured: the second network was absent from
+  `list_networks` entirely. **This contradicts
+  [0015](doc/decision/0015-the-supplicant-holds-no-state.md)**, which says
+  networks arrive "at apply time ... and are removed by `REMOVE_NETWORK` when
+  the document stops asking for them" -- a reconcile that does not exist.
+  Flagged rather than resolved: whether `ncfg apply` grows a `wifi.networks`
+  operation is the holder's decision.
+- **A supplicant that exits cleanly leaves the radio unconfigurable.** It
+  removes its own pid file; `read_backend_liveness` reads a missing pid file as
+  "cannot tell" and leaves `running` true; the dead socket then makes it
+  `running and silent`; and the restart is refused. Only
+  `ncfg apply --restart-wedged` recovers it. Reachable by any clean exit -- a
+  `wpa_cli terminate`, a SIGTERM, a crash that runs its handler.
+
+  **The obvious fix is the one that comment exists to prevent.** Reading an
+  absent pid file as "not running" would start a second dhcpcd beside the first
+  on every machine where netcfgd holds no file for one. A fix has to be
+  per-backend: `pid_by_marker` answers for a supplicant and
+  [0143](doc/decision/0143-the-one-backend-that-cannot-be-read-from-its-process.md)
+  says it cannot for dhcpcd, which destroys its argv. That spans 0080, 0140 and
+  0143 together, so it is a design decision rather than a patch.
+
+Neither would have appeared in `make live`: all eleven of its wifi tests drive a
+fake supplicant, which never exits and never declines.
+
 **This is a lab, not the operator's hardware.** The fault reported there is a
 different one and remains open: netcfgd runs in the host namespace, the guard's
 check passes, and NetworkManager genuinely does hold the radio.

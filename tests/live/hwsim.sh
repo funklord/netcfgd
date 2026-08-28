@@ -198,7 +198,11 @@ trap cleanup EXIT INT TERM
 # -------------------------------------------------------------- the radios
 
 before=$(ls /sys/class/ieee80211 2>/dev/null | sort)
-"$modprobe" mac80211_hwsim radios=2 || die "could not load mac80211_hwsim"
+# Three radios, not two: the third is a second access point, so that choosing
+# between saved networks can be tested rather than reasoned about. It costs one
+# more simulated phy and nothing else -- hwsim radios are free and hear each
+# other by default, which is exactly the topology "two networks in range" needs.
+"$modprobe" mac80211_hwsim radios=3 || die "could not load mac80211_hwsim"
 loaded_here=yes
 # udev renames interfaces asynchronously; give it a moment before reading them.
 sleep 1
@@ -206,24 +210,28 @@ after=$(ls /sys/class/ieee80211 | sort)
 
 phys=$(echo "$before
 $after" | sort | uniq -u)
-[ "$(echo "$phys" | wc -l)" = 2 ] || die "expected 2 new phys, got: $(echo "$phys" | tr '\n' ' ')"
+[ "$(echo "$phys" | wc -l)" = 3 ] || die "expected 3 new phys, got: $(echo "$phys" | tr '\n' ' ')"
 
-ap_phy=$(echo "$phys" | head -1)
-sta_phy=$(echo "$phys" | tail -1)
+ap_phy=$(echo "$phys" | sed -n 1p)
+ap2_phy=$(echo "$phys" | sed -n 2p)
+sta_phy=$(echo "$phys" | sed -n 3p)
 
 netdev_of() {
 	ls "/sys/class/ieee80211/$1/device/net" 2>/dev/null | head -1
 }
 ap_dev=$(netdev_of "$ap_phy")
+ap2_dev=$(netdev_of "$ap2_phy")
 sta_dev=$(netdev_of "$sta_phy")
-[ -n "$ap_dev" ] && [ -n "$sta_dev" ] || die "the new phys have no interfaces"
+[ -n "$ap_dev" ] && [ -n "$sta_dev" ] && [ -n "$ap2_dev" ] ||
+	die "the new phys have no interfaces"
 
-echo "hwsim.sh: ap $ap_phy/$ap_dev, station $sta_phy/$sta_dev"
+echo "hwsim.sh: ap $ap_phy/$ap_dev, ap2 $ap2_phy/$ap2_dev, station $sta_phy/$sta_dev"
 
 "$ip" netns add "$ns" || die "could not create the network namespace"
 created_ns=yes
 # Into the namespace before anything else can adopt them.
 "$iw" phy "$ap_phy" set netns name "$ns" || die "could not move $ap_phy"
+"$iw" phy "$ap2_phy" set netns name "$ns" || die "could not move $ap2_phy"
 "$iw" phy "$sta_phy" set netns name "$ns" || die "could not move $sta_phy"
 "$ip" -n "$ns" link set lo up
 
@@ -233,7 +241,7 @@ inns() { "$ip" netns exec "$ns" "$@"; }
 
 # Short, because a unix socket path has to fit in SUN_LEN.
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-hwsim.XXXXXX")
-mkdir -p "$work/etc/secrets" "$work/run" "$work/ctrl" "$work/ap"
+mkdir -p "$work/etc/secrets" "$work/run" "$work/ctrl" "$work/ap" "$work/ap2"
 
 passphrase=hunter2hunter2
 
@@ -581,6 +589,184 @@ if [ "$state" = COMPLETED ]; then
 				echo "FAIL cannot reach the access point at 10.55.0.1"
 				failures=$((failures + 1))
 			fi
+		fi
+	fi
+fi
+
+# ------------------------------------------------------ choosing between them
+#
+# **Two saved networks in range, and the document says which one to prefer.**
+# `priority` is written into the supplicant's network block -- higher wins,
+# which is wpa_supplicant's convention rather than netcfgd's -- and until now
+# nothing exercised it with a radio. The code path was read and believed, which
+# is the state every other wireless claim was in this morning.
+#
+# Deliberately after the checks above and on a rewritten document, so that a
+# failure to prefer cannot take the association and lease results with it.
+if [ "$state" = COMPLETED ]; then
+	cat > "$work/ap2/ap.conf" <<CONF
+ctrl_interface=$work/ap2/ctrl
+update_config=0
+
+network={
+	ssid="netcfgd-better"
+	mode=2
+	frequency=2412
+	key_mgmt=SAE WPA-PSK
+	proto=RSN
+	ieee80211w=1
+	psk="$passphrase"
+}
+CONF
+	inns "$supplicant" -B -Dnl80211 -i "$ap2_dev" -c "$work/ap2/ap.conf" \
+		> "$work/ap2/log" 2>&1 || die "could not start the second access point"
+
+	waited=0
+	ap2_state=
+	until [ "$ap2_state" = COMPLETED ]; do
+		ap2_state=$(inns "$cli" -p "$work/ap2/ctrl" -i "$ap2_dev" status 2>/dev/null |
+			sed -n 's/^wpa_state=//p')
+		waited=$((waited + 1))
+		if [ "$waited" -gt 150 ]; then
+			echo "FAIL the second access point never came up (last: ${ap2_state:-none})"
+			failures=$((failures + 1))
+			break
+		fi
+		sleep 0.1
+	done
+
+	if [ "$ap2_state" = COMPLETED ]; then
+		echo "ok   a second access point is beaconing"
+
+		# Both networks, and the one the station is *not* on is preferred.
+		# Written that way round on purpose: if the document is ignored
+		# entirely the station stays where it is, which is the failure this
+		# is looking for rather than a pass it could fall into.
+		cat > "$work/etc/netcfgd.conf" <<CONF
+device $sta_dev {
+	wifi { backend = "wpa_supplicant"; autoconnect = true }
+}
+
+network "netcfgd-test" {
+	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3"; priority = 1 }
+	config = "null"
+}
+
+network "netcfgd-better" {
+	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3"; priority = 100 }
+	config = "null"
+}
+
+interface $sta_dev { config = "dhcp" }
+CONF
+		# **The supplicant is stopped first, and that is a finding rather
+		# than a convenience.** `populate_supplicant` has one caller: the
+		# `backend.start` handler. Networks reach the supplicant when it is
+		# started and at no other time, so a `network` block added to the
+		# document afterwards is never pushed and `ncfg apply` correctly
+		# reports "nothing to do" -- measured, with the second network
+		# absent from `list_networks` entirely.
+		#
+		# Decision 0015 says networks arrive "at apply time ... and are
+		# removed by REMOVE_NETWORK when the document stops asking for
+		# them", which describes a reconcile the planner has no operation
+		# for. The document and the code disagree; that is the holder's to
+		# settle, not this test's.
+		#
+		# So this stops the supplicant to get a fresh populate, which makes
+		# the check below honest about what it proves: **that netcfgd
+		# expresses the document's preference correctly**, not that it
+		# notices a document changing under a running supplicant.
+		# **Wait for the process, not for the socket.** The first version
+		# polled the control socket and stopped as soon as it stopped
+		# answering, which is earlier than the supplicant exiting -- so the
+		# apply below found a pid that was still alive with no socket
+		# behind it, classified it as running-and-silent, and refused to
+		# kill a daemon that might only be busy. That refusal is correct
+		# and is the guard working; the test was asking the wrong question.
+		sta_pid=$(cat "$work/run/supplicant/$sta_dev.pid" 2>/dev/null)
+		inns "$cli" -p "$work/ctrl" -i "$sta_dev" terminate > /dev/null 2>&1 || true
+		waited=0
+		while [ -n "$sta_pid" ] && kill -0 "$sta_pid" 2>/dev/null; do
+			waited=$((waited + 1))
+			if [ "$waited" -gt 150 ]; then
+				echo "FAIL the supplicant did not exit after TERMINATE"
+				failures=$((failures + 1))
+				break
+			fi
+			sleep 0.1
+		done
+		# `--restart-wedged`, which netcfgd itself names in the refusal.
+		#
+		# **A supplicant that exits cleanly removes its own pid file, and
+		# netcfgd reads a missing pid file as "cannot tell" rather than as
+		# "gone".** So it stays `running`, the silent socket makes it
+		# `running and silent`, and the restart is refused: the radio is
+		# unconfigurable until somebody passes this flag.
+		#
+		# That is a real gap and not this test's to close. The obvious fix
+		# is the one `read_backend_liveness` warns against, since reading
+		# an absent pid file as "not running" would start a second dhcpcd
+		# on every machine where netcfgd holds no file for one. Any fix has
+		# to be per-backend -- `pid_by_marker` answers for a supplicant and
+		# 0143 says it cannot for dhcpcd -- so it touches 0080, 0140 and
+		# 0143 together.
+		out=$(innc "$ncfg" apply --restart-wedged "$sta_dev" 2>&1 || true)
+
+		waited=0
+		chosen=
+		until [ "$chosen" = netcfgd-better ]; do
+			chosen=$(inns "$cli" -p "$work/ctrl" -i "$sta_dev" status 2>/dev/null |
+				sed -n 's/^ssid=//p')
+			waited=$((waited + 1))
+			if [ "$waited" -gt 400 ]; then
+				echo "FAIL did not move to the preferred network \
+(on: ${chosen:-none})"
+				echo "       ncfg apply said: $out"
+				echo "       pid file: $work/run/supplicant/$sta_dev.pid"
+				echo "       exists:   $([ -e "$work/run/supplicant/$sta_dev.pid" ] &&
+					echo yes || echo NO)"
+				echo "       contents: $(cat "$work/run/supplicant/$sta_dev.pid" 2>/dev/null |
+					tr -d '\n')"
+				echo "       captured: ${sta_pid:-<empty>}"
+				echo "       supplicants alive in the namespace:"
+				for q in $("$ip" netns pids "$ns" 2>/dev/null); do
+					case "$(cat "/proc/$q/comm" 2>/dev/null)" in
+					wpa_supplicant)
+						echo "         $q $(tr '\0' ' ' < "/proc/$q/cmdline" |
+							cut -c1-90)"
+						;;
+					esac
+				done
+				echo "       the supplicant knows:"
+				inns "$cli" -p "$work/ctrl" -i "$sta_dev" list_networks 2>&1 |
+					sed 's/^/         /'
+				failures=$((failures + 1))
+				break
+			fi
+			sleep 0.1
+		done
+
+		if [ "$chosen" = netcfgd-better ]; then
+			echo "ok   preferred the higher-priority network of the two"
+			echo "note: proved on a freshly started supplicant. A network"
+			echo "note:   added to the document under a running one is not"
+			echo "note:   pushed at all -- see the comment above."
+			# And both are still configured: preferring one must not be
+			# implemented by forgetting the other, which would look
+			# identical from `status` alone and break the moment the
+			# preferred network went away.
+			known=$(inns "$cli" -p "$work/ctrl" -i "$sta_dev" list_networks 2>&1)
+			case "$known" in
+			*netcfgd-test*)
+				echo "ok   and still knows the one it left"
+				;;
+			*)
+				echo "FAIL the network it left is no longer configured"
+				echo "$known" | sed 's/^/       /'
+				failures=$((failures + 1))
+				;;
+			esac
 		fi
 	fi
 fi
