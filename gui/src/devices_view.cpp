@@ -3,9 +3,12 @@
  */
 #include "devices_view.h"
 
+#include "interface_dialog.h"
 #include "ncfg_connection.h"
 
+#include <QHBoxLayout>
 #include <QHeaderView>
+#include <QPushButton>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -39,6 +42,21 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	table->horizontalHeader()->setStretchLastSection(true);
 	layout->addWidget(table);
+
+	auto *controls = new QHBoxLayout();
+	configure_button = new QPushButton(QStringLiteral("configure"), this);
+	configure_button->setObjectName(QStringLiteral("configure_interface"));
+	configure_button->setEnabled(false);
+	controls->addWidget(configure_button);
+	controls->addStretch();
+	layout->addLayout(controls);
+
+	connect(configure_button, &QPushButton::clicked, this,
+	    &ncfg_devices_view::configure_selected);
+	connect(table, &QTableWidget::doubleClicked, this, &ncfg_devices_view::configure_selected);
+	connect(table, &QTableWidget::itemSelectionChanged, this, [this]() {
+		configure_button->setEnabled(table->currentRow() >= 0);
+	});
 }
 
 void ncfg_devices_view::refresh()
@@ -76,4 +94,25 @@ void ncfg_devices_view::refresh()
 
 	emit reported(rows.isEmpty() ? QStringLiteral("no interfaces reported")
 	                 : QStringLiteral("%1 interfaces").arg(rows.size()));
+}
+
+void ncfg_devices_view::configure_selected()
+{
+	const int row = table->currentRow();
+	if (row < 0) {
+		return;
+	}
+	/* The name out of the first column, which is where the table puts it. A
+	 * row with no name is a row this view did not draw. */
+	const QTableWidgetItem *named = table->item(row, 0);
+	if (!named || named->text().isEmpty()) {
+		return;
+	}
+
+	ncfg_interface_dialog dialog(connection, named->text(), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	emit changed();
 }

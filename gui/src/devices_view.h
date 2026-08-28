@@ -15,6 +15,7 @@
 
 #include <QWidget>
 
+class QPushButton;
 class QTableWidget;
 
 class ncfg_connection;
@@ -30,10 +31,19 @@ public slots:
 
 signals:
 	void reported(const QString &summary);
+	/* The configuration changed, so anything showing a plan is stale. */
+	void changed();
+
+private slots:
+	/* Open the interface editor on the selected row. This is where
+	 * `preference` -- which uplink wins -- and a wired port's addressing are
+	 * set, neither of which the program could reach before. */
+	void configure_selected();
 
 private:
 	ncfg_connection *connection;
 	QTableWidget    *table;
+	QPushButton     *configure_button;
 };
 
 #endif /* NCFG_DEVICES_VIEW_H */

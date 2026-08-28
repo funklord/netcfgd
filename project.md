@@ -1214,6 +1214,43 @@ adds no verb, no tier and nothing to the permission surface -- and
 hatch, so a later settings tab writes its own block through the same guarded
 path.
 
+**Interfaces are configurable, which is where `preference` and link detection
+live.** `preference` is which uplink wins -- it becomes the route metric, lower
+is better, and it is how a wired cable takes over from wifi -- and nothing in
+the program could set it. Its tooltip says so and says it is the opposite way
+round from a wireless network's priority, since both are settable here now.
+
+**Link detection is offered as a probe rather than as carrier, deliberately.**
+netcfgd used to choose an uplink by carrier alone, and a cable into a switch
+that has lost its own uplink has carrier and no path: netcfgd kept preferring
+it while the wifi that worked sat at a worse metric doing nothing.
+[0119](doc/decision/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)
+answers that with a program whose exit status is the observation, and a failing
+probe withholds routes exactly as a missing carrier does. So the dialog names
+"carrier only" as a choice rather than leaving it as the absence of a setting,
+and says what it costs.
+
+It shows the command it will run rather than hiding it behind a friendly word:
+`/usr/bin/ping -c 1 -I <iface> <host>`. The `-I` is not decoration -- netcfgd
+runs the command as given and binds nothing, so a probe without it answers
+about whichever interface the route table picked, which is the failure a probe
+exists to catch. `live_interface_dialog` asserts that argv.
+
+The tray built earlier already behaves correctly under this without knowing
+about it: it reports `routed` from a default route in the main table, and a
+probe-failing interface has its routes withheld, so the icon drops to amber on
+its own. It never looks at carrier.
+
+**A probe that writes configuration writes it for every probe that runs
+after.** `gui_wifi.sh` drives all of them against one daemon and one config
+directory in glob order. The first version of `live_interface_dialog`
+configured `radio0` with a probe pinging an address nothing answers, and
+`live_wifi` then failed three checks about activating that radio, several
+probes later, with nothing connecting the two. It uses a name of its own now
+and removes its drop-in; nothing was lost, because every assertion is about the
+text written and whether netcfgd compiled it, and an interface the machine does
+not have compiles to a warning rather than a failure.
+
 **Wireless networks are viewable, changeable and writable by hand**, from a
 dialog that follows the same rule. `add_network_dialog` builds from a scan row
 and fixes its security type at construction, so it cannot open a network the
