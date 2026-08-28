@@ -534,6 +534,25 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
  * The request buffer is wiped before returning, which is not a guarantee about
  * the caller's own copy of the value.
  */
+/*
+ * Write a configuration drop-in, by name, through the daemon.
+ *
+ * `name` is the file's stem under `conf.d`; `text` is the block it contains.
+ * `replace` allows overwriting one that is already there, so that a client
+ * cannot clobber a file by forgetting it existed.
+ *
+ * **This is `admin`, and the tier is not the whole guard.** It writes
+ * configuration, so the daemon runs `check_content` over the text afterwards
+ * and refuses anything granting more than configuring a network -- a hook, a
+ * path, a `run_as`. That is what makes opening `admin` to a group survivable
+ * rather than equivalent to handing it root (0117).
+ *
+ * The daemon re-reads its configuration on success, so a caller does not
+ * follow this with a reload.
+ */
+int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *text, int replace,
+    char *err, size_t err_size);
+
 int ncfg_client_secret_put(ncfg_client_t *client, const char *name, const char *value,
                int replace, char *err, size_t err_size);
 

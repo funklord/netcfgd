@@ -4,6 +4,7 @@
 #include "main_window.h"
 
 #include "access_view.h"
+#include "dns_view.h"
 #include "apply_dialog.h"
 #include "devices_view.h"
 #include "events_view.h"
@@ -43,6 +44,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	devices = new ncfg_devices_view(connection, tabs);
 	wifi = new ncfg_wifi_view(connection, tabs);
 	access = new ncfg_access_view(connection, tabs);
+	dns = new ncfg_dns_view(connection, tabs);
 	plan = new ncfg_plan_view(connection, tabs);
 	events = new ncfg_events_view(connection, tabs);
 	tabs->addTab(devices, QStringLiteral("devices"));
@@ -51,6 +53,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	tabs->addTab(events, QStringLiteral("events"));
 	/* Last, because it is the one tab that is useful while every other is
 	 * saying no -- and the one an operator is sent to when it is. */
+	tabs->addTab(dns, QStringLiteral("dns"));
 	tabs->addTab(access, QStringLiteral("access"));
 	layout->addWidget(tabs);
 
@@ -58,6 +61,8 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(wifi, &ncfg_wifi_view::reported, this, &ncfg_main_window::note);
 	connect(access, &ncfg_access_view::reported, this, &ncfg_main_window::note);
 	connect(access, &ncfg_access_view::changed, this, &ncfg_main_window::reload);
+	connect(dns, &ncfg_dns_view::reported, this, &ncfg_main_window::note);
+	connect(dns, &ncfg_dns_view::changed, this, &ncfg_main_window::reload);
 	connect(plan, &ncfg_plan_view::reported, this, &ncfg_main_window::note);
 	connect(events, &ncfg_events_view::reported, this, &ncfg_main_window::note);
 	connect(tabs, &QTabWidget::currentChanged, this, &ncfg_main_window::tab_changed);
@@ -163,6 +168,8 @@ void ncfg_main_window::refresh()
 		/* Re-reads the radios and what they are doing. Never scans: a scan
 		 * blocks for seconds and a refresh button is not consent to that. */
 		wifi->refresh();
+	} else if (current == dns) {
+		dns->refresh();
 	} else if (current == access) {
 		access->refresh();
 	} else if (current == plan) {

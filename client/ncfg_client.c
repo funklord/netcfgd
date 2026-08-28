@@ -1580,6 +1580,63 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
  * worth having. Worst case for JSON escaping is six bytes out per byte in
  * (\u00XX for a control character), plus the fixed text and the name.
  */
+int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *text, int replace,
+    char *err, size_t err_size)
+{
+	if (!name || !text) {
+		set_error(err, err_size, "a drop-in needs a name and some text");
+		return 0;
+	}
+	if (!*text) {
+		/* Refused here as well as at the daemon: an empty drop-in is a file
+		 * that configures nothing, and the round trip would not say which
+		 * name was empty. Removing one is its own verb. */
+		set_error(err, err_size, "an empty drop-in is a file that configures nothing");
+		return 0;
+	}
+
+	const size_t need = 64 + strlen(name) * 6 + strlen(text) * 6;
+	char *request = malloc(need);
+	if (!request) {
+		set_error(err, err_size, "that drop-in does not fit in memory");
+		return 0;
+	}
+
+	int head = snprintf(request, need, "{\"request\":\"config_put\",\"name\":");
+	int built = head > 0 && (size_t)head < need;
+	size_t at = built ? (size_t)head : 0;
+	if (built) {
+		built = ncfg_client_quote(name, request + at, need - at) > 0;
+	}
+	if (built) {
+		at += strlen(request + at);
+		built = append_member(request, need, &at, "text", text);
+	}
+	if (built && replace) {
+		int span = snprintf(request + at, need - at, ",\"replace\":true");
+		built = span >= 0 && (size_t)span < need - at;
+		if (built) {
+			at += (size_t)span;
+		}
+	}
+	if (!built || at + 2 > need) {
+		free(request);
+		set_error(err, err_size, "that drop-in does not fit in one request");
+		return 0;
+	}
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	free(request);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
 int ncfg_client_secret_put(ncfg_client_t *client, const char *name, const char *value,
                int replace, char *err, size_t err_size)
 {

@@ -504,6 +504,27 @@ bool ncfg_connection::dns(ncfg_dns_row *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::config_put(const QString &name, const QString &text, bool replace,
+    QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_config_put(client, name.toUtf8().constData(), text.toUtf8().constData(),
+	    replace ? 1 : 0, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::radios(QList<ncfg_radio_row> *out, QString *error)
 {
 	if (!out) {

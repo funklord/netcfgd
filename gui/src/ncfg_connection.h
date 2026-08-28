@@ -383,6 +383,15 @@ public:
 	bool wifi_disconnect(const QString &interface, QString *error);
 	bool saved_networks(QList<ncfg_saved_network_row> *out, QString *error);
 	bool dns(ncfg_dns_row *out, QString *error);
+	/*
+	 * Write a configuration drop-in by name.
+	 *
+	 * Admin, and the daemon refuses text granting more than configuring a
+	 * network however this is called. The GUI composes the block rather than
+	 * taking one typed in: a text box wired straight to this would be 0117's
+	 * remote code execution with a nicer font.
+	 */
+	bool config_put(const QString &name, const QString &text, bool replace, QString *error);
 
 	/*
 	 * Apply, with a confirm window in seconds or 0 for none.
