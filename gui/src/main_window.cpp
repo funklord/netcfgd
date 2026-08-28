@@ -59,6 +59,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 
 	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
 	connect(wifi, &ncfg_wifi_view::reported, this, &ncfg_main_window::note);
+	connect(wifi, &ncfg_wifi_view::changed, this, &ncfg_main_window::reload);
 	connect(access, &ncfg_access_view::reported, this, &ncfg_main_window::note);
 	connect(access, &ncfg_access_view::changed, this, &ncfg_main_window::reload);
 	connect(dns, &ncfg_dns_view::reported, this, &ncfg_main_window::note);

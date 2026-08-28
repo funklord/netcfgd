@@ -54,6 +54,10 @@ public slots:
 
 signals:
 	void reported(const QString &summary);
+	/* The configuration changed, so anything showing a plan is stale. The
+	 * same signal the dns and access tabs emit, so the window reloads the
+	 * same way whichever tab wrote. */
+	void changed();
 
 private slots:
 	void scan();
@@ -62,6 +66,8 @@ private slots:
 	void leave();
 	void activate();
 	void selection_changed();
+	void edit_selected();
+	void add_manually();
 
 private:
 	QString chosen_interface() const;
@@ -109,8 +115,14 @@ private:
 	 * had no answer in this program.
 	 */
 	QTableWidget    *saved_table;
+	QPushButton     *edit_button;
+	QPushButton     *manual_button;
 	QList<ncfg_saved_network_row> saved;
 	void    update_saved();
+	/* Open the editor on a saved network, or on nothing to write one by
+	 * hand. One dialog for both, because "view what this is set to" and
+	 * "set one up" are the same form with different starting values. */
+	void    edit_network(const ncfg_saved_network_row &existing);
 };
 
 #endif /* NCFG_WIFI_VIEW_H */

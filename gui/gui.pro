@@ -42,6 +42,7 @@ PRE_TARGETDEPS += $$CLIENT_LIB
 SOURCES += \
 	src/access_view.cpp \
 	src/dns_view.cpp \
+	src/network_dialog.cpp \
 	src/add_network_dialog.cpp \
 	src/apply_dialog.cpp \
 	src/devices_view.cpp \
@@ -57,6 +58,7 @@ SOURCES += \
 HEADERS += \
 	src/access_view.h \
 	src/dns_view.h \
+	src/network_dialog.h \
 	src/add_network_dialog.h \
 	src/apply_dialog.h \
 	src/devices_view.h \

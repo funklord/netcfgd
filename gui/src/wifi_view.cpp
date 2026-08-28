@@ -3,6 +3,8 @@
  */
 #include "wifi_view.h"
 
+#include "network_dialog.h"
+
 #include "add_network_dialog.h"
 #include "ncfg_connection.h"
 
@@ -117,8 +119,20 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	 * different questions: the table above is what is around this machine,
 	 * and this is what the configuration holds. Keeping them in one table
 	 * with a flag would mean a saved network out of range had no row. */
-	auto *saved_label = new QLabel(QStringLiteral("saved networks"), this);
-	layout->addWidget(saved_label);
+	auto *saved_controls = new QHBoxLayout();
+	saved_controls->addWidget(new QLabel(QStringLiteral("saved networks"), this));
+	edit_button = new QPushButton(QStringLiteral("view / change"), this);
+	edit_button->setObjectName(QStringLiteral("edit_saved"));
+	edit_button->setEnabled(false);
+	manual_button = new QPushButton(QStringLiteral("add by hand"), this);
+	manual_button->setObjectName(QStringLiteral("add_manually"));
+	saved_controls->addWidget(edit_button);
+	/* "By hand" rather than "add", because the button above the scan table is
+	 * also called add and does something different: that one adds what the
+	 * scan found, and this one writes a network that need not be in range. */
+	saved_controls->addWidget(manual_button);
+	saved_controls->addStretch();
+	layout->addLayout(saved_controls);
 
 	saved_table = new QTableWidget(0, saved_column_count, this);
 	QStringList saved_headers;
@@ -133,6 +147,15 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	saved_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	saved_table->horizontalHeader()->setStretchLastSection(true);
 	layout->addWidget(saved_table);
+
+	connect(edit_button, &QPushButton::clicked, this, &ncfg_wifi_view::edit_selected);
+	connect(manual_button, &QPushButton::clicked, this, &ncfg_wifi_view::add_manually);
+	/* Double-click opens it too. A table of settings that cannot be opened by
+	 * double-clicking a row is one an operator tries to double-click. */
+	connect(saved_table, &QTableWidget::doubleClicked, this, &ncfg_wifi_view::edit_selected);
+	connect(saved_table, &QTableWidget::itemSelectionChanged, this, [this]() {
+		edit_button->setEnabled(saved_table->currentRow() >= 0);
+	});
 
 	connect(scan_button, &QPushButton::clicked, this, &ncfg_wifi_view::scan);
 	connect(join_button, &QPushButton::clicked, this, &ncfg_wifi_view::join);
@@ -199,6 +222,33 @@ void ncfg_wifi_view::update_saved()
 		}
 	}
 	saved_table->resizeColumnsToContents();
+}
+
+void ncfg_wifi_view::edit_network(const ncfg_saved_network_row &existing)
+{
+	ncfg_network_dialog dialog(connection, existing, this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	/* The document changed, so the saved list and anything showing a plan are
+	 * both stale. */
+	update_saved();
+	emit changed();
+}
+
+void ncfg_wifi_view::edit_selected()
+{
+	const int row = saved_table->currentRow();
+	if (row < 0 || row >= saved.size()) {
+		return;
+	}
+	edit_network(saved.at(row));
+}
+
+void ncfg_wifi_view::add_manually()
+{
+	edit_network(ncfg_saved_network_row());
 }
 
 void ncfg_wifi_view::refresh()

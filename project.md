@@ -1214,6 +1214,33 @@ adds no verb, no tier and nothing to the permission surface -- and
 hatch, so a later settings tab writes its own block through the same guarded
 path.
 
+**Wireless networks are viewable, changeable and writable by hand**, from a
+dialog that follows the same rule. `add_network_dialog` builds from a scan row
+and fixes its security type at construction, so it cannot open a network the
+document already holds and cannot add one that is not in range; both are things
+an operator asks for. `network_dialog` does both, from one form, because "view
+what this is set to" and "set one up" differ only in their starting values.
+
+Every field whose values are a closed set is a list -- security, generation,
+EAP method, addressing -- and free text is allowed only where the value
+genuinely is free: an identity, a certificate path, an SSID in hex. Each of
+those is refused if it carries a quote, a backslash or a newline, so a key the
+dialog did not choose cannot be introduced through a value.
+
+**The credential is never shown and never re-entered.** netcfgd keeps the
+passphrase in the secret store and the block holds `@secret:<id>`, so rewriting
+the block leaves it alone and blank means keep. `live_network_dialog` asserts
+both halves of that: the reference survives an edit, and the passphrase never
+appears in the configuration file. The first would be a silent failure -- a
+rewrite that dropped the reference takes the network off the air at the next
+apply with nothing on screen to say so.
+
+The name is read-only once there is something to edit, being the block's name
+and the drop-in's filename: changing it would write a second network and leave
+the first. Defaults are not restated -- `autoconnect = true` is written only
+when it is false -- because a block that spells out every default is one nobody
+can read for what is unusual.
+
 **The modes are a fixed list and not a text box, and that is the privilege
 decision rather than a convenience.** A box wired to `ConfigPut` would be
 [0117](doc/decision/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)'s remote

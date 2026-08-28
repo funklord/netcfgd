@@ -1,4 +1,4 @@
-# gui/tests/live_wifi.pro -- the wifi view against a real daemon.
+# gui/tests/live/live_network_dialog.pro -- the network editor against a real daemon.
 #
 # In `gui/tests/live/` rather than beside the other probes, and the directory
 # is the whole reason: `make -C gui test` globs `tests/*.pro` and runs whatever
@@ -8,7 +8,7 @@
 # suite, which builds and runs this itself through `tests/live/gui_wifi.sh`.
 
 TEMPLATE = app
-TARGET = live_wifi
+TARGET = live_network_dialog
 QT += widgets
 CONFIG += c++17 console
 CONFIG -= app_bundle
@@ -25,10 +25,6 @@ LIBS += $$CLIENT_DIR/libncfg_client.a
 # which cost one debugging round on the day this was written.
 PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
 
-# `network_dialog` is here because `wifi_view` opens it: the saved-networks
-# table's view/change button and the add-by-hand one both construct it, so the
-# tab does not link without it.
-SOURCES += live_wifi.cpp ../../src/ncfg_connection.cpp ../../src/wifi_view.cpp \
-	../../src/add_network_dialog.cpp ../../src/network_dialog.cpp
-HEADERS += ../../src/ncfg_connection.h ../../src/wifi_view.h \
-	../../src/add_network_dialog.h ../../src/network_dialog.h
+SOURCES += live_network_dialog.cpp ../../src/ncfg_connection.cpp \
+	../../src/network_dialog.cpp
+HEADERS += ../../src/ncfg_connection.h ../../src/network_dialog.h
