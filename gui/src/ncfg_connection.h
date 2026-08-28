@@ -59,6 +59,20 @@ struct ncfg_link_row {
  * configured network out of range appears in this list and in no scan, which
  * is exactly the case that had nowhere to be shown.
  */
+/*
+ * One link-detection script, as netcfgd sees it.
+ *
+ * `editable` is whether netcfgd would overwrite this file. A shipped example
+ * is not edited in place: an edit becomes a copy in /etc of the same name,
+ * which shadows it.
+ */
+struct ncfg_probe_row {
+	QString name;
+	QString directory;
+	QString text;
+	bool    editable = false;
+};
+
 struct ncfg_saved_network_row {
 	QString id;
 	QString name;
@@ -402,6 +416,15 @@ public:
 	 * files.
 	 */
 	bool probe_put(const QString &name, const QString &text, bool replace, QString *error);
+	/*
+	 * The link-detection scripts, from the daemon.
+	 *
+	 * Asked rather than read off this machine's disk: a client only ever talks
+	 * to netcfgd, and these files belong to the machine netcfgd runs on. A gui
+	 * listing its own /etc would show the operator's laptop while configuring
+	 * a remote machine.
+	 */
+	bool probes(QList<ncfg_probe_row> *out, QString *error);
 
 	/*
 	 * Apply, with a confirm window in seconds or 0 for none.

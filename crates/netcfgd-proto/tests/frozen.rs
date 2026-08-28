@@ -69,29 +69,6 @@ fn witness_path() -> PathBuf {
 /// exact about the same division.
 fn every_request() -> Vec<Request> {
 	let all = every_request_sample();
-	// Two, for `config_put`'s reason: `replace` is skip_serializing_if, so one
-	// that sets it pins only the present form. Lifted out of the list above
-	// because that function has a line limit -- a natural group rather than an
-	// arbitrary cut. The script is the shortest thing that is still a probe: a
-	// witness is committed, read and diffed, and one carrying a real address
-	// would be copied by somebody, which is the whole reason netcfgd ships no
-	// default target.
-	let all: Vec<Request> = all
-		.into_iter()
-		.chain([
-			Request::ProbePut {
-				name: "office".to_owned(),
-				text: "#!/bin/sh\nexit 0\n".to_owned(),
-				replace: true,
-			},
-			Request::ProbePut {
-				name: "home".to_owned(),
-				text: "#!/bin/sh\nexit 1\n".to_owned(),
-				replace: false,
-			},
-		])
-		.collect();
-
 	let name = |request: &Request| match request {
 		Request::Hello => "hello",
 		Request::Status => "status",
@@ -115,6 +92,7 @@ fn every_request() -> Vec<Request> {
 		Request::ConfigDelete { .. } => "config_delete",
 		Request::SecretDelete { .. } => "secret_delete",
 		Request::Radios => "radios",
+		Request::ProbeList => "probe_list",
 		Request::RadioSet { .. } => "radio_set",
 	};
 	let mut present: Vec<&str> = all.iter().map(name).collect();
@@ -132,6 +110,7 @@ fn every_request() -> Vec<Request> {
 			"hello",
 			"monitor",
 			"plan",
+			"probe_list",
 			"probe_put",
 			"radio_set",
 			"radios",
@@ -153,8 +132,80 @@ fn every_request() -> Vec<Request> {
 	all
 }
 
+/// The link-detection requests.
+///
+/// A helper for `enterprise_samples`' reason: `every_request_sample` has a line
+/// limit, and these are a group rather than an arbitrary cut. The scripts are
+/// the shortest thing that is still a probe -- a witness is committed, read and
+/// diffed, and one carrying a real address would be copied by somebody, which
+/// is the whole reason netcfgd ships no default target.
+fn probe_samples() -> Vec<Request> {
+	vec![
+		Request::ProbeList,
+		// Two, because `replace` is skip_serializing_if and one that sets it
+		// pins only the present form.
+		Request::ProbePut {
+			name: "office".to_owned(),
+			text: "#!/bin/sh\nexit 0\n".to_owned(),
+			replace: true,
+		},
+		Request::ProbePut {
+			name: "home".to_owned(),
+			text: "#!/bin/sh\nexit 1\n".to_owned(),
+			replace: false,
+		},
+	]
+}
+
+/// The requests that write, and the two that take something away.
+///
+/// Grouped out of `every_request_sample` because that function has a line
+/// limit, and these belong together: every one of them changes the machine.
+fn writer_samples() -> Vec<Request> {
+	vec![
+		// Two samples, for `wifi_add`'s reason: `replace` is
+		// skip_serializing_if, so one that sets it pins only the present form.
+		// The absent one is what a client sends when it means "do not
+		// overwrite anything", which is the shape that must stay the default.
+		Request::ConfigPut {
+			name: "from-a-client".to_owned(),
+			text: "interface eth0 {\n\tconfig = \"dhcp\"\n}\n".to_owned(),
+			replace: true,
+		},
+		Request::ConfigPut {
+			name: "cafe".to_owned(),
+			text: "network \"Cafe\" {\n\twifi { open = true }\n}\n".to_owned(),
+			replace: false,
+		},
+		// Two, for the reason the others have two: `replace` is
+		// skip_serializing_if. The value is a placeholder and looks like one
+		// on purpose -- a witness is committed, read and diffed, and a sample
+		// that looked like a credential would be copied by somebody.
+		Request::SecretPut {
+			name: "vpn".to_owned(),
+			value: "NOT-A-REAL-SECRET".to_owned(),
+			replace: true,
+		},
+		Request::SecretPut {
+			name: "cafe".to_owned(),
+			value: "NOT-A-REAL-SECRET".to_owned(),
+			replace: false,
+		},
+		// One each: neither has an optional member, so one sample pins the
+		// whole shape.
+		Request::ConfigDelete {
+			name: "nm-cafe".to_owned(),
+		},
+		Request::SecretDelete {
+			name: "cafe".to_owned(),
+		},
+	]
+}
+
 fn every_request_sample() -> Vec<Request> {
 	let mut samples = enterprise_samples();
+	samples.extend(probe_samples());
+	samples.extend(writer_samples());
 	samples.extend(vec![
 		Request::Hello,
 		Request::Status,
@@ -228,42 +279,6 @@ fn every_request_sample() -> Vec<Request> {
 		Request::WifiDisconnect {
 			interface: "wlan0".to_owned(),
 		},
-		// Two samples, for `wifi_add`'s reason: `replace` is
-		// skip_serializing_if, so one that sets it pins only the present form.
-		// The absent one is what a client sends when it means "do not
-		// overwrite anything", which is the shape that must stay the default.
-		Request::ConfigPut {
-			name: "from-a-client".to_owned(),
-			text: "interface eth0 {\n\tconfig = \"dhcp\"\n}\n".to_owned(),
-			replace: true,
-		},
-		Request::ConfigPut {
-			name: "cafe".to_owned(),
-			text: "network \"Cafe\" {\n\twifi { open = true }\n}\n".to_owned(),
-			replace: false,
-		},
-		// Two, for the reason the others have two: `replace` is
-		// skip_serializing_if. The value is a placeholder and looks like one
-		// on purpose -- a witness is committed, read and diffed, and a sample
-		// that looked like a credential would be copied by somebody.
-		Request::SecretPut {
-			name: "vpn".to_owned(),
-			value: "NOT-A-REAL-SECRET".to_owned(),
-			replace: true,
-		},
-		Request::SecretPut {
-			name: "cafe".to_owned(),
-			value: "NOT-A-REAL-SECRET".to_owned(),
-			replace: false,
-		},
-		// One each: neither has an optional member, so one sample pins the
-		// whole shape.
-		Request::ConfigDelete {
-			name: "nm-cafe".to_owned(),
-		},
-		Request::SecretDelete {
-			name: "cafe".to_owned(),
-		},
 		Request::ApStations {
 			interface: "wlan0".to_owned(),
 		},
@@ -303,6 +318,30 @@ fn enterprise_samples() -> Vec<Request> {
 /// Every response, on the same terms.
 fn every_response() -> Vec<Response> {
 	let all = every_response_sample();
+	// One of each kind, because the pair is the point: a shipped example is not
+	// editable in place, and the operator's copy of the same name is what
+	// shadows it. A witness carrying only one would not pin that. Out of the
+	// list above because that function has a line limit.
+	let all: Vec<Response> = all
+		.into_iter()
+		.chain([Response::Probes {
+			probes: vec![
+				netcfgd_proto::ProbeScript {
+					name: "default".to_owned(),
+					directory: "/usr/share/netcfgd/probe".to_owned(),
+					text: "#!/bin/sh\nexit 0\n".to_owned(),
+					editable: false,
+				},
+				netcfgd_proto::ProbeScript {
+					name: "office".to_owned(),
+					directory: "/etc/netcfgd/probe".to_owned(),
+					text: "#!/bin/sh\nexit 1\n".to_owned(),
+					editable: true,
+				},
+			],
+		}])
+		.collect();
+
 	let name = |response: &Response| match response {
 		Response::Hello { .. } => "hello",
 		Response::Status(_) => "status",
@@ -315,6 +354,7 @@ fn every_response() -> Vec<Response> {
 		Response::WifiStatus(_) => "wifi_status",
 		Response::ApStations(_) => "ap_stations",
 		Response::Radios { .. } => "radios",
+		Response::Probes { .. } => "probes",
 		Response::Ok => "ok",
 		Response::Error { .. } => "error",
 	};
@@ -333,6 +373,7 @@ fn every_response() -> Vec<Response> {
 			"journal",
 			"ok",
 			"plan",
+			"probes",
 			"radios",
 			"status",
 			"wifi_scan",

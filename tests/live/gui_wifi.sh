@@ -123,15 +123,16 @@ export NCFG_PROC="$NCFG_RUN_ROOT/proc"
 # a directory rather than carrying a list, so the probe needs one it can write
 # to: /etc is not writable here and a test that reordered the real lookup would
 # be exercising something the shipped program does not do.
-mkdir -p "$work/probe"
-cat > "$work/probe/example" <<'PROBE'
+# It goes in the *daemon's* config directory, because the gui asks netcfgd for
+# the list rather than reading a directory of its own. That is the property
+# worth testing: a client that listed its own /etc would show the machine it
+# runs on while configuring a different one.
+mkdir -p "$NCFG_CONFIG_DIR/probe"
+cat > "$NCFG_CONFIG_DIR/probe/example" <<'PROBE'
 #!/bin/sh
 exit 0
 PROBE
-chmod +x "$work/probe/example"
-export NCFG_PROBE_DIR="$work/probe"
-NCFG_TEST_PROBE_SCRIPT="$work/probe/example"
-export NCFG_TEST_PROBE_SCRIPT
+chmod +x "$NCFG_CONFIG_DIR/probe/example"
 
 "$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
 daemon=$!

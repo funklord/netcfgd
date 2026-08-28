@@ -22,6 +22,8 @@
 #ifndef NCFG_PROBE_DIALOG_H
 #define NCFG_PROBE_DIALOG_H
 
+#include "ncfg_connection.h"
+
 #include <QDialog>
 #include <QString>
 
@@ -36,11 +38,16 @@ class ncfg_probe_dialog : public QDialog {
 
 public:
 	/*
-	 * `path` empty means a new script: the name is asked for and the body
-	 * starts from the example, so that "write one" does not start at a blank
-	 * page with no clue about the argument or the exit status.
+	 * An `existing` with an empty name means a new script: the name is asked
+	 * for and the body starts from a template, so that "write one" does not
+	 * start at a blank page with no clue about the argument or the exit
+	 * status.
+	 *
+	 * The script arrives whole rather than as a path to open. A client does
+	 * not read the machine's files -- it asks netcfgd, which may not be this
+	 * machine at all.
 	 */
-	ncfg_probe_dialog(ncfg_connection *connection, const QString &path,
+	ncfg_probe_dialog(ncfg_connection *connection, const ncfg_probe_row &existing,
 	          QWidget *parent = nullptr);
 
 	QString outcome() const { return summary; }

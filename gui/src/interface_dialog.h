@@ -23,6 +23,8 @@
 #ifndef NCFG_INTERFACE_DIALOG_H
 #define NCFG_INTERFACE_DIALOG_H
 
+#include "ncfg_connection.h"
+
 #include <QDialog>
 #include <QString>
 
@@ -75,6 +77,9 @@ private:
 	QCheckBox   *forwarding;
 	QCheckBox   *nat;
 	QComboBox   *detection;
+	/* What the daemon said, kept so the editor can be handed the text rather
+	 * than a path this machine would have to open. */
+	QList<ncfg_probe_row> scripts;
 	QPushButton *edit_detection_button;
 	QLineEdit   *probe_command;
 	QLineEdit   *probe_args;

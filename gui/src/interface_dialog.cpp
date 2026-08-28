@@ -53,26 +53,6 @@ const choice detections[] = {
 	{ "run a command", "command" },
 };
 
-/*
- * Where link-detection scripts live. The operator's first, so a copy of an
- * example that has been edited wins over the example -- the same order the
- * config directory and its factory tree already use.
- *
- * `NCFG_PROBE_DIR` overrides both, for the reason `NCFG_SYS_CLASS_NET` and
- * `NCFG_RUN_ROOT` exist: a test cannot write to /etc, and one that reordered
- * these paths to make itself possible would be exercising a lookup the
- * shipped program does not do.
- */
-QStringList probe_directories()
-{
-	const QByteArray named = qgetenv("NCFG_PROBE_DIR");
-	if (!named.isEmpty()) {
-		return QStringList{ QString::fromUtf8(named) };
-	}
-	return QStringList{ QStringLiteral("/etc/netcfgd/probe"),
-		QStringLiteral("/usr/share/netcfgd/probe") };
-}
-
 void fill(QComboBox *box, const choice *from, size_t count)
 {
 	for (size_t i = 0; i < count; i++) {
@@ -154,7 +134,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	 * shadows the member here and a lambda cannot capture a parameter it was
 	 * not told about. */
 	connect(new_probe, &QPushButton::clicked, this, [this]() {
-		ncfg_probe_dialog dialog(this->connection, QString(), this);
+		ncfg_probe_dialog dialog(this->connection, ncfg_probe_row(), this);
 		if (dialog.exec() == QDialog::Accepted) {
 			reload_detections(dialog.written_name());
 			note->setText(dialog.outcome());
@@ -238,26 +218,42 @@ void ncfg_interface_dialog::reload_detections(const QString &select)
 	detection->clear();
 	fill(detection, detections, sizeof(detections) / sizeof(detections[0]));
 
-	QStringList seen;
+	/*
+	 * **Asked of the daemon, not read off this machine.** A client only ever
+	 * talks to netcfgd, and these files belong to the machine netcfgd runs on.
+	 * Listing the local /etc would show the operator's own laptop while
+	 * configuring a remote one -- and the editor would then save an edit of
+	 * one machine's script onto another.
+	 *
+	 * The daemon has already resolved the shadowing, so each name appears once
+	 * and is the one netcfgd would run.
+	 */
+	QString error;
+	scripts.clear();
+	if (!connection->probes(&scripts, &error)) {
+		/* Not fatal: the rest of the dialog works, and carrier-only and a
+		 * hand-written command are both still reachable. */
+		note->setText(error);
+	}
+
+	for (const ncfg_probe_row &script : scripts) {
+		/* Keyed by absolute path, which is what gets written: the model
+		 * requires an absolute command, and a name resolved later could
+		 * resolve to something else. */
+		detection->insertItem(detection->count() - 1,
+		    QStringLiteral("%1 -- %2").arg(script.name, script.directory),
+		    QStringLiteral("%1/%2").arg(script.directory, script.name));
+	}
+
 	QString chosen;
-	for (const QString &where : probe_directories()) {
-		QDir dir(where);
-		const QFileInfoList found =
-		    dir.entryInfoList(QDir::Files | QDir::Executable, QDir::Name);
-		for (const QFileInfo &script : found) {
-			if (seen.contains(script.fileName())) {
-				continue;
-			}
-			seen << script.fileName();
-			detection->insertItem(detection->count() - 1,
-			    QStringLiteral("%1 -- %2").arg(script.fileName(), where),
-			    script.absoluteFilePath());
-			if (!select.isEmpty() && script.fileName() == select) {
-				chosen = script.absoluteFilePath();
+	if (!select.isEmpty()) {
+		for (const ncfg_probe_row &script : scripts) {
+			if (script.name == select) {
+				chosen = QStringLiteral("%1/%2").arg(script.directory, script.name);
+				break;
 			}
 		}
 	}
-
 	const QString want = chosen.isEmpty() ? had : chosen;
 	const int at = detection->findData(want);
 	if (at >= 0) {
@@ -277,7 +273,17 @@ void ncfg_interface_dialog::edit_detection()
 		return;
 	}
 
-	ncfg_probe_dialog dialog(connection, chosen, this);
+	/* The text is already in hand from the listing, so the editor is given it
+	 * rather than a path to open: reading the file here would be the same
+	 * mistake in the other direction. */
+	ncfg_probe_row opening;
+	for (const ncfg_probe_row &script : scripts) {
+		if (QStringLiteral("%1/%2").arg(script.directory, script.name) == chosen) {
+			opening = script;
+			break;
+		}
+	}
+	ncfg_probe_dialog dialog(connection, opening, this);
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}

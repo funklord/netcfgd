@@ -1,4 +1,13 @@
 {"request":"wifi_add","ssid":"656475726f616d","id":"eduroam","passphrase":"NOT-A-REAL-SECRET","eap":{"method":"peap","identity":"you@corp.example","anonymous_identity":"anonymous@corp.example","phase2":"mschapv2","ca_cert":"corp-ca"}}
+{"request":"probe_list"}
+{"request":"probe_put","name":"office","text":"#!/bin/sh\nexit 0\n","replace":true}
+{"request":"probe_put","name":"home","text":"#!/bin/sh\nexit 1\n"}
+{"request":"config_put","name":"from-a-client","text":"interface eth0 {\n\tconfig = \"dhcp\"\n}\n","replace":true}
+{"request":"config_put","name":"cafe","text":"network \"Cafe\" {\n\twifi { open = true }\n}\n"}
+{"request":"secret_put","name":"vpn","value":"NOT-A-REAL-SECRET","replace":true}
+{"request":"secret_put","name":"cafe","value":"NOT-A-REAL-SECRET"}
+{"request":"config_delete","name":"nm-cafe"}
+{"request":"secret_delete","name":"cafe"}
 {"request":"hello"}
 {"request":"status"}
 {"request":"plan"}
@@ -19,15 +28,7 @@
 {"request":"wifi_add","ssid":"686f6d65","id":"home","passphrase":"hunter2","proto":"wpa3","hidden":true,"priority":10}
 {"request":"wifi_add","ssid":"63616665"}
 {"request":"wifi_disconnect","interface":"wlan0"}
-{"request":"config_put","name":"from-a-client","text":"interface eth0 {\n\tconfig = \"dhcp\"\n}\n","replace":true}
-{"request":"config_put","name":"cafe","text":"network \"Cafe\" {\n\twifi { open = true }\n}\n"}
-{"request":"secret_put","name":"vpn","value":"NOT-A-REAL-SECRET","replace":true}
-{"request":"secret_put","name":"cafe","value":"NOT-A-REAL-SECRET"}
-{"request":"config_delete","name":"nm-cafe"}
-{"request":"secret_delete","name":"cafe"}
 {"request":"ap_stations","interface":"wlan0"}
-{"request":"probe_put","name":"office","text":"#!/bin/sh\nexit 0\n","replace":true}
-{"request":"probe_put","name":"home","text":"#!/bin/sh\nexit 1\n"}
 {"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":0},"tiers":["observe","admin"]}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"enterprise":false,"ssid":"686f6d65","name":"home","mobility_domain":"a1b2","configured":"home"},{"bssid":"00:11:22:33:44:66","frequency":5180,"signal":-58,"secured":false,"enterprise":false,"ssid":"","name":""},{"bssid":"00:11:22:33:44:77","frequency":2437,"signal":-71,"secured":true,"enterprise":true,"ssid":"ff00ff"}]}
@@ -42,6 +43,7 @@
 {"response":"ap_stations","interface":"wlan0","access_point":"home","access_control":"deny","stations":[{"address":"00:11:22:33:44:55","authorized":true,"listed":true,"signal":-52,"connected_seconds":184,"inactive_msec":120,"rx_bytes":4096,"tx_bytes":8192}]}
 {"response":"ok"}
 {"response":"error","message":"not permitted"}
+{"response":"probes","probes":[{"name":"default","directory":"/usr/share/netcfgd/probe","text":"#!/bin/sh\nexit 0\n","editable":false},{"name":"office","directory":"/etc/netcfgd/probe","text":"#!/bin/sh\nexit 1\n","editable":true}]}
 {"event":"observed","summary":"eth0 gained an address"}
 {"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}
 {"event":"drift","interface":"eth0","summary":"an address we installed is gone","action":"reconciled"}

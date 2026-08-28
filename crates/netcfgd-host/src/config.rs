@@ -949,6 +949,55 @@ pub fn install_secret(
 	Ok(path)
 }
 
+/// Every link-detection script netcfgd can see.
+///
+/// **The operator's shadow the shipped examples**, name by name, and only the
+/// winner is listed: two entries called `default` would be a list an operator
+/// has to disambiguate by reading a path, and the one that loses is not the one
+/// netcfgd would run.
+///
+/// `editable` says whether netcfgd would overwrite this file. A shipped example
+/// is not edited in place -- an edit of one becomes a copy in `/etc` with the
+/// same name, which then shadows it -- so a client can offer the right verb
+/// rather than promising something the next upgrade undoes.
+///
+/// Unreadable files are skipped rather than reported. This is a listing, and a
+/// directory that does not exist is the ordinary case on a machine that has
+/// never configured one.
+#[must_use]
+pub fn list_probes(config_dir: &Path, factory_dir: &Path) -> Vec<netcfgd_proto::ProbeScript> {
+	let mut found: Vec<netcfgd_proto::ProbeScript> = Vec::new();
+	let mut seen: Vec<String> = Vec::new();
+
+	for (dir, editable) in [
+		(config_dir.join("probe"), true),
+		(factory_dir.join("probe"), false),
+	] {
+		let Ok(entries) = std::fs::read_dir(&dir) else {
+			continue;
+		};
+		let mut here: Vec<_> = entries.flatten().collect();
+		here.sort_by_key(std::fs::DirEntry::file_name);
+		for entry in here {
+			let name = entry.file_name().to_string_lossy().into_owned();
+			if seen.contains(&name) || !entry.path().is_file() {
+				continue;
+			}
+			let Ok(text) = std::fs::read_to_string(entry.path()) else {
+				continue;
+			};
+			seen.push(name.clone());
+			found.push(netcfgd_proto::ProbeScript {
+				name,
+				directory: dir.to_string_lossy().into_owned(),
+				text,
+				editable,
+			});
+		}
+	}
+	found
+}
+
 /// Put a link-detection script on disk, executable.
 ///
 /// **The most dangerous thing netcfgd writes, and the shortest function.** A

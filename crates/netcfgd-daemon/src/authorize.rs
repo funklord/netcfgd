@@ -44,7 +44,13 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// people's: an interface name, whether netcfgd was given it, and
 		// whether a supplicant answers. All three are visible to anybody who
 		// can run `ip link` on the machine.
-		| Request::Radios => Tier::Observe,
+		| Request::Radios
+		// Listing the link-detection scripts is reading, and the files are
+		// 0755 on disk so anybody on the machine can already read them. It is
+		// `observe` for the reason `WifiStatus` is: a display that needed a
+		// writing tier to show what is configured is a display that ends up
+		// being given one.
+		| Request::ProbeList => Tier::Observe,
 
 		// Scanning is not reading: it transmits probe requests, it interrupts
 		// whatever the radio was doing, and it is one of the things design

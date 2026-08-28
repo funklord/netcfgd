@@ -204,6 +204,16 @@ pub enum Request {
 		replace: bool,
 	},
 
+	/// The link-detection scripts netcfgd can see.
+	///
+	/// **Over the socket rather than off the disk, and that is the whole
+	/// point.** A client only ever talks to netcfgd; these files belong to the
+	/// machine netcfgd runs on. A gui that listed its own
+	/// `/etc/netcfgd/probe` would be showing the operator's laptop while
+	/// configuring a remote machine -- and would then save an edit of one
+	/// machine's script onto another.
+	ProbeList,
+
 	/// Store a link-detection script, which netcfgd writes.
 	///
 	/// A probe is a program netcfgd runs **as root, on an interval**, so this
@@ -357,6 +367,7 @@ impl Request {
 			Self::Hello
 			| Self::Status
 			| Self::Plan
+			| Self::ProbeList
 			| Self::Confirm
 			| Self::Revert
 			| Self::Reload
@@ -390,6 +401,26 @@ impl Request {
 			Self::RadioSet { .. } => &["interface", "activate"],
 		}
 	}
+}
+
+/// One link-detection script, as netcfgd sees it.
+///
+/// **The text comes with the listing.** A client needs it to show one, and
+/// these are a few hundred bytes each -- a second round trip per script would
+/// buy nothing and would mean a list and a body that could disagree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProbeScript {
+	/// The filename, which is what a client sends back to write it.
+	pub name: String,
+	/// Where it was found, so a client can say whether this is a shipped
+	/// example or the operator's own.
+	pub directory: String,
+	/// The script.
+	pub text: String,
+	/// Whether netcfgd would overwrite this file, rather than write a copy
+	/// into `/etc` beside it. A shipped example is not edited in place.
+	pub editable: bool,
 }
 
 /// One radio, and whether netcfgd has been given it.
@@ -530,6 +561,12 @@ pub enum Response {
 	Event(Box<Event>),
 	/// What a scan found.
 	WifiScan(Box<ScanReport>),
+	/// The link-detection scripts, in answer to [`Request::ProbeList`].
+	Probes {
+		/// One per script. A copy in `/etc` shadows a shipped example of the
+		/// same name, and only the copy is listed.
+		probes: Vec<ProbeScript>,
+	},
 	/// The radios this machine has, in answer to [`Request::Radios`].
 	Radios {
 		/// One per wireless interface the kernel reports.

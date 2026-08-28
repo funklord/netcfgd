@@ -1251,6 +1251,69 @@ int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t er
 	return 1;
 }
 
+void ncfg_probes_free(ncfg_probes_t *probes)
+{
+	if (!probes) {
+		return;
+	}
+	for (size_t i = 0; i < probes->count; i++) {
+		free(probes->items[i].name);
+		free(probes->items[i].directory);
+		free(probes->items[i].text);
+	}
+	free(probes->items);
+	probes->items = NULL;
+	probes->count = 0;
+}
+
+int ncfg_client_probes(ncfg_client_t *client, ncfg_probes_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc =
+	    ncfg_client_request(client, "{\"request\":\"probe_list\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t probes = ncfg_json_member(doc, ncfg_json_root(doc), "probes");
+	uint32_t count = ncfg_json_count(doc, probes);
+	if (!count) {
+		/* A machine with no scripts is an ordinary answer -- and calloc(0, n)
+		 * may return NULL, which the next line would read as being out of
+		 * memory. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, probes, i);
+		out->items[i].name = member_text(doc, entry, "name");
+		out->items[i].directory = member_text(doc, entry, "directory");
+		out->items[i].text = member_text(doc, entry, "text");
+		out->items[i].editable =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "editable"), 0);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_radios_free(ncfg_radios_t *radios)
 {
 	if (!radios) {

@@ -1249,6 +1249,28 @@ keeping three lists in step -- and the editor is a plain text box, because any
 form would either constrain what a program can express or lie about what is
 running.
 
+**Reading them needed a request too, and the first version got that half
+wrong.** The listing was a local directory scan and the editor opened a local
+file, so a gui connected to a *remote* netcfgd would have shown the operator's
+own laptop while configuring a different machine -- and then saved an edit of
+one machine's script onto another. `Origin::Remote` is real: clients arrive
+from off the machine through an agent, so this was reachable rather than
+theoretical. It is the same shape as reading an ifindex across a namespace
+boundary, which this session had already found once.
+
+**The invariant, stated by the holder and worth keeping here:** a client only
+ever talks to netcfgd and writes its *own* files -- the config for reaching a
+remote netcfgd, and exports the operator asked for. Any file that is netcfgd's
+is written by netcfgd, and read from netcfgd.
+
+`probe_list` carries it, at the `observe` tier because the scripts are 0755 on
+disk and anybody on the machine can already read them. The daemon resolves the
+shadowing, so each name appears once and is the one netcfgd would run, and the
+text comes with the listing: they are a few hundred bytes each, and a second
+round trip would buy nothing while allowing a list and a body to disagree.
+`editable` says whether netcfgd would overwrite the file, so the dialog can
+offer the right verb rather than promising something the next upgrade undoes.
+
 **It needed a request, not a file write.**
 [0127](doc/decision/0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)
 is that a client cannot write system files, so a gui writing

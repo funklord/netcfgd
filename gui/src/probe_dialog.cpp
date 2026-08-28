@@ -3,8 +3,6 @@
 #include "ncfg_connection.h"
 
 #include <QDialogButtonBox>
-#include <QFile>
-#include <QFileInfo>
 #include <QFontDatabase>
 #include <QLabel>
 #include <QLineEdit>
@@ -57,12 +55,12 @@ const char *const starting_script =
 
 } // namespace
 
-ncfg_probe_dialog::ncfg_probe_dialog(ncfg_connection *connection, const QString &path,
+ncfg_probe_dialog::ncfg_probe_dialog(ncfg_connection *connection, const ncfg_probe_row &existing,
     QWidget *parent)
     : QDialog(parent), connection(connection)
 {
-	const bool editing = !path.isEmpty();
-	setWindowTitle(editing ? QStringLiteral("link detection: %1").arg(QFileInfo(path).fileName())
+	const bool editing = !existing.name.isEmpty();
+	setWindowTitle(editing ? QStringLiteral("link detection: %1").arg(existing.name)
 	                 : QStringLiteral("new link-detection script"));
 	resize(760, 560);
 
@@ -72,7 +70,7 @@ ncfg_probe_dialog::ncfg_probe_dialog(ncfg_connection *connection, const QString 
 	name->setObjectName(QStringLiteral("probe_name"));
 	name->setPlaceholderText(QStringLiteral("a name, without a path"));
 	if (editing) {
-		name->setText(QFileInfo(path).fileName());
+		name->setText(existing.name);
 	}
 	layout->addWidget(name);
 
@@ -83,13 +81,10 @@ ncfg_probe_dialog::ncfg_probe_dialog(ncfg_connection *connection, const QString 
 	body->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
 	body->setTabChangesFocus(false);
 	if (editing) {
-		QFile file(path);
-		if (file.open(QIODevice::ReadOnly)) {
-			body->setPlainText(QString::fromUtf8(file.readAll()));
-			file.close();
-		} else {
-			body->setPlainText(QStringLiteral("# could not read %1").arg(path));
-		}
+		/* Already in hand from the listing: the daemon sent the text with the
+		 * name, so there is no file for this process to open -- and on a
+		 * remote connection there would not be one to open here anyway. */
+		body->setPlainText(existing.text);
 	} else {
 		body->setPlainText(QString::fromLatin1(starting_script));
 	}
@@ -107,11 +102,19 @@ ncfg_probe_dialog::ncfg_probe_dialog(ncfg_connection *connection, const QString 
 	 * Where it is saved is worth saying too: an edit of a shipped example
 	 * lands in /etc as a copy, so the example is still there to go back to.
 	 */
-	note->setText(QStringLiteral(
-	    "Saved into /etc/netcfgd/probe, executable. Editing one of the shipped "
-	    "examples writes your copy there and leaves the original alone.\n"
-	    "This needs root: netcfgd runs a probe as root, on an interval, so the "
-	    "daemon refuses to store one for anybody else."));
+	note->setText(
+	    (editing && !existing.editable)
+	        ? QStringLiteral(
+	              "This is a shipped example in %1 and is not edited in place: saving "
+	              "writes your copy into /etc/netcfgd/probe, which then shadows it. "
+	              "The original stays where it is.\nThis needs root: netcfgd runs a "
+	              "probe as root, on an interval, so the daemon refuses to store one "
+	              "for anybody else.")
+	              .arg(existing.directory)
+	        : QStringLiteral(
+	              "Saved into /etc/netcfgd/probe, executable.\nThis needs root: "
+	              "netcfgd runs a probe as root, on an interval, so the daemon "
+	              "refuses to store one for anybody else."));
 	layout->addWidget(note);
 
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);

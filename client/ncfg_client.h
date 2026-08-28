@@ -554,6 +554,43 @@ int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *
     char *err, size_t err_size);
 
 /*
+ * One link-detection script, as netcfgd sees it.
+ *
+ * `editable` is whether netcfgd would overwrite this file. A shipped example
+ * is not edited in place: an edit becomes a copy in /etc with the same name,
+ * which then shadows it -- so a client can offer the right verb rather than
+ * promising something the next upgrade undoes.
+ */
+typedef struct {
+	char *name;
+	char *directory;
+	char *text;
+	int   editable;
+} ncfg_probe_t;
+
+typedef struct {
+	ncfg_probe_t *items;
+	size_t        count;
+} ncfg_probes_t;
+
+void ncfg_probes_free(ncfg_probes_t *probes);
+
+/*
+ * The link-detection scripts netcfgd can see. Needs `observe`.
+ *
+ * **Asked of the daemon rather than read off the disk, and that is the whole
+ * point.** A client only ever talks to netcfgd; these files belong to the
+ * machine netcfgd runs on. A client that listed its own /etc/netcfgd/probe
+ * would be showing the machine it is running on while configuring a different
+ * one -- and would then save an edit of one machine's script onto another.
+ *
+ * The text comes with the listing: they are a few hundred bytes each, and a
+ * second round trip per script would buy nothing and would mean a list and a
+ * body that could disagree.
+ */
+int ncfg_client_probes(ncfg_client_t *client, ncfg_probes_t *out, char *err, size_t err_size);
+
+/*
  * Write a link-detection script, through the daemon.
  *
  * `name` is a plain filename; netcfgd chooses the directory

@@ -104,9 +104,12 @@ int main(int argc, char **argv)
 	 * list depends on what is installed. `--` in the label is how a script row
 	 * is spelled; the fixture writes one so this is not testing the packaging.
 	 */
-	const QString script = QString::fromUtf8(qgetenv("NCFG_TEST_PROBE_SCRIPT"));
-	int at = script.isEmpty() ? -1 : detection->findData(script);
-	check("a link-detection script found on disk is offered", at >= 0,
+	/* The daemon's config dir, because the list now comes from netcfgd rather
+	 * than from this machine's disk -- which is the whole point of asking it. */
+	const QString script = QString::fromUtf8(qgetenv("NCFG_CONFIG_DIR")) +
+	    QStringLiteral("/probe/example");
+	int at = detection->findData(script);
+	check("a link-detection script the daemon knows about is offered", at >= 0,
 	    QStringLiteral("looked for %1").arg(script));
 	check("and running a command is still offered as the escape hatch",
 	    detection->findData(QStringLiteral("command")) >= 0);
@@ -195,7 +198,20 @@ int main(int argc, char **argv)
 	 * it editable without leaving the program.
 	 */
 	{
-		ncfg_probe_dialog editor(&connection, script);
+		/* The editor is handed the script, not a path: a client does not open
+		 * the machine's files. Fetched the way the dialog fetches it. */
+		QList<ncfg_probe_row> found;
+		check("the daemon lists its own scripts", connection.probes(&found, &error), error);
+		ncfg_probe_row opening;
+		for (const ncfg_probe_row &one : found) {
+			if (one.name == QStringLiteral("example")) {
+				opening = one;
+			}
+		}
+		check("including the one the fixture wrote", !opening.name.isEmpty());
+		check("and says it is the operator's rather than a shipped example",
+		    opening.editable);
+		ncfg_probe_dialog editor(&connection, opening);
 		auto *name = editor.findChild<QLineEdit *>(QStringLiteral("probe_name"));
 		auto *body = editor.findChild<QPlainTextEdit *>(QStringLiteral("probe_body"));
 		auto *save = editor.findChild<QPushButton *>(QStringLiteral("probe_save"));
@@ -206,7 +222,7 @@ int main(int argc, char **argv)
 		check("the probe editor has a name, a body and a save", true);
 		/* It opened the file rather than a blank page: an editor that showed
 		 * nothing would look identical to one whose read failed. */
-		check("and it read the script off disk",
+		check("and the editor shows what the daemon sent",
 		    body->toPlainText().contains(QStringLiteral("exit 0")),
 		    body->toPlainText());
 		check("and named it", name->text() == QStringLiteral("example"), name->text());

@@ -1116,6 +1116,9 @@ fn answer(
 			value,
 			replace,
 		} => put_secret_request(state, name, value, *replace),
+		Request::ProbeList => Response::Probes {
+			probes: netcfgd_host::config::list_probes(&state.paths.config, &state.paths.factory),
+		},
 		Request::ProbePut {
 			name,
 			text,
