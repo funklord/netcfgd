@@ -23,6 +23,7 @@
  */
 
 #include "../../src/interface_dialog.h"
+#include "../../src/probe_dialog.h"
 #include "../../src/ncfg_connection.h"
 
 #include <QApplication>
@@ -31,6 +32,8 @@
 #include <QFile>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QFormLayout>
+#include <QPlainTextEdit>
 #include <QSpinBox>
 
 #include <cstdio>
@@ -85,9 +88,8 @@ int main(int argc, char **argv)
 	auto *addressing = dialog.findChild<QComboBox *>(QStringLiteral("iface_addressing"));
 	auto *preference = dialog.findChild<QSpinBox *>(QStringLiteral("iface_preference"));
 	auto *detection = dialog.findChild<QComboBox *>(QStringLiteral("iface_detection"));
-	auto *host = dialog.findChild<QLineEdit *>(QStringLiteral("iface_probe_host"));
 	auto *save = dialog.findChild<QPushButton *>(QStringLiteral("iface_save"));
-	if (!addressing || !preference || !detection || !host || !save) {
+	if (!addressing || !preference || !detection || !save) {
 		check("the dialog has the fields it needs", false);
 		return 1;
 	}
@@ -98,12 +100,23 @@ int main(int argc, char **argv)
 	 * and an operator choosing it should be choosing it. */
 	check("carrier-only link detection is offered by name",
 	    detection->findData(QString()) >= 0);
-	check("and so is a probe", detection->findData(QStringLiteral("ping")) >= 0);
+	/* The scripts come off the disk rather than out of this dialog, so the
+	 * list depends on what is installed. `--` in the label is how a script row
+	 * is spelled; the fixture writes one so this is not testing the packaging.
+	 */
+	const QString script = QString::fromUtf8(qgetenv("NCFG_TEST_PROBE_SCRIPT"));
+	int at = script.isEmpty() ? -1 : detection->findData(script);
+	check("a link-detection script found on disk is offered", at >= 0,
+	    QStringLiteral("looked for %1").arg(script));
+	check("and running a command is still offered as the escape hatch",
+	    detection->findData(QStringLiteral("command")) >= 0);
+	if (at < 0) {
+		return 1;
+	}
 
 	addressing->setCurrentIndex(addressing->findData(QStringLiteral("dhcp")));
 	preference->setValue(50);
-	detection->setCurrentIndex(detection->findData(QStringLiteral("ping")));
-	host->setText(QStringLiteral("192.0.2.1"));
+	detection->setCurrentIndex(at);
 	save->click();
 
 	/* The file, because the probe's argv is the part that has to be exactly
@@ -115,12 +128,14 @@ int main(int argc, char **argv)
 		check("the preference was written", text.contains(QStringLiteral("preference = 50")),
 		    text);
 		check("and a probe block", text.contains(QStringLiteral("probe {")), text);
-		/* The interface is named in the argv. Without it the probe answers
-		 * about whichever interface the route table picked. */
-		check("whose argv binds this interface",
-		    text.contains(QStringLiteral("\"-I\", \"gui-probe0\"")), text);
-		check("and names the host it was given",
-		    text.contains(QStringLiteral("192.0.2.1")), text);
+		/* The interface is the script's argument, and it is not optional:
+		 * netcfgd runs the command as given and binds nothing, so a script
+		 * without it answers about whichever interface the route table
+		 * picked. */
+		check("whose argv names this interface",
+		    text.contains(QStringLiteral("args = [\"gui-probe0\"]")), text);
+		check("and the script it was given",
+		    text.contains(script), text);
 		/* Defaults are not restated: interval and timeout were left alone. */
 		check("and does not restate the defaults it was not given",
 		    !text.contains(QStringLiteral("interval")) &&
@@ -138,6 +153,74 @@ int main(int argc, char **argv)
 	/* Removed, because the daemon and this directory outlive this probe and
 	 * the next one should not inherit a configuration it did not write. */
 	written.remove();
+
+	/*
+	 * **Every field is actually in the layout.**
+	 *
+	 * `findChild` finds a widget whether or not anything laid it out, so every
+	 * check above passes on a dialog that shows the operator nothing. That is
+	 * not hypothetical: an edit that removed a dead field took the link
+	 * detection row's `addRow` with it, and the combo box sat orphaned through
+	 * a green test run. A widget with no parent layout is one nobody can use.
+	 */
+	{
+		QFormLayout *form = dialog.findChild<QFormLayout *>();
+		check("the dialog has a form", form != nullptr);
+		if (form) {
+			const QWidget *fields[] = { addressing, preference, detection };
+			const char *names[] = { "addressing", "preference", "link detection" };
+			for (int i = 0; i < 3; i++) {
+				int row = -1;
+				QFormLayout::ItemRole role{};
+				/* A widget inside a row's layout rather than the row
+				 * itself still counts: the detection row holds the
+				 * combo beside its buttons. */
+				form->getWidgetPosition(const_cast<QWidget *>(fields[i]), &row, &role);
+				bool placed = row >= 0;
+				if (!placed) {
+					for (int r = 0; r < form->rowCount() && !placed; r++) {
+						QLayoutItem *item = form->itemAt(r, QFormLayout::FieldRole);
+						placed = item && item->layout() &&
+						     item->layout()->indexOf(
+						         const_cast<QWidget *>(fields[i])) >= 0;
+					}
+				}
+				check(names[i], placed, QStringLiteral("is not in the layout"));
+			}
+		}
+	}
+
+	/*
+	 * The editor: a probe is a shell script, and this is the thing that makes
+	 * it editable without leaving the program.
+	 */
+	{
+		ncfg_probe_dialog editor(&connection, script);
+		auto *name = editor.findChild<QLineEdit *>(QStringLiteral("probe_name"));
+		auto *body = editor.findChild<QPlainTextEdit *>(QStringLiteral("probe_body"));
+		auto *save = editor.findChild<QPushButton *>(QStringLiteral("probe_save"));
+		if (!name || !body || !save) {
+			check("the probe editor has a name, a body and a save", false);
+			return 1;
+		}
+		check("the probe editor has a name, a body and a save", true);
+		/* It opened the file rather than a blank page: an editor that showed
+		 * nothing would look identical to one whose read failed. */
+		check("and it read the script off disk",
+		    body->toPlainText().contains(QStringLiteral("exit 0")),
+		    body->toPlainText());
+		check("and named it", name->text() == QStringLiteral("example"), name->text());
+
+		/* Writing needs root, and the daemon refuses it otherwise. Under the
+		 * live suite this runs as root in a namespace, so it should be
+		 * stored -- and the refusal path is what a desktop user meets. */
+		body->setPlainText(QStringLiteral("#!/bin/sh\n# edited by the test\nexit 0\n"));
+		name->setText(QStringLiteral("edited-by-test"));
+		save->click();
+		check("saving a script reports where it went",
+		    editor.outcome().contains(QStringLiteral("edited-by-test")),
+		    editor.outcome());
+	}
 
 	printf("\n");
 	if (failures) {

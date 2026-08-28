@@ -33,6 +33,16 @@ struct Tally {
 	due: Option<Instant>,
 	/// The earliest the verdict may change again, where a dwell is configured.
 	settled_until: Option<Instant>,
+	/// Consecutive failures to *start* the program.
+	///
+	/// Separate from `failures`, which counts a program that ran and said no.
+	/// The two mean different things and only one of them is about the link.
+	start_failures: u32,
+	/// Set aside: the program could not be started enough times running that
+	/// asking again is not going to help.
+	blacklisted: bool,
+	/// What the program last said, or why it was set aside.
+	detail: Option<String>,
 }
 
 /// Every interface's tally, across ticks.
@@ -41,37 +51,126 @@ pub(crate) struct Probes {
 	tallies: HashMap<String, Tally>,
 }
 
-/// Run one probe and say whether it succeeded.
+/// How many consecutive failures to *start* a probe before it is set aside.
+///
+/// Only start failures count. A program that runs and exits non-zero is the
+/// feature working -- that is a link that is down -- and no number of those
+/// ever sets a probe aside.
+const START_FAILURES_BEFORE_BLACKLIST: u32 = 5;
+
+/// The most of a probe's standard error that is kept.
+///
+/// It crosses the socket to every client, and a script can write without end.
+/// The tail rather than the head: a shell script's last words are the ones
+/// about the thing that just failed.
+const DETAIL_MAX: usize = 400;
+
+/// What one run of a probe did.
+struct Outcome {
+	/// Whether the program ran and exited zero.
+	ok: bool,
+	/// Whether it ran at all. A program that could not be started says nothing
+	/// about the link, which is a different fact from one that ran and failed.
+	started: bool,
+	/// Its standard error, tail-trimmed, or the reason it could not be run.
+	detail: Option<String>,
+}
+
+/// Keep the last `DETAIL_MAX` bytes, on a character boundary, one line.
+fn trim_detail(text: &str) -> Option<String> {
+	let text = text.trim();
+	if text.is_empty() {
+		return None;
+	}
+	// The last non-empty line: a program that printed a banner and then an
+	// error should report the error.
+	let last = text.lines().rev().find(|line| !line.trim().is_empty())?;
+	let last = last.trim();
+	if last.len() <= DETAIL_MAX {
+		return Some(last.to_owned());
+	}
+	let mut cut = last.len() - DETAIL_MAX;
+	while cut < last.len() && !last.is_char_boundary(cut) {
+		cut += 1;
+	}
+	Some(format!("...{}", &last[cut..]))
+}
+
+/// Run one probe and say what happened.
 ///
 /// The timeout is enforced here rather than trusted to the program, because a
 /// probe that hangs is the failure mode a probe is for: a `curl` against a
 /// black hole does not exit, and a runner that waited would stop asking about
 /// every other interface too.
-fn succeeds(policy: &ProbePolicy) -> bool {
+///
+/// **Standard error is kept, where it used to go to `/dev/null`.** An exit
+/// status says the link does not work and nothing about why, so the one thing
+/// the program had to say about it was being discarded -- and a probe nobody
+/// can debug is one that gets deleted rather than fixed.
+fn run(policy: &ProbePolicy) -> Outcome {
 	// A probe that cannot be started is a probe that is not answering yes.
 	// Treated as a failure rather than as an absence, because the alternative
-	// is a typo in `command` quietly meaning "always up".
-	let Ok(mut child) = Command::new(&policy.command)
+	// is a typo in `command` quietly meaning "always up" -- but counted
+	// separately, so a script that can never run is set aside rather than
+	// withholding an interface's routes for ever on no information.
+	let child = Command::new(&policy.command)
 		.args(&policy.args)
 		.stdin(Stdio::null())
 		.stdout(Stdio::null())
-		.stderr(Stdio::null())
-		.spawn()
-	else {
-		return false;
+		.stderr(Stdio::piped())
+		.spawn();
+	let mut child = match child {
+		Ok(child) => child,
+		Err(error) => {
+			return Outcome {
+				ok: false,
+				started: false,
+				detail: Some(format!("cannot run {}: {error}", policy.command)),
+			};
+		}
 	};
 
 	let deadline = Instant::now() + Duration::from_secs(u64::from(policy.timeout));
 	loop {
 		match child.try_wait() {
-			Ok(Some(status)) => return status.success(),
+			Ok(Some(status)) => {
+				let mut said = String::new();
+				if let Some(mut pipe) = child.stderr.take() {
+					use std::io::Read;
+					let mut raw = Vec::new();
+					let _ = pipe.read_to_end(&mut raw);
+					said = String::from_utf8_lossy(&raw).into_owned();
+				}
+				return Outcome {
+					ok: status.success(),
+					started: true,
+					detail: trim_detail(&said),
+				};
+			}
 			Ok(None) => {}
-			Err(_) => return false,
+			Err(error) => {
+				return Outcome {
+					ok: false,
+					started: true,
+					detail: Some(format!("cannot wait for the probe: {error}")),
+				};
+			}
 		}
 		if Instant::now() >= deadline {
 			let _ = child.kill();
 			let _ = child.wait();
-			return false;
+			// A hanging probe is a failing link rather than a broken script:
+			// it started, so it is answering, just not in time. Timing out for
+			// ever must not set it aside -- that is exactly the black hole
+			// 0119 is about.
+			return Outcome {
+				ok: false,
+				started: true,
+				detail: Some(format!(
+					"no answer within {}s, so it was killed",
+					policy.timeout
+				)),
+			};
 		}
 		std::thread::sleep(Duration::from_millis(50));
 	}
@@ -116,11 +215,49 @@ impl Probes {
 			// keeps being asked, so the counts stay current and the moment the
 			// dwell expires the verdict reflects what has been happening
 			// rather than one stale result.
+			// Set aside stays set aside until the configuration changes, which
+			// drops the tally entirely. Re-trying a command that does not
+			// exist, every interval, for ever, is noise rather than
+			// resilience.
+			if tally.blacklisted {
+				continue;
+			}
+
 			let held = tally
 				.settled_until
 				.is_some_and(|until| Instant::now() < until);
 
-			if succeeds(policy) {
+			let outcome = run(policy);
+			tally.detail = outcome.detail;
+
+			// **A program that cannot be started says nothing about the
+			// link.** Counted apart, and after enough of them the probe is set
+			// aside and its verdict cleared rather than left at `false`:
+			// withholding an interface's routes for ever because of a typo in
+			// `command` is how a probe takes a machine off the network and
+			// keeps it there. The verdict going back to `None` means "nobody
+			// asked", which is what a probe that never ran amounts to -- and
+			// it is loud rather than quiet, which is the half the original
+			// concern was really about.
+			if !outcome.started {
+				tally.start_failures = tally.start_failures.saturating_add(1);
+				if tally.start_failures >= START_FAILURES_BEFORE_BLACKLIST {
+					tally.blacklisted = true;
+					tally.detail = Some(format!(
+						"set aside after {} attempts: {}",
+						tally.start_failures,
+						tally.detail.as_deref().unwrap_or("it could not be started")
+					));
+					if tally.verdict.is_some() {
+						tally.verdict = None;
+						changed = true;
+					}
+				}
+				continue;
+			}
+			tally.start_failures = 0;
+
+			if outcome.ok {
 				tally.failures = 0;
 				tally.successes = tally.successes.saturating_add(1);
 				if !held && tally.successes >= policy.up_after && tally.verdict != Some(true) {
@@ -162,6 +299,7 @@ impl Probes {
 		for link in &mut observed.links {
 			if let Some(tally) = self.tallies.get(&link.name) {
 				link.reachable = tally.verdict;
+				link.probe_detail = tally.detail.clone();
 			}
 		}
 	}
@@ -264,6 +402,162 @@ mod tests {
 			changes(60) <= 1,
 			"a dwell longer than the test should let the verdict change once \
 			 and then hold"
+		);
+	}
+}
+
+#[cfg(test)]
+mod probe_detail_tests {
+	use super::*;
+	use netcfgd_testdir::TestDir;
+
+	/// A link the way the model requires one.
+	///
+	/// `ObservedLink` has no `Default` and 31 fields, most of them answers
+	/// rather than absences, so this spells out the ones that matter here and
+	/// leaves the rest empty.
+	fn link_named(name: &str) -> netcfgd_model::ObservedLink {
+		netcfgd_model::ObservedLink {
+			name: name.to_owned(),
+			index: 2,
+			kind: String::new(),
+			wireless: false,
+			up: true,
+			carrier: true,
+			reachable: None,
+			probe_detail: None,
+			mtu: 1500,
+			mac: None,
+			master: None,
+			parent: None,
+			offloads: Vec::new(),
+			ipv6_token: None,
+			qdisc: None,
+			qdisc_bandwidth_bits: None,
+			qdisc_ingress: false,
+			ingress_redirect: None,
+			forwarding: None,
+			rfkill: None,
+			privacy: None,
+			accept_ra: None,
+			ownership: netcfgd_model::Ownership::Foreign,
+			private_key_loaded: false,
+			bond: None,
+			bridge: None,
+			macvlan: None,
+			vlan: None,
+			tunnel: None,
+			vxlan: None,
+			wireguard: None,
+		}
+	}
+
+	fn document_for(command: &str) -> Document {
+		let mut sources = netcfgd_compile::SourceMap::new();
+		sources.add(
+			"netcfgd.conf",
+			format!(
+				"interface eth0 {{\n\tpreference = 10\n\tprobe {{\n\
+				 \t\tcommand = \"{command}\"\n\t\tinterval = 1\n\
+				 \t\ttimeout = 5\n\t\tdown_after = 1\n\t\tup_after = 1\n\t}}\n}}\n"
+			),
+		);
+		netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
+			.expect("the test config compiles")
+	}
+
+	/// **A failing probe says why, in the program's own words.**
+	///
+	/// The exit status says the link does not work and nothing about why not,
+	/// and standard error used to go to `/dev/null` -- so the one thing the
+	/// program had to say about it was discarded. A probe nobody can debug is
+	/// one that gets deleted rather than fixed.
+	#[test]
+	fn a_failing_probe_reports_what_it_printed() {
+		let dir = TestDir::new("probe-detail");
+		let script = dir.join("noisy.sh");
+		std::fs::write(
+			&script,
+			"#!/bin/sh\necho 'ping: connect: Network is unreachable' >&2\nexit 1\n",
+		)
+		.expect("write");
+		let mut permissions = std::fs::metadata(&script).expect("stat").permissions();
+		std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+		std::fs::set_permissions(&script, permissions).expect("chmod");
+
+		let document = document_for(&script.to_string_lossy());
+		let mut probes = Probes::default();
+		probes.run_due(Some(&document));
+
+		let mut observed = Observed::default();
+		observed.links.push(link_named("eth0"));
+		probes.apply(&mut observed);
+
+		assert_eq!(
+			observed.links[0].reachable,
+			Some(false),
+			"it ran and said no"
+		);
+		assert_eq!(
+			observed.links[0].probe_detail.as_deref(),
+			Some("ping: connect: Network is unreachable"),
+			"what it printed reaches the observation"
+		);
+	}
+
+	/// **A program that cannot be started is set aside, not left withholding
+	/// routes for ever.**
+	///
+	/// It says nothing about the link, so a verdict of `false` would be an
+	/// answer to a question nobody managed to ask -- and a typo in `command`
+	/// would take an interface off the network and keep it there. Loudly:
+	/// `probe_detail` names the count and the reason, which is the half the
+	/// original "a typo quietly meaning always up" concern was about.
+	#[test]
+	fn a_probe_that_cannot_run_is_set_aside_with_a_reason() {
+		let document = document_for("/nonexistent/probe");
+		let mut probes = Probes::default();
+
+		// One short of the limit: still trying, and no verdict has been
+		// reached because nothing ever ran.
+		for _ in 0..(START_FAILURES_BEFORE_BLACKLIST - 1) {
+			probes.run_due(Some(&document));
+			std::thread::sleep(Duration::from_millis(1100));
+		}
+		let mut observed = Observed::default();
+		observed.links.push(link_named("eth0"));
+		probes.apply(&mut observed);
+		assert!(
+			observed.links[0]
+				.probe_detail
+				.as_deref()
+				.is_some_and(|said| said.contains("cannot run")),
+			"it says what went wrong before giving up: {:?}",
+			observed.links[0].probe_detail
+		);
+		assert!(
+			!observed.links[0]
+				.probe_detail
+				.as_deref()
+				.is_some_and(|said| said.contains("set aside")),
+			"and has not given up yet"
+		);
+
+		probes.run_due(Some(&document));
+		let mut observed = Observed::default();
+		observed.links.push(link_named("eth0"));
+		probes.apply(&mut observed);
+		assert_eq!(
+			observed.links[0].reachable, None,
+			"a probe that never ran leaves the link unjudged rather than down"
+		);
+		assert!(
+			observed.links[0]
+				.probe_detail
+				.as_deref()
+				.is_some_and(|said| said.contains("set aside")),
+			"and says so: {:?}",
+			observed.links[0].probe_detail
 		);
 	}
 }

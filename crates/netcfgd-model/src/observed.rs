@@ -104,6 +104,19 @@ pub struct ObservedLink {
 	/// on a machine that configured no probes at all.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub reachable: Option<bool>,
+	/// Why the probe last said what it said, in its own words.
+	///
+	/// **A probe that fails silently is a probe nobody can fix.** The exit
+	/// status says whether the link works and nothing about why not, so the
+	/// program's standard error is kept and reported: a name that does not
+	/// resolve, a route that is missing, a certificate that expired. Bounded,
+	/// because this crosses the socket and a script can write without end.
+	///
+	/// Also carries the reason a probe was set aside, which is the one case
+	/// the exit status cannot express -- a program that never ran has no
+	/// status to report.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub probe_detail: Option<String>,
 	/// Current MTU.
 	pub mtu: u32,
 	/// Current hardware address.

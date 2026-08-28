@@ -1241,6 +1241,58 @@ about it: it reports `routed` from a default route in the main table, and a
 probe-failing interface has its routes withheld, so the icon drops to amber on
 its own. It never looks at carrier.
 
+**Link-detection scripts are readable and writable from the gui, through the
+daemon.** A probe is a shell script whose exit status is the answer, so the
+dropdown is a directory listing rather than a list in the program -- which
+means the gui, `ncfg` and any later front end offer the same set without anyone
+keeping three lists in step -- and the editor is a plain text box, because any
+form would either constrain what a program can express or lie about what is
+running.
+
+**It needed a request, not a file write.**
+[0127](doc/decision/0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)
+is that a client cannot write system files, so a gui writing
+`/etc/netcfgd/probe` itself would have been the fifth program with root's
+permissions on what the daemon treats as its own. `probe_put` carries it, and
+**it needs root rather than the `admin` tier**: a probe is strictly more than
+the privileged *productions* `check_content` already refuses, since those name
+a program and this one is the program. The dialog says so before the operator
+types rather than after.
+
+Reading is done from disk, which anyone may do: the scripts are 0755 so that
+somebody debugging a link judged down can run one by hand, and a probe nobody
+can run is one nobody can fix. Editing a shipped example writes the operator's
+copy into `/etc` and leaves the original alone.
+
+**A new script starts from a template rather than a blank page**, carrying the
+two things that are not guessable -- `$1` is the interface and must be used,
+because netcfgd runs the command as given and binds nothing; and the exit
+status is the whole answer. Its addresses are documentation ranges and do not
+work, deliberately: netcfgd ships no opinion about who a machine should talk
+to, and an example carrying a real address gets copied.
+
+**A probe now says why it failed.** Standard error went to `/dev/null`, so the
+exit status said the link was down and the one thing the program had to say
+about it was discarded. It is kept, tail-trimmed, and reported as
+`probe_detail`.
+
+**And a program that cannot be started is set aside rather than left
+withholding routes.** Only failures to *start* count: a program that runs and
+exits non-zero is the feature working, and a timeout is a failing link rather
+than a broken script -- that is precisely the black hole 0119 is about. After
+five failed starts the verdict is cleared to `None` and the reason recorded,
+because withholding an interface's routes for ever over a typo in `command` is
+how a probe takes a machine off the network and keeps it there. Loudly, which
+is what the original "a typo quietly meaning always up" concern was really
+about.
+
+**`findChild` finds a widget nothing laid out, and a test built on it passed a
+dialog that showed nothing.** An edit removing a dead field took the link
+detection row's `addRow` with it, and the combo box sat orphaned through a
+green run. `live_interface_dialog` asserts every field is in the form now, and
+that check was verified against its own failure: removing the line produces
+`FAIL link detection`.
+
 **A probe that writes configuration writes it for every probe that runs
 after.** `gui_wifi.sh` drives all of them against one daemon and one config
 directory in glob order. The first version of `live_interface_dialog`

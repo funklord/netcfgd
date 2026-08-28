@@ -553,6 +553,26 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
 int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *text, int replace,
     char *err, size_t err_size);
 
+/*
+ * Write a link-detection script, through the daemon.
+ *
+ * `name` is a plain filename; netcfgd chooses the directory
+ * (`/etc/netcfgd/probe`) and a name carrying a separator is refused, because
+ * otherwise the caller would be choosing where an executable lands.
+ *
+ * **Needs root on this machine, not merely the `admin` tier.** A probe is a
+ * program netcfgd runs as root on an interval, which is the most dangerous
+ * payload this socket carries -- more than the privileged *productions*
+ * `config_put` is checked for, since those name a program and this one is the
+ * program. A site that opened `admin` to a group has not thereby granted this.
+ *
+ * It exists rather than letting a client write the file because that is 0127:
+ * a client cannot write system files, and system configuration cannot live
+ * under a user.
+ */
+int ncfg_client_probe_put(ncfg_client_t *client, const char *name, const char *text, int replace,
+    char *err, size_t err_size);
+
 int ncfg_client_secret_put(ncfg_client_t *client, const char *name, const char *value,
                int replace, char *err, size_t err_size);
 

@@ -949,6 +949,66 @@ pub fn install_secret(
 	Ok(path)
 }
 
+/// Put a link-detection script on disk, executable.
+///
+/// **The most dangerous thing netcfgd writes, and the shortest function.** A
+/// probe is a program netcfgd runs as root on an interval, so the guard is not
+/// here: `authorize::check_content` refuses this request from anyone but local
+/// root before it reaches the daemon's dispatcher, for the reason
+/// `install_drop_in` gives -- an authorization question answered in two places
+/// is one where the two come to disagree.
+///
+/// What is here is the *name*, because that is not an authorization question.
+/// netcfgd chooses the directory; a name carrying a separator, or `..`, would
+/// let a caller choose it instead and write an executable anywhere root can.
+///
+/// Mode 0755 rather than 0700: netcfgd runs it as root and could read it at
+/// 0700, but an operator debugging why their link is judged down will want to
+/// run it by hand as themselves, and a probe nobody can run is one nobody can
+/// fix.
+///
+/// # Errors
+///
+/// A name that cannot be used, an empty script, a file that exists when
+/// replacing was not asked for, or a write that failed.
+pub fn install_probe(
+	config_dir: &Path,
+	name: &str,
+	text: &str,
+	replace: bool,
+) -> Result<PathBuf, String> {
+	crate::wifi_profile::usable_id(name)
+		.map_err(|why| format!("`{name}` cannot be used as a script name: {why}"))?;
+	if text.trim().is_empty() {
+		return Err(format!(
+			"nothing was given for `{name}`, and an empty script exits zero -- which \
+			 netcfgd would read as the link being up, for ever"
+		));
+	}
+
+	let path = config_dir.join("probe").join(name);
+	if path.exists() && !replace {
+		return Err(format!(
+			"{} already exists. Ask to replace it if that is what you mean",
+			path.display()
+		));
+	}
+
+	if let Some(parent) = path.parent() {
+		use std::os::unix::fs::DirBuilderExt as _;
+		if !parent.is_dir() {
+			std::fs::DirBuilder::new()
+				.recursive(true)
+				.mode(0o755)
+				.create(parent)
+				.map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+		}
+	}
+	write_atomically(&path, text.as_bytes(), 0o755)
+		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
+	Ok(path)
+}
+
 /// Remove a drop-in, and prove what is left still compiles.
 ///
 /// The mirror of [`install_drop_in`], and it needs the same check for the same

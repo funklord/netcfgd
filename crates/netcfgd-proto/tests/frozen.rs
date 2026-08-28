@@ -69,6 +69,29 @@ fn witness_path() -> PathBuf {
 /// exact about the same division.
 fn every_request() -> Vec<Request> {
 	let all = every_request_sample();
+	// Two, for `config_put`'s reason: `replace` is skip_serializing_if, so one
+	// that sets it pins only the present form. Lifted out of the list above
+	// because that function has a line limit -- a natural group rather than an
+	// arbitrary cut. The script is the shortest thing that is still a probe: a
+	// witness is committed, read and diffed, and one carrying a real address
+	// would be copied by somebody, which is the whole reason netcfgd ships no
+	// default target.
+	let all: Vec<Request> = all
+		.into_iter()
+		.chain([
+			Request::ProbePut {
+				name: "office".to_owned(),
+				text: "#!/bin/sh\nexit 0\n".to_owned(),
+				replace: true,
+			},
+			Request::ProbePut {
+				name: "home".to_owned(),
+				text: "#!/bin/sh\nexit 1\n".to_owned(),
+				replace: false,
+			},
+		])
+		.collect();
+
 	let name = |request: &Request| match request {
 		Request::Hello => "hello",
 		Request::Status => "status",
@@ -87,6 +110,7 @@ fn every_request() -> Vec<Request> {
 		Request::WifiDisconnect { .. } => "wifi_disconnect",
 		Request::ApStations { .. } => "ap_stations",
 		Request::ConfigPut { .. } => "config_put",
+		Request::ProbePut { .. } => "probe_put",
 		Request::SecretPut { .. } => "secret_put",
 		Request::ConfigDelete { .. } => "config_delete",
 		Request::SecretDelete { .. } => "secret_delete",
@@ -108,6 +132,7 @@ fn every_request() -> Vec<Request> {
 			"hello",
 			"monitor",
 			"plan",
+			"probe_put",
 			"radio_set",
 			"radios",
 			"reload",

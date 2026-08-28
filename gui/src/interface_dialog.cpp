@@ -1,11 +1,16 @@
 #include "interface_dialog.h"
 
+#include "probe_dialog.h"
+
 #include "ncfg_connection.h"
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
+#include <QFileInfo>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -37,12 +42,36 @@ const choice addressings[] = {
  * setting, because it is the answer that was wrong often enough to need
  * replacing: a cable into a switch with no uplink of its own has carrier and no
  * path. Decision 0119.
+ *
+ * The rest of the list is **read off the disk**, not written here. A probe is
+ * a shell script that exits zero when the link works, so the set of them is a
+ * directory listing -- which means this dialog, `ncfg` and any other front end
+ * offer the same set without anyone keeping three lists in step.
  */
 const choice detections[] = {
 	{ "carrier only -- the cable is plugged in", "" },
-	{ "ping a host through this interface", "ping" },
 	{ "run a command", "command" },
 };
+
+/*
+ * Where link-detection scripts live. The operator's first, so a copy of an
+ * example that has been edited wins over the example -- the same order the
+ * config directory and its factory tree already use.
+ *
+ * `NCFG_PROBE_DIR` overrides both, for the reason `NCFG_SYS_CLASS_NET` and
+ * `NCFG_RUN_ROOT` exist: a test cannot write to /etc, and one that reordered
+ * these paths to make itself possible would be exercising a lookup the
+ * shipped program does not do.
+ */
+QStringList probe_directories()
+{
+	const QByteArray named = qgetenv("NCFG_PROBE_DIR");
+	if (!named.isEmpty()) {
+		return QStringList{ QString::fromUtf8(named) };
+	}
+	return QStringList{ QStringLiteral("/etc/netcfgd/probe"),
+		QStringLiteral("/usr/share/netcfgd/probe") };
+}
 
 void fill(QComboBox *box, const choice *from, size_t count)
 {
@@ -103,13 +132,34 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 
 	detection = new QComboBox(this);
 	detection->setObjectName(QStringLiteral("iface_detection"));
-	fill(detection, detections, sizeof(detections) / sizeof(detections[0]));
-	form->addRow(QStringLiteral("link detection"), detection);
+	reload_detections(QString());
 
-	probe_host = new QLineEdit(this);
-	probe_host->setObjectName(QStringLiteral("iface_probe_host"));
-	probe_host->setPlaceholderText(QStringLiteral("the gateway, or something beyond it"));
-	form->addRow(QStringLiteral("host to ping"), probe_host);
+	/* The list, and the two things an operator does with it. `view / edit`
+	 * because a probe is a shell script and reading the one that is judging
+	 * your link is the first thing anybody wants; `new` because writing one
+	 * should not mean leaving the program. */
+	auto *detection_row = new QHBoxLayout();
+	detection_row->addWidget(detection, 1);
+	edit_detection_button = new QPushButton(QStringLiteral("view / edit"), this);
+	edit_detection_button->setObjectName(QStringLiteral("iface_edit_probe"));
+	detection_row->addWidget(edit_detection_button);
+	auto *new_probe = new QPushButton(QStringLiteral("new"), this);
+	new_probe->setObjectName(QStringLiteral("iface_new_probe"));
+	detection_row->addWidget(new_probe);
+	form->addRow(QStringLiteral("link detection"), detection_row);
+
+	connect(edit_detection_button, &QPushButton::clicked, this,
+	    &ncfg_interface_dialog::edit_detection);
+	/* `this->connection`, because the constructor's parameter of that name
+	 * shadows the member here and a lambda cannot capture a parameter it was
+	 * not told about. */
+	connect(new_probe, &QPushButton::clicked, this, [this]() {
+		ncfg_probe_dialog dialog(this->connection, QString(), this);
+		if (dialog.exec() == QDialog::Accepted) {
+			reload_detections(dialog.written_name());
+			note->setText(dialog.outcome());
+		}
+	});
 
 	probe_command = new QLineEdit(this);
 	probe_command->setObjectName(QStringLiteral("iface_probe_command"));
@@ -169,6 +219,74 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	detection_changed();
 }
 
+/*
+ * The scripts on disk, rebuilt.
+ *
+ * A method rather than constructor code because the editor can create one, and
+ * a list read before that script existed would not contain it -- which reads as
+ * the save having failed.
+ *
+ * Inserted before "run a command" so the escape hatch stays last, and keyed by
+ * absolute path because that is what gets written: the model requires an
+ * absolute command, and a name resolved later could resolve to something else.
+ * A name seen in /etc wins over the same name in /usr/share, so an operator who
+ * copied an example and edited it gets theirs.
+ */
+void ncfg_interface_dialog::reload_detections(const QString &select)
+{
+	const QString had = select.isEmpty() ? detection->currentData().toString() : QString();
+	detection->clear();
+	fill(detection, detections, sizeof(detections) / sizeof(detections[0]));
+
+	QStringList seen;
+	QString chosen;
+	for (const QString &where : probe_directories()) {
+		QDir dir(where);
+		const QFileInfoList found =
+		    dir.entryInfoList(QDir::Files | QDir::Executable, QDir::Name);
+		for (const QFileInfo &script : found) {
+			if (seen.contains(script.fileName())) {
+				continue;
+			}
+			seen << script.fileName();
+			detection->insertItem(detection->count() - 1,
+			    QStringLiteral("%1 -- %2").arg(script.fileName(), where),
+			    script.absoluteFilePath());
+			if (!select.isEmpty() && script.fileName() == select) {
+				chosen = script.absoluteFilePath();
+			}
+		}
+	}
+
+	const QString want = chosen.isEmpty() ? had : chosen;
+	const int at = detection->findData(want);
+	if (at >= 0) {
+		detection->setCurrentIndex(at);
+	}
+}
+
+void ncfg_interface_dialog::edit_detection()
+{
+	const QString chosen = detection->currentData().toString();
+	/* Only a script can be opened. "Carrier only" is not a program, and "run a
+	 * command" names one this dialog did not put there and does not own. */
+	if (chosen.isEmpty() || chosen == QStringLiteral("command")) {
+		note->setText(QStringLiteral(
+		    "choose a script to view it. `run a command` names a program this dialog "
+		    "did not write, so there is nothing here to open."));
+		return;
+	}
+
+	ncfg_probe_dialog dialog(connection, chosen, this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	/* An edit of a shipped example is saved as a copy in /etc, so the list has
+	 * gained an entry and the selection should follow it there. */
+	reload_detections(dialog.written_name());
+	note->setText(dialog.outcome());
+}
+
 void ncfg_interface_dialog::addressing_changed()
 {
 	const bool fixed = addressing->currentData().toString() == QStringLiteral("static");
@@ -182,35 +300,39 @@ void ncfg_interface_dialog::addressing_changed()
 void ncfg_interface_dialog::detection_changed()
 {
 	const QString how = detection->currentData().toString();
+	const bool custom = how == QStringLiteral("command");
 	auto *form = qobject_cast<QFormLayout *>(layout()->itemAt(0)->layout());
 	if (form) {
-		form->setRowVisible(probe_host, how == QStringLiteral("ping"));
-		form->setRowVisible(probe_command, how == QStringLiteral("command"));
-		form->setRowVisible(probe_args, how == QStringLiteral("command"));
+		form->setRowVisible(probe_command, custom);
+		form->setRowVisible(probe_args, custom);
 		form->setRowVisible(probe_interval, !how.isEmpty());
 		form->setRowVisible(probe_timeout, !how.isEmpty());
 	}
 
-	if (how == QStringLiteral("ping")) {
-		/* Shown rather than described, because a probe is a program netcfgd
-		 * runs as root on an interval and an operator should be able to read
-		 * exactly what that is. `-I` is not decoration: netcfgd runs the
-		 * command as given and binds nothing, so a probe that did not name
-		 * this interface would be answering about whichever one the route
-		 * table happened to pick. */
-		note->setText(QStringLiteral(
-		    "netcfgd will run:  /usr/bin/ping -c 1 -I %1 <host>\n"
-		    "A failing probe withholds this interface's routes, exactly as an "
-		    "unplugged cable does.")
-		          .arg(interface));
-	} else if (how.isEmpty()) {
+	if (how.isEmpty()) {
 		note->setText(QStringLiteral(
 		    "Carrier alone. A cable into a switch that has lost its own uplink has "
 		    "carrier and no path, and netcfgd will keep preferring it."));
-	} else {
+	} else if (custom) {
 		note->setText(QStringLiteral(
 		    "Exit status zero means the link works. It runs as root, on an "
-		    "interval, and a probe that cannot be started counts as a failure."));
+		    "interval, and what it prints on standard error is shown here and in "
+		    "`ncfg status`. Do not background anything: netcfgd kills the process "
+		    "it started, and a child left running outlives it."));
+	} else {
+		/* The exact command line, because a probe is a program netcfgd runs as
+		 * root on an interval and an operator should be able to read what that
+		 * is rather than trust a friendly word for it. The interface is passed
+		 * as an argument because netcfgd binds nothing: a script that did not
+		 * take it would answer about whichever interface the route table
+		 * happened to pick. */
+		note->setText(QStringLiteral(
+		    "netcfgd will run:  %1 %2\n"
+		    "Exit zero means the link works. A failing probe withholds this "
+		    "interface's routes, exactly as an unplugged cable does -- and what "
+		    "the script prints on standard error is shown as the reason. It is an "
+		    "ordinary shell script: copy it into /etc/netcfgd/probe and edit it.")
+		          .arg(how, interface));
 	}
 }
 
@@ -254,10 +376,12 @@ QString ncfg_interface_dialog::block_text() const
 	if (!how.isEmpty()) {
 		QString command;
 		QString args;
-		if (how == QStringLiteral("ping")) {
-			command = QStringLiteral("/usr/bin/ping");
-			args = QStringLiteral("\"-c\", \"1\", \"-I\", \"%1\", \"%2\"")
-			       .arg(interface, probe_host->text().trimmed());
+		if (how != QStringLiteral("command")) {
+			/* A script from the list. The interface is its only argument, and
+			 * it is not optional: netcfgd runs the command as given and binds
+			 * nothing. */
+			command = how;
+			args = QStringLiteral("\"%1\"").arg(interface);
 		} else {
 			command = probe_command->text().trimmed();
 			QStringList each;
@@ -294,8 +418,7 @@ QString ncfg_interface_dialog::block_text() const
 
 void ncfg_interface_dialog::submit()
 {
-	const QLineEdit *values[] = { static_address, gateway, probe_host, probe_command,
-		probe_args };
+	const QLineEdit *values[] = { static_address, gateway, probe_command, probe_args };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
@@ -306,11 +429,6 @@ void ncfg_interface_dialog::submit()
 	if (addressing->currentData().toString() == QStringLiteral("static") &&
 	    static_address->text().trimmed().isEmpty()) {
 		note->setText(QStringLiteral("a fixed address needs an address"));
-		return;
-	}
-	if (detection->currentData().toString() == QStringLiteral("ping") &&
-	    probe_host->text().trimmed().isEmpty()) {
-		note->setText(QStringLiteral("a ping probe needs a host to ping"));
 		return;
 	}
 	if (detection->currentData().toString() == QStringLiteral("command") &&

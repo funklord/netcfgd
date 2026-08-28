@@ -204,6 +204,32 @@ pub enum Request {
 		replace: bool,
 	},
 
+	/// Store a link-detection script, which netcfgd writes.
+	///
+	/// A probe is a program netcfgd runs **as root, on an interval**, so this
+	/// is the most dangerous payload the socket carries and it is guarded
+	/// accordingly: local root and nothing else, the same bar `ConfigPut`
+	/// applies to a privileged production. The `admin` tier is not enough,
+	/// because a site may have opened `admin` to a group and 0127's
+	/// architecture only survives that if opening it cannot grant root.
+	///
+	/// It exists rather than letting a client write the file because 0127 is
+	/// the whole arrangement: a client cannot write system files, and system
+	/// configuration cannot live under a user. A gui that wrote
+	/// `/etc/netcfgd/probe/` itself would be the fifth program with root's
+	/// write permissions on what the daemon treats as its own.
+	ProbePut {
+		/// The script's filename under `/etc/netcfgd/probe`. A plain name:
+		/// netcfgd chooses the directory, and a name carrying a separator
+		/// would let a caller choose it instead.
+		name: String,
+		/// The script. Written executable, because netcfgd runs it.
+		text: String,
+		/// Overwrite one of this name that already exists.
+		#[serde(skip_serializing_if = "std::ops::Not::not", default)]
+		replace: bool,
+	},
+
 	/// Store a credential the configuration refers to, which netcfgd writes.
 	///
 	/// The other half of 0127's collapse, beside [`Request::ConfigPut`]. A
@@ -358,7 +384,7 @@ impl Request {
 				"eap",
 			],
 			Self::WifiConnect { .. } => &["interface", "network"],
-			Self::ConfigPut { .. } => &["name", "text", "replace"],
+			Self::ConfigPut { .. } | Self::ProbePut { .. } => &["name", "text", "replace"],
 			Self::SecretPut { .. } => &["name", "value", "replace"],
 			Self::ConfigDelete { .. } | Self::SecretDelete { .. } => &["name"],
 			Self::RadioSet { .. } => &["interface", "activate"],

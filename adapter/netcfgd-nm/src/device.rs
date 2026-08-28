@@ -1027,6 +1027,7 @@ mod tests {
 			up: true,
 			carrier: true,
 			reachable: None,
+			probe_detail: None,
 			mtu: 1500,
 			mac: Some("aa:bb:cc:dd:ee:ff".to_owned()),
 			master: None,

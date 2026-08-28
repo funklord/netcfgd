@@ -1580,8 +1580,13 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
  * worth having. Worst case for JSON escaping is six bytes out per byte in
  * (\u00XX for a control character), plus the fixed text and the name.
  */
-int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *text, int replace,
-    char *err, size_t err_size)
+/*
+ * Both writers are one function: the requests differ only in their verb, and
+ * two copies of this would drift in the quoting, which is the half that has to
+ * be right.
+ */
+static int put_named_text(ncfg_client_t *client, const char *verb, const char *name,
+    const char *text, int replace, char *err, size_t err_size)
 {
 	if (!name || !text) {
 		set_error(err, err_size, "a drop-in needs a name and some text");
@@ -1595,14 +1600,14 @@ int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *
 		return 0;
 	}
 
-	const size_t need = 64 + strlen(name) * 6 + strlen(text) * 6;
+	const size_t need = 64 + strlen(verb) + strlen(name) * 6 + strlen(text) * 6;
 	char *request = malloc(need);
 	if (!request) {
 		set_error(err, err_size, "that drop-in does not fit in memory");
 		return 0;
 	}
 
-	int head = snprintf(request, need, "{\"request\":\"config_put\",\"name\":");
+	int head = snprintf(request, need, "{\"request\":\"%s\",\"name\":", verb);
 	int built = head > 0 && (size_t)head < need;
 	size_t at = built ? (size_t)head : 0;
 	if (built) {
@@ -1635,6 +1640,18 @@ int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *
 	int done = !took_refusal(doc, err, err_size);
 	ncfg_json_free(doc);
 	return done;
+}
+
+int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *text, int replace,
+    char *err, size_t err_size)
+{
+	return put_named_text(client, "config_put", name, text, replace, err, err_size);
+}
+
+int ncfg_client_probe_put(ncfg_client_t *client, const char *name, const char *text, int replace,
+    char *err, size_t err_size)
+{
+	return put_named_text(client, "probe_put", name, text, replace, err, err_size);
 }
 
 int ncfg_client_secret_put(ncfg_client_t *client, const char *name, const char *value,

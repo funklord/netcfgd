@@ -182,6 +182,7 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		// The decided form, for the reason above: absent is already pinned by
 		// every other sample, and `Some(false)` is the one the planner acts on.
 		reachable: Some(false),
+		probe_detail: Some("no reply from 1.1.1.1 or 9.9.9.9 via eth0".to_owned()),
 		mtu: 1500,
 		mac: Some("02:00:00:00:00:01".to_owned()),
 		master: Some("br0".to_owned()),

@@ -26,6 +26,8 @@
 {"request":"config_delete","name":"nm-cafe"}
 {"request":"secret_delete","name":"cafe"}
 {"request":"ap_stations","interface":"wlan0"}
+{"request":"probe_put","name":"office","text":"#!/bin/sh\nexit 0\n","replace":true}
+{"request":"probe_put","name":"home","text":"#!/bin/sh\nexit 1\n"}
 {"response":"hello","protocol":{"major":1,"minor":0},"schema":{"major":1,"minor":0},"tiers":["observe","admin"]}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"enterprise":false,"ssid":"686f6d65","name":"home","mobility_domain":"a1b2","configured":"home"},{"bssid":"00:11:22:33:44:66","frequency":5180,"signal":-58,"secured":false,"enterprise":false,"ssid":"","name":""},{"bssid":"00:11:22:33:44:77","frequency":2437,"signal":-71,"secured":true,"enterprise":true,"ssid":"ff00ff"}]}

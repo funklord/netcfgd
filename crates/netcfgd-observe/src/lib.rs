@@ -164,6 +164,9 @@ fn observed_link(
 		// there. The daemon runs probes and fills this in; leaving it None
 		// here is what makes an unprobed link keep its routes.
 		reachable: None,
+		// Filled in beside `reachable` and for the same reason: the observer
+		// reads the kernel, and what a probe said is not there.
+		probe_detail: None,
 		mtu: link.mtu,
 		mac: link.mac.clone(),
 		master: link

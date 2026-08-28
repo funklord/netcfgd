@@ -1116,19 +1116,12 @@ fn answer(
 			value,
 			replace,
 		} => put_secret_request(state, name, value, *replace),
-		Request::ConfigDelete { name } => {
-			match netcfgd_host::config::remove_drop_in(
-				&state.paths.config,
-				&state.paths.factory,
-				name,
-			) {
-				Ok(()) => {
-					state.reload();
-					Response::Ok
-				}
-				Err(message) => Response::error(message),
-			}
-		}
+		Request::ProbePut {
+			name,
+			text,
+			replace,
+		} => put_probe_request(state, name, text, *replace),
+		Request::ConfigDelete { name } => delete_config_request(state, name),
 		Request::SecretDelete { name } => {
 			match netcfgd_host::config::remove_secret(&state.paths.config, name) {
 				Ok(()) => Response::Ok,
@@ -1206,6 +1199,38 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 /// Nothing is reported back but success: not the path, not the length, not
 /// whether it replaced anything. `netcfgd-secret` keeps that rule everywhere
 /// and a socket is not the place to break it.
+/// Take a drop-in away, and read the configuration back.
+///
+/// A function rather than an arm for the reason its siblings are: `answer` has
+/// a line limit, and every other writer here is already one of these.
+fn delete_config_request(state: &mut State, name: &str) -> Response {
+	match netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, name) {
+		Ok(()) => {
+			state.reload();
+			Response::Ok
+		}
+		Err(message) => Response::error(message),
+	}
+}
+
+/// Put a link-detection script on disk.
+///
+/// **No reload**, unlike `put_config_request`. A script is not configuration:
+/// nothing in the document changed, and the `probe` block naming it is a
+/// different request. Reloading here would re-read a document that says the
+/// same thing it did a moment ago.
+///
+/// The privilege check is not here, for the reason `put_config_request` gives:
+/// `authorize::check_content` refuses this from anyone but local root before
+/// the dispatcher sees it, and an authorization question answered in two
+/// places is one where the two come to disagree.
+fn put_probe_request(state: &State, name: &str, text: &str, replace: bool) -> Response {
+	match netcfgd_host::config::install_probe(&state.paths.config, name, text, replace) {
+		Ok(_) => Response::Ok,
+		Err(message) => Response::error(message),
+	}
+}
+
 fn put_secret_request(state: &State, name: &str, value: &str, replace: bool) -> Response {
 	match netcfgd_host::config::install_secret(&state.paths.config, name, value, replace) {
 		Ok(_) => Response::Ok,

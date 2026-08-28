@@ -96,6 +96,12 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		| Request::Revert
 		| Request::Reload
 		| Request::ConfigPut { .. }
+		// Writing a probe is `admin` for the tier system's sake and root in
+		// fact: `check_content` refuses it from anyone else. A probe is a
+		// program netcfgd runs as root on an interval, which is strictly more
+		// than the privileged *productions* that rule already exists for --
+		// those name a program, and this one is the program.
+		| Request::ProbePut { .. }
 		// Storing a credential is `admin` and not `wifi`, even though
 		// `wifi_add` carries one at the wifi tier. The difference is the
 		// blast radius of the *name*: `wifi_add` writes a secret it also
@@ -227,6 +233,19 @@ pub(crate) fn check(
 /// "not permitted" sends the reader to the source and the reason is usually
 /// something they did not know their configuration could do.
 pub(crate) fn check_content(origin: Origin, peer: &Peer, request: &Request) -> Result<(), String> {
+	// A probe script is the program a privileged production would merely have
+	// named, so it takes the same answer without needing to be parsed: there is
+	// no shape of shell that grants less than root here.
+	if let Request::ProbePut { name, .. } = request {
+		if origin == Origin::Local && peer.is_root() {
+			return Ok(());
+		}
+		return Err(format!(
+			"writing the link-detection script `{name}` needs root on this machine: \
+			 a probe is a program netcfgd runs as root, on an interval. Send it as \
+			 root."
+		));
+	}
 	let Request::ConfigPut { text, .. } = request else {
 		return Ok(());
 	};

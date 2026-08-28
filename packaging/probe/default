@@ -1,0 +1,62 @@
+#!/bin/sh
+# netcfgd link detection: does this interface actually carry traffic?
+#
+# netcfgd runs this on an interval and takes the EXIT STATUS as the answer.
+# Zero means the link works. Anything else means it does not, and netcfgd
+# withholds this interface's routes exactly as it does for an unplugged cable
+# -- so the wifi that works stops sitting behind a cable that does not.
+#
+# WHY THIS EXISTS AT ALL
+#   Carrier is not connectivity. A cable plugged into a switch that has lost
+#   its own uplink has carrier and no path, and netcfgd used to keep preferring
+#   it. That is the failure this replaces, so a probe that only reaches the
+#   local gateway does not do the job: the gateway answers in exactly that
+#   case. Aim past it.
+#
+# WHAT NETCFGD GIVES YOU
+#   $1  the interface this is about. Use it -- netcfgd runs this command as
+#       given and binds nothing, so a probe that does not name the interface
+#       answers about whichever one the route table happened to pick.
+#
+# WHAT NETCFGD DOES WITH WHAT YOU PRINT
+#   Standard error is kept and shown in `ncfg status` and in the gui. Say why
+#   it failed; the exit status cannot.
+#
+# HOW IT GIVES UP
+#   A run that outlives the configured timeout is killed and counts as a
+#   failure -- a hanging probe is a failing link. A script that cannot be
+#   STARTED at all is different: after five attempts netcfgd sets it aside and
+#   says so, rather than withholding routes for ever because of a typo.
+#
+#   Do not background anything. netcfgd kills the process it started, and a
+#   child you left running outlives it.
+#
+# THE ADDRESSES BELOW ARE EXAMPLES AND ARE YOURS TO CHANGE.
+#   netcfgd ships no opinion about who this machine should talk to: a fixed
+#   address chosen by a network daemon is a third party learning when you join
+#   a network. These two are public resolvers, picked because they are widely
+#   reachable and because two of them shows the shape below. Point them at your
+#   own infrastructure if you have any.
+
+interface="$1"
+
+# Two hosts, and EITHER answering is enough.
+#
+# This is the shape worth copying. A probe that required both would report a
+# broken link every time one of them had a bad day, and a link that flaps takes
+# the default route with it. Ask for the weakest thing that is still true when
+# the link works: "anything out there answers".
+#
+# `-c 1` one packet, `-W 2` two seconds, `-I` bind to the interface under test,
+# `-n` no reverse lookup -- a probe that waits on DNS is a probe that times out
+# when DNS is the thing that broke.
+for host in 1.1.1.1 9.9.9.9; do
+	if ping -c 1 -W 2 -n -I "$interface" "$host" >/dev/null 2>&1; then
+		exit 0
+	fi
+done
+
+# Nothing answered. Say which interface and what was tried: the exit status
+# says "down" and this is the only place the reason can come from.
+echo "no reply from 1.1.1.1 or 9.9.9.9 via $interface" >&2
+exit 1

@@ -392,6 +392,16 @@ public:
 	 * remote code execution with a nicer font.
 	 */
 	bool config_put(const QString &name, const QString &text, bool replace, QString *error);
+	/*
+	 * Write a link-detection script, through the daemon.
+	 *
+	 * Needs root on this machine, not merely `admin`: a probe is a program
+	 * netcfgd runs as root on an interval. A gui running as an ordinary user
+	 * gets a refusal saying so, which is the right answer -- and the reason
+	 * this goes over the socket at all is 0127, a client cannot write system
+	 * files.
+	 */
+	bool probe_put(const QString &name, const QString &text, bool replace, QString *error);
 
 	/*
 	 * Apply, with a confirm window in seconds or 0 for none.

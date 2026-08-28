@@ -119,6 +119,20 @@ mkdir -p "$NCFG_RUN_ROOT/proc/424"
 printf 'NetworkManager\n' > "$NCFG_RUN_ROOT/proc/424/comm"
 export NCFG_PROC="$NCFG_RUN_ROOT/proc"
 
+# A link-detection script for the interface dialog to find. The dialog reads
+# a directory rather than carrying a list, so the probe needs one it can write
+# to: /etc is not writable here and a test that reordered the real lookup would
+# be exercising something the shipped program does not do.
+mkdir -p "$work/probe"
+cat > "$work/probe/example" <<'PROBE'
+#!/bin/sh
+exit 0
+PROBE
+chmod +x "$work/probe/example"
+export NCFG_PROBE_DIR="$work/probe"
+NCFG_TEST_PROBE_SCRIPT="$work/probe/example"
+export NCFG_TEST_PROBE_SCRIPT
+
 "$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0

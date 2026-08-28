@@ -50,9 +50,17 @@ private slots:
 	void submit();
 	void addressing_changed();
 	void detection_changed();
+	/* Open the selected script, or start a new one. A probe is a shell script
+	 * and this edits it as one -- no form could express what a program is
+	 * without either constraining it or lying about it. */
+	void edit_detection();
 
 private:
 	QString block_text() const;
+	/* Rebuild the list from disk, keeping the selection where it can be kept.
+	 * Called after the editor writes, because a script that was just created
+	 * is not in a list read before it existed. */
+	void reload_detections(const QString &select);
 
 	ncfg_connection *connection;
 	QString          interface;
@@ -67,7 +75,7 @@ private:
 	QCheckBox   *forwarding;
 	QCheckBox   *nat;
 	QComboBox   *detection;
-	QLineEdit   *probe_host;
+	QPushButton *edit_detection_button;
 	QLineEdit   *probe_command;
 	QLineEdit   *probe_args;
 	QSpinBox    *probe_interval;

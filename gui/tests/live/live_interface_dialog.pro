@@ -26,5 +26,5 @@ LIBS += $$CLIENT_DIR/libncfg_client.a
 PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
 
 SOURCES += live_interface_dialog.cpp ../../src/ncfg_connection.cpp \
-	../../src/interface_dialog.cpp
-HEADERS += ../../src/ncfg_connection.h ../../src/interface_dialog.h
+	../../src/interface_dialog.cpp ../../src/probe_dialog.cpp
+HEADERS += ../../src/ncfg_connection.h ../../src/interface_dialog.h ../../src/probe_dialog.h

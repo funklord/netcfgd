@@ -34,6 +34,12 @@ endif
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/netcfgd PREFIX=/usr
 	$(MAKE) install-systemd DESTDIR=$(CURDIR)/debian/netcfgd
+	# Link-detection scripts. Executable, because netcfgd runs them, and
+	# under /usr/share rather than /etc: these are examples the package owns
+	# and replaces on upgrade. An operator's own go in /etc/netcfgd/probe,
+	# which the package does not write.
+	install -Dm755 packaging/probe/default \
+		$(CURDIR)/debian/netcfgd/usr/share/netcfgd/probe/default
 	install -Dm644 packaging/systemd/netcfgd-exclusive.conf \
 		$(CURDIR)/debian/netcfgd/usr/share/doc/netcfgd/netcfgd-exclusive.conf
 	@# The exclusive drop-in ships as documentation and is NOT installed into
