@@ -11,7 +11,21 @@ Rules-Requires-Root: no
 Package: netcfgd
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Suggests: dhcpcd-base, wpasupplicant, hostapd, openvpn, ppp, pppoe, radvd,
+# `wpasupplicant` and a DHCP client are the floor rather than a suggestion.
+# Decision 0014 makes wpa_supplicant the wireless backend outright -- netcfgd
+# does not implement association and has no fallback that does -- and an
+# address on a modern network comes from DHCP. As Suggests, apt installed
+# neither, so `apt install netcfgd` on a machine that never had NetworkManager
+# produced a daemon that refused every radio with "no wpa_supplicant found"
+# and could not take an address. Recommends installs them by default and an
+# operator who genuinely wants neither can still say --no-install-recommends.
+#
+# The rest stay Suggests, and the line between them is whether netcfgd works
+# without one: hostapd is for a machine serving an access point, openvpn and
+# ppp and radvd are features, and the resolver packages are alternatives to
+# each other that only a chosen `dns { mode }` calls for.
+Recommends: wpasupplicant, dhcpcd-base
+Suggests: hostapd, openvpn, ppp, pppoe, radvd,
  dnsmasq-base, unbound, openresolv, systemd-resolved
 Description: network configuration daemon that states what it will do
  netcfgd reads one declarative configuration, reports what the machine
