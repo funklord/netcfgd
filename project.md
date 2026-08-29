@@ -1251,11 +1251,52 @@ running.
 
 ## Open: the permission system needs an overhaul
 
-**The holder's call, deferred deliberately, and recorded so it is not
-rediscovered.** The tiers have priority inversions: operations sit at a tier
-that does not match what they can do. What follows is what this session met
-head-on rather than a survey, and none of it is the holder's list -- it is
-evidence for whoever does the pass.
+**Deferred by the holder, and the shape of the answer is already given.**
+
+### What the tiers actually mean
+
+**Config access to a network configuration tool is root on that machine.** Not
+approximately: the default route, the resolvers, NAT, forwarding, and which
+access point an `@secret:` is offered to are all ordinary configuration, and any
+one of them is a man in the middle. A machine whose traffic somebody else
+chooses reaches root by an ordinary path -- a poisoned resolver, a poisoned
+package source -- so refusing hooks and probes prevents the direct route and
+leaves a short indirect one open.
+
+**And remote config access to several hosts is root on all of them**, by the
+same argument, at the scale that makes it worth doing.
+
+So the model is three things and not a gradient:
+
+- **view** -- reading, and nothing else.
+- **laptop** -- what a person using their own machine must be able to do: join
+  and leave networks, add one, take the radio on and off. **Wide and dangerous,
+  and necessary anyway.** What bounds it is not a tier label but the *shape* of
+  what it can send: typed requests carrying no configuration text, which is
+  [0117](doc/decision/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)'s
+  principle used as the boundary rather than as a mitigation.
+- **root** -- everything else, called root, with no pretence that it is less.
+
+**The current design says otherwise and that is the thing to change.**
+`authorize.rs` argues that `admin` is survivable because `check_content` refuses
+privileged productions from a non-root caller. It does refuse them, and the
+machine is still lost by the indirect route, so the tier is claiming a property
+it does not have.
+
+**On this machine right now, `admin = group:netcfgd`.** Under this model that
+line hands root to that group, and it should be read that way rather than as a
+middle setting.
+
+### What it settles that was open
+
+**Showing a stored credential stops being a question for anything at the root
+tier**, because a caller who can already choose the machine's resolvers and
+repoint an SSID gains nothing from being shown a passphrase. It stays a
+question for the laptop tier, which is the one that is meant to be less.
+
+### Inversions already met, as evidence for the pass
+
+What follows is what this session met head-on rather than a survey.
 
 - **`wifi_add` writes a `network` block and a credential at the `wifi` tier**,
   while `config_put` -- which can write the same block -- is `admin`, and
