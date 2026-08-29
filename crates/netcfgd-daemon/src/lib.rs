@@ -42,6 +42,7 @@ options:
   --no-apply-on-start    observe and watch, but change nothing until asked
   --poll-config          use mtime polling rather than inotify
   -h, --help             this text
+  --version              the version, and who holds the copyright
 ";
 
 /// How long a quiet loop waits before looking anyway.
@@ -104,6 +105,14 @@ fn parse_options(arguments: &[String]) -> Result<Option<Options>, String> {
 		match argument {
 			"-h" | "--help" => {
 				print!("{USAGE}");
+				return Ok(None);
+			}
+			// The copyright surface harmonization.md names first. Shares
+			// `netcfgd_model::COPYRIGHT` with `ncfg` so the two cannot drift
+			// apart about a fact neither of them owns.
+			"--version" => {
+				println!("netcfgd {}", env!("CARGO_PKG_VERSION"));
+				println!("{}", netcfgd_model::COPYRIGHT);
 				return Ok(None);
 			}
 			"--config-dir" => options.config_dir = Some(value("--config-dir")?),

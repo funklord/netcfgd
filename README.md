@@ -202,6 +202,16 @@ audited exception and carries its own fuzz targets.
 Where a document and the code disagree, that is a bug in one of them worth
 raising rather than quietly resolving.
 
+## Copyright
+
+Copyright (C) 2026 Nabeel Sowan <nabeel@vibes.se>
+
+**This is attribution and not a grant.** It says who wrote netcfgd, which is a
+fact that vests automatically and gives nobody permission to do anything. What
+you may do with it is the next section, and that is deliberately unsettled --
+so this line must not be read as narrowing or widening it. `ncfg --version` and
+`netcfgd --version` print the same line.
+
 ## Licence
 
 Not yet settled, and deliberately not asserted here. There is no `LICENSE`

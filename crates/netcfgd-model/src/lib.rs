@@ -22,6 +22,18 @@
 //!   can hold a value, which is what makes a document safe to write to `/run`
 //!   and, eventually, to transmit.
 
+/// Who holds the copyright, for the surfaces a person actually looks at.
+///
+/// Named in one place because it appears in more than one: `ncfg --version`
+/// and `netcfgd --version` both print it, and three spellings of one fact is
+/// how they come to disagree. `adapter/netcfgd-nm` keeps its own copy because
+/// it is a separate workspace on purpose -- dependency containment costs a
+/// duplicated string here and that is the cheaper half of the trade.
+///
+/// **Attribution, not a licence.** Naming the holder is factual and grants
+/// nothing; this tree states no terms and this line does not change that.
+pub const COPYRIGHT: &str = "Copyright (C) 2026 Nabeel Sowan <nabeel@vibes.se>";
+
 pub mod address;
 pub mod bluetooth;
 pub mod canonical;

@@ -26,6 +26,7 @@ const USAGE: &str = "\
 ncfg -- netcfgd command line
 
 usage:
+  ncfg --version           the version, and who holds the copyright
   ncfg plan [options]      show what would change, and change nothing
   ncfg apply [options]     make the observed state match the config
   ncfg status [options]    show what is currently observed
@@ -200,6 +201,15 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	};
 	if command == "-h" || command == "--help" || command == "help" {
 		print!("{USAGE}");
+		return Ok(ExitCode::SUCCESS);
+	}
+	// One of the three surfaces harmonization.md names for the copyright
+	// holder, and the first place a person looks. The line comes from
+	// `netcfgd_model::COPYRIGHT` so that this and the daemon cannot come to
+	// disagree about a fact neither of them owns.
+	if command == "--version" || command == "version" {
+		println!("ncfg {}", env!("CARGO_PKG_VERSION"));
+		println!("{}", netcfgd_model::COPYRIGHT);
 		return Ok(ExitCode::SUCCESS);
 	}
 
@@ -1701,6 +1711,31 @@ mod tests {
 	/// wrong: a hidden network drew as a blank cell in two clients, and an
 	/// unprintable SSID drew as `<not text>` in the TUI -- which named the
 	/// condition and threw the network away, so two of them were one row.
+	/// The copyright surface exists and names somebody.
+	///
+	/// `harmonization.md` asks for the holder in `--version`, and a version
+	/// string is the kind of thing that is edited for an unrelated reason and
+	/// quietly loses a line. Asserted against the model's constant rather than
+	/// a literal, so this checks that the surface carries it rather than
+	/// restating the fact and agreeing with itself.
+	#[test]
+	fn the_version_surface_names_the_copyright_holder() {
+		assert!(
+			netcfgd_model::COPYRIGHT.contains("Copyright (C)"),
+			"the line must be recognisable as a copyright notice"
+		);
+		assert!(
+			netcfgd_model::COPYRIGHT.contains('<') && netcfgd_model::COPYRIGHT.contains('@'),
+			"harmonization.md requires the name and the address: {}",
+			netcfgd_model::COPYRIGHT
+		);
+		// The usage text offers it, so a reader can find the surface at all.
+		assert!(
+			super::USAGE.contains("--version"),
+			"`ncfg --help` must mention --version or nobody will run it"
+		);
+	}
+
 	#[test]
 	fn an_access_point_is_named_three_ways_and_never_two() {
 		assert_eq!(access_point_name(Some("home"), "686f6d65"), "home");

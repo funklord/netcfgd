@@ -73,6 +73,10 @@ fn run() -> Result<(), String> {
 		}
 		["--version"] => {
 			println!("netcfgd-nm {}", env!("CARGO_PKG_VERSION"));
+			// Spelled here rather than shared: this adapter is its own
+			// workspace so its dependencies cannot reach the core's, which is
+			// the point of the containment and costs one duplicated string.
+			println!("Copyright (C) 2026 Nabeel Sowan <nabeel@vibes.se>");
 			Ok(())
 		}
 		other => Err(format!(
