@@ -30,7 +30,7 @@ constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(col
  * cell rather than left as a bare number, because a route metric is the other
  * way round and both are on screen in this program. */
 const char *const saved_column_titles[] = {
-	"network", "security", "priority", "autoconnect", "in range"
+	"network", "security", "credential", "priority", "autoconnect", "in range"
 };
 constexpr int saved_column_count =
     static_cast<int>(sizeof(saved_column_titles) / sizeof(saved_column_titles[0]));
@@ -209,16 +209,42 @@ void ncfg_wifi_view::update_saved()
 			}
 		}
 
+		/*
+		 * **Dots rather than nothing, because "no credential" and "a
+		 * credential you cannot see" are different facts and a blank cell
+		 * spells them the same way.** An operator looking at a network that
+		 * will not join needs to know whether one was ever configured.
+		 *
+		 * `configured` and not `stored`: this is the document's reference, and
+		 * whether `secrets/<name>` exists is an observed fact nothing here has
+		 * asked for. A network written without its passphrase looks exactly
+		 * like one written with it, which is the case 0031 answers by asking
+		 * an agent -- and is worth showing, once netcfgd is asked.
+		 */
+		const QString credential = network.credential.isEmpty()
+		                   ? QStringLiteral("none needed")
+		                   : QStringLiteral("\u2022\u2022\u2022\u2022");
+
 		const QString cells[] = {
 			network.name.isEmpty() ? network.id : network.name,
 			network.security,
+			credential,
 			network.priority ? QStringLiteral("%1 (higher wins)").arg(network.priority)
 			           : QString(),
 			network.autoconnect ? QStringLiteral("yes") : QStringLiteral("no"),
 			range,
 		};
 		for (int column = 0; column < saved_column_count; column++) {
-			saved_table->setItem(row, column, new QTableWidgetItem(cells[column]));
+			auto *item = new QTableWidgetItem(cells[column]);
+			/* The reference in a tooltip rather than a column: it is what an
+			 * operator needs when a credential is wrong and noise the rest of
+			 * the time. */
+			if (column == 2 && !network.credential.isEmpty()) {
+				item->setToolTip(QStringLiteral("configured as @secret:%1 -- whether "
+				         "that file exists is not shown here")
+				             .arg(network.credential));
+			}
+			saved_table->setItem(row, column, item);
 		}
 	}
 	saved_table->resizeColumnsToContents();

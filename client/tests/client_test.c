@@ -1706,9 +1706,13 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 	if (!staged_open(&staged, "a client asking for saved networks connects",
 	    "{\"response\":\"document\",\"schema_version\":1,\"networks\":["
 	    "{\"id\":\"home\",\"ssid\":\"686f6d65\",\"hidden\":false,"
-	    "\"security\":{\"type\":\"psk\"},\"priority\":100,\"autoconnect\":true},"
+	    "\"security\":{\"type\":\"psk\",\"passphrase\":{\"provider\":\"file\","
+	    "\"name\":\"home-secret\"}},\"priority\":100,\"autoconnect\":true},"
+	    /* An open network refers to no secret, and the field is empty rather
+	     * than absent: a screen must be able to tell "needs none" from "has
+	     * one you cannot see", and a blank cell spells both the same way. */
 	    "{\"id\":\"campus\",\"ssid\":\"63616d707573\",\"hidden\":true,"
-	    "\"security\":{\"type\":\"eap\"},\"priority\":0,\"autoconnect\":false}"
+	    "\"security\":{\"type\":\"open\"},\"priority\":0,\"autoconnect\":false}"
 	    "],\"globals\":{}}\n")) {
 		return;
 	}
@@ -1721,6 +1725,10 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 			equals("the first is named by its id", networks.items[0].id, "home");
 			equals("and carries the ssid as hex", networks.items[0].ssid, "686f6d65");
 			equals("and its security type", networks.items[0].security, "psk");
+			/* The reference, so a screen can say a credential is configured
+			 * without being able to read one. */
+			equals("and the secret it refers to", networks.items[0].credential,
+			       "home-secret");
 			ok("and its priority, where higher wins",
 			   networks.items[0].priority == 100, NULL);
 			ok("and whether it joins by itself", networks.items[0].autoconnect == 1,
@@ -1731,7 +1739,9 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 			 * the first row and wrong on this one. */
 			equals("the second is there too", networks.items[1].id, "campus");
 			equals("with a different security type", networks.items[1].security,
-			       "eap");
+			       "open");
+			equals("and an open network refers to no secret",
+			       networks.items[1].credential, "");
 			ok("a priority the document did not name is zero, not invented",
 			   networks.items[1].priority == 0, NULL);
 			ok("and autoconnect false is carried rather than defaulted",

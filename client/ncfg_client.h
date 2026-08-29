@@ -697,6 +697,22 @@ typedef struct {
 	char *name;        /* the SSID as text, "" when it is not text */
 	char *ssid;        /* lowercase hex; always present */
 	char *security;    /* "psk", "eap", "open", "owe", or "" if unstated */
+	/*
+	 * The secret this network refers to, or "" where it needs none.
+	 *
+	 * **A reference, not a presence.** The document says the network wants
+	 * `@secret:<name>`; whether that file exists is an observed fact and this
+	 * comes from the compiled document. So a client may say a credential is
+	 * *configured* and must not say it is *stored* -- the two differ exactly
+	 * when a network was written and its passphrase never was, which is the
+	 * case decision 0031 answers by asking an agent.
+	 *
+	 * Which key it came from depends on the security: `psk` for a passphrase,
+	 * `password` for the inner one of an enterprise network, `private_key` for
+	 * a certificate. A client showing dots does not need to care; one naming
+	 * the reference does.
+	 */
+	char *credential;
 	int   priority;    /* higher wins; 0 when the document names none */
 	int   autoconnect; /* whether it may be joined without being asked */
 	int   hidden;      /* whether the document says it does not broadcast */

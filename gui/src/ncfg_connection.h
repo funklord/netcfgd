@@ -78,6 +78,10 @@ struct ncfg_saved_network_row {
 	QString name;
 	QString ssid;
 	QString security;
+	/* The secret this network refers to, or empty where it needs none. A
+	 * reference rather than a presence: the document says what the network
+	 * wants, not whether the file is there. */
+	QString credential;
 	int     priority = 0;
 	bool    autoconnect = false;
 	bool    hidden = false;

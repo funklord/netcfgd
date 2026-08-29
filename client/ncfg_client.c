@@ -1097,6 +1097,7 @@ void ncfg_saved_networks_free(ncfg_saved_networks_t *networks)
 		free(networks->items[i].name);
 		free(networks->items[i].ssid);
 		free(networks->items[i].security);
+		free(networks->items[i].credential);
 	}
 	free(networks->items);
 	networks->items = NULL;
@@ -1152,7 +1153,27 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		 * hex kept: `ncfg_access_point_display` is the one place that
 		 * decides how these are spelled. */
 		item->name = member_text(doc, entry, "id");
-		item->security = member_text(doc, ncfg_json_member(doc, entry, "security"), "type");
+		uint32_t security = ncfg_json_member(doc, entry, "security");
+		item->security = member_text(doc, security, "type");
+		/* Whichever of the three a network of this kind refers to. An open or
+		 * OWE network names none of them and the field stays empty, which is
+		 * the honest answer rather than a dash a screen has to interpret. */
+		item->credential = NULL;
+		{
+			static const char *const keys[] = { "passphrase", "password", "private_key" };
+			for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
+				uint32_t held = ncfg_json_member(doc, security, keys[k]);
+				char *named = member_text(doc, held, "name");
+				if (named && *named) {
+					item->credential = named;
+					break;
+				}
+				free(named);
+			}
+			if (!item->credential) {
+				item->credential = dup_string("");
+			}
+		}
 		item->priority =
 		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "priority"), 0);
 		item->autoconnect =
