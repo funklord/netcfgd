@@ -2181,3 +2181,67 @@ fn a_device_that_names_no_url_is_not_probed() {
 		.portal_check
 		.is_none());
 }
+
+/// **`global` is the one block several independent things contribute to**, so
+/// distinct contributions combine rather than colliding.
+///
+/// The case that forced it is the ordinary one: `ncfg control set` writes a
+/// `control` block into its own drop-in, and after that no other tool could add
+/// anything to `global` at all. Setting the dns mode from a gui was refused on
+/// a machine that had ever set a control policy, which is most of them.
+///
+/// `override` is not the answer and the config example says why in its own
+/// words: an `override global` carrying only a `control` block "silently
+/// discards the `dns` block the file it replaced was carrying, and takes name
+/// resolution away from the machine in order to change who may open a socket".
+#[test]
+fn two_files_may_each_contribute_to_global() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"conf.d/00-control.conf",
+		"global { control { observe = \"any\" } }",
+	);
+	sources.add(
+		"conf.d/50-dns.conf",
+		"global { dns { mode = \"write_resolv_conf\" } }",
+	);
+
+	let document = compile(&sources, &mut NoHooks).expect("both contributions are kept");
+	assert_eq!(
+		document.globals.dns.mode,
+		netcfgd_model::DnsMode::WriteResolvConf,
+		"the later file's dns block took effect"
+	);
+	assert_eq!(
+		document.globals.control.observe,
+		netcfgd_model::Principal::Any,
+		"and the earlier file's control block survived it, which `override` \
+		 would not have"
+	);
+}
+
+/// And a real disagreement is still an error.
+///
+/// The point is to let independent contributions coexist, not to make the last
+/// file quietly win: two files both setting `dns` are two files disagreeing
+/// about one setting, which is what `override` is for.
+#[test]
+fn two_files_setting_the_same_thing_in_global_is_still_an_error() {
+	let mut sources = SourceMap::new();
+	sources.add("conf.d/00-a.conf", "global { dns { mode = \"none\" } }");
+	sources.add(
+		"conf.d/50-b.conf",
+		"global { dns { mode = \"write_resolv_conf\" } }",
+	);
+
+	let diagnostics = compile(&sources, &mut NoHooks).expect_err("must refuse");
+	let rendered = diagnostics.render(&sources);
+	assert!(
+		rendered.contains("already set in `global`"),
+		"it should say what collided: {rendered}"
+	);
+	assert!(
+		rendered.contains("conf.d/00-a.conf"),
+		"and name the file that set it first: {rendered}"
+	);
+}

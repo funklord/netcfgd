@@ -81,6 +81,26 @@ fn merge_block(
 			// keyword exists to remove.
 			merged.blocks[index] = block.clone();
 		}
+		// **`global` is a singleton several independent things contribute to**,
+		// and a drop-in model has no other way to say so. `control`, `dns`,
+		// `hostname_policy`, `remote` and `confirm_default` all live in it and
+		// are written by different tools: `ncfg control set` writes one, the
+		// gui writes another. One file owning the block means the first writer
+		// locks out every other, and `override` is worse than the error it
+		// silences -- the config example says so in its own words, that an
+		// `override global` carrying only a `control` block "silently discards
+		// the `dns` block the file it replaced was carrying, and takes name
+		// resolution away from the machine in order to change who may open a
+		// socket".
+		//
+		// So distinct contributions combine and a genuine collision is still
+		// an error. That is the rule the language already states for scalars --
+		// later wins for a single key -- extended to the one block that is not
+		// a collection. `interface eth0` twice is still two files disagreeing
+		// about one interface, which is what the error is for.
+		(Some(index), false) if block.head == "global" => {
+			merge_into_global(merged, index, block, sources, diagnostics);
+		}
 		(Some(index), false) => {
 			let first = merged.blocks[index].span;
 			diagnostics.push(
@@ -113,5 +133,67 @@ fn merge_block(
 			);
 		}
 		(None, false) => merged.blocks.push(block.clone()),
+	}
+}
+
+/// Fold one `global` block's items into the one already seen.
+///
+/// A sub-block or a key that both files set is a real disagreement and gets the
+/// same error any other duplicate would: the point is to let independent
+/// contributions coexist, not to make the last file quietly win.
+fn merge_into_global(
+	merged: &mut Merged,
+	index: usize,
+	block: &Block,
+	sources: &SourceMap,
+	diagnostics: &mut Diagnostics,
+) {
+	for item in &block.items {
+		match item {
+			Item::Block(inner) => {
+				let clash = merged.blocks[index]
+					.items
+					.iter()
+					.find_map(|existing| match existing {
+						Item::Block(seen) if seen.key() == inner.key() => Some(seen.span),
+						_ => None,
+					});
+				if let Some(first) = clash {
+					diagnostics.push(
+						Diagnostic::new(
+							inner.span,
+							format!("`{}` is already set in `global`", inner.describe()),
+						)
+						.with_help(format!(
+							"first set at {}:{}; two files disagreeing about one \
+							 setting is the case `override` is for",
+							sources.name(first.source),
+							first.line
+						)),
+					);
+					continue;
+				}
+				merged.blocks[index].items.push(item.clone());
+			}
+			Item::Assignment(assignment) => {
+				// A scalar directly in `global` -- `confirm_default`, say.
+				// Later wins, which is what the language says for a key.
+				if let Some(existing) =
+					merged.blocks[index]
+						.items
+						.iter_mut()
+						.find_map(|seen| match seen {
+							Item::Assignment(a) if a.key == assignment.key => Some(a),
+							_ => None,
+						}) {
+					*existing = assignment.clone();
+				} else {
+					merged.blocks[index].items.push(item.clone());
+				}
+			}
+			// A hook inside `global` is already refused where hooks are
+			// checked; carrying it through unchanged keeps that one error.
+			other => merged.blocks[index].items.push(other.clone()),
+		}
 	}
 }

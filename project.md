@@ -1249,6 +1249,22 @@ keeping three lists in step -- and the editor is a plain text box, because any
 form would either constrain what a program can express or lie about what is
 running.
 
+**`global` takes contributions from several files now.** It was the one block
+a drop-in model had no answer for: `control`, `dns`, `hostname_policy`,
+`remote` and `confirm_default` all live in it and are written by different
+tools, and one file owning the block meant the first writer locked out every
+other. `ncfg control set` got there first on any machine that had opened a tier
+to a group, and after that the documented way to configure dns could not be
+written as a drop-in at all -- which is how the gui's dns tab came to be
+correct, tested and broken on the machine that asked for it.
+
+See [0147](doc/decision/0147-global-is-a-singleton-several-writers-contribute-to.md).
+Distinct sub-blocks combine; two files both naming `dns` is still an error,
+because that is two files disagreeing about one setting. Only `global`:
+`interface eth0` twice is two files each claiming a whole collection member,
+and merging those would make the result depend on which keys each happened to
+set.
+
 ## Open: the permission system needs an overhaul
 
 **Deferred by the holder, and the shape of the answer is already given.**
