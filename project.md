@@ -1249,6 +1249,41 @@ keeping three lists in step -- and the editor is a plain text box, because any
 form would either constrain what a program can express or lie about what is
 running.
 
+## Open: the permission system needs an overhaul
+
+**The holder's call, deferred deliberately, and recorded so it is not
+rediscovered.** The tiers have priority inversions: operations sit at a tier
+that does not match what they can do. What follows is what this session met
+head-on rather than a survey, and none of it is the holder's list -- it is
+evidence for whoever does the pass.
+
+- **`wifi_add` writes a `network` block and a credential at the `wifi` tier**,
+  while `config_put` -- which can write the same block -- is `admin`, and
+  `secret_put` is `admin` too. 0124 argues the case from the *shape* of the
+  message, which is sound, and the result is still that the same two files are
+  reachable from two tiers depending on which verb was used.
+- **Setting `dns { mode }` is `admin`**, and it decides who owns
+  `/etc/resolv.conf`. Adding a wireless network with a stored passphrase is
+  `wifi`. The second is the more sensitive act and sits lower.
+- **`nat = true` is ordinary configuration**, and it makes the machine forward
+  other people's packets. A `hook` is privileged and needs root. Both change
+  what the machine does to traffic; only one is gated.
+- **`observe` defaults to `any` and carries station lists** -- other people's
+  hardware addresses and signal strengths. `authorize.rs` names this itself: "a
+  proximity sensor for anybody granted `observe`". It is reading, so it is in
+  the reading tier, and what it reads is not the same kind of thing as an
+  interface's mtu.
+- **`admin` is not root and that is load-bearing**, so `check_content` refuses
+  privileged productions from a non-root caller. But an `admin` caller can
+  repoint an existing `@secret:` at an SSID they control and have the machine
+  offer the handshake to their access point. Reading a credential is refused;
+  mounting an offline attack on one is not.
+
+Settled and not part of this: `Origin` is which socket a connection arrived on
+([0128](doc/decision/0128-origin-is-which-socket-you-arrived-on.md)), so a
+remote caller cannot present as local root -- there is no field to forge. That
+boundary is sound and a reveal gated on local root would rest on it safely.
+
 **Reading them needed a request too, and the first version got that half
 wrong.** The listing was a local directory scan and the editor opened a local
 file, so a gui connected to a *remote* netcfgd would have shown the operator's
