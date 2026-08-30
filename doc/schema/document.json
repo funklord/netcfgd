@@ -6822,6 +6822,14 @@
       "hooks": []
     }
   ],
+  "bluetooth": [
+    {
+      "id": "headphones",
+      "address": "AA:BB:CC:DD:EE:FF",
+      "profile": "a2dp-sink",
+      "autoconnect": true
+    }
+  ],
   "rules": [
     {
       "id": "vpn",

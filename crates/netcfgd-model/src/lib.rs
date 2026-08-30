@@ -23,6 +23,7 @@
 //!   and, eventually, to transmit.
 
 pub mod address;
+pub mod bluetooth;
 pub mod canonical;
 pub mod control;
 pub mod device;
@@ -201,6 +202,11 @@ pub struct Document {
 	pub interfaces: Vec<Interface>,
 	/// Wifi profiles, sorted by id. Not bound to a device.
 	pub networks: Vec<WifiNetwork>,
+	/// Bluetooth devices, sorted by id. Not bound to an adapter, for the
+	/// reason a `network` is not bound to a radio: a device is a thing the
+	/// machine uses, and which adapter reaches it is the machine's business.
+	#[serde(skip_serializing_if = "Vec::is_empty", default)]
+	pub bluetooth: Vec<bluetooth::BluetoothDevice>,
 	/// Policy routing rules, sorted by priority. Host-wide, not per-interface
 	/// -- see [`rule`] for why.
 	#[serde(default)]
@@ -235,6 +241,7 @@ impl Default for Document {
 			devices: Vec::new(),
 			interfaces: Vec::new(),
 			networks: Vec::new(),
+			bluetooth: Vec::new(),
 			rules: Vec::new(),
 			access_points: Vec::new(),
 		}

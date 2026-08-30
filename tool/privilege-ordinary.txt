@@ -178,3 +178,10 @@ wol
 wpa2
 wpa3
 wpa_supplicant
+
+# Bluetooth (0149). A device's address names hardware and grants nothing; the
+# profile is a closed set of five and decides whether the device carries audio
+# or packets. Neither can name a path, a command or a principal, which is the
+# line this file draws.
+address
+profile

@@ -1297,12 +1297,51 @@ finds whichever the filesystem returns first. The test fixture carries that
 decoy, so it fails if that changes. Checked against real hardware: `hci0`,
 `rfkill0`, `name=hci0`.
 
+**The vocabulary is settled.** See
+[0149](doc/decision/0149-a-bluetooth-device-is-a-block-like-a-network.md): a
+Bluetooth device is a block like a network, labelled by a handle the operator
+chose and carrying the address as a fact, so the wifi vocabulary and this one
+teach each other. Multiple in and out falls out of that rather than being
+added -- two `a2dp-sink` blocks are two speakers, each its own PCM to
+`bluealsa`. `profile` is a closed set of five from the start, because the
+configuration language is what cannot be changed quietly later.
+
+**Three gates each caught something while it was written, and two were
+mistakes that would have shipped.** The privilege gate reads the keys a block
+accepts by scanning from `match ....key.as_str()` to the `unknown ... key` arm:
+the new diagnostic said "is not a bluetooth key" instead, so the scan overran
+and reported `leave` and `clear` -- keys that predate all of this -- as
+unclassified. Then it reported `hfp`, `pan` and `nap`, which are profile
+*values* in a nested match sitting inside that span. The answer was not to
+widen a gate whose own documentation admits it matches on names and cannot see
+context, but to stop one function parsing two things. The size gate then caught
+3405 bytes and was satisfied at the measured figure rather than by riding the
+3% tolerance, which is that file's own rule: the tolerance is for compiler
+noise, and spending it on a feature makes the next feature fail for the wrong
+reason.
+
 **Next is the rig, before the feature.** Every wireless fault found this week
 came from something that had never run, and netcfgd associated with a network
 for the first time only after `hwsim.sh` was finally used. `hci_vhci` is the
 `mac80211_hwsim` equivalent; Debian's `bluez` ships no `btvirt`, so two virtual
 controllers cannot pair with each other out of the box and it is built from
 bluez source for the tests.
+
+`tests/live/bluetooth.sh` covers the first half and says in its own header what
+a green run does not mean. It opens `/dev/vhci`, which autoloads the module and
+creates one adapter for as long as the descriptor is held -- so killing the
+helper is the whole teardown and an interrupt leaves nothing behind. It runs
+**this build's** daemon rather than asking `ncfg status`, which would reach
+whichever netcfgd owns `/run/netcfgd` and on a developer's machine is the
+packaged one: the first version did exactly that and would have passed or
+failed for reasons unrelated to the change under it. It names the new adapter
+by diffing before and after rather than taking the last one sorted, because a
+machine with a real `hci0` gets `hci1` and a machine without gets `hci0`.
+
+**Pairing and audio are out of its reach**, which is written into the script:
+one virtual controller has nobody to talk to. That is the `btvirt` step, and
+until it exists a green `bluetooth.sh` means adapter observation works and
+nothing more.
 
 ## Open: the permission system needs an overhaul
 

@@ -1418,6 +1418,11 @@ live:
 	@# NCFG_LIVE: nmcli comes from the network-manager package, which is exactly
 	@# what a netcfgd machine is expected not to have installed.
 	@unshare -rn sh -c "sh tests/live/nm.sh"
+	@# A Bluetooth adapter, which needs real root: /dev/vhci is root-only and
+	@# the module autoloads on the open. Not under NCFG_LIVE and not under
+	@# unshare -- the adapter belongs to the machine, and a machine that
+	@# cannot make one gets a skip rather than a failure.
+	@sh tests/live/bluetooth.sh
 	@# Association, which needs real root and a loadable mac80211_hwsim. Not
 	@# under NCFG_LIVE and not under unshare: it does its own namespace, and a
 	@# machine that cannot run it should get a skip rather than a failure.

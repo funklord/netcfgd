@@ -2245,3 +2245,156 @@ fn two_files_setting_the_same_thing_in_global_is_still_an_error() {
 		"and name the file that set it first: {rendered}"
 	);
 }
+
+/// A Bluetooth device reads as the wifi vocabulary in different words.
+///
+/// 0149's whole claim: an operator who knows `network "Cafe" { wifi { ... } }`
+/// can read this without being told. The label is a handle they chose and the
+/// address is the fact, so replacing the hardware is one line rather than
+/// every reference to it.
+#[test]
+fn a_bluetooth_device_compiles() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"bluetooth \"headphones\" {\n\
+		 \taddress = \"aa:bb:cc:dd:ee:ff\"\n\
+		 \tprofile = \"a2dp-sink\"\n\
+		 }\n",
+	);
+
+	let document = compile(&sources, &mut NoHooks).expect("it compiles");
+	assert_eq!(document.bluetooth.len(), 1);
+	let device = &document.bluetooth[0];
+	assert_eq!(device.id, "headphones");
+	// Uppercased rather than kept as written: the same address in two cases is
+	// two strings to a diff, a duplicate check, and a comparison against what
+	// the adapter reports.
+	assert_eq!(device.address, "AA:BB:CC:DD:EE:FF");
+	assert_eq!(
+		device.profile,
+		netcfgd_model::bluetooth::BluetoothProfile::A2dpSink
+	);
+	assert!(
+		device.autoconnect,
+		"true unless said otherwise, as a network is"
+	);
+}
+
+/// **Multiple in and out is multiple blocks**, which is what was asked for and
+/// falls out of the shape rather than being added.
+///
+/// Two sinks are two speakers, each its own PCM to `bluealsa`. A device used
+/// as both a sink and a hands-free unit is two blocks, because those are
+/// different things to the audio layer.
+#[test]
+fn several_devices_and_directions_coexist() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"bluetooth \"desk\"    { address = \"AA:00:00:00:00:01\"\n\
+		 profile = \"a2dp-sink\" }\n\
+		 bluetooth \"kitchen\" { address = \"AA:00:00:00:00:02\"\n\
+		 profile = \"a2dp-sink\" }\n\
+		 bluetooth \"headset\" { address = \"AA:00:00:00:00:03\"\n\
+		 profile = \"hfp\" }\n\
+		 bluetooth \"phone\"   { address = \"AA:00:00:00:00:04\"\n\
+		 profile = \"pan\"\n\
+		 autoconnect = false }\n",
+	);
+
+	let document = compile(&sources, &mut NoHooks).expect("they compile");
+	assert_eq!(document.bluetooth.len(), 4);
+	let audio = document
+		.bluetooth
+		.iter()
+		.filter(|d| d.profile.is_audio())
+		.count();
+	assert_eq!(audio, 3, "two sinks and a hands-free unit carry audio");
+	let phone = document
+		.bluetooth
+		.iter()
+		.find(|d| d.id == "phone")
+		.expect("the pan device");
+	assert!(!phone.profile.is_audio(), "pan carries packets, not audio");
+	assert!(!phone.autoconnect, "and autoconnect = false survived");
+}
+
+/// A profile netcfgd does not know is refused by name, with the set listed.
+///
+/// The closed set is the point: a free-form string would have to keep
+/// accepting whatever anybody wrote, for ever, because a document written
+/// today has to still compile.
+#[test]
+fn an_unknown_bluetooth_profile_is_refused() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"bluetooth \"x\" { address = \"AA:BB:CC:DD:EE:FF\"\nprofile = \"a2dp\" }\n",
+	);
+
+	let rendered = compile(&sources, &mut NoHooks)
+		.expect_err("must refuse")
+		.render(&sources);
+	assert!(
+		rendered.contains("a2dp"),
+		"it names what was written: {rendered}"
+	);
+	assert!(
+		rendered.contains("a2dp-sink"),
+		"and lists what it could have been: {rendered}"
+	);
+}
+
+/// An address that is not one is refused rather than stored.
+///
+/// Stored, it would reach the adapter as a string that matches nothing, and
+/// the failure would surface as a device that never connects with nothing
+/// saying why.
+#[test]
+fn a_malformed_bluetooth_address_is_refused() {
+	for bad in [
+		"AA:BB:CC:DD:EE",
+		"AA:BB:CC:DD:EE:FF:00",
+		"not-an-address",
+		"AA-BB-CC-DD-EE-FF",
+	] {
+		let mut sources = SourceMap::new();
+		sources.add(
+			"netcfgd.conf",
+			format!("bluetooth \"x\" {{ address = \"{bad}\"\nprofile = \"pan\" }}\n"),
+		);
+		let rendered = compile(&sources, &mut NoHooks)
+			.unwrap_err()
+			.render(&sources);
+		assert!(
+			rendered.contains("not a Bluetooth address"),
+			"`{bad}` should be refused: {rendered}"
+		);
+	}
+}
+
+/// Neither address nor profile has a defensible default.
+///
+/// An address netcfgd invented would name somebody else's hardware, and a
+/// profile it guessed would decide whether the device carries audio or
+/// packets. Both are required and the diagnostic says which is missing.
+#[test]
+fn a_bluetooth_device_needs_an_address_and_a_profile() {
+	let mut sources = SourceMap::new();
+	sources.add("netcfgd.conf", "bluetooth \"x\" { profile = \"pan\" }\n");
+	let rendered = compile(&sources, &mut NoHooks)
+		.unwrap_err()
+		.render(&sources);
+	assert!(rendered.contains("no address"), "got: {rendered}");
+
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"bluetooth \"x\" { address = \"AA:BB:CC:DD:EE:FF\" }\n",
+	);
+	let rendered = compile(&sources, &mut NoHooks)
+		.unwrap_err()
+		.render(&sources);
+	assert!(rendered.contains("no profile"), "got: {rendered}");
+}

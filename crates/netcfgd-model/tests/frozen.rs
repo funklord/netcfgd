@@ -614,6 +614,14 @@ fn every_network() -> Vec<WifiNetwork> {
 fn witness() -> Document {
 	let mut document = Document {
 		schema_version: netcfgd_model::SCHEMA_VERSION,
+		// One device, because a witness pins a shape and an empty list would
+		// pin nothing about this one.
+		bluetooth: vec![netcfgd_model::bluetooth::BluetoothDevice {
+			id: "headphones".to_owned(),
+			address: "AA:BB:CC:DD:EE:FF".to_owned(),
+			profile: netcfgd_model::bluetooth::BluetoothProfile::A2dpSink,
+			autoconnect: true,
+		}],
 		// Excluded from equality and from the hash, and present here so the
 		// field itself cannot vanish unnoticed.
 		generated_by: Some("witness".to_owned()),

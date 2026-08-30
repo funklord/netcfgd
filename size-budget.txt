@@ -511,4 +511,13 @@ netcfgd
 #   over a ceiling with the 3% already spent. Which is the header's point --
 #   the tolerance is for compiler noise, and a feature that eats it makes the
 #   next one fail for a reason that is not its own.
-total 2480664
+#
+# Then Bluetooth's vocabulary: the model's device type and the compiler
+# lowering a `bluetooth` block, which both binaries carry because `ncfg`
+# compiles the configuration itself. +3405 bytes, which is a closed set of five
+# profiles, an address check and serde's generated code for one more document
+# field.
+#
+# No new dependency again, and deliberately none: 0148 puts BlueZ's D-Bus in an
+# adapter of its own precisely so this number does not learn about zbus.
+total 2558488

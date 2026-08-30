@@ -10,6 +10,7 @@ use crate::hook::HookSink;
 use crate::merge::Merged;
 use crate::provenance::{field_path, interface_path, Provenance};
 use netcfgd_model::address::{Delegated, PrefixRef, Static};
+use netcfgd_model::bluetooth::{BluetoothDevice, BluetoothProfile};
 use netcfgd_model::device::{
 	AccessControl, AccessPoint, AclPolicy, MacPolicy, Powersave, WifiBackend, WifiDevicePolicy,
 };
@@ -61,6 +62,11 @@ pub fn lower(
 			"device" => {
 				if let Some(device) = lower_device(block, &mut diagnostics) {
 					document.devices.push(device);
+				}
+			}
+			"bluetooth" => {
+				if let Some(device) = lower_bluetooth(block, &mut diagnostics) {
+					document.bluetooth.push(device);
 				}
 			}
 			"interface" => {
@@ -571,6 +577,144 @@ fn dns_mode(name: &str) -> Option<DnsMode> {
 		"unbound" => DnsMode::Unbound,
 		_ => return None,
 	})
+}
+
+/// A `bluetooth "handle" { ... }` block.
+///
+/// [0149]: labelled by a handle the operator chose, carrying the address as a
+/// fact. The label is what `ncfg` prints and what the drop-in is named after;
+/// replacing the hardware means changing one line rather than everything that
+/// refers to it.
+///
+/// [0149]: ../../../doc/decision/0149-a-bluetooth-device-is-a-block-like-a-network.md
+fn lower_bluetooth(block: &Block, diags: &mut Diagnostics) -> Option<BluetoothDevice> {
+	let id = require_label(block, diags)?;
+	let mut address = None;
+	let mut profile = None;
+	// True unless said otherwise, which is `network`'s rule: a device somebody
+	// wrote down is one they want used.
+	let mut autoconnect = true;
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			if let Item::Block(inner) = item {
+				diags.push(
+					Diagnostic::new(
+						inner.span,
+						format!("unknown bluetooth key `{}`", inner.head),
+					)
+					.with_help("a bluetooth block holds address, profile and autoconnect"),
+				);
+			}
+			continue;
+		};
+		match assignment.key.as_str() {
+			"address" => {
+				if let Some(text) = as_string(&assignment.value, diags) {
+					match normalise_address(&text) {
+						Some(normal) => address = Some(normal),
+						None => diags.push(
+							Diagnostic::new(
+								assignment.span,
+								format!("`{text}` is not a Bluetooth address"),
+							)
+							.with_help("six colon-separated hex octets, `AA:BB:CC:DD:EE:FF`"),
+						),
+					}
+				}
+			}
+			"profile" => {
+				if let Some(text) = as_string(&assignment.value, diags) {
+					profile = profile_named(&text, assignment.span, diags);
+				}
+			}
+			"autoconnect" => {
+				if let Some(flag) = as_bool(&assignment.value, diags) {
+					autoconnect = flag;
+				}
+			}
+			other => diags.push(
+				Diagnostic::new(assignment.span, format!("unknown bluetooth key `{other}`"))
+					.with_help("address, profile or autoconnect"),
+			),
+		}
+	}
+
+	// Both are required and neither has a defensible default: an address
+	// netcfgd invented would name somebody else's hardware, and a profile it
+	// guessed would decide whether the device carries audio or packets.
+	let Some(address) = address else {
+		diags.push(
+			Diagnostic::new(block.span, format!("`bluetooth {id}` names no address"))
+				.with_help("`address = \"AA:BB:CC:DD:EE:FF\"`"),
+		);
+		return None;
+	};
+	let Some(profile) = profile else {
+		diags.push(
+			Diagnostic::new(block.span, format!("`bluetooth {id}` names no profile"))
+				.with_help("one of a2dp-sink, a2dp-source, hfp, pan, nap"),
+		);
+		return None;
+	};
+
+	Some(BluetoothDevice {
+		id,
+		address,
+		profile,
+		autoconnect,
+	})
+}
+
+/// One of the five profiles, or a diagnostic naming the set.
+///
+/// **A function rather than a match inside the key loop, and the privilege
+/// gate is what asked for it.** That gate reads the keys a block accepts by
+/// scanning from `match ....key.as_str()` to the `unknown ... key` arm, so a
+/// nested match on a *value* inside that span had its arms read as keys:
+/// `hfp`, `pan` and `nap` were reported as configuration nobody had
+/// classified. The gate's own documentation admits it matches on names and
+/// cannot see context, so the answer is not to widen it but to stop asking one
+/// function to parse two different things.
+fn profile_named(
+	text: &str,
+	span: crate::diag::Span,
+	diags: &mut Diagnostics,
+) -> Option<BluetoothProfile> {
+	match text {
+		"a2dp-sink" => Some(BluetoothProfile::A2dpSink),
+		"a2dp-source" => Some(BluetoothProfile::A2dpSource),
+		"hfp" => Some(BluetoothProfile::Hfp),
+		"pan" => Some(BluetoothProfile::Pan),
+		"nap" => Some(BluetoothProfile::Nap),
+		other => {
+			diags.push(
+				Diagnostic::new(span, format!("`{other}` is not a Bluetooth profile"))
+					.with_help("one of a2dp-sink, a2dp-source, hfp, pan, nap"),
+			);
+			None
+		}
+	}
+}
+
+/// Six colon-separated hex octets, uppercased.
+///
+/// Uppercased rather than accepted as written, because the same address in two
+/// cases is two strings to everything downstream -- a diff, a duplicate check,
+/// a comparison against what the adapter reports. `BlueZ` prints uppercase and
+/// that is what this normalises to.
+fn normalise_address(text: &str) -> Option<String> {
+	let parts: Vec<&str> = text.split(':').collect();
+	if parts.len() != 6 {
+		return None;
+	}
+	if !parts
+		.iter()
+		.all(|part| part.len() == 2 && part.chars().all(|c| c.is_ascii_hexdigit()))
+	{
+		return None;
+	}
+	Some(text.to_ascii_uppercase())
 }
 
 fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
