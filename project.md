@@ -1265,6 +1265,51 @@ because that is two files disagreeing about one setting. Only `global`:
 and merging those would make the result depend on which keys each happened to
 set.
 
+## LTE: what one board's bringup taught, generalised
+
+**A ping is not enough on a cellular link, and that is measured.** A modem
+attached on the wrong APN produces a link where ICMP works everywhere and the
+well-known resolvers accept connections, while every other address blackholes
+the SYN with no reply at all. The example probe shipped days earlier pinged
+`1.1.1.1` and `9.9.9.9` and would have called that link healthy. Both it and
+the gui's new-script template say so now, with the rule the case teaches:
+**probe the thing you actually need.** ICMP proves a path to something that
+answers ICMP, which is a weaker claim than it looks and is exactly the claim a
+broken cellular link still satisfies.
+
+**A large class of modems offers neither MBIM nor QMI.** `AT+QCFG="usbnet"`
+returning `(1,3)` means ECM and RNDIS only -- no `/dev/cdc-wdm*` and no
+`/dev/wwan*` exist, so `helper/netcfgd-modem-mbim` cannot work on such a device
+at all: there is no control node for `mbimcli` to open. That is an ordinary
+Quectel configuration rather than an oddity, and it is the gap. What it needs
+is a second helper speaking AT over a tty, writing the same interface report --
+which [0045](doc/decision/0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
+already makes the supported way to add one.
+
+**Nothing owning the link is the failure netcfgd exists for, observed
+elsewhere.** On that board NetworkManager configured the ECM interface, took
+the default route, then disowned the device and cancelled the lease so the
+address could never renew; networkd was running and configuring nothing; and
+the module's own `qcautoconnect` dialled a third context. Three contenders, no
+owner. The modem-side one is invisible to `contention.rs` and is what
+[0043](doc/decision/0043-mbim-is-ours-and-the-quirks-are-a-table.md)'s quirk
+table -- designed, unbuilt -- is for.
+
+**Selecting between SIM sources belongs here, apart from the hardware poke.**
+See [0150](doc/decision/0150-a-sim-source-is-chosen-the-way-an-uplink-is.md).
+The component that solved it on that board had to reinvent constraint 1 to be
+correct -- its configured preference "is never rewritten by the script" because
+"a transient failure must not quietly redefine what was asked for" -- and when
+a component rebuilds an architecture in order to work, the logic belongs in the
+thing that already has it. Driving the mux line stays a `pre_up` hook, which
+0011 documents by naming this case.
+
+**The APN is provisioning data and cannot be discovered**, measured with a
+control: `EF_ACL` empty and the APN Control List service not activated, while
+`EF_UST` read successfully through the same channel. Nor from an offline
+database, which carries public APNs only. And an invalid APN is silently
+overridden with a default rather than refused.
+
 ## Bluetooth: networking and audio
 
 **Asked for on 2026-08-30: Bluetooth networking, and Bluetooth audio with

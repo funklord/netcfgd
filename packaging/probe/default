@@ -37,6 +37,22 @@
 #   a network. These two are public resolvers, picked because they are widely
 #   reachable and because two of them shows the shape below. Point them at your
 #   own infrastructure if you have any.
+#
+# **A PING IS NOT ENOUGH ON A CELLULAR LINK, AND THIS IS MEASURED.**
+#   A modem attached on the wrong APN produces a link where ICMP works
+#   everywhere, the well-known resolvers accept a connection, and every other
+#   address blackholes the SYN with no reply at all. A ping-based probe reports
+#   that link as healthy, and it is useless: it resolves and carries nothing.
+#
+#   So on a cellular interface, ask for something a blackhole cannot fake --
+#   open a TCP connection to a host you rely on, or fetch a URL and check what
+#   came back. `nc -z -w 2` and `curl -fsS -o /dev/null --max-time 5` are both
+#   one line, and both fail where this file passes.
+#
+#   The general rule the case teaches: **probe the thing you actually need.**
+#   ICMP proves a path exists to something that answers ICMP, which is a weaker
+#   claim than it looks and is exactly the claim a broken cellular link can
+#   still satisfy.
 
 interface="$1"
 
@@ -60,3 +76,16 @@ done
 # says "down" and this is the only place the reason can come from.
 echo "no reply from 1.1.1.1 or 9.9.9.9 via $interface" >&2
 exit 1
+
+# A stronger check, commented out because it needs a host you have chosen and
+# netcfgd will not choose one for you. Uncomment and replace the address, and
+# delete the ping loop above -- a TCP connection subsumes it.
+#
+# for host in 192.0.2.10 192.0.2.11; do
+# 	if nc -z -w 2 -s "$(ip -4 -o addr show dev "$interface" |
+# 	    awk '{split($4,a,"/"); print a[1]; exit}')" "$host" 443; then
+# 		exit 0
+# 	fi
+# done
+# echo "nothing accepted a connection via $interface" >&2
+# exit 1
