@@ -1,0 +1,237 @@
+#!/bin/sh
+# A modem helper for netcfgd, over AT, for modems that offer no MBIM or QMI.
+#
+#     netcfgd-modem-at attach  -p /dev/ttyUSB2 -a im.cxn
+#     netcfgd-modem-at monitor -p /dev/ttyUSB2 -a im.cxn -i wwan0
+#     netcfgd-modem-at status  -p /dev/ttyUSB2
+#     netcfgd-modem-at iccid   -p /dev/ttyUSB2
+#
+#   -p PATH   the AT tty, required        -t SECS  per-command timeout, 5
+#   -a NAME   the APN to request          -n SECS  monitor interval, 15
+#   -i NAME   the ECM interface, for logs
+#
+# ## WHY THIS EXISTS BESIDE THE MBIM ONE
+#
+# `netcfgd-modem-mbim` needs `/dev/cdc-wdmX`. A large class of modules never
+# presents one: `AT+QCFG="usbnet"` answering `(1,3)` means the firmware offers
+# ECM and RNDIS and nothing else -- no RMNET/QMI, no MBIM -- so there is no
+# control node for `mbimcli` to open and no amount of quirking makes one
+# appear. That is an ordinary configuration rather than a broken one, and on
+# such a module the whole control surface is AT over a tty.
+#
+# Decision 0045 is why this is a second helper rather than a branch in the
+# first: the contract is `doc/interface-report.md` and the writer is
+# deliberately plural.
+#
+# ## WHAT IT DOES NOT DO, WHICH IS MOST OF IT
+#
+# **It writes no interface report, and that is not an omission.** On ECM the
+# module presents an ordinary ethernet interface and runs a DHCP server on it,
+# handing over the address the operator assigned. So the host takes a lease like
+# it would from any other server, and netcfgd needs `config = "dhcp"` on the
+# interface and nothing else. A helper reporting an address it did not obtain
+# would be a second writer for a job DHCP already does.
+#
+# It does not configure the interface either -- that is netcfgd's, and two
+# writers on one interface is the failure the whole arrangement avoids.
+#
+# ## KNOWING WHETHER IT WORKS IS A PROBE, NOT THIS
+#
+# **A cellular link that pings is not a cellular link that works.** Measured: a
+# module attached on an APN the subscription does not carry gets the network's
+# own default, and on that default ICMP succeeds everywhere and the well-known
+# resolvers accept connections while every other address blackholes the SYN.
+# The bearer is up, `+CGATT` says 1, and nothing useful crosses it.
+#
+# So this helper reports that the bearer is attached, which is all AT can tell
+# you, and whether the link *carries traffic* is decision 0119's probe on the
+# interface. Do not treat a successful `attach` as connectivity.
+#
+# ## THE APN IS YOURS AND CANNOT BE GUESSED
+#
+# It is not on the card: an APN Control List is a restriction rather than a
+# choice, and where one exists it is usually empty. It is not in an offline
+# carrier database either, which carries public APNs only -- a private APN is by
+# definition absent. And asking for one the subscription does not carry is
+# **silently overridden** with the network's default rather than refused, so a
+# wrong APN looks like a working attach.
+#
+# What it needs: a tty the modem answers AT on, and nothing else. No D-Bus, no
+# ModemManager, no libqmi, no libmbim.
+
+set -eu
+
+# Printed from this file's own header rather than a heredoc, which is the mbim
+# helper's idiom and stops the two drifting apart -- and keeps the alignment
+# out of the script body, where the style gate wants tabs.
+usage() {
+	sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+port=
+apn=
+interface=
+timeout=5
+interval=15
+
+[ $# -ge 1 ] || { usage >&2; exit 2; }
+command=$1
+shift
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	-p|--port)      port=${2:?--port needs a path}; shift 2 ;;
+	-a|--apn)       apn=${2:?--apn needs a name}; shift 2 ;;
+	-i|--interface) interface=${2:?--interface needs a name}; shift 2 ;;
+	-t|--timeout)   timeout=${2:?--timeout needs seconds}; shift 2 ;;
+	-n|--interval)  interval=${2:?--interval needs seconds}; shift 2 ;;
+	-h|--help)      usage; exit 0 ;;
+	*) echo "netcfgd-modem-at: unknown option $1" >&2; usage >&2; exit 2 ;;
+	esac
+done
+
+[ -n "$port" ] || { echo "netcfgd-modem-at: --port is required" >&2; exit 2; }
+[ -c "$port" ] || { echo "netcfgd-modem-at: $port is not a character device" >&2; exit 2; }
+
+# Raw, 115200, no echo of our own writes back at us.
+#
+# `-echo` matters more than it looks: with it on, the modem's echo of the
+# command arrives before its answer and every parser below has to skip a line
+# it did not ask for. `ATE0` turns the *modem's* echo off and is sent first for
+# the same reason, because a tty setting cannot control what the far end sends.
+stty -F "$port" 115200 raw -echo -echoe -echok -crtscts min 0 time 1 2>/dev/null ||
+	{ echo "netcfgd-modem-at: cannot configure $port" >&2; exit 1; }
+
+# Send one command and print everything up to the final result code.
+#
+# **Bounded by a deadline rather than by a line count.** A modem answering
+# nothing is the failure this is for, and a reader waiting for a fixed number
+# of lines would hang on exactly that. `+CFUN=1,1` also takes seconds to answer
+# and a fixed short read would call a working modem broken.
+at() {
+	printf '%s\r' "$1" > "$port"
+	deadline=$(( $(date +%s) + timeout ))
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		# `head -c` rather than `read`: a modem sends CR-terminated lines and
+		# `read` waits for LF, which some firmwares send and some do not.
+		chunk=$(dd if="$port" bs=1 count=256 2>/dev/null | tr -d '\r' || true)
+		[ -n "$chunk" ] || continue
+		printf '%s\n' "$chunk"
+		case $chunk in
+		*OK*|*ERROR*) return 0 ;;
+		esac
+	done
+	return 1
+}
+
+# Everything below sends ATE0 first, because a modem that was left echoing by
+# whatever spoke to it last is the normal state rather than the exception.
+quiet() { at "ATE0" >/dev/null 2>&1 || true; }
+
+registered() {
+	# `+CREG`/`+CGREG` stat 1 is registered home, 5 is roaming. Anything else
+	# -- searching, denied, unknown -- is not registered, and 2 in particular
+	# is "searching", which is a state and not a failure.
+	answer=$(at "AT+CGREG?" || true)
+	case $answer in
+	*"+CGREG: 0,1"*|*"+CGREG: 0,5"*|*"+CGREG: 1,1"*|*"+CGREG: 1,5"*|*"+CGREG: 2,1"*|*"+CGREG: 2,5"*)
+		return 0 ;;
+	esac
+	return 1
+}
+
+attached() {
+	case $(at "AT+CGATT?" || true) in
+	*"+CGATT: 1"*) return 0 ;;
+	esac
+	return 1
+}
+
+set_apn() {
+	[ -n "$apn" ] || return 0
+	# Context 1, IP. Written even when it looks unchanged: a module that
+	# autoconnects may have dialled an empty APN already, and rewriting the
+	# context is what makes the next attach use this one.
+	case $(at "AT+CGDCONT=1,\"IP\",\"$apn\"" || true) in
+	*OK*) return 0 ;;
+	esac
+	echo "netcfgd-modem-at: the modem refused APN \`$apn\`" >&2
+	return 1
+}
+
+do_attach() {
+	quiet
+	set_apn || return 1
+
+	deadline=$(( $(date +%s) + 60 ))
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		if registered && attached; then
+			# **The APN the context has, not the one we asked for.**
+			#
+			# Asking for an APN the subscription does not carry is not
+			# refused: the network substitutes its own default and the attach
+			# succeeds. Reporting the requested one would print exactly the
+			# same sentence for a working link and a useless one -- which is
+			# the failure this whole helper is most likely to be blamed for,
+			# and the first version of this file did it.
+			in_use=$(at "AT+CGDCONT?" 2>/dev/null |
+				sed -n 's/.*+CGDCONT: 1,"[^"]*","\([^"]*\)".*/\1/p' |
+				head -1)
+			echo "netcfgd-modem-at: attached${in_use:+ on $in_use}"
+			if [ -n "$apn" ] && [ -n "$in_use" ] && [ "$in_use" != "$apn" ]; then
+				echo "netcfgd-modem-at: THE NETWORK SUBSTITUTED THE APN" >&2
+				echo "netcfgd-modem-at:   asked for \`$apn\`, got \`$in_use\`" >&2
+				echo "netcfgd-modem-at:   this happens when the subscription does" >&2
+				echo "netcfgd-modem-at:   not carry the APN requested, and the" >&2
+				echo "netcfgd-modem-at:   default it gives instead may route" >&2
+				echo "netcfgd-modem-at:   almost nothing" >&2
+			fi
+			# Said every time, because an attach that succeeded on the wrong
+			# APN looks exactly like one that succeeded on the right one.
+			echo "netcfgd-modem-at:   this says the bearer is up and nothing" >&2
+			echo "netcfgd-modem-at:   about whether it carries traffic --" >&2
+			echo "netcfgd-modem-at:   configure a probe on the interface" >&2
+			return 0
+		fi
+		sleep 2
+	done
+
+	echo "netcfgd-modem-at: not attached after 60s" >&2
+	at "AT+CEER" 2>/dev/null | sed 's/^/  /' >&2 || true
+	return 1
+}
+
+case $command in
+attach)
+	do_attach
+	;;
+monitor)
+	do_attach || exit 1
+	while :; do
+		sleep "$interval"
+		if ! attached; then
+			echo "netcfgd-modem-at: bearer dropped${interface:+ on $interface}, re-attaching" >&2
+			do_attach || true
+		fi
+	done
+	;;
+status)
+	quiet
+	at "AT+CGREG?" || true
+	at "AT+CGATT?" || true
+	at "AT+CGDCONT?" || true
+	;;
+iccid)
+	# The card's own identifier, which is the fact about which SIM is current.
+	# A board that switches SIMs behind the modem cannot be asked "which is
+	# selected" -- the mux is invisible to the module -- so this is what says
+	# which one it is actually reading.
+	quiet
+	at "AT+CCID" || at "AT+QCCID" || true
+	;;
+*)
+	echo "netcfgd-modem-at: unknown command \`$command\`" >&2
+	usage >&2
+	exit 2
+	;;
+esac

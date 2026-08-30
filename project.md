@@ -1295,6 +1295,33 @@ owner. The modem-side one is invisible to `contention.rs` and is what
 [0043](doc/decision/0043-mbim-is-ours-and-the-quirks-are-a-table.md)'s quirk
 table -- designed, unbuilt -- is for.
 
+**`helper/netcfgd-modem-at` fills the gap**, beside the MBIM one rather than
+inside it, which is what 0045 makes the supported way. Its job is small and
+deliberately so: set the APN, hold the bearer, and write **no interface
+report** -- on ECM the module presents an ordinary ethernet interface and runs
+its own DHCP server handing over the operator's address, so netcfgd wants
+`config = "dhcp"` and nothing else. A helper reporting an address it did not
+obtain would be a second writer for a job DHCP already does.
+
+**The fake modem caught the helper lying, on its first run.**
+`fake_at_modem.py` is a pty rather than a stub, so termios, CR-terminated
+writes and byte-at-a-time reads are exercised; its `--wrong-apn` mode
+reproduces the measured behaviour where a network accepts a request for an APN
+the subscription does not carry and silently substitutes its own. The helper
+reported `attached on im.cxn` while the context read back `xlm.cxn` -- printing
+the APN it *asked for*, which is the same sentence for a working link and a
+useless one. It reads back `+CGDCONT?` and reports what is in effect now, with
+a loud warning when they differ.
+
+**Writing the test found two bugs in the test**, and the second is the
+dangerous shape. A stale pty path let a case run against a closed device; and
+`wait` on a signal-killed process returns 143, which under `set -e` aborted the
+script -- so the run stopped after the fifth check **with no failure reported**,
+which looks exactly like a test that finished rather than one that died. Had it
+been wired into `make live` before being run directly, the suite would have
+gone green while skipping half the file. `dhcpcd.sh` records the same family in
+an AND-list, so this is a repeat rather than a novelty.
+
 **Selecting between SIM sources belongs here, apart from the hardware poke.**
 See [0150](doc/decision/0150-a-sim-source-is-chosen-the-way-an-uplink-is.md).
 The component that solved it on that board had to reinvent constraint 1 to be

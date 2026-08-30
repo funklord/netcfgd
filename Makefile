@@ -428,7 +428,15 @@ install:
 install-modem-mbim:
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 0755 helper/netcfgd-modem-mbim $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
+	@# The AT helper goes with it: which one a machine needs is a property of
+	@# the module, not a choice, and a module offering only ECM has no
+	@# /dev/cdc-wdm for the MBIM one to open. Neither has a dependency the
+	@# other does not -- mbimcli for one, a tty for the other -- so shipping
+	@# both costs nothing and shipping one means guessing.
+	install -m 0755 helper/netcfgd-modem-at $(DESTDIR)$(BINDIR)/netcfgd-modem-at
 	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
+	@echo "install-modem-mbim: netcfgd-modem-at installed too, for modules that"
+	@echo "install-modem-mbim:   offer neither MBIM nor QMI -- it needs only a tty"
 	@echo "install-modem-mbim:   doc/interface-report.md is the contract -- write"
 	@echo "install-modem-mbim:   your own helper if this one does not fit"
 
@@ -1418,6 +1426,10 @@ live:
 	@# NCFG_LIVE: nmcli comes from the network-manager package, which is exactly
 	@# what a netcfgd machine is expected not to have installed.
 	@unshare -rn sh -c "sh tests/live/nm.sh"
+	@# The AT modem helper, against a modem that is a pty. No root and no
+	@# hardware: the fake is a real character device, so termios, CR-terminated
+	@# writes and byte-at-a-time reads are exercised rather than stubbed.
+	@sh tests/live/modem_at.sh
 	@# A Bluetooth adapter, which needs real root: /dev/vhci is root-only and
 	@# the module autoloads on the open. Not under NCFG_LIVE and not under
 	@# unshare -- the adapter belongs to the machine, and a machine that
@@ -1567,6 +1579,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-gui
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
+	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-at
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-nm
