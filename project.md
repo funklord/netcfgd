@@ -1265,6 +1265,45 @@ because that is two files disagreeing about one setting. Only `global`:
 and merging those would make the result depend on which keys each happened to
 set.
 
+## Bluetooth: networking and audio
+
+**Asked for on 2026-08-30: Bluetooth networking, and Bluetooth audio with
+multiple in and out, ALSA only and no PulseAudio.** Later, audio device
+handover over fuzznet's streaming. See
+[0148](doc/decision/0148-bluetooth-is-two-backends-and-an-adapter.md) for the
+shape; what follows is where it has got to.
+
+**Audio is not networking, and it fits anyway** because netcfgd owns devices
+and links and delegates the work to backends it supervises. `bluealsa` is one
+more of those, so netcfgd never touches a sample. `bluez-alsa-utils` is the
+ALSA-only path and does the codecs; netcfgd implements no A2DP.
+
+**The D-Bus question decided the architecture, and reading it properly gave a
+better answer than the first sketch.** `backend/netcfgd-bluetooth` speaking
+D-Bus is not available: the NM shim is a separate workspace precisely so zbus's
+eighty-odd transitive crates never enter the core's `cargo-deny` graph, and
+`make nm-containment` proves the core links none of it. So the core needs no
+D-Bus at all -- adapters from sysfs, `bluetoothd` and `bluealsa` supervised
+like every other backend, `bnep*` configured like any link -- and pairing and
+profile selection go in an adapter of their own.
+
+**Adapter observation is done.** `/sys/class/bluetooth` gives the adapter and
+its rfkill node; an adapter is not a link, has no place in netlink, and so is
+its own list rather than an `ObservedLink`. The switch is read from *inside*
+the adapter's directory rather than searched for by type in
+`/sys/class/rfkill`, which is the mistake the wifi reader records having made:
+a laptop has a platform button beside the adapter's own switch and a search
+finds whichever the filesystem returns first. The test fixture carries that
+decoy, so it fails if that changes. Checked against real hardware: `hci0`,
+`rfkill0`, `name=hci0`.
+
+**Next is the rig, before the feature.** Every wireless fault found this week
+came from something that had never run, and netcfgd associated with a network
+for the first time only after `hwsim.sh` was finally used. `hci_vhci` is the
+`mac80211_hwsim` equivalent; Debian's `bluez` ships no `btvirt`, so two virtual
+controllers cannot pair with each other out of the box and it is built from
+bluez source for the tests.
+
 ## Open: the permission system needs an overhaul
 
 **Deferred by the holder, and the shape of the answer is already given.**

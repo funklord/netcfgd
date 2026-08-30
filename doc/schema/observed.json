@@ -259,6 +259,16 @@
       }
     }
   ],
+  "bluetooth": [
+    {
+      "name": "hci0",
+      "rfkill": {
+        "switch": "hci0",
+        "soft": true,
+        "hard": false
+      }
+    }
+  ],
   "addresses": [
     {
       "interface": "eth0",

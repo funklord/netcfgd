@@ -349,6 +349,10 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		.collect();
 
 	let mut observed = Observed {
+		// Filled in by `host::augment`, which reads /sys. The netlink pass
+		// this belongs to knows nothing about Bluetooth: an adapter is not a
+		// link and never appears in a dump.
+		bluetooth: Vec::new(),
 		rules: snapshot.rules.iter().map(observed_rule).collect(),
 		nat: Vec::new(),
 		nat_conflicts: Vec::new(),

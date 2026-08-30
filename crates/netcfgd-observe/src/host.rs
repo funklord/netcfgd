@@ -49,6 +49,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	for link in &mut observed.links {
 		link.rfkill = rfkill(&sys, &link.name);
 	}
+	observed.bluetooth = bluetooth(&sys);
 	read_backend_liveness(observed, run_dir);
 	read_netfilter(observed);
 	read_offloads(observed);
@@ -517,6 +518,79 @@ fn forwarding(root: &std::path::Path, name: &str) -> Option<bool> {
 	Some(read("ipv4")? && read("ipv6")?)
 }
 
+/// The Bluetooth adapters this machine has, and whether each is blocked.
+///
+/// **`/sys/class/bluetooth`, and nothing else.** `BlueZ` is D-Bus and nothing
+/// else, and 0014 keeps D-Bus out of the core -- so what is read here is what
+/// the kernel puts in sysfs, which is the adapter's existence and its rfkill
+/// node. An address, a name and a powered state all come from the management
+/// socket or from bluetoothd, and neither is the core's to hold: bluetoothd
+/// owns the adapter through `mgmt`, so netcfgd reading it would be two daemons
+/// on one radio, one layer below the failure `contention.rs` exists for.
+///
+/// **The switch is found through the adapter's own directory, not by name.**
+/// A laptop has a platform Bluetooth switch as well as the adapter's --
+/// `dell-bluetooth` beside `hci0` on the machine this was written on -- and
+/// searching `/sys/class/rfkill` for a bluetooth entry would find whichever
+/// came first. `/sys/class/bluetooth/hci0/rfkill*` is the adapter's own, which
+/// is the one its driver obeys. That is the same mistake `rfkill` above
+/// records having made for wifi, avoided here by construction rather than by
+/// remembering.
+fn bluetooth(sys: &Path) -> Vec<netcfgd_model::ObservedBluetooth> {
+	let Ok(entries) = fs::read_dir(sys.join("class/bluetooth")) else {
+		// No Bluetooth, or a kernel without the subsystem. An empty list is
+		// the honest answer and is what a machine with no adapter has.
+		return Vec::new();
+	};
+	let mut found: Vec<netcfgd_model::ObservedBluetooth> = entries
+		.flatten()
+		.map(|entry| netcfgd_model::ObservedBluetooth {
+			rfkill: adapter_rfkill(&entry.path()),
+			name: entry.file_name().to_string_lossy().into_owned(),
+		})
+		.collect();
+	found.sort_by(|a, b| a.name.cmp(&b.name));
+	found
+}
+
+/// The rfkill switch inside one adapter's sysfs directory.
+///
+/// `None` where there is none, which is a kernel without `CONFIG_RFKILL` or a
+/// driver that registers no switch. Both mean netcfgd cannot tell, and 0062's
+/// rule is that nothing is planned on that.
+fn adapter_rfkill(adapter: &Path) -> Option<netcfgd_model::ObservedRfkill> {
+	// Sorted, for the reason the wifi search sorts: `read_dir` order is the
+	// filesystem's, and a directory that ever held two would make the answer
+	// luck. One is expected here, so this is cheap insurance rather than a
+	// case anybody has seen.
+	let mut entries: Vec<PathBuf> = fs::read_dir(adapter)
+		.ok()?
+		.flatten()
+		.map(|entry| entry.path())
+		.filter(|path| {
+			path.file_name()
+				.and_then(|name| name.to_str())
+				.is_some_and(|name| name.starts_with("rfkill"))
+		})
+		.collect();
+	entries.sort();
+	let path = entries.first()?;
+
+	// Both flags or nothing: a flag that cannot be read is not a flag that is
+	// clear, and half an answer here would report a radio that looks fine.
+	let flag = |file: &str| -> Option<bool> {
+		Some(fs::read_to_string(path.join(file)).ok()?.trim() == "1")
+	};
+	Some(netcfgd_model::ObservedRfkill {
+		switch: fs::read_to_string(path.join("name"))
+			.ok()?
+			.trim()
+			.to_owned(),
+		soft: flag("soft")?,
+		hard: flag("hard")?,
+	})
+}
+
 /// Whether one interface's radio is switched off.
 ///
 /// Two reads and a search. `/sys/class/net/<iface>/phy80211/name` is the phy this
@@ -807,5 +881,78 @@ mod tests {
 		fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
 		fs::write(path, "phy0\n").expect("a file");
 		assert!(rfkill(dir.path(), "wlan0").is_none());
+	}
+}
+
+#[cfg(test)]
+mod bluetooth_tests {
+	use super::*;
+	use netcfgd_testdir::TestDir;
+
+	/// **The adapter's own switch, not the platform's.**
+	///
+	/// A laptop has both: `hci0`'s, which its driver obeys, and a
+	/// `dell-bluetooth` for the keyboard button. Searching `/sys/class/rfkill`
+	/// for a bluetooth entry finds whichever the filesystem returns first,
+	/// which is the mistake `rfkill` above records having made for wifi. This
+	/// reads the switch inside the adapter's own directory, so the wrong one
+	/// is not reachable rather than merely not chosen -- and the fixture
+	/// carries the decoy so the test would fail if that changed.
+	#[test]
+	fn an_adapter_reports_its_own_switch_and_not_the_platform_button() {
+		let dir = TestDir::new("bt-rfkill");
+		let sys = dir.path();
+
+		// The adapter, with its own switch inside it.
+		let own = sys.join("class/bluetooth/hci0/rfkill0");
+		std::fs::create_dir_all(&own).expect("mkdir");
+		std::fs::write(own.join("name"), "hci0\n").expect("write");
+		std::fs::write(own.join("soft"), "1\n").expect("write");
+		std::fs::write(own.join("hard"), "0\n").expect("write");
+
+		// The decoy: a platform button, in the global list, unblocked. A
+		// reader that searched by type would find this and report the radio
+		// as fine while the adapter's own switch says otherwise.
+		let button = sys.join("class/rfkill/rfkill3");
+		std::fs::create_dir_all(&button).expect("mkdir");
+		std::fs::write(button.join("name"), "dell-bluetooth\n").expect("write");
+		std::fs::write(button.join("soft"), "0\n").expect("write");
+		std::fs::write(button.join("hard"), "0\n").expect("write");
+
+		let found = bluetooth(sys);
+		assert_eq!(found.len(), 1, "one adapter: {found:?}");
+		assert_eq!(found[0].name, "hci0");
+		let switch = found[0].rfkill.as_ref().expect("the adapter has a switch");
+		assert_eq!(
+			switch.switch, "hci0",
+			"it read the adapter's own switch, not the platform button"
+		);
+		assert!(switch.soft, "and the block it reports is the adapter's");
+	}
+
+	/// A machine with no Bluetooth reports none, rather than failing.
+	///
+	/// That is most servers, and an absent `/sys/class/bluetooth` must be an
+	/// empty list rather than an error -- nothing is planned on it either way,
+	/// and a status that refused to render on a machine without a radio would
+	/// be worse than useless.
+	#[test]
+	fn a_machine_without_bluetooth_reports_an_empty_list() {
+		let dir = TestDir::new("bt-none");
+		assert!(bluetooth(dir.path()).is_empty());
+	}
+
+	/// An adapter whose driver registers no switch is reported without one.
+	///
+	/// `None` is "netcfgd cannot tell", which 0062 says nothing is planned on.
+	/// The adapter is still listed: it exists, and that is the fact.
+	#[test]
+	fn an_adapter_with_no_switch_is_still_an_adapter() {
+		let dir = TestDir::new("bt-noswitch");
+		std::fs::create_dir_all(dir.path().join("class/bluetooth/hci1")).expect("mkdir");
+		let found = bluetooth(dir.path());
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].name, "hci1");
+		assert!(found[0].rfkill.is_none(), "no switch is not a clear switch");
 	}
 }

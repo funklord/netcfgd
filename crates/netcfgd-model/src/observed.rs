@@ -350,6 +350,32 @@ pub struct ObservedHookState {
 /// a soft block is software and comes back with one command, a hard block is a
 /// physical switch and no amount of configuration will move it.
 ///
+/// One Bluetooth adapter, as the kernel presents it.
+///
+/// **Not a link, which is why it is its own list.** `hci0` is not a network
+/// interface: it has no address, no mtu and no place in netlink, so it cannot
+/// be an `ObservedLink` and the rfkill attached to a link never finds it. A PAN
+/// connection through it produces a `bnep0` that *is* a link, and that one goes
+/// through the ordinary model with no special case -- the adapter and the link
+/// it may eventually carry are different objects and this is the first.
+///
+/// Read from `/sys/class/bluetooth`, so it needs no D-Bus and says nothing
+/// bluetoothd would have to be running to answer. What is here is what the
+/// kernel knows: the adapter exists, and whether its radio is switched off.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedBluetooth {
+	/// The kernel's name for it: `hci0`.
+	pub name: String,
+	/// Whether its radio is blocked, where a switch could be found.
+	///
+	/// `None` means netcfgd cannot tell -- no `CONFIG_RFKILL`, or an adapter
+	/// whose driver registers no switch -- and nothing is planned on one, which
+	/// is 0062's rule unchanged.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub rfkill: Option<ObservedRfkill>,
+}
+
 /// netcfgd reads the **phy's own** switch, which is the one the driver obeys. A
 /// laptop usually has a second `wlan` switch as well -- a Dell here reports
 /// `dell-wifi` beside `phy0` -- which is the platform button's, and whether
@@ -1005,6 +1031,14 @@ pub struct AppliedDns {
 pub struct Observed {
 	/// Links, sorted by name.
 	pub links: Vec<ObservedLink>,
+	/// Bluetooth adapters, sorted by name.
+	///
+	/// Separate from `links` because an adapter is not one: it has no address
+	/// and no place in netlink. Empty on a machine with no Bluetooth, which is
+	/// most servers, and `skip_serializing_if` keeps it out of their status
+	/// entirely rather than showing an empty list nobody asked about.
+	#[serde(skip_serializing_if = "Vec::is_empty", default)]
+	pub bluetooth: Vec<ObservedBluetooth>,
 	/// Addresses, sorted by interface then address.
 	pub addresses: Vec<ObservedAddress>,
 	/// Routes, sorted canonically.

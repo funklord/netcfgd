@@ -482,6 +482,16 @@ fn backends(observed: &mut Observed) {
 /// The whole observed surface, in one value.
 fn witness() -> Observed {
 	let mut observed = Observed {
+		// One adapter, blocked. The witness exists to pin a shape, and an
+		// empty list would pin nothing about this one.
+		bluetooth: vec![netcfgd_model::ObservedBluetooth {
+			name: "hci0".to_owned(),
+			rfkill: Some(netcfgd_model::ObservedRfkill {
+				switch: "hci0".to_owned(),
+				soft: true,
+				hard: false,
+			}),
+		}],
 		links: every_ownership()
 			.into_iter()
 			.enumerate()
