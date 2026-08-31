@@ -1515,22 +1515,29 @@ refuses to overwrite an existing one without being told to. It selects the
 profile afterwards, because having just said what `office` means, being left
 on none would be a surprise.
 
-**`save` is not built yet, and the reason is worth writing down.** Saving has
-to be exact -- what the machine is running now must be what the profile means
-later -- and the only exact form is the effective document rendered back as
-config text. **netcfgd has no document-to-DSL renderer**: the compiler goes one
-way, and every writer here (`wifi_profile::render`, `control::render`, the NM
-shim) renders one block it knows about. Writing a whole-document one is its own
-piece of work -- it touches interfaces, addresses, routes, dns, wifi networks,
-bluetooth, rules, qdiscs, bonds, bridges and tunnels -- and it belongs beside
-the parser in `netcfgd-compile`, so that the two cannot drift.
+`save` moves the configuration rather than copying it: the fold is taken back
+out of `conf.d`, so the old profile is not left in the base to stay in force
+after switching away. What it writes is a snapshot of the effective document,
+with `override` on the blocks the base still defines and not on the ones it
+does not. It is verified before it is kept -- the loader is asked what the
+machine now compiles to, and it must be what was running -- and if it is not,
+the fold, the snapshot and the selection are all put back.
 
-Its gate is already obvious and should be built with it: **render, re-parse,
-and require the document to be equal.** A renderer that silently drops a field
-is worse than none, because the field is gone from a profile nobody will read
-again until they need it. Until that exists, the three-step workflow stops
-after step two: a profile is written by hand, which is the case the directive
-above was protecting in the first place.
+**The renderer is partial by design and refuses rather than drops.** It lives
+in `netcfgd-compile` beside the parser so a key added to one is under the nose
+of whoever adds it to the other. It covers globals, interfaces, wifi networks
+and devices; what it cannot render it names -- wireguard, tunnels, bonds,
+bridges, `access_point`, `rule`, dns transports, EAP -- and `save` prints the
+list and writes nothing, leaving the operator to write that profile by hand.
+Its gate is the round trip: compile text, render, compile again, and the
+documents must be equal.
+
+Two things follow that are worth knowing before extending it. The round trip
+is written from *text* rather than from model values, so it also proves the
+renderer against what the parser accepts. And `wifi_profile::render` in
+`netcfgd-host` renders a network block from its own `Profile` type, which is
+now a second spelling of one this can produce from a `WifiNetwork` -- they do
+not collide and neither is wrong, but they should become one.
 
 ### What running it turned up
 

@@ -28,6 +28,7 @@ pub mod merge;
 pub mod parse;
 pub mod privilege;
 pub mod provenance;
+pub mod render;
 
 pub use diag::{Diagnostic, Diagnostics, SourceId, SourceMap, Span};
 pub use hook::{HookSink, NoHooks};

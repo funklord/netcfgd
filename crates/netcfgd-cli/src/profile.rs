@@ -21,15 +21,17 @@ use netcfgd_host::config::PROFILE_DROP_IN as DROP_IN;
 
 pub(crate) fn run(positional: &[String], options: &Options) -> Result<ExitCode, String> {
 	let Some(subcommand) = positional.first() else {
-		return Err("`ncfg profile` takes `get`, `set`, `unset` or `list`".to_owned());
+		return Err("`ncfg profile` takes `get`, `set`, `save`, `unset` or `list`".to_owned());
 	};
 	match subcommand.as_str() {
 		"get" => get(options),
 		"list" => Ok(list(options)),
+		"save" => save(&positional[1..], options),
 		"set" => set(&positional[1..], options),
 		"unset" => unset(options),
 		other => Err(format!(
-			"unknown profile subcommand `{other}`; it is `get`, `set`, `unset` or `list`"
+			"unknown profile subcommand `{other}`; it is `get`, `set`, `save`, \
+			 `unset` or `list`"
 		)),
 	}
 }
@@ -97,6 +99,149 @@ fn list(options: &Options) -> ExitCode {
 		println!("{mark} {name}  ({origin})");
 	}
 	ExitCode::SUCCESS
+}
+
+/// Write what the machine is running into a profile, and select it.
+///
+/// **The only door into a profile directory.** 0151: nothing else writes
+/// there -- not a settings edit, not the gui, not the shim, not the daemon --
+/// because a profile may be carefully crafted and none of that is recoverable
+/// from the running state once something has helpfully rewritten it.
+///
+/// The fold is taken out of `conf.d` as part of this, so that saving really
+/// moves the configuration into the profile rather than copying it. Leaving it
+/// behind would keep the old profile in force after switching to a different
+/// one, which is not what "saved it into office" means to anybody.
+///
+/// **Verified, then kept.** The whole thing is written, the loader is asked
+/// what the machine now compiles to, and it must be what was running. Anything
+/// else and every part of it is put back -- the profile written here is the
+/// thing somebody will rely on months later, and a snapshot that is subtly not
+/// what they saved is worse than a refusal today.
+fn save(rest: &[String], options: &Options) -> Result<ExitCode, String> {
+	let Some(name) = rest.first() else {
+		return Err("`ncfg profile save` needs a name to save as".to_owned());
+	};
+	usable_name(name)?;
+
+	let config = netcfgd_host::config::resolve_dir(options.config_dir.as_deref());
+	let factory = netcfgd_host::config::resolve_factory_dir(options.factory_dir.as_deref());
+	let directory = config.join("profile").join(name);
+	let snapshot = directory.join("00-saved.conf");
+
+	// Refused rather than merged. An existing profile is somebody's work, and
+	// guessing here is the failure this command exists to prevent.
+	if directory.is_dir() && !options.replace {
+		return Err(format!(
+			"`{name}` already exists ({}); --replace to overwrite it",
+			directory.display()
+		));
+	}
+	if directory.is_dir() && !snapshot.exists() {
+		return Err(format!(
+			"`{name}` was written by hand ({}), so saving over it would discard \
+			 files this cannot reproduce. Save as another name, or take that \
+			 directory away first",
+			directory.display()
+		));
+	}
+
+	// What is running, before anything moves.
+	let (running, _) = crate::compile(options)?;
+
+	let taken = netcfgd_host::config::take_folded(&config)
+		.map_err(|error| format!("could not take the folded profile out: {error}"))?;
+
+	let outcome = write_snapshot(
+		&running, name, &config, &factory, &directory, &snapshot, options,
+	);
+	if outcome.is_err() {
+		let _ = std::fs::remove_file(&snapshot);
+		let _ = std::fs::remove_dir(&directory);
+		let _ = netcfgd_host::config::restore_folded(&taken);
+	}
+	outcome
+}
+
+/// The half of `save` that can fail with something to undo.
+#[allow(clippy::too_many_arguments)]
+fn write_snapshot(
+	running: &netcfgd_model::Document,
+	name: &str,
+	config: &std::path::Path,
+	factory: &std::path::Path,
+	directory: &std::path::Path,
+	snapshot: &std::path::Path,
+	options: &Options,
+) -> Result<ExitCode, String> {
+	// Which blocks the base still defines, now that the fold is out of it.
+	// `override` on a block nothing defines is a compile error, and its absence
+	// on one that is defined is a different one -- so this is not a detail the
+	// renderer can guess.
+	let base = netcfgd_host::config::load_layered(factory, config)
+		.ok()
+		.and_then(|sources| netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok());
+	let mut overrides = netcfgd_compile::render::Overrides::new();
+	if let Some(base) = &base {
+		for interface in &base.interfaces {
+			overrides.insert(format!("interface {}", interface.name));
+		}
+		for network in &base.networks {
+			overrides.insert(format!("network {}", network.id));
+		}
+		for device in &base.devices {
+			overrides.insert(format!("device {}", device.name));
+		}
+	}
+
+	let text = netcfgd_compile::render::render(running, &overrides).map_err(|missing| {
+		format!(
+			"this configuration cannot be written out yet, so it was not saved. \
+			 What is in the way:\n  {}\nWrite the profile by hand instead; \
+			 `ncfg profile list` shows where it goes",
+			missing.join("\n  ")
+		)
+	})?;
+
+	std::fs::create_dir_all(directory)
+		.map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+	std::fs::write(snapshot, &text)
+		.map_err(|error| format!("could not write {}: {error}", snapshot.display()))?;
+	println!("wrote {}", snapshot.display());
+
+	// Selecting is part of the same act: having just said what this profile
+	// means, being left on none would be a surprise.
+	set(std::slice::from_ref(&name.to_owned()), options)?;
+
+	// The proof. What the machine compiles to now must be what it was running,
+	// but for the selection this just made.
+	let after = netcfgd_host::config::load_with_profile(factory, config)
+		.ok()
+		.and_then(|sources| netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok());
+	let mut expected = running.clone();
+	expected.globals.profile = Some(name.to_owned());
+	if after.as_ref() != Some(&expected) {
+		return Err(format!(
+			"saving `{name}` would not reproduce what this machine is running, \
+			 so nothing was kept. That is a fault in the snapshot rather than \
+			 in your configuration; write the profile by hand and please report \
+			 it"
+		));
+	}
+
+	Ok(ExitCode::SUCCESS)
+}
+
+/// A name that can be a directory here, refused early so the message can say
+/// which part was the problem rather than leaving it to the compiler.
+fn usable_name(name: &str) -> Result<(), String> {
+	if name.is_empty() || name.contains('/') || name.starts_with('.') {
+		return Err(format!(
+			"`{name}` cannot be a profile name: a plain name, since netcfgd \
+			 chooses the directory it is read from"
+		));
+	}
+	Ok(())
 }
 
 fn set(rest: &[String], options: &Options) -> Result<ExitCode, String> {
@@ -314,6 +459,72 @@ mod tests {
 			let error = set(&[bad.to_owned()], &options).expect_err("refused");
 			assert!(error.contains("cannot be a profile name"), "{bad}: {error}");
 		}
+	}
+
+	/// The workflow of 0151 end to end: choose a profile, change a setting,
+	/// save it. What the machine runs must not move at any step, and the
+	/// profile that was chosen at the start must come out of it untouched --
+	/// which is the whole reason saving is a separate explicit act.
+	#[test]
+	fn the_set_change_save_workflow_keeps_what_is_running() {
+		let (root, options) = fixture("workflow");
+		let crafted = root.join("etc/profile/office/10-office.conf");
+		let before = std::fs::read_to_string(&crafted).expect("the profile");
+
+		set(&["office".to_owned()], &options).expect("set");
+		crate::drop_in::put_text(
+			"50-mine",
+			"override interface eth0 { mtu = 1400 }\n".to_owned(),
+			false,
+			"`50-mine`",
+			&options,
+		)
+		.expect("the edit compiles");
+
+		let (running, _) = crate::compile(&options).expect("compiles");
+		assert_eq!(running.interfaces[0].mtu, Some(1400));
+
+		save(&["office-v2".to_owned()], &options).expect("save");
+
+		let (after, _) = crate::compile(&options).expect("compiles");
+		assert_eq!(after.interfaces[0].mtu, Some(1400), "nothing moved");
+		assert_eq!(
+			after.globals.profile.as_deref(),
+			Some("office-v2"),
+			"selected"
+		);
+		assert!(root.join("etc/profile/office-v2/00-saved.conf").exists());
+
+		// The crafted profile is byte-identical. Nothing here may rewrite it.
+		assert_eq!(
+			std::fs::read_to_string(&crafted).expect("still there"),
+			before,
+			"the profile that was chosen was rewritten"
+		);
+		// And the fold moved into the profile rather than being copied, so
+		// switching away later does not leave the old profile in the base.
+		assert!(!root.join("etc/conf.d/05-profile-office.conf").exists());
+		assert!(!root.join("etc/conf.d/zz-profile-office.conf").exists());
+	}
+
+	/// Saving over an existing profile needs saying so, because an existing
+	/// profile is somebody's work.
+	#[test]
+	fn saving_over_a_profile_is_refused_without_replace() {
+		let (_root, options) = fixture("save-over");
+		let error = save(&["office".to_owned()], &options).expect_err("refused");
+		assert!(error.contains("already exists"), "{error}");
+		assert!(error.contains("--replace"), "{error}");
+	}
+
+	/// And a hand-written profile is refused even with `--replace`, since
+	/// saving cannot reproduce files it did not write.
+	#[test]
+	fn a_hand_written_profile_is_not_saved_over() {
+		let (_root, mut options) = fixture("hand-written");
+		options.replace = true;
+		let error = save(&["office".to_owned()], &options).expect_err("refused");
+		assert!(error.contains("written by hand"), "{error}");
 	}
 
 	/// Both layers are listed, and a name in both is reported as the

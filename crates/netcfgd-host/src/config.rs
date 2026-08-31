@@ -1805,3 +1805,52 @@ pub fn restore_profile(config_dir: &Path, name: &str) -> io::Result<()> {
 		format!("global {{\n\tprofile = \"{name}\"\n}}\n"),
 	)
 }
+
+/// Take the folded profile files out of `conf.d`, returning what was removed.
+///
+/// `ncfg profile save` writes the running configuration into a profile, and
+/// leaving the fold behind would keep a copy of the old profile in the base
+/// for ever -- so it would still be in force after switching to a different
+/// profile, which is not what "saved it into office" means to anybody.
+///
+/// The contents come back so the caller can put them there again, because the
+/// save is verified afterwards and a save that does not verify must leave the
+/// machine exactly as it found it.
+///
+/// # Errors
+///
+/// A `conf.d` that cannot be read, or a file that cannot be removed.
+pub fn take_folded(config_dir: &Path) -> io::Result<Vec<(PathBuf, String)>> {
+	let conf_d = config_dir.join("conf.d");
+	let mut taken = Vec::new();
+	let Ok(entries) = fs::read_dir(&conf_d) else {
+		return Ok(taken);
+	};
+	for entry in entries.flatten() {
+		let path = entry.path();
+		let Some(file) = path.file_name().and_then(|name| name.to_str()) else {
+			continue;
+		};
+		if !FOLDED_PREFIXES
+			.iter()
+			.any(|prefix| file.starts_with(prefix))
+		{
+			continue;
+		}
+		taken.push((path.clone(), fs::read_to_string(&path)?));
+		fs::remove_file(&path)?;
+	}
+	Ok(taken)
+}
+
+/// Put back what [`take_folded`] took, because the save did not stand.
+///
+/// # Errors
+///
+/// A file that cannot be written.
+pub fn restore_folded(taken: &[(PathBuf, String)]) -> io::Result<()> {
+	for (path, text) in taken {
+		fs::write(path, text)?;
+	}
+	Ok(())
+}
