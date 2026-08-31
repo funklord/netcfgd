@@ -93,6 +93,8 @@ fn every_request() -> Vec<Request> {
 		Request::SecretDelete { .. } => "secret_delete",
 		Request::Radios => "radios",
 		Request::ProbeList => "probe_list",
+		Request::ProfileList => "profile_list",
+		Request::ProfileSet { .. } => "profile_set",
 		Request::RadioSet { .. } => "radio_set",
 	};
 	let mut present: Vec<&str> = all.iter().map(name).collect();
@@ -112,6 +114,8 @@ fn every_request() -> Vec<Request> {
 			"plan",
 			"probe_list",
 			"probe_put",
+			"profile_list",
+			"profile_set",
 			"radio_set",
 			"radios",
 			"reload",
@@ -142,6 +146,14 @@ fn every_request() -> Vec<Request> {
 fn probe_samples() -> Vec<Request> {
 	vec![
 		Request::ProbeList,
+		Request::ProfileList,
+		// Two, because `name` is skip_serializing_if and one that sets it
+		// pins only the present form. The absent one is "no profile chosen",
+		// which is a real state rather than a missing argument.
+		Request::ProfileSet {
+			name: Some("office".to_owned()),
+		},
+		Request::ProfileSet { name: None },
 		// Two, because `replace` is skip_serializing_if and one that sets it
 		// pins only the present form.
 		Request::ProbePut {
@@ -324,6 +336,21 @@ fn every_response() -> Vec<Response> {
 	// list above because that function has a line limit.
 	let all: Vec<Response> = all
 		.into_iter()
+		.chain([Response::Profiles {
+			// Two, one from each layer, because a witness carrying only the
+			// operator's would not pin how a shipped one reports.
+			profiles: vec![
+				netcfgd_proto::ProfileEntry {
+					name: "offline".to_owned(),
+					shipped: true,
+				},
+				netcfgd_proto::ProfileEntry {
+					name: "office".to_owned(),
+					shipped: false,
+				},
+			],
+			chosen: Some("office".to_owned()),
+		}])
 		.chain([Response::Probes {
 			probes: vec![
 				netcfgd_proto::ProbeScript {
@@ -355,6 +382,7 @@ fn every_response() -> Vec<Response> {
 		Response::ApStations(_) => "ap_stations",
 		Response::Radios { .. } => "radios",
 		Response::Probes { .. } => "probes",
+		Response::Profiles { .. } => "profiles",
 		Response::Ok => "ok",
 		Response::Error { .. } => "error",
 	};
@@ -374,6 +402,7 @@ fn every_response() -> Vec<Response> {
 			"ok",
 			"plan",
 			"probes",
+			"profiles",
 			"radios",
 			"status",
 			"wifi_scan",

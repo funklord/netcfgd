@@ -59,6 +59,24 @@ nothing: links down, no addresses, no routes.
 
 The two are easy to confuse and the shipped file says which it is.
 
+**Built since, and it needed a host-wide key.** "Links down, no addresses" had
+no way to be written: the config language has no wildcard, so a profile would
+have to name this machine's interfaces, and a shipped profile cannot know
+them. That is why `global { networking = "off" }` exists -- one key says it
+once -- and why `offline` is nothing but that key.
+
+It is applied by the compiler, which disables every interface as the document
+is built, rather than by the planner. `ncfg show` and `ncfg plan` then say what
+netcfgd wants, instead of describing a configuration something downstream
+quietly ignores. The planner already had the rest: a disabled interface has
+its addresses withdrawn and its link brought down.
+
+**`offline` is therefore the only profile a package can ship**, and every
+other useful one is per machine. It installs to
+`$(DATADIR)/netcfgd/profile/offline`, so `ncfg profile list` shows it as
+`(shipped)` and an operator's own copy in `/etc/netcfgd/profile/offline`
+layers over it -- the factory-and-runtime rule, one directory down.
+
 ## A profile switch is the strongest case for the confirm window
 
 Applying `offline` on a machine reached over the network disconnects the person
@@ -177,142 +195,6 @@ compile, render, compile again, and the documents must be equal. Written that
 way rather than by building model values by hand, because it then also proves
 the renderer against what the parser actually accepts -- a rendering the
 compiler rejects fails in the suite instead of at somebody's next `ncfg apply`.
-
-## A profile writes `override`, and that is not a wart
-
-Found by running the thing rather than reasoning about it. A profile
-directory is read **after** the base, so a profile that changes an interface
-the base already describes writes `override interface eth0 { ... }`; a plain
-`interface eth0` is `already defined` and the profile does not load at all.
-
-That is the language working as designed -- redefinition is an error
-everywhere else too, and the diagnostic names both files and suggests the
-word. It is recorded because it is the first thing an operator writing a
-profile will hit, and because it is the opposite of the rule for `global`:
-sub-blocks of `global` merge (0147), so a profile setting `dns` writes
-`global`, while a profile setting an interface writes `override interface`.
-One reads as an exception to the other until you see that the unit differs --
-`global` is a singleton whose parts are independent, an interface is a block
-that is either this one or that one.
-
-## Changing a setting puts the machine on none, and that is the directive
-
-**Changing a setting by hand puts the machine on "none chosen". A change
-netcfgd makes for itself must never move the selection at all.** Those are the
-two halves, and they are not symmetrical because the two events are not: one
-is somebody saying what they want, the other is a program doing its job.
-
-The first half is the honest record. A profile is a preset; the moment an
-operator edits a value they have diverged from it, and a machine that goes on
-reporting `office` while running something that is not office is lying in the
-place it can least afford to. "None chosen" is exactly the state 0151 already
-defines: the machine runs its own configuration. So the edit does not modify
-the profile -- it takes the machine off it.
-
-**Nothing about the running configuration changes when that happens.** The
-profile's drop-ins are folded into `conf.d` in the same step, as one generated
-file, so the effective document before and after is identical; only the label
-moves. Anything else would make a one-line edit capable of dropping every
-override a profile carried -- a static address, a route, the link the operator
-is connected over -- as a side effect of changing something unrelated. **The
-fold is proved rather than trusted**: the loader compiles the document before
-and after and refuses to write when the two differ, which is the rule for
-mechanical changes applied to a change made on somebody's behalf.
-
-The second half is the one that needs a rule at all. netcfgd writes its own
-configuration, and a self-driven write clearing the selection would be a
-profile switch nobody asked for, arriving through a change made for an
-unrelated reason -- the hardest kind of fault to attribute afterwards. So the
-line is drawn at the actor, not at the file: **a person's settings write
-clears the selection; netcfgd's own writes leave it exactly where it was.**
-
-The hazard the guard catches is the third case, which is neither: `override
-global` replaces the whole block, so a hand-written file adding a search
-domain silently discards `profile` along with everything else in there. That
-is not an operator taking themselves off a profile, it is an accident, and it
-is refused with the file named and `global` suggested instead (0147).
-
-## A profile is written by one command and no other
-
-**Nothing writes into `profile/` except `ncfg profile save`.** Not a settings
-edit, not the gui, not the shim, not the daemon. A profile may be carefully
-crafted -- ordered drop-ins, comments, overrides that took an afternoon to get
-right -- and there is no way to recover that from the running state once
-something has helpfully rewritten it.
-
-So the workflow is three explicit steps, and the middle one is where the work
-happens:
-
-    ncfg profile set office      # run it
-    ...change settings...        # now on none chosen; office is folded in
-    ncfg profile save office     # write what is running back, and select it
-
-`save` is the only door into the directory, it names the profile it writes,
-and it refuses to overwrite an existing one without being told to. Selecting
-afterwards is part of the same act: having just said "this is what office
-means", being left on none would be a surprise.
-
-**`save` is not implemented yet.** Saving must be exact, and the only exact
-form is the effective document rendered back as config text -- which needs a
-document-to-DSL renderer netcfgd does not have. Every writer here renders one
-block it knows about; nothing renders a whole document. That work belongs
-beside the parser in `netcfgd-compile` so the two cannot drift, and its gate
-is render-then-reparse-then-compare, because a renderer that silently drops a
-field is worse than none: the field is gone from a profile nobody will read
-again until they need it.
-
-Until then a profile is written by hand, which is the case this record was
-protecting anyway. Nothing about the directive waits on it: the machine still
-comes off its profile when a setting changes, and still never comes off it on
-its own.
-
-## A profile writes `override`, and that is not a wart
-
-Found by running the thing rather than reasoning about it. A profile
-directory is read **after** the base, so a profile that changes an interface
-the base already describes writes `override interface eth0 { ... }`; a plain
-`interface eth0` is `already defined` and the profile does not load at all.
-
-That is the language working as designed -- redefinition is an error
-everywhere else too, and the diagnostic names both files and suggests the
-word. It is recorded because it is the first thing an operator writing a
-profile will hit, and because it is the opposite of the rule for `global`:
-sub-blocks of `global` merge (0147), so a profile setting `dns` writes
-`global`, while a profile setting an interface writes `override interface`.
-One reads as an exception to the other until you see that the unit differs --
-`global` is a singleton whose parts are independent, an interface is a block
-that is either this one or that one.
-
-## Nothing netcfgd writes may change the profile
-
-**A directive, and it covers the daemon's own writes.** netcfgd writes
-configuration itself -- `ncfg wifi add`, `ncfg control set`, the gui's dns tab
-and network editor, the NM shim -- and **none of them may add, change or remove
-the profile selection.** Only an operator asking for it may, through
-`ncfg profile set` or by editing the file.
-
-The hazard is not hypothetical and 0147 already names its shape: `override
-global` replaces the block entirely, so a writer emitting `override global {
-control { ... } }` would silently discard a `dns` block -- and would equally
-discard `profile`. A machine would then fall back to no profile, which is a
-different configuration, with nothing on screen to say why. That is a
-self-driven switch to "none" in everything but name.
-
-Two things follow, and both are mechanical rather than a matter of care:
-
-- **Writers emit their own sub-block and never `override global`.** Since 0147
-  distinct sub-blocks merge, so `global { control { ... } }` from one file and
-  `global { profile = "x" }` from another coexist. Nothing needs to know about
-  anything else.
-- **`ncfg profile` owns exactly one drop-in** and writes nothing else into it.
-  A command that wrote the profile alongside something else would make the two
-  impossible to change independently.
-
-**Why this is a directive rather than an observation.** A profile decides what
-the whole machine does; losing the selection is not a small drift, it is a
-different machine. And the change would arrive through a write somebody made
-for an unrelated reason -- adding a wifi network, opening a tier to a group --
-which is the hardest kind of fault to attribute afterwards.
 
 ## Finding the name costs a compile, and the loop is refused
 

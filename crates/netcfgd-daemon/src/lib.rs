@@ -1125,6 +1125,8 @@ fn answer(
 			value,
 			replace,
 		} => put_secret_request(state, name, value, *replace),
+		Request::ProfileList => list_profiles_request(state),
+		Request::ProfileSet { name } => set_profile_request(state, name.as_deref()),
 		Request::ProbeList => Response::Probes {
 			probes: netcfgd_host::config::list_probes(&state.paths.config, &state.paths.factory),
 		},
@@ -1317,6 +1319,81 @@ fn take_off_profile(state: &State, name: &str) -> Result<Option<String>, String>
 			Ok(Some(profile))
 		}
 		Err(error) => Err(error.to_string()),
+	}
+}
+
+/// The profiles, and which one is in effect.
+fn list_profiles_request(state: &State) -> Response {
+	Response::Profiles {
+		profiles: netcfgd_host::config::list_profiles(&state.paths.config, &state.paths.factory),
+		// From the document rather than from the file, so what is reported is
+		// what the loader actually chose -- a `90-profile` some other file
+		// contradicts is refused by the loader, and this would otherwise
+		// announce a profile that is not in effect.
+		chosen: state
+			.desired
+			.as_ref()
+			.and_then(|document| document.globals.profile.clone()),
+	}
+}
+
+/// Choose a profile, or stop using one.
+///
+/// The write goes through the same drop-in machinery every other configuration
+/// write uses, under the name netcfgd owns -- which is why a client never
+/// spells that name and cannot go stale when it changes.
+///
+/// **A name with no directory is refused rather than written.** Writing it
+/// would leave a machine whose configuration names a profile that does not
+/// exist, and the fault would surface later as a profile that changes nothing,
+/// which reads as netcfgd ignoring the operator. The check belongs here
+/// because this is the machine that would have to read the directory: a
+/// client checking its own disk would be answering about the wrong host.
+fn set_profile_request(state: &mut State, name: Option<&str>) -> Response {
+	let drop_in = netcfgd_host::config::PROFILE_DROP_IN;
+
+	let Some(name) = name else {
+		return match netcfgd_host::config::remove_drop_in(
+			&state.paths.config,
+			&state.paths.factory,
+			drop_in,
+		) {
+			Ok(()) => {
+				state.reload();
+				Response::Ok
+			}
+			Err(message) => Response::error(message),
+		};
+	};
+
+	let known = netcfgd_host::config::list_profiles(&state.paths.config, &state.paths.factory);
+	if !known.iter().any(|entry| entry.name == name) {
+		let names: Vec<&str> = known.iter().map(|entry| entry.name.as_str()).collect();
+		return Response::error(if names.is_empty() {
+			format!("no profile called `{name}`, and this machine has none")
+		} else {
+			format!(
+				"no profile called `{name}`; this machine has {}",
+				names.join(", ")
+			)
+		});
+	}
+
+	// Replacing, because switching twice must edit one file rather than
+	// leaving the previous choice behind for the loader to argue with.
+	let text = format!("global {{\n\tprofile = \"{name}\"\n}}\n");
+	match netcfgd_host::config::install_drop_in(
+		&state.paths.config,
+		&state.paths.factory,
+		drop_in,
+		&text,
+		true,
+	) {
+		Ok(_) => {
+			state.reload();
+			Response::Ok
+		}
+		Err(message) => Response::error(message),
 	}
 }
 

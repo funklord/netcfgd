@@ -582,6 +582,67 @@ bool ncfg_connection::probes(QList<ncfg_probe_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::profile_set(const QString &name, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray chosen = name.toUtf8();
+	/* An empty name is "stop using a profile", which the client spells as no
+	 * name at all rather than as an empty one. */
+	const char *which = name.isEmpty() ? nullptr : chosen.constData();
+	if (!ncfg_client_profile_set(client, which, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
+bool ncfg_connection::profiles(QList<ncfg_profile_row> *out, QString *chosen, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (chosen) {
+		chosen->clear();
+	}
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_profiles_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_profiles(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_profile_row row;
+		row.name = from_c(found.items[i].name);
+		row.shipped = found.items[i].shipped != 0;
+		out->append(row);
+	}
+	if (chosen) {
+		*chosen = from_c(found.chosen);
+	}
+	ncfg_profiles_free(&found);
+	return true;
+}
+
 bool ncfg_connection::radios(QList<ncfg_radio_row> *out, QString *error)
 {
 	if (!out) {

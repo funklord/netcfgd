@@ -17,9 +17,23 @@
  *   opened a menu would be wrong twice over. Joining therefore lives in the
  *   window, where a scan is a thing the operator asked for.
  *
- *   **Anything needing the admin tier.** Disconnecting is the `wifi` tier and
- *   is offered; applying is not, because a menu is the wrong place to change a
- *   machine without showing the plan first, which is the whole product.
+ *   **Applying.** A menu is the wrong place to change a machine without
+ *   showing the plan first, which is the whole product. Disconnecting is
+ *   offered because it is the `wifi` tier and needs no plan to understand.
+ *
+ * THE ONE ADMIN-TIER THING IT DOES, AND WHY
+ *   **Switching profiles**, which is a configuration write and therefore the
+ *   `admin` tier. This paragraph used to say the tray did nothing of the kind.
+ *   It does now, by instruction, and the reason it is the right exception is
+ *   that a profile is the one change whose entire value is being one click
+ *   away: an operator moving between office, home and offline is doing it
+ *   several times a day, and a change that costs a window and a plan review
+ *   each time is one they will stop making.
+ *
+ *   It is not silent. Switching asks first, naming the profile and saying
+ *   plainly that the network is about to be reconfigured -- because the daemon
+ *   reconciles a changed configuration on its own, so writing the selection
+ *   *is* the change. That confirmation is this menu's stand-in for the plan.
  *
  * IF THERE IS NO TRAY
  *   Nothing is created and the window behaves as it always did. A desktop
@@ -90,6 +104,9 @@ signals:
 private slots:
 	void activated(int reason);
 	void disconnect_radio();
+	/* Write the selection, having asked. An empty name means no profile
+	 * chosen, which is the default and is not a profile called "none". */
+	void choose_profile(const QString &name);
 
 private:
 	ncfg_tray(ncfg_connection *connection, QObject *parent);
@@ -99,7 +116,13 @@ private:
 	QMenu           *menu;
 	QAction         *state_action;
 	QAction         *disconnect_action;
+	QMenu           *profile_menu;
 	QString          radio;
+	/* Rebuilt on every refresh, because a profile can appear or be chosen
+	 * from anywhere -- `ncfg`, an editor, another client. A menu built once
+	 * would go quietly stale, which is the failure this tray exists to not
+	 * have. */
+	void rebuild_profiles();
 };
 
 #endif /* NCFG_TRAY_H */

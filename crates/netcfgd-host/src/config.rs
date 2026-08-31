@@ -1854,3 +1854,35 @@ pub fn restore_folded(taken: &[(PathBuf, String)]) -> io::Result<()> {
 	}
 	Ok(())
 }
+
+/// The profiles this machine has, in name order, from both layers.
+///
+/// The operator's are listed first, so a name in both reads as theirs -- which
+/// is what it effectively is, since their files layer over the shipped ones.
+/// The same rule the loader reads by, so the list and the load agree.
+///
+/// Moved here from the cli so that `ncfg profile list` and the daemon answer
+/// from one implementation. Two enumerations of the same directories is how a
+/// gui comes to offer a profile the loader will not read.
+#[must_use]
+pub fn list_profiles(config_dir: &Path, factory_dir: &Path) -> Vec<netcfgd_proto::ProfileEntry> {
+	let mut found: Vec<netcfgd_proto::ProfileEntry> = Vec::new();
+
+	for (root, shipped) in [(config_dir, false), (factory_dir, true)] {
+		let Ok(entries) = fs::read_dir(root.join("profile")) else {
+			continue;
+		};
+		for entry in entries.flatten() {
+			if !entry.path().is_dir() {
+				continue;
+			}
+			let name = entry.file_name().to_string_lossy().into_owned();
+			if found.iter().any(|seen| seen.name == name) {
+				continue;
+			}
+			found.push(netcfgd_proto::ProfileEntry { name, shipped });
+		}
+	}
+	found.sort_by(|a, b| a.name.cmp(&b.name));
+	found
+}

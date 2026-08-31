@@ -25,7 +25,7 @@ use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{PskConfig, PskProto};
 use netcfgd_model::{
 	AddressSource, Device, Dhcp4, Dhcp6, DnsPolicy, DnsServer, Document, DriftPolicy, HookPhase,
-	HostnamePolicy, Interface, InterfaceKind, ProbePolicy, Route, Slaac,
+	HostnamePolicy, Interface, InterfaceKind, Networking, ProbePolicy, Route, Slaac,
 };
 use netcfgd_model::{EapConfig, EapMethod, SecretProvider, SecretRef, Security, Ssid, WifiNetwork};
 use std::net::IpAddr;
@@ -404,6 +404,21 @@ fn lower_global_key(document: &mut Document, assignment: &Assignment, diags: &mu
 					);
 				} else {
 					document.globals.profile = Some(name);
+				}
+			}
+		}
+		"networking" => {
+			if let Some(word) = as_string(&assignment.value, diags) {
+				match word.as_str() {
+					"on" => document.globals.networking = Networking::On,
+					"off" => document.globals.networking = Networking::Off,
+					other => diags.push(
+						Diagnostic::new(
+							assignment.span,
+							format!("`{other}` is not a networking setting"),
+						)
+						.with_help("one of: on, off"),
+					),
 				}
 			}
 		}

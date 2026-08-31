@@ -417,6 +417,16 @@ install:
 	@echo "install: netcfgd and ncfg installed; no init glue"
 	@echo "install:   $(SYSCONFDIR)/netcfgd/netcfgd.conf.example documents every feature"
 	@echo "install:   make install-systemd | install-openrc | install-procd"
+	@# The profiles the package ships. Under $(DATADIR) rather than /etc, so
+	@# they are the package's to replace on upgrade; an operator's own go in
+	@# $(SYSCONFDIR)/netcfgd/profile, which layers over these and which the
+	@# package never writes. `offline` is the one profile that can be shipped
+	@# at all: every other useful profile names this machine's interfaces, and
+	@# a package cannot know them.
+	install -d $(DESTDIR)$(DATADIR)/netcfgd/profile/offline
+	install -m 0644 packaging/profile/offline/10-offline.conf \
+		$(DESTDIR)$(DATADIR)/netcfgd/profile/offline/10-offline.conf
+	@echo "install:   ncfg profile list shows the shipped offline profile"
 	@# Constraint 2: the filesystem reflects use. conf.d/, secrets/ and hooks/
 	@# appear when something needs them, so they are not created here. The
 	@# example is not a feature's file and creates no capability, which is why
@@ -1193,7 +1203,19 @@ footprint:
 # measurement fails on noise. Observed 4208..4384 KB over twelve runs; this is
 # the peak plus a noise band of the width the debug measurement showed.
 
-RSS_LIMIT_KB ?= 4608
+# **Raised from 4608 deliberately, and it is not a memory regression.** The
+# profile feature and the document renderer added 32 KB of text (2583064 ->
+# 2615832 bytes, still inside the size gate's 3% tolerance), and VmHWM counts
+# resident text page by page -- so the number this gate pins moved while the
+# allocation it is nominally about did not: RssAnon went 488 -> 500 KB.
+# Measured five runs before the feature (4320..4500) and four after
+# (4520..4656), on glibc. On musl, which is what the apk ships, the same
+# daemon peaks around 2920 KB.
+#
+# Left as a ratchet rather than tightened, because tuning a footprint budget
+# while the design is still moving is optimising the wrong end. Re-derive the
+# band from measurement once the feature set settles.
+RSS_LIMIT_KB ?= 4864
 
 rss:
 	@$(CARGO) build --release --quiet
@@ -1301,6 +1323,12 @@ live:
 	@# "buttons don't work properly" report was about. Skips without Qt, which
 	@# is a dependency a machine may reasonably not have.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/gui_wifi.sh"
+	@# The profile verbs against a running daemon. The gui's tray lists and
+	@# switches profiles over the socket rather than off its own disk, so what
+	@# the tray can do is exactly what these two verbs do -- and neither had
+	@# ever been spoken to a daemon. No namespace: this touches no interface,
+	@# it reads and writes configuration.
+	@sh tests/live/profile.sh
 	@# The 802.1X path, where the worst fault of M8 was and which had no live
 	@# coverage: a certificate must reach the supplicant as a path it can open,
 	@# never as the content of a key.
@@ -1591,13 +1619,19 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-nm
 	rm -f $(DESTDIR)$(DATADIR)/dbus-1/system.d/netcfgd-nm.conf
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-nm.service
+	@# The shipped profile, by name. An operator's own profiles live under
+	@# $(SYSCONFDIR)/netcfgd/profile and are not touched.
+	rm -f $(DESTDIR)$(DATADIR)/netcfgd/profile/offline/10-offline.conf
+	@rmdir $(DESTDIR)$(DATADIR)/netcfgd/profile/offline 2>/dev/null || true
+	@rmdir $(DESTDIR)$(DATADIR)/netcfgd/profile 2>/dev/null || true
 	@# This one is ours: `install` wrote it, so `uninstall` takes it away. The
 	@# operator's own configuration beside it is not, and is left alone.
 	rm -f $(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf.example
 	@# Only if the operator left nothing in it. Their configuration is not
 	@# ours to remove, and an empty directory is not worth keeping.
 	@rmdir $(DESTDIR)$(SYSCONFDIR)/netcfgd 2>/dev/null || true
-	@echo "uninstall: removed the programs, the example, the desktop entry and"
+	@echo "uninstall: removed the programs, the example, the shipped profile,"
+	@echo "uninstall:   the desktop entry and"
 	@echo "uninstall:   the init glue"
 	@echo "uninstall:   any configuration you wrote in $(SYSCONFDIR)/netcfgd is"
 	@echo "uninstall:   left alone -- it is yours and this Makefile never wrote it"

@@ -1272,6 +1272,74 @@ int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t er
 	return 1;
 }
 
+void ncfg_profiles_free(ncfg_profiles_t *profiles)
+{
+	if (!profiles) {
+		return;
+	}
+	for (size_t i = 0; i < profiles->count; i++) {
+		free(profiles->items[i].name);
+	}
+	free(profiles->items);
+	free(profiles->chosen);
+	profiles->items = NULL;
+	profiles->count = 0;
+	profiles->chosen = NULL;
+}
+
+int ncfg_client_profiles(ncfg_client_t *client, ncfg_profiles_t *out, char *err,
+                         size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+	out->chosen = NULL;
+
+	ncfg_json_doc_t *doc =
+	    ncfg_client_request(client, "{\"request\":\"profile_list\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	/* Absent rather than empty when no profile is chosen, which is the
+	 * default state and not an error. `member_text` gives NULL for a missing
+	 * or null member, which is exactly the distinction wanted here. */
+	out->chosen = member_text(doc, ncfg_json_root(doc), "chosen");
+
+	uint32_t profiles = ncfg_json_member(doc, ncfg_json_root(doc), "profiles");
+	uint32_t count = ncfg_json_count(doc, profiles);
+	if (!count) {
+		/* A machine with no profiles is an ordinary answer -- and
+		 * calloc(0, n) may return NULL, which the next line would read as
+		 * being out of memory. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, profiles, i);
+		out->items[i].name = member_text(doc, entry, "name");
+		out->items[i].shipped =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "shipped"), 0);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_probes_free(ncfg_probes_t *probes)
 {
 	if (!probes) {
@@ -1730,6 +1798,61 @@ int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *
     char *err, size_t err_size)
 {
 	return put_named_text(client, "config_put", name, text, replace, err, err_size);
+}
+
+int ncfg_client_profile_set(ncfg_client_t *client, const char *name, char *err, size_t err_size)
+{
+	/* NULL is "stop using a profile", which is a real state rather than a
+	 * missing argument -- so it is sent as the request with no name, not
+	 * refused here. */
+	char stack[512];
+	char *request = stack;
+	size_t need = sizeof(stack);
+
+	if (!name) {
+		snprintf(stack, sizeof(stack), "{\"request\":\"profile_set\"}");
+	} else {
+		need = 64 + strlen(name) * 6;
+		if (need > sizeof(stack)) {
+			request = malloc(need);
+			if (!request) {
+				set_error(err, err_size, "that name does not fit in memory");
+				return 0;
+			}
+		} else {
+			need = sizeof(stack);
+		}
+
+		int head = snprintf(request, need, "{\"request\":\"profile_set\",\"name\":");
+		int built = head > 0 && (size_t)head < need;
+		size_t at = built ? (size_t)head : 0;
+		if (built) {
+			built = ncfg_client_quote(name, request + at, need - at) > 0;
+		}
+		if (built) {
+			at += strlen(request + at);
+		}
+		if (!built || at + 2 > need) {
+			if (request != stack) {
+				free(request);
+			}
+			set_error(err, err_size, "that name does not fit in one request");
+			return 0;
+		}
+		request[at++] = '}';
+		request[at] = '\0';
+	}
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (request != stack) {
+		free(request);
+	}
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
 }
 
 int ncfg_client_probe_put(ncfg_client_t *client, const char *name, const char *text, int replace,

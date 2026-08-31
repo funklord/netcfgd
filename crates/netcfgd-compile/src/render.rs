@@ -127,6 +127,9 @@ fn render_globals(document: &Document, text: &mut String, missing: &mut Unrender
 			quote(drift_name(globals.on_drift_default))
 		);
 	}
+	if globals.networking != netcfgd_model::Networking::default() {
+		body.push_str("\tnetworking = \"off\"\n");
+	}
 	match &globals.hostname_policy {
 		HostnamePolicy::None => {}
 		HostnamePolicy::FromDhcp => body.push_str("\thostname = \"from_dhcp\"\n"),
@@ -566,6 +569,15 @@ mod tests {
 			 \t\tadmin = \"root\"\n\
 			 \t}\n\
 			 }\n",
+		);
+	}
+
+	/// The off switch survives a save. A profile that turns networking off is
+	/// exactly the profile somebody most needs to come back unchanged.
+	#[test]
+	fn networking_off_round_trips() {
+		round_trips(
+			"global {\n\tnetworking = \"off\"\n}\ninterface eth0 {\n\tconfig = \"dhcp\"\n}\n",
 		);
 	}
 

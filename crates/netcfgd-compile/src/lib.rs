@@ -77,6 +77,21 @@ pub fn compile_with_provenance(
 	let mut document = lower::lower(&merged, hooks, sources, &mut provenance)?;
 	provenance.canonicalize();
 
+	// A host-wide "no networking" is applied here rather than by the planner,
+	// so that `ncfg show` and `ncfg plan` say what netcfgd actually wants. A
+	// planner rule would leave the document describing a configuration that
+	// something downstream quietly ignores, which is the shape of every
+	// "netcfgd says it is configured and the machine is not" report.
+	//
+	// It exists because a profile cannot say "every interface on this machine,
+	// down": the language has no wildcard, so it would have to name them, and
+	// the names differ per machine. One host-wide key says it once.
+	if document.globals.networking == netcfgd_model::Networking::Off {
+		for interface in &mut document.interfaces {
+			interface.enabled = false;
+		}
+	}
+
 	// Canonicalise before validating so that a diagnostic about, say, a
 	// duplicate interface names the same entry every time regardless of which
 	// drop-in file introduced it.

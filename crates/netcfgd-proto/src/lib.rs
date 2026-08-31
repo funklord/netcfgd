@@ -214,6 +214,32 @@ pub enum Request {
 	/// machine's script onto another.
 	ProbeList,
 
+	/// The profiles this machine has, and which one is chosen.
+	///
+	/// **Asked of netcfgd rather than read off the client's own disk**, for
+	/// the reason `ProbeList` gives: a gui listing its own
+	/// `/etc/netcfgd/profile` would be showing the operator's laptop while
+	/// configuring a remote machine, and would then offer to switch that
+	/// machine to a profile it does not have.
+	ProfileList,
+
+	/// Choose a profile, or stop using one.
+	///
+	/// **A verb of its own rather than a `ConfigPut` of a known filename.**
+	/// netcfgd owns the drop-in the selection lives in, and a client that
+	/// spelled that name would be a second copy of it -- one that goes stale
+	/// the day the name changes, in a client nobody rebuilt. It also puts the
+	/// check where the directories are: a name with no profile directory is
+	/// refused by the machine that would have to read it.
+	///
+	/// `admin`, like any other configuration write.
+	ProfileSet {
+		/// The profile to run, or `None` to stop using one -- which is the
+		/// default state and is not a profile called "none".
+		#[serde(skip_serializing_if = "Option::is_none", default)]
+		name: Option<String>,
+	},
+
 	/// Store a link-detection script, which netcfgd writes.
 	///
 	/// A probe is a program netcfgd runs **as root, on an interval**, so this
@@ -368,6 +394,7 @@ impl Request {
 			| Self::Status
 			| Self::Plan
 			| Self::ProbeList
+			| Self::ProfileList
 			| Self::Confirm
 			| Self::Revert
 			| Self::Reload
@@ -397,7 +424,12 @@ impl Request {
 			Self::WifiConnect { .. } => &["interface", "network"],
 			Self::ConfigPut { .. } | Self::ProbePut { .. } => &["name", "text", "replace"],
 			Self::SecretPut { .. } => &["name", "value", "replace"],
-			Self::ConfigDelete { .. } | Self::SecretDelete { .. } => &["name"],
+			// `ProfileSet` is here because its `name` is the same one member,
+			// even though it is skip_serializing_if on the unset form -- the
+			// witness pins both shapes.
+			Self::ConfigDelete { .. } | Self::SecretDelete { .. } | Self::ProfileSet { .. } => {
+				&["name"]
+			}
 			Self::RadioSet { .. } => &["interface", "activate"],
 		}
 	}
@@ -421,6 +453,18 @@ pub struct ProbeScript {
 	/// Whether netcfgd would overwrite this file, rather than write a copy
 	/// into `/etc` beside it. A shipped example is not edited in place.
 	pub editable: bool,
+}
+
+/// One profile this machine could be switched to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileEntry {
+	/// The directory name, which is what a client sends back to choose it.
+	pub name: String,
+	/// Whether this came from the factory directory rather than from `/etc`,
+	/// so a client can say whose it is. An operator's copy of a shipped
+	/// profile reads as theirs, because theirs is what layers on top.
+	pub shipped: bool,
 }
 
 /// One radio, and whether netcfgd has been given it.
@@ -561,6 +605,16 @@ pub enum Response {
 	Event(Box<Event>),
 	/// What a scan found.
 	WifiScan(Box<ScanReport>),
+	/// The profiles, in answer to [`Request::ProfileList`].
+	Profiles {
+		/// One per profile directory. A copy in `/etc` shadows a shipped one
+		/// of the same name, and only the copy is listed -- the same rule the
+		/// loader layers by.
+		profiles: Vec<ProfileEntry>,
+		/// The profile in effect, or `None`, which is the default and is not
+		/// a profile called "none".
+		chosen: Option<String>,
+	},
 	/// The link-detection scripts, in answer to [`Request::ProbeList`].
 	Probes {
 		/// One per script. A copy in `/etc` shadows a shipped example of the

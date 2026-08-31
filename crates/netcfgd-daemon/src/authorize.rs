@@ -50,7 +50,8 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// `observe` for the reason `WifiStatus` is: a display that needed a
 		// writing tier to show what is configured is a display that ends up
 		// being given one.
-		| Request::ProbeList => Tier::Observe,
+		| Request::ProbeList
+		| Request::ProfileList => Tier::Observe,
 
 		// Scanning is not reading: it transmits probe requests, it interrupts
 		// whatever the radio was doing, and it is one of the things design
@@ -101,6 +102,7 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		| Request::Confirm
 		| Request::Revert
 		| Request::Reload
+		| Request::ProfileSet { .. }
 		| Request::ConfigPut { .. }
 		// Writing a probe is `admin` for the tier system's sake and root in
 		// fact: `check_content` refuses it from anyone else. A probe is a

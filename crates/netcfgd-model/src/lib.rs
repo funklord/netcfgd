@@ -168,6 +168,33 @@ pub enum HostnamePolicy {
 	Static(String),
 }
 
+/// Whether this host does networking at all.
+///
+/// The switch a "no networking" profile needs. A profile is a set of drop-ins
+/// and the config language has no wildcard, so a profile cannot say "every
+/// interface on this machine, down" -- it would have to name them, and the
+/// names differ per machine, which is exactly what a shipped profile cannot
+/// know. One host-wide key can say it once.
+///
+/// `Off` is applied by the compiler, which disables every interface in the
+/// document. That is deliberate rather than a planner rule: `ncfg show` and
+/// `ncfg plan` then say what netcfgd actually wants, instead of showing a
+/// configuration that something downstream quietly ignores.
+///
+/// It is not `managed = false`. Unmanaged means netcfgd does not touch the
+/// interface, so whatever address it already had stays and the machine keeps
+/// talking. Off means the links go down and the addresses are withdrawn,
+/// which is what somebody choosing an offline profile is asking for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Networking {
+	/// Configure the machine as the document says.
+	#[default]
+	On,
+	/// Every interface down, every address withdrawn.
+	Off,
+}
+
 /// Host-wide policy that per-interface settings compose over.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -179,6 +206,8 @@ pub struct Globals {
 	pub on_drift_default: DriftPolicy,
 	/// Default commit-confirm window in seconds.
 	pub confirm_default: Option<u32>,
+	/// Whether this host does networking at all. See [`Networking`].
+	pub networking: Networking,
 	/// The profile whose directory is read on top of `conf.d`, if one is
 	/// chosen.
 	///
