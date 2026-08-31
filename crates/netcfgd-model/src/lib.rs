@@ -179,6 +179,16 @@ pub struct Globals {
 	pub on_drift_default: DriftPolicy,
 	/// Default commit-confirm window in seconds.
 	pub confirm_default: Option<u32>,
+	/// The profile whose directory is read on top of `conf.d`, if one is
+	/// chosen.
+	///
+	/// **Absent is the default and is not a profile called "none".** A machine
+	/// with hand-written configuration and no selection is not running a
+	/// profile, and spelling that state as one would make it permanently
+	/// confusable with the shipped `offline` profile in every diagnostic that
+	/// mentions either. 0151.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub profile: Option<String>,
 	/// Hostname handling.
 	pub hostname_policy: HostnamePolicy,
 	/// Who may do what over the control socket.

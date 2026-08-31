@@ -31,6 +31,7 @@
     },
     "on_drift_default": "report",
     "confirm_default": 90,
+    "profile": "office",
     "hostname_policy": {
       "static": "host.example"
     },

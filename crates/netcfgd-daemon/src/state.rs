@@ -99,7 +99,7 @@ impl State {
 	/// Returns the event describing what happened, for subscribers.
 	pub(crate) fn reload(&mut self) -> Event {
 		let mut sink = RunHooks::new(&self.paths.run);
-		let sources = match config::load_layered(&self.paths.factory, &self.paths.config) {
+		let sources = match config::load_with_profile(&self.paths.factory, &self.paths.config) {
 			Ok(sources) => sources,
 			Err(error) => {
 				self.diagnostics = Some(format!("{}: {error}", self.paths.config.display()));

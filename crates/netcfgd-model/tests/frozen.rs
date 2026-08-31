@@ -630,6 +630,10 @@ fn witness() -> Document {
 			on_drift_default: DriftPolicy::Report,
 			confirm_default: Some(90),
 			hostname_policy: HostnamePolicy::Static("host.example".to_owned()),
+			// Set rather than absent, so the witness pins the field's
+			// serialisation. Absent is the default and skips, which would
+			// serialise identically whether the field existed or not.
+			profile: Some("office".to_owned()),
 			control: Control {
 				observe: Principal::Any,
 				wifi: Principal::Group("netdev".to_owned()),

@@ -385,6 +385,28 @@ fn lower_global_key(document: &mut Document, assignment: &Assignment, diags: &mu
 				document.globals.on_drift_default = policy;
 			}
 		}
+		"profile" => {
+			if let Some(name) = as_string(&assignment.value, diags) {
+				// The same rule a drop-in name follows, and for the same
+				// reason: this becomes a directory netcfgd opens, and a name
+				// carrying a separator would let the configuration choose
+				// where that is rather than netcfgd.
+				if name.is_empty() || name.contains('/') || name.starts_with('.') {
+					diags.push(
+						Diagnostic::new(
+							assignment.span,
+							format!("`{name}` cannot be a profile name"),
+						)
+						.with_help(
+							"a plain name -- netcfgd chooses the directory it \
+							 is read from",
+						),
+					);
+				} else {
+					document.globals.profile = Some(name);
+				}
+			}
+		}
 		"dns" | "dns_search" | "dns_mode" | "dns_domains" => {
 			lower_dns_key(&mut document.globals.dns, assignment, diags);
 		}

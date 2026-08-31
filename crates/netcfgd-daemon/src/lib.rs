@@ -1216,7 +1216,16 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 /// A function rather than an arm for the reason its siblings are: `answer` has
 /// a line limit, and every other writer here is already one of these.
 fn delete_config_request(state: &mut State, name: &str) -> Response {
-	match netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, name) {
+	// Taking a drop-in away is a settings change like any other.
+	let folded = match take_off_profile(state, name) {
+		Ok(folded) => folded,
+		Err(message) => return Response::error(message),
+	};
+	match refold_on_failure(
+		state,
+		folded.as_deref(),
+		netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, name),
+	) {
 		Ok(()) => {
 			state.reload();
 			Response::Ok
@@ -1262,13 +1271,70 @@ fn put_secret_request(state: &State, name: &str, value: &str, replace: bool) -> 
 /// asked before the request reaches the dispatcher, because it is an
 /// authorization question and answering it in two places is how the two come
 /// to disagree. By the time execution is here the answer is yes.
+/// A person changed a setting, so the machine comes off its profile.
+///
+/// [0151]'s directive: a settings write by a person puts the machine on "none
+/// chosen", and the profile's drop-ins are folded into `conf.d` in the same
+/// step so that what is running does not move. A write netcfgd makes for
+/// itself does not come through here, which is what keeps the other half of
+/// the directive true -- the selection never moves on its own.
+///
+/// `ncfg profile set` and `unset` are exempt by name: they write the selection
+/// itself, and taking the machine off a profile in order to put it on one
+/// would be a loop.
+///
+/// [0151]: ../../../doc/decision/0151-a-profile-is-a-directory-and-it-is-switched-by-hand.md
+/// Put the profile back when the settings write it was made for did not
+/// happen. A refused drop-in changed no setting, so it must not have moved the
+/// selection either.
+fn refold_on_failure<T>(
+	state: &State,
+	folded: Option<&str>,
+	outcome: Result<T, String>,
+) -> Result<T, String> {
+	let (Err(error), Some(profile)) = (&outcome, folded) else {
+		return outcome;
+	};
+	if let Err(undo) = netcfgd_host::config::restore_profile(&state.paths.config, profile) {
+		return Err(format!(
+			"{error}\n(and the `{profile}` profile could not be put back: {undo})"
+		));
+	}
+	outcome
+}
+
+fn take_off_profile(state: &State, name: &str) -> Result<Option<String>, String> {
+	if name == netcfgd_host::config::PROFILE_DROP_IN {
+		return Ok(None);
+	}
+	match netcfgd_host::config::adopt_profile(&state.paths.config, &state.paths.factory) {
+		Ok(None) => Ok(None),
+		Ok(Some(profile)) => {
+			eprintln!(
+				"netcfgd: a setting was changed by hand, so the `{profile}` \
+				 profile was folded into conf.d and no profile is chosen now"
+			);
+			Ok(Some(profile))
+		}
+		Err(error) => Err(error.to_string()),
+	}
+}
+
 fn put_config_request(state: &mut State, name: &str, text: &str, replace: bool) -> Response {
-	match netcfgd_host::config::install_drop_in(
-		&state.paths.config,
-		&state.paths.factory,
-		name,
-		text,
-		replace,
+	let folded = match take_off_profile(state, name) {
+		Ok(folded) => folded,
+		Err(message) => return Response::error(message),
+	};
+	match refold_on_failure(
+		state,
+		folded.as_deref(),
+		netcfgd_host::config::install_drop_in(
+			&state.paths.config,
+			&state.paths.factory,
+			name,
+			text,
+			replace,
+		),
 	) {
 		Ok(_) => {
 			state.reload();

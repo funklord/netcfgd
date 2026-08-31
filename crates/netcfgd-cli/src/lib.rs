@@ -10,6 +10,7 @@
 mod client;
 mod control;
 mod drop_in;
+mod profile;
 mod secret;
 #[cfg(feature = "tui")]
 mod tui;
@@ -69,6 +70,18 @@ usage:
                            netcfgd compiles the result before keeping it, so a
                            drop-in that would break the configuration is
                            refused with the diagnostics
+  ncfg profile SUBCOMMAND  which set of drop-ins this machine runs on top of
+                           its own configuration. SUBCOMMAND is:
+                             get                 the profile in effect, or that
+                                                 none is chosen
+                             list                the profiles this machine has,
+                                                 the chosen one marked `*`
+                             set NAME            choose one. Never automatic:
+                                                 nothing netcfgd writes for
+                                                 itself may change it
+                             unset               go back to no profile chosen,
+                                                 which is the default and is
+                                                 not a profile called `none`
   ncfg secret SUBCOMMAND   credentials the config refers to. SUBCOMMAND is:
                              set NAME            store the value of
                                                  `@secret:NAME`, asked for at
@@ -225,6 +238,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"wifi" => command_wifi(&positional, &options),
 		"control" => control::run(&positional, &options),
 		"config" => drop_in::run(&positional, &options),
+		"profile" => profile::run(&positional, &options),
 		"secret" => command_secret(&positional, &options),
 		#[cfg(feature = "tui")]
 		"tui" => tui::run(&options),
@@ -382,11 +396,11 @@ fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::Pat
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
 
-	let sources = config::load_layered(
+	let sources = config::load_with_profile(
 		&config::resolve_factory_dir(options.factory_dir.as_deref()),
 		&config_dir,
 	)
-	.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
+	.map_err(|error| load_failure(&config_dir, &error))?;
 
 	let mut sink = hooks::RunHooks::new(&run_dir);
 	let (document, provenance) = netcfgd_compile::compile_with_provenance(&sources, &mut sink)
@@ -398,17 +412,31 @@ fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::Pat
 	Ok((document, run_dir))
 }
 
+/// How a failed load reads back.
+///
+/// A refusal the loader made deliberately -- the profile guard of 0151 -- says
+/// what it is and needs no framing. Wrapping it in "could not read <dir>"
+/// blamed the filesystem for a fault that was in the configuration, and sent
+/// the reader to check permissions on a directory that was perfectly readable.
+fn load_failure(config_dir: &std::path::Path, error: &std::io::Error) -> String {
+	if error.kind() == std::io::ErrorKind::InvalidData {
+		error.to_string()
+	} else {
+		format!("could not read {}: {error}", config_dir.display())
+	}
+}
+
 /// Compile, keeping the provenance table.
 fn compile_with_provenance(
 	options: &Options,
 ) -> Result<(netcfgd_model::Document, netcfgd_compile::Provenance), String> {
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
-	let sources = config::load_layered(
+	let sources = config::load_with_profile(
 		&config::resolve_factory_dir(options.factory_dir.as_deref()),
 		&config_dir,
 	)
-	.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
+	.map_err(|error| load_failure(&config_dir, &error))?;
 	let mut sink = hooks::RunHooks::new(&run_dir);
 	let (document, provenance) = netcfgd_compile::compile_with_provenance(&sources, &mut sink)
 		.map_err(|diagnostics| diagnostics.render(&sources))?;
@@ -489,7 +517,7 @@ fn command_plan(options: &Options) -> Result<ExitCode, String> {
 /// whose whole output is a document a parser is meant to consume.
 fn note_empty_config(options: &Options) {
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
-	let Ok(sources) = config::load_layered(
+	let Ok(sources) = config::load_with_profile(
 		&config::resolve_factory_dir(options.factory_dir.as_deref()),
 		&config_dir,
 	) else {
