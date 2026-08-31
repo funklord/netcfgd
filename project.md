@@ -4765,6 +4765,29 @@ Longer-range direction is in [0036](doc/decision/0036-the-shim-is-not-the-roadma
 
 ### Waiting on a decision
 
+**Added at the end of the pass that diagnosed CI**, and each is genuinely the
+holder's rather than a worker's:
+
+- **The Actions billing state.** Private repositories meter Actions minutes and
+  this account's are blocked, so six private trees run nothing while the two
+  public ones still execute. Nothing in any tree can fix it, and until it is
+  fixed **no remote check exists for netcfgd at all** — the local `make check`
+  is the whole of it, and it does not read `.rs` for style.
+- **`debian/copyright` names no copyright holder**, which is what lintian's
+  `copyright-without-copyright-notice` reports on every package build. It is
+  arguably a document a reader looks in, so the attribution directive would
+  reach it — but it also asserts `MIT OR Apache-2.0` for a tree that states no
+  terms, so adding a holder would complete the attribution half of a file whose
+  licence half nobody here can validate. `Cargo.toml` and the Alpine template
+  assert the same terms. **Three files declare a licence for a holder the tree
+  never names**, and that is the one packaging finding standing between this
+  and a distributable package.
+- **One commit is committed and unpushed**: `eb0af01`, the copyright
+  attribution on `--version` and the README. It was held deliberately rather
+  than pushed on a relayed instruction, since it carries the holder's name into
+  the program's own output. Any session in this tree can push it.
+
+
 Not work anybody should do unasked. Each is recorded where it arose; they are
 gathered here so a new session does not have to find them.
 
@@ -4936,6 +4959,23 @@ gathered here so a new session does not have to find them.
   not survived contact with hardware documents guesses.
 
 ### Things that are true and non-obvious
+
+- **CI has never been green, and its red was two real defects nobody owned.** 77 runs, 0 successes. `gh run list` shows them all as `failure` in the same column, but they are two different things and the list cannot tell them apart. The recent ones did not run at all — *"the job was not started because recent account payments have failed"*, an account-level billing state that blocks Actions minutes on private repositories, which is why only the two public trees still execute. **The earlier ones executed and failed for real reasons**, and the earliest predates this session's first commit, which was documentation-only — so the red is older than any work done here and had never been diagnosed. Both halves are now diagnosed, from the logs:
+
+  - **glibc, `make check-ci`** ([31759139671](https://github.com/funklord/netcfgd/actions/runs/31759139671)) failed at the **clippy** gate, not at `fmt`: `` `format!(..)` appended to existing `String` `` at `crates/netcfgd-sys/src/wire.rs:284`, under `-D clippy::format-push-string`. **Already fixed** — the line is gone and `cargo clippy --workspace --all-targets -- -D warnings` passes on the current tree.
+  - **musl, `cargo test`** ([31160730900](https://github.com/funklord/netcfgd/actions/runs/31160730900)) failed to *link*, not to compile: `ld: cannot find -lncursesw` and `-ltinfo`. The Alpine job installs `rust cargo make gcc musl-dev python3 git` and no ncurses, while the TUI links `ncursesw`. **Still open, and it is a workflow gap rather than a code defect** — the same shape `make cross` already records, where a cross build fails at `-lncursesw` until the target's ncurses is installed or the TUI is compiled out. Fix by adding `ncurses-dev` to that job's `apk add`, or by building it `--no-default-features`.
+
+  So when billing is restored, **expect glibc green and musl still red**. That is a prediction with a named cause, and it is the cheapest thing to check first.
+
+- **A guessed diagnosis with the right shape was still wrong, and one log settled it.** The glibc failure was reasoned about as formatting: rustfmt is absent from a distro rustc, CI installs it by name, and the local gate could not see what it never ran — a hypothesis with the right shape and one confirming instance, since installing rustfmt locally did immediately surface two files that had reached the remote unformatted. It was clippy. Same family, different gate, different defect. **The confirming instance is what made it persuasive and it was not evidence about this failure at all.**
+
+- **`gh run view --log` returns nothing here; `gh api repos/OWNER/REPO/actions/jobs/<id>/logs` returns everything.** Both were tried on the same job. The first was read as "the logs have expired", which was stated as fact and was false — the tool was wrong, not the data. `gh run view <id>` gives the job ids to feed it.
+
+- **Duration says nothing about whether a run executed.** Run `31820932952` was blocked and took **1m36s**; run `31160730900` executed sixteen steps in **40s**. The bands overlap completely, so a fast run is not a blocked one and a slow run is not an executing one. The separator is `gh run view <id>` and looking for `Set up job`: zero steps means blocked whatever the clock says. A duration is a property of the queue, not of the work — it measures how long something waited before being cancelled. This killed a heuristic that had been adopted into the shared guidelines on one repository's sample, and the entry there records why: a proxy validated on one queue is validated on one queue.
+
+- **Nothing has ever gated this tree's Rust.** `.rs` is absent from `style_gate.py`'s `indent_suffixes` *and* its `text_suffixes`, so all 144 tracked `.rs` files are invisible to `make style` — not the tab rule, not trailing whitespace, not the final newline, not ASCII. The file count it prints has never included them. **Proved rather than inferred**: space indentation, trailing whitespace and mixed tabs were added to a `.rs` file on purpose and the gate still reported every file conforming. So a green `make style` is not evidence about a `.rs` file, and every citation of it in this document that accompanied a Rust change was true and covered none of the Rust.
+
+  What has actually been checking it: `cargo` — the compiler, the test suites, and `clippy`/`fmt` **only since somebody installed them here**, which is when two already-pushed files turned out to be misformatted. Measured across all 144: zero space-indented, zero trailing whitespace, zero missing final newline, zero non-ASCII, zero space-before-tab. **A clean bill sustained by hand with nothing enforcing it** — which is worth knowing precisely, because it means the next Rust file added is unguarded too. The suffix list lives in the shared gate and a project overriding `indent_suffixes` locally replaces the whole list rather than extending it, so a local fix goes stale the day the shared default gains a suffix; it is signalled for a deliberate cross-project pass. If that pass lands, expect **118 space-indent findings here, all false** — 106 of them inside the `--help` string literal in `crates/netcfgd-cli/src/lib.rs`, because the gate skips string lines for Python and relaxes the heuristic for C and C++, and a language with neither gets the strictest check with the least knowledge.
 
 - **A field the model carries and nothing reads bounds nothing, and reads as though it does.** `HookRef` has had `timeout: Option<u32>` since the model was written. Both construction sites hardcoded it to `None`, no config key lowered one, and `hooks::run` never looked at it — so a hook ran under `Command::status()` with no bound at all, while the type said otherwise. Because the reconcile loop is single threaded and calls the executor inline, a hook that never exits stalled *everything*: no `status`, no `plan`, no reply to any request, in a process holding `CAP_NET_ADMIN` — the two commands an operator reaches for when the network stops are the two that could not answer. Bounded in [0123](doc/decision/0123-a-hook-that-never-exits-is-killed.md), sixty seconds by default, `SIGTERM` then `SIGKILL`, and the phase decides what the failure means exactly as it does for a non-zero exit. **The first version of that bound killed the wrong process**, and the lesson is its own: a hook is a *script*, so `sleep 300` inside it is a grandchild the shell forked, and signalling the child killed the shell while the work carried on reparented to init. The bound freed the daemon and not the machine — a distinction no assertion about return values can see, and the suite reported exit 0 with two orphans behind it. Found by `running-code.md`'s check for what is still running afterwards; fixed by giving the hook its own process group; asserted by reading `/proc/<pid>/cmdline` for the grandchild, because `kill -0` calls a zombie alive and a grandchild reparented to init is exactly that case. **`run_as` on the same struct had the identical shape and is fixed too**: it was also always `None` and never read, and where an unread `timeout` merely failed to bound, an unread `run_as` meant a hook that asked to drop privilege did not — against a design that says in as many words that hooks "run as a configurable user, not blindly as root". The runner drops with `setgroups`, `setgid`, `setuid` in that order and fails closed both ways. What is left is reachability, which needs config grammar and a materialiser that does not write the script 0700 root-owned.
 
