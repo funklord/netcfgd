@@ -1322,6 +1322,27 @@ been wired into `make live` before being run directly, the suite would have
 gone green while skipping half the file. `dhcpcd.sh` records the same family in
 an AND-list, so this is a repeat rather than a novelty.
 
+**0043's quirk table exists, with one row, and the row says what it was
+measured from.** `helper/modem-quirks` is keyed on the USB id, and its first
+entry is `2c7c:6007` -- a Quectel EG916Q-GL whose firmware offers ECM and RNDIS
+only, dials its own context, and bridges the operator address rather than
+handing out a private one. A row nobody has run is a guess with a citation and
+is worse than an empty table, so the file says that and asks for the evidence.
+
+**The table explains and does not decide**, which is the design and not
+caution. The helper waits for the module to dial and dials itself if it has
+not, which is right whether or not the module autoconnects -- a helper that
+chose from the table would behave worse on every module the table does not
+know, and the unknown module is the one somebody is holding when it fails. The
+first version of the helper never dialled at all, which worked only because the
+one module measured happens to autoconnect.
+
+**Both halves of the lookup are tested**, including the one that matches. A
+lookup that has never found anything reports "unknown module" for every module
+and looks exactly like one that works, so the test builds the sysfs shape a
+real module has -- ids on the device *above* the interface the tty belongs to,
+which is why the lookup walks up rather than reading one directory.
+
 **Selecting between SIM sources belongs here, apart from the hardware poke.**
 See [0150](doc/decision/0150-a-sim-source-is-chosen-the-way-an-uplink-is.md).
 The component that solved it on that board had to reinvent constraint 1 to be

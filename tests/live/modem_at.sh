@@ -156,6 +156,50 @@ fi
 contains "and says how long it waited" "$(cat "$work/out")" "not attached after"
 stop_modem
 
+# 6. **The quirks table's matching half.**
+#
+#    A lookup that has never matched anything reports "unknown module" for
+#    every module and looks exactly like one that works. The pty above is not
+#    a USB device and finds nothing, which is the right answer and proves only
+#    the not-found path -- so this builds the sysfs shape a real module has and
+#    checks the found path too.
+sysroot="$work/sys"
+mkdir -p "$sysroot/class/tty" \
+	"$sysroot/devices/usb1/1-1/1-1:1.0/ttyUSB3"
+printf '2c7c\n' > "$sysroot/devices/usb1/1-1/idVendor"
+printf '6007\n' > "$sysroot/devices/usb1/1-1/idProduct"
+ln -s "../../devices/usb1/1-1/1-1:1.0/ttyUSB3" "$sysroot/class/tty/ttyUSB3"
+# The ids sit on the device *above* the interface the tty belongs to, which is
+# why the lookup walks up rather than reading one directory.
+ln -s .. "$sysroot/devices/usb1/1-1/1-1:1.0/ttyUSB3/device"
+
+start_modem
+out=$(NCFG_SYS_ROOT="$sysroot" NCFG_MODEM_QUIRKS="$repo/helper/modem-quirks" \
+	sh "$helper" status -p "$port" 2>&1 || true)
+lacks "a port whose sysfs says nothing is not claimed as known" "$out" "known module"
+stop_modem
+
+# The same helper, told to look at a tty name the fake sysfs describes. The
+# port it talks to is still the pty -- what is being tested is the lookup, not
+# the modem.
+out=$(NCFG_SYS_ROOT="$sysroot" NCFG_MODEM_QUIRKS="$repo/helper/modem-quirks" \
+	sh -c '. /dev/stdin' <<QUIRK 2>&1 || true
+port=/dev/ttyUSB3
+sysroot="\$NCFG_SYS_ROOT"
+table="\$NCFG_MODEM_QUIRKS"
+device=\$(readlink -f "\$sysroot/class/tty/\$(basename \$port)/device" 2>/dev/null)
+while [ -n "\$device" ] && [ "\$device" != "/" ]; do
+	if [ -r "\$device/idVendor" ] && [ -r "\$device/idProduct" ]; then
+		grep -i "^\$(cat \$device/idVendor):\$(cat \$device/idProduct)[[:space:]]" "\$table"
+		break
+	fi
+	device=\$(dirname "\$device")
+done
+QUIRK
+)
+contains "and a module the table knows is found by its usb id" "$out" "2c7c:6007"
+contains "with what was measured about it" "$out" "autoconnect=yes"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "modem_at.sh: all checks passed"

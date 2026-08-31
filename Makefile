@@ -434,6 +434,11 @@ install-modem-mbim:
 	@# other does not -- mbimcli for one, a tty for the other -- so shipping
 	@# both costs nothing and shipping one means guessing.
 	install -m 0755 helper/netcfgd-modem-at $(DESTDIR)$(BINDIR)/netcfgd-modem-at
+	@# The quirks table goes under /usr/share, where the helpers look first
+	@# after $NCFG_MODEM_QUIRKS and /etc. It explains rather than decides, so a
+	@# machine without it behaves identically and merely says less.
+	install -d $(DESTDIR)$(PREFIX)/share/netcfgd
+	install -m 0644 helper/modem-quirks $(DESTDIR)$(PREFIX)/share/netcfgd/modem-quirks
 	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
 	@echo "install-modem-mbim: netcfgd-modem-at installed too, for modules that"
 	@echo "install-modem-mbim:   offer neither MBIM nor QMI -- it needs only a tty"
@@ -1580,6 +1585,7 @@ uninstall:
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-at
+	rm -f $(DESTDIR)$(PREFIX)/share/netcfgd/modem-quirks
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-nm

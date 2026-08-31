@@ -1,0 +1,54 @@
+# What is known about particular cellular modules, as data.
+#
+# Decision 0043's shape: a quirk is a table entry somebody can read, diff and
+# contribute without touching code, keyed on the USB id. A quirk expressed as a
+# branch grows a second branch; a quirk expressed as a row does not.
+#
+# ## THIS TABLE EXPLAINS. IT DOES NOT DECIDE.
+#
+# The helpers behave correctly on a module that is not listed here, and that is
+# a rule rather than an aspiration: `netcfgd-modem-at` waits for the module to
+# dial and dials itself if it has not, which is right whether or not the module
+# autoconnects. A table that *decided* would make every unlisted module behave
+# worse -- and the unlisted module is the one somebody is holding when it
+# fails.
+#
+# So what this is for is answering "why is this module like that", picking a
+# sensible default port, and saying which helper applies at all.
+#
+# ## EVERY ROW IS MEASURED, AND SAYS ON WHAT
+#
+# A row nobody has run is a guess with a citation, which is worse than an empty
+# table -- somebody will trust it. If you add one, add it from a module you
+# have in front of you, and say what you read it off.
+#
+# ## FORMAT
+#
+#   vid:pid  key=value key=value ...
+#
+#   data=       ecm | mbim | qmi | rndis  -- the data path the firmware offers
+#   helper=     at | mbim                 -- which helper can drive it
+#   at=         N                         -- ttyUSB index that answers AT and
+#                                            that a modem manager does not hold
+#   autoconnect=yes | no                  -- the module dials its own context
+#                                            on registration
+#   note=       free text, no spaces around `=`
+#
+# `data=ecm` with `helper=mbim` would be a contradiction: a module offering only
+# ECM presents no /dev/cdc-wdm for mbimcli to open, which is the whole reason
+# the AT helper exists.
+
+# Quectel EG916Q-GL. Measured 2026-07-28 and after, on an i.MX93 board with the
+# module on a daughtercard: `+QCFG: "usbnet",1` (ECM; the firmware offers only
+# 1 and 3, so no MBIM and no QMI exist to select), `+QCFG: "qcautoconnect",1`,
+# `+QCFG: "nat",0`. Composition is four `option` ports plus `cdc_ether`.
+#
+# `at=3` because a running ModemManager held `ttyUSB2` and left `ttyUSB0`,
+# `ttyUSB1` and `ttyUSB3` free -- checked by looking at what had the ports open
+# rather than assumed from the port order. On a machine with no modem manager,
+# 2 answers as well.
+#
+# `nat=0` is why the host takes a DHCP lease: the module bridges the operator's
+# address rather than handing out a private one, so the ECM interface gets the
+# real address and `config = "dhcp"` is all netcfgd needs.
+2c7c:6007  data=ecm helper=at at=3 autoconnect=yes note=EG916Q-GL,firmware_EG916QGLLGR01A05M04

@@ -163,8 +163,27 @@ do_attach() {
 	quiet
 	set_apn || return 1
 
+	# **Wait first, then dial, rather than choosing by module.**
+	#
+	# Some modules dial their own context on registration -- Quectel calls it
+	# `qcautoconnect` and ships it on -- and some do not. A helper that decided
+	# which from a table would behave worse on every module the table does not
+	# know, and the unknown module is the one somebody is holding when this
+	# fails. So: wait for the module to do it, and dial only if it has not
+	# after `dial_after` seconds. That is right on both without being told
+	# which is which, and `helper/modem-quirks` explains rather than decides.
+	dialled=0
 	deadline=$(( $(date +%s) + 60 ))
+	dial_at=$(( $(date +%s) + 20 ))
 	while [ "$(date +%s)" -lt "$deadline" ]; do
+		if [ "$dialled" -eq 0 ] && [ "$(date +%s)" -ge "$dial_at" ] && ! attached; then
+			# `+CGACT` is the standard activate and is a no-op on a context
+			# that is already up, so racing a module that was about to dial
+			# for itself costs an ERROR rather than a broken bearer.
+			echo "netcfgd-modem-at: not attached after 20s, activating context 1" >&2
+			at "AT+CGACT=1,1" >/dev/null 2>&1 || true
+			dialled=1
+		fi
 		if registered && attached; then
 			# **The APN the context has, not the one we asked for.**
 			#
@@ -200,6 +219,55 @@ do_attach() {
 	at "AT+CEER" 2>/dev/null | sed 's/^/  /' >&2 || true
 	return 1
 }
+
+# What the quirks table says about the module behind this port, if anything.
+#
+# **Diagnostic only.** Nothing below changes behaviour on what it finds: the
+# table explains and does not decide, for the reason its own header gives --
+# a table that decided would make every unlisted module behave worse, and the
+# unlisted module is the one somebody is holding when this fails.
+#
+# The lookup walks sysfs from the tty to its USB device, which is where the ids
+# are. A port that is not USB -- a serial modem on a header, which still exists
+# in the places this helper is for -- simply finds nothing.
+quirks_line() {
+	table=${NCFG_MODEM_QUIRKS:-}
+	if [ -z "$table" ]; then
+		for candidate in \
+			/usr/share/netcfgd/modem-quirks \
+			/etc/netcfgd/modem-quirks \
+			"$(dirname "$0")/modem-quirks"; do
+			[ -f "$candidate" ] && table=$candidate
+		done
+	fi
+	[ -n "$table" ] && [ -f "$table" ] || return 1
+
+	# `NCFG_SYS_ROOT` for the same reason the daemon has one: without it the
+	# matching half of this lookup can only be exercised by owning the
+	# hardware, and a path that has never matched anything is one that reports
+	# "unknown module" for every module.
+	sysroot=${NCFG_SYS_ROOT:-/sys}
+	name=$(basename "$port")
+	device=$(readlink -f "$sysroot/class/tty/$name/device" 2>/dev/null) || return 1
+	# Up the tree until a directory carries both ids: the tty's own directory
+	# is the interface, and the ids live on the device above it.
+	while [ -n "$device" ] && [ "$device" != "/" ]; do
+		if [ -r "$device/idVendor" ] && [ -r "$device/idProduct" ]; then
+			id="$(cat "$device/idVendor"):$(cat "$device/idProduct")"
+			grep -i "^$id[[:space:]]" "$table" 2>/dev/null && return 0
+			return 1
+		fi
+		device=$(dirname "$device")
+	done
+	return 1
+}
+
+# Said once, before anything is attempted, because "netcfgd knows this module"
+# is worth reading at the top of a log rather than discovering afterwards.
+known=$(quirks_line || true)
+if [ -n "$known" ]; then
+	echo "netcfgd-modem-at: known module: $known" >&2
+fi
 
 case $command in
 attach)
