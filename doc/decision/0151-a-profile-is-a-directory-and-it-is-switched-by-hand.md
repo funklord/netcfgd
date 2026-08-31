@@ -141,6 +141,117 @@ and it refuses to overwrite an existing one without being told to. Selecting
 afterwards is part of the same act: having just said "this is what office
 means", being left on none would be a surprise.
 
+**Saving moves the configuration, it does not copy it.** The fold is taken
+back out of `conf.d` as part of the save, so the old profile is no longer in
+the base afterwards -- leaving it there would keep it in force after switching
+to a different profile, which is not what "saved it into office" means to
+anybody.
+
+**What gets written is a snapshot, and it says so in the file.** A profile
+layers over `conf.d`, so a snapshot that overrides everything reproduces the
+current state whatever the base says. Blocks the base still defines are
+written with `override` and blocks it does not are not, because `override`
+with nothing to override is a compile error and its absence on a defined block
+is a different one -- so the caller works out which is which rather than the
+renderer guessing.
+
+**The save is verified before it is kept.** Everything is written, the loader
+is asked what the machine now compiles to, and it must be what was running but
+for the selection just made. Anything else and every part of it is put back:
+the fold, the snapshot, the directory, the selection. The profile written here
+is what somebody relies on months later, and one that is subtly not what they
+saved is worse than a refusal today.
+
+**The renderer's coverage is partial, and refusal is the design.** It lives in
+`netcfgd-compile` beside the parser, so a key added to one is under the nose of
+whoever adds it to the other. What it cannot render it *names* -- a wireguard
+interface, an `access_point`, a dns transport -- and `save` reports the list
+and writes nothing. A renderer that silently dropped a field would be worse
+than none, because the field is gone from a profile nobody will read again
+until they need it. The round trip is the second net: render, compile the
+result, compare. Between naming and comparing, a lost field is a refusal
+rather than a surprise.
+
+Its own gate is that round trip, run over configurations written as text:
+compile, render, compile again, and the documents must be equal. Written that
+way rather than by building model values by hand, because it then also proves
+the renderer against what the parser actually accepts -- a rendering the
+compiler rejects fails in the suite instead of at somebody's next `ncfg apply`.
+
+## A profile writes `override`, and that is not a wart
+
+Found by running the thing rather than reasoning about it. A profile
+directory is read **after** the base, so a profile that changes an interface
+the base already describes writes `override interface eth0 { ... }`; a plain
+`interface eth0` is `already defined` and the profile does not load at all.
+
+That is the language working as designed -- redefinition is an error
+everywhere else too, and the diagnostic names both files and suggests the
+word. It is recorded because it is the first thing an operator writing a
+profile will hit, and because it is the opposite of the rule for `global`:
+sub-blocks of `global` merge (0147), so a profile setting `dns` writes
+`global`, while a profile setting an interface writes `override interface`.
+One reads as an exception to the other until you see that the unit differs --
+`global` is a singleton whose parts are independent, an interface is a block
+that is either this one or that one.
+
+## Changing a setting puts the machine on none, and that is the directive
+
+**Changing a setting by hand puts the machine on "none chosen". A change
+netcfgd makes for itself must never move the selection at all.** Those are the
+two halves, and they are not symmetrical because the two events are not: one
+is somebody saying what they want, the other is a program doing its job.
+
+The first half is the honest record. A profile is a preset; the moment an
+operator edits a value they have diverged from it, and a machine that goes on
+reporting `office` while running something that is not office is lying in the
+place it can least afford to. "None chosen" is exactly the state 0151 already
+defines: the machine runs its own configuration. So the edit does not modify
+the profile -- it takes the machine off it.
+
+**Nothing about the running configuration changes when that happens.** The
+profile's drop-ins are folded into `conf.d` in the same step, as one generated
+file, so the effective document before and after is identical; only the label
+moves. Anything else would make a one-line edit capable of dropping every
+override a profile carried -- a static address, a route, the link the operator
+is connected over -- as a side effect of changing something unrelated. **The
+fold is proved rather than trusted**: the loader compiles the document before
+and after and refuses to write when the two differ, which is the rule for
+mechanical changes applied to a change made on somebody's behalf.
+
+The second half is the one that needs a rule at all. netcfgd writes its own
+configuration, and a self-driven write clearing the selection would be a
+profile switch nobody asked for, arriving through a change made for an
+unrelated reason -- the hardest kind of fault to attribute afterwards. So the
+line is drawn at the actor, not at the file: **a person's settings write
+clears the selection; netcfgd's own writes leave it exactly where it was.**
+
+The hazard the guard catches is the third case, which is neither: `override
+global` replaces the whole block, so a hand-written file adding a search
+domain silently discards `profile` along with everything else in there. That
+is not an operator taking themselves off a profile, it is an accident, and it
+is refused with the file named and `global` suggested instead (0147).
+
+## A profile is written by one command and no other
+
+**Nothing writes into `profile/` except `ncfg profile save`.** Not a settings
+edit, not the gui, not the shim, not the daemon. A profile may be carefully
+crafted -- ordered drop-ins, comments, overrides that took an afternoon to get
+right -- and there is no way to recover that from the running state once
+something has helpfully rewritten it.
+
+So the workflow is three explicit steps, and the middle one is where the work
+happens:
+
+    ncfg profile set office      # run it
+    ...change settings...        # now on none chosen; office is folded in
+    ncfg profile save office     # write what is running back, and select it
+
+`save` is the only door into the directory, it names the profile it writes,
+and it refuses to overwrite an existing one without being told to. Selecting
+afterwards is part of the same act: having just said "this is what office
+means", being left on none would be a surprise.
+
 **`save` is not implemented yet.** Saving must be exact, and the only exact
 form is the effective document rendered back as config text -- which needs a
 document-to-DSL renderer netcfgd does not have. Every writer here renders one

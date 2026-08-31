@@ -79,6 +79,12 @@ usage:
                              set NAME            choose one. Never automatic:
                                                  nothing netcfgd writes for
                                                  itself may change it
+                             save NAME           write what this machine is
+                                                 running into a profile, and
+                                                 select it. The only thing
+                                                 that writes into a profile
+                                                 directory; --replace to
+                                                 overwrite one it wrote before
                              unset               go back to no profile chosen,
                                                  which is the default and is
                                                  not a profile called `none`
@@ -106,7 +112,8 @@ options:
   --factory-dir PATH       default /usr/share/netcfgd, or $NCFG_FACTORY_DIR.
                            Read before --config-dir, which overrides it
   --yes                    for `reset`: actually remove the files
-  --replace                for `secret set`: overwrite one that already exists
+  --replace                for `secret set` and `profile save`: overwrite one
+                           that already exists
   --run-dir PATH           default /run/netcfgd, or $NCFG_RUN_DIR
   --oneshot                apply once and exit; the default, there being no
                            daemon yet
