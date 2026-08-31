@@ -1436,6 +1436,112 @@ one virtual controller has nobody to talk to. That is the `btvirt` step, and
 until it exists a green `bluetooth.sh` means adapter observation works and
 nothing more.
 
+## Profiles: a directory, switched by hand
+
+A **profile** is a directory of drop-ins layered over `conf.d`, so that one
+machine can behave differently by location or by preference -- office, home,
+offline -- without the operator editing the same files back and forth. It is
+recorded in [0151](doc/decision/0151-a-profile-is-a-directory-and-it-is-switched-by-hand.md).
+
+The design in one paragraph. `global { profile = "office" }` selects one;
+the loader then reads `<config>/profile/office/*.conf` on top of the base,
+factory layer first and runtime second, exactly the way it layers `conf.d`.
+Selecting is an ordinary configuration write into a fixed drop-in,
+`90-profile`, so the state is in the configuration where it can be read,
+diffed and committed, `ncfg plan` shows what a switch would do before it does
+it, and a reboot has nothing to forget.
+
+**The default is that none is chosen** -- not a profile called `none`. The two
+are different: an absent selection means the machine runs its own
+configuration, which is what a machine that has never heard of profiles does.
+A profile that configures nothing is a separate, ordinary profile
+(`offline`), and a machine choosing it has said something.
+
+**Switching is manual, and only manual.** Automatic switching invites the
+feedback loop where a profile changes the network, the changed network
+selects another profile, and the machine oscillates. If a reason to switch
+automatically appears, it gets some other mechanism with its own damping --
+not this one.
+
+### The directive: an edit puts you on none; nothing automatic may
+
+**Changing a setting by hand puts the machine on "none chosen". A change
+netcfgd makes for itself must never move the selection.**
+
+The first half is honesty. A profile is a preset, and the moment an operator
+edits a value they have diverged from it; a machine that goes on reporting
+`office` while running something that is not office is lying where it can
+least afford to. So the edit takes the machine off the profile rather than
+quietly redefining what `office` means.
+
+**The running configuration does not change when that happens.** The profile's
+drop-ins are folded into `conf.d` in the same step, as one generated file, so
+the compiled document is identical before and after -- only the label moves.
+Otherwise a one-line edit could drop every override the profile carried, the
+link the operator is connected over included, as a side effect of changing
+something unrelated. The fold is **proved**: compile before, compile after,
+refuse the write if they differ.
+
+The second half is what needed the rule. netcfgd writes its own configuration,
+and a self-driven write clearing the selection would be a profile switch
+nobody asked for, arriving through a change made for an unrelated reason. The
+line is drawn at the actor: **a person's settings write clears the selection;
+netcfgd's own writes leave it alone.**
+
+A third case is neither, and is the one the loader guards: `override global`
+replaces the whole block, so a hand-written file adding a search domain
+silently discards `profile` with it ([0147](doc/decision/0147-global-is-a-singleton-and-its-parts-are-independent.md)).
+That is an accident rather than an intention, so it is refused, with the file
+named and `global` suggested instead. The guard watches only the drop-in
+`ncfg profile` owns; a profile chosen by hand in another file is nobody's to
+check against. Verified by neutering the comparison and watching the test fail.
+
+### A profile is written by one command and no other
+
+**Nothing writes into `profile/` except `ncfg profile save`.** Not a settings
+edit, not the gui, not the shim, not the daemon. A profile may be carefully
+crafted -- ordered drop-ins, comments, overrides that took an afternoon to get
+right -- and none of that is recoverable from the running state once something
+has helpfully rewritten it.
+
+The workflow is three explicit steps:
+
+    ncfg profile set office      # run it
+    ...change settings...        # now on none chosen; office is folded in
+    ncfg profile save office     # write what is running back, and select it
+
+`save` is the only door into the directory, names the profile it writes, and
+refuses to overwrite an existing one without being told to. It selects the
+profile afterwards, because having just said what `office` means, being left
+on none would be a surprise.
+
+**`save` is not built yet, and the reason is worth writing down.** Saving has
+to be exact -- what the machine is running now must be what the profile means
+later -- and the only exact form is the effective document rendered back as
+config text. **netcfgd has no document-to-DSL renderer**: the compiler goes one
+way, and every writer here (`wifi_profile::render`, `control::render`, the NM
+shim) renders one block it knows about. Writing a whole-document one is its own
+piece of work -- it touches interfaces, addresses, routes, dns, wifi networks,
+bluetooth, rules, qdiscs, bonds, bridges and tunnels -- and it belongs beside
+the parser in `netcfgd-compile`, so that the two cannot drift.
+
+Its gate is already obvious and should be built with it: **render, re-parse,
+and require the document to be equal.** A renderer that silently drops a field
+is worse than none, because the field is gone from a profile nobody will read
+again until they need it. Until that exists, the three-step workflow stops
+after step two: a profile is written by hand, which is the case the directive
+above was protecting in the first place.
+
+### What running it turned up
+
+A profile directory is read **after** the base, so a profile that changes an
+interface the base already describes writes `override interface eth0 { ... }`
+-- a plain `interface eth0` is `already defined` and the profile does not load
+at all. That is the language working as designed, and the diagnostic names
+both files and suggests the word. It is worth knowing because it is the
+opposite of the rule for `global`, and because it is the first thing an
+operator writing a profile will hit.
+
 ## Open: the permission system needs an overhaul
 
 **Deferred by the holder, and the shape of the answer is already given.**

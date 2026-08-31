@@ -94,6 +94,87 @@ fn put(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 		));
 	}
 
+	put_text(name, text, options.replace, &format!("`{name}`"), options)
+}
+
+fn remove(rest: &[String], options: &Options) -> Result<ExitCode, String> {
+	let Some(name) = rest.first() else {
+		return Err("`ncfg config rm` needs the name a drop-in was put under".to_owned());
+	};
+
+	remove_named(name, &format!("a drop-in called `{name}`"), options)
+}
+
+/// A person changed a setting, so the machine comes off its profile.
+///
+/// The local half of the daemon's rule of the same name, for a machine being
+/// configured before netcfgd runs on it. 0151: a settings write by a person
+/// puts the machine on "none chosen", with the profile folded into `conf.d` so
+/// that what is running does not move.
+fn take_off_profile(
+	config_dir: &std::path::Path,
+	factory_dir: &std::path::Path,
+	name: &str,
+) -> Result<Option<String>, String> {
+	if name == config::PROFILE_DROP_IN {
+		return Ok(None);
+	}
+	match config::adopt_profile(config_dir, factory_dir) {
+		Ok(None) => Ok(None),
+		Ok(Some(profile)) => {
+			println!(
+				"the `{profile}` profile was folded into your configuration and \
+				 no profile is chosen now; what is running has not changed"
+			);
+			Ok(Some(profile))
+		}
+		Err(error) => Err(error.to_string()),
+	}
+}
+
+/// Run a settings write with the fold undone if the write does not happen.
+///
+/// A refused drop-in changed no setting, so it must not have moved the
+/// selection either. The fold has to come first (see `restore_profile`), so
+/// the only way to keep that true is to put it back.
+fn with_profile_taken_off<T>(
+	config_dir: &std::path::Path,
+	factory_dir: &std::path::Path,
+	name: &str,
+	write: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+	let folded = take_off_profile(config_dir, factory_dir, name)?;
+	match (write(), folded) {
+		(Ok(value), _) => Ok(value),
+		(Err(error), None) => Err(error),
+		(Err(error), Some(profile)) => {
+			if let Err(undo) = config::restore_profile(config_dir, &profile) {
+				return Err(format!(
+					"{error}\n(and the `{profile}` profile could not be put \
+					 back: {undo})"
+				));
+			}
+			println!("nothing was written, so the `{profile}` profile is chosen again");
+			Err(error)
+		}
+	}
+}
+
+/// Store one drop-in: the daemon when it is listening, the directory when it
+/// is not.
+///
+/// Extracted from `put` so that `ncfg profile set` writes a drop-in exactly
+/// the way `ncfg config put` does. A second writer beside this one is how the
+/// daemon and the directory come to disagree about which is authoritative.
+/// `subject` is how the file is named back to the reader, since "the profile
+/// `office`" means something to somebody `90-profile` does not.
+pub(crate) fn put_text(
+	name: &str,
+	text: String,
+	replace: bool,
+	subject: &str,
+	options: &Options,
+) -> Result<ExitCode, String> {
 	// The daemon first, and the local write only when none is listening -- the
 	// same order `ncfg wifi add` and `ncfg secret set` take since 0127, and for
 	// the same reason. The local path is for a machine being configured before
@@ -101,13 +182,13 @@ fn put(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
 	if socket.exists() {
 		let request = netcfgd_proto::Request::ConfigPut {
-			name: name.clone(),
+			name: name.to_owned(),
 			text,
-			replace: options.replace,
+			replace,
 		};
 		return match crate::client::ask(&socket, &request) {
 			Ok(crate::client::Answer::Ok) => {
-				println!("netcfgd stored `{name}` and re-read its configuration");
+				println!("netcfgd stored {subject} and re-read its configuration");
 				Ok(ExitCode::SUCCESS)
 			}
 			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
@@ -117,7 +198,9 @@ fn put(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
-	let path = config::install_drop_in(&config_dir, &factory_dir, name, &text, options.replace)?;
+	let path = with_profile_taken_off(&config_dir, &factory_dir, name, || {
+		config::install_drop_in(&config_dir, &factory_dir, name, &text, replace)
+	})?;
 	println!("wrote {}", path.display());
 	println!(
 		"nothing is listening on {}, so this was written directly",
@@ -126,19 +209,22 @@ fn put(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 	Ok(ExitCode::SUCCESS)
 }
 
-fn remove(rest: &[String], options: &Options) -> Result<ExitCode, String> {
-	let Some(name) = rest.first() else {
-		return Err("`ncfg config rm` needs the name a drop-in was put under".to_owned());
-	};
-
+/// Take one drop-in away, by the same daemon-then-directory rule.
+pub(crate) fn remove_named(
+	name: &str,
+	subject: &str,
+	options: &Options,
+) -> Result<ExitCode, String> {
 	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
 	if socket.exists() {
-		let request = netcfgd_proto::Request::ConfigDelete { name: name.clone() };
+		let request = netcfgd_proto::Request::ConfigDelete {
+			name: name.to_owned(),
+		};
 		return match crate::client::ask(&socket, &request) {
 			Ok(crate::client::Answer::Ok) => {
 				// Said plainly, because an absent file is success and somebody
 				// who mistyped the name would otherwise read that as "removed".
-				println!("netcfgd no longer has a drop-in called `{name}`");
+				println!("netcfgd no longer has {subject}");
 				Ok(ExitCode::SUCCESS)
 			}
 			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
@@ -148,8 +234,10 @@ fn remove(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
-	config::remove_drop_in(&config_dir, &factory_dir, name)?;
-	println!("`{name}` is not in {}", config_dir.display());
+	with_profile_taken_off(&config_dir, &factory_dir, name, || {
+		config::remove_drop_in(&config_dir, &factory_dir, name)
+	})?;
+	println!("{subject} is not in {}", config_dir.display());
 	Ok(ExitCode::SUCCESS)
 }
 

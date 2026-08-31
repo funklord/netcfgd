@@ -45,22 +45,35 @@ fn extend(sources: &mut SourceMap, dir: &Path) -> io::Result<()> {
 
 	let drop_in_dir = dir.join("conf.d");
 	if drop_in_dir.is_dir() {
-		let mut drop_ins: Vec<PathBuf> = fs::read_dir(&drop_in_dir)?
-			.filter_map(Result::ok)
-			.map(|entry| entry.path())
-			.filter(|path| {
-				path.extension()
-					.is_some_and(|ext| ext.eq_ignore_ascii_case("conf"))
-			})
-			.collect();
-		// Lexical filename order, so 10-foo.conf precedes 20-bar.conf and the
-		// precedence an operator sees matches the one they named.
-		drop_ins.sort();
-		for path in drop_ins {
-			add_file(sources, &path)?;
-		}
+		add_drop_ins(sources, &drop_in_dir)?;
 	}
 
+	Ok(())
+}
+
+/// Every `.conf` in one directory, in lexical filename order.
+///
+/// Extracted from [`extend`] because a profile directory **is** a `conf.d`:
+/// the files sit in it directly, and reading them any other way would mean two
+/// rules for what a drop-in directory looks like. The first version of the
+/// profile loader called `extend` on it, which looks for `netcfgd.conf` and a
+/// nested `conf.d` -- so it found nothing, silently, and the profile appeared
+/// to be empty.
+fn add_drop_ins(sources: &mut SourceMap, dir: &Path) -> io::Result<()> {
+	let mut drop_ins: Vec<PathBuf> = fs::read_dir(dir)?
+		.filter_map(Result::ok)
+		.map(|entry| entry.path())
+		.filter(|path| {
+			path.extension()
+				.is_some_and(|ext| ext.eq_ignore_ascii_case("conf"))
+		})
+		.collect();
+	// Lexical filename order, so 10-foo.conf precedes 20-bar.conf and the
+	// precedence an operator sees matches the one they named.
+	drop_ins.sort();
+	for path in drop_ins {
+		add_file(sources, &path)?;
+	}
 	Ok(())
 }
 
@@ -182,6 +195,159 @@ pub fn load_layered(factory: &Path, runtime: &Path) -> io::Result<SourceMap> {
 		extend(&mut sources, runtime)?;
 	}
 	Ok(sources)
+}
+
+/// The drop-in `ncfg profile set` owns, without its `.conf`.
+///
+/// Numbered high so a profile selection layers over the `conf.d` files that
+/// describe the machine, and fixed so that switching twice edits one file
+/// rather than accumulating them. Named once and read from here by the
+/// command that writes it, so that the writer and the guard below cannot
+/// drift apart -- a guard watching a filename the writer no longer uses is a
+/// guard that passes vacuously for ever.
+pub const PROFILE_DROP_IN: &str = "90-profile";
+
+/// The base configuration, plus the chosen profile's directory if there is one.
+///
+/// **A profile is the same mechanism pointed at another directory** ([0151]):
+/// `<root>/profile/<name>/*.conf`, factory then runtime, read after `conf.d`
+/// so it layers on top and `override` means what it always meant.
+///
+/// **Finding the name costs a compile.** The selector is in the configuration
+/// language rather than a bare file beside it, so the base has to be compiled
+/// before netcfgd knows which directory to open. That first compile runs with
+/// hooks disabled, because it is a question and not an application --
+/// materialising every hook twice would write them twice and fire nothing,
+/// which is the sort of difference nobody notices until a hook is not
+/// idempotent.
+///
+/// **A profile that names a profile is refused**, rather than followed. A
+/// loader that re-read until the answer stopped changing is the same shape as
+/// the automatic switching 0151 declined, and it would let a profile capture
+/// the machine.
+///
+/// # Errors
+///
+/// A directory that cannot be read. A base configuration that does not compile
+/// is **not** an error here: it has no profile to find, so the caller gets the
+/// sources and the compiler's own diagnostics, which point at the line.
+///
+/// [0151]: ../../../doc/decision/0151-a-profile-is-a-directory-and-it-is-switched-by-hand.md
+pub fn load_with_profile(factory: &Path, runtime: &Path) -> io::Result<SourceMap> {
+	let mut sources = load_layered(factory, runtime)?;
+
+	// A base that does not compile chooses nothing, and there is nothing here
+	// to check: the caller compiles it properly next and reports diagnostics
+	// that point at the line. Answering a syntax error with "your profile was
+	// taken away" would send the reader somewhere the fault is not.
+	let Ok(document) = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks) else {
+		return Ok(sources);
+	};
+	let selected = document.globals.profile.clone();
+
+	// What one file asked for, against what every file together says. 0151
+	// requires them to agree: nothing but `ncfg profile` moves the selection,
+	// so a disagreement is some other config change having taken it away --
+	// which is the automatic switch to no profile that record forbids.
+	if let Some(asked) = profile_drop_in_asks(&sources) {
+		if selected.as_deref() != Some(asked.as_str()) {
+			return Err(shadowed_profile(&sources, &asked, selected.as_deref()));
+		}
+	}
+
+	let Some(name) = selected else {
+		return Ok(sources);
+	};
+
+	// The same guard `load_layered` makes, one directory down and for the same
+	// reason: one directory read twice defines every block twice, which is an
+	// error rather than a no-op. Missing it made a profile fail to compile and
+	// report itself as a loop, which is a confusing way to say "read once".
+	let roots: &[&Path] = if factory == runtime {
+		&[factory]
+	} else {
+		&[factory, runtime]
+	};
+	for root in roots {
+		let dir = root.join("profile").join(&name);
+		if dir.is_dir() {
+			add_drop_ins(&mut sources, &dir)?;
+		}
+	}
+
+	// The refusal above, checked rather than assumed. A profile directory that
+	// sets `profile` would otherwise be silently ignored -- the base's answer
+	// already won -- and silently ignored is how somebody spends an afternoon
+	// wondering why their profile does not switch.
+	// Only when it compiles and says something else. A combined configuration
+	// that does not compile is the caller's to report, with diagnostics that
+	// point at the line -- answering that with "your profile chose again"
+	// would send the reader somewhere the fault is not.
+	let after = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks);
+	if after.is_ok_and(|document| document.globals.profile.as_deref() != Some(name.as_str())) {
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!(
+				"the `{name}` profile sets `profile` itself, which would make \
+				 the loader choose again; remove it"
+			),
+		));
+	}
+	Ok(sources)
+}
+
+/// What the profile drop-in by itself asks for.
+///
+/// Compiled alone, deliberately. The whole point is to learn what this one
+/// file says without anything else being able to answer for it, so that the
+/// two can then be compared.
+fn profile_drop_in_asks(sources: &SourceMap) -> Option<String> {
+	let id = sources.ids().find(|id| {
+		Path::new(sources.name(*id))
+			.file_stem()
+			.is_some_and(|stem| stem == PROFILE_DROP_IN)
+	})?;
+	let mut alone = SourceMap::new();
+	alone.add(sources.name(id), sources.text(id));
+	netcfgd_compile::compile(&alone, &mut netcfgd_compile::NoHooks)
+		.ok()?
+		.globals
+		.profile
+}
+
+/// The refusal when something has taken the selection away.
+///
+/// It names the likely culprit, because the reader's next question is which
+/// file did it and the loader is the only thing holding the whole list.
+fn shadowed_profile(sources: &SourceMap, asked: &str, selected: Option<&str>) -> io::Error {
+	let ids: Vec<_> = sources.ids().collect();
+	let culprit = ids.iter().rev().find(|id| {
+		let text = sources.text(**id);
+		text.contains("override") && text.contains("global")
+	});
+	let blame = culprit.map_or_else(
+		|| {
+			"no file in the set writes `override global`, so look for whichever \
+		    one writes `global` last"
+				.to_owned()
+		},
+		|id| format!("`{}` writes `override global`", sources.name(*id)),
+	);
+	let now = selected.map_or_else(
+		|| "no profile at all".to_owned(),
+		|other| format!("the profile `{other}`"),
+	);
+	io::Error::new(
+		io::ErrorKind::InvalidData,
+		format!(
+			"`{PROFILE_DROP_IN}` selects the profile `{asked}`, but the \
+			 configuration as a whole selects {now}. A profile changes only \
+			 when somebody asks -- `ncfg profile set` or `ncfg profile unset` \
+			 -- so this is refused rather than applied (0151). {blame}; \
+			 `override global` replaces the whole block, taking the profile \
+			 with it. Write `global` instead and the two merge (0147)."
+		),
+	)
 }
 
 /// Every config file in one directory, in the order [`load`] would read them.
@@ -408,7 +574,7 @@ mod tests {
 
 #[cfg(test)]
 mod layering {
-	use super::{install_drop_in, load_layered, writable_files};
+	use super::{adopt_profile, install_drop_in, load_layered, load_with_profile, writable_files};
 
 	/// Writing is atomic and leaves no temporary behind.
 	///
@@ -727,6 +893,359 @@ mod layering {
 			.display()
 			.to_string()
 			.replace('\\', "/")
+	}
+
+	/// **No profile chosen is the default, and it is not a profile.**
+	///
+	/// A machine with hand-written configuration and no selection reads
+	/// exactly its own files. 0151: spelling that state as a profile called
+	/// `none` would make it confusable with the shipped `offline` one in every
+	/// diagnostic that mentioned either.
+	#[test]
+	fn no_profile_reads_only_the_base() {
+		let base = tree(
+			"p0",
+			&[("conf.d/10-base.conf", "interface eth0 { mtu = 1500 }\n")],
+		);
+		let sources = load_with_profile(&base, &base).expect("load");
+		assert_eq!(names(&sources).len(), 1, "{:?}", names(&sources));
+	}
+
+	/// The other half of the directive: a settings edit takes the machine off
+	/// its profile, and the configuration it is running does not move.
+	#[test]
+	fn folding_a_profile_in_changes_the_label_and_nothing_else() {
+		let base = tree(
+			"pa1",
+			&[
+				(
+					"conf.d/90-profile.conf",
+					"global { profile = \"office\" }\n",
+				),
+				(
+					"profile/office/10-office.conf",
+					"override interface eth0 { mtu = 9000 }\n",
+				),
+				("netcfgd.conf", "interface eth0 { mtu = 1500 }\n"),
+			],
+		);
+		let before = netcfgd_compile::compile(
+			&load_with_profile(&base, &base).expect("load"),
+			&mut netcfgd_compile::NoHooks,
+		)
+		.expect("compiles");
+		assert_eq!(before.globals.profile.as_deref(), Some("office"));
+		assert_eq!(before.interfaces[0].mtu, Some(9000));
+
+		let folded = adopt_profile(&base, &base)
+			.expect("fold")
+			.expect("one was chosen");
+		assert_eq!(folded, "office");
+
+		let after = netcfgd_compile::compile(
+			&load_with_profile(&base, &base).expect("load"),
+			&mut netcfgd_compile::NoHooks,
+		)
+		.expect("compiles");
+		assert_eq!(after.globals.profile, None, "on no profile now");
+		assert_eq!(
+			after.interfaces[0].mtu,
+			Some(9000),
+			"and running exactly what it was"
+		);
+		assert!(
+			!base.join("conf.d/90-profile.conf").exists(),
+			"the selection is gone"
+		);
+		assert!(
+			base.join("conf.d/05-profile-office.conf").exists(),
+			"kept, and early enough that the next edit wins"
+		);
+	}
+
+	/// No profile chosen is the common case and is not an error: there is
+	/// nothing to fold, and a settings edit is just a settings edit.
+	#[test]
+	fn folding_with_no_profile_chosen_does_nothing() {
+		let base = tree(
+			"pa2",
+			&[("netcfgd.conf", "interface eth0 { mtu = 1500 }\n")],
+		);
+		assert_eq!(adopt_profile(&base, &base).expect("fold"), None);
+	}
+
+	/// The late position, used only when the early one would change things.
+	/// A drop-in between the two means the profile really did depend on being
+	/// read last, so the fold has to go last too -- and the operator's future
+	/// edits will lose to it, which is the trade the proof is choosing.
+	#[test]
+	fn a_fold_falls_back_to_the_late_position() {
+		let base = tree(
+			"pa4",
+			&[
+				(
+					"conf.d/90-profile.conf",
+					"global { profile = \"office\" }\n",
+				),
+				(
+					"profile/office/10-office.conf",
+					"override interface eth0 { mtu = 9000 }\n",
+				),
+				(
+					"conf.d/50-middle.conf",
+					"override interface eth0 { mtu = 1280 }\n",
+				),
+				("netcfgd.conf", "interface eth0 { mtu = 1500 }\n"),
+			],
+		);
+
+		assert_eq!(
+			adopt_profile(&base, &base).expect("fold"),
+			Some("office".to_owned())
+		);
+		assert!(
+			base.join("conf.d/zz-profile-office.conf").exists(),
+			"late, because early would have lost to 50-middle"
+		);
+		assert!(!base.join("conf.d/05-profile-office.conf").exists());
+
+		let after = netcfgd_compile::compile(
+			&load_with_profile(&base, &base).expect("load"),
+			&mut netcfgd_compile::NoHooks,
+		)
+		.expect("compiles");
+		assert_eq!(after.interfaces[0].mtu, Some(9000), "unchanged either way");
+	}
+
+	/// The proof, exercised. A drop-in sorting after the folded file would
+	/// take precedence the profile used to have, so the fold would change what
+	/// the machine runs -- and is refused with nothing written.
+	#[test]
+	fn a_fold_that_would_change_the_configuration_is_refused() {
+		let base = tree(
+			"pa3",
+			&[
+				(
+					"conf.d/90-profile.conf",
+					"global { profile = \"office\" }\n",
+				),
+				(
+					"profile/office/10-office.conf",
+					"override interface eth0 { mtu = 9000 }\n",
+				),
+				// Sorts after both positions the fold may take, so neither
+				// reproduces the precedence the profile had: the profile used
+				// to be read after this file and now cannot be.
+				(
+					"conf.d/zzz-late.conf",
+					"override interface eth0 { mtu = 1280 }\n",
+				),
+				("netcfgd.conf", "interface eth0 { mtu = 1500 }\n"),
+			],
+		);
+
+		let error = adopt_profile(&base, &base).expect_err("refused");
+		assert!(error.to_string().contains("would change what"), "{error}");
+		assert!(
+			base.join("conf.d/90-profile.conf").exists(),
+			"and nothing was written"
+		);
+		for prefix in ["05-profile-", "zz-profile-"] {
+			assert!(
+				!base.join(format!("conf.d/{prefix}office.conf")).exists(),
+				"{prefix} was left behind"
+			);
+		}
+	}
+
+	/// The directive of 0151, mechanically. A hand edit that writes `override
+	/// global` -- the shape 0147 warns about -- replaces the whole block and
+	/// takes the profile selection with it. That is a switch to no profile
+	/// that nobody asked for, so the load is refused and says which file did
+	/// it.
+	#[test]
+	fn a_hand_edit_cannot_take_the_profile_away() {
+		let base = tree(
+			"pg1",
+			&[
+				(
+					"conf.d/90-profile.conf",
+					"global { profile = \"office\" }\n",
+				),
+				(
+					"conf.d/99-mine.conf",
+					"override global { dns { search = \"example.invalid\" } }\n",
+				),
+				(
+					"profile/office/10-office.conf",
+					"interface eth0 { mtu = 9000 }\n",
+				),
+			],
+		);
+
+		let error = load_with_profile(&base, &base).expect_err("it is refused");
+		let text = error.to_string();
+		assert!(text.contains("99-mine.conf"), "names the culprit: {text}");
+		assert!(text.contains("office"), "names what was asked for: {text}");
+		assert!(text.contains("ncfg profile set"), "says who may: {text}");
+	}
+
+	/// The other half, and the one that makes the guard worth having rather
+	/// than merely strict: a write that merges is not a write that shadows.
+	/// `ncfg control set` and the gui's dns tab emit their own sub-block, so
+	/// they must go on working next to a chosen profile.
+	#[test]
+	fn a_merging_write_leaves_the_profile_alone() {
+		let base = tree(
+			"pg2",
+			&[
+				(
+					"conf.d/90-profile.conf",
+					"global { profile = \"office\" }\n",
+				),
+				(
+					"conf.d/99-mine.conf",
+					"global { dns { search = \"example.invalid\" } }\n",
+				),
+				(
+					"profile/office/10-office.conf",
+					"interface eth0 { mtu = 9000 }\n",
+				),
+			],
+		);
+
+		let sources = load_with_profile(&base, &base).expect("load");
+		let document =
+			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).expect("it compiles");
+		assert_eq!(document.globals.profile.as_deref(), Some("office"));
+		assert_eq!(
+			document.interfaces[0].mtu,
+			Some(9000),
+			"the profile was read"
+		);
+	}
+
+	/// The guard reads the drop-in `ncfg profile` owns, and only that one. A
+	/// profile chosen by hand in some other file is nobody's to check against,
+	/// so the load proceeds -- a guard that fired here would forbid editing
+	/// the configuration by hand, which is not what 0151 says.
+	#[test]
+	fn a_profile_chosen_in_another_file_is_not_guarded() {
+		let base = tree(
+			"pg3",
+			&[
+				("conf.d/10-base.conf", "global { profile = \"office\" }\n"),
+				(
+					"profile/office/10-office.conf",
+					"interface eth0 { mtu = 9000 }\n",
+				),
+			],
+		);
+
+		let sources = load_with_profile(&base, &base).expect("load");
+		assert_eq!(names(&sources).len(), 2, "the profile was still read");
+	}
+
+	/// A chosen profile's directory is read on top.
+	#[test]
+	fn a_chosen_profile_is_layered_on_the_base() {
+		let base = tree(
+			"p1",
+			&[
+				("conf.d/10-base.conf", "global { profile = \"office\" }\n"),
+				(
+					"profile/office/10-office.conf",
+					"interface eth0 { mtu = 9000 }\n",
+				),
+				// A profile that was not chosen is not read, which is the
+				// point of choosing.
+				(
+					"profile/home/10-home.conf",
+					"interface eth0 { mtu = 1400 }\n",
+				),
+			],
+		);
+
+		let sources = load_with_profile(&base, &base).expect("load");
+		let found = names(&sources);
+		assert_eq!(found.len(), 2, "{found:?}");
+		assert!(found[1].ends_with("10-office.conf"), "{found:?}");
+
+		let document =
+			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).expect("it compiles");
+		assert_eq!(document.interfaces[0].mtu, Some(9000), "the profile won");
+	}
+
+	/// The operator's copy of a shipped profile layers over it, which is the
+	/// factory-and-runtime rule applied one directory down rather than a
+	/// second mechanism.
+	#[test]
+	fn a_profile_layers_factory_then_runtime() {
+		let factory = tree(
+			"p2f",
+			&[
+				("conf.d/10-base.conf", "global { profile = \"offline\" }\n"),
+				(
+					"profile/offline/10-off.conf",
+					"interface eth0 { mtu = 1280 }\n",
+				),
+			],
+		);
+		let runtime = tree(
+			"p2r",
+			&[(
+				"profile/offline/20-mine.conf",
+				"override interface eth0 { mtu = 1500 }\n",
+			)],
+		);
+
+		let sources = load_with_profile(&factory, &runtime).expect("load");
+		let document =
+			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).expect("it compiles");
+		assert_eq!(
+			document.interfaces[0].mtu,
+			Some(1500),
+			"the operator's copy layered over the shipped one"
+		);
+	}
+
+	/// **A profile that names a profile is refused rather than ignored.**
+	///
+	/// The base's answer already won, so following it would mean loading until
+	/// the answer stopped changing -- and ignoring it silently is how somebody
+	/// spends an afternoon wondering why their profile does not switch.
+	#[test]
+	fn a_profile_that_names_a_profile_is_refused() {
+		let base = tree(
+			"p3",
+			&[
+				("conf.d/10-base.conf", "global { profile = \"office\" }\n"),
+				(
+					"profile/office/10-office.conf",
+					"override global { profile = \"home\" }\n",
+				),
+			],
+		);
+
+		let error = load_with_profile(&base, &base).expect_err("must refuse");
+		let text = error.to_string();
+		assert!(text.contains("office"), "it names the profile: {text}");
+		assert!(text.contains("choose again"), "and says why: {text}");
+	}
+
+	/// A base that does not compile has no profile to find, and says so
+	/// through the compiler rather than through the loader.
+	///
+	/// The loader returning an error here would replace a diagnostic pointing
+	/// at the offending line with one that does not.
+	#[test]
+	fn a_base_that_does_not_compile_is_not_the_loader_s_error() {
+		let base = tree("p4", &[("conf.d/10-base.conf", "interface { mtu = }\n")]);
+		let sources = load_with_profile(&base, &base).expect("the loader is content");
+		assert!(
+			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).is_err(),
+			"and the compiler is the one that complains"
+		);
 	}
 }
 
@@ -1121,4 +1640,168 @@ pub fn remove_secret(config_dir: &Path, name: &str) -> Result<(), String> {
 		Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
 		Err(error) => Err(format!("could not remove {}: {error}", path.display())),
 	}
+}
+
+/// The file a folded profile is written to.
+///
+/// `zz-` so it sorts after every drop-in a person is likely to write, which is
+/// what preserves precedence: a profile is read after all of `conf.d`, so a
+/// fold that landed earlier in the order could change which override wins.
+/// The name is not load-bearing on its own -- the proof below is -- but a name
+/// that usually sorts right means the proof usually passes.
+/// Where a folded profile is tried, in order.
+///
+/// **Early first, and the proof decides.** A profile is read after all of
+/// `conf.d`, so folding it in late is what reproduces its precedence -- and
+/// late is exactly wrong afterwards, because the operator is on no profile now
+/// and the next drop-in they write should win. Landing it at `zz-` cost that:
+/// a person changed a setting, the folded file sorted after their drop-in, and
+/// `override interface` replaced the block whole, so their edit did nothing
+/// and said nothing. Found by running the workflow rather than by reading it.
+///
+/// So `05-` is tried first, which is where a future edit beats it, and `zz-`
+/// only when the early position would change what the machine runs. Neither
+/// name is load-bearing on its own: the proof is what makes the choice safe.
+const FOLDED_PREFIXES: [&str; 2] = ["05-profile-", "zz-profile-"];
+
+/// Take the machine off its profile without changing what it is running.
+///
+/// [0151]: changing a setting by hand puts the machine on "none chosen". The
+/// profile's own drop-ins are folded into `conf.d` in the same step, so the
+/// compiled document is identical afterwards and only the label moves.
+/// Without that, a one-line edit could drop every override a profile carried
+/// -- an address, a route, the link the operator is connected over -- as a
+/// side effect of changing something unrelated.
+///
+/// Returns the profile that was folded, or `None` when none was chosen, which
+/// is the common case and is not an error.
+///
+/// **The fold is proved, not trusted.** The document is compiled before and
+/// after and must be equal but for the selection itself; anything else and
+/// nothing is written. That is the rule for mechanical rewrites, applied here
+/// because this one is made on somebody's behalf while they were doing
+/// something else.
+///
+/// # Errors
+///
+/// A directory that cannot be read or written, or a fold that would change the
+/// configuration -- which is refused rather than applied.
+///
+/// [0151]: ../../../doc/decision/0151-a-profile-is-a-directory-and-it-is-switched-by-hand.md
+pub fn adopt_profile(config_dir: &Path, factory_dir: &Path) -> io::Result<Option<String>> {
+	let before_sources = load_with_profile(factory_dir, config_dir)?;
+	let Ok(before) = netcfgd_compile::compile(&before_sources, &mut netcfgd_compile::NoHooks)
+	else {
+		// It does not compile, so there is nothing to preserve and nothing to
+		// prove. Leave it alone and let the caller report the diagnostics.
+		return Ok(None);
+	};
+	let Some(name) = before.globals.profile.clone() else {
+		return Ok(None);
+	};
+
+	// The profile's files, in the order the loader read them, as one text. One
+	// file rather than several: it is generated, it is removed as a unit by
+	// `ncfg profile save`, and a person reading `conf.d` should see one thing
+	// that arrived together rather than a scatter they have to reassemble.
+	let base = load_layered(factory_dir, config_dir)?;
+	let mut folded = format!(
+		"# Generated by netcfgd: the `{name}` profile, folded in when a setting\n\
+		 # was changed by hand. The machine is on no profile now (0151); this\n\
+		 # file is what it was running, so nothing moved. Edit it freely, or\n\
+		 # `ncfg profile save {name}` to put it back and select it again.\n"
+	);
+	for id in before_sources.ids() {
+		let source = before_sources.name(id);
+		if base.ids().any(|old| base.name(old) == source) {
+			continue;
+		}
+		folded.push_str(&format!("\n# from {source}\n"));
+		folded.push_str(before_sources.text(id));
+	}
+
+	// **Verified through the real loader, not through a model of it.** The
+	// first attempt built a candidate in memory and appended the folded file
+	// last, which is not where it sorts on disk -- so it proved a layering
+	// that would never happen and passed a fold that changed the machine's
+	// MTU. Ordering is the loader's to decide; ask it rather than reimplement
+	// it. That means writing first and undoing when the answer is wrong.
+	let conf_d = config_dir.join("conf.d");
+	let selection = conf_d.join(format!("{PROFILE_DROP_IN}.conf"));
+
+	// A selection written somewhere else is not netcfgd's to move. Editing
+	// somebody's own file to take them off a profile is exactly the helpful
+	// rewrite 0151 forbids, so the machine stays on it and the edit is an
+	// ordinary edit.
+	let Ok(kept) = fs::read_to_string(&selection) else {
+		return Ok(None);
+	};
+
+	// Equal but for the selection, which is the one thing this is meant to
+	// change. Comparing the whole document would fail every time and prove
+	// nothing; comparing nothing would prove nothing either.
+	let mut expected = before.clone();
+	expected.globals.profile = None;
+
+	fs::create_dir_all(&conf_d)?;
+	let mut refusal = None;
+	for prefix in FOLDED_PREFIXES {
+		let folded_name = format!("{prefix}{name}.conf");
+		let written = conf_d.join(&folded_name);
+		fs::write(&written, &folded)?;
+		fs::remove_file(&selection)?;
+
+		let after = load_with_profile(factory_dir, config_dir)
+			.ok()
+			.and_then(|sources| {
+				netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok()
+			});
+		if after.as_ref() == Some(&expected) {
+			return Ok(Some(name));
+		}
+		refusal = Some(if after.is_none() {
+			format!(
+				"folding the `{name}` profile into the configuration would not \
+				 compile, so nothing was changed"
+			)
+		} else {
+			format!(
+				"folding the `{name}` profile into `conf.d` would change what \
+				 this machine is running, at either position tried, so nothing \
+				 was changed. `ncfg profile unset` takes the profile off \
+				 without folding it in, if that is what you want"
+			)
+		});
+		let _ = fs::write(&selection, &kept);
+		let _ = fs::remove_file(&written);
+	}
+	Err(io::Error::new(
+		io::ErrorKind::InvalidData,
+		refusal.unwrap_or_else(|| format!("the `{name}` profile could not be folded in")),
+	))
+}
+
+/// Undo a fold, because the settings write it was made for did not happen.
+///
+/// The fold has to come first -- folding after the write would have to
+/// preserve a document in which the profile still overrides the new edit, so
+/// it would land late and the edit would never take effect. Coming first means
+/// it can be made for a write that is then refused, and a rejected edit must
+/// not move the selection: nothing was changed, so nothing should have moved.
+///
+/// # Errors
+///
+/// A directory that cannot be written.
+pub fn restore_profile(config_dir: &Path, name: &str) -> io::Result<()> {
+	let conf_d = config_dir.join("conf.d");
+	for prefix in FOLDED_PREFIXES {
+		let folded = conf_d.join(format!("{prefix}{name}.conf"));
+		if folded.exists() {
+			fs::remove_file(folded)?;
+		}
+	}
+	fs::write(
+		conf_d.join(format!("{PROFILE_DROP_IN}.conf")),
+		format!("global {{\n\tprofile = \"{name}\"\n}}\n"),
+	)
 }
