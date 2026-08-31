@@ -7,7 +7,9 @@
 
 #include <QAction>
 #include <QIcon>
+#include <QActionGroup>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
 #include <QSystemTrayIcon>
@@ -102,6 +104,11 @@ ncfg_tray::ncfg_tray(ncfg_connection *connection, QObject *parent)
 	disconnect_action = menu->addAction(QStringLiteral("Disconnect wifi"));
 	connect(disconnect_action, &QAction::triggered, this, &ncfg_tray::disconnect_radio);
 
+	/* Empty until the first refresh fills it. A submenu rather than a flat
+	 * list: a machine may have several profiles and they would otherwise
+	 * crowd out the two entries somebody opens this menu for. */
+	profile_menu = menu->addMenu(QStringLiteral("Profile"));
+
 	menu->addSeparator();
 	QAction *quit = menu->addAction(QStringLiteral("Quit"));
 	connect(quit, &QAction::triggered, this, &ncfg_tray::quit_requested);
@@ -118,6 +125,11 @@ ncfg_tray::ncfg_tray(ncfg_connection *connection, QObject *parent)
 
 void ncfg_tray::refresh()
 {
+	/* Before the link check, and unconditionally: a daemon that refuses
+	 * `links` refuses `profiles` too, and the submenu then carries the same
+	 * sentence rather than being silently empty. */
+	rebuild_profiles();
+
 	QList<ncfg_link_row> links;
 	QString error;
 
@@ -238,6 +250,96 @@ void ncfg_tray::disconnect_radio()
 		state_action->setText(error);
 		icon->setToolTip(error);
 		return;
+	}
+	refresh();
+	emit changed();
+}
+
+void ncfg_tray::rebuild_profiles()
+{
+	profile_menu->clear();
+
+	QList<ncfg_profile_row> found;
+	QString chosen;
+	QString error;
+	if (!connection->profiles(&found, &chosen, &error)) {
+		/* The daemon's own words, including a refusal naming the tier --
+		 * disabled rather than hidden, because a menu that silently loses an
+		 * entry looks like a machine with no profiles. */
+		QAction *why = profile_menu->addAction(error);
+		why->setEnabled(false);
+		return;
+	}
+
+	/* Exclusive, because a machine is on one profile or none. The group is
+	 * parented to the menu so it goes when the menu is cleared. */
+	QActionGroup *group = new QActionGroup(profile_menu);
+	group->setExclusive(true);
+
+	/* First, and named for what it is. 0151: an absent selection is the
+	 * default and is not a profile called "none" -- the machine runs its own
+	 * configuration. Saying "None chosen" rather than "None" is the whole
+	 * distinction, in the one place an operator meets it. */
+	QAction *none = profile_menu->addAction(QStringLiteral("None chosen"));
+	none->setCheckable(true);
+	none->setChecked(chosen.isEmpty());
+	group->addAction(none);
+	connect(none, &QAction::triggered, this, [this] { choose_profile(QString()); });
+
+	if (found.isEmpty()) {
+		QAction *empty =
+		    profile_menu->addAction(QStringLiteral("no profiles on this machine"));
+		empty->setEnabled(false);
+		return;
+	}
+
+	profile_menu->addSeparator();
+	for (const ncfg_profile_row &profile : found) {
+		/* The shipped ones say so. An operator with their own `offline`
+		 * beside the packaged one should be able to tell which they are
+		 * about to select. */
+		const QString label = profile.shipped
+		    ? QStringLiteral("%1  (shipped)").arg(profile.name)
+		    : profile.name;
+		QAction *action = profile_menu->addAction(label);
+		action->setCheckable(true);
+		action->setChecked(profile.name == chosen);
+		group->addAction(action);
+		const QString name = profile.name;
+		connect(action, &QAction::triggered, this, [this, name] { choose_profile(name); });
+	}
+}
+
+void ncfg_tray::choose_profile(const QString &name)
+{
+	/* **Asked first, and this is the menu's stand-in for the plan.** The
+	 * daemon reconciles a changed configuration on its own, so writing the
+	 * selection is the change -- there is no later step at which somebody
+	 * would get to look. A profile switch is the strongest case for that
+	 * caution: it can take down the link the operator is connected over. */
+	const QString what = name.isEmpty()
+	    ? QStringLiteral("Stop using a profile, and run this machine's own configuration?")
+	    : QStringLiteral("Switch to the `%1` profile?").arg(name);
+	const QMessageBox::StandardButton answer = QMessageBox::question(nullptr,
+	    QStringLiteral("netcfgd"),
+	    what + QStringLiteral("\n\nThe network is reconfigured as soon as this is "
+	                          "written. Over a remote connection, this can take the "
+	                          "link down."),
+	    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (answer != QMessageBox::Yes) {
+		/* Put the ticks back where they were: the menu already moved the
+		 * check to what was clicked, and nothing was written. */
+		rebuild_profiles();
+		return;
+	}
+
+	/* The gui never spells netcfgd's own drop-in name: `profile_set` is a verb
+	 * and the daemon owns where the selection is written. An empty name is
+	 * "stop using a profile". */
+	QString error;
+	if (!connection->profile_set(name, &error)) {
+		/* The daemon's words, which name the tier when the refusal is one. */
+		QMessageBox::warning(nullptr, QStringLiteral("netcfgd"), error);
 	}
 	refresh();
 	emit changed();

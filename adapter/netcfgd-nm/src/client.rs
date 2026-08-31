@@ -312,6 +312,7 @@ fn describe(response: &Response) -> &'static str {
 		Response::ApStations(_) => "a station list",
 		Response::Radios { .. } => "a radio list",
 		Response::Probes { .. } => "a link-detection script list",
+		Response::Profiles { .. } => "a profile list",
 		Response::Ok => "ok",
 		Response::Error { .. } => "an error",
 	}

@@ -73,6 +73,18 @@ struct ncfg_probe_row {
 	bool    editable = false;
 };
 
+/*
+ * One profile the machine could be switched to.
+ *
+ * `shipped` says it came from the factory directory rather than /etc. An
+ * operator's copy of a shipped profile reads as theirs, because theirs is
+ * what layers on top.
+ */
+struct ncfg_profile_row {
+	QString name;
+	bool    shipped = false;
+};
+
 struct ncfg_saved_network_row {
 	QString id;
 	QString name;
@@ -429,6 +441,25 @@ public:
 	 * a remote machine.
 	 */
 	bool probes(QList<ncfg_probe_row> *out, QString *error);
+	/*
+	 * The profiles, and which one is chosen, from the daemon.
+	 *
+	 * `chosen` is empty when none is, which is the default and is not a
+	 * profile called "none": it means the machine runs its own configuration.
+	 *
+	 * Asked rather than read off this machine's disk, for the reason `probes`
+	 * gives -- a gui listing its own /etc/netcfgd/profile would offer to
+	 * switch a remote machine to a profile that machine does not have.
+	 */
+	bool profiles(QList<ncfg_profile_row> *out, QString *chosen, QString *error);
+	/*
+	 * Choose a profile, or stop using one with an empty name. Needs `admin`.
+	 *
+	 * A verb rather than a write of netcfgd's own filename, so the gui never
+	 * spells it. The network is reconfigured as soon as this returns -- the
+	 * daemon reconciles a changed configuration on its own -- so ask first.
+	 */
+	bool profile_set(const QString &name, QString *error);
 
 	/*
 	 * Apply, with a confirm window in seconds or 0 for none.

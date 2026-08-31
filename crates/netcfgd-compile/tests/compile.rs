@@ -2398,3 +2398,60 @@ fn a_bluetooth_device_needs_an_address_and_a_profile() {
 		.render(&sources);
 	assert!(rendered.contains("no profile"), "got: {rendered}");
 }
+
+/// The host-wide off switch a "no networking" profile needs.
+///
+/// Applied by the compiler rather than by the planner, so that `ncfg show`
+/// says what netcfgd wants instead of a configuration something downstream
+/// ignores. A profile cannot say "every interface, down" -- the language has
+/// no wildcard, so it would have to name them, and the names differ per
+/// machine.
+#[test]
+fn networking_off_disables_every_interface() {
+	let document = build_ok(
+		"global {\n\
+		 \tnetworking = \"off\"\n\
+		 }\n\
+		 interface eth0 {\n\
+		 \tconfig = \"dhcp\"\n\
+		 }\n\
+		 interface wlan0 {\n\
+		 \tconfig = \"dhcp\"\n\
+		 }\n",
+	);
+	assert_eq!(document.globals.networking, netcfgd_model::Networking::Off);
+	assert!(
+		document
+			.interfaces
+			.iter()
+			.all(|interface| !interface.enabled),
+		"every interface is down"
+	);
+	// The addressing is left in the document rather than stripped: it is what
+	// the machine goes back to, and the planner withdraws addresses when it
+	// takes a disabled link down.
+	assert!(!document.interfaces[0].addressing.is_empty());
+}
+
+/// On is the default, and saying it explicitly changes nothing.
+#[test]
+fn networking_on_is_the_default_and_is_sayable() {
+	let implied = build_ok("interface eth0 {\n\tconfig = \"dhcp\"\n}\n");
+	assert_eq!(implied.globals.networking, netcfgd_model::Networking::On);
+	assert!(implied.interfaces[0].enabled);
+
+	let stated =
+		build_ok("global {\n\tnetworking = \"on\"\n}\ninterface eth0 {\n\tconfig = \"dhcp\"\n}\n");
+	assert_eq!(implied, stated);
+}
+
+/// A word that is neither is refused, with the two that are.
+#[test]
+fn an_unknown_networking_setting_is_refused() {
+	let complaint = errors("global {\n\tnetworking = \"maybe\"\n}\n");
+	assert!(
+		complaint.contains("not a networking setting"),
+		"{complaint}"
+	);
+	assert!(complaint.contains("on, off"), "{complaint}");
+}

@@ -634,6 +634,8 @@ fn witness() -> Document {
 			// serialisation. Absent is the default and skips, which would
 			// serialise identically whether the field existed or not.
 			profile: Some("office".to_owned()),
+			// Not the default, for the same reason.
+			networking: netcfgd_model::Networking::Off,
 			control: Control {
 				observe: Principal::Any,
 				wifi: Principal::Group("netdev".to_owned()),

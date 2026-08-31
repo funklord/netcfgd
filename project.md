@@ -1539,6 +1539,88 @@ renderer against what the parser accepts. And `wifi_profile::render` in
 now a second spelling of one this can produce from a `WifiNetwork` -- they do
 not collide and neither is wrong, but they should become one.
 
+### The one profile that can be shipped
+
+**`offline` is shipped; everything else is per machine.** It is installed to
+`$(DATADIR)/netcfgd/profile/offline`, so `ncfg profile list` shows it as
+`(shipped)` and an operator's own copy at `/etc/netcfgd/profile/offline`
+layers over it -- the factory-and-runtime rule, one directory down.
+
+It is the only profile a package *can* ship, and the reason is worth stating
+because it shaped the feature. Every other useful profile names this machine's
+interfaces, and a package cannot know them. So "no networking" needed one
+host-wide key rather than a list of interfaces:
+
+```
+global {
+	networking = "off"
+}
+```
+
+**Applied by the compiler, not the planner.** `networking = "off"` disables
+every interface in the document as it is built, so `ncfg show` and `ncfg plan`
+say what netcfgd actually wants. A planner rule would leave the document
+describing a configuration something downstream quietly ignores, which is the
+shape of every "netcfgd says it is configured and the machine is not" report.
+The planner already had the rest: a disabled interface has its addresses
+withdrawn and its link brought down.
+
+**It is not `managed = false`**, and the difference matters at exactly the
+moment somebody reaches for it. Unmanaged means netcfgd does not touch the
+interface, so whatever address it had stays and the machine keeps talking.
+`networking = "off"` means the links go down and the addresses go with them,
+which is what choosing an offline profile is asking for.
+
+**Nor is it "no profile chosen".** That is the default and means the machine
+runs its own configuration; choosing `offline` is a statement. The two were
+easy to conflate when the feature was described, and they are the two ends of
+the range.
+
+### The tray lists them, and it is the one admin-tier thing it does
+
+**The tray's right-click menu carries a `Profile` submenu**: every profile the
+machine has, the chosen one ticked, `None chosen` first, and the shipped ones
+labelled `(shipped)` so an operator can tell a packaged profile from their own
+before selecting it.
+
+That is a deliberate exception to a rule the tray's own header states -- it
+does nothing needing the `admin` tier, because a menu is the wrong place to
+change a machine without showing the plan first. A profile is the right thing
+to except: its entire value is being one click away, an operator moving
+between office, home and offline does it several times a day, and a switch
+that costs a window and a plan review each time is one they will stop making.
+
+**It is not silent.** Switching asks first, naming the profile and saying that
+the network is about to be reconfigured, because the daemon reconciles a
+changed configuration on its own -- writing the selection *is* the change, and
+there is no later step at which anybody would get to look. That confirmation
+is the menu's stand-in for the plan.
+
+**Two new socket verbs, and the reason they are verbs.** `profile_list`
+answers what the machine has and what is chosen; `profile_set` chooses one or
+stops using one. Both are asked of netcfgd rather than read off the client's
+own disk, for the reason `probe_list` already gives -- a gui listing its own
+`/etc/netcfgd/profile` would be showing the operator's laptop while
+configuring a remote machine, and would then offer to switch that machine to a
+profile it does not have.
+
+`profile_set` in particular is a verb rather than a `config_put` of a known
+filename. netcfgd owns the drop-in the selection lives in, and a client that
+spelled that name would be a second copy of it, going stale the day the name
+changes in a client nobody rebuilt. It also puts the check where the
+directories are: a name with no profile directory is refused by the machine
+that would have to read it. `ncfg profile set` takes the same verb, so the two
+clients share one path rather than each writing the file their own way.
+
+**Covered by `tests/live/profile.sh`**, against a real daemon over a real
+socket -- twelve checks: both layers listed and attributed, a switch that
+shows up in the compiled document rather than only in the file, a name with no
+directory refused with what there is, the shipped `offline` profile turning
+networking off and downing the link, and unsetting going back to none chosen
+rather than to a profile called "none". It found the first thing it was
+pointed at: switching is a configuration write, so the daemon refuses it to
+anything but root, which is correct and which no unit test had exercised.
+
 ### What running it turned up
 
 A profile directory is read **after** the base, so a profile that changes an

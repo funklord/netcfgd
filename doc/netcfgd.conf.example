@@ -171,6 +171,23 @@
 #	on_drift = "report"
 #}
 
+# Whether this machine does networking at all. `off` takes every interface
+# down and withdraws every address netcfgd owns -- one key rather than a list,
+# because it is meant to be usable by a profile that cannot know what this
+# machine's interfaces are called.
+#
+# It is NOT `managed = false`, which means netcfgd does not touch an interface:
+# the address it already has stays and the machine keeps talking. This is the
+# opposite. Over a network, arm a way back first:
+#
+#   ncfg apply --confirm 60
+#
+# The shipped `offline` profile is exactly this key. `ncfg profile set offline`.
+
+#global {
+#	networking = "off"
+#}
+
 # The hostname, from the DHCP lease or pinned here.
 
 #global {

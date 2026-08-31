@@ -42,31 +42,49 @@ pub(crate) fn run(positional: &[String], options: &Options) -> Result<ExitCode, 
 /// what looks like their own file and finding it replaced on upgrade is the
 /// confusion this column exists to prevent.
 fn profile_dirs(options: &Options) -> Vec<(String, bool)> {
+	if let Some((found, _)) = from_daemon(options) {
+		return found;
+	}
 	let config = netcfgd_host::config::resolve_dir(options.config_dir.as_deref());
 	let factory = netcfgd_host::config::resolve_factory_dir(options.factory_dir.as_deref());
+	netcfgd_host::config::list_profiles(&config, &factory)
+		.into_iter()
+		.map(|entry| (entry.name, !entry.shipped))
+		.collect()
+}
 
-	let mut found: Vec<(String, bool)> = Vec::new();
-	// The operator's first, so a name in both is reported as theirs -- which
-	// is what it effectively is, since their files layer on top.
-	for (root, mine) in [(config, true), (factory, false)] {
-		let Ok(entries) = std::fs::read_dir(root.join("profile")) else {
-			continue;
-		};
-		for entry in entries.flatten() {
-			if !entry.path().is_dir() {
-				continue;
-			}
-			let name = entry.file_name().to_string_lossy().into_owned();
-			if !found.iter().any(|(seen, _)| seen == &name) {
-				found.push((name, mine));
-			}
-		}
+/// What netcfgd has, and what it is running: the profiles paired with whose
+/// each is, and the one in effect.
+type Listing = (Vec<(String, bool)>, Option<String>);
+
+/// What netcfgd says it has and what it is running, when one is listening.
+///
+/// A client only ever talks to netcfgd: listing the local
+/// `/etc/netcfgd/profile` would show this laptop while configuring a remote
+/// machine, and would then offer to switch that machine to a profile it does
+/// not have. The daemon's `chosen` comes from the document it compiled, so it
+/// is what is in effect rather than what a file asked for.
+fn from_daemon(options: &Options) -> Option<Listing> {
+	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
+	if !socket.exists() {
+		return None;
 	}
-	found.sort_by(|a, b| a.0.cmp(&b.0));
-	found
+	match crate::client::ask(&socket, &netcfgd_proto::Request::ProfileList) {
+		Ok(crate::client::Answer::Profiles { profiles, chosen }) => Some((
+			profiles
+				.into_iter()
+				.map(|entry| (entry.name, !entry.shipped))
+				.collect(),
+			chosen,
+		)),
+		_ => None,
+	}
 }
 
 fn active(options: &Options) -> Result<Option<String>, String> {
+	if let Some((_, chosen)) = from_daemon(options) {
+		return Ok(chosen);
+	}
 	let (document, _) = crate::compile(options)?;
 	Ok(document.globals.profile)
 }
@@ -276,15 +294,7 @@ fn set(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 	}
 
 	let text = format!("global {{\n\tprofile = \"{name}\"\n}}\n");
-	// Replacing, because switching twice must edit one file rather than
-	// leaving the previous choice behind for the loader to argue with.
-	crate::drop_in::put_text(
-		DROP_IN,
-		text,
-		true,
-		&format!("the profile `{name}`"),
-		options,
-	)?;
+	write_selection(Some(name), text, options)?;
 	println!("profile is now `{name}`");
 	// Said because a profile switch is the change most likely to need it: it
 	// is large, deliberate, and cannot be undone from the far end of a link it
@@ -296,8 +306,46 @@ fn set(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 	Ok(ExitCode::SUCCESS)
 }
 
+/// Put the selection where netcfgd keeps it.
+///
+/// **Through `ProfileSet` when a daemon is listening**, which is the verb the
+/// gui uses -- so the two clients take one path and the daemon's own checks
+/// run for both. Writing the drop-in directly from here would have been a
+/// second way to do the same thing, and the day the name or the rules change
+/// one of them would be wrong.
+///
+/// The local write is for a machine being configured before netcfgd runs on
+/// it, which is the fallback every other write here takes.
+fn write_selection(name: Option<&str>, text: String, options: &Options) -> Result<(), String> {
+	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
+	if socket.exists() {
+		let request = netcfgd_proto::Request::ProfileSet {
+			name: name.map(str::to_owned),
+		};
+		return match crate::client::ask(&socket, &request) {
+			Ok(crate::client::Answer::Ok) => Ok(()),
+			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
+			Ok(other) => Err(format!("the daemon sent {}", other.describe())),
+		};
+	}
+
+	match name {
+		// Replacing, because switching twice must edit one file rather than
+		// leaving the previous choice behind for the loader to argue with.
+		Some(name) => crate::drop_in::put_text(
+			DROP_IN,
+			text,
+			true,
+			&format!("the profile `{name}`"),
+			options,
+		)
+		.map(|_| ()),
+		None => crate::drop_in::remove_named(DROP_IN, "a chosen profile", options).map(|_| ()),
+	}
+}
+
 fn unset(options: &Options) -> Result<ExitCode, String> {
-	crate::drop_in::remove_named(DROP_IN, "a chosen profile", options)?;
+	write_selection(None, String::new(), options)?;
 	println!(
 		"no profile is chosen now, which is the default rather than a \
 	          profile called `none`"

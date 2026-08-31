@@ -576,6 +576,60 @@ typedef struct {
 void ncfg_probes_free(ncfg_probes_t *probes);
 
 /*
+ * One profile the machine could be switched to.
+ *
+ * `shipped` says the profile came from the factory directory rather than from
+ * /etc, so a client can say whose it is. An operator's copy of a shipped
+ * profile reads as theirs, because theirs is what layers on top.
+ */
+typedef struct {
+	char *name;
+	int   shipped;
+} ncfg_profile_t;
+
+typedef struct {
+	ncfg_profile_t *items;
+	size_t          count;
+	/* The profile in effect, or NULL. NULL is the default and is not a
+	 * profile called "none": it means the machine runs its own
+	 * configuration. */
+	char           *chosen;
+} ncfg_profiles_t;
+
+void ncfg_profiles_free(ncfg_profiles_t *profiles);
+
+/*
+ * The profiles netcfgd can see, and which one is chosen. Needs `observe`.
+ *
+ * Asked of the daemon rather than read off the disk, for the reason
+ * `ncfg_client_probes` gives: a client listing its own /etc/netcfgd/profile
+ * would be showing the machine it runs on while configuring a different one,
+ * and would then offer to switch that machine to a profile it does not have.
+ *
+ * Choosing one is not a verb of its own -- it is `ncfg_client_config_put` of a
+ * drop-in named "90-profile", which is an ordinary configuration write and
+ * needs `admin` like any other.
+ */
+int ncfg_client_profiles(ncfg_client_t *client, ncfg_profiles_t *out, char *err,
+                         size_t err_size);
+
+/*
+ * Choose a profile, or stop using one. `name` NULL means stop. Needs `admin`.
+ *
+ * **A verb rather than a write of a known filename.** netcfgd owns the drop-in
+ * the selection lives in; a client that spelled that name would be a second
+ * copy of it, going stale the day the name changes in a client nobody
+ * rebuilt. A name with no profile directory is refused by the daemon, which is
+ * the machine that would have to read it.
+ *
+ * The network is reconfigured as soon as this returns: netcfgd reconciles a
+ * changed configuration on its own. There is no later step at which somebody
+ * gets to look, so ask before calling it.
+ */
+int ncfg_client_profile_set(ncfg_client_t *client, const char *name, char *err,
+                            size_t err_size);
+
+/*
  * The link-detection scripts netcfgd can see. Needs `observe`.
  *
  * **Asked of the daemon rather than read off the disk, and that is the whole
