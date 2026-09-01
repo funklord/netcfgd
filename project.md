@@ -1595,6 +1595,35 @@ would not compile. Caught by testing each kind twice, once with every optional
 key set and once with none: the second is the case a renderer gets wrong in
 the other direction, and it is the one nobody writes.
 
+**The audit found a second one, and it is the worse of the two.**
+`Device::on_unmanage` was neither rendered nor refused. `clear` is what an
+operator chooses when the hardware is leaving their hands, and the default it
+silently reverted to is `leave` -- so a machine restored from a saved profile
+would walk away from a device without removing what netcfgd had put on it,
+stranding a `WireGuard` key in the kernel and a supplicant's passphrases.
+`render_device` also returned early when its body was empty, so a device whose
+only setting was `on_unmanage` vanished from the profile entirely rather than
+losing one line. Both are fixed and both have a test that fails without the
+fix.
+
+**Seven model fields cannot be reached from the configuration language at
+all**, which is 0061's disease in a place nobody had looked: `DnsPolicy`'s
+`options`, `dnssec` and `transport`, `DnsServer`'s `port` and `sni`, and
+`Device`'s `match` and `wifi`. `lower_dns` reads four keys -- `servers`,
+`search`, `domains`, `mode` -- and hardcodes `port: None, sni: None`; the
+device parser reads `managed`, `on_unmanage`, `leave` and `clear`. Nothing
+else in the tree writes any of them either, measured across `crates/`,
+`backend/` and `adapter/`.
+
+So the renderer's refusals for those seven are correct and **unreachable**:
+they can never fire from a document the compiler produced. They are left in
+place because the renderer takes a `Document` and not a config file, and a
+refusal that cannot fire costs nothing while a missing one costs the silent
+drop above. **What needs deciding is the model, not the renderer** -- either
+the parser gains the keys or the schema loses the fields, and the schema is
+witnessed and versioned, so neither is a passing change. Recorded rather than
+acted on.
+
 **The audit that found it is worth repeating whenever a model type gains a
 field**: list the struct's fields, list the ones the renderer mentions, and
 diff the two. Anything in neither the rendered set nor the refused set is

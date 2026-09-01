@@ -18,6 +18,7 @@
 //! the nose of whoever adds it to the other.
 
 use netcfgd_model::control::Principal;
+use netcfgd_model::device::OnUnmanage;
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
 use netcfgd_model::interface::{BridgeVlan, InterfaceKind, ProbePolicy};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
@@ -652,6 +653,15 @@ fn render_device(
 	if !device.managed {
 		body.push_str("\tmanaged = false\n");
 	}
+	// Was dropped in silence, and this is the expensive one to lose. `Clear`
+	// exists because walking away from a device otherwise strands credentials
+	// -- a WireGuard key stays loaded in the kernel, a supplicant keeps its
+	// passphrases, a running hostapd keeps its generated configuration. A
+	// profile that lost it would put the machine back on `Leave`, which is the
+	// default and the opposite intent, with nothing said.
+	if device.on_unmanage != OnUnmanage::default() {
+		body.push_str("\ton_unmanage = \"clear\"\n");
+	}
 	if body.is_empty() {
 		return;
 	}
@@ -850,6 +860,30 @@ mod tests {
 			 \t}\n\
 			 }\n",
 		);
+	}
+
+	/// `on_unmanage`, the second field found being dropped in silence.
+	///
+	/// Worse to lose than the VLANs: `clear` is chosen when the hardware is
+	/// leaving your hands, and the default it silently reverts to strands
+	/// credentials -- a `WireGuard` key stays loaded in the kernel, a
+	/// supplicant keeps its passphrases. A profile that quietly downgraded it
+	/// to `leave` would leave those behind on every machine restored from it.
+	#[test]
+	fn a_devices_unmanage_policy_round_trips() {
+		round_trips(
+			"device wlan0 {\n\
+			 \tmanaged = false\n\
+			 \ton_unmanage = \"clear\"\n\
+			 }\n",
+		);
+	}
+
+	/// The same policy on a device that is otherwise entirely default, which
+	/// is the case `render_device`'s early return would have swallowed whole.
+	#[test]
+	fn an_unmanage_policy_alone_still_renders_its_device() {
+		round_trips("device wlan1 { on_unmanage = \"clear\" }\n");
 	}
 
 	/// The per-interface keys a laptop's profile is actually about.
