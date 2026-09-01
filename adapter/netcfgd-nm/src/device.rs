@@ -1024,6 +1024,7 @@ mod tests {
 			// relays it; these fixtures are about how a device is projected
 			// onto NetworkManager's bus.
 			wireless: false,
+			network: None,
 			up: true,
 			carrier: true,
 			reachable: None,

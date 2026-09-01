@@ -627,6 +627,15 @@ fn render_network(
 	if network.metered {
 		body.push_str("\tmetered = true\n");
 	}
+	// Network level, beside `metered`, and deliberately not inside `wifi`
+	// where `priority` sits. The two are different scales: `priority` is the
+	// supplicant's, higher wins, and it chooses which network in range to
+	// join; `metric` is the kernel's, lower wins, and it ranks this network's
+	// routes against every other link once joined. A profile keeping only one
+	// would come back ranking differently from the machine it was saved on.
+	if let Some(metric) = network.metric {
+		let _ = writeln!(body, "\tmetric = {metric}");
+	}
 	// Was dropped in silence. A bssid list is how an operator pins a network
 	// to the access points that are actually theirs, so losing it widens the
 	// network to any radio broadcasting the same name -- which is the thing
@@ -942,6 +951,24 @@ mod tests {
 	fn networking_off_round_trips() {
 		round_trips(
 			"global {\n\tnetworking = \"off\"\n}\ninterface eth0 {\n\tconfig = \"dhcp\"\n}\n",
+		);
+	}
+
+	/// Both rankings at once, because they are separately easy to get wrong:
+	/// `priority` belongs inside `wifi` and `metric` beside `metered`, and a
+	/// renderer that writes either in the other's place produces a profile the
+	/// parser refuses. The two numbers are deliberately different so a swap
+	/// cannot pass.
+	#[test]
+	fn a_networks_priority_and_metric_both_round_trip() {
+		round_trips(
+			"network \"Office\" {\n\
+			 \tmetric = 50\n\
+			 \twifi {\n\
+			 \t\tpsk = \"@secret:office\"\n\
+			 \t\tpriority = 9\n\
+			 \t}\n\
+			 }\n",
 		);
 	}
 

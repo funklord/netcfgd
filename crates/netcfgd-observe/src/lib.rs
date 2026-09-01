@@ -158,6 +158,10 @@ fn observed_link(
 		// `ncfg wifi add` uses to pick a radio, shared rather than repeated:
 		// three copies of one fact is how they end up disagreeing.
 		wireless: netcfgd_sys::radio::is_wireless(&netcfgd_sys::radio::class_net(), &link.name),
+		// Filled by `host::read_wifi_association` during `augment`, not here:
+		// the kernel knows the link is a radio, but only the supplicant knows
+		// which network it joined, and only the document can name it (0153).
+		network: None,
 		up: link.up,
 		carrier: link.carrier,
 		// The observer reads the kernel, and no probe result comes from

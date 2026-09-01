@@ -767,9 +767,14 @@ fn radios_of(desired: &Document, observed: &Observed) -> Vec<String> {
 		.collect()
 }
 
-/// Compute what would have to change for `observed` to satisfy `desired`.
-#[must_use]
-pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> Plan {
+/// The builder, with everything that must be known before any interface is
+/// considered.
+///
+/// Split out of `plan` because it is a preamble rather than planning: every
+/// one of these is a set or a lookup that a decision later in the pass reads,
+/// and none of them depends on the order interfaces sort in. Keeping them
+/// here also keeps `plan` itself readable as the sequence of rules it is.
+fn prepare(desired: &Document, observed: &Observed, options: &PlanOptions) -> Builder {
 	let mut builder = Builder {
 		consented: options.allow_disruption.clone(),
 		restart_wedged: options.restart_wedged.clone(),
@@ -790,6 +795,11 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		.collect();
 
 	builder.radios = radios_of(desired, observed);
+	builder.network_metrics = desired
+		.networks
+		.iter()
+		.filter_map(|network| network.metric.map(|metric| (network.id.clone(), metric)))
+		.collect();
 	builder.has_networks = !desired.networks.is_empty();
 	builder.access_point_devices = desired
 		.access_points
@@ -808,6 +818,14 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		.filter(|device| !device.managed && device.on_unmanage == netcfgd_model::OnUnmanage::Clear)
 		.map(|device| device.name.clone())
 		.collect();
+
+	builder
+}
+
+/// Compute what would have to change for `observed` to satisfy `desired`.
+#[must_use]
+pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> Plan {
+	let mut builder = prepare(desired, observed, options);
 
 	// What the document asks for that this build does not do. Warned at plan
 	// time rather than refused at compile time: the config is valid and will
@@ -960,6 +978,12 @@ struct Builder {
 	/// `interface` block -- so it is collected up front instead of looked up
 	/// per action.
 	radios: Vec<String>,
+	/// Each network's `metric`, by network id.
+	///
+	/// Precomputed rather than looked up through the document, because the
+	/// route path does not carry one -- and this is the whole of what it needs
+	/// from it.
+	network_metrics: std::collections::HashMap<String, u32>,
 	/// Names that will exist by the end of this plan without anything
 	/// creating them directly.
 	///
@@ -1145,6 +1169,34 @@ impl Builder {
 			.iter()
 			.find(|(iface, _)| iface == name)
 			.map(|(_, id)| *id)
+	}
+
+	/// How this interface ranks right now, which for a radio depends on what
+	/// it joined.
+	///
+	/// An interface's `preference` is fixed, so a radio carried one ranking
+	/// whichever network it was on -- and "the office wifi beats this
+	/// ethernet, the cafe wifi does not" could not be said at all. A
+	/// network's `metric` is the same scale and the same meaning, and it wins
+	/// while that network is the one associated.
+	///
+	/// Falls back rather than replacing: a network with no `metric` leaves the
+	/// interface's `preference` exactly as it was, so every machine that never
+	/// needed this is unaffected.
+	///
+	/// The *gating* deliberately still keys on `preference`. Carrier and probe
+	/// decide whether an interface's routes go in at all, and that is a
+	/// property of the link rather than of the network on it -- a radio whose
+	/// network names a metric but whose interface names no preference is
+	/// asking to be ranked, not asking to have its routes withheld when the
+	/// cable is out.
+	fn effective_metric(&self, interface: &Interface, observed: &Observed) -> Option<u32> {
+		observed
+			.link(&interface.name)
+			.and_then(|link| link.network.as_deref())
+			.and_then(|id| self.network_metrics.get(id))
+			.copied()
+			.or(interface.preference)
 	}
 
 	/// Whether an interface currently has carrier.
@@ -2987,7 +3039,7 @@ impl Builder {
 			return;
 		}
 
-		let route = &with_metric(route, interface.preference);
+		let route = &with_metric(route, self.effective_metric(interface, observed));
 		if observed
 			.routes_on(name)
 			.any(|observed| route_matches(route, observed))

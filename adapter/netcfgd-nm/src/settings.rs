@@ -964,6 +964,7 @@ mod tests {
 			hidden: false,
 			security,
 			priority: 0,
+			metric: None,
 			autoconnect: true,
 			metered: false,
 			bssid: Vec::new(),

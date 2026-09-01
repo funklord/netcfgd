@@ -149,6 +149,7 @@ fn network(id: &str, ssid: &str, security: Security) -> WifiNetwork {
 		hidden: false,
 		security,
 		priority: 0,
+		metric: None,
 		autoconnect: true,
 		metered: false,
 		bssid: Vec::new(),

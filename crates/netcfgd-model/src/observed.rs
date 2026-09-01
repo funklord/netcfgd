@@ -90,6 +90,20 @@ pub struct ObservedLink {
 	/// interfaces do not exist.
 	#[serde(default)]
 	pub wireless: bool,
+	/// The configured network this link is associated to, where it is one.
+	///
+	/// **The id from the document, not the SSID**, so the planner can look the
+	/// network up and take its `metric`. Resolving an SSID and BSSID to a
+	/// configured network is the observation's job, because a network
+	/// identified by address rather than by name is exactly the one whose SSID
+	/// cannot answer "which of my networks is this?".
+	///
+	/// `None` for a wired link, for a radio that is not associated, and for
+	/// one associated to a network the document does not describe -- which is
+	/// a real state and not an error, since an operator may join something by
+	/// hand.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub network: Option<String>,
 	/// Administrative state.
 	pub up: bool,
 	/// Whether the link has carrier. Distinct from `up`: an interface can be

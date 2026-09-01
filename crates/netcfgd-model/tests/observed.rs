@@ -177,6 +177,10 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		// carries `serde(default)` for reading an older observation back, not
 		// `skip_serializing_if`, so both values are written.
 		wireless: false,
+		// Absent even in the maximal sample, and it has to be: it names the
+		// `network` block a radio is associated with, and this link is a veth.
+		// A name here would pin an observation the host could not produce.
+		network: None,
 		up: true,
 		carrier: true,
 		// The decided form, for the reason above: absent is already pinned by
@@ -492,11 +496,27 @@ fn witness() -> Observed {
 				hard: false,
 			}),
 		}],
-		links: every_ownership()
-			.into_iter()
-			.enumerate()
-			.map(|(index, ownership)| maximal_link(&format!("eth{index}"), ownership))
-			.collect(),
+		links: {
+			let mut links: Vec<ObservedLink> = every_ownership()
+				.into_iter()
+				.enumerate()
+				.map(|(index, ownership)| maximal_link(&format!("eth{index}"), ownership))
+				.collect();
+			// One associated radio, because `maximal_link` cannot be one: it is
+			// a veth, and `network` on a veth would pin an observation the host
+			// cannot produce. Without this the field is absent from the witness
+			// -- it carries `skip_serializing_if` -- and a field absent from the
+			// witness is exactly the field that can go quiet unnoticed, which is
+			// what this file exists to stop.
+			links.push(ObservedLink {
+				name: "wlan0".to_owned(),
+				kind: "wlan".to_owned(),
+				wireless: true,
+				network: Some("n-office".to_owned()),
+				..maximal_link("wlan0", Ownership::Ours)
+			});
+			links
+		},
 		addresses: Vec::new(),
 		routes: Vec::new(),
 		backends: Vec::new(),

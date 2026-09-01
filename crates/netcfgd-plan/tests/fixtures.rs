@@ -36,6 +36,7 @@ fn link(name: &str) -> ObservedLink {
 		// rather than of the `device` block, because a `wifi { }` section
 		// carries things like `portal_check` that are meaningful on anything.
 		wireless: name.starts_with("wlan"),
+		network: None,
 		up: false,
 		carrier: true,
 		reachable: None,
@@ -7651,4 +7652,110 @@ fn cycling_an_unmanaged_device_changes_nothing() {
 		"an unmanaged device must not be cycled: {:?}",
 		names(&plan)
 	);
+}
+
+/// Ranking a wifi *network* against an ethernet interface, which is the thing
+/// an interface's `preference` alone could not say.
+///
+/// A radio carries one preference whichever network it joined, so "the office
+/// wifi beats this ethernet, the cafe wifi does not" was inexpressible. The
+/// unit on the wireless side has to be the network, because that is the thing
+/// that changes.
+#[test]
+fn an_associated_networks_metric_outranks_the_interfaces_preference() {
+	let desired = document(
+		"interface eth0 {\n\
+		 \tconfig = \"192.0.2.10/24\"\n\
+		 \troutes = \"default via 192.0.2.1\"\n\
+		 \tpreference = 100\n\
+		 }\n\
+		 interface wlan0 {\n\
+		 \tconfig = \"10.0.0.5/24\"\n\
+		 \troutes = \"default via 10.0.0.1\"\n\
+		 \tpreference = 600\n\
+		 }\n\
+		 network \"Office\" {\n\
+		 \tmetric = 50\n\
+		 \twifi { psk = \"@secret:office\" }\n\
+		 }\n",
+	);
+	let mut observed = observed_with(&["eth0", "wlan0"]);
+	for link in &mut observed.links {
+		link.up = true;
+	}
+	// The radio is on `Office`, which the document ranks ahead of the cable.
+	observed.links[1].network = Some("Office".to_owned());
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let metrics: Vec<Option<u32>> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::RouteAdd { iface, route } if iface == "wlan0" => Some(route.metric),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(
+		metrics,
+		vec![Some(50)],
+		"the network's metric should win over the interface's 600: {:?}",
+		names(&plan)
+	);
+}
+
+/// The same radio on a network that names no metric keeps the interface's
+/// preference, which is what every machine that never needed this gets.
+#[test]
+fn a_network_with_no_metric_leaves_the_preference_alone() {
+	let desired = document(
+		"interface wlan0 {\n\
+		 \tconfig = \"10.0.0.5/24\"\n\
+		 \troutes = \"default via 10.0.0.1\"\n\
+		 \tpreference = 600\n\
+		 }\n\
+		 network \"Cafe\" {\n\
+		 \twifi { psk = \"@secret:cafe\" }\n\
+		 }\n",
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.links[0].network = Some("Cafe".to_owned());
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let metrics: Vec<Option<u32>> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::RouteAdd { route, .. } => Some(route.metric),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(metrics, vec![Some(600)], "{:?}", names(&plan));
+}
+
+/// An association to a network the document does not describe is a real state
+/// -- somebody joined something by hand -- and falls back rather than failing.
+#[test]
+fn an_unknown_association_falls_back_to_the_preference() {
+	let desired = document(
+		"interface wlan0 {\n\
+		 \tconfig = \"10.0.0.5/24\"\n\
+		 \troutes = \"default via 10.0.0.1\"\n\
+		 \tpreference = 600\n\
+		 }\n",
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.links[0].network = Some("SomethingElse".to_owned());
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let metrics: Vec<Option<u32>> = plan
+		.actions
+		.iter()
+		.filter_map(|action| match &action.op {
+			Op::RouteAdd { route, .. } => Some(route.metric),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(metrics, vec![Some(600)], "{:?}", names(&plan));
 }

@@ -162,6 +162,30 @@ pub struct WifiNetwork {
 	/// Higher wins when several known networks are in range.
 	#[serde(default)]
 	pub priority: i32,
+	/// How this network ranks against every other link on the machine.
+	///
+	/// **Lower wins, and it is a route metric** -- the same number and the
+	/// same scale as an interface's `preference`, because it becomes the same
+	/// thing. While the radio is associated to this network, its interface's
+	/// routes take this metric instead of the interface's own.
+	///
+	/// **This is the only way to rank a wired link against a *network*.** An
+	/// interface's `preference` is fixed, so a radio carries one ranking
+	/// whichever network it joined -- and "the office wifi beats this
+	/// ethernet, the cafe wifi does not" was inexpressible. The unit on the
+	/// wireless side has to be the network, because that is the thing that
+	/// changes.
+	///
+	/// **Not `priority`, and the two do different jobs.** `priority` is
+	/// `wpa_supplicant`'s own word for which SSID to join out of those in
+	/// range, higher winning; this is what happens to the routes afterwards.
+	/// Named `metric` rather than `preference` so that one block does not
+	/// carry two near-synonyms ranking in opposite directions.
+	///
+	/// Absent means the interface's `preference` applies unchanged, which is
+	/// what every machine that has never needed this gets.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub metric: Option<u32>,
 	/// Whether to join without being asked.
 	#[serde(default = "crate::default_true")]
 	pub autoconnect: bool,
@@ -205,4 +229,37 @@ pub struct WifiNetwork {
 	/// Hook references.
 	#[serde(default)]
 	pub hooks: Vec<HookRef>,
+}
+
+/// Which configured network an association is on.
+///
+/// By SSID, and by BSSID for a network that has no SSID to match on -- one that
+/// names access points instead and learns the name from them. Without the
+/// second, exactly the networks whose whole point is being identified by
+/// address would show as unconfigured, which is the list an operator checks to
+/// see whether netcfgd knows about what it can see.
+///
+/// **Here rather than in either caller, because there are two.** The socket
+/// answers "which network is this radio on?" for a client, and the observation
+/// answers it for the planner, which ranks a network's `metric` against an
+/// interface's `preference`. Two copies of this rule could disagree, and the
+/// disagreement would show up as a route metric that does not match what the
+/// window says the machine is associated with.
+#[must_use]
+pub fn network_for<'a>(
+	networks: &'a [WifiNetwork],
+	ssid: &Ssid,
+	bssid: &str,
+) -> Option<&'a WifiNetwork> {
+	networks.iter().find(|network| {
+		network.ssid.as_ref().map_or_else(
+			|| {
+				network
+					.bssid
+					.iter()
+					.any(|listed| listed.eq_ignore_ascii_case(bssid))
+			},
+			|stated| stated == ssid,
+		)
+	})
 }

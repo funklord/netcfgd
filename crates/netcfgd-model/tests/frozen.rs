@@ -573,6 +573,9 @@ fn every_network() -> Vec<WifiNetwork> {
 			hidden: true,
 			security,
 			priority: 30,
+			// The other ranking, and the opposite scale: lower wins
+			// here, higher wins above (0153).
+			metric: Some(300),
 			autoconnect: true,
 			metered: true,
 			bssid: vec!["00:11:22:33:44:55".to_owned()],
@@ -594,6 +597,7 @@ fn every_network() -> Vec<WifiNetwork> {
 		hidden: false,
 		security: Security::Owe,
 		priority: 10,
+		metric: Some(20),
 		autoconnect: true,
 		metered: false,
 		bssid: Vec::new(),

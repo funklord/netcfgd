@@ -257,6 +257,93 @@
           }
         ]
       }
+    },
+    {
+      "name": "wlan0",
+      "index": 7,
+      "kind": "wlan",
+      "wireless": true,
+      "network": "n-office",
+      "up": true,
+      "carrier": true,
+      "reachable": false,
+      "probe_detail": "no reply from 1.1.1.1 or 9.9.9.9 via eth0",
+      "mtu": 1500,
+      "mac": "02:00:00:00:00:01",
+      "master": "br0",
+      "parent": "eth0",
+      "offloads": [
+        "rx-checksum",
+        "tx-checksum-ip-generic"
+      ],
+      "ipv6_token": "::5",
+      "qdisc": "cake",
+      "qdisc_bandwidth_bits": 20000000,
+      "qdisc_ingress": true,
+      "ingress_redirect": "ifb-eth0",
+      "forwarding": true,
+      "rfkill": {
+        "switch": "phy0",
+        "soft": true,
+        "hard": false
+      },
+      "privacy": true,
+      "accept_ra": {
+        "value": 2,
+        "effective": true
+      },
+      "ownership": "ours",
+      "private_key_loaded": true,
+      "bond": {
+        "mode": "active-backup",
+        "miimon": 100
+      },
+      "bridge": {
+        "stp": true,
+        "forward_delay": 4,
+        "hello_time": 2,
+        "ageing_time": 300,
+        "priority": 32768,
+        "vlan_filtering": true
+      },
+      "macvlan": {
+        "mode": "bridge"
+      },
+      "vlan": {
+        "id": 42,
+        "protocol": "dot1ad"
+      },
+      "tunnel": {
+        "local": "192.0.2.1",
+        "remote": "192.0.2.2",
+        "ttl": 64,
+        "key": 42
+      },
+      "vxlan": {
+        "id": 100,
+        "local": "192.0.2.1",
+        "remote": "192.0.2.3",
+        "port": 4789
+      },
+      "wireguard": {
+        "public_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+        "listen_port": 51820,
+        "fwmark": 110,
+        "key_matches": true,
+        "peers": [
+          {
+            "public_key": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+            "preshared_key": true,
+            "preshared_matches": false,
+            "endpoint": "198.51.100.7:51820",
+            "allowed_ips": [
+              "10.0.0.0/24",
+              "fd00::/64"
+            ],
+            "keepalive": 25
+          }
+        ]
+      }
     }
   ],
   "bluetooth": [

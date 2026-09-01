@@ -312,6 +312,11 @@
 # route -- lower is better, and it is how a wired cable takes over from wifi.
 # `enabled = false` keeps the configuration and leaves the link down.
 #
+# A radio carries one `preference` whichever network it joined, which is not
+# enough to say "the office wifi beats this ethernet, the cafe wifi does not".
+# That is a statement about networks, so it is made on the network: see
+# `metric` under WIRELESS NETWORKS below.
+#
 # PER-INTERFACE DNS, which beats the global block for names in its domains.
 
 #global {
@@ -489,6 +494,48 @@
 #	}
 #	metered = true
 #}
+
+# RANKING A NETWORK AGAINST A WIRED LINK.
+#
+# `metric` is what this network's routes get while the machine is on it, and
+# it is compared against every other link's `preference` on the same scale --
+# lower is better, both are route metrics. So a network can be declared better
+# than a cable, or worse than one, without the radio having to be either.
+
+#interface eth0 {
+#	config     = "dhcp"
+#	preference = 100
+#}
+#network "Office" {
+#	metric = 50
+#	wifi {
+#		psk      = "@secret:office"
+#		priority = 100
+#	}
+#}
+#network "Cafe" {
+#	metric = 600
+#	wifi {
+#		psk      = "@secret:cafe"
+#		priority = 50
+#	}
+#}
+
+# On "Office" the wifi carries the default route (50 beats eth0's 100); on
+# "Cafe" the cable does (100 beats 600). The radio never changed.
+#
+# `metric` and `priority` are different questions and different scales, which
+# is why they are two words:
+#
+#   priority  higher wins, and it chooses which network in range to JOIN.
+#             It is wpa_supplicant's own vocabulary and it never leaves the
+#             supplicant.
+#   metric    lower wins, and it ranks the routes of the network already
+#             joined against every other link. It never influences which
+#             network is chosen.
+#
+# A network with no `metric` leaves its interface's `preference` alone, which
+# is what every configuration written before this existed does.
 
 # A hidden network has to be probed for by name.
 

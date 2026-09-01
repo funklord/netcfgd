@@ -55,6 +55,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
 	ask_supplicants(observed);
+	read_wifi_association(observed, desired);
 	read_advertised(observed, run_dir);
 	read_secret_currency(observed, run_dir, desired);
 	read_tunnel_currency(observed, run_dir, desired);
@@ -285,6 +286,57 @@ fn ask_supplicants(observed: &mut Observed) {
 			continue;
 		}
 		backend.answering = Some(netcfgd_supplicant::answers(&dir, &backend.interface));
+	}
+}
+
+/// Which configured network each wireless link is associated with.
+///
+/// The planner needs this to rank links against each other. An interface
+/// carries one `preference` whichever network its radio joined, but the
+/// networks themselves are what an operator ranks -- "the office wifi beats
+/// this ethernet, the guest wifi does not" is a statement about networks, and
+/// it cannot be made about the radio. So a network's `metric` overrides its
+/// interface's `preference` while that network is the one in use, and this is
+/// the only place that can say which one is.
+///
+/// **From the supplicant rather than from nl80211**, though nl80211 would work
+/// under any backend. netcfgd already asks this exact question through this
+/// exact socket to answer `wifi status` for a client, and two sources for one
+/// fact can disagree -- which would surface as a route metric that contradicts
+/// what the window says the machine is on. The cost is nothing new either:
+/// `ask_supplicants` above already opens these sockets on every observation.
+/// A backend that is not `wpa_supplicant` leaves the field `None`, and `None`
+/// means the interface's own preference stands.
+fn read_wifi_association(observed: &mut Observed, desired: Option<&netcfgd_model::Document>) {
+	let Some(document) = desired else {
+		return;
+	};
+	let dir = netcfgd_supplicant::ctrl_dir();
+	// Only of a supplicant netcfgd believes is running, which is the same
+	// guard the rest of this module uses against reading a leftover: the
+	// socket outlives the process that bound it.
+	let running: Vec<String> = observed
+		.backends
+		.iter()
+		.filter(|backend| backend.kind == netcfgd_model::BackendKind::Supplicant && backend.running)
+		.map(|backend| backend.interface.clone())
+		.collect();
+
+	for interface in running {
+		let Some((ssid, bssid)) = netcfgd_supplicant::associated(&dir, &interface) else {
+			continue;
+		};
+		let Some(network) = netcfgd_model::wifi::network_for(&document.networks, &ssid, &bssid)
+		else {
+			continue;
+		};
+		if let Some(link) = observed
+			.links
+			.iter_mut()
+			.find(|link| link.name == interface)
+		{
+			link.network = Some(network.id.clone());
+		}
 	}
 }
 

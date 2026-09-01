@@ -736,6 +736,7 @@ mod tests {
 				index: 2,
 				kind: String::new(),
 				wireless: false,
+				network: None,
 				up: true,
 				carrier: true,
 				reachable: None,

@@ -61,6 +61,38 @@ pub fn answers(dir: &Path, interface: &str) -> bool {
 	Client::connect_within(dir, interface, client::IMPATIENT).is_ok()
 }
 
+/// The network a supplicant is currently associated with: its name, and the
+/// access point serving it.
+///
+/// Both halves come back because resolving an association to a configured
+/// network needs both -- a network that lists BSSIDs instead of an SSID is
+/// identified by the second (`netcfgd_model::wifi::network_for`).
+///
+/// `None` covers every way there is no answer: the socket is gone, the
+/// supplicant is scanning rather than associated, or the name is not a name
+/// this crate will accept. The observation asks this only of a supplicant it
+/// already believes is running, and treats no answer as no association -- so a
+/// wireless link falls back to its interface's own preference rather than
+/// borrowing a stale network's metric.
+///
+/// **Impatient, for the reason `answers` is.** This runs on every observation,
+/// and a supplicant that has stopped answering must not hold the cycle open.
+#[must_use]
+pub fn associated(dir: &Path, interface: &str) -> Option<(netcfgd_model::Ssid, String)> {
+	let client = Client::connect_within(dir, interface, client::IMPATIENT).ok()?;
+	let body = client.ask("STATUS").ok()?;
+	let status = protocol::parse_status(&body);
+	// The supplicant reports the name here already decoded from its own hex,
+	// but escaped the same way as everywhere else.
+	let ssid = protocol::status_field(&status, "ssid")
+		.map(protocol::printf_decode)
+		.and_then(|octets| netcfgd_model::Ssid::new(octets).ok())?;
+	let bssid = protocol::status_field(&status, "bssid")
+		.unwrap_or_default()
+		.to_owned();
+	Some((ssid, bssid))
+}
+
 /// Remove every network the supplicant currently holds.
 ///
 /// Decision 0015: called before adding anything, so a supplicant started by

@@ -1047,6 +1047,7 @@ mod tests {
 			// radio is netcfgd's to say, and these fixtures are about
 			// NetworkManager's interfaces rather than about radios.
 			wireless: false,
+			network: None,
 			up: true,
 			carrier: true,
 			reachable: None,

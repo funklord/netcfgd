@@ -904,6 +904,7 @@ mod tests {
 			index: 2,
 			kind: String::new(),
 			wireless: true,
+			network: None,
 			up: false,
 			carrier: true,
 			reachable: None,

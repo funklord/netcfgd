@@ -1241,6 +1241,7 @@ fn station_placeholder() -> WifiNetwork {
 		hidden: false,
 		security: Security::Open,
 		priority: 0,
+		metric: None,
 		autoconnect: true,
 		metered: false,
 		bssid: Vec::new(),
@@ -1491,6 +1492,11 @@ fn lower_network_key(network: &mut WifiNetwork, assignment: &Assignment, diags: 
 				network.metered = flag;
 			}
 		}
+		// Beside `metered` rather than inside `wifi`, because it is not about
+		// the radio: it says how this network ranks against every other link
+		// on the machine, including wired ones. `wifi { priority }` is the
+		// supplicant's word for which SSID to join and ranks the other way up.
+		"metric" => network.metric = as_u32(&assignment.value, diags),
 		"ssid" => {
 			// The escape hatch for a name that is not text, given as hex. The
 			// label stays the id, so the network still has one readable
@@ -1611,6 +1617,7 @@ fn lower_network(
 		hidden: false,
 		security: Security::Open,
 		priority: 0,
+		metric: None,
 		autoconnect: true,
 		metered: false,
 		bssid: Vec::new(),
@@ -1972,6 +1979,7 @@ fn lower_dot1x_key(keys: &mut WifiKeys, assignment: &Assignment, diags: &mut Dia
 				hidden: false,
 				security: Security::Open,
 				priority: 0,
+				metric: None,
 				autoconnect: true,
 				metered: false,
 				bssid: Vec::new(),

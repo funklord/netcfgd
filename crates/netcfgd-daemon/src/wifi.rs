@@ -426,27 +426,16 @@ mod diagnosis_tests {
 
 /// Find the `network` block this scan result belongs to, for labelling a scan.
 ///
-/// By SSID, and by BSSID for a network that has no SSID to match on -- one that
-/// names access points instead and learns the name from them. Without the
-/// second, exactly the networks whose whole point is being identified by
-/// address would show as unconfigured in a scan, which is the list an operator
-/// checks to see whether netcfgd knows about what it can see.
+/// The rule itself is `netcfgd_model::wifi::network_for`, shared with the
+/// observation, which needs the same answer to rank an associated network's
+/// metric against its interface's preference. This wrapper is only the
+/// `Option<&Document>` the socket paths happen to hold.
 fn configured_for<'a>(
 	document: Option<&'a Document>,
 	ssid: &Ssid,
 	bssid: &str,
 ) -> Option<&'a WifiNetwork> {
-	document?.networks.iter().find(|network| {
-		network.ssid.as_ref().map_or_else(
-			|| {
-				network
-					.bssid
-					.iter()
-					.any(|listed| listed.eq_ignore_ascii_case(bssid))
-			},
-			|stated| stated == ssid,
-		)
-	})
+	netcfgd_model::wifi::network_for(&document?.networks, ssid, bssid)
 }
 
 /// The name as text, where it happens to be text.
@@ -962,6 +951,7 @@ mod tests {
 				index: 2,
 				kind: String::new(),
 				wireless: true,
+				network: None,
 				up: false,
 				carrier: true,
 				reachable: None,
