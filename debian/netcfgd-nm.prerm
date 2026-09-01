@@ -1,0 +1,33 @@
+#!/bin/sh
+# Stop the shim if this machine is running it.
+#
+# **The one maintainer script whose absence is a trap, rather than a policy.**
+# netcfgd's own prerm leaves the network configured on purpose -- pulling a
+# package is not an instruction to take the network away. This is not that
+# case: while the shim runs it owns `org.freedesktop.NetworkManager`, so
+# removing the package without stopping it deletes the binary and leaves a
+# process holding a name NetworkManager needs. NetworkManager then refuses to
+# start, on a machine where nothing is left to explain why, and it clears at
+# the next reboot -- which is how it gets misfiled as something else.
+#
+# `dh_installsystemd` would normally generate this, and does not: the package
+# is built with `--no-start`, which suppresses the stop snippet along with the
+# start. netcfgd's own prerm is hand-written for the same reason.
+set -e
+
+case "$1" in
+remove | deconfigure)
+	if [ -d /run/systemd/system ]; then
+		# `deb-systemd-invoke` rather than `systemctl`, because it honours
+		# policy-rc.d: removing this inside a chroot or an image build must not
+		# reach out and stop the service on whatever is really running there.
+		deb-systemd-invoke stop netcfgd-nm.service >/dev/null 2>&1 || true
+	elif command -v invoke-rc.d >/dev/null 2>&1; then
+		# Without systemd the shim runs from the init script this package
+		# ships. `invoke-rc.d` honours policy-rc.d in the same way.
+		invoke-rc.d netcfgd-nm stop >/dev/null 2>&1 || true
+	fi
+	;;
+esac
+
+#DEBHELPER#

@@ -1550,6 +1550,58 @@ collapsing them onto a shared read-only table is exactly the kind of thing the
 simplification pass is for. Recorded so that pass does not have to rediscover
 it.
 
+**A deb upgrade restarts a running daemon now, and did not before.** Nothing
+started or restarted either service: `--no-enable --no-start` suppressed
+debhelper's start snippet along with everything else, so the old binary kept
+running until somebody restarted it by hand -- a security fix reaching the disk
+and not the process. The postinst does it itself, guarded on `$2` being
+non-empty so a first install still starts nothing, and with `try-restart`,
+which acts only on a unit that is already active.
+
+**It is safe because 0134, 0135 and 0142 landed, not because a restart is
+cheap.** `KillMode=process` leaves the supplicant and the dhcp client running,
+and `RuntimeDirectoryPreserve=restart` keeps the record of what netcfgd owns.
+Before those, this would have taken the network down on every upgrade and then
+failed to recognise what was left.
+
+**`netcfgd-nm` had no `prerm` at all**, so removing the package deleted the
+binary and left a process holding `org.freedesktop.NetworkManager` --
+NetworkManager then refuses to start, on a machine with nothing left to explain
+why, and it clears at the next reboot, which is how it gets misfiled.
+`dh_installsystemd` would normally generate that script and does not: `--no-start`
+suppresses the stop snippet too, which is why netcfgd's own prerm is
+hand-written. The shim's is now as well.
+
+**The deb ships sysvinit scripts**, so a Devuan or `sysvinit-core` machine has
+a way to run the daemon as a service. Before, `apt install netcfgd` there
+installed a unit nothing reads, left no init script, and every maintainer
+script no-opped on `[ -d /run/systemd/system ]`. One LSB script covers sysvinit
+and Debian's OpenRC both; `packaging/openrc` is an `openrc-run` script for
+Gentoo and Alpine and is not interchangeable with it. The shim's starts in no
+runlevel at all, since starting it takes NetworkManager's bus name.
+
+**`netcfgd` suggests `netcfgd-nm` and `netcfgd-gui` now, and recommends
+neither.** apt installs Recommends by default, so recommending the shim would
+put a package whose purpose is to displace NetworkManager onto every machine
+that installs netcfgd. `netcfgd-nm` has always depended on `netcfgd` at an
+exact version; nothing pointed the other way, so there was no way to discover
+either package existed.
+
+**The deb gate refused all of this, correctly, and had to learn a distinction.**
+It refused *any* `deb-systemd-invoke` in a postinst, which was right while the
+only reason one appeared was start-on-install. It now allows `try-restart` and
+refuses everything else -- by the verb, because try-restart cannot start a
+stopped unit whatever guard surrounds it, which is a property grep can rely on
+where "is this inside an upgrade guard" is not.
+
+**The first attempt at that check was blind and looked like it worked.** It
+matched `deb-systemd-invoke +(start|restart)`, and what debhelper actually
+emits is `deb-systemd-invoke $_dh_action` -- the verb in a variable. A package
+built without `--no-start` passed it; the gate only appeared to fire because
+the *enable* check caught the same build for a different reason. Written as
+"any invocation that is not try-restart" now, and verified by building three
+ways and watching it fire on two.
+
 **`profile_save` and `secret_list`, the two verbs that had no socket at all.**
 Both were CLI-only by construction rather than by decision, which meant a
 machine with a gui could switch between profiles it already had and never make

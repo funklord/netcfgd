@@ -34,6 +34,7 @@ endif
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/netcfgd PREFIX=/usr
 	$(MAKE) install-systemd DESTDIR=$(CURDIR)/debian/netcfgd
+	$(MAKE) install-sysvinit DESTDIR=$(CURDIR)/debian/netcfgd
 	# Link-detection scripts. Executable, because netcfgd runs them, and
 	# under /usr/share rather than /etc: these are examples the package owns
 	# and replaces on upgrade. An operator's own go in /etc/netcfgd/probe,
@@ -47,6 +48,7 @@ override_dh_auto_install:
 	@# operator's act, by explicit instruction: installing a package must not
 	@# decide that this machine's other network daemons stop.
 	$(MAKE) install-nm DESTDIR=$(CURDIR)/debian/netcfgd-nm PREFIX=/usr
+	$(MAKE) install-sysvinit-nm DESTDIR=$(CURDIR)/debian/netcfgd-nm
 ifneq (,$(GUI_PROFILE))
 	$(MAKE) install-gui DESTDIR=$(CURDIR)/debian/netcfgd-gui PREFIX=/usr
 endif
@@ -69,6 +71,18 @@ endif
 # yet, and possibly over the network being reconfigured.
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start
+
+# The init scripts go in through `make install-sysvinit`, beside the unit and
+# for the same reason: `dh_installinit` wants them at debian/<package>.init and
+# would install, enable and start them on its own terms, where this tree keeps
+# every init's glue under packaging/ and installs it deliberately.
+#
+# Disabled outright rather than configured, so it cannot start or enable
+# anything it did not install. What an upgrade needs -- restarting a daemon
+# that is already running -- the postinst does itself, with `invoke-rc.d
+# try-restart`, which honours policy-rc.d the same way.
+override_dh_installinit:
+	@echo "override_dh_installinit: init scripts come from make install-sysvinit"
 
 override_dh_auto_test:
 	# `make check` is the gate; it wants a build tree the packaging keeps no

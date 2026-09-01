@@ -1,0 +1,89 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          netcfgd-nm
+# Required-Start:    $local_fs $remote_fs dbus netcfgd
+# Required-Stop:     $local_fs $remote_fs
+# Should-Start:      dbus
+# Default-Start:
+# Default-Stop:      0 1 6
+# Short-Description: NetworkManager-compatible D-Bus shim for netcfgd
+# Description:       Answers org.freedesktop.NetworkManager from netcfgd, so
+#                    nmcli, nmtui and nm-applet show what netcfgd is doing.
+### END INIT INFO
+#
+# netcfgd-nm under sysvinit. See packaging/sysvinit/netcfgd for why this file
+# exists beside the OpenRC one.
+#
+# **`Default-Start:` is deliberately empty.** Every other init script here
+# starts in the usual runlevels; this one starts in none, because starting it
+# takes `org.freedesktop.NetworkManager` and therefore stops NetworkManager.
+# That is a decision about the whole machine and belongs to whoever is sitting
+# at it -- the same reason the systemd unit ships not enabled. `update-rc.d
+# netcfgd-nm defaults` is the deliberate act.
+set -e
+
+DAEMON=/usr/bin/netcfgd-nm
+NAME=netcfgd-nm
+PIDFILE=/run/netcfgd-nm.pid
+DESC="netcfgd NetworkManager compatibility shim"
+
+[ -x "$DAEMON" ] || exit 0
+
+if [ -r /lib/lsb/init-functions ]; then
+	. /lib/lsb/init-functions
+else
+	log_daemon_msg() { printf '%s %s' "$1" "${2:-}"; }
+	log_end_msg() { [ "$1" = 0 ] && echo "." || echo " failed!"; }
+	log_action_msg() { echo "$1"; }
+fi
+
+start() {
+	log_daemon_msg "Starting $DESC" "$NAME"
+	start-stop-daemon --start --quiet --background --make-pidfile \
+		--pidfile "$PIDFILE" --exec "$DAEMON"
+	log_end_msg $?
+}
+
+stop() {
+	log_daemon_msg "Stopping $DESC" "$NAME"
+	start-stop-daemon --stop --quiet --retry TERM/10/KILL/5 \
+		--pidfile "$PIDFILE" --exec "$DAEMON"
+	status=$?
+	rm -f "$PIDFILE"
+	log_end_msg $status
+}
+
+case "$1" in
+start)
+	start
+	;;
+stop)
+	stop
+	;;
+restart | force-reload)
+	stop || true
+	start
+	;;
+try-restart)
+	if start-stop-daemon --stop --test --quiet --pidfile "$PIDFILE" \
+		--exec "$DAEMON" >/dev/null; then
+		stop || true
+		start
+	fi
+	;;
+status)
+	if command -v status_of_proc >/dev/null 2>&1; then
+		status_of_proc -p "$PIDFILE" "$DAEMON" "$NAME"
+	elif start-stop-daemon --stop --test --quiet --pidfile "$PIDFILE" \
+		--exec "$DAEMON" >/dev/null; then
+		log_action_msg "$NAME is running"
+	else
+		log_action_msg "$NAME is not running"
+		exit 3
+	fi
+	;;
+*)
+	echo "usage: $0 {start|stop|restart|force-reload|try-restart|status}" >&2
+	exit 2
+	;;
+esac

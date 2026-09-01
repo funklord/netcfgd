@@ -1,0 +1,31 @@
+#!/bin/sh
+# Installing the shim must not change how this machine's network works, and
+# this one is stronger than netcfgd's own: starting it takes
+# `org.freedesktop.NetworkManager` and therefore stops NetworkManager, so
+# enabling it is a decision about the whole machine.
+set -e
+
+case "$1" in
+configure)
+	# **An upgrade restarts a shim that is already running, and only that.**
+	# `$2` is the version being upgraded from, so it is empty on a first
+	# install and nothing starts. `try-restart` acts only on a unit that is
+	# already active, so a machine that installed the shim and never enabled it
+	# is not quietly switched away from NetworkManager by an upgrade.
+	#
+	# The shim is a read-mostly projection holding no authority of its own, so
+	# restarting it drops a D-Bus connection and nothing else -- what it was
+	# reporting is netcfgd's, and netcfgd is not being restarted here. A client
+	# watching the bus reconnects; nmcli is a one-shot and will not notice.
+	if [ -n "$2" ]; then
+		if [ -d /run/systemd/system ]; then
+			deb-systemd-invoke try-restart netcfgd-nm.service >/dev/null 2>&1 || true
+		elif command -v invoke-rc.d >/dev/null 2>&1; then
+			invoke-rc.d netcfgd-nm try-restart >/dev/null 2>&1 || true
+		fi
+	fi
+	;;
+abort-upgrade | abort-remove | abort-deconfigure) ;;
+esac
+
+#DEBHELPER#

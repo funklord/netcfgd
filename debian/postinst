@@ -42,6 +42,32 @@ configure)
 	echo "netcfgd:     usermod -aG netcfgd USER   # then log out and back in"
 	echo "netcfgd:   that covers scanning, joining and adding a network. Changing"
 	echo "netcfgd:   anything else stays root; ncfg control show prints the policy"
+
+	# **An upgrade restarts a daemon that is already running, and only that.**
+	# `$2` is the version being upgraded from, so it is empty on a first
+	# install -- which is what keeps the header above true: installing netcfgd
+	# still starts nothing.
+	#
+	# `try-restart` and not `restart`: it acts only on a unit that is already
+	# active, so a machine that installed netcfgd and never enabled it is not
+	# quietly given a running daemon by an upgrade.
+	#
+	# This is safe because of what the unit says, not because a restart is
+	# inherently cheap. `KillMode=process` means stopping netcfgd leaves the
+	# supplicant and the dhcp client running (0134, 0142), and
+	# `RuntimeDirectoryPreserve=restart` keeps the record of what netcfgd owns
+	# (0135). Before those two, this would have taken the network down on every
+	# upgrade and then failed to recognise what was left.
+	#
+	# Without it the old binary kept running until somebody restarted it by
+	# hand, which meant a security fix reached the disk and not the process.
+	if [ -n "$2" ]; then
+		if [ -d /run/systemd/system ]; then
+			deb-systemd-invoke try-restart netcfgd.service >/dev/null 2>&1 || true
+		elif command -v invoke-rc.d >/dev/null 2>&1; then
+			invoke-rc.d netcfgd try-restart >/dev/null 2>&1 || true
+		fi
+	fi
 	;;
 abort-upgrade | abort-remove | abort-deconfigure) ;;
 esac

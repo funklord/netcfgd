@@ -186,3 +186,15 @@ wpa_supplicant
 # line this file draws.
 address
 profile
+
+# The modem block (0150). An APN names a network to attach to and a SIM source
+# names which card the board should present -- provisioning data, and neither
+# can name a path, a command or a principal, which is the line this file draws.
+#
+# `sim` reaches a `pre_up` hook as a value, and that is not the same as
+# granting one: the hook is already installed and installing one is privileged
+# on its own. What this chooses is which source a hook that exists is told to
+# select. Both are refused outright if they contain a quote, a backslash or a
+# control character, since the APN is interpolated into a quoted AT command.
+apn
+sim

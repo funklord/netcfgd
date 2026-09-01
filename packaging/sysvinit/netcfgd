@@ -1,0 +1,124 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          netcfgd
+# Required-Start:    $local_fs $remote_fs
+# Required-Stop:     $local_fs $remote_fs
+# Should-Start:      dbus
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: network configuration daemon
+# Description:       netcfgd reads one declarative configuration and makes the
+#                    machine match it.
+### END INIT INFO
+#
+# netcfgd under sysvinit, for the Debian derivatives that do not run systemd.
+#
+# **Why this exists when packaging/openrc already does.** That one is an
+# `openrc-run` script for Gentoo and Alpine, and it is not readable by
+# sysvinit. Devuan and a Debian machine with `sysvinit-core` need an LSB script
+# in /etc/init.d, and OpenRC on Debian reads those too -- so this one file
+# covers both, and the deb ships it. Before it, `apt install netcfgd` on such a
+# machine installed a systemd unit nothing reads and left no way to run the
+# daemon as a service at all.
+#
+# It deliberately does not supervise. systemd has Restart=on-failure, OpenRC
+# has its own supervisor and procd has `respawn`; sysvinit has none, and a
+# start-stop-daemon loop written here would be a fourth supervision policy
+# maintained by nobody. A machine that wants netcfgd watched runs one of the
+# other three.
+set -e
+
+DAEMON=/usr/sbin/netcfgd
+NAME=netcfgd
+PIDFILE=/run/netcfgd.pid
+DESC="network configuration daemon"
+
+[ -x "$DAEMON" ] || exit 0
+
+# `. /lib/lsb/init-functions` is what gives log_daemon_msg and friends. Guarded
+# because a minimal image may not have lsb-base, and a service that refuses to
+# start for want of pretty output would be worse than one that prints less.
+if [ -r /lib/lsb/init-functions ]; then
+	. /lib/lsb/init-functions
+else
+	log_daemon_msg() { printf '%s %s' "$1" "${2:-}"; }
+	log_end_msg() { [ "$1" = 0 ] && echo "." || echo " failed!"; }
+	log_action_msg() { echo "$1"; }
+fi
+
+# The runtime directory the daemon writes its state into. systemd makes this
+# with RuntimeDirectory= and OpenRC with checkpath; here it is one mkdir, and
+# it is **not** removed on stop. That is the same choice as
+# `RuntimeDirectoryPreserve=restart`: the record of what netcfgd installed --
+# the sysctls it changed, the links it created, the DNS scopes it delivered --
+# has nowhere else to live, and a restart that threw it away would leave the
+# daemon unable to put those back (0135).
+RUN_DIR=/run/netcfgd
+
+start() {
+	log_daemon_msg "Starting $DESC" "$NAME"
+	mkdir -p "$RUN_DIR"
+	start-stop-daemon --start --quiet --background --make-pidfile \
+		--pidfile "$PIDFILE" --exec "$DAEMON" -- "$@"
+	log_end_msg $?
+}
+
+stop() {
+	log_daemon_msg "Stopping $DESC" "$NAME"
+	# **The daemon only.** netcfgd's children -- a supplicant, a dhcp client --
+	# are left running, which is decision 0134: an unannounced stop holds, and
+	# the next netcfgd adopts what this one left. systemd needs KillMode=process
+	# to get here; start-stop-daemon signals the named process and no more, so
+	# this is the default rather than a setting.
+	start-stop-daemon --stop --quiet --retry TERM/10/KILL/5 \
+		--pidfile "$PIDFILE" --exec "$DAEMON"
+	status=$?
+	rm -f "$PIDFILE"
+	log_end_msg $status
+}
+
+case "$1" in
+start)
+	start
+	;;
+stop)
+	stop
+	;;
+restart | force-reload)
+	stop || true
+	start
+	;;
+try-restart)
+	# Restart only if it is already running, which is what a package upgrade
+	# calls: a machine that installed netcfgd and never started it must not be
+	# given a running daemon by an upgrade.
+	if start-stop-daemon --stop --test --quiet --pidfile "$PIDFILE" \
+		--exec "$DAEMON" >/dev/null; then
+		stop || true
+		start
+	fi
+	;;
+reload)
+	# Recompile and reconcile without a gap, which is what netcfgd is for.
+	# Preferred over restart wherever the configuration is what changed.
+	log_action_msg "Reloading $DESC"
+	/usr/bin/ncfg reload >/dev/null 2>&1 || true
+	;;
+status)
+	# `status_of_proc` comes from lsb-base; without it, say what is knowable
+	# rather than claiming to know.
+	if command -v status_of_proc >/dev/null 2>&1; then
+		status_of_proc -p "$PIDFILE" "$DAEMON" "$NAME"
+	elif start-stop-daemon --stop --test --quiet --pidfile "$PIDFILE" \
+		--exec "$DAEMON" >/dev/null; then
+		log_action_msg "$NAME is running"
+	else
+		log_action_msg "$NAME is not running"
+		exit 3
+	fi
+	;;
+*)
+	echo "usage: $0 {start|stop|restart|force-reload|try-restart|reload|status}" >&2
+	exit 2
+	;;
+esac

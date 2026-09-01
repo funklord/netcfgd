@@ -520,4 +520,17 @@ netcfgd
 #
 # No new dependency again, and deliberately none: 0148 puts BlueZ's D-Bus in an
 # adapter of its own precisely so this number does not learn about zbus.
-total 2558488
+#
+# The cellular block and two socket verbs, +126,976 bytes to 2,685,464.
+#
+# What consumed it, in rough order: `ModemPolicy` on `Device` and serde's
+# generated code for it; `save_profile` and the secrets walk moving into
+# `netcfgd-host`, which puts the profile renderer and a document walk into the
+# daemon's link rather than only the CLI's; `ModemList`, `SecretList`,
+# `ProfileSave` and their responses; and the SIM selector.
+#
+# Raised rather than investigated, per the holder: tuning a footprint budget
+# while the design is still moving measures growth that was expected rather
+# than a defect. The bands want re-deriving deliberately once the feature set
+# settles.
+total 2685464

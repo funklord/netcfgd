@@ -24,8 +24,17 @@ Depends: ${shlibs:Depends}, ${misc:Depends}
 # without one: hostapd is for a machine serving an access point, openvpn and
 # ppp and radvd are features, and the resolver packages are alternatives to
 # each other that only a chosen `dns { mode }` calls for.
+#
+# netcfgd-nm is a Suggests and deliberately not a Recommends. apt installs
+# Recommends by default, so recommending it would put a package whose whole
+# purpose is to displace NetworkManager onto every machine that installs
+# netcfgd -- and with it a D-Bus policy granting that bus name. It starts
+# nothing on install, but the line this package holds everywhere else is that
+# installing must not change how the machine's network works, and shipping the
+# means to take a bus name is close enough to that line to stay opt-in. A
+# Suggests is how somebody finds out it exists.
 Recommends: wpasupplicant, dhcpcd-base
-Suggests: hostapd, openvpn, ppp, pppoe, radvd,
+Suggests: netcfgd-nm, netcfgd-gui, hostapd, openvpn, ppp, pppoe, radvd,
  dnsmasq-base, unbound, openresolv, systemd-resolved
 Description: network configuration daemon that states what it will do
  netcfgd reads one declarative configuration, reports what the machine

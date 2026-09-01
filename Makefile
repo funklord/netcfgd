@@ -488,6 +488,27 @@ install-gui:
 	@echo "install-gui: netcfgd-gui installed; it needs libqt6widgets6 at run time"
 	@echo "install-gui:   and links libQt6DBus, which the daemon does not"
 
+# The LSB init scripts, for the machines that do not run systemd.
+#
+# Devuan and a Debian machine with sysvinit-core read /etc/init.d, and so does
+# OpenRC on Debian -- one script covers both. packaging/openrc is not this and
+# is not interchangeable with it: that one is an `openrc-run` script for Gentoo
+# and Alpine, which sysvinit cannot read.
+#
+# Installed and not enabled, like every other init glue here. `update-rc.d
+# netcfgd defaults` is the operator's act.
+install-sysvinit:
+	install -d $(DESTDIR)$(SYSCONFDIR)/init.d
+	install -m 0755 packaging/sysvinit/netcfgd $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
+	@echo "install-sysvinit: /etc/init.d/netcfgd installed, not enabled"
+	@echo "install-sysvinit:   to run it as a service: update-rc.d netcfgd defaults"
+
+install-sysvinit-nm:
+	install -d $(DESTDIR)$(SYSCONFDIR)/init.d
+	install -m 0755 packaging/sysvinit/netcfgd-nm $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd-nm
+	@echo "install-sysvinit-nm: /etc/init.d/netcfgd-nm installed, not enabled"
+	@echo "install-sysvinit-nm:   starting it takes NetworkManager's bus name"
+
 install-systemd:
 	install -d $(DESTDIR)/usr/lib/systemd/system
 	install -m 0644 packaging/systemd/netcfgd.service \
@@ -615,7 +636,35 @@ deb: version-check
 	@# Two markers, both learned from watching the check fail to fire when the
 	@# override was removed:
 	@#
-	@#   - ANY `deb-systemd-invoke` in a postinst starts or restarts something.
+	@#   - `deb-systemd-invoke start|restart` in a postinst starts something,
+	@#     and so does the `invoke-rc.d` form on a machine without systemd.
+	@#
+	@#     This used to refuse ANY `deb-systemd-invoke`, which was right while
+	@#     the only reason one appeared was debhelper's start-on-install. It
+	@#     stopped being right when the postinst gained an upgrade-only
+	@#     restart, so the check now names the verbs rather than the command.
+	@#
+	@#     `try-restart` is deliberately allowed, and by the verb rather than
+	@#     by reading the guard around it: try-restart acts only on a unit that
+	@#     is *already active*, so it cannot start anything on a fresh install
+	@#     whatever surrounds it. That is a property of the verb, which a text
+	@#     check can rely on, where "is this inside an `if [ -n "$$2" ]`" is
+	@#     not something grep can answer honestly.
+	@#
+	@#     **Written as "any invocation that is not try-restart", and not as a
+	@#     list of the bad verbs.** The first attempt matched
+	@#     `deb-systemd-invoke +(start|restart)` and was blind to what
+	@#     debhelper actually emits, which is
+	@#     `deb-systemd-invoke $$_dh_action` -- the verb in a variable. That
+	@#     version passed a package built without `--no-start`; the gate only
+	@#     appeared to work because the *enable* check below caught the same
+	@#     build for a different reason. Verified since by building all three
+	@#     ways and watching this line fire on two of them.
+	@#
+	@#     `command -v invoke-rc.d` is dropped before the test, because a
+	@#     script that asks whether the command exists is not a script that
+	@#     runs it -- and the first version of this line caught the postinst's
+	@#     own availability probe.
 	@#     The first version looked for `deb-systemd-invoke.*start` and the
 	@#     generated code says `deb-systemd-invoke $$_dh_action`, with the verb
 	@#     assigned three lines earlier -- so the check could not have failed
@@ -641,8 +690,13 @@ deb: version-check
 		script=$$(dpkg-deb -I "$$deb" postinst 2>/dev/null | sed 's/#.*//'); \
 		[ -n "$$script" ] || continue; \
 		checked=$$(( checked + 1 )); \
-		if printf '%s\n' "$$script" | grep -q 'deb-systemd-invoke'; then \
+		if printf '%s\n' "$$script" | grep 'deb-systemd-invoke' | \
+		   grep -qv 'try-restart'; then \
 			echo "deb: $$deb starts or restarts a service on install"; fail=1; \
+		fi; \
+		if printf '%s\n' "$$script" | grep 'invoke-rc\.d' | \
+		   grep -v 'command -v' | grep -qv 'try-restart'; then \
+			echo "deb: $$deb starts a service on install, without systemd"; fail=1; \
 		fi; \
 		if printf '%s\n' "$$script" | grep -q 'deb-systemd-helper enable' && \
 		   ! printf '%s\n' "$$script" | grep -q 'debian-installed'; then \
@@ -1634,6 +1688,11 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-nm
 	rm -f $(DESTDIR)$(DATADIR)/dbus-1/system.d/netcfgd-nm.conf
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-nm.service
+	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd-nm
+	@# The example SIM-select hook, which install-modem-mbim ships beside the
+	@# quirk table. An operator's copy of it lives elsewhere and is theirs.
+	rm -f $(DESTDIR)$(PREFIX)/share/netcfgd/hook/sim-select.example
+	@rmdir $(DESTDIR)$(PREFIX)/share/netcfgd/hook 2>/dev/null || true
 	@# The shipped profile, by name. An operator's own profiles live under
 	@# $(SYSCONFDIR)/netcfgd/profile and are not touched.
 	rm -f $(DESTDIR)$(DATADIR)/netcfgd/profile/offline/10-offline.conf
