@@ -224,9 +224,10 @@ Lowercase for everything this project names itself.
 The exception is a name a tool will not accept lowercased or in another
 shape: `Cargo.toml`, `Cargo.lock`, `README.md`, `LICENSE`, `Makefile`, and
 `VERSION`. That last one is this workspace's own rather than the wider
-world's, and is settled by use: thirteen of the fourteen private projects
-track one, and a build reads it for the package version and for whatever
+world's, and is settled by use: a project that packages or ships a version
+tracks one, and a build reads it for the package version and for whatever
 the program prints, so the number lives in exactly one place.
+`claude-guidelines` is the exception, because it packages nothing.
 
 ### Singular, unless somebody else standardised the plural
 
