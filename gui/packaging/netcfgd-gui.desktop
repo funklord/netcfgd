@@ -6,5 +6,5 @@ Comment=Review what netcfgd would change, then apply it
 Exec=netcfgd-gui
 Icon=network-wireless
 Terminal=false
-Categories=Settings;Network;Qt;
+Categories=Settings;Qt;
 Keywords=network;wifi;wireless;vpn;dns;
