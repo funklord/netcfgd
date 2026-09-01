@@ -1624,6 +1624,39 @@ the parser gains the keys or the schema loses the fields, and the schema is
 witnessed and versioned, so neither is a passing change. Recorded rather than
 acted on.
 
+**Run properly, the audit found six more, and the renderer had been losing
+more than it kept.** A wireless network silently dropped its `bssid` pins, its
+`roam` policy, and its own `config`, `routes` and `dns`; a route silently
+dropped `src` and `onlink`. The network ones are the worst of the set, because
+a `network` block taking its own addressing and resolver is how a machine says
+"on this SSID use this static address and this nameserver" -- so a profile
+that lost them brought the machine back on DHCP against the wrong resolver,
+which looks like a working network until something internal fails to resolve.
+`onlink` has teeth of a different kind: it exempts a route from the ordering
+rule that installs addresses first, so a route needing it simply fails to
+install.
+
+**`config` and `routes` are one implementation now, not two.** The network
+side was rendering neither, and writing a second copy is how the two would
+have come to disagree about what `slaac` spells -- the same trap `project.md`
+already records between this renderer and `wifi_profile::render`.
+
+**Every field of every type the renderer consumes is now rendered, refused, or
+deliberately omitted with a stated reason.** The three that are omitted:
+`Globals::profile`, because `ncfg profile save` writes the selection through
+its own drop-in and a profile naming itself would make the loader choose
+again; and `Document`'s `schema_version` and `generated_by`, which the
+configuration language cannot express at all and the compiler regenerates.
+
+**The audit's first form was wrong in the direction that hides things**, and
+that is the part worth carrying. It searched the whole renderer for each field
+*name*, so `WifiNetwork::addressing` was reported covered because
+`interface.addressing` appears -- four of the six drops above were invisible
+to it and were found only when a failing test printed a whole `WifiNetwork`
+and the missing fields were sitting in it. **Match `binding.field`, not
+`field`.** A coverage check keyed on a name shared between types reports the
+union and calls it the intersection.
+
 **The audit that found it is worth repeating whenever a model type gains a
 field**: list the struct's fields, list the ones the renderer mentions, and
 diff the two. Anything in neither the rendered set nor the refused set is

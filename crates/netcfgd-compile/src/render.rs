@@ -24,7 +24,9 @@ use netcfgd_model::interface::{BridgeVlan, InterfaceKind, ProbePolicy};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
 use netcfgd_model::security::{CertSource, EapConfig, EapMethod, Security};
 use netcfgd_model::wifi::WifiNetwork;
-use netcfgd_model::{AddressSource, Device, Document, DriftPolicy, HostnamePolicy, Interface};
+use netcfgd_model::{
+	AddressSource, Device, Document, DriftPolicy, HostnamePolicy, Interface, Route,
+};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
@@ -64,7 +66,7 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 		render_interface(interface, overrides, &mut text, &mut missing);
 	}
 	for network in &document.networks {
-		render_network(network, overrides, &mut text);
+		render_network(network, overrides, &mut text, &mut missing);
 	}
 	for device in &document.devices {
 		render_device(device, overrides, &mut text, &mut missing);
@@ -303,58 +305,9 @@ fn render_interface(
 		let _ = writeln!(body, "\ton_drift = {}", quote(drift_name(policy)));
 	}
 
-	let config: Vec<String> = interface
-		.addressing
-		.iter()
-		.filter_map(|source| match source {
-			AddressSource::Static(address) => {
-				if address.peer.is_some()
-					|| address.preferred_lifetime.is_some()
-					|| address.valid_lifetime.is_some()
-				{
-					missing.push(format!(
-						"interface {name}: an address with lifetimes or a peer"
-					));
-				}
-				Some(quote(&address.address))
-			}
-			AddressSource::Dhcp4(_) => Some(quote("dhcp")),
-			AddressSource::Dhcp6(_) => Some(quote("dhcp6")),
-			AddressSource::Slaac(_) => Some(quote("slaac")),
-			AddressSource::LinkLocal => Some(quote("link_local")),
-			other => {
-				missing.push(format!(
-					"interface {name}: {} addressing",
-					other.kind_name()
-				));
-				None
-			}
-		})
-		.collect();
-	if !config.is_empty() {
-		let _ = writeln!(body, "\tconfig = {}", list_or_scalar(&config));
-	}
-
-	let routes: Vec<String> = interface
-		.routes
-		.iter()
-		.map(|route| {
-			let mut phrase = route.destination.clone();
-			if let Some(via) = route.via {
-				let _ = write!(phrase, " via {via}");
-			}
-			if let Some(metric) = route.metric {
-				let _ = write!(phrase, " metric {metric}");
-			}
-			if let Some(table) = route.table {
-				let _ = write!(phrase, " table {table}");
-			}
-			quote(&phrase)
-		})
-		.collect();
-	if !routes.is_empty() {
-		let _ = writeln!(body, "\troutes = {}", list_or_scalar(&routes));
-	}
+	let whose = &format!("interface {name}");
+	render_addressing(&interface.addressing, whose, &mut body, missing);
+	render_routes(&interface.routes, whose, &mut body, missing);
 
 	render_bridge_vlans(&interface.bridge_vlans, &mut body);
 
@@ -534,6 +487,95 @@ fn render_probe(probe: &ProbePolicy, body: &mut String) {
 	body.push_str("\t}\n");
 }
 
+/// Addressing, shared by an interface and by a wireless network.
+///
+/// A `network` block takes the same `config` key an interface does, so this is
+/// one function rather than two: the network side was rendering nothing at
+/// all, and writing a second copy is how the two would come to disagree about
+/// what `slaac` spells.
+fn render_addressing(
+	sources: &[AddressSource],
+	whose: &str,
+	body: &mut String,
+	missing: &mut Unrenderable,
+) {
+	let config: Vec<String> = sources
+		.iter()
+		.filter_map(|source| match source {
+			AddressSource::Static(address) => {
+				if address.peer.is_some()
+					|| address.preferred_lifetime.is_some()
+					|| address.valid_lifetime.is_some()
+				{
+					missing.push(format!("{whose}: an address with lifetimes or a peer"));
+				}
+				Some(quote(&address.address))
+			}
+			AddressSource::Dhcp4(_) => Some(quote("dhcp")),
+			AddressSource::Dhcp6(_) => Some(quote("dhcp6")),
+			AddressSource::Slaac(_) => Some(quote("slaac")),
+			AddressSource::LinkLocal => Some(quote("link_local")),
+			other => {
+				missing.push(format!("{whose}: {} addressing", other.kind_name()));
+				None
+			}
+		})
+		.collect();
+	if !config.is_empty() {
+		let _ = writeln!(body, "\tconfig = {}", list_or_scalar(&config));
+	}
+}
+
+/// Routes, shared by an interface and by a wireless network, for the reason
+/// [`render_addressing`] is shared.
+fn render_routes(routes: &[Route], whose: &str, body: &mut String, missing: &mut Unrenderable) {
+	let phrases: Vec<String> = routes
+		.iter()
+		.map(|route| {
+			let mut phrase = route.destination.clone();
+			if let Some(via) = route.via {
+				let _ = write!(phrase, " via {via}");
+			}
+			// Was dropped in silence. A preferred source is what decides which
+			// address a machine with several is seen as coming from, so losing
+			// it moves traffic to a different identity rather than breaking it
+			// -- which is the kind of change nothing notices until a firewall
+			// somewhere else does.
+			if let Some(src) = route.src {
+				let _ = write!(phrase, " src {src}");
+			}
+			if let Some(metric) = route.metric {
+				let _ = write!(phrase, " metric {metric}");
+			}
+			if let Some(table) = route.table {
+				let _ = write!(phrase, " table {table}");
+			}
+			// Also dropped in silence, and it is not merely descriptive: it
+			// exempts the route from the ordering rule that installs addresses
+			// before routes, so a route that needs it fails to install without
+			// it.
+			if route.onlink {
+				phrase.push_str(" onlink");
+			}
+			// No route phrase can express these two -- the keywords are `via`,
+			// `metric`, `table`, `src` and `onlink` -- so they are named
+			// rather than written. Reachable only from a document some other
+			// producer built, which is exactly when a silent drop would be
+			// hardest to trace.
+			if route.scope.is_some() {
+				missing.push(format!("{whose}: a route with a scope"));
+			}
+			if route.proto.is_some() {
+				missing.push(format!("{whose}: a route with a proto"));
+			}
+			quote(&phrase)
+		})
+		.collect();
+	if !phrases.is_empty() {
+		let _ = writeln!(body, "\troutes = {}", list_or_scalar(&phrases));
+	}
+}
+
 /// A port's VLAN membership, as the phrases the parser reads back.
 ///
 /// One phrase per VLAN rather than the ranges the parser also accepts: a range
@@ -565,7 +607,12 @@ fn render_bridge_vlans(vlans: &[BridgeVlan], body: &mut String) {
 	}
 }
 
-fn render_network(network: &WifiNetwork, overrides: &Overrides, text: &mut String) {
+fn render_network(
+	network: &WifiNetwork,
+	overrides: &Overrides,
+	text: &mut String,
+	missing: &mut Unrenderable,
+) {
 	let id = &network.id;
 	let mut body = String::new();
 
@@ -579,6 +626,14 @@ fn render_network(network: &WifiNetwork, overrides: &Overrides, text: &mut Strin
 	}
 	if network.metered {
 		body.push_str("\tmetered = true\n");
+	}
+	// Was dropped in silence. A bssid list is how an operator pins a network
+	// to the access points that are actually theirs, so losing it widens the
+	// network to any radio broadcasting the same name -- which is the thing
+	// the key exists to prevent.
+	if !network.bssid.is_empty() {
+		let pins: Vec<String> = network.bssid.iter().map(|bssid| quote(bssid)).collect();
+		let _ = writeln!(body, "\tbssid = {}", list_or_scalar(&pins));
 	}
 
 	body.push_str("\twifi {\n");
@@ -596,7 +651,39 @@ fn render_network(network: &WifiNetwork, overrides: &Overrides, text: &mut Strin
 	if !network.autoconnect {
 		body.push_str("\t\tautoconnect = false\n");
 	}
+	// Also dropped in silence, and it lives inside `wifi` rather than beside
+	// it. Every value is written whenever the block exists, because the
+	// parser's defaults are supplied when the block is *absent* -- a roam
+	// block that rendered only its non-defaults could come back empty, and an
+	// empty block is not the same document as no block at all.
+	if let Some(roam) = &network.roam {
+		let _ = write!(
+			body,
+			"\t\troam {{\n\
+			 \t\t\tsignal = {}\n\
+			 \t\t\tinterval = {}\n\
+			 \t\t\tslow_interval = {}\n\
+			 \t\t}}\n",
+			roam.signal, roam.interval, roam.slow_interval
+		);
+	}
 	body.push_str("\t}\n");
+
+	// All four were dropped in silence. A `network` block takes the same
+	// `config`, `routes` and `dns` an interface does -- that is how a machine
+	// says "on this SSID, use this static address and this resolver" -- and a
+	// profile that lost them would come back on DHCP against the wrong DNS.
+	let whose = &format!("network {id}");
+	render_addressing(&network.addressing, whose, &mut body, missing);
+	render_routes(&network.routes, whose, &mut body, missing);
+	if let Some(dns) = &network.dns {
+		render_dns(dns, "\t", &mut body, missing, whose);
+	}
+	// Refused rather than rendered, matching an interface's hooks: the phase
+	// blocks have a shape of their own and neither side writes them yet.
+	if !network.hooks.is_empty() {
+		missing.push(format!("{whose}: hooks"));
+	}
 
 	let head = opening("network", id, overrides);
 	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", quote(id));
@@ -857,6 +944,84 @@ mod tests {
 			 \tmetered = true\n\
 			 \twifi {\n\
 			 \t\topen = true\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// A network's own addressing, routes and resolver, all dropped in
+	/// silence.
+	///
+	/// A `network` block takes the same `config`, `routes` and `dns` keys an
+	/// interface does -- that is how a machine says "on this SSID use this
+	/// static address and this resolver". A profile that lost them brought the
+	/// machine back on DHCP against the wrong nameserver, which looks like a
+	/// working network until something internal fails to resolve.
+	#[test]
+	fn a_networks_own_addressing_round_trips() {
+		round_trips(
+			"network \"Lab\" {\n\
+			 \tconfig = \"10.4.0.9/24\"\n\
+			 \troutes = \"default via 10.4.0.1\"\n\
+			 \tdns {\n\
+			 \t\tmode = \"write_resolv_conf\"\n\
+			 \t\tservers = [\"10.4.0.53\"]\n\
+			 \t\tsearch = [\"lab.example\"]\n\
+			 \t}\n\
+			 \twifi { psk = \"@secret:lab\" }\n\
+			 }\n",
+		);
+	}
+
+	/// A route's `src` and `onlink`, both dropped in silence.
+	///
+	/// `onlink` is the one with teeth: it exempts the route from the ordering
+	/// rule that installs addresses before routes, so a route that needs it
+	/// fails to install without it. `src` decides which address the machine is
+	/// seen as coming from, which moves traffic to another identity rather
+	/// than breaking it.
+	#[test]
+	fn a_routes_source_and_onlink_round_trip() {
+		round_trips(
+			"interface eth0 {\n\
+			 \tconfig = \"192.0.2.10/24\"\n\
+			 \troutes = [\"default via 192.0.2.1 src 192.0.2.10 metric 100\", \
+			 \"198.51.100.0/24 via 192.0.2.99 onlink\"]\n\
+			 }\n",
+		);
+	}
+
+	/// A network's pinned access points and its roaming policy, both dropped
+	/// in silence. Losing the bssid list widens the network to any radio
+	/// broadcasting the same name, which is what the key exists to prevent.
+	#[test]
+	fn a_networks_bssid_and_roam_round_trip() {
+		round_trips(
+			"network \"Office\" {\n\
+			 \tbssid = [\"00:11:22:33:44:55\", \"00:11:22:33:44:66\"]\n\
+			 \twifi {\n\
+			 \t\tpsk = \"@secret:office\"\n\
+			 \t\troam {\n\
+			 \t\t\tsignal = -65\n\
+			 \t\t\tinterval = 20\n\
+			 \t\t\tslow_interval = 240\n\
+			 \t\t}\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// A roam block whose every value is the parser's default. It must still
+	/// render as a block: the defaults are what an *absent* block means, so
+	/// rendering nothing would turn "roam with the usual settings" into "do
+	/// not roam", which is a different document.
+	#[test]
+	fn a_default_roam_block_survives() {
+		round_trips(
+			"network \"Cafe\" {\n\
+			 \twifi {\n\
+			 \t\tpsk = \"@secret:cafe\"\n\
+			 \t\troam { signal = -70; interval = 30; slow_interval = 300 }\n\
 			 \t}\n\
 			 }\n",
 		);
