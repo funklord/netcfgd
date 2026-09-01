@@ -223,6 +223,23 @@ pub enum Request {
 	/// machine to a profile it does not have.
 	ProfileList,
 
+	/// The modem devices, their SIM order, and which source is in use.
+	///
+	/// A verb rather than a client reading the document and `/run` itself, for
+	/// the reason [`Request::ProbeList`] already gives: a gui listing its own
+	/// machine's modems would describe the laptop while configuring a remote
+	/// host. It also joins two facts that live apart -- the configured order
+	/// comes from the document and the *chosen* source is runtime state under
+	/// `/run` -- and a client stitching those together would be a second copy
+	/// of a rule that belongs to the daemon
+	/// ([0152](../../../doc/decision/0152-a-sim-source-is-kept-until-the-probe-says-otherwise.md)).
+	///
+	/// Reading, so `observe`. There is deliberately no verb to *choose* a
+	/// source: which one is in use is netcfgd's answer to a failing probe, and
+	/// letting a client pin it is a design question about what happens to the
+	/// fallback afterwards, not a missing accessor.
+	ModemList,
+
 	/// Choose a profile, or stop using one.
 	///
 	/// **A verb of its own rather than a `ConfigPut` of a known filename.**
@@ -395,6 +412,7 @@ impl Request {
 			| Self::Plan
 			| Self::ProbeList
 			| Self::ProfileList
+			| Self::ModemList
 			| Self::Confirm
 			| Self::Revert
 			| Self::Reload
@@ -465,6 +483,37 @@ pub struct ProfileEntry {
 	/// so a client can say whose it is. An operator's copy of a shipped
 	/// profile reads as theirs, because theirs is what layers on top.
 	pub shipped: bool,
+}
+
+/// One modem device: what the document asks for, and what is in force.
+///
+/// The two halves are deliberately separate fields rather than one resolved
+/// answer. `sim` is the operator's ordered preference and never changes on its
+/// own; `selected` is where netcfgd has got to, which moves when a probe says
+/// a source does not work. A client showing only the second could not say what
+/// was asked for, and one showing only the first would describe a machine that
+/// is not the machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModemStatus {
+	/// The device, which is the kernel name of the interface.
+	pub device: String,
+	/// The SIM sources the document lists, in the order they are tried.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub sim: Vec<String>,
+	/// The source in use, where the device has any listed.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub selected: Option<String>,
+	/// The APN the document asks for.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub apn: Option<String>,
+	/// Whether the selection has moved and the link has not been cycled yet.
+	///
+	/// Visible because it is the difference between "netcfgd wants the other
+	/// SIM" and "the machine is on the other SIM", and an operator watching a
+	/// modem that will not attach needs to tell those apart.
+	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+	pub cycle_pending: bool,
 }
 
 /// One radio, and whether netcfgd has been given it.
@@ -605,6 +654,12 @@ pub enum Response {
 	Event(Box<Event>),
 	/// What a scan found.
 	WifiScan(Box<ScanReport>),
+	/// The modems, in answer to [`Request::ModemList`].
+	Modems {
+		/// One per device with a `modem` block, in document order.
+		modems: Vec<ModemStatus>,
+	},
+
 	/// The profiles, in answer to [`Request::ProfileList`].
 	Profiles {
 		/// One per profile directory. A copy in `/etc` shadows a shipped one

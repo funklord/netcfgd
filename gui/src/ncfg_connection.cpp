@@ -605,6 +605,43 @@ bool ncfg_connection::profile_set(const QString &name, QString *error)
 	return true;
 }
 
+bool ncfg_connection::modems(QList<ncfg_modem_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_modems_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_modems(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_modem_row row;
+		row.device = from_c(found.items[i].device);
+		row.selected = from_c(found.items[i].selected);
+		row.apn = from_c(found.items[i].apn);
+		row.cycle_pending = found.items[i].cycle_pending != 0;
+		for (size_t j = 0; j < found.items[i].sim_count; j++) {
+			row.sim << from_c(found.items[i].sim[j]);
+		}
+		out->append(row);
+	}
+	ncfg_modems_free(&found);
+	return true;
+}
+
 bool ncfg_connection::profiles(QList<ncfg_profile_row> *out, QString *chosen, QString *error)
 {
 	if (!out) {

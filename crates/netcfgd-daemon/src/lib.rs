@@ -1171,6 +1171,9 @@ fn answer(
 		} => put_secret_request(state, name, value, *replace),
 		Request::ProfileList => list_profiles_request(state),
 		Request::ProfileSet { name } => set_profile_request(state, name.as_deref()),
+		Request::ModemList => Response::Modems {
+			modems: state.sims.status(state.desired.as_ref()),
+		},
 		Request::ProbeList => Response::Probes {
 			probes: netcfgd_host::config::list_probes(&state.paths.config, &state.paths.factory),
 		},

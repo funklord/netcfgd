@@ -7,6 +7,7 @@
 #include "dns_view.h"
 #include "apply_dialog.h"
 #include "devices_view.h"
+#include "modems_view.h"
 #include "events_view.h"
 #include "ncfg_connection.h"
 #include "plan_view.h"
@@ -42,6 +43,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 
 	tabs = new QTabWidget(central);
 	devices = new ncfg_devices_view(connection, tabs);
+	modems = new ncfg_modems_view(connection, tabs);
 	wifi = new ncfg_wifi_view(connection, tabs);
 	access = new ncfg_access_view(connection, tabs);
 	dns = new ncfg_dns_view(connection, tabs);
@@ -49,6 +51,10 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	events = new ncfg_events_view(connection, tabs);
 	tabs->addTab(devices, QStringLiteral("devices"));
 	tabs->addTab(wifi, QStringLiteral("wifi"));
+	/* Beside wifi rather than after the diagnostic tabs: a modem is the
+	 * other way this machine reaches a network, and an operator looking
+	 * for one looks where the radios are. */
+	tabs->addTab(modems, QStringLiteral("modems"));
 	tabs->addTab(plan, QStringLiteral("plan"));
 	tabs->addTab(events, QStringLiteral("events"));
 	/* Last, because it is the one tab that is useful while every other is
@@ -58,6 +64,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	layout->addWidget(tabs);
 
 	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
+	connect(modems, &ncfg_modems_view::reported, this, &ncfg_main_window::note);
 	connect(devices, &ncfg_devices_view::changed, this, &ncfg_main_window::reload);
 	connect(wifi, &ncfg_wifi_view::reported, this, &ncfg_main_window::note);
 	connect(wifi, &ncfg_wifi_view::changed, this, &ncfg_main_window::reload);
@@ -170,6 +177,8 @@ void ncfg_main_window::refresh()
 		/* Re-reads the radios and what they are doing. Never scans: a scan
 		 * blocks for seconds and a refresh button is not consent to that. */
 		wifi->refresh();
+	} else if (current == modems) {
+		modems->refresh();
 	} else if (current == dns) {
 		dns->refresh();
 	} else if (current == access) {

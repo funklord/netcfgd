@@ -599,6 +599,54 @@ typedef struct {
 void ncfg_profiles_free(ncfg_profiles_t *profiles);
 
 /*
+ * One modem device: what the document asks for, and what is in force.
+ *
+ * `sim` and `selected` are separate on purpose. The first is the operator's
+ * ordered preference and never moves on its own; the second is where netcfgd
+ * has got to, which changes when a probe says a source does not work. A view
+ * showing only the second cannot say what was asked for, and one showing only
+ * the first describes a machine that is not the machine.
+ */
+typedef struct {
+	char  *device;
+	char **sim;
+	size_t sim_count;
+	/* The source in use. Empty where the device lists none: `member_text`
+	 * returns an empty string rather than NULL for an absent member, so a
+	 * caller tests the first byte rather than the pointer. */
+	char  *selected;
+	/* The APN the document asks for, empty where it names none. */
+	char  *apn;
+	/* Non-zero when netcfgd has moved the selection and the link has not
+	 * been cycled yet -- the difference between "netcfgd wants the other
+	 * SIM" and "the machine is on the other SIM". */
+	int    cycle_pending;
+} ncfg_modem_t;
+
+typedef struct {
+	ncfg_modem_t *items;
+	size_t        count;
+} ncfg_modems_t;
+
+void ncfg_modems_free(ncfg_modems_t *modems);
+
+/*
+ * The modem devices, their SIM order, and which source is in use. Needs
+ * `observe`.
+ *
+ * Asked of the daemon rather than assembled here, for the reason
+ * `ncfg_client_probes` gives and one more: the order comes from the document
+ * and the choice is runtime state under /run, and a client joining those two
+ * would be a second copy of a rule that belongs to the daemon.
+ *
+ * There is deliberately no call to *choose* a source. Which one is in use is
+ * netcfgd's answer to a failing probe, and letting a client pin it is a design
+ * question about what happens to the fallback afterwards.
+ */
+int ncfg_client_modems(ncfg_client_t *client, ncfg_modems_t *out, char *err,
+                       size_t err_size);
+
+/*
  * The profiles netcfgd can see, and which one is chosen. Needs `observe`.
  *
  * Asked of the daemon rather than read off the disk, for the reason

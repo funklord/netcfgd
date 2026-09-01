@@ -51,7 +51,8 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// writing tier to show what is configured is a display that ends up
 		// being given one.
 		| Request::ProbeList
-		| Request::ProfileList => Tier::Observe,
+		| Request::ProfileList
+		| Request::ModemList => Tier::Observe,
 
 		// Scanning is not reading: it transmits probe requests, it interrupts
 		// whatever the radio was doing, and it is one of the things design

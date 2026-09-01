@@ -120,6 +120,31 @@ impl Sims {
 		self.pending.iter().cloned().collect()
 	}
 
+	/// Every modem device, what it asks for and what is in force.
+	///
+	/// Joined here rather than by the client, because the two halves live
+	/// apart: the order comes from the document and the choice from this
+	/// module's own state. A client stitching them together would be a second
+	/// copy of a rule that belongs to the daemon.
+	pub(crate) fn status(&self, document: Option<&Document>) -> Vec<netcfgd_proto::ModemStatus> {
+		let Some(document) = document else {
+			return Vec::new();
+		};
+		modems(document)
+			.map(|device| {
+				let policy = device.modem.as_ref().expect("filtered on is_some");
+				let index = self.chosen.get(&device.name).copied().unwrap_or(0);
+				netcfgd_proto::ModemStatus {
+					device: device.name.clone(),
+					sim: policy.sim.clone(),
+					selected: policy.sim.get(index).cloned(),
+					apn: policy.apn.clone(),
+					cycle_pending: self.pending.contains(&device.name),
+				}
+			})
+			.collect()
+	}
+
 	/// Whether this device is waiting for its link to be cycled.
 	pub(crate) fn is_pending(&self, device: &str) -> bool {
 		self.pending.contains(device)
@@ -287,6 +312,45 @@ mod tests {
 
 		sims.sync(&Document::default(), run.path());
 		assert!(!run.path().join("modem").join("wwan0").exists());
+	}
+
+	/// What the socket answers: the preference and the selection as separate
+	/// facts.
+	///
+	/// Collapsing them into one "current SIM" would lose the question an
+	/// operator actually has when a modem will not attach -- whether it is on
+	/// the source they asked for, or has fallen through to a spare.
+	#[test]
+	fn the_status_reports_the_preference_and_the_choice_apart() {
+		let run = tempdir();
+		let document = document(&["esim", "socket"], Some("im.cxn"));
+		let mut sims = Sims::default();
+		sims.sync(&document, run.path());
+
+		let before = sims.status(Some(&document));
+		assert_eq!(before.len(), 1);
+		assert_eq!(before[0].device, "wwan0");
+		assert_eq!(before[0].sim, vec!["esim".to_owned(), "socket".to_owned()]);
+		assert_eq!(before[0].selected.as_deref(), Some("esim"));
+		assert_eq!(before[0].apn.as_deref(), Some("im.cxn"));
+		assert!(!before[0].cycle_pending);
+
+		sims.advance(&document, "wwan0", run.path());
+		let after = sims.status(Some(&document));
+		// The preference has not moved and must not: it is the operator's,
+		// and constraint 1 is that netcfgd never rewrites it.
+		assert_eq!(after[0].sim, vec!["esim".to_owned(), "socket".to_owned()]);
+		assert_eq!(after[0].selected.as_deref(), Some("socket"));
+		// Advanced but not yet cycled, which is "netcfgd wants the other SIM"
+		// rather than "the machine is on it".
+		assert!(after[0].cycle_pending);
+	}
+
+	/// A daemon that has not compiled a document yet answers with a list
+	/// rather than an error: no configuration is a state.
+	#[test]
+	fn the_status_of_no_document_is_empty() {
+		assert!(Sims::default().status(None).is_empty());
 	}
 
 	/// A modem block with no sources still publishes, so a hook can read the

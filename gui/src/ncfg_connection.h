@@ -85,6 +85,25 @@ struct ncfg_profile_row {
 	bool    shipped = false;
 };
 
+/*
+ * One modem device: what the document asks for, and what is in force.
+ *
+ * `sim` and `selected` are separate because they answer different questions.
+ * The first is the operator's ordered preference and never moves on its own;
+ * the second is where netcfgd has got to, which changes when a probe says a
+ * source does not work. A view showing only one of them would either not say
+ * what was asked for, or describe a machine that is not the machine.
+ */
+struct ncfg_modem_row {
+	QString     device;
+	QStringList sim;
+	QString     selected;
+	QString     apn;
+	/* netcfgd has moved the selection and the link has not been cycled yet:
+	 * it wants the other SIM rather than being on it. */
+	bool        cycle_pending = false;
+};
+
 struct ncfg_saved_network_row {
 	QString id;
 	QString name;
@@ -452,6 +471,15 @@ public:
 	 * switch a remote machine to a profile that machine does not have.
 	 */
 	bool profiles(QList<ncfg_profile_row> *out, QString *chosen, QString *error);
+	/*
+	 * The modem devices, their SIM order, and which source is in use.
+	 *
+	 * From the daemon rather than assembled here, for the reason `probes`
+	 * gives and one more: the order is in the document and the choice is
+	 * runtime state under /run, so a client joining them would be a second
+	 * copy of a rule that belongs to the daemon.
+	 */
+	bool modems(QList<ncfg_modem_row> *out, QString *error);
 	/*
 	 * Choose a profile, or stop using one with an empty name. Needs `admin`.
 	 *

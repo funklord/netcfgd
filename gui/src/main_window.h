@@ -30,6 +30,7 @@ class ncfg_connection;
 class ncfg_access_view;
 class ncfg_dns_view;
 class ncfg_devices_view;
+class ncfg_modems_view;
 class ncfg_wifi_view;
 class ncfg_events_view;
 class ncfg_plan_view;
@@ -82,6 +83,7 @@ private:
 	QTimer            *settle;
 	QTabWidget        *tabs;
 	ncfg_devices_view *devices;
+	ncfg_modems_view  *modems;
 	ncfg_access_view  *access;
 	ncfg_dns_view     *dns;
 	ncfg_wifi_view    *wifi;

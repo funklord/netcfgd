@@ -1492,6 +1492,36 @@ link really is going down. Its `link.down` folds into the bring-up's
 dependencies so the order is `link.down`, `pre_up`, `link.up`; a hook selecting
 a source on a modem about to be reset past it would achieve nothing.
 
+**A `modem_list` verb and a `modems` tab, so the GUI can see any of this.**
+Cellular had no client surface at all: no verb, no view, no way to tell which
+SIM a machine was on or that a fallback had happened. The verb is `observe`
+and reading only.
+
+**The response keeps the preference and the choice apart, and that is the
+design rather than a field count.** `sim` is the operator's ordered list from
+the document and never moves on its own; `selected` is where netcfgd has got
+to. Collapsing them into one "current SIM" would lose the question an operator
+actually has when a modem will not attach -- whether it is on the source they
+asked for, or has fallen through to a spare. `cycle_pending` is the third
+state and is the difference between "netcfgd wants the other SIM" and "the
+machine is on it".
+
+**Joined by the daemon, not the client**, because the halves live apart: the
+order is in the document and the choice is runtime state under `/run`. A client
+stitching them together would be a second copy of a rule that belongs to the
+daemon -- the same argument `probe_list` already makes about a gui listing its
+own disk.
+
+**There is deliberately no verb to choose a source.** Which one is in use is
+netcfgd's answer to a failing probe, and letting a client pin it is a design
+question about what then happens to the fallback -- not a missing accessor.
+The tab shows; it does not steer.
+
+**A tab per fundamental thing is the holder's rule for now**, especially where
+the thing is a list, with a pass to simplify the window once every control
+exists. The reasoning is worth keeping: a control that is missing cannot be
+found by anybody, while one in the wrong tab can.
+
 **Both helpers read the published file, which is what closes the loop.** Until
 they did, the document held an APN that nothing consumed -- 0061's disease
 again, one layer out. `--apn` still wins so a helper stays runnable by hand

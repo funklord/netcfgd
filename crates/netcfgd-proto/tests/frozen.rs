@@ -94,6 +94,7 @@ fn every_request() -> Vec<Request> {
 		Request::Radios => "radios",
 		Request::ProbeList => "probe_list",
 		Request::ProfileList => "profile_list",
+		Request::ModemList => "modem_list",
 		Request::ProfileSet { .. } => "profile_set",
 		Request::RadioSet { .. } => "radio_set",
 	};
@@ -110,6 +111,7 @@ fn every_request() -> Vec<Request> {
 			"confirm",
 			"explain",
 			"hello",
+			"modem_list",
 			"monitor",
 			"plan",
 			"probe_list",
@@ -147,6 +149,7 @@ fn probe_samples() -> Vec<Request> {
 	vec![
 		Request::ProbeList,
 		Request::ProfileList,
+		Request::ModemList,
 		// Two, because `name` is skip_serializing_if and one that sets it
 		// pins only the present form. The absent one is "no profile chosen",
 		// which is a real state rather than a missing argument.
@@ -336,6 +339,28 @@ fn every_response() -> Vec<Response> {
 	// list above because that function has a line limit.
 	let all: Vec<Response> = all
 		.into_iter()
+		.chain([Response::Modems {
+			// Two, because the interesting facts are the ones that differ
+			// between them: the first has advanced off its preference and is
+			// waiting for the cycle, the second is a single-SIM board that has
+			// nowhere to go. A witness carrying only one would pin neither.
+			modems: vec![
+				netcfgd_proto::ModemStatus {
+					device: "wwan0".to_owned(),
+					sim: vec!["esim".to_owned(), "socket".to_owned()],
+					selected: Some("socket".to_owned()),
+					apn: Some("im.cxn".to_owned()),
+					cycle_pending: true,
+				},
+				netcfgd_proto::ModemStatus {
+					device: "wwan1".to_owned(),
+					sim: vec!["socket".to_owned()],
+					selected: Some("socket".to_owned()),
+					apn: None,
+					cycle_pending: false,
+				},
+			],
+		}])
 		.chain([Response::Profiles {
 			// Two, one from each layer, because a witness carrying only the
 			// operator's would not pin how a shipped one reports.
@@ -383,6 +408,7 @@ fn every_response() -> Vec<Response> {
 		Response::Radios { .. } => "radios",
 		Response::Probes { .. } => "probes",
 		Response::Profiles { .. } => "profiles",
+		Response::Modems { .. } => "modems",
 		Response::Ok => "ok",
 		Response::Error { .. } => "error",
 	};
@@ -399,6 +425,7 @@ fn every_response() -> Vec<Response> {
 			"explanation",
 			"hello",
 			"journal",
+			"modems",
 			"ok",
 			"plan",
 			"probes",

@@ -1340,6 +1340,96 @@ int ncfg_client_profiles(ncfg_client_t *client, ncfg_profiles_t *out, char *err,
 	return 1;
 }
 
+void ncfg_modems_free(ncfg_modems_t *modems)
+{
+	if (!modems) {
+		return;
+	}
+	for (size_t i = 0; i < modems->count; i++) {
+		free(modems->items[i].device);
+		for (size_t j = 0; j < modems->items[i].sim_count; j++) {
+			free(modems->items[i].sim[j]);
+		}
+		free(modems->items[i].sim);
+		free(modems->items[i].selected);
+		free(modems->items[i].apn);
+	}
+	free(modems->items);
+	modems->items = NULL;
+	modems->count = 0;
+}
+
+int ncfg_client_modems(ncfg_client_t *client, ncfg_modems_t *out, char *err,
+                       size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc =
+	    ncfg_client_request(client, "{\"request\":\"modem_list\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t modems = ncfg_json_member(doc, ncfg_json_root(doc), "modems");
+	uint32_t count = ncfg_json_count(doc, modems);
+	if (!count) {
+		/* A machine with no modem is the ordinary case, not an error --
+		 * and calloc(0, n) may return NULL, which the next line would
+		 * read as being out of memory. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, modems, i);
+		out->items[i].device = member_text(doc, entry, "device");
+		out->items[i].selected = member_text(doc, entry, "selected");
+		out->items[i].apn = member_text(doc, entry, "apn");
+		out->items[i].cycle_pending =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "cycle_pending"), 0);
+
+		uint32_t sim = ncfg_json_member(doc, entry, "sim");
+		uint32_t sources = ncfg_json_count(doc, sim);
+		if (!sources) {
+			/* A modem block with no source listed is an ordinary
+			 * configuration: an APN, and the SIM left alone. */
+			continue;
+		}
+		out->items[i].sim = calloc(sources, sizeof(*out->items[i].sim));
+		if (!out->items[i].sim) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			ncfg_modems_free(out);
+			return 0;
+		}
+		out->items[i].sim_count = sources;
+		for (uint32_t j = 0; j < sources; j++) {
+			size_t length = 0;
+			const char *text =
+			    ncfg_json_string(doc, ncfg_json_at(doc, sim, j), &length);
+			out->items[i].sim[j] = dup_text(text ? text : "", text ? length : 0);
+		}
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_probes_free(ncfg_probes_t *probes)
 {
 	if (!probes) {
