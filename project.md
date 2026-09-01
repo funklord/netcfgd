@@ -855,6 +855,75 @@ The packages are `cargo rust ncurses-dev make git iproute2 python3 util-linux pr
 
 Kept current deliberately: this is the section to read after a break, and the one to rewrite rather than append to.
 
+### Where it stands, 2026-09-01
+
+**Cellular is complete in software and has never met a modem.** The whole path
+exists now -- `device wwan0 { modem { sim = [...], apn = "..." } }` parses,
+refuses the characters that would break an AT command, renders into a saved
+profile, chooses a source, falls back when 0119's probe says the link is dead,
+cycles the link so `pre_up` acts on the change, publishes the choice to
+`/run/netcfgd/modem/<device>`, and both helpers read it. 0150 and
+[0152](doc/decision/0152-a-sim-source-is-kept-until-the-probe-says-otherwise.md)
+are the design; the LTE section below is the knowledge behind it.
+
+Every test of it drives a fake: a pty pretending to be a modem, a shell script
+pretending to be `mbimcli`. **That is the gap, and it is hardware rather than
+code.** Nothing in the tree is waiting on a decision before the modem path can
+be tried on a real module.
+
+**The profile renderer went from partial to complete in coverage.** Every field
+of every type it consumes is rendered, refused, or deliberately omitted with a
+reason in place -- checked by an audit worth re-running whenever a model type
+gains a field. Getting there fixed **seven fields a saved profile was silently
+dropping**, which turned out to be the real finding: `bridge_vlans`,
+`Device::on_unmanage`, a network's `bssid`, `roam`, `config`, `routes` and
+`dns`, and a route's `src` and `onlink`. `ncfg profile save` had been writing
+incomplete profiles and reporting success. The round trip had not caught any of
+them because no test had ever carried those keys.
+
+**What to pick up next, in order.**
+
+1. **Live with it on real hardware.** *What would prove it* is the bar and
+   nothing on it has moved: no real radio, no real modem, no day of somebody
+   depending on this machine. Every remaining item there needs a person and a
+   device rather than a design.
+2. **The renderer's last refusals need a decision, not code.** `wireguard`,
+   `openvpn`, `tunnel`, `pppoe` and `tun` are what is left, and they are not
+   more keys: a WireGuard block carries a private key and OpenVPN names an
+   operator's file. **What may a snapshot contain?** That is the holder's, and
+   it blocks the work rather than delaying it.
+3. **The permission tiers**, deferred by the holder with the shape already
+   given -- `view` / `laptop` / `root`, replacing the current gradient. Written
+   up under *Open: the permission system needs an overhaul*.
+4. **Restart without dropping the link**, requested 2026-08-25 and still
+   undesigned -- the subsection immediately below.
+
+**Three things open that a worker should not settle alone.**
+
+- **The generated profile's header contradicts the renderer.** It tells its
+  reader the file "says everything explicitly -- including things a person
+  would have left to a default", and the code omits every value equal to a
+  default. Both behaviours are defensible and the round trip cannot tell them
+  apart; what is not defensible is the artifact describing itself wrongly. The
+  existing code's convention was followed rather than the header's wording, so
+  the choice stays open.
+- **Six model fields cannot be reached from the configuration language at
+  all** -- `DnsPolicy`'s `options`, `dnssec` and `transport`, `DnsServer`'s
+  `port` and `sni`, and `Device`'s `match`. Either the parser gains the keys or
+  the schema loses the fields, and the schema is witnessed, so neither is a
+  passing change.
+- **`ncfg apply` without `--confirm` spawns backends as children of a
+  short-lived CLI**, so which process owns dhcpcd depends on whether the
+  operator typed a flag. Raised with the holder; unanswered.
+
+**Two lessons from this pass that generalise, both about checks rather than
+code.** A coverage check keyed on a field *name* reports the union of every
+type that shares it and calls it the intersection -- match `binding.field`, not
+`field`. And a check should say **how far it looked**: the claim that
+`Device::wifi` was unreachable came from reading a function with `grep -A 30`
+when the arm was at line 798, reported with the confidence of something that
+had looked everywhere.
+
 ### Wanted, not yet designed: restart without dropping the link
 
 **Requested 2026-08-25 by the copyright holder, explicitly to be planned
@@ -5230,10 +5299,13 @@ holder's rather than a worker's:
   assert the same terms. **Three files declare a licence for a holder the tree
   never names**, and that is the one packaging finding standing between this
   and a distributable package.
-- **One commit is committed and unpushed**: `eb0af01`, the copyright
-  attribution on `--version` and the README. It was held deliberately rather
-  than pushed on a relayed instruction, since it carries the holder's name into
-  the program's own output. Any session in this tree can push it.
+- ~~**One commit is committed and unpushed**: `eb0af01`, the copyright
+  attribution on `--version` and the README.~~ **Pushed**, as `7303f74` -- the
+  sha differs because it was rebased on the way. Left here with its original
+  number rather than deleted, because a note naming a commit that exists
+  nowhere is what sent the next reader looking: `git log --grep` for `eb0af01`
+  finds nothing, and the natural conclusion is that the work was lost rather
+  than re-hashed.
 
 
 Not work anybody should do unasked. Each is recorded where it arose; they are
@@ -5421,7 +5493,15 @@ gathered here so a new session does not have to find them.
 
 - **Duration says nothing about whether a run executed.** Run `31820932952` was blocked and took **1m36s**; run `31160730900` executed sixteen steps in **40s**. The bands overlap completely, so a fast run is not a blocked one and a slow run is not an executing one. The separator is `gh run view <id>` and looking for `Set up job`: zero steps means blocked whatever the clock says. A duration is a property of the queue, not of the work — it measures how long something waited before being cancelled. This killed a heuristic that had been adopted into the shared guidelines on one repository's sample, and the entry there records why: a proxy validated on one queue is validated on one queue.
 
-- **Nothing has ever gated this tree's Rust.** `.rs` is absent from `style_gate.py`'s `indent_suffixes` *and* its `text_suffixes`, so all 144 tracked `.rs` files are invisible to `make style` — not the tab rule, not trailing whitespace, not the final newline, not ASCII. The file count it prints has never included them. **Proved rather than inferred**: space indentation, trailing whitespace and mixed tabs were added to a `.rs` file on purpose and the gate still reported every file conforming. So a green `make style` is not evidence about a `.rs` file, and every citation of it in this document that accompanied a Rust change was true and covered none of the Rust.
+- **Nothing had ever gated this tree's Rust, and now it does.** `.rs` joined
+  `indent_suffixes` in `b5f2723` and `NO_COLUMN_HEURISTIC` gives it the checks
+  that need no parser, so `make style` reads 148 Rust files where it used to
+  read none. The finding below is kept because it is what the fix was for, and
+  because its last sentence is the part that generalises -- a gate's green is
+  evidence only about the files it actually opened. The predicted 118 false
+  positives did not appear: the heuristic that skips them is why the count of
+  files "without the column rule" exists.
+- **The finding, as it stood.** `.rs` is absent from `style_gate.py`'s `indent_suffixes` *and* its `text_suffixes`, so all 144 tracked `.rs` files are invisible to `make style` — not the tab rule, not trailing whitespace, not the final newline, not ASCII. The file count it prints has never included them. **Proved rather than inferred**: space indentation, trailing whitespace and mixed tabs were added to a `.rs` file on purpose and the gate still reported every file conforming. So a green `make style` is not evidence about a `.rs` file, and every citation of it in this document that accompanied a Rust change was true and covered none of the Rust.
 
   What has actually been checking it: `cargo` — the compiler, the test suites, and `clippy`/`fmt` **only since somebody installed them here**, which is when two already-pushed files turned out to be misformatted. Measured across all 144: zero space-indented, zero trailing whitespace, zero missing final newline, zero non-ASCII, zero space-before-tab. **A clean bill sustained by hand with nothing enforcing it** — which is worth knowing precisely, because it means the next Rust file added is unguarded too. The suffix list lives in the shared gate and a project overriding `indent_suffixes` locally replaces the whole list rather than extending it, so a local fix goes stale the day the shared default gains a suffix; it is signalled for a deliberate cross-project pass. If that pass lands, expect **118 space-indent findings here, all false** — 106 of them inside the `--help` string literal in `crates/netcfgd-cli/src/lib.rs`, because the gate skips string lines for Python and relaxes the heuristic for C and C++, and a language with neither gets the strictest check with the least knowledge.
 
