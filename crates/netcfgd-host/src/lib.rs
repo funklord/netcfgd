@@ -24,6 +24,7 @@ pub use netcfgd_apply::contention;
 pub mod explain;
 pub mod hooks;
 pub mod portal;
+pub mod secrets;
 pub mod state;
 pub mod wifi_profile;
 

@@ -241,77 +241,13 @@ fn report(secret: &Path, name: &str, replacing: bool, options: &Options) {
 /// A walk rather than a search of the file text: the document is what the
 /// backends resolve against, so a reference the compiler dropped or renamed is
 /// not one anything will look for.
+/// The blocks that refer to this name.
+///
+/// The walk itself is `netcfgd_host::secrets`, because the socket needs the
+/// same knowledge inverted -- every name and who refers to it -- and two walks
+/// would be two chances to miss a shape when the model grows one.
 fn referring_to(document: &netcfgd_model::Document, name: &str) -> Vec<String> {
-	let mut users = Vec::new();
-	let mut note = |what: &str, reference: &netcfgd_model::SecretRef| {
-		if reference.name == name {
-			users.push(what.to_owned());
-		}
-	};
-	for interface in &document.interfaces {
-		if let netcfgd_model::InterfaceKind::WireGuard(wireguard) = &interface.kind {
-			note(
-				&format!("interface {} (private key)", interface.name),
-				&wireguard.private_key,
-			);
-			for peer in &wireguard.peers {
-				if let Some(preshared) = &peer.preshared_key {
-					note(
-						&format!("interface {} (peer {})", interface.name, peer.name),
-						preshared,
-					);
-				}
-			}
-		}
-		if let netcfgd_model::InterfaceKind::Pppoe(pppoe) = &interface.kind {
-			note(&format!("interface {}", interface.name), &pppoe.password);
-		}
-		if let Some(dot1x) = &interface.dot1x {
-			if let Some(password) = &dot1x.password {
-				note(&format!("interface {} (802.1X)", interface.name), password);
-			}
-			// Only a *stored* key is a secret this command put there. One
-			// given as a path is a file the operator manages, and reporting it
-			// as an unused secret would be wrong in both directions -- it is
-			// not this store's, and `ncfg secret set` cannot create it.
-			if let Some(netcfgd_model::CertSource::Stored(key)) = &dot1x.private_key {
-				note(
-					&format!("interface {} (802.1X client key)", interface.name),
-					key,
-				);
-			}
-		}
-	}
-	for network in &document.networks {
-		match &network.security {
-			netcfgd_model::Security::Psk(psk) => {
-				note(&format!("network {}", network.id), &psk.passphrase);
-			}
-			netcfgd_model::Security::Eap(eap) => {
-				if let Some(password) = &eap.password {
-					note(&format!("network {}", network.id), password);
-				}
-				if let Some(netcfgd_model::CertSource::Stored(key)) = &eap.private_key {
-					note(&format!("network {} (client key)", network.id), key);
-				}
-				// The certificates too, now that they can be stored content:
-				// a client sends `ca_cert = "@secret:corp-ca"` and this is
-				// what tells the operator the store has it.
-				for (source, what) in [
-					(&eap.ca_cert, "CA certificate"),
-					(&eap.client_cert, "client certificate"),
-				] {
-					if let Some(netcfgd_model::CertSource::Stored(reference)) = source {
-						note(&format!("network {} ({what})", network.id), reference);
-					}
-				}
-			}
-			netcfgd_model::Security::Open | netcfgd_model::Security::Owe => {}
-		}
-	}
-	users.sort_unstable();
-	users.dedup();
-	users
+	netcfgd_host::secrets::referring_to(document, name)
 }
 
 #[cfg(test)]

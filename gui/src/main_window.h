@@ -32,6 +32,7 @@ class ncfg_dns_view;
 class ncfg_devices_view;
 class ncfg_modems_view;
 class ncfg_global_view;
+class ncfg_secrets_view;
 class ncfg_profiles_view;
 class ncfg_rules_view;
 class ncfg_bluetooth_view;
@@ -90,6 +91,7 @@ private:
 	ncfg_devices_view *devices;
 	ncfg_modems_view  *modems;
 	ncfg_global_view  *global;
+	ncfg_secrets_view *secrets;
 	ncfg_profiles_view *profiles;
 	ncfg_rules_view *rules;
 	ncfg_bluetooth_view *bluetooth;

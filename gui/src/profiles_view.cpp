@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
@@ -47,6 +48,9 @@ ncfg_profiles_view::ncfg_profiles_view(ncfg_connection *connection, QWidget *par
 	use_button->setObjectName(QStringLiteral("use_profile"));
 	use_button->setEnabled(false);
 	controls->addWidget(use_button);
+	save_button = new QPushButton(QStringLiteral("save what is running as..."), this);
+	save_button->setObjectName(QStringLiteral("save_profile"));
+	controls->addWidget(save_button);
 	controls->addStretch();
 	layout->addLayout(controls);
 
@@ -56,6 +60,7 @@ ncfg_profiles_view::ncfg_profiles_view(ncfg_connection *connection, QWidget *par
 	layout->addWidget(note);
 
 	connect(use_button, &QPushButton::clicked, this, &ncfg_profiles_view::use_selected);
+	connect(save_button, &QPushButton::clicked, this, &ncfg_profiles_view::save_current);
 	connect(table, &QTableWidget::doubleClicked, this, &ncfg_profiles_view::use_selected);
 	connect(table, &QTableWidget::itemSelectionChanged, this,
 	    [this]() { use_button->setEnabled(table->currentRow() >= 0); });
@@ -155,6 +160,59 @@ void ncfg_profiles_view::use_selected()
 		emit reported(error);
 		return;
 	}
+	refresh();
+	emit changed();
+}
+
+void ncfg_profiles_view::save_current()
+{
+	bool named = false;
+	const QString name = QInputDialog::getText(this, QStringLiteral("netcfgd"),
+	    QStringLiteral("Save what this machine is running as a profile called:"),
+	    QLineEdit::Normal, QString(), &named)
+	                         .trimmed();
+	if (!named || name.isEmpty()) {
+		return;
+	}
+
+	/* Tried without `replace` first, so an existing profile is refused by the
+	 * daemon rather than overwritten by a client that guessed. Somebody's
+	 * profile is somebody's work, and the second ask is what makes the
+	 * overwrite deliberate rather than a consequence of typing a name. */
+	QString error;
+	if (connection->profile_save(name, false, &error)) {
+		emit reported(
+		    QStringLiteral("saved what is running as `%1`, and switched to it").arg(name));
+		refresh();
+		emit changed();
+		return;
+	}
+
+	/* The daemon's refusal is the message, and only one of its refusals is
+	 * worth offering to push past. The others -- a name that cannot be a
+	 * directory, a configuration the renderer will not write out, a profile
+	 * written by hand -- are answers rather than obstacles. */
+	if (!error.contains(QStringLiteral("already exists"))) {
+		QMessageBox::warning(this, QStringLiteral("netcfgd"), error);
+		emit reported(error);
+		return;
+	}
+
+	const QMessageBox::StandardButton answer = QMessageBox::question(this,
+	    QStringLiteral("netcfgd"),
+	    QStringLiteral("`%1` already exists. Overwrite it with what this machine is "
+	                   "running?\n\nWhat is in that profile now is replaced.")
+	        .arg(name),
+	    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (answer != QMessageBox::Yes) {
+		return;
+	}
+	if (!connection->profile_save(name, true, &error)) {
+		QMessageBox::warning(this, QStringLiteral("netcfgd"), error);
+		emit reported(error);
+		return;
+	}
+	emit reported(QStringLiteral("saved what is running as `%1`, and switched to it").arg(name));
 	refresh();
 	emit changed();
 }

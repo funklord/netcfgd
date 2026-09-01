@@ -52,7 +52,12 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// being given one.
 		| Request::ProbeList
 		| Request::ProfileList
-		| Request::ModemList => Tier::Observe,
+		| Request::ModemList
+		// Names only, never values -- and the names are already in the
+		// document `Show` returns, since `@secret:` references live there.
+		// What this adds is whether the file behind each one exists, which is
+		// a diagnostic rather than a disclosure.
+		| Request::SecretList => Tier::Observe,
 
 		// Scanning is not reading: it transmits probe requests, it interrupts
 		// whatever the radio was doing, and it is one of the things design
@@ -104,6 +109,7 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		| Request::Revert
 		| Request::Reload
 		| Request::ProfileSet { .. }
+		| Request::ProfileSave { .. }
 		| Request::ConfigPut { .. }
 		// Writing a probe is `admin` for the tier system's sake and root in
 		// fact: `check_content` refuses it from anyone else. A probe is a

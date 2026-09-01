@@ -1171,6 +1171,8 @@ fn answer(
 		} => put_secret_request(state, name, value, *replace),
 		Request::ProfileList => list_profiles_request(state),
 		Request::ProfileSet { name } => set_profile_request(state, name.as_deref()),
+		Request::ProfileSave { name, replace } => save_profile_request(state, name, *replace),
+		Request::SecretList => list_secrets_request(state),
 		Request::ModemList => Response::Modems {
 			modems: state.sims.status(state.desired.as_ref()),
 		},
@@ -1396,6 +1398,53 @@ fn list_profiles_request(state: &State) -> Response {
 /// which reads as netcfgd ignoring the operator. The check belongs here
 /// because this is the machine that would have to read the directory: a
 /// client checking its own disk would be answering about the wrong host.
+/// The credentials this machine holds, by name and never by value.
+///
+/// A function rather than an arm for the reason its siblings are: `answer` has
+/// a line limit and every other reader here is already one of these.
+///
+/// The document is the one the daemon compiled, so a name referenced by a
+/// configuration that does not currently compile is not reported as used --
+/// which is right, because it is not in force.
+fn list_secrets_request(state: &State) -> Response {
+	Response::Secrets {
+		secrets: netcfgd_host::secrets::list(&state.paths.config, state.desired.as_ref()),
+	}
+}
+
+/// Write what the machine is running into a profile, and select it.
+///
+/// A function rather than an arm for the reason its siblings are: `answer` has
+/// a line limit and every other writer here is already one of these.
+///
+/// The document it saves is the one the daemon compiled, not one re-read from
+/// disk: that is what "what this machine is running" means, and re-reading
+/// would race an edit somebody made in the last second.
+fn save_profile_request(state: &mut State, name: &str, replace: bool) -> Response {
+	let Some(running) = state.desired.clone() else {
+		return Response::error(
+			"there is no compiled configuration to save; fix the configuration first",
+		);
+	};
+	match netcfgd_host::config::save_profile(
+		&state.paths.config,
+		&state.paths.factory,
+		name,
+		replace,
+		&running,
+		"asking again with replace",
+	) {
+		Ok(_) => {
+			// The selection moved, so what the daemon holds is now stale --
+			// and `save_profile` has already proved the result compiles back
+			// to what was running.
+			state.reload();
+			Response::Ok
+		}
+		Err(message) => Response::error(message),
+	}
+}
+
 fn set_profile_request(state: &mut State, name: Option<&str>) -> Response {
 	let drop_in = netcfgd_host::config::PROFILE_DROP_IN;
 

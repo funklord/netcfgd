@@ -140,126 +140,29 @@ fn save(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 	let Some(name) = rest.first() else {
 		return Err("`ncfg profile save` needs a name to save as".to_owned());
 	};
-	usable_name(name)?;
 
 	let config = netcfgd_host::config::resolve_dir(options.config_dir.as_deref());
 	let factory = netcfgd_host::config::resolve_factory_dir(options.factory_dir.as_deref());
-	let directory = config.join("profile").join(name);
-	let snapshot = directory.join("00-saved.conf");
-
-	// Refused rather than merged. An existing profile is somebody's work, and
-	// guessing here is the failure this command exists to prevent.
-	if directory.is_dir() && !options.replace {
-		return Err(format!(
-			"`{name}` already exists ({}); --replace to overwrite it",
-			directory.display()
-		));
-	}
-	if directory.is_dir() && !snapshot.exists() {
-		return Err(format!(
-			"`{name}` was written by hand ({}), so saving over it would discard \
-			 files this cannot reproduce. Save as another name, or take that \
-			 directory away first",
-			directory.display()
-		));
-	}
 
 	// What is running, before anything moves.
 	let (running, _) = crate::compile(options)?;
 
-	let taken = netcfgd_host::config::take_folded(&config)
-		.map_err(|error| format!("could not take the folded profile out: {error}"))?;
-
-	let outcome = write_snapshot(
-		&running, name, &config, &factory, &directory, &snapshot, options,
-	);
-	if outcome.is_err() {
-		let _ = std::fs::remove_file(&snapshot);
-		let _ = std::fs::remove_dir(&directory);
-		let _ = netcfgd_host::config::restore_folded(&taken);
-	}
-	outcome
-}
-
-/// The half of `save` that can fail with something to undo.
-#[allow(clippy::too_many_arguments)]
-fn write_snapshot(
-	running: &netcfgd_model::Document,
-	name: &str,
-	config: &std::path::Path,
-	factory: &std::path::Path,
-	directory: &std::path::Path,
-	snapshot: &std::path::Path,
-	options: &Options,
-) -> Result<ExitCode, String> {
-	// Which blocks the base still defines, now that the fold is out of it.
-	// `override` on a block nothing defines is a compile error, and its absence
-	// on one that is defined is a different one -- so this is not a detail the
-	// renderer can guess.
-	let base = netcfgd_host::config::load_layered(factory, config)
-		.ok()
-		.and_then(|sources| netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok());
-	let mut overrides = netcfgd_compile::render::Overrides::new();
-	if let Some(base) = &base {
-		for interface in &base.interfaces {
-			overrides.insert(format!("interface {}", interface.name));
-		}
-		for network in &base.networks {
-			overrides.insert(format!("network {}", network.id));
-		}
-		for device in &base.devices {
-			overrides.insert(format!("device {}", device.name));
-		}
-	}
-
-	let text = netcfgd_compile::render::render(running, &overrides).map_err(|missing| {
-		format!(
-			"this configuration cannot be written out yet, so it was not saved. \
-			 What is in the way:\n  {}\nWrite the profile by hand instead; \
-			 `ncfg profile list` shows where it goes",
-			missing.join("\n  ")
-		)
-	})?;
-
-	std::fs::create_dir_all(directory)
-		.map_err(|error| format!("could not create {}: {error}", directory.display()))?;
-	std::fs::write(snapshot, &text)
-		.map_err(|error| format!("could not write {}: {error}", snapshot.display()))?;
+	// The whole of it is in `netcfgd-host` so that the daemon can do it too:
+	// this was the only way to save a profile, which meant a machine with a
+	// gui could switch between profiles it already had and never make one.
+	let snapshot = netcfgd_host::config::save_profile(
+		&config,
+		&factory,
+		name,
+		options.replace,
+		&running,
+		// The remedy in this caller's vocabulary: `ncfg` has a flag to
+		// name, and a message naming a gui's button would be useless here.
+		"`--replace`",
+	)?;
 	println!("wrote {}", snapshot.display());
-
-	// Selecting is part of the same act: having just said what this profile
-	// means, being left on none would be a surprise.
-	set(std::slice::from_ref(&name.to_owned()), options)?;
-
-	// The proof. What the machine compiles to now must be what it was running,
-	// but for the selection this just made.
-	let after = netcfgd_host::config::load_with_profile(factory, config)
-		.ok()
-		.and_then(|sources| netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok());
-	let mut expected = running.clone();
-	expected.globals.profile = Some(name.to_owned());
-	if after.as_ref() != Some(&expected) {
-		return Err(format!(
-			"saving `{name}` would not reproduce what this machine is running, \
-			 so nothing was kept. That is a fault in the snapshot rather than \
-			 in your configuration; write the profile by hand and please report \
-			 it"
-		));
-	}
-
+	println!("`{name}` is now the profile in use");
 	Ok(ExitCode::SUCCESS)
-}
-
-/// A name that can be a directory here, refused early so the message can say
-/// which part was the problem rather than leaving it to the compiler.
-fn usable_name(name: &str) -> Result<(), String> {
-	if name.is_empty() || name.contains('/') || name.starts_with('.') {
-		return Err(format!(
-			"`{name}` cannot be a profile name: a plain name, since netcfgd \
-			 chooses the directory it is read from"
-		));
-	}
-	Ok(())
 }
 
 fn set(rest: &[String], options: &Options) -> Result<ExitCode, String> {

@@ -2,6 +2,9 @@
 {"request":"probe_list"}
 {"request":"profile_list"}
 {"request":"modem_list"}
+{"request":"secret_list"}
+{"request":"profile_save","name":"office"}
+{"request":"profile_save","name":"office","replace":true}
 {"request":"profile_set","name":"office"}
 {"request":"profile_set"}
 {"request":"probe_put","name":"office","text":"#!/bin/sh\nexit 0\n","replace":true}
@@ -47,6 +50,7 @@
 {"response":"ap_stations","interface":"wlan0","access_point":"home","access_control":"deny","stations":[{"address":"00:11:22:33:44:55","authorized":true,"listed":true,"signal":-52,"connected_seconds":184,"inactive_msec":120,"rx_bytes":4096,"tx_bytes":8192}]}
 {"response":"ok"}
 {"response":"error","message":"not permitted"}
+{"response":"secrets","secrets":[{"name":"cafe","stored":true,"used_by":["network Cafe"]},{"name":"campus","stored":false,"used_by":["network Campus"]},{"name":"old-vpn","stored":true}]}
 {"response":"modems","modems":[{"device":"wwan0","sim":["esim","socket"],"selected":"socket","apn":"im.cxn","cycle_pending":true},{"device":"wwan1","sim":["socket"],"selected":"socket"}]}
 {"response":"profiles","profiles":[{"name":"offline","shipped":true},{"name":"office","shipped":false}],"chosen":"office"}
 {"response":"probes","probes":[{"name":"default","directory":"/usr/share/netcfgd/probe","text":"#!/bin/sh\nexit 0\n","editable":false},{"name":"office","directory":"/etc/netcfgd/probe","text":"#!/bin/sh\nexit 1\n","editable":true}]}

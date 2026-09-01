@@ -50,6 +50,7 @@ SOURCES += \
 	src/devices_view.cpp \
 	src/global_view.cpp \
 	src/modems_view.cpp \
+	src/secrets_view.cpp \
 	src/profiles_view.cpp \
 	src/rules_view.cpp \
 	src/bluetooth_view.cpp \
@@ -74,6 +75,7 @@ HEADERS += \
 	src/devices_view.h \
 	src/global_view.h \
 	src/modems_view.h \
+	src/secrets_view.h \
 	src/profiles_view.h \
 	src/rules_view.h \
 	src/bluetooth_view.h \

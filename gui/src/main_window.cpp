@@ -9,6 +9,7 @@
 #include "devices_view.h"
 #include "global_view.h"
 #include "modems_view.h"
+#include "secrets_view.h"
 #include "profiles_view.h"
 #include "rules_view.h"
 #include "bluetooth_view.h"
@@ -50,6 +51,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	devices = new ncfg_devices_view(connection, tabs);
 	modems = new ncfg_modems_view(connection, tabs);
 	global = new ncfg_global_view(connection, tabs);
+	secrets = new ncfg_secrets_view(connection, tabs);
 	profiles = new ncfg_profiles_view(connection, tabs);
 	rules = new ncfg_rules_view(connection, tabs);
 	bluetooth = new ncfg_bluetooth_view(connection, tabs);
@@ -78,6 +80,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	tabs->addTab(rules, QStringLiteral("rules"));
 	tabs->addTab(bluetooth, QStringLiteral("bluetooth"));
 	tabs->addTab(hooks, QStringLiteral("hooks"));
+	tabs->addTab(secrets, QStringLiteral("secrets"));
 	tabs->addTab(plan, QStringLiteral("plan"));
 	tabs->addTab(events, QStringLiteral("events"));
 	/* Last, because it is the one tab that is useful while every other is
@@ -89,6 +92,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
 	connect(modems, &ncfg_modems_view::reported, this, &ncfg_main_window::note);
 	connect(global, &ncfg_global_view::reported, this, &ncfg_main_window::note);
+	connect(secrets, &ncfg_secrets_view::reported, this, &ncfg_main_window::note);
 	connect(global, &ncfg_global_view::changed, this, &ncfg_main_window::reload);
 	connect(profiles, &ncfg_profiles_view::reported, this, &ncfg_main_window::note);
 	connect(rules, &ncfg_rules_view::reported, this, &ncfg_main_window::note);
@@ -211,6 +215,8 @@ void ncfg_main_window::refresh()
 		modems->refresh();
 	} else if (current == global) {
 		global->refresh();
+	} else if (current == secrets) {
+		secrets->refresh();
 	} else if (current == profiles) {
 		profiles->refresh();
 	} else if (current == rules) {

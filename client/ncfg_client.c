@@ -2212,6 +2212,134 @@ int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *
 	return put_named_text(client, "config_put", name, text, replace, err, err_size);
 }
 
+void ncfg_secrets_free(ncfg_secrets_t *secrets)
+{
+	if (!secrets) {
+		return;
+	}
+	for (size_t i = 0; i < secrets->count; i++) {
+		free(secrets->items[i].name);
+		free(secrets->items[i].used_by);
+	}
+	free(secrets->items);
+	secrets->items = NULL;
+	secrets->count = 0;
+}
+
+int ncfg_client_secrets(ncfg_client_t *client, ncfg_secrets_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc =
+	    ncfg_client_request(client, "{\"request\":\"secret_list\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t secrets = ncfg_json_member(doc, ncfg_json_root(doc), "secrets");
+	uint32_t count = ncfg_json_count(doc, secrets);
+	if (!count) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, secrets, i);
+		out->items[i].name = member_text(doc, entry, "name");
+		out->items[i].stored = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "stored"), 0);
+
+		/* Joined here rather than in the view: the seam puts the models
+		 * below the widgets, and "which blocks use this" is a model. */
+		char joined[512];
+		joined[0] = '\0';
+		uint32_t used = ncfg_json_member(doc, entry, "used_by");
+		uint32_t users = ncfg_json_count(doc, used);
+		for (uint32_t j = 0; j < users; j++) {
+			size_t length = 0;
+			const char *text = ncfg_json_string(doc, ncfg_json_at(doc, used, j), &length);
+			size_t at = strlen(joined);
+			if (!text || at >= sizeof(joined)) {
+				continue;
+			}
+			(void)snprintf(joined + at, sizeof(joined) - at, "%s%.*s", at ? ", " : "",
+			    (int)length, text);
+		}
+		out->items[i].used_by = dup_string(joined);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
+int ncfg_client_profile_save(ncfg_client_t *client, const char *name, int replace, char *err,
+                             size_t err_size)
+{
+	if (!name || !name[0]) {
+		set_error(err, err_size, "a profile needs a name to be saved as");
+		return 0;
+	}
+
+	char stack[512];
+	char *request = stack;
+	size_t need = 96 + strlen(name) * 6;
+
+	if (need > sizeof(stack)) {
+		request = malloc(need);
+		if (!request) {
+			set_error(err, err_size, "that name does not fit in memory");
+			return 0;
+		}
+	} else {
+		need = sizeof(stack);
+	}
+
+	int head = snprintf(request, need, "{\"request\":\"profile_save\",\"name\":");
+	int built = head > 0 && (size_t)head < need;
+	size_t at = built ? (size_t)head : 0;
+	if (built) {
+		built = ncfg_client_quote(name, request + at, need - at) > 0;
+	}
+	if (built) {
+		at += strlen(request + at);
+		int tail = snprintf(request + at, need - at, "%s}",
+		    replace ? ",\"replace\":true" : "");
+		built = tail > 0 && (size_t)tail < need - at;
+	}
+	if (!built) {
+		if (request != stack) {
+			free(request);
+		}
+		set_error(err, err_size, "that name does not fit in one request");
+		return 0;
+	}
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (request != stack) {
+		free(request);
+	}
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
 int ncfg_client_profile_set(ncfg_client_t *client, const char *name, char *err, size_t err_size)
 {
 	/* NULL is "stop using a profile", which is a real state rather than a

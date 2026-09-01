@@ -150,6 +150,15 @@ struct ncfg_globals {
 	bool    remote_admin = false;
 };
 
+/* One credential, by name and never by value. */
+struct ncfg_secret_row {
+	QString name;
+	bool    stored = false;
+	/* The blocks that refer to it, joined. Empty for a stored secret nothing
+	 * uses, which is a credential left behind. */
+	QString used_by;
+};
+
 struct ncfg_saved_network_row {
 	QString id;
 	QString name;
@@ -534,6 +543,12 @@ public:
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);
 	/* The host-wide policy the configuration declares. */
 	bool globals(ncfg_globals *out, QString *error);
+	/* The credentials this machine holds, by name. Never by value: there is
+	 * no field that could carry one. */
+	bool secrets(QList<ncfg_secret_row> *out, QString *error);
+	/* Write what this machine is running into a profile, and select it.
+	 * Needs `admin`. */
+	bool profile_save(const QString &name, bool replace, QString *error);
 	/*
 	 * Choose a profile, or stop using one with an empty name. Needs `admin`.
 	 *

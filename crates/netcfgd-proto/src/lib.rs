@@ -240,6 +240,42 @@ pub enum Request {
 	/// fallback afterwards, not a missing accessor.
 	ModemList,
 
+	/// Write what this machine is running into a profile, and select it.
+	///
+	/// **`admin`, and the heaviest thing at that tier.** It writes a
+	/// configuration file, moves the folded profile out of `conf.d`, and
+	/// changes the selection -- and the daemon reconciles on its own, so it is
+	/// a change to the running machine rather than a note for later.
+	///
+	/// A verb rather than a `ConfigPut` of a rendered file, for the reason
+	/// [`Request::ProfileSet`] gives and one more: the caller does not have
+	/// the text. What gets written is the *effective* document rendered back
+	/// out, which only the machine holding it can produce.
+	ProfileSave {
+		/// The profile to write. A plain name: netcfgd chooses the directory.
+		name: String,
+		/// Overwrite one that exists. Refused without it, because an existing
+		/// profile is somebody's work.
+		#[serde(default, skip_serializing_if = "std::ops::Not::not")]
+		replace: bool,
+	},
+
+	/// The credentials this machine holds, by name and never by value.
+	///
+	/// **Names only, and that is the whole design.** A secret's value never
+	/// crosses this socket in this direction; `SecretPut` goes the other way.
+	/// What a client needs is which names exist and which the configuration
+	/// refers to, because the interesting fault is the mismatch: a network
+	/// naming `@secret:cafe` where no such secret exists is a network that
+	/// will never join, and it fails at association time with an error about
+	/// the radio rather than about the missing passphrase.
+	///
+	/// `observe`, which is weaker than it first looks: the *names* are already
+	/// in the document that [`Request::Show`] returns, since that is where
+	/// `@secret:` references live. What this adds is whether the file behind
+	/// each one is actually there.
+	SecretList,
+
 	/// Choose a profile, or stop using one.
 	///
 	/// **A verb of its own rather than a `ConfigPut` of a known filename.**
@@ -413,6 +449,7 @@ impl Request {
 			| Self::ProbeList
 			| Self::ProfileList
 			| Self::ModemList
+			| Self::SecretList
 			| Self::Confirm
 			| Self::Revert
 			| Self::Reload
@@ -448,6 +485,7 @@ impl Request {
 			Self::ConfigDelete { .. } | Self::SecretDelete { .. } | Self::ProfileSet { .. } => {
 				&["name"]
 			}
+			Self::ProfileSave { .. } => &["name", "replace"],
 			Self::RadioSet { .. } => &["interface", "activate"],
 		}
 	}
@@ -483,6 +521,27 @@ pub struct ProfileEntry {
 	/// so a client can say whose it is. An operator's copy of a shipped
 	/// profile reads as theirs, because theirs is what layers on top.
 	pub shipped: bool,
+}
+
+/// One credential, by name.
+///
+/// **No value, ever.** There is no field here that could carry one, which is a
+/// stronger guarantee than a rule saying not to fill one in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretEntry {
+	/// The name, as `@secret:<name>` spells it.
+	pub name: String,
+	/// Whether the store actually holds it.
+	pub stored: bool,
+	/// The blocks that refer to it, as `network Cafe` or `interface eth0`.
+	///
+	/// Present because the two interesting faults are opposite ways round: a
+	/// referenced secret that is not stored is a network that will never join,
+	/// and a stored secret nothing refers to is a credential still on the
+	/// machine after whatever wanted it was deleted.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub used_by: Vec<String>,
 }
 
 /// One modem device: what the document asks for, and what is in force.
@@ -654,6 +713,13 @@ pub enum Response {
 	Event(Box<Event>),
 	/// What a scan found.
 	WifiScan(Box<ScanReport>),
+	/// The credentials, in answer to [`Request::SecretList`].
+	Secrets {
+		/// Every name the configuration refers to or the store holds, sorted,
+		/// with no duplicates.
+		secrets: Vec<SecretEntry>,
+	},
+
 	/// The modems, in answer to [`Request::ModemList`].
 	Modems {
 		/// One per device with a `modem` block, in document order.

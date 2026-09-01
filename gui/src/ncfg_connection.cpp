@@ -605,6 +605,58 @@ bool ncfg_connection::profile_set(const QString &name, QString *error)
 	return true;
 }
 
+bool ncfg_connection::secrets(QList<ncfg_secret_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_secrets_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_secrets(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_secret_row row;
+		row.name = from_c(found.items[i].name);
+		row.stored = found.items[i].stored != 0;
+		row.used_by = from_c(found.items[i].used_by);
+		out->append(row);
+	}
+	ncfg_secrets_free(&found);
+	return true;
+}
+
+bool ncfg_connection::profile_save(const QString &name, bool replace, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+	const QByteArray as_bytes = name.toUtf8();
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_profile_save(client, as_bytes.constData(), replace ? 1 : 0, message,
+	        sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::globals(ncfg_globals *out, QString *error)
 {
 	if (!out) {

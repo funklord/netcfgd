@@ -47,11 +47,17 @@ signals:
 private slots:
 	/* Switch to the selected profile, asking first. Needs `admin`. */
 	void use_selected();
+	/* Write what this machine is running into a profile, and select it.
+	 * Needs `admin`. The verb is the daemon's: what gets written is the
+	 * effective document rendered back out, which only the machine holding
+	 * it can produce -- this client does not have the text. */
+	void save_current();
 
 private:
 	ncfg_connection *connection;
 	QTableWidget    *table;
 	QPushButton     *use_button;
+	QPushButton     *save_button;
 	QLabel          *note;
 };
 

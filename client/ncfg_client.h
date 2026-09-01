@@ -754,6 +754,59 @@ typedef struct {
 void ncfg_globals_free(ncfg_globals_t *globals);
 
 /*
+ * One credential, by name. There is no field here that could carry a value,
+ * which is a stronger guarantee than a rule saying not to fill one in.
+ */
+typedef struct {
+	char *name;
+	/* Whether the store actually holds it. */
+	int   stored;
+	/* The blocks that refer to it, joined for display: `network Cafe`. Empty
+	 * for a stored secret nothing uses, which is a credential still on the
+	 * machine after whatever wanted it was deleted. */
+	char *used_by;
+} ncfg_secret_t;
+
+typedef struct {
+	ncfg_secret_t *items;
+	size_t         count;
+} ncfg_secrets_t;
+
+void ncfg_secrets_free(ncfg_secrets_t *secrets);
+
+/*
+ * The credentials this machine holds, by name and never by value. Needs
+ * `observe`.
+ *
+ * The union of what the store holds and what the configuration refers to,
+ * because the two interesting faults are opposite ways round: a referenced
+ * name with no file is a network that will never join -- and it fails at
+ * association time with an error about the radio rather than about the missing
+ * passphrase -- while a stored name nothing refers to is a credential left
+ * behind.
+ */
+int ncfg_client_secrets(ncfg_client_t *client, ncfg_secrets_t *out, char *err, size_t err_size);
+
+/*
+ * Write what this machine is running into a profile, and select it. Needs
+ * `admin`.
+ *
+ * A verb rather than a write of a rendered file, and not only because netcfgd
+ * owns where a profile lives: the caller does not have the text. What gets
+ * written is the effective document rendered back out, which only the machine
+ * holding it can produce.
+ *
+ * `replace` overwrites a profile that exists. Without it that is refused,
+ * because an existing profile is somebody's work.
+ *
+ * The network is not reconfigured by this -- the running configuration is what
+ * was just saved -- but the selection moves, so the machine is on the new
+ * profile afterwards.
+ */
+int ncfg_client_profile_save(ncfg_client_t *client, const char *name, int replace, char *err,
+                             size_t err_size);
+
+/*
  * The host-wide policy the configuration declares. Needs `observe`.
  */
 int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, size_t err_size);

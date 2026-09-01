@@ -1550,6 +1550,49 @@ collapsing them onto a shared read-only table is exactly the kind of thing the
 simplification pass is for. Recorded so that pass does not have to rediscover
 it.
 
+**`profile_save` and `secret_list`, the two verbs that had no socket at all.**
+Both were CLI-only by construction rather than by decision, which meant a
+machine with a gui could switch between profiles it already had and never make
+one -- and a profile is most wanted on the machine somebody is standing in
+front of.
+
+**Saving is a verb rather than a `config_put` of a rendered file, and the
+reason is stronger than `profile_set`'s: the caller does not have the text.**
+What gets written is the effective document rendered back out, which only the
+machine holding it can produce. So the whole routine moved from
+`ncfg profile save` into `netcfgd_host::config::save_profile` and both callers
+share it -- the CLI's own tests still pass through the moved code, which is what
+says the move preserved it.
+
+**The remedy in a refusal is the caller's words, not the library's.** Moving
+the message lost `--replace` from what `ncfg` prints, which is worse than it
+sounds: a flag the user cannot see is a flag they cannot type. Rather than
+string-matching an error afterwards, `save_profile` takes how the caller asks
+for an overwrite and puts that in the message. The CLI passes `` `--replace` ``
+and the daemon passes a phrase about asking again.
+
+**`secret_list` is names and never values, and the type is what guarantees
+it** -- `SecretEntry` has no field that could carry one, which is stronger than
+a rule saying not to fill one in. It is `observe`, which is weaker than it
+first looks: the names are already in the document `Show` returns, since that
+is where `@secret:` references live. What it adds is whether the file behind
+each one exists.
+
+**The union of stored and referenced is the point**, because the two faults
+worth finding are opposite ways round. A referenced name with no file is a
+network that will never join -- and it fails at association time with an error
+about the radio rather than about the missing passphrase, which is why somebody
+would go looking. A stored name nothing refers to is a credential still on the
+machine after whatever wanted it was deleted. Neither was visible anywhere in
+the program before.
+
+**One walk of the document, in one place.** `ncfg secret set` already reported
+which blocks refer to a name and the socket needed the same knowledge inverted;
+two walks would be two chances to miss a shape when the model grows one, and it
+has grown three since that walk was written -- stored certificates, a wireguard
+peer's preshared key, and 802.1X on a wired port. `netcfgd_host::secrets` holds
+it and the CLI calls in.
+
 **A `global` tab, which is the last of the document's top-level things.** Not a
 list, which is why it is a setting-and-value table rather than rows of
 something: it is the frame the other tabs sit in. It carries the host-wide off

@@ -95,6 +95,8 @@ fn every_request() -> Vec<Request> {
 		Request::ProbeList => "probe_list",
 		Request::ProfileList => "profile_list",
 		Request::ModemList => "modem_list",
+		Request::SecretList => "secret_list",
+		Request::ProfileSave { .. } => "profile_save",
 		Request::ProfileSet { .. } => "profile_set",
 		Request::RadioSet { .. } => "radio_set",
 	};
@@ -117,12 +119,14 @@ fn every_request() -> Vec<Request> {
 			"probe_list",
 			"probe_put",
 			"profile_list",
+			"profile_save",
 			"profile_set",
 			"radio_set",
 			"radios",
 			"reload",
 			"revert",
 			"secret_delete",
+			"secret_list",
 			"secret_put",
 			"show",
 			"status",
@@ -150,6 +154,18 @@ fn probe_samples() -> Vec<Request> {
 		Request::ProbeList,
 		Request::ProfileList,
 		Request::ModemList,
+		Request::SecretList,
+		// Two, because `replace` is skip_serializing_if: the witness has to
+		// pin both the present and the absent form, and overwriting somebody's
+		// profile is exactly the member you want pinned.
+		Request::ProfileSave {
+			name: "office".to_owned(),
+			replace: false,
+		},
+		Request::ProfileSave {
+			name: "office".to_owned(),
+			replace: true,
+		},
 		// Two, because `name` is skip_serializing_if and one that sets it
 		// pins only the present form. The absent one is "no profile chosen",
 		// which is a real state rather than a missing argument.
@@ -331,6 +347,39 @@ fn enterprise_samples() -> Vec<Request> {
 }
 
 /// Every response, on the same terms.
+/// The credentials, as their own function so `every_response` stays under its
+/// line limit.
+///
+/// Three, one per state worth telling apart: stored and used, referenced by
+/// nothing that is stored -- a network that will never join -- and stored with
+/// nothing referring to it, a credential left behind. A witness carrying only
+/// the first pins none of it.
+fn secrets_sample() -> Response {
+	Response::Secrets {
+		// Three, one per state worth telling apart: stored and used,
+		// referenced by nothing that is stored (a network that will never
+		// join), and stored with nothing referring to it (a credential
+		// left behind). A witness carrying only the first pins none of it.
+		secrets: vec![
+			netcfgd_proto::SecretEntry {
+				name: "cafe".to_owned(),
+				stored: true,
+				used_by: vec!["network Cafe".to_owned()],
+			},
+			netcfgd_proto::SecretEntry {
+				name: "campus".to_owned(),
+				stored: false,
+				used_by: vec!["network Campus".to_owned()],
+			},
+			netcfgd_proto::SecretEntry {
+				name: "old-vpn".to_owned(),
+				stored: true,
+				used_by: Vec::new(),
+			},
+		],
+	}
+}
+
 fn every_response() -> Vec<Response> {
 	let all = every_response_sample();
 	// One of each kind, because the pair is the point: a shipped example is not
@@ -339,6 +388,7 @@ fn every_response() -> Vec<Response> {
 	// list above because that function has a line limit.
 	let all: Vec<Response> = all
 		.into_iter()
+		.chain([secrets_sample()])
 		.chain([Response::Modems {
 			// Two, because the interesting facts are the ones that differ
 			// between them: the first has advanced off its preference and is
@@ -409,6 +459,7 @@ fn every_response() -> Vec<Response> {
 		Response::Probes { .. } => "probes",
 		Response::Profiles { .. } => "profiles",
 		Response::Modems { .. } => "modems",
+		Response::Secrets { .. } => "secrets",
 		Response::Ok => "ok",
 		Response::Error { .. } => "error",
 	};
@@ -431,6 +482,7 @@ fn every_response() -> Vec<Response> {
 			"probes",
 			"profiles",
 			"radios",
+			"secrets",
 			"status",
 			"wifi_scan",
 			"wifi_status",
