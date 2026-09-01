@@ -1,0 +1,89 @@
+#!/bin/sh
+# An example `pre_up` hook: put the modem on the SIM source netcfgd chose.
+#
+# **This is an example and not a working hook**, because the part that matters
+# is the part only you can write. netcfgd decides *which* source it wants and
+# publishes that; making the hardware agree means driving a mux select line,
+# and that line is your board's -- a GPIO number, a regulator, a vendor sysfs
+# node, a `devmem` poke. netcfgd has no GPIO anywhere and is not going to grow
+# one for one board (decision 0150), so the two lines marked BOARD are yours.
+#
+# Install it as a `pre_up` hook on the modem's interface:
+#
+#     interface wwan0 {
+#         config  = "reported"
+#         pre_up { /etc/netcfgd/hook/sim-select }
+#     }
+#
+# and say which sources exist, in the order you want them tried:
+#
+#     device wwan0 {
+#         modem {
+#             sim = ["esim", "socket"]
+#             apn = "im.cxn"
+#         }
+#     }
+#
+# ## WHY pre_up AND NOT SOMEWHERE ELSE
+#
+# `pre_up` is the one phase that runs while the interface is down (0011), which
+# is what switching a SIM needs: the mux moves under a modem that is about to
+# be reset, and a source changed while the bearer is up is a source the modem
+# never re-reads. netcfgd cycles the link for you when it moves the selection
+# (0152), so this runs again on the way back up with the new value in the file.
+#
+# ## WHAT netcfgd GIVES YOU
+#
+# `/run/netcfgd/modem/<interface>`, written before the interface is brought up:
+#
+#     # wwan0, netcfgd's SIM selection
+#     sim=esim
+#     apn=im.cxn
+#
+# `NCFG_IFACE` says which interface this run is for, and `NCFG_RUN_DIR` moves
+# the directory when netcfgd was told to use another one. Read the file rather
+# than remembering a previous answer: the whole point is that netcfgd changes
+# it when a source stops working.
+
+set -eu
+
+run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
+iface=${NCFG_IFACE:?this is a netcfgd hook and expects NCFG_IFACE}
+selection="$run_dir/modem/$iface"
+
+# No file means netcfgd has nothing to say about this interface's SIM -- the
+# device has no `modem` block. Do nothing rather than guessing at a default:
+# a hook that picks a source on no information is the failure decision 0152
+# keeps netcfgd itself away from.
+[ -f "$selection" ] || exit 0
+
+sim=$(sed -n 's/^sim=//p' "$selection" | head -n 1)
+
+# A `modem` block that lists no source is a machine that wants its APN
+# configured and its SIM left alone. That is an ordinary configuration.
+[ -n "$sim" ] || exit 0
+
+case $sim in
+esim)
+	# BOARD: put the mux on the embedded SIM.
+	echo "sim-select: would select the eSIM on $iface" >&2
+	;;
+socket)
+	# BOARD: put the mux on the removable socket.
+	echo "sim-select: would select the SIM socket on $iface" >&2
+	;;
+*)
+	# A name netcfgd was configured with and this script does not know. Fail
+	# loudly: the alternative is bringing the interface up on whichever source
+	# the mux happened to be left on, which looks like the fallback working
+	# and is the machine ignoring you.
+	echo "sim-select: no idea how to select \`$sim\` on $iface" >&2
+	exit 1
+	;;
+esac
+
+# BOARD: reset the modem here if yours latches the SIM at power-on, which most
+# do. Without it the mux has moved and the module is still talking to the card
+# it read at boot -- and netcfgd will see the probe keep failing, advance to
+# the next source, and eventually run out, all without anything having actually
+# changed.

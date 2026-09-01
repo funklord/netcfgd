@@ -109,6 +109,27 @@ check "the helper connected with the apn it was given" \
 check "and through the proxy, so the session survives the second command" \
 	"$(grep -c -- '--device-open-proxy' "$FAKE_MBIMCLI_LOG" || true)" "2"
 
+# The APN netcfgd published, taken from the file rather than a flag. 0150 put
+# it in the document and 0152 published it; this is the half that makes it
+# reach the modem, without which the document holds a value nothing consumes.
+mkdir -p "$NCFG_RUN_DIR/modem"
+printf 'sim=esim\napn=from.document\n' > "$NCFG_RUN_DIR/modem/wwan0"
+: > "$FAKE_MBIMCLI_LOG"
+sh "$helper" connect -d /dev/cdc-wdm0 -i wwan0 > "$work/published.txt" 2>&1 || true
+check "the apn is taken from the file netcfgd published" \
+	"$(grep -c -- '--connect=access-string=from.document' "$FAKE_MBIMCLI_LOG" || true)" "1"
+
+# An explicit flag still wins, so the helper stays runnable by hand -- and the
+# disagreement is said rather than silently resolved, a stale APN in a unit
+# file quietly overriding the document being what 0150 settled.
+: > "$FAKE_MBIMCLI_LOG"
+sh "$helper" connect -d /dev/cdc-wdm0 -i wwan0 -a on.the.flag > "$work/override.txt" 2>&1 || true
+check "an explicit apn still wins" \
+	"$(grep -c -- '--connect=access-string=on.the.flag' "$FAKE_MBIMCLI_LOG" || true)" "1"
+check "and the disagreement is called out" \
+	"$(grep -c 'overrides' "$work/override.txt" || true)" "1"
+rm -f "$NCFG_RUN_DIR/modem/wwan0"
+
 check "and wrote a report where the contract says" \
 	"$([ -f "$work/run/reported/wwan0" ] && echo yes || echo no)" "yes"
 # Both families, from libmbim's own output format. The v4 and v6 sections use

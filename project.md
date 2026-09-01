@@ -1423,6 +1423,27 @@ link really is going down. Its `link.down` folds into the bring-up's
 dependencies so the order is `link.down`, `pre_up`, `link.up`; a hook selecting
 a source on a modem about to be reset past it would achieve nothing.
 
+**Both helpers read the published file, which is what closes the loop.** Until
+they did, the document held an APN that nothing consumed -- 0061's disease
+again, one layer out. `--apn` still wins so a helper stays runnable by hand
+against a modem netcfgd knows nothing about, but a disagreement is *said*
+rather than silently resolved: an APN stale in a unit file quietly overriding
+the document is precisely the confusion 0150 was settled to end.
+
+**The `sim` half needed a consumer too**, and it is
+`packaging/hook/sim-select.example` -- an example rather than a working hook,
+because the two lines that matter drive a board's mux and netcfgd has no GPIO.
+It is installed non-executable and named `.example` for a reason worth keeping:
+a hook that ran and did nothing would look exactly like a SIM switch that
+worked. It refuses a source name it does not recognise rather than bringing the
+link up on whatever the mux was left on, which is the same failure wearing a
+success.
+
+**The shell gate did not cover what ships.** It read `helper/*` and
+`tests/live/*.sh`, so `packaging/probe/default` and the new hook -- shell this
+project installs onto other people's machines -- were parsed by nothing. Both
+are in the list now, which took the count from 56 to 58.
+
 **A cycle is not drift**, so a pending interface joins `reconciling_interfaces`
 beside the `preference` exception already there, for the same reason: nothing
 moved the machine away from its configuration. Left out, the cycle would be

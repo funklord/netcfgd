@@ -31,13 +31,19 @@
 # control device. No D-Bus, no systemd, no ModemManager -- mbimcli links
 # neither libdbus nor libsystemd and talks to /dev/cdc-wdmX and nothing else.
 #
-# The APN comes from netcfgd's document and arrives here as `--apn`. That was
-# the other way round until decision 0150, which the copyright holder settled:
-# the APN is provisioning data, it cannot be discovered from the card or from
-# any offline database, and it belongs beside the SIM source preference where
-# it can be read, diffed and committed. This script still connects the bearer
-# and netcfgd is still told only the result -- what moved is where the
-# parameter is written down, not who dials.
+# The APN comes from netcfgd's document. That was the other way round until
+# decision 0150, which the copyright holder settled: the APN is provisioning
+# data, it cannot be discovered from the card or from any offline database, and
+# it belongs beside the SIM source preference where it can be read, diffed and
+# committed. This script still connects the bearer and netcfgd is still told
+# only the result -- what moved is where the parameter is written down, not who
+# dials.
+#
+# It arrives through `/run/netcfgd/modem/<interface>`, which netcfgd writes
+# from that block (decision 0152) and this reads when `--apn` is not given.
+# That is the interface report's shape pointed the other way: one file per
+# device, `key=value`, no library and no socket. The same file carries `sim`,
+# which is for the `pre_up` hook that drives a SIM mux rather than for this.
 
 set -eu
 
@@ -76,6 +82,32 @@ done
 # honours, so a helper can be exercised somewhere other than /run.
 run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
 report="$run_dir/reported/$interface"
+selection="$run_dir/modem/$interface"
+
+# What netcfgd published for this interface, if anything.
+#
+# The mirror of the interface report, and the other direction: netcfgd writes
+# `sim` and `apn` from the document's `device <name> { modem { ... } }` block,
+# this reads them. Decision 0152 -- and it is why decision 0150 could settle
+# that the APN belongs in the document without the helper having to grow a
+# parser or a socket. `key=value` lines, `#` comments, one file per device.
+published() {
+	[ -n "$interface" ] || return 0
+	[ -f "$selection" ] || return 0
+	sed -n "s/^$1=//p" "$selection" | head -n 1
+}
+
+# `--apn` still wins, so the script stays runnable by hand against a modem
+# netcfgd knows nothing about. But a disagreement is said out loud rather than
+# resolved in silence: an APN left behind in a unit file quietly overriding the
+# document is exactly the confusion 0150 was settled to end.
+from_document=$(published apn)
+if [ -z "$apn" ]; then
+	apn=$from_document
+elif [ -n "$from_document" ] && [ "$from_document" != "$apn" ]; then
+	echo "netcfgd-modem-mbim: --apn \`$apn\` overrides \`$from_document\`," >&2
+	echo "netcfgd-modem-mbim:   which netcfgd published in $selection" >&2
+fi
 
 mbimcli=${MBIMCLI:-mbimcli}
 

@@ -200,6 +200,36 @@ QUIRK
 contains "and a module the table knows is found by its usb id" "$out" "2c7c:6007"
 contains "with what was measured about it" "$out" "autoconnect=yes"
 
+# 6. The APN netcfgd published, read from the file rather than a flag.
+#    0150 put the APN in the document and 0152 published it here; this is the
+#    half that makes that reach the modem. Without it the document holds a
+#    value nothing consumes, which is 0061's disease.
+start_modem
+export NCFG_RUN_DIR="$work/run"
+mkdir -p "$NCFG_RUN_DIR/modem"
+printf '# wwan0, netcfgd'"'"'s SIM selection\nsim=esim\napn=im.cxn\n' \
+	> "$NCFG_RUN_DIR/modem/wwan0"
+
+out=$(sh "$helper" attach -p "$port" -i wwan0 2>&1 || true)
+contains "the apn is taken from the file netcfgd published" "$out" "im.cxn"
+
+# An explicit flag still wins, so the script stays runnable by hand -- but the
+# disagreement is said rather than silently resolved. An APN left stale in a
+# unit file quietly overriding the document is the confusion 0150 settled.
+out=$(sh "$helper" attach -p "$port" -i wwan0 -a other.cxn 2>&1 || true)
+contains "an explicit apn overrides it" "$out" "other.cxn"
+contains "and the override is called out" "$out" "overrides"
+contains "naming what netcfgd published" "$out" "im.cxn"
+
+# No file is not an error: a device with no `modem` block publishes nothing,
+# and the helper is still usable with a flag.
+rm -f "$NCFG_RUN_DIR/modem/wwan0"
+out=$(sh "$helper" attach -p "$port" -i wwan0 -a im.cxn 2>&1 || true)
+contains "no published file is not an error" "$out" "im.cxn"
+lacks "and nothing is claimed to be overridden" "$out" "overrides"
+unset NCFG_RUN_DIR
+stop_modem
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "modem_at.sh: all checks passed"

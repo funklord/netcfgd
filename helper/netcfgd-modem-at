@@ -8,7 +8,8 @@
 #
 #   -p PATH   the AT tty, required        -t SECS  per-command timeout, 5
 #   -a NAME   the APN to request          -n SECS  monitor interval, 15
-#   -i NAME   the ECM interface, for logs
+#   -i NAME   the ECM interface: names the log lines, and the file netcfgd
+#             publishes the APN in, so -a can be left off
 #
 # ## WHY THIS EXISTS BESIDE THE MBIM ONE
 #
@@ -57,9 +58,12 @@
 # wrong APN looks like a working attach.
 #
 # It is configuration, so it lives in netcfgd's document as
-# `device <name> { modem { apn = "..." } }` and reaches this script as `-a`
-# (decision 0150). This helper does not read the document and never will --
-# it is told the parameter, the same way netcfgd is told the result.
+# `device <name> { modem { apn = "..." } }` (decision 0150). netcfgd publishes
+# it to `/run/netcfgd/modem/<interface>` and this reads it there when `-a` is
+# not given (decision 0152), which is the mirror of the interface report: one
+# file, `key=value`, no library and no socket. This still does not read the
+# document and never will -- it reads what netcfgd decided, the same way
+# netcfgd reads what this decided.
 #
 # What it needs: a tty the modem answers AT on, and nothing else. No D-Bus, no
 # ModemManager, no libqmi, no libmbim.
@@ -94,6 +98,33 @@ while [ $# -gt 0 ]; do
 	*) echo "netcfgd-modem-at: unknown option $1" >&2; usage >&2; exit 2 ;;
 	esac
 done
+
+# The same directory netcfgd reads and writes, and the same environment
+# variable it honours, so this can be exercised somewhere other than /run.
+run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
+selection="$run_dir/modem/$interface"
+
+# What netcfgd published for this interface, if anything. Decision 0152: the
+# mirror of the interface report, going the other way -- netcfgd writes `sim`
+# and `apn` from the document's `modem` block and this reads them, which is
+# what lets 0150 keep the APN in the document without this script growing a
+# parser or a socket.
+published() {
+	[ -n "$interface" ] || return 0
+	[ -f "$selection" ] || return 0
+	sed -n "s/^$1=//p" "$selection" | head -n 1
+}
+
+# `--apn` still wins, so this stays runnable by hand against a modem netcfgd
+# knows nothing about -- but a disagreement is said rather than silently
+# resolved, an APN stale in a unit file being the confusion 0150 settled.
+from_document=$(published apn)
+if [ -z "$apn" ]; then
+	apn=$from_document
+elif [ -n "$from_document" ] && [ "$from_document" != "$apn" ]; then
+	echo "netcfgd-modem-at: --apn \`$apn\` overrides \`$from_document\`," >&2
+	echo "netcfgd-modem-at:   which netcfgd published in $selection" >&2
+fi
 
 [ -n "$port" ] || { echo "netcfgd-modem-at: --port is required" >&2; exit 2; }
 [ -c "$port" ] || { echo "netcfgd-modem-at: $port is not a character device" >&2; exit 2; }

@@ -209,9 +209,13 @@ nm-containment:
 #
 # Counted, because a glob that matches nothing passes: this project has caught
 # that exact failure in a `make packaging` check before.
+# packaging/ is in the list because what ships is what matters: the probe and
+# the SIM-select hook are shell this project installs onto other people's
+# machines, and neither was parsed by anything until they were added here. A
+# shipped script that does not parse is this gate's whole subject.
 shell:
 	@count=0; \
-	for script in helper/* tests/live/*.sh; do \
+	for script in helper/* tests/live/*.sh packaging/probe/* packaging/hook/*; do \
 		[ -f "$$script" ] || continue; \
 		sh -n "$$script" || exit 1; \
 		count=$$((count + 1)); \
@@ -449,11 +453,22 @@ install-modem-mbim:
 	@# machine without it behaves identically and merely says less.
 	install -d $(DESTDIR)$(PREFIX)/share/netcfgd
 	install -m 0644 helper/modem-quirks $(DESTDIR)$(PREFIX)/share/netcfgd/modem-quirks
+	@# The SIM-select hook, as an example and not as a working hook: netcfgd
+	@# chooses the source and a board drives the mux, so the two lines that
+	@# matter are the operator's. Named `.example` and installed non-executable
+	@# for that reason -- a hook that ran and did nothing would look like a SIM
+	@# switch that worked.
+	install -d $(DESTDIR)$(PREFIX)/share/netcfgd/hook
+	install -m 0644 packaging/hook/sim-select.example \
+		$(DESTDIR)$(PREFIX)/share/netcfgd/hook/sim-select.example
 	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
 	@echo "install-modem-mbim: netcfgd-modem-at installed too, for modules that"
 	@echo "install-modem-mbim:   offer neither MBIM nor QMI -- it needs only a tty"
 	@echo "install-modem-mbim:   doc/interface-report.md is the contract -- write"
 	@echo "install-modem-mbim:   your own helper if this one does not fit"
+	@echo "install-modem-mbim: for a board that muxes two SIMs, copy"
+	@echo "install-modem-mbim:   share/netcfgd/hook/sim-select.example and fill in"
+	@echo "install-modem-mbim:   the two BOARD lines -- netcfgd has no GPIO"
 
 # The Qt client, opt-in the way install-modem-mbim is.
 #
