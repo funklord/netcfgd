@@ -104,6 +104,35 @@ struct ncfg_modem_row {
 	bool        cycle_pending = false;
 };
 
+/* One routing rule. `selector` is the matching half as one string: a rule with
+ * six of the eight selectors set is unreadable as six columns, most of them
+ * empty on every other row. */
+struct ncfg_rule_row {
+	QString id;
+	int     priority = 0;
+	QString family;
+	QString selector;
+	QString action;
+	QString table;
+};
+
+struct ncfg_bluetooth_row {
+	QString id;
+	QString address;
+	QString profile;
+	bool    autoconnect = false;
+};
+
+/* One hook, flattened across interfaces: a hook belongs to an interface, but
+ * the question is "what runs on this machine, and when". */
+struct ncfg_hook_row {
+	QString interface;
+	QString phase;
+	QString path;
+	QString run_as;
+	int     timeout = 0;
+};
+
 struct ncfg_saved_network_row {
 	QString id;
 	QString name;
@@ -480,6 +509,12 @@ public:
 	 * copy of a rule that belongs to the daemon.
 	 */
 	bool modems(QList<ncfg_modem_row> *out, QString *error);
+	/* The routing rules the configuration declares -- what was asked for,
+	 * rather than what the kernel currently has, which is drift's question. */
+	bool rules(QList<ncfg_rule_row> *out, QString *error);
+	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
+	/* Every hook on every interface, in interface order. */
+	bool hooks(QList<ncfg_hook_row> *out, QString *error);
 	/*
 	 * Choose a profile, or stop using one with an empty name. Needs `admin`.
 	 *

@@ -1340,6 +1340,228 @@ int ncfg_client_profiles(ncfg_client_t *client, ncfg_profiles_t *out, char *err,
 	return 1;
 }
 
+/* One selector word, appended only when the member is there. Building the
+ * phrase this way rather than with a format string per combination is what
+ * keeps eight optional selectors from becoming eight nested conditionals. */
+static void append_selector(char *out, size_t size, const char *word, char *value)
+{
+	if (value && value[0]) {
+		size_t used = strlen(out);
+		if (used < size) {
+			(void)snprintf(out + used, size - used, "%s%s %s",
+			    used ? " " : "", word, value);
+		}
+	}
+	free(value);
+}
+
+void ncfg_rules_free(ncfg_rules_t *rules)
+{
+	if (!rules) {
+		return;
+	}
+	for (size_t i = 0; i < rules->count; i++) {
+		free(rules->items[i].id);
+		free(rules->items[i].family);
+		free(rules->items[i].selector);
+		free(rules->items[i].action);
+		free(rules->items[i].table);
+	}
+	free(rules->items);
+	rules->items = NULL;
+	rules->count = 0;
+}
+
+int ncfg_client_rules(ncfg_client_t *client, ncfg_rules_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t rules = ncfg_json_member(doc, ncfg_json_root(doc), "rules");
+	uint32_t count = ncfg_json_count(doc, rules);
+	if (!count) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, rules, i);
+		out->items[i].id = member_text(doc, entry, "id");
+		out->items[i].priority =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "priority"), 0);
+		out->items[i].family = member_text(doc, entry, "family");
+		out->items[i].action = member_text(doc, entry, "action");
+		out->items[i].table = member_text(doc, entry, "table");
+
+		char phrase[256];
+		phrase[0] = '\0';
+		append_selector(phrase, sizeof(phrase), "from", member_text(doc, entry, "from"));
+		append_selector(phrase, sizeof(phrase), "to", member_text(doc, entry, "to"));
+		append_selector(phrase, sizeof(phrase), "iif", member_text(doc, entry, "iif"));
+		append_selector(phrase, sizeof(phrase), "oif", member_text(doc, entry, "oif"));
+		out->items[i].selector = dup_string(phrase);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
+void ncfg_bluetooths_free(ncfg_bluetooths_t *devices)
+{
+	if (!devices) {
+		return;
+	}
+	for (size_t i = 0; i < devices->count; i++) {
+		free(devices->items[i].id);
+		free(devices->items[i].address);
+		free(devices->items[i].profile);
+	}
+	free(devices->items);
+	devices->items = NULL;
+	devices->count = 0;
+}
+
+int ncfg_client_bluetooth(ncfg_client_t *client, ncfg_bluetooths_t *out, char *err,
+                          size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t devices = ncfg_json_member(doc, ncfg_json_root(doc), "bluetooth");
+	uint32_t count = ncfg_json_count(doc, devices);
+	if (!count) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, devices, i);
+		out->items[i].id = member_text(doc, entry, "id");
+		out->items[i].address = member_text(doc, entry, "address");
+		out->items[i].profile = member_text(doc, entry, "profile");
+		out->items[i].autoconnect =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "autoconnect"), 0);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
+void ncfg_hooks_free(ncfg_hooks_t *hooks)
+{
+	if (!hooks) {
+		return;
+	}
+	for (size_t i = 0; i < hooks->count; i++) {
+		free(hooks->items[i].interface);
+		free(hooks->items[i].phase);
+		free(hooks->items[i].path);
+		free(hooks->items[i].run_as);
+	}
+	free(hooks->items);
+	hooks->items = NULL;
+	hooks->count = 0;
+}
+
+int ncfg_client_hooks(ncfg_client_t *client, ncfg_hooks_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t interfaces = ncfg_json_member(doc, ncfg_json_root(doc), "interfaces");
+	uint32_t interface_count = ncfg_json_count(doc, interfaces);
+
+	/* Counted first, because the rows are spread across interfaces and one
+	 * allocation is easier to reason about than a growing array. */
+	size_t total = 0;
+	for (uint32_t i = 0; i < interface_count; i++) {
+		uint32_t hooks = ncfg_json_member(doc, ncfg_json_at(doc, interfaces, i), "hooks");
+		total += ncfg_json_count(doc, hooks);
+	}
+	if (!total) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(total, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = total;
+
+	size_t row = 0;
+	for (uint32_t i = 0; i < interface_count; i++) {
+		uint32_t interface = ncfg_json_at(doc, interfaces, i);
+		char *name = member_text(doc, interface, "name");
+		uint32_t hooks = ncfg_json_member(doc, interface, "hooks");
+		uint32_t count = ncfg_json_count(doc, hooks);
+		for (uint32_t j = 0; j < count && row < total; j++, row++) {
+			uint32_t entry = ncfg_json_at(doc, hooks, j);
+			out->items[row].interface = dup_string(name ? name : "");
+			out->items[row].phase = member_text(doc, entry, "phase");
+			out->items[row].path = member_text(doc, entry, "path");
+			out->items[row].run_as = member_text(doc, entry, "run_as");
+			out->items[row].timeout =
+			    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "timeout"), 0);
+		}
+		free(name);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_modems_free(ncfg_modems_t *modems)
 {
 	if (!modems) {

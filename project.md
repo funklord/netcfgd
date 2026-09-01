@@ -1517,6 +1517,39 @@ netcfgd's answer to a failing probe, and letting a client pin it is a design
 question about what then happens to the fallback -- not a missing accessor.
 The tab shows; it does not steer.
 
+**Four more tabs, for the document's remaining lists**: `profiles`, `rules`,
+`bluetooth` and `hooks`. Three read the compiled document through new typed
+accessors in `client/`, because the seam rule is that models live below the
+widgets and a view that parsed JSON itself would be on the wrong side of it.
+
+**`profiles` is not duplication of the tray menu.** The tray exists so that
+switching costs one click for somebody who does it several times a day; the tab
+exists so somebody can *look* at what the machine has -- where each profile came
+from, and whether a shipped one has been shadowed by a local copy -- before
+choosing. Two surfaces onto one verb, for two different questions. "None chosen"
+is a row rather than an absence, because it is the default and it is the one an
+operator reaches for when a profile has just broken something.
+
+**`hooks` is flattened across interfaces on purpose.** A hook belongs to an
+interface, but the question is "what runs on this machine, and when", and that
+is a list rather than something to go hunting for one interface at a time. It
+shows `runs as`, which design section 9 makes a privilege boundary rather than a
+detail: a hook given no user runs as the daemon, which is root, and finding that
+out by opening eleven interface dialogs is how it stays invisible.
+
+**`rules` reads the document, not the kernel**, and says so. What netcfgd was
+asked for and what the kernel currently has are different questions; the second
+is drift's, and the plan tab answers it. A table mixing them without saying
+which is which is how somebody concludes a rule is installed when it is only
+configured.
+
+**The three read-only tables are near-identical and that is deliberate for
+now.** Each explains itself where it is, which is worth more than the
+duplication costs while the shape of the window is still moving -- and
+collapsing them onto a shared read-only table is exactly the kind of thing the
+simplification pass is for. Recorded so that pass does not have to rediscover
+it.
+
 **A tab per fundamental thing is the holder's rule for now**, especially where
 the thing is a list, with a pass to simplify the window once every control
 exists. The reasoning is worth keeping: a control that is missing cannot be

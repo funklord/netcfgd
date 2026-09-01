@@ -631,6 +631,97 @@ typedef struct {
 void ncfg_modems_free(ncfg_modems_t *modems);
 
 /*
+ * One routing rule: which packets consult which table, and when.
+ *
+ * The priority is the identity as far as the kernel is concerned -- it decides
+ * when the rule is consulted -- so it is shown rather than being an index the
+ * view invents. `selector` is the matching half rendered as one string,
+ * because a rule with six of the eight possible selectors set is unreadable as
+ * six columns, most of them empty on every other row.
+ */
+typedef struct {
+	char *id;
+	int   priority;
+	char *family;
+	/* `from 10/8 to 192.0.2/24 iif eth0`, or empty for a rule that matches
+	 * everything -- which is a real rule and not a broken one. */
+	char *selector;
+	char *action;
+	/* The table consulted, or empty where the action does not consult one. */
+	char *table;
+} ncfg_rule_t;
+
+typedef struct {
+	ncfg_rule_t *items;
+	size_t       count;
+} ncfg_rules_t;
+
+void ncfg_rules_free(ncfg_rules_t *rules);
+
+/*
+ * The routing rules the configuration declares. Needs `observe`.
+ *
+ * From the document rather than from the kernel, deliberately: this is what
+ * netcfgd was asked for. What the kernel currently has is a different question
+ * and belongs to drift.
+ */
+int ncfg_client_rules(ncfg_client_t *client, ncfg_rules_t *out, char *err, size_t err_size);
+
+/* One bluetooth device the configuration declares. */
+typedef struct {
+	char *id;
+	char *address;
+	char *profile;
+	int   autoconnect;
+} ncfg_bluetooth_t;
+
+typedef struct {
+	ncfg_bluetooth_t *items;
+	size_t            count;
+} ncfg_bluetooths_t;
+
+void ncfg_bluetooths_free(ncfg_bluetooths_t *devices);
+
+/*
+ * The bluetooth devices the configuration declares. Needs `observe`.
+ */
+int ncfg_client_bluetooth(ncfg_client_t *client, ncfg_bluetooths_t *out, char *err,
+                          size_t err_size);
+
+/*
+ * One hook: a program netcfgd runs at a named moment in an interface's life.
+ *
+ * Flattened across interfaces on purpose. A hook belongs to an interface, but
+ * the question an operator has is "what runs on this machine, and when", and
+ * that is a list rather than something to go looking for one interface at a
+ * time.
+ */
+typedef struct {
+	char *interface;
+	char *phase;
+	char *path;
+	/* The user it drops to, or empty where it runs as the daemon. Shown
+	 * because design section 9 makes it a privilege boundary rather than a
+	 * detail, and a hook running as root when somebody meant otherwise is
+	 * exactly what a list is for. */
+	char *run_as;
+	/* Seconds before it is killed, or 0 where the default applies. */
+	int   timeout;
+} ncfg_hook_t;
+
+typedef struct {
+	ncfg_hook_t *items;
+	size_t       count;
+} ncfg_hooks_t;
+
+void ncfg_hooks_free(ncfg_hooks_t *hooks);
+
+/*
+ * Every hook on every interface, in interface order. Needs `observe`.
+ */
+int ncfg_client_hooks(ncfg_client_t *client, ncfg_hooks_t *out, char *err, size_t err_size);
+
+/*
  * The modem devices, their SIM order, and which source is in use. Needs
  * `observe`.
  *

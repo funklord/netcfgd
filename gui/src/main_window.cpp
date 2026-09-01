@@ -8,6 +8,10 @@
 #include "apply_dialog.h"
 #include "devices_view.h"
 #include "modems_view.h"
+#include "profiles_view.h"
+#include "rules_view.h"
+#include "bluetooth_view.h"
+#include "hooks_view.h"
 #include "events_view.h"
 #include "ncfg_connection.h"
 #include "plan_view.h"
@@ -44,6 +48,10 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	tabs = new QTabWidget(central);
 	devices = new ncfg_devices_view(connection, tabs);
 	modems = new ncfg_modems_view(connection, tabs);
+	profiles = new ncfg_profiles_view(connection, tabs);
+	rules = new ncfg_rules_view(connection, tabs);
+	bluetooth = new ncfg_bluetooth_view(connection, tabs);
+	hooks = new ncfg_hooks_view(connection, tabs);
 	wifi = new ncfg_wifi_view(connection, tabs);
 	access = new ncfg_access_view(connection, tabs);
 	dns = new ncfg_dns_view(connection, tabs);
@@ -55,6 +63,15 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * other way this machine reaches a network, and an operator looking
 	 * for one looks where the radios are. */
 	tabs->addTab(modems, QStringLiteral("modems"));
+	/* The configuration's own lists, between what the machine is doing and
+	 * the diagnostic tabs. A tab per fundamental thing, especially where
+	 * the thing is a list: a control that is missing cannot be found by
+	 * anybody, while one in the wrong tab can. Simplifying the window is a
+	 * pass of its own, once every control exists. */
+	tabs->addTab(profiles, QStringLiteral("profiles"));
+	tabs->addTab(rules, QStringLiteral("rules"));
+	tabs->addTab(bluetooth, QStringLiteral("bluetooth"));
+	tabs->addTab(hooks, QStringLiteral("hooks"));
 	tabs->addTab(plan, QStringLiteral("plan"));
 	tabs->addTab(events, QStringLiteral("events"));
 	/* Last, because it is the one tab that is useful while every other is
@@ -65,6 +82,11 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 
 	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
 	connect(modems, &ncfg_modems_view::reported, this, &ncfg_main_window::note);
+	connect(profiles, &ncfg_profiles_view::reported, this, &ncfg_main_window::note);
+	connect(rules, &ncfg_rules_view::reported, this, &ncfg_main_window::note);
+	connect(bluetooth, &ncfg_bluetooth_view::reported, this, &ncfg_main_window::note);
+	connect(hooks, &ncfg_hooks_view::reported, this, &ncfg_main_window::note);
+	connect(profiles, &ncfg_profiles_view::changed, this, &ncfg_main_window::reload);
 	connect(devices, &ncfg_devices_view::changed, this, &ncfg_main_window::reload);
 	connect(wifi, &ncfg_wifi_view::reported, this, &ncfg_main_window::note);
 	connect(wifi, &ncfg_wifi_view::changed, this, &ncfg_main_window::reload);
@@ -179,6 +201,14 @@ void ncfg_main_window::refresh()
 		wifi->refresh();
 	} else if (current == modems) {
 		modems->refresh();
+	} else if (current == profiles) {
+		profiles->refresh();
+	} else if (current == rules) {
+		rules->refresh();
+	} else if (current == bluetooth) {
+		bluetooth->refresh();
+	} else if (current == hooks) {
+		hooks->refresh();
 	} else if (current == dns) {
 		dns->refresh();
 	} else if (current == access) {

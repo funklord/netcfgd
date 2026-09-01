@@ -605,6 +605,108 @@ bool ncfg_connection::profile_set(const QString &name, QString *error)
 	return true;
 }
 
+bool ncfg_connection::rules(QList<ncfg_rule_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_rules_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_rules(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_rule_row row;
+		row.id = from_c(found.items[i].id);
+		row.priority = found.items[i].priority;
+		row.family = from_c(found.items[i].family);
+		row.selector = from_c(found.items[i].selector);
+		row.action = from_c(found.items[i].action);
+		row.table = from_c(found.items[i].table);
+		out->append(row);
+	}
+	ncfg_rules_free(&found);
+	return true;
+}
+
+bool ncfg_connection::bluetooth(QList<ncfg_bluetooth_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_bluetooths_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_bluetooth(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_bluetooth_row row;
+		row.id = from_c(found.items[i].id);
+		row.address = from_c(found.items[i].address);
+		row.profile = from_c(found.items[i].profile);
+		row.autoconnect = found.items[i].autoconnect != 0;
+		out->append(row);
+	}
+	ncfg_bluetooths_free(&found);
+	return true;
+}
+
+bool ncfg_connection::hooks(QList<ncfg_hook_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_hooks_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_hooks(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_hook_row row;
+		row.interface = from_c(found.items[i].interface);
+		row.phase = from_c(found.items[i].phase);
+		row.path = from_c(found.items[i].path);
+		row.run_as = from_c(found.items[i].run_as);
+		row.timeout = found.items[i].timeout;
+		out->append(row);
+	}
+	ncfg_hooks_free(&found);
+	return true;
+}
+
 bool ncfg_connection::modems(QList<ncfg_modem_row> *out, QString *error)
 {
 	if (!out) {

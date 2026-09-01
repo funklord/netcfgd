@@ -49,6 +49,10 @@ SOURCES += \
 	src/apply_dialog.cpp \
 	src/devices_view.cpp \
 	src/modems_view.cpp \
+	src/profiles_view.cpp \
+	src/rules_view.cpp \
+	src/bluetooth_view.cpp \
+	src/hooks_view.cpp \
 	src/events_view.cpp \
 	src/main.cpp \
 	src/main_window.cpp \
@@ -68,6 +72,10 @@ HEADERS += \
 	src/apply_dialog.h \
 	src/devices_view.h \
 	src/modems_view.h \
+	src/profiles_view.h \
+	src/rules_view.h \
+	src/bluetooth_view.h \
+	src/hooks_view.h \
 	src/events_view.h \
 	src/main_window.h \
 	src/monitor_stream.h \
