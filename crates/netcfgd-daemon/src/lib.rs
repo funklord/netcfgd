@@ -12,6 +12,7 @@ mod authorize;
 mod confirm;
 mod probe;
 mod server;
+mod sim;
 mod state;
 mod wifi;
 
@@ -253,6 +254,8 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		// event. Run before the block below so a verdict that did change goes
 		// round the same path a carrier change does (0119).
 		let probe_changed = state.probes.run_due(state.desired.as_ref());
+
+		advance_failed_sims(&mut state, probe_changed);
 
 		if kernel_changed || config_changed || probe_changed || ticked {
 			state.reobserve();
@@ -933,6 +936,33 @@ fn remember_told(state: &State, phase: netcfgd_model::HookPhase, told: &[(String
 }
 
 /// Put back what drifted, but only on interfaces whose policy says to.
+/// Move a modem to its next SIM source when its probe says the link is dead.
+///
+/// [0152](../../../doc/decision/0152-a-sim-source-is-kept-until-the-probe-says-otherwise.md).
+/// Only a *decided* failure counts: 0119 leaves an unprobed link at `None`,
+/// and switching a SIM on no information is what that rule exists to prevent
+/// -- so a modem with no `probe` block never falls back, deliberately.
+///
+/// Called only when a verdict moved, so a link that has been down for an hour
+/// costs nothing. `advance` would return `None` on every tick after the first
+/// anyway, but reaching it would still be work.
+///
+/// A device and an interface with the same kernel name are the same hardware,
+/// which is what makes the probe's interface name a device lookup here.
+fn advance_failed_sims(state: &mut State, probe_changed: bool) {
+	if !probe_changed {
+		return;
+	}
+	let Some(document) = state.desired.clone() else {
+		return;
+	};
+	for iface in state.probes.failing() {
+		if let Some(source) = state.sims.advance(&document, &iface, &state.paths.run) {
+			eprintln!("netcfgd: {iface}: probe says this link is dead; trying SIM `{source}`");
+		}
+	}
+}
+
 fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 	let wanted = state.reconciling_interfaces();
 	if wanted.is_empty() {

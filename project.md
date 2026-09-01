@@ -1382,13 +1382,42 @@ follows becomes another command. Quotes, backslashes and control characters
 are refused where they are written rather than where they would detonate. A
 SIM source listed twice is refused too, being two answers to "what next".
 
-**What is built is the vocabulary, not the policy.** The document can now say
-which source is wanted and which APN; nothing yet chooses a source, watches
-for registration, falls back to the next, or records in `/run` which one
-worked. Nor does anything pass either value to a hook -- there is no
-`NCFG_SIM` or `NCFG_APN` in the hook environment yet. That is the next piece
-and it is where 0150's actual argument lives, since the plan-and-reconcile
-loop with 0119's probe is the machinery it says already exists.
+**The policy is built too, and its three defaults are
+[0152](doc/decision/0152-a-sim-source-is-kept-until-the-probe-says-otherwise.md).**
+0150 left them open and the holder's instruction was to choose and record
+rather than ask again: a source has failed when **0119's probe says the link
+does not work** -- not when the link comes up, because a modem on the wrong APN
+produces a link that is up, addressed, and answering ICMP everywhere while
+blackholing everything else; the **last source is where it stops**, since
+wrapping turns a lapsed subscription into a modem resetting for ever and a
+machine permanently rather than temporarily offline; and the choice is
+**sticky**, because always retrying `sim[0]` makes a marginal primary flap at
+the probe's period, and a SIM switch costs a modem reset where a route change
+costs nothing.
+
+**A modem with no `probe` block therefore never falls back**, which is
+deliberate rather than a gap: 0119 leaves an unprobed link's verdict at `None`
+-- "nobody asked" -- and switching a machine's SIM on no information is what
+that rule exists to prevent.
+
+**netcfgd says which source it wants through a file, not the hook
+environment**: `/run/netcfgd/modem/<device>`, the mirror of
+`/run/netcfgd/reported/<interface>`, same `key=value` format written
+atomically. That reuses the contract `doc/interface-report.md` already defines
+as the whole interface between netcfgd and a helper, rather than growing
+`Op::HookRun` a second value, moving the plan witness, and creating a second
+mechanism beside it.
+
+**One gap remains and it is the one that matters: netcfgd does not cycle the
+interface when the selection advances.** `pre_up` fires at bring-up, and a link
+whose probe is failing is still up -- 0119 withholds its routes rather than
+taking it down -- so the new selection is published at once and acted on at the
+*next* bring-up. It was left rather than forced because taking a link down
+needs an action the planner does not produce today (`link.down` means
+`enabled = false`), and assembling one by hand in the daemon would put an
+action outside the `managed` choke point 0035 exists to be. **A planner-level
+reason to cycle a link is what turns this from a published intention into an
+automatic fallback**, and it is the next piece.
 
 **The APN is provisioning data and cannot be discovered**, measured with a
 control: `EF_ACL` empty and the APN Control List service not activated, while

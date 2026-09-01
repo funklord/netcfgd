@@ -289,6 +289,26 @@ impl Probes {
 		changed || self.tallies.len() != before
 	}
 
+	/// The interfaces whose probe has decided the link does not work.
+	///
+	/// A decided `false` only: an interface with no probe, or one whose probe
+	/// has not yet agreed with itself `down_after` times, is not in here. That
+	/// is 0119's rule and it is what stops a SIM being switched on no
+	/// information -- see
+	/// [0152](../../../doc/decision/0152-a-sim-source-is-kept-until-the-probe-says-otherwise.md).
+	pub(crate) fn failing(&self) -> Vec<String> {
+		let mut names: Vec<String> = self
+			.tallies
+			.iter()
+			.filter(|(_, tally)| tally.verdict == Some(false))
+			.map(|(name, _)| name.clone())
+			.collect();
+		// Sorted so a machine with two failing modems advances them in the
+		// same order every time, and a test can say what it expects.
+		names.sort();
+		names
+	}
+
 	/// Stamp the verdicts onto a fresh observation.
 	///
 	/// Only a decided verdict is written. A link with no probe, or one whose

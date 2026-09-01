@@ -47,6 +47,7 @@ pub(crate) struct State {
 	/// observation from the kernel every time and a verdict written into one
 	/// would be gone on the next tick.
 	pub(crate) probes: crate::probe::Probes,
+	pub(crate) sims: crate::sim::Sims,
 }
 
 /// What a `reload` request answers, given the event that reload produced.
@@ -83,6 +84,7 @@ impl State {
 	pub(crate) fn new(paths: Paths) -> Self {
 		let mut state = Self {
 			probes: crate::probe::Probes::default(),
+			sims: crate::sim::Sims::default(),
 			paths,
 			desired: None,
 			diagnostics: None,
@@ -130,6 +132,10 @@ impl State {
 					};
 				}
 				let _ = run_state::write_desired(&self.paths.run, &document);
+				// Published on adoption rather than at bring-up time, so a
+				// `pre_up` hook finds the file already there on the first run
+				// and never has to tell "not written yet" from "no modem".
+				self.sims.sync(&document, &self.paths.run);
 				self.rejected = None;
 				self.desired = Some(document);
 				self.diagnostics = None;
@@ -475,6 +481,7 @@ mod tests {
 		std::fs::write(config.join("netcfgd.conf"), text).expect("config written");
 		State {
 			probes: crate::probe::Probes::default(),
+			sims: crate::sim::Sims::default(),
 			paths: Paths {
 				factory: config.to_path_buf(),
 				config: config.to_path_buf(),
