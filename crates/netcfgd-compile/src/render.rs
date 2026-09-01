@@ -749,6 +749,21 @@ fn render_device(
 	if device.on_unmanage != OnUnmanage::default() {
 		body.push_str("\ton_unmanage = \"clear\"\n");
 	}
+	// Rendered from the day the field arrived, rather than joining the list of
+	// things a profile silently loses. A cellular machine is the one most
+	// likely to want a profile at all -- the APN differs per SIM and the SIM
+	// order is the whole point of switching between them.
+	if let Some(modem) = &device.modem {
+		body.push_str("\tmodem {\n");
+		if !modem.sim.is_empty() {
+			let sources: Vec<String> = modem.sim.iter().map(|name| quote(name)).collect();
+			let _ = writeln!(body, "\t\tsim = {}", list_or_scalar(&sources));
+		}
+		if let Some(apn) = &modem.apn {
+			let _ = writeln!(body, "\t\tapn = {}", quote(apn));
+		}
+		body.push_str("\t}\n");
+	}
 	if body.is_empty() {
 		return;
 	}
@@ -1025,6 +1040,26 @@ mod tests {
 			 \t}\n\
 			 }\n",
 		);
+	}
+
+	/// A modem's SIM order and APN, 0150's vocabulary.
+	#[test]
+	fn a_modem_policy_round_trips() {
+		round_trips(
+			"device wwan0 {\n\
+			 \tmodem {\n\
+			 \t\tsim = [\"esim\", \"socket\"]\n\
+			 \t\tapn = \"im.cxn\"\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// One source and no APN: the ordinary single-SIM board, where the list is
+	/// a list of one rather than a different shape.
+	#[test]
+	fn a_single_sim_modem_round_trips() {
+		round_trips("device wwan0 { modem { sim = \"socket\" } }\n");
 	}
 
 	/// `on_unmanage`, the second field found being dropped in silence.

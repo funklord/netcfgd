@@ -56,6 +56,11 @@
 # **silently overridden** with the network's default rather than refused, so a
 # wrong APN looks like a working attach.
 #
+# It is configuration, so it lives in netcfgd's document as
+# `device <name> { modem { apn = "..." } }` and reaches this script as `-a`
+# (decision 0150). This helper does not read the document and never will --
+# it is told the parameter, the same way netcfgd is told the result.
+#
 # What it needs: a tty the modem answers AT on, and nothing else. No D-Bus, no
 # ModemManager, no libqmi, no libmbim.
 

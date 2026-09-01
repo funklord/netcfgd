@@ -762,6 +762,7 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 		managed: true,
 		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
+		modem: None,
 	};
 
 	for item in &block.items {
@@ -798,6 +799,9 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 			Item::Block(inner) if inner.head == "wifi" => {
 				device.wifi = Some(lower_wifi_device(inner, diags));
 			}
+			Item::Block(inner) if inner.head == "modem" => {
+				device.modem = Some(lower_modem(inner, diags));
+			}
 			Item::Block(inner) => diags.push(Diagnostic::new(
 				inner.span,
 				format!("`{}` is not valid inside `device`", inner.head),
@@ -814,6 +818,95 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 	}
 
 	Some(device)
+}
+
+/// A `modem` block inside a `device`: which SIM source, and which APN.
+///
+/// Decision 0150: netcfgd chooses the source and says what to do when it will
+/// not register, while a `pre_up` hook drives the mux -- a select line is
+/// board enablement and this daemon has no GPIO.
+fn lower_modem(block: &Block, diags: &mut Diagnostics) -> netcfgd_model::ModemPolicy {
+	let mut modem = netcfgd_model::ModemPolicy::default();
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			if let Item::Block(inner) = item {
+				diags.push(Diagnostic::new(
+					inner.span,
+					format!("`{}` is not valid inside `modem`", inner.head),
+				));
+			}
+			continue;
+		};
+		match assignment.key.as_str() {
+			"sim" => {
+				modem.sim.clear();
+				for word in as_words(&assignment.value, diags) {
+					if let Some(name) = check_hook_word(&word, "a SIM source", diags) {
+						// A source named twice is two answers to "what next".
+						if modem.sim.contains(&name) {
+							diags.push(Diagnostic::new(
+								word.span,
+								format!("`{name}` is listed twice"),
+							));
+						} else {
+							modem.sim.push(name);
+						}
+					}
+				}
+			}
+			"apn" => {
+				if let Some(text) = as_string(&assignment.value, diags) {
+					let spanned = Spanned {
+						node: text,
+						span: assignment.value.span,
+					};
+					modem.apn = check_hook_word(&spanned, "an APN", diags);
+				}
+			}
+			other => diags.push(Diagnostic::new(
+				assignment.span,
+				format!("unknown modem key `{other}`"),
+			)),
+		}
+	}
+
+	modem
+}
+
+/// A value that will be handed to a hook or a helper, checked for the
+/// characters that would change what the receiver runs.
+///
+/// Not fussiness and not validation of the value's *meaning*: 0150 is explicit
+/// that netcfgd must not be clever about an APN, and a SIM source name is the
+/// board's word rather than one from a closed set. What is checked is the part
+/// netcfgd is responsible for -- these reach `helper/netcfgd-modem-at`, which
+/// interpolates the APN into `AT+CGDCONT=1,"IP","<apn>"`, so a quote ends the
+/// command early and the rest becomes another one. A control character does
+/// the same to a line-oriented protocol.
+fn check_hook_word(value: &Spanned<String>, what: &str, diags: &mut Diagnostics) -> Option<String> {
+	let text = &value.node;
+	if text.is_empty() {
+		diags.push(Diagnostic::new(
+			value.span,
+			format!("{what} cannot be empty"),
+		));
+		return None;
+	}
+	if text.chars().any(char::is_control) || text.contains(['"', '\\']) {
+		diags.push(
+			Diagnostic::new(
+				value.span,
+				format!("{what} contains a quote, a backslash or a control character"),
+			)
+			.with_help(
+				"this is passed to a hook and to a modem helper that puts it inside \
+				 a quoted AT command, where a quote would end the command early",
+			),
+		);
+		return None;
+	}
+	Some(text.clone())
 }
 
 /// A `rule` block: `rule 100 { from = "10.0.0.0/8"; lookup = 100 }`.

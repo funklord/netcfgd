@@ -611,6 +611,46 @@ fn every_network() -> Vec<WifiNetwork> {
 }
 
 /// A document exercising every type, field and variant in the schema.
+/// The devices, as their own function so `witness` stays under its line limit.
+///
+/// One device carrying both a wifi policy and a modem policy, which is not a
+/// machine anybody would configure. The witness is one document holding every
+/// field rather than a plausible host, and both sub-blocks being present is
+/// what pins that neither can vanish from the schema unnoticed.
+fn every_device() -> Vec<Device> {
+	vec![Device {
+		name: "wlan0".to_owned(),
+		r#match: Some(DeviceMatch {
+			mac: Some("02:00:00:00:00:02".to_owned()),
+			path: Some("pci-0000:03:00.0".to_owned()),
+			driver: Some("iwlwifi".to_owned()),
+			name_glob: Some("wl*".to_owned()),
+		}),
+		managed: true,
+		// The witness carries the non-default so a spelling change moves
+		// the bytes: a field that is always at its default serialises to
+		// nothing and is pinned by nothing.
+		on_unmanage: netcfgd_model::OnUnmanage::Clear,
+		wifi: Some(WifiDevicePolicy {
+			backend: WifiBackend::WpaSupplicant,
+			autoconnect: true,
+			portal_check: Some("http://example.com/generate_204".to_owned()),
+			regdom: Some("SE".to_owned()),
+			powersave: Powersave::Off,
+			mac_policy: MacPolicy::PerNetwork,
+			scan_randomization: true,
+		}),
+		// A wifi device with a modem block is not a configuration anybody
+		// would write. The witness is one document carrying every field,
+		// not a plausible machine -- and both sub-blocks being present is
+		// what pins that neither can vanish from the schema unnoticed.
+		modem: Some(netcfgd_model::ModemPolicy {
+			sim: vec!["esim".to_owned(), "socket".to_owned()],
+			apn: Some("im.cxn".to_owned()),
+		}),
+	}]
+}
+
 fn witness() -> Document {
 	let mut document = Document {
 		schema_version: netcfgd_model::SCHEMA_VERSION,
@@ -650,29 +690,7 @@ fn witness() -> Document {
 				admin: false,
 			},
 		},
-		devices: vec![Device {
-			name: "wlan0".to_owned(),
-			r#match: Some(DeviceMatch {
-				mac: Some("02:00:00:00:00:02".to_owned()),
-				path: Some("pci-0000:03:00.0".to_owned()),
-				driver: Some("iwlwifi".to_owned()),
-				name_glob: Some("wl*".to_owned()),
-			}),
-			managed: true,
-			// The witness carries the non-default so a spelling change moves
-			// the bytes: a field that is always at its default serialises to
-			// nothing and is pinned by nothing.
-			on_unmanage: netcfgd_model::OnUnmanage::Clear,
-			wifi: Some(WifiDevicePolicy {
-				backend: WifiBackend::WpaSupplicant,
-				autoconnect: true,
-				portal_check: Some("http://example.com/generate_204".to_owned()),
-				regdom: Some("SE".to_owned()),
-				powersave: Powersave::Off,
-				mac_policy: MacPolicy::PerNetwork,
-				scan_randomization: true,
-			}),
-		}],
+		devices: every_device(),
 		interfaces: every_kind(),
 		networks: every_network(),
 		rules: vec![RoutingRule {

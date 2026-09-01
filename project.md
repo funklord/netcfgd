@@ -1352,6 +1352,44 @@ a component rebuilds an architecture in order to work, the logic belongs in the
 thing that already has it. Driving the mux line stays a `pre_up` hook, which
 0011 documents by naming this case.
 
+**0150's vocabulary is built, and the APN question is settled.** The holder
+ruled that the APN belongs in the document, which closes a contradiction the
+tree had been carrying: `helper/netcfgd-modem-mbim`'s header said the APN
+lived in the helper "rather than in netcfgd's document ... netcfgd is told the
+result, never asked for the parameters", while 0150 said the opposite. The
+helper's header is corrected rather than left to be read as current.
+
+    device wwan0 {
+        modem {
+            sim = ["esim", "socket"]
+            apn = "im.cxn"
+        }
+    }
+
+`ModemPolicy` is on `Device` beside the wifi policy, parsed by `lower_modem`,
+rendered by the profile renderer from the day the field arrived rather than
+joining the list of things a saved profile silently loses -- a cellular
+machine is the one most likely to want a profile at all, since the APN differs
+per SIM and the SIM order is the whole point of switching.
+
+**Two values are refused and neither refusal is netcfgd being clever about
+the value.** 0150 is explicit that an APN cannot be discovered or validated,
+and nothing here tries to. What is checked is what netcfgd is responsible for
+passing on: a SIM name reaches a `pre_up` hook and an APN reaches
+`helper/netcfgd-modem-at`, which interpolates it into
+`AT+CGDCONT=1,"IP","<apn>"` -- so a quote ends the command early and what
+follows becomes another command. Quotes, backslashes and control characters
+are refused where they are written rather than where they would detonate. A
+SIM source listed twice is refused too, being two answers to "what next".
+
+**What is built is the vocabulary, not the policy.** The document can now say
+which source is wanted and which APN; nothing yet chooses a source, watches
+for registration, falls back to the next, or records in `/run` which one
+worked. Nor does anything pass either value to a hook -- there is no
+`NCFG_SIM` or `NCFG_APN` in the hook environment yet. That is the next piece
+and it is where 0150's actual argument lives, since the plan-and-reconcile
+loop with 0119's probe is the machinery it says already exists.
+
 **The APN is provisioning data and cannot be discovered**, measured with a
 control: `EF_ACL` empty and the APN Control List service not activated, while
 `EF_UST` read successfully through the same channel. Nor from an offline
@@ -1606,14 +1644,22 @@ only setting was `on_unmanage` vanished from the profile entirely rather than
 losing one line. Both are fixed and both have a test that fails without the
 fix.
 
-**Seven model fields cannot be reached from the configuration language at
+**Six model fields cannot be reached from the configuration language at
 all**, which is 0061's disease in a place nobody had looked: `DnsPolicy`'s
 `options`, `dnssec` and `transport`, `DnsServer`'s `port` and `sni`, and
-`Device`'s `match` and `wifi`. `lower_dns` reads four keys -- `servers`,
-`search`, `domains`, `mode` -- and hardcodes `port: None, sni: None`; the
-device parser reads `managed`, `on_unmanage`, `leave` and `clear`. Nothing
-else in the tree writes any of them either, measured across `crates/`,
-`backend/` and `adapter/`.
+`Device`'s `match`. `lower_dns` reads four keys -- `servers`, `search`,
+`domains`, `mode` -- and hardcodes `port: None, sni: None`; `lower_device`
+never assigns `r#match`. Nothing else in the tree writes any of them either,
+measured across `crates/`, `backend/` and `adapter/`.
+
+**This paragraph said seven and named `Device::wifi` as the seventh, and that
+was wrong.** `lower_device` parses a `wifi` block through `lower_wifi_device`;
+the check that produced the claim read the function with `grep -A 30` and the
+block arm is at line 798, past the window. The error is worth keeping rather
+than quietly deleting, because it is the same failure as the audit's first
+form directly above -- a measurement whose *reach* was too short, reported
+with the confidence of one that had looked everywhere. **Say how far a check
+looked, not only what it found.**
 
 So the renderer's refusals for those seven are correct and **unreachable**:
 they can never fire from a document the compiler produced. They are left in

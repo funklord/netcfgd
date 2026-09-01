@@ -113,6 +113,7 @@ fn insertion_order_does_not_survive_canonicalisation() {
 		managed: true,
 		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
+		modem: None,
 	});
 
 	let mut backward = Document::default();
@@ -127,6 +128,7 @@ fn insertion_order_does_not_survive_canonicalisation() {
 		managed: true,
 		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
+		modem: None,
 	});
 
 	assert_eq!(

@@ -58,7 +58,7 @@ pub use address::{
 pub use control::{Control, Principal, RemotePolicy, Tier};
 pub use device::{
 	normalize_station, AccessControl, AccessPoint, AclPolicy, Device, DeviceMatch, MacPolicy,
-	OnUnmanage, WifiDevicePolicy,
+	ModemPolicy, OnUnmanage, WifiDevicePolicy,
 };
 pub use dns::{DnsMode, DnsPolicy, DnsServer, DnsTransport, Dnssec, RoutingDomain};
 pub use hook::{HookPhase, HookRef};

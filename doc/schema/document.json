@@ -70,6 +70,13 @@
         "powersave": "off",
         "mac_policy": "per_network",
         "scan_randomization": true
+      },
+      "modem": {
+        "sim": [
+          "esim",
+          "socket"
+        ],
+        "apn": "im.cxn"
       }
     }
   ],

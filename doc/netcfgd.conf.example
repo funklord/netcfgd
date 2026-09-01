@@ -391,6 +391,29 @@
 # notices a captive portal instead of reporting a working network that
 # resolves nothing.
 #
+# THE MODEM. Which SIM source to use, and which APN to ask for (0150).
+
+#device wwan0 {
+#	modem {
+#		sim = ["esim", "socket"]
+#		apn = "im.cxn"
+#	}
+#}
+
+# `sim` is ordered rather than a preference plus a fallback: "which one do you
+# want, and what next" is one statement, and two settings could disagree. The
+# names are your board's -- netcfgd does not interpret them, it hands them to
+# a `pre_up` hook, which is the only thing that knows what a mux select line
+# does. Driving that line is board enablement and netcfgd has no GPIO.
+#
+# The APN cannot be guessed and netcfgd does not try. It is not on the card --
+# an APN Control List is a restriction rather than a directory, and on the
+# board this was measured against it was empty with the service not activated.
+# It is not in an offline carrier database either, which carries public APNs
+# only. And asking for one your subscription does not carry gets the network's
+# own default rather than an error, so a wrong APN looks like a working attach
+# and only a probe of the thing you actually need will tell you otherwise.
+#
 # ETHERNET OFFLOADS AND LINK SETTINGS, for a NIC whose defaults are wrong.
 # Each toggle is "on", "off" or "unmanaged" -- three values rather than two,
 # because "leave this one alone" is a different instruction from "turn it

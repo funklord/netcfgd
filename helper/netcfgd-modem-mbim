@@ -31,9 +31,13 @@
 # control device. No D-Bus, no systemd, no ModemManager -- mbimcli links
 # neither libdbus nor libsystemd and talks to /dev/cdc-wdmX and nothing else.
 #
-# The APN lives here rather than in netcfgd's document because connecting the
-# bearer is this script's job, not netcfgd's. netcfgd is told the result, never
-# asked for the parameters.
+# The APN comes from netcfgd's document and arrives here as `--apn`. That was
+# the other way round until decision 0150, which the copyright holder settled:
+# the APN is provisioning data, it cannot be discovered from the card or from
+# any offline database, and it belongs beside the SIM source preference where
+# it can be read, diffed and committed. This script still connects the bearer
+# and netcfgd is still told only the result -- what moved is where the
+# parameter is written down, not who dials.
 
 set -eu
 

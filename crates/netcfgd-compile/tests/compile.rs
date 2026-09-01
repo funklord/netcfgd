@@ -2455,3 +2455,81 @@ fn an_unknown_networking_setting_is_refused() {
 	);
 	assert!(complaint.contains("on, off"), "{complaint}");
 }
+
+/// 0150's vocabulary: which SIM source is wanted, and which APN.
+///
+/// The order is the statement. A board with two sources and a mux gets one at
+/// a time, and "which one do you want, and what next" is one question -- so
+/// the list is ordered rather than being a preference plus a separate
+/// fallback that could disagree with it.
+#[test]
+fn a_modem_block_carries_the_sim_order_and_the_apn() {
+	let document = build_ok(
+		"device wwan0 {\n\
+		 \tmodem {\n\
+		 \t\tsim = [\"esim\", \"socket\"]\n\
+		 \t\tapn = \"im.cxn\"\n\
+		 \t}\n\
+		 }\n",
+	);
+	let modem = document.devices[0]
+		.modem
+		.as_ref()
+		.expect("the modem policy");
+	assert_eq!(modem.sim, vec!["esim".to_owned(), "socket".to_owned()]);
+	assert_eq!(modem.apn.as_deref(), Some("im.cxn"));
+}
+
+/// A source listed twice is two answers to "what next".
+#[test]
+fn a_repeated_sim_source_is_refused() {
+	let rendered = errors("device wwan0 { modem { sim = [\"esim\", \"esim\"] } }\n");
+	assert!(rendered.contains("listed twice"), "got: {rendered}");
+}
+
+/// The APN reaches `helper/netcfgd-modem-at`, which interpolates it into
+/// `AT+CGDCONT=1,"IP","<apn>"`. A quote there ends the command early and what
+/// follows becomes another one, so the character is refused where it is
+/// written rather than where it would detonate.
+///
+/// This is not netcfgd being clever about the value: 0150 is explicit that an
+/// APN cannot be discovered or validated, and nothing here tries to. What is
+/// checked is only what netcfgd is responsible for passing on safely.
+#[test]
+fn an_apn_that_would_break_an_at_command_is_refused() {
+	// Written as configuration text rather than by interpolating a value, so
+	// each case exercises the escape the lexer resolves and the checker then
+	// sees: `\"` is a quote, `\\` a backslash, `\n` a control character.
+	for bad in [
+		r#"apn = "im\".cxn""#,
+		r#"apn = "im\\cxn""#,
+		r#"apn = "im\ncxn""#,
+	] {
+		let text = format!("device wwan0 {{ modem {{ {bad} }} }}\n");
+		let rendered = errors(&text);
+		assert!(
+			rendered.contains("quote, a backslash or a control character"),
+			"`{bad}` should be refused, got: {rendered}"
+		);
+	}
+}
+
+/// The same check guards a SIM source name, which reaches a `pre_up` hook.
+#[test]
+fn a_sim_source_that_would_break_a_hook_is_refused() {
+	let rendered = errors("device wwan0 { modem { sim = \"e\\\"sim\" } }\n");
+	assert!(
+		rendered.contains("quote, a backslash or a control character"),
+		"got: {rendered}"
+	);
+}
+
+/// An unknown key inside `modem` is named rather than ignored.
+#[test]
+fn an_unknown_modem_key_is_refused() {
+	let rendered = errors("device wwan0 { modem { imsi = \"1234\" } }\n");
+	assert!(
+		rendered.contains("unknown modem key `imsi`"),
+		"got: {rendered}"
+	);
+}

@@ -96,6 +96,47 @@ pub struct WifiDevicePolicy {
 	pub scan_randomization: bool,
 }
 
+/// Cellular policy, for a modem device.
+///
+/// [0150](../../../doc/decision/0150-a-sim-source-is-chosen-the-way-an-uplink-is.md):
+/// netcfgd says which SIM source is wanted and what to do when it will not
+/// register; a `pre_up` hook makes the hardware do it. Driving a mux select
+/// line is board enablement and netcfgd has no GPIO anywhere -- but the
+/// *policy* belongs here, because the component that solved this on one board
+/// had to reinvent constraint 1 in order to be correct.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ModemPolicy {
+	/// SIM sources, in the order they should be tried.
+	///
+	/// **Ordered rather than a preference plus a fallback**, because "which
+	/// one do you want, and what next" is one statement, and splitting it into
+	/// two settings would let them disagree.
+	///
+	/// The names are the board's and netcfgd does not interpret them: they
+	/// reach a `pre_up` hook, which is the only thing that knows what a select
+	/// line does. `esim` and `socket` are one board's spelling rather than a
+	/// closed set.
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub sim: Vec<String>,
+	/// The APN to request.
+	///
+	/// **Provisioning data, and it cannot be discovered** -- measured with a
+	/// control on the board that produced 0150: `EF_ACL` empty and the APN
+	/// Control List service not activated, with `EF_UST` reading successfully
+	/// through the same channel, which is what makes the empty list a real
+	/// negative rather than a failed probe. An offline carrier database
+	/// carries public APNs only, and a private APN is by definition not in
+	/// one.
+	///
+	/// Nor can it be validated by connecting: asking for an APN the
+	/// subscription does not carry gets the network's own default rather than
+	/// an error, and that default may be nearly useless. That is why a probe
+	/// is not optional on a cellular link.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub apn: Option<String>,
+}
+
 impl Default for WifiDevicePolicy {
 	fn default() -> Self {
 		Self {
@@ -132,6 +173,9 @@ pub struct Device {
 	/// Radio policy, for wifi devices.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub wifi: Option<WifiDevicePolicy>,
+	/// Cellular policy, for modem devices. See [`ModemPolicy`].
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub modem: Option<ModemPolicy>,
 }
 
 /// What hardware address a radio presents.
