@@ -1541,6 +1541,22 @@ here meant a machine could be configured for a campus network by
 the model rather than from the `Profile` type, so the two renderers now
 overlap on everything a network block can say.
 
+**Extending it found the failure its own header rules out.** `bridge_vlans`
+was neither rendered nor named: a switch port's per-port VLAN membership was
+dropped in silence and `save` reported success. The round trip did not catch
+it because no round trip had ever carried a `vlans` key -- the gate was real
+and the case was absent, which is the vacuous pass wearing its usual costume.
+It is not cosmetic. A port whose PVID is lost takes untagged ingress to a
+different VLAN than it did before, and 0023's own note says the kernel accepts
+a second PVID and moves it without reporting anything.
+
+**The audit that found it is worth repeating whenever a model type gains a
+field**: list the struct's fields, list the ones the renderer mentions, and
+diff the two. Anything in neither the rendered set nor the refused set is
+being dropped. `addressing` and `routes` look like false positives in that
+diff and are not -- they are reached through a multi-line expression, which is
+worth knowing before trusting the grep that produces the list.
+
 **A stored certificate and a path are the trap in it.** `as_cert_source` tells
 them apart by the `@secret:` prefix alone, so writing stored content bare
 produces a filename that does not exist and writing a path through the secret

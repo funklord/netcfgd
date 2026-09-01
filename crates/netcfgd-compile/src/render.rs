@@ -19,7 +19,7 @@
 
 use netcfgd_model::control::Principal;
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
-use netcfgd_model::interface::InterfaceKind;
+use netcfgd_model::interface::{BridgeVlan, InterfaceKind};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
 use netcfgd_model::security::{CertSource, EapConfig, EapMethod, Security};
 use netcfgd_model::wifi::WifiNetwork;
@@ -355,12 +355,45 @@ fn render_interface(
 		let _ = writeln!(body, "\troutes = {}", list_or_scalar(&routes));
 	}
 
+	render_bridge_vlans(&interface.bridge_vlans, &mut body);
+
 	if let Some(dns) = &interface.dns {
 		render_dns(dns, "\t", &mut body, missing, &format!("interface {name}"));
 	}
 
 	let head = opening("interface", name, overrides);
 	let _ = write!(text, "\n{head} {name} {{\n{body}}}\n");
+}
+
+/// A port's VLAN membership, as the phrases the parser reads back.
+///
+/// One phrase per VLAN rather than the ranges the parser also accepts: a range
+/// is expanded on the way in, so the individual ids are all this has to write.
+/// The round trip compares documents rather than text, so re-compacting them
+/// would be work nothing checks.
+///
+/// A function of its own because `render_interface` is at its line limit, and
+/// because this is the field that was being dropped in silence -- it is easier
+/// to notice missing when it has a name.
+fn render_bridge_vlans(vlans: &[BridgeVlan], body: &mut String) {
+	let phrases: Vec<String> = vlans
+		.iter()
+		.map(|vlan| {
+			let mut phrase = vlan.vid.to_string();
+			if vlan.pvid {
+				phrase.push_str(" pvid");
+			}
+			// `tagged` is the absence of `untagged` and the parser's default,
+			// so writing it would be noise that reads as a setting.
+			if vlan.untagged {
+				phrase.push_str(" untagged");
+			}
+			quote(&phrase)
+		})
+		.collect();
+	if !phrases.is_empty() {
+		let _ = writeln!(body, "\tvlans = {}", list_or_scalar(&phrases));
+	}
 }
 
 fn render_network(network: &WifiNetwork, overrides: &Overrides, text: &mut String) {
@@ -647,6 +680,24 @@ mod tests {
 			 \twifi {\n\
 			 \t\topen = true\n\
 			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// Per-port VLAN membership, which was being dropped in silence.
+	///
+	/// It was neither rendered nor refused, so `ncfg profile save` wrote a
+	/// switch port's configuration back without its VLANs and reported
+	/// success. That is the one failure the renderer's header rules out, and
+	/// nothing caught it because no round trip had ever carried a `vlans` key.
+	/// The consequence is not cosmetic: a port whose PVID is lost takes
+	/// untagged ingress to a different VLAN than before.
+	#[test]
+	fn per_port_vlans_round_trip() {
+		round_trips(
+			"interface eth0 {\n\
+			 \tconfig = \"192.0.2.10/24\"\n\
+			 \tvlans = [\"10 pvid untagged\", \"20\", \"30 untagged\"]\n\
 			 }\n",
 		);
 	}
