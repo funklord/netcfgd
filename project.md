@@ -895,8 +895,16 @@ them because no test had ever carried those keys.
 3. **The permission tiers**, deferred by the holder with the shape already
    given -- `view` / `laptop` / `root`, replacing the current gradient. Written
    up under *Open: the permission system needs an overhaul*.
-4. **Restart without dropping the link**, requested 2026-08-25 and still
-   undesigned -- the subsection immediately below.
+4. **Being told *why* you are being stopped**, which is the half of the
+   2026-08-25 restart requirement that is still open. The other half landed:
+   a stop holds, the record survives, and a deb upgrade restarts a running
+   daemon. What is missing is that an upgrade and a final stop look identical
+   to the daemon, and nothing writes the intent down for the next copy.
+
+**And one question rather than a task: could this run on a microcontroller?**
+Put by the holder 2026-09-02. The core turns out to be portable already and the
+`Op` enum carries no platform in it -- what is unmeasured is RAM, which is the
+wall. *Asked: could this run on a microcontroller?* below has the numbers.
 
 **Three things open that a worker should not settle alone.**
 
@@ -924,6 +932,68 @@ type that shares it and calls it the intersection -- match `binding.field`, not
 when the arm was at line 798, reported with the confidence of something that
 had looked everywhere.
 
+### Asked: could this run on a microcontroller?
+
+**Raised by the copyright holder 2026-09-02, on the observation that the helper
+programs "are going to bite hard the day netcfgd needs to run on an embedded
+system" -- and then sharpened past embedded Linux to an ESP32.** Nothing here
+is a plan. It is what the tree measures when the question is put to it, so that
+deciding does not start from zero.
+
+**The core is already portable, and nobody designed it that way.**
+`netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` depend on serde and
+serde_json and nothing else, and their entire OS surface is 31 references, all
+of them `IpAddr`/`Ipv4Addr`/`Ipv6Addr` -- which live in `core::net` since Rust
+1.77. No `fs`, no `process`, no `thread`, no sockets. Declaring a state,
+compiling it, and planning the difference is `no_std + alloc` territory today.
+The plan/apply split forced that; it was not aimed at.
+
+**`Executor` is one trait with one method**, `execute(&mut self, op: &Op)`, and
+the `Op` enum carries no platform in it. Across its 48 variants every payload is
+a `String`, a `bool`, an integer, or one of netcfgd's own model types. No
+netlink types, no libc, no file descriptors.
+
+**Classified against a target with lwIP and `esp_wifi`:**
+
+    25  portable intent          implement against the target's stack
+    22  feature absent there     never emitted, because the document
+                                 cannot declare a bond or a qdisc on
+                                 hardware that has none
+     1  needs a process          HookRun, the only variant carrying a path
+
+**The result that decides it: `BackendStart` carries no command line.** It is
+`{ kind: BackendKind, iface }`, and `BackendKind` is nine roles -- `Dhcp4`,
+`Supplicant`, `AccessPoint`, `Dns` and the rest. So "start the supplicant on
+wlan0" survives the platform change untouched: on an MCU it is
+`esp_wifi_connect()` rather than a `wpa_supplicant` process. That fell out of
+0140 and 0143, which made a backend identifiable by role rather than by the
+command line netcfgd composed, and it is the single reason a port is one file
+rather than a redesign.
+
+**Two blemishes, both cosmetic today.** `SysctlSetPrivacy`, `SysctlSetAcceptRa`
+and `SysctlSetForwarding` are named after a Linux mechanism where the intent is
+portable, and `SysctlSetAcceptRa { value: u8 }` carries the kernel's 0/1/2
+encoding in its payload. `LinkSetOffloads` carries ethtool feature names as
+free strings, which is the loosest thing in the enum -- in the never-emitted
+22, so it costs nothing until it does not.
+
+**RAM is the wall, and it is the one thing not measured.** `make rss` reports
+508 KB as netcfgd's own on a Linux build carrying the socket server, the TUI
+and every backend. An ESP32 has 520 KB of SRAM and a C3 has 400 KB, so that
+figure is the whole chip before FreeRTOS, lwIP and the wifi stack exist. What
+model, compile and plan cost *alone* has never been measured, and that number
+decides whether this is possible rather than merely well-shaped. It is a
+`make cross`-shaped experiment and it is the next thing to do if the question
+is pursued.
+
+**And the helper pattern does not merely get expensive there, it stops
+existing.** No fork, no exec, no `/run` contract, no shell hooks. Which is the
+same direction the ModemManager rejection already pointed -- netcfgd owning the
+wire protocol rather than shelling out -- and it is worth noticing which modem
+path survives that test: **AT over a UART**, which `helper/netcfgd-modem-at`
+already speaks and which is trivially in-process on an MCU. MBIM over a USB CDC
+control endpoint is not.
+
 ### Wanted, not yet designed: restart without dropping the link
 
 **Requested 2026-08-25 by the copyright holder, explicitly to be planned
@@ -948,8 +1018,24 @@ no test asserts it. **Anybody adding graceful teardown would be removing this
 feature without knowing it existed.** Writing the property down and testing it
 is the cheapest part of the whole job and should come first.
 
-**The startup half is where the work is, and there is one concrete obstacle.**
-`RuntimeDirectory=netcfgd` is set in the unit with no `RuntimeDirectoryPreserve=`.
+**Everything below this line was written before the work landed, and the work
+landed.** 0134 settled that an unannounced stop holds, 0135 put the ownership
+record where the kernel keeps it, 0136 gave a link its own mark, and the unit
+carries `KillMode=process` and `RuntimeDirectoryPreserve=restart` today --
+`tests/live/adopt.sh` runs the cycle with the record deleted. A deb upgrade
+restarts a running daemon now, which is only safe *because* those landed. The
+paragraphs that follow are kept because they are the reasoning that produced
+them and the requirement they were answering; read them as history, and the
+account of what was built as the ~1,600 lines further down that begin
+"`RuntimeDirectoryPreserve=restart` was not a systemd-only patch."
+
+**What is still open is the second half: netcfgd is not told *why* it is being
+stopped.** An upgrade and a final stop are different intents, a `SIGTERM`
+carries neither, and nothing yet writes an intent beside the state for the next
+copy to read. That part of the requirement is unbuilt.
+
+**The obstacle as it stood when this was written.**
+`RuntimeDirectory=netcfgd` was set in the unit with no `RuntimeDirectoryPreserve=`.
 Per `systemd.exec(5)`, the default is `no`, and the directories "are always
 removed when the service stops". So `systemctl restart netcfgd` deletes
 `/run/netcfgd` -- **the entire record of what netcfgd started and therefore of
