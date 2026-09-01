@@ -448,6 +448,11 @@ install-modem-mbim:
 	@# other does not -- mbimcli for one, a tty for the other -- so shipping
 	@# both costs nothing and shipping one means guessing.
 	install -m 0755 helper/netcfgd-modem-at $(DESTDIR)$(BINDIR)/netcfgd-modem-at
+	@# And the umbim one, for the target 0045 named and nothing had been
+	@# written for. `mbimcli` costs 6.77 MB of glib beyond libc, measured --
+	@# about four times netcfgd itself and seven times the embedded budget --
+	@# so a constrained box gets a client that costs libubox.
+	install -m 0755 helper/netcfgd-modem-umbim $(DESTDIR)$(BINDIR)/netcfgd-modem-umbim
 	@# The quirks table goes under /usr/share, where the helpers look first
 	@# after $NCFG_MODEM_QUIRKS and /etc. It explains rather than decides, so a
 	@# machine without it behaves identically and merely says less.
@@ -1532,6 +1537,7 @@ live:
 	@# hardware: the fake is a real character device, so termios, CR-terminated
 	@# writes and byte-at-a-time reads are exercised rather than stubbed.
 	@sh tests/live/modem_at.sh
+	@sh tests/live/umbim.sh
 	@# A Bluetooth adapter, which needs real root: /dev/vhci is root-only and
 	@# the module autoloads on the open. Not under NCFG_LIVE and not under
 	@# unshare -- the adapter belongs to the machine, and a machine that
@@ -1682,6 +1688,7 @@ uninstall:
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-at
+	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-umbim
 	rm -f $(DESTDIR)$(PREFIX)/share/netcfgd/modem-quirks
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd

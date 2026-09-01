@@ -1,0 +1,248 @@
+#!/bin/sh
+# A modem helper for netcfgd, over MBIM, using OpenWrt's `umbim`.
+#
+#     netcfgd-modem-umbim monitor    -d /dev/cdc-wdm0 -i wwan0 -a internet
+#     netcfgd-modem-umbim connect    -d /dev/cdc-wdm0 -i wwan0 -a internet
+#     netcfgd-modem-umbim disconnect -d /dev/cdc-wdm0 -i wwan0
+#     netcfgd-modem-umbim stop       -i wwan0
+#
+# ## WHY THIS EXISTS BESIDE netcfgd-modem-mbim
+#
+# The same protocol and a different client, because of what the other one
+# weighs. `mbimcli` links libmbim-glib, and the chain measured on a Debian
+# machine is **6.77 MB of libraries beyond libc** -- gio at 2.0 MB, glib at
+# 1.4 MB, libmbim-glib at 874 KB, pcre2 at 711 KB, and mount, blkid, gobject,
+# selinux, z and ffi behind them. netcfgd itself is 1.77 MB on aarch64 and
+# design section 10.2 budgets an embedded build at 1 MB, so that one dependency
+# is about four times the daemon and seven times the target.
+#
+# `umbim` is OpenWrt's own MBIM client: `+libubox +kmod-usb-net-cdc-mbim +wwan`,
+# no glib and no bus. Decision 0045 names it as the answer for exactly this
+# hardware -- "the contract is the decision and the helper is plural" -- and
+# writing it is what makes that sentence true rather than a plan.
+#
+# Neither helper is more correct than the other. `mbimcli` has machine-readable
+# output and runs where glib is already paid for; this one runs where it is not.
+#
+# ## WHAT IT DOES AND DOES NOT DO
+#
+# It connects a cellular bearer and writes what the network gave it to
+# `/run/netcfgd/reported/<interface>`; netcfgd reads that file and configures
+# the interface from it. `doc/interface-report.md` is the whole contract between
+# the two, and netcfgd does not start this, supervise it, or speak to it.
+#
+# It does NOT configure the interface. That is netcfgd's, and two writers on one
+# interface is the failure the arrangement exists to avoid. Set
+# `config = "reported"` on the interface.
+#
+# The APN comes from netcfgd's document (0150) and arrives through
+# `/run/netcfgd/modem/<interface>` (0152), which this reads when `--apn` is not
+# given. Same as the other two helpers, for the same reason.
+#
+# ## THE SEQUENCE IS OPENWRT'S, NOT INVENTED HERE
+#
+# `umbim` is stateful across invocations in a way `mbimcli` is not: each call
+# carries a transaction id and OpenWrt's own `mbim.sh` proto handler passes `-n`
+# on every call except the final disconnect, incrementing the id as it goes.
+# Getting that order or those flags wrong produces a modem that answers the
+# first command and refuses the rest, so the order below is theirs and is not
+# a place to be clever:
+#
+#     caps -> pinstate -> subscriber -> registration -> attach -> connect
+#
+# What it needs: `umbim`, and read/write on the modem's control device. No
+# D-Bus, no systemd, no ModemManager, no glib.
+
+set -eu
+
+usage() {
+	sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+	exit "${1:-2}"
+}
+
+[ $# -ge 1 ] || usage
+command=$1
+shift || true
+
+device=
+interface=
+apn=
+user=
+password=
+interval=30
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	-d|--device)    device=${2:?--device needs a path}; shift 2 ;;
+	-i|--interface) interface=${2:?--interface needs a name}; shift 2 ;;
+	-a|--apn)       apn=${2:?--apn needs a name}; shift 2 ;;
+	-u|--user)      user=${2:?--user needs a name}; shift 2 ;;
+	-p|--password)  password=${2:?--password needs a value}; shift 2 ;;
+	-n|--interval)  interval=${2:?--interval needs seconds}; shift 2 ;;
+	-h|--help)      usage 0 ;;
+	*) echo "netcfgd-modem-umbim: unknown option $1" >&2; exit 2 ;;
+	esac
+done
+
+[ -n "$interface" ] || { echo "netcfgd-modem-umbim: --interface is required" >&2; exit 2; }
+
+run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
+report="$run_dir/reported/$interface"
+selection="$run_dir/modem/$interface"
+
+umbim_bin=${UMBIM:-umbim}
+
+# What netcfgd published for this interface, if anything. The mirror of the
+# interface report, going the other way (0152).
+published() {
+	[ -f "$selection" ] || return 0
+	sed -n "s/^$1=//p" "$selection" | head -n 1
+}
+
+from_document=$(published apn)
+if [ -z "$apn" ]; then
+	apn=$from_document
+elif [ -n "$from_document" ] && [ "$from_document" != "$apn" ]; then
+	echo "netcfgd-modem-umbim: --apn \`$apn\` overrides \`$from_document\`," >&2
+	echo "netcfgd-modem-umbim:   which netcfgd published in $selection" >&2
+fi
+
+# The transaction id, carried across the calls in one sequence. OpenWrt starts
+# at 1 and increments after each command; the number itself means nothing to
+# the modem beyond matching a reply to a request, but reusing one inside a
+# session is how a sequence comes apart.
+tid=1
+
+umbim() {
+	command_name=$1
+	shift
+	tid=$((tid + 1))
+	"$umbim_bin" -n -t "$tid" -d "$device" "$command_name" "$@"
+}
+
+write_report() {
+	mkdir -p "$run_dir/reported"
+	cat > "$report.tmp"
+	mv "$report.tmp" "$report"
+}
+
+# `umbim config` prints `field: value` lines. The field names are umbim's and
+# the keys are the report's, which is the whole of the translation -- and the
+# reason a helper exists at all rather than netcfgd learning one more output
+# format.
+#
+# `ipv4address` arrives without a prefix length on some firmware and with one
+# on others; the report wants CIDR, so a bare address is given /32. Guessing
+# wrong here would give netcfgd an address it installs with the wrong mask,
+# which is worse than an address it refuses.
+to_report() {
+	awk '
+		{ key = $1; sub(/:$/, "", key); value = $NF }
+		key == "ipv4address" {
+			if (value !~ /\//) { value = value "/32" }
+			print "address=" value
+		}
+		key == "ipv6address" {
+			if (value !~ /\//) { value = value "/128" }
+			print "address=" value
+		}
+		key == "ipv4gateway" || key == "ipv6gateway" { print "gateway=" value }
+		key == "ipv4dnsserver" || key == "ipv6dnsserver" { print "dns=" value }
+		key == "ipv4mtu" || key == "ipv6mtu" { print "mtu=" value }
+	'
+}
+
+# The order is OpenWrt's. Each step is allowed to fail loudly rather than being
+# retried here: a modem that will not register is not a modem that registers if
+# asked twice in the same second, and netcfgd's own probe is what decides
+# whether the link works (0119).
+bring_up() {
+	[ -n "$device" ] || { echo "netcfgd-modem-umbim: --device is required" >&2; exit 2; }
+	[ -n "$apn" ] || { echo "netcfgd-modem-umbim: --apn is required" >&2; exit 2; }
+
+	for step in caps pinstate subscriber registration attach; do
+		if ! umbim "$step" > /dev/null; then
+			echo "netcfgd-modem-umbim: $step failed on $device" >&2
+			exit 1
+		fi
+	done
+
+	# The auth triple is passed only when a username is given. umbim takes the
+	# four positionally, and sending empty strings is not the same as sending
+	# nothing on every firmware.
+	if [ -n "$user" ]; then
+		umbim connect "$apn" none "$user" "$password" > /dev/null || {
+			echo "netcfgd-modem-umbim: could not connect $interface via $apn" >&2
+			exit 1
+		}
+	else
+		umbim connect "$apn" > /dev/null || {
+			echo "netcfgd-modem-umbim: could not connect $interface via $apn" >&2
+			exit 1
+		}
+	fi
+
+	config=$(umbim config) || {
+		echo "netcfgd-modem-umbim: connected but could not read the configuration" >&2
+		exit 1
+	}
+
+	body=$(printf '%s\n' "$config" | to_report)
+	if ! printf '%s\n' "$body" | grep -q '^address='; then
+		# A bearer that connected and produced no address is not a bearer. Say
+		# so rather than writing an empty report, which would tell netcfgd the
+		# modem is down when it is up and misconfigured.
+		echo "netcfgd-modem-umbim: $interface connected but the network gave no address" >&2
+		exit 1
+	fi
+
+	printf '# %s via %s, %s\n%s\n' "$interface" "$apn" \
+		"$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$body" | write_report
+}
+
+# Emptying the report rather than deleting it: netcfgd reads an empty report as
+# "this writer has nothing for you", and a missing file is indistinguishable
+# from a helper that has not run yet.
+empty_report() {
+	[ -f "$report" ] || return 0
+	mkdir -p "$run_dir/reported"
+	printf '# %s, disconnected %s\n' "$interface" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+		| write_report
+}
+
+case $command in
+connect)
+	bring_up
+	;;
+monitor)
+	# The one to run from a service manager: connect, then watch, and empty the
+	# report the moment the network drops the bearer. A stale report means
+	# netcfgd keeps an address and a default route on a modem that is gone, and
+	# a default route down a dead modem black-holes traffic another interface
+	# would have carried.
+	bring_up
+	while true; do
+		sleep "$interval"
+		if ! umbim registration > /dev/null 2>&1; then
+			echo "netcfgd-modem-umbim: $interface lost its registration" >&2
+			empty_report
+			exit 1
+		fi
+	done
+	;;
+disconnect)
+	[ -n "$device" ] || { echo "netcfgd-modem-umbim: --device is required" >&2; exit 2; }
+	tid=$((tid + 1))
+	# Without `-n`, which is what OpenWrt's own script does on this one call:
+	# the session is being finished rather than handed to the next command.
+	"$umbim_bin" -t "$tid" -d "$device" disconnect > /dev/null 2>&1 || true
+	empty_report
+	;;
+stop)
+	empty_report
+	;;
+*)
+	echo "netcfgd-modem-umbim: unknown command \`$command\`" >&2
+	usage
+	;;
+esac

@@ -1364,6 +1364,39 @@ owner. The modem-side one is invisible to `contention.rs` and is what
 [0043](doc/decision/0043-mbim-is-ours-and-the-quirks-are-a-table.md)'s quirk
 table -- designed, unbuilt -- is for.
 
+**`helper/netcfgd-modem-umbim` exists now, and 0045 had been waiting for it
+since it was written.** That record says the contract is the decision and the
+helper is plural, and names `umbim` as the answer for a box that cannot afford
+glib -- then nobody wrote one, so the only MBIM path was the expensive one.
+
+**The number that makes it matter, measured rather than asserted:** `mbimcli`
+links a chain of **6.77 MB beyond libc** -- gio 2.0 MB, glib 1.4 MB,
+libmbim-glib 874 KB, pcre2 711 KB, with mount, blkid, gobject, selinux, z and
+ffi behind them. netcfgd is 1.77 MB on aarch64 and design section 10.2 budgets
+an embedded build at 1 MB, so one helper's dependency is about **four times the
+daemon and seven times the target**. `umbim` is `+libubox +kmod-usb-net-cdc-mbim
++wwan`, no glib and no bus.
+
+**The cost is concentrated rather than diffuse, which is the useful part.** The
+AT helper needs a tty and a shell and nothing else; wpa_supplicant, hostapd and
+udhcpc are on any OpenWrt image already; `ping` is a busybox applet. It was one
+tool, and there is now a way round it.
+
+**The sequence is OpenWrt's and is not a place to be clever.** `umbim` is
+stateful across invocations where `mbimcli` is not: each call carries a
+transaction id, and OpenWrt's own `mbim.sh` passes `-n` on every call except
+the final disconnect. `caps`, `pinstate`, `subscriber`, `registration`,
+`attach`, `connect`, `config` -- in that order, which `tests/live/umbim.sh`
+asserts by name rather than trusting. Verified by dropping a step and watching
+it fail.
+
+**Two things the fake has to do that a forgiving one would not.** It returns a
+v4 address without a prefix and a v6 address with one, because real firmware
+does both and the report wants CIDR -- a bare address gets `/32` here, since
+guessing wrong gives netcfgd an address it installs with the wrong mask, which
+is worse than one it refuses. And it can be told to deregister, which is the
+condition the monitor loop exists to notice.
+
 **`helper/netcfgd-modem-at` fills the gap**, beside the MBIM one rather than
 inside it, which is what 0045 makes the supported way. Its job is small and
 deliberately so: set the APN, hold the bearer, and write **no interface
