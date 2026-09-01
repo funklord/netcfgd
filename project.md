@@ -1526,18 +1526,41 @@ the fold, the snapshot and the selection are all put back.
 **The renderer is partial by design and refuses rather than drops.** It lives
 in `netcfgd-compile` beside the parser so a key added to one is under the nose
 of whoever adds it to the other. It covers globals, interfaces, wifi networks
-and devices; what it cannot render it names -- wireguard, tunnels, bonds,
-bridges, `access_point`, `rule`, dns transports, EAP -- and `save` prints the
-list and writes nothing, leaving the operator to write that profile by hand.
-Its gate is the round trip: compile text, render, compile again, and the
-documents must be equal.
+and devices, **802.1X included**; what it cannot render it names -- wireguard,
+tunnels, bonds, bridges, `access_point`, `rule`, dns transports -- and `save`
+prints the list and writes nothing, leaving the operator to write that profile
+by hand. Its gate is the round trip: compile text, render, compile again, and
+the documents must be equal.
+
+**EAP came off that list first, and it was the one worth taking first**
+because the knowledge already existed in the tree: `wifi_profile::render` in
+`netcfgd-host` had rendered an enterprise block since 0087, so refusing one
+here meant a machine could be configured for a campus network by
+`ncfg wifi add` and then could not have that configuration saved as a profile
+-- the exact machine most likely to want one. The eight keys are written from
+the model rather than from the `Profile` type, so the two renderers now
+overlap on everything a network block can say.
+
+**A stored certificate and a path are the trap in it.** `as_cert_source` tells
+them apart by the `@secret:` prefix alone, so writing stored content bare
+produces a filename that does not exist and writing a path through the secret
+spelling produces a lookup that fails -- neither is a compile error, so the
+round trip is what catches them. Proved by neutering the renderer and watching
+the enterprise round trip fail.
 
 Two things follow that are worth knowing before extending it. The round trip
 is written from *text* rather than from model values, so it also proves the
 renderer against what the parser accepts. And `wifi_profile::render` in
 `netcfgd-host` renders a network block from its own `Profile` type, which is
 now a second spelling of one this can produce from a `WifiNetwork` -- they do
-not collide and neither is wrong, but they should become one.
+not collide and neither is wrong, but they should become one. **That is more
+true since EAP landed here, not less**: the two now say the same eight keys
+in two places, and `netcfgd-host` already depends on `netcfgd-compile`, so
+the direction of the merge is not in question. What is in question is the
+input type, and it is a real design choice rather than a tidy-up -- the host
+renderer writes a *new* file from what a client asked for, this one writes a
+*snapshot* of what compiled, and the header comment and the one-line-versus-
+block heuristic belong to the first and not the second.
 
 ### The one profile that can be shipped
 

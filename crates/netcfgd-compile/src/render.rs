@@ -21,7 +21,7 @@ use netcfgd_model::control::Principal;
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
 use netcfgd_model::interface::InterfaceKind;
 use netcfgd_model::secret::{SecretProvider, SecretRef};
-use netcfgd_model::security::Security;
+use netcfgd_model::security::{CertSource, EapConfig, EapMethod, Security};
 use netcfgd_model::wifi::WifiNetwork;
 use netcfgd_model::{AddressSource, Device, Document, DriftPolicy, HostnamePolicy, Interface};
 use std::collections::BTreeSet;
@@ -63,7 +63,7 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 		render_interface(interface, overrides, &mut text, &mut missing);
 	}
 	for network in &document.networks {
-		render_network(network, overrides, &mut text, &mut missing);
+		render_network(network, overrides, &mut text);
 	}
 	for device in &document.devices {
 		render_device(device, overrides, &mut text, &mut missing);
@@ -363,12 +363,7 @@ fn render_interface(
 	let _ = write!(text, "\n{head} {name} {{\n{body}}}\n");
 }
 
-fn render_network(
-	network: &WifiNetwork,
-	overrides: &Overrides,
-	text: &mut String,
-	missing: &mut Unrenderable,
-) {
+fn render_network(network: &WifiNetwork, overrides: &Overrides, text: &mut String) {
 	let id = &network.id;
 	let mut body = String::new();
 
@@ -391,7 +386,7 @@ fn render_network(
 		Security::Psk(psk) => {
 			let _ = writeln!(body, "\t\tpsk = {}", quote(&secret_ref(&psk.passphrase)));
 		}
-		Security::Eap(_) => missing.push(format!("network {id}: eap")),
+		Security::Eap(eap) => render_eap(eap, &mut body),
 	}
 	if network.priority != 0 {
 		let _ = writeln!(body, "\t\tpriority = {}", network.priority);
@@ -403,6 +398,39 @@ fn render_network(
 
 	let head = opening("network", id, overrides);
 	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", quote(id));
+}
+
+/// The keys of an 802.1X network, inside an open `wifi` block.
+///
+/// Every value is quoted rather than written bare. An identity is
+/// `you@example.ac.uk` and a certificate is a path, and neither is guaranteed
+/// to be a word the lexer reads back as itself.
+///
+/// `identity` is unconditional because the model requires it -- a `String` and
+/// not an `Option`, since no method authenticates without one. The rest are
+/// written only when set, so a PEAP network does not acquire empty `ca_cert`
+/// and `client_cert` lines that say nothing and invite an answer.
+fn render_eap(eap: &EapConfig, body: &mut String) {
+	let _ = writeln!(body, "\t\teap = {}", quote(eap_method_name(eap.method)));
+	let _ = writeln!(body, "\t\tidentity = {}", quote(&eap.identity));
+	if let Some(anonymous) = &eap.anonymous_identity {
+		let _ = writeln!(body, "\t\tanonymous_identity = {}", quote(anonymous));
+	}
+	if let Some(password) = &eap.password {
+		let _ = writeln!(body, "\t\tpassword = {}", quote(&secret_ref(password)));
+	}
+	for (source, key) in [
+		(&eap.ca_cert, "ca_cert"),
+		(&eap.client_cert, "client_cert"),
+		(&eap.private_key, "private_key"),
+	] {
+		if let Some(source) = source {
+			let _ = writeln!(body, "\t\t{key} = {}", quote(&cert_source(source)));
+		}
+	}
+	if let Some(phase2) = &eap.phase2 {
+		let _ = writeln!(body, "\t\tphase2 = {}", quote(phase2));
+	}
 }
 
 fn render_device(
@@ -476,6 +504,29 @@ fn kind_name(kind: &InterfaceKind) -> &'static str {
 		InterfaceKind::Tunnel(_) => "tunnel",
 		InterfaceKind::Tun(_) => "tun",
 		InterfaceKind::Ifb => "ifb",
+	}
+}
+
+fn eap_method_name(method: EapMethod) -> &'static str {
+	match method {
+		EapMethod::Peap => "peap",
+		EapMethod::Ttls => "ttls",
+		EapMethod::Tls => "tls",
+		EapMethod::Pwd => "pwd",
+	}
+}
+
+/// A certificate or key as the document names it.
+///
+/// The two sources read back differently and the parser tells them apart by
+/// the `@secret:` prefix alone (`as_cert_source`), so a stored one must go
+/// through [`secret_ref`] and a path must not: a path that happened to begin
+/// with `@secret:` would come back as stored content, and stored content
+/// written bare would come back as a filename that does not exist.
+fn cert_source(source: &CertSource) -> String {
+	match source {
+		CertSource::Path(path) => path.clone(),
+		CertSource::Stored(reference) => secret_ref(reference),
 	}
 }
 
@@ -595,6 +646,92 @@ mod tests {
 			 \tmetered = true\n\
 			 \twifi {\n\
 			 \t\topen = true\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// The tunnelled methods, with everything optional set.
+	///
+	/// Written as text rather than as model values, so it proves the renderer
+	/// against what the parser actually accepts rather than against what this
+	/// file believes it accepts.
+	#[test]
+	fn an_enterprise_network_round_trips() {
+		round_trips(
+			"network \"Campus\" {\n\
+			 \twifi {\n\
+			 \t\teap = \"peap\"\n\
+			 \t\tidentity = \"someone@example.ac.uk\"\n\
+			 \t\tanonymous_identity = \"anonymous@example.ac.uk\"\n\
+			 \t\tpassword = \"@secret:campus\"\n\
+			 \t\tca_cert = \"/etc/ssl/certs/campus.pem\"\n\
+			 \t\tphase2 = \"mschapv2\"\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// EAP-TLS, which presents a certificate instead of a password.
+	#[test]
+	fn a_certificate_network_round_trips() {
+		round_trips(
+			"network \"Corp\" {\n\
+			 \twifi {\n\
+			 \t\teap = \"tls\"\n\
+			 \t\tidentity = \"laptop.corp\"\n\
+			 \t\tca_cert = \"/etc/ssl/certs/corp.pem\"\n\
+			 \t\tclient_cert = \"/etc/ssl/certs/laptop.pem\"\n\
+			 \t\tprivate_key = \"@secret:laptop-key\"\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// A stored certificate and a path are told apart by the `@secret:` prefix
+	/// alone, so rendering one as the other is a silent corruption rather than
+	/// a compile error: `private_key` here is content netcfgd holds, and
+	/// `ca_cert` is a file already on the machine. The round trip is what
+	/// catches a renderer that writes stored content as a bare filename.
+	#[test]
+	fn a_stored_certificate_stays_stored() {
+		round_trips(
+			"network \"Corp\" {\n\
+			 \twifi {\n\
+			 \t\teap = \"tls\"\n\
+			 \t\tidentity = \"laptop.corp\"\n\
+			 \t\tca_cert = \"/etc/ssl/certs/corp.pem\"\n\
+			 \t\tprivate_key = \"@secret:laptop-key\"\n\
+			 \t}\n\
+			 }\n",
+		);
+		let document = compile(
+			"network \"Corp\" {\n\
+			 \twifi {\n\
+			 \t\teap = \"tls\"\n\
+			 \t\tidentity = \"laptop.corp\"\n\
+			 \t\tprivate_key = \"@secret:laptop-key\"\n\
+			 \t}\n\
+			 }\n",
+		);
+		let rendered = render(&document, &Overrides::new()).expect("rendered");
+		assert!(
+			rendered.contains("private_key = \"@secret:laptop-key\""),
+			"{rendered}"
+		);
+	}
+
+	/// EAP-PWD, which is the one method carrying neither a certificate nor a
+	/// phase 2, so it proves the optional keys are genuinely optional rather
+	/// than written empty.
+	#[test]
+	fn a_password_only_network_round_trips() {
+		round_trips(
+			"network \"Pwd\" {\n\
+			 \twifi {\n\
+			 \t\teap = \"pwd\"\n\
+			 \t\tidentity = \"someone\"\n\
+			 \t\tpassword = \"@secret:pwd\"\n\
 			 \t}\n\
 			 }\n",
 		);
