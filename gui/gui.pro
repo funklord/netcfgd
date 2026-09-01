@@ -48,6 +48,7 @@ SOURCES += \
 	src/add_network_dialog.cpp \
 	src/apply_dialog.cpp \
 	src/devices_view.cpp \
+	src/global_view.cpp \
 	src/modems_view.cpp \
 	src/profiles_view.cpp \
 	src/rules_view.cpp \
@@ -71,6 +72,7 @@ HEADERS += \
 	src/add_network_dialog.h \
 	src/apply_dialog.h \
 	src/devices_view.h \
+	src/global_view.h \
 	src/modems_view.h \
 	src/profiles_view.h \
 	src/rules_view.h \

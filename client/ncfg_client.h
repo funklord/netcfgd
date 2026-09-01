@@ -717,6 +717,48 @@ typedef struct {
 void ncfg_hooks_free(ncfg_hooks_t *hooks);
 
 /*
+ * The host-wide policy: the `global` block, minus the dns half the dns view
+ * already owns.
+ *
+ * Every field is rendered rather than typed, because this is a view onto
+ * settings that have little in common beyond living in one block -- a policy
+ * name, a hostname source, a number of seconds, three principals. Typing each
+ * one would put a parser here for values only a table draws.
+ *
+ * `networking` is the exception and is a real control: it is the host-wide off
+ * switch, and it is the only thing here a client can set today.
+ */
+typedef struct {
+	/* "on" or "off". */
+	char *networking;
+	/* The profile in force, or empty for none chosen -- which is the default
+	 * and is not a profile called "none". */
+	char *profile;
+	/* "none", "from_dhcp", or the static name asked for. */
+	char *hostname;
+	/* "report", "reconcile" or "ignore". */
+	char *on_drift;
+	/* Seconds, or 0 where the machine names no window. */
+	int   confirm;
+	/* Who may do what, as the configuration spells it: "root", "any",
+	 * "user:name" or "group:name". */
+	char *control_observe;
+	char *control_wifi;
+	char *control_admin;
+	/* Whether each tier is reachable from off this machine. */
+	int   remote_observe;
+	int   remote_wifi;
+	int   remote_admin;
+} ncfg_globals_t;
+
+void ncfg_globals_free(ncfg_globals_t *globals);
+
+/*
+ * The host-wide policy the configuration declares. Needs `observe`.
+ */
+int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, size_t err_size);
+
+/*
  * Every hook on every interface, in interface order. Needs `observe`.
  */
 int ncfg_client_hooks(ncfg_client_t *client, ncfg_hooks_t *out, char *err, size_t err_size);

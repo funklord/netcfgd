@@ -1550,6 +1550,28 @@ collapsing them onto a shared read-only table is exactly the kind of thing the
 simplification pass is for. Recorded so that pass does not have to rediscover
 it.
 
+**A `global` tab, which is the last of the document's top-level things.** Not a
+list, which is why it is a setting-and-value table rather than rows of
+something: it is the frame the other tabs sit in. It carries the host-wide off
+switch, the profile in force, the hostname source, the drift default, the
+confirm window, and -- the reason it is worth a tab even where nothing is
+settable -- `control` and `remote`, which say who may ask this machine to do
+what. An operator who cannot see those cannot know why a client is being
+refused.
+
+**`networking = "off"` is its one control and it is the largest in the
+program**, so it asks in the words a profile switch asks: every interface
+disabled, links down, addresses withdrawn, and over a remote connection there
+is no way back from here. It writes `50-networking` rather than sharing the dns
+tab's file, which is 0147 working as designed -- several files contribute to
+`global` precisely so two tools do not lock each other out. `on` is written
+explicitly rather than by deleting the drop-in, so what is in force is legible
+in the configuration instead of being the absence of something.
+
+**The dns half is deliberately not repeated there.** It has its own tab, and
+showing it twice would invite somebody to change it in the copy that is not
+wired up.
+
 **A tab per fundamental thing is the holder's rule for now**, especially where
 the thing is a list, with a pass to simplify the window once every control
 exists. The reasoning is worth keeping: a control that is missing cannot be

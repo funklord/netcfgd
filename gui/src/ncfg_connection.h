@@ -133,6 +133,23 @@ struct ncfg_hook_row {
 	int     timeout = 0;
 };
 
+/* The host-wide policy: the `global` block, minus the dns half the dns view
+ * already owns. Rendered strings rather than typed values, because these have
+ * little in common beyond living in one block. */
+struct ncfg_globals {
+	QString networking;
+	QString profile;
+	QString hostname;
+	QString on_drift;
+	int     confirm = 0;
+	QString control_observe;
+	QString control_wifi;
+	QString control_admin;
+	bool    remote_observe = false;
+	bool    remote_wifi = false;
+	bool    remote_admin = false;
+};
+
 struct ncfg_saved_network_row {
 	QString id;
 	QString name;
@@ -515,6 +532,8 @@ public:
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);
+	/* The host-wide policy the configuration declares. */
+	bool globals(ncfg_globals *out, QString *error);
 	/*
 	 * Choose a profile, or stop using one with an empty name. Needs `admin`.
 	 *

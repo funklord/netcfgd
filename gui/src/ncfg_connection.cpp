@@ -605,6 +605,42 @@ bool ncfg_connection::profile_set(const QString &name, QString *error)
 	return true;
 }
 
+bool ncfg_connection::globals(ncfg_globals *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	*out = ncfg_globals();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_globals_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_globals(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	out->networking = from_c(found.networking);
+	out->profile = from_c(found.profile);
+	out->hostname = from_c(found.hostname);
+	out->on_drift = from_c(found.on_drift);
+	out->confirm = found.confirm;
+	out->control_observe = from_c(found.control_observe);
+	out->control_wifi = from_c(found.control_wifi);
+	out->control_admin = from_c(found.control_admin);
+	out->remote_observe = found.remote_observe != 0;
+	out->remote_wifi = found.remote_wifi != 0;
+	out->remote_admin = found.remote_admin != 0;
+	ncfg_globals_free(&found);
+	return true;
+}
+
 bool ncfg_connection::rules(QList<ncfg_rule_row> *out, QString *error)
 {
 	if (!out) {

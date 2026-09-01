@@ -1485,6 +1485,106 @@ int ncfg_client_bluetooth(ncfg_client_t *client, ncfg_bluetooths_t *out, char *e
 	return 1;
 }
 
+/* A principal as the configuration spells it.
+ *
+ * The wire form is either a bare string -- "root", "any" -- or a one-member
+ * object, {"group":"netdev"}. Rendered back to the configuration's own
+ * spelling rather than to something this file invents, so that what a table
+ * shows is what an operator would type.
+ */
+static char *principal_text(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
+{
+	uint32_t member = ncfg_json_member(doc, object, name);
+	size_t length = 0;
+	const char *text = ncfg_json_string(doc, member, &length);
+
+	if (text) {
+		return dup_text(text, length);
+	}
+	for (size_t i = 0; i < 2; i++) {
+		const char *kind = i ? "group" : "user";
+		uint32_t inner = ncfg_json_member(doc, member, kind);
+		const char *who = ncfg_json_string(doc, inner, &length);
+		if (who) {
+			char rendered[160];
+			(void)snprintf(rendered, sizeof(rendered), "%s:%.*s", kind, (int)length,
+			    who);
+			return dup_string(rendered);
+		}
+	}
+	return dup_string("");
+}
+
+void ncfg_globals_free(ncfg_globals_t *globals)
+{
+	if (!globals) {
+		return;
+	}
+	free(globals->networking);
+	free(globals->profile);
+	free(globals->hostname);
+	free(globals->on_drift);
+	free(globals->control_observe);
+	free(globals->control_wifi);
+	free(globals->control_admin);
+	memset(globals, 0, sizeof(*globals));
+}
+
+int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t globals = ncfg_json_member(doc, ncfg_json_root(doc), "globals");
+	out->networking = member_text(doc, globals, "networking");
+	if (!out->networking[0]) {
+		/* Absent means the default, and the default is on. A blank cell
+		 * would read as "netcfgd does not know", which is a different
+		 * thing from "this machine does networking". */
+		free(out->networking);
+		out->networking = dup_string("on");
+	}
+	out->profile = member_text(doc, globals, "profile");
+	out->on_drift = member_text(doc, globals, "on_drift_default");
+	out->confirm = (int)ncfg_json_int(doc, ncfg_json_member(doc, globals, "confirm_default"), 0);
+
+	/* Either the string "none"/"from_dhcp" or {"static":"name"}, which is the
+	 * same shape a principal takes and is read the same way. */
+	uint32_t hostname = ncfg_json_member(doc, globals, "hostname_policy");
+	size_t length = 0;
+	const char *policy = ncfg_json_string(doc, hostname, &length);
+	if (policy) {
+		out->hostname = dup_text(policy, length);
+	} else {
+		out->hostname = member_text(doc, hostname, "static");
+	}
+
+	uint32_t control = ncfg_json_member(doc, globals, "control");
+	out->control_observe = principal_text(doc, control, "observe");
+	out->control_wifi = principal_text(doc, control, "wifi");
+	out->control_admin = principal_text(doc, control, "admin");
+
+	uint32_t remote = ncfg_json_member(doc, globals, "remote");
+	out->remote_observe = ncfg_json_bool(doc, ncfg_json_member(doc, remote, "observe"), 0);
+	out->remote_wifi = ncfg_json_bool(doc, ncfg_json_member(doc, remote, "wifi"), 0);
+	out->remote_admin = ncfg_json_bool(doc, ncfg_json_member(doc, remote, "admin"), 0);
+
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_hooks_free(ncfg_hooks_t *hooks)
 {
 	if (!hooks) {
