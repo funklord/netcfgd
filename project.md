@@ -1550,6 +1550,22 @@ It is not cosmetic. A port whose PVID is lost takes untagged ingress to a
 different VLAN than it did before, and 0023's own note says the kernel accepts
 a second PVID and moves it without reporting anything.
 
+**The topology kinds render now** -- bridge, bond, vlan, vxlan, macvlan, vrf
+and veth -- which leaves the tunnels. The split is by what they carry rather
+than by effort: those seven say who they are made of and nothing secret, while
+`wireguard` has peers and a private key and `openvpn` names an operator's
+file, so those need a decision about what a snapshot may contain rather than
+more keys.
+
+**A model default and a language default are not the same fact, and a bond is
+where they differ.** `BondMode` has `#[default] ActiveBackup`, so the rule
+used everywhere else here -- write a value only when it differs from the
+default, since writing one back reads as a choice somebody made -- would omit
+`mode` from a bond that used it. The *parser* requires `mode`, so that profile
+would not compile. Caught by testing each kind twice, once with every optional
+key set and once with none: the second is the case a renderer gets wrong in
+the other direction, and it is the one nobody writes.
+
 **The audit that found it is worth repeating whenever a model type gains a
 field**: list the struct's fields, list the ones the renderer mentions, and
 diff the two. Anything in neither the rendered set nor the refused set is

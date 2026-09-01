@@ -257,11 +257,7 @@ fn render_interface(
 	let name = &interface.name;
 	let mut body = String::new();
 
-	match &interface.kind {
-		InterfaceKind::Physical => {}
-		InterfaceKind::Dummy => body.push_str("\tkind = \"dummy\"\n"),
-		other => missing.push(format!("interface {name}: kind {}", kind_name(other))),
-	}
+	render_kind(&interface.kind, name, &mut body, missing);
 
 	// Every one of these has a block or a key of its own that this does not
 	// write yet. Named so the operator knows what to keep by hand.
@@ -363,6 +359,110 @@ fn render_interface(
 
 	let head = opening("interface", name, overrides);
 	let _ = write!(text, "\n{head} {name} {{\n{body}}}\n");
+}
+
+/// What kind of link this is, as its own block.
+///
+/// The topology kinds are here and the tunnels are not yet. They are separated
+/// by what they carry rather than by effort: a bridge, a bond, a VLAN and a
+/// macvlan say who they are made of and nothing secret, while `wireguard` has
+/// peers and a private key and `openvpn` names an operator's file, so those
+/// need decisions about what a snapshot is allowed to contain rather than more
+/// keys.
+///
+/// A default is written only where the parser's default differs, so a bond
+/// that never named a mode does not acquire one -- the round trip compares
+/// documents, and a written default is equal to an absent one, but a person
+/// reading the profile afterwards cannot tell what was chosen from what was
+/// merely true.
+fn render_kind(kind: &InterfaceKind, name: &str, body: &mut String, missing: &mut Unrenderable) {
+	match kind {
+		InterfaceKind::Physical => {}
+		InterfaceKind::Dummy => body.push_str("\tkind = \"dummy\"\n"),
+		InterfaceKind::Bridge(bridge) => {
+			body.push_str("\tbridge {\n");
+			if !bridge.members.is_empty() {
+				let members: Vec<String> = bridge.members.iter().map(|m| quote(m)).collect();
+				let _ = writeln!(body, "\t\tmembers = {}", list_or_scalar(&members));
+			}
+			if bridge.stp {
+				body.push_str("\t\tstp = true\n");
+			}
+			for (value, key) in [
+				(bridge.forward_delay, "forward_delay"),
+				(bridge.hello_time, "hello_time"),
+				(bridge.ageing_time, "ageing_time"),
+			] {
+				if let Some(value) = value {
+					let _ = writeln!(body, "\t\t{key} = {value}");
+				}
+			}
+			if let Some(priority) = bridge.priority {
+				let _ = writeln!(body, "\t\tpriority = {priority}");
+			}
+			if bridge.vlan_filtering {
+				body.push_str("\t\tvlan_filtering = true\n");
+			}
+			body.push_str("\t}\n");
+		}
+		InterfaceKind::Bond(bond) => {
+			body.push_str("\tbond {\n");
+			if !bond.members.is_empty() {
+				let members: Vec<String> = bond.members.iter().map(|m| quote(m)).collect();
+				let _ = writeln!(body, "\t\tmembers = {}", list_or_scalar(&members));
+			}
+			// Always, unlike every other default here: the *parser* requires a
+			// mode even though the model has one, so a bond whose mode happens
+			// to equal `BondMode::default()` would render as a block that no
+			// longer compiles. A model default and a language default are not
+			// the same fact, and this is the one place they differ.
+			let _ = writeln!(body, "\t\tmode = {}", quote(bond.mode.name()));
+			if let Some(miimon) = bond.miimon {
+				let _ = writeln!(body, "\t\tmiimon = {miimon}");
+			}
+			body.push_str("\t}\n");
+		}
+		InterfaceKind::Vlan(vlan) => {
+			body.push_str("\tvlan {\n");
+			let _ = writeln!(body, "\t\tparent = {}", quote(&vlan.parent));
+			let _ = writeln!(body, "\t\tid = {}", vlan.id);
+			if vlan.protocol != netcfgd_model::interface::VlanProtocol::default() {
+				let _ = writeln!(body, "\t\tprotocol = {}", quote(vlan.protocol.name()));
+			}
+			body.push_str("\t}\n");
+		}
+		InterfaceKind::Vxlan(vxlan) => {
+			body.push_str("\tvxlan {\n");
+			let _ = writeln!(body, "\t\tid = {}", vxlan.id);
+			if let Some(parent) = &vxlan.parent {
+				let _ = writeln!(body, "\t\tparent = {}", quote(parent));
+			}
+			for (address, key) in [(vxlan.local, "local"), (vxlan.remote, "remote")] {
+				if let Some(address) = address {
+					let _ = writeln!(body, "\t\t{key} = {}", quote(&address.to_string()));
+				}
+			}
+			if let Some(port) = vxlan.port {
+				let _ = writeln!(body, "\t\tport = {port}");
+			}
+			body.push_str("\t}\n");
+		}
+		InterfaceKind::Macvlan(macvlan) => {
+			body.push_str("\tmacvlan {\n");
+			let _ = writeln!(body, "\t\tparent = {}", quote(&macvlan.parent));
+			if macvlan.mode != netcfgd_model::interface::MacvlanMode::default() {
+				let _ = writeln!(body, "\t\tmode = {}", quote(macvlan.mode.name()));
+			}
+			body.push_str("\t}\n");
+		}
+		InterfaceKind::Vrf(vrf) => {
+			let _ = writeln!(body, "\tvrf {{ table = {} }}", vrf.table);
+		}
+		InterfaceKind::Veth(veth) => {
+			let _ = writeln!(body, "\tveth {{ peer = {} }}", quote(&veth.peer));
+		}
+		other => missing.push(format!("interface {name}: kind {}", kind_name(other))),
+	}
 }
 
 /// A port's VLAN membership, as the phrases the parser reads back.
@@ -680,6 +780,91 @@ mod tests {
 			 \twifi {\n\
 			 \t\topen = true\n\
 			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// The topology kinds, each with every key it has set.
+	///
+	/// One document rather than one per kind, because the thing most likely to
+	/// go wrong is a block written at the wrong nesting or without its closing
+	/// brace, and that breaks the *next* block rather than its own.
+	#[test]
+	fn the_link_kinds_round_trip() {
+		round_trips(
+			"interface br0 {\n\
+			 \tconfig = \"192.0.2.10/24\"\n\
+			 \tbridge {\n\
+			 \t\tmembers = [\"eth0\", \"eth1\"]\n\
+			 \t\tstp = true\n\
+			 \t\tforward_delay = 4\n\
+			 \t\thello_time = 2\n\
+			 \t\tageing_time = 300\n\
+			 \t\tpriority = 4096\n\
+			 \t\tvlan_filtering = true\n\
+			 \t}\n\
+			 }\n\
+			 interface bond0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 \tbond {\n\
+			 \t\tmembers = [\"eth2\", \"eth3\"]\n\
+			 \t\tmode = \"802.3ad\"\n\
+			 \t\tmiimon = 100\n\
+			 \t}\n\
+			 }\n\
+			 interface vlan10 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 \tvlan {\n\
+			 \t\tparent = \"eth0\"\n\
+			 \t\tid = 10\n\
+			 \t\tprotocol = \"dot1ad\"\n\
+			 \t}\n\
+			 }\n\
+			 interface vx0 {\n\
+			 \tconfig = \"10.20.0.1/24\"\n\
+			 \tvxlan {\n\
+			 \t\tid = 100\n\
+			 \t\tparent = \"eth0\"\n\
+			 \t\tlocal = \"192.0.2.10\"\n\
+			 \t\tremote = \"198.51.100.10\"\n\
+			 \t\tport = 4789\n\
+			 \t}\n\
+			 }\n\
+			 interface mv0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 \tmacvlan {\n\
+			 \t\tparent = \"eth0\"\n\
+			 \t\tmode = \"bridge\"\n\
+			 \t}\n\
+			 }\n\
+			 interface mgmt {\n\
+			 \tconfig = \"192.0.2.11/24\"\n\
+			 \tvrf { table = 100 }\n\
+			 }\n",
+		);
+	}
+
+	/// The same kinds with every optional key absent, which is the case a
+	/// renderer gets wrong in the other direction: writing a default back as
+	/// though somebody had chosen it.
+	#[test]
+	fn the_link_kinds_round_trip_bare() {
+		round_trips(
+			"interface br1 {\n\
+			 \tconfig = \"null\"\n\
+			 \tbridge { members = \"eth4\" }\n\
+			 }\n\
+			 interface bond1 {\n\
+			 \tconfig = \"null\"\n\
+			 \tbond { members = \"eth5\"; mode = \"active-backup\" }\n\
+			 }\n\
+			 interface vlan20 {\n\
+			 \tconfig = \"null\"\n\
+			 \tvlan { parent = \"eth0\"; id = 20 }\n\
+			 }\n\
+			 interface mv1 {\n\
+			 \tconfig = \"null\"\n\
+			 \tmacvlan { parent = \"eth0\" }\n\
 			 }\n",
 		);
 	}
