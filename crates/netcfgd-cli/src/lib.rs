@@ -485,6 +485,9 @@ fn build_plan(
 		allow_disruption: options.allow_disruption.clone(),
 		strand_credentials: options.strand_credentials.clone(),
 		restart_wedged: options.restart_wedged.clone(),
+		// `ncfg` plans one shot against the document; a SIM cycle is the
+		// daemon's running state and there is none here to consult.
+		cycle: Vec::new(),
 	};
 	let plan = plan(&document, &observed, &plan_options);
 	Ok((plan, document, observed, run_dir))

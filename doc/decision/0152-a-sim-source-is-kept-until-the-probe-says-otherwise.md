@@ -130,21 +130,40 @@ It does not reset the modem, drive a GPIO, or know what a SIM source name
 means. 0150 settled that and nothing here moves it: netcfgd writes down which
 source it wants and why, and a hook makes the hardware agree.
 
-**netcfgd does not cycle the interface when the selection advances, and until
-it does the fallback is not automatic.** A `pre_up` hook runs when an interface
-is brought up, and a link whose probe is failing is still up -- 0119 withholds
-its routes rather than taking it down. So the new selection is published
-immediately and is acted on at the *next* bring-up, which today means a reboot,
-a `down`/`up`, or a helper that watches the file itself. The mbim helper's
-`monitor` mode is the shape that would.
+## Cycling the link, which is what makes it automatic
 
-This is named rather than papered over because the obvious fix is worse than
-the gap. Taking the link down needs an action the planner does not currently
-produce: `link.down` today means `enabled = false`, and a second reason for it
-has to go through the planner's `managed` choke point (0035) rather than being
-assembled by hand in the daemon and handed to an executor. Building that in the
-same pass as the policy would have put a hand-made action outside the one place
-that decides what netcfgd is allowed to touch.
+A `pre_up` hook runs when an interface is brought up, and a link whose probe is
+failing is still up -- 0119 withholds its routes rather than taking it down. So
+publishing the new selection is not applying it: something has to cycle the
+link, or the choice waits for the next reboot.
 
-So the next piece is a planner-level reason to cycle a link, and it is the
-thing that turns this from a published intention into an automatic fallback.
+**That something is the planner, through `PlanOptions::cycle`, and not the
+daemon reaching past it.** An action assembled by hand and handed to an
+executor would miss the `managed` choke point
+[0035](0035-every-action-passes-one-choke-point.md) exists to be, so an
+unmanaged device could be cycled by a code path that never asked. Going through
+the planner means `managed = false` is honoured by construction, and there is a
+test that says so.
+
+**The teardown is `plan_disable`, unchanged**: the same `pre_down`, address
+withdrawal, `down` and `post_down` an operator gets from `enabled = false`,
+because the link really is going down and a second, quieter way of taking one
+down would be a second thing to reason about. Its `link.down` is folded into
+the bring-up's dependencies, so the order is `link.down`, `pre_up`, `link.up`
+-- which is the order that matters, since a hook selecting a source on a modem
+that is about to be reset past it would achieve nothing.
+
+**A cycle is not drift, so the interface joins `reconciling_interfaces`.** That
+list already carries the same exception for `preference`, and for the same
+reason: nothing moved the system away from the configuration, netcfgd decided
+the modem should be on another source. Left out, the cycle would be planned and
+then dropped by `restrict`, and the machine would sit on a source nothing ever
+selected.
+
+**The note is cleared after the plan is applied, not when it is planned**, so a
+plan that could not run is tried again rather than being forgotten.
+
+`plan_disable` now takes the reason it should give. Taking a link down used to
+mean exactly one thing, so `enabled` was written into it as a literal; a plan
+that told an operator `enabled` had changed when it had not would be worse than
+one that said nothing.

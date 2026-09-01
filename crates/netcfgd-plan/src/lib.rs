@@ -50,6 +50,42 @@ fn confirm_window(desired: &Document, options: &PlanOptions) -> Option<u32> {
 	}
 }
 
+/// Why an interface is being taken down, as the plan will explain it.
+///
+/// Taking a link down used to mean one thing -- `enabled = false` -- so the
+/// reason was written into `plan_disable` as a literal. A cycle for a SIM
+/// switch is the second reason, and a plan that told the operator `enabled`
+/// had changed when it had not would be worse than one that said nothing.
+struct Teardown<'a> {
+	/// The document field this is about, as a dotted path.
+	field: &'a str,
+	/// What is wanted, rendered.
+	desired: &'a str,
+	/// What is there now, rendered.
+	observed: &'a str,
+}
+
+impl Teardown<'_> {
+	/// The original reason: the document says this interface is disabled.
+	fn disabled() -> Self {
+		Self {
+			field: "enabled",
+			desired: "false",
+			observed: "true",
+		}
+	}
+
+	/// 0152: the modem is being moved to another SIM source, and `pre_up` --
+	/// where the hook that drives the mux runs -- only fires on the way up.
+	fn sim_switch() -> Self {
+		Self {
+			field: "modem.sim",
+			desired: "the next SIM source",
+			observed: "the one whose probe failed",
+		}
+	}
+}
+
 /// How to build the plan.
 #[derive(Debug, Clone, Default)]
 pub struct PlanOptions {
@@ -84,6 +120,23 @@ pub struct PlanOptions {
 	/// to restarting the supplicant on one radio is not consent to restarting
 	/// every backend on the machine.
 	pub restart_wedged: Vec<String>,
+	/// Interfaces to take down and bring back up, even though the document
+	/// asks for exactly what is already running.
+	///
+	/// **The option half of
+	/// [0152](../../../doc/decision/0152-a-sim-source-is-kept-until-the-probe-says-otherwise.md).**
+	/// Advancing a modem to its next SIM source publishes the choice, and a
+	/// `pre_up` hook is what acts on it -- but `pre_up` fires at bring-up, and
+	/// a link whose probe is failing is still up. So something has to cycle
+	/// it, and that something is the planner rather than the daemon reaching
+	/// past it: an action assembled by hand and handed to an executor would
+	/// miss the `managed` choke point 0035 exists to be, so an unmanaged
+	/// device could be cycled by a code path that never asked.
+	///
+	/// Per interface, like `allow_disruption` and `restart_wedged`, and for
+	/// the same reason -- this takes a link down, which is a disruption
+	/// somebody has to have asked for.
+	pub cycle: Vec<String>,
 	/// Devices the operator has explicitly consented to walk away from, keys
 	/// and all.
 	///
@@ -720,6 +773,7 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	let mut builder = Builder {
 		consented: options.allow_disruption.clone(),
 		restart_wedged: options.restart_wedged.clone(),
+		cycle: options.cycle.clone(),
 		..Builder::default()
 	};
 
@@ -888,6 +942,7 @@ struct Builder {
 	consented: Vec<String>,
 	/// Interfaces whose wedged backend the operator consented to restart (0141).
 	restart_wedged: Vec<String>,
+	cycle: Vec<String>,
 	/// Ids every later action on an interface must wait for: its creation.
 	gates: Vec<(String, u32)>,
 	/// `link.set_master` ids, keyed by the master they enslave to.
@@ -2299,7 +2354,13 @@ impl Builder {
 	/// It is also a fix in its own right: `link.down` flushes IPv6 and **leaves
 	/// IPv4 behind** -- measured on a real kernel -- so a disabled interface
 	/// kept a stale address that netcfgd still recorded as its own.
-	fn plan_disable(&mut self, interface: &Interface, observed: &Observed, base: &[u32]) {
+	fn plan_disable(
+		&mut self,
+		interface: &Interface,
+		observed: &Observed,
+		base: &[u32],
+		why: &Teardown<'_>,
+	) -> Option<u32> {
 		let name = &interface.name;
 		let mut deps = base.to_vec();
 		deps.extend(self.plan_hooks(interface, HookPhase::PreDown, base));
@@ -2315,7 +2376,7 @@ impl Builder {
 					iface: name.clone(),
 					addr: address.address.clone(),
 				},
-				Reason::unwanted(name, "enabled", address.address.clone()),
+				Reason::unwanted(name, why.field, address.address.clone()),
 				deps.clone(),
 				Some(Op::AddrAdd {
 					iface: name.clone(),
@@ -2333,13 +2394,15 @@ impl Builder {
 		before_down.extend(self.plan_hooks(interface, HookPhase::Down, &withdrawn));
 		let id = self.push(
 			Op::LinkDown { name: name.clone() },
-			Reason::differs(name, "enabled", "false", "true"),
+			Reason::differs(name, why.field, why.desired, why.observed),
 			before_down,
 			Some(Op::LinkUp { name: name.clone() }),
 		);
-		if id != u32::MAX {
-			self.plan_hooks(interface, HookPhase::PostDown, &[id]);
+		if id == u32::MAX {
+			return None;
 		}
+		self.plan_hooks(interface, HookPhase::PostDown, &[id]);
+		Some(id)
 	}
 
 	fn plan_interface_contents(&mut self, interface: &Interface, observed: &Observed) {
@@ -2384,7 +2447,28 @@ impl Builder {
 		// already-correct state runs zero hooks -- and a *disabled* interface ran
 		// them too, producing a plan that went `pre_up`, `link.down`, `post_down`,
 		// `post_up`. Decision 0063.
-		let bringing_up = interface.enabled && link.is_none_or(|link| !link.up);
+		// 0152: a modem that has advanced to another SIM source needs the link
+		// to go down and come back, because `pre_up` -- where the hook that
+		// drives the mux runs -- fires only on the way up, and a link whose
+		// probe is failing is still up.
+		//
+		// The teardown is `plan_disable`, unchanged: the same `pre_down`,
+		// address withdrawal, `down` and `post_down` an operator gets from
+		// `enabled = false`, because the link really is going down and a
+		// second, quieter way of doing it would be a second thing to reason
+		// about. Folding its `link.down` into `base` is what makes the rest of
+		// the bring-up wait for it, so the order is down, `pre_up`, up.
+		let cycling =
+			interface.enabled && self.cycle.contains(name) && link.is_some_and(|link| link.up);
+		if cycling {
+			if let Some(down) =
+				self.plan_disable(interface, observed, &base, &Teardown::sim_switch())
+			{
+				base.push(down);
+			}
+		}
+
+		let bringing_up = interface.enabled && (cycling || link.is_none_or(|link| !link.up));
 
 		// Rule 6: pre_up runs before link.up. Deliberately, and not the same
 		// as netifrc, which runs `up; preup; up` so that a preup hook can read
@@ -2427,7 +2511,7 @@ impl Builder {
 			}
 			base.extend(self.plan_hooks(interface, HookPhase::Up, &after_up));
 		} else if !interface.enabled && link.is_some_and(|link| link.up) {
-			self.plan_disable(interface, observed, &base);
+			self.plan_disable(interface, observed, &base, &Teardown::disabled());
 		}
 
 		// 802.1X comes before addressing, not after. A port that has not

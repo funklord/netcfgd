@@ -391,7 +391,16 @@ impl State {
 					// switch instead of making it, and a laptop that announces
 					// "your cable is out" while still routing down it is not
 					// the feature anybody asked for.
-					interface.preference.is_some()
+					// A pending SIM cycle is the same kind of exception as a
+					// preference, and for the same reason: it is not drift.
+					// Nothing moved the system away from the config -- netcfgd
+					// decided the modem should be on another source, and the
+					// only way to act on that is to bring the link down and up.
+					// Left out of this list, the cycle would be planned and
+					// then dropped by `restrict`, and the machine would sit on
+					// a source nothing ever selected.
+					self.sims.is_pending(&interface.name)
+						|| interface.preference.is_some()
 						|| interface
 							.on_drift
 							.unwrap_or(desired.globals.on_drift_default)

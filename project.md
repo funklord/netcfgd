@@ -1408,16 +1408,27 @@ as the whole interface between netcfgd and a helper, rather than growing
 `Op::HookRun` a second value, moving the plan witness, and creating a second
 mechanism beside it.
 
-**One gap remains and it is the one that matters: netcfgd does not cycle the
-interface when the selection advances.** `pre_up` fires at bring-up, and a link
-whose probe is failing is still up -- 0119 withholds its routes rather than
-taking it down -- so the new selection is published at once and acted on at the
-*next* bring-up. It was left rather than forced because taking a link down
-needs an action the planner does not produce today (`link.down` means
-`enabled = false`), and assembling one by hand in the daemon would put an
-action outside the `managed` choke point 0035 exists to be. **A planner-level
-reason to cycle a link is what turns this from a published intention into an
-automatic fallback**, and it is the next piece.
+**The link is cycled by the planner, which is what makes the fallback
+automatic.** `pre_up` fires at bring-up and a failing link is still up, so
+publishing the selection is not applying it. `PlanOptions::cycle` is the option
+half: the daemon names the interfaces whose modem has advanced, and the planner
+emits the teardown. Going through the planner rather than assembling an action
+in the daemon is the whole point -- `managed = false` is enforced at the action
+choke point (0035), so an unmanaged device cannot be cycled by a code path that
+never asked, and there is a test that says so.
+
+The teardown is `plan_disable` unchanged -- the same `pre_down`, address
+withdrawal, `down` and `post_down` that `enabled = false` produces, because the
+link really is going down. Its `link.down` folds into the bring-up's
+dependencies so the order is `link.down`, `pre_up`, `link.up`; a hook selecting
+a source on a modem about to be reset past it would achieve nothing.
+
+**A cycle is not drift**, so a pending interface joins `reconciling_interfaces`
+beside the `preference` exception already there, for the same reason: nothing
+moved the machine away from its configuration. Left out, the cycle would be
+planned and then dropped by `restrict`. The pending note is cleared after the
+plan is applied rather than when it is planned, so a plan that could not run is
+retried.
 
 **The APN is provisioning data and cannot be discovered**, measured with a
 control: `EF_ACL` empty and the APN Control List service not activated, while

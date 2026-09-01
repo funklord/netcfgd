@@ -14,13 +14,22 @@
 //! gone after a reboot, so a cold start begins at the preference again.
 
 use netcfgd_model::{Device, Document};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Which source each modem device is currently on, as an index into its list.
 #[derive(Debug, Default)]
 pub(crate) struct Sims {
 	chosen: HashMap<String, usize>,
+	/// Devices that have advanced and whose link has not been cycled yet.
+	///
+	/// Publishing the choice is not applying it: a `pre_up` hook is what acts
+	/// on the file, and `pre_up` fires on the way up. So an advance leaves a
+	/// note here, the reconcile turns it into `PlanOptions::cycle`, and it is
+	/// cleared once a plan carrying that cycle has been applied -- not when it
+	/// is planned, so a plan that could not run is tried again rather than
+	/// leaving the machine on a source nothing ever selected.
+	pending: BTreeSet<String>,
 }
 
 /// Where the selection is published, per the mirror of the interface report.
@@ -73,6 +82,7 @@ impl Sims {
 			.collect();
 		for name in gone {
 			self.chosen.remove(&name);
+			self.pending.remove(&name);
 			let _ = std::fs::remove_file(path(run_dir, &name));
 		}
 	}
@@ -100,8 +110,26 @@ impl Sims {
 		}
 		*index += 1;
 		let chosen = policy.sim.get(*index).cloned();
+		self.pending.insert(device.to_owned());
 		publish(run_dir, device, chosen.as_ref(), policy.apn.as_deref());
 		chosen
+	}
+
+	/// Devices whose link has to be cycled for the new selection to take.
+	pub(crate) fn pending(&self) -> Vec<String> {
+		self.pending.iter().cloned().collect()
+	}
+
+	/// Whether this device is waiting for its link to be cycled.
+	pub(crate) fn is_pending(&self, device: &str) -> bool {
+		self.pending.contains(device)
+	}
+
+	/// Forget the notes that a plan has now acted on.
+	pub(crate) fn cycled(&mut self, devices: &[String]) {
+		for device in devices {
+			self.pending.remove(device);
+		}
 	}
 
 	/// The source a device is on, for reporting.

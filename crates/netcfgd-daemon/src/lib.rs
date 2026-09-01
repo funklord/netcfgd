@@ -968,7 +968,15 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 	if wanted.is_empty() {
 		return;
 	}
-	let full = state.plan(&PlanOptions::default());
+	// The cycles waiting to happen, taken before the plan and cleared only
+	// after it ran: a plan that could not be applied leaves the note in place
+	// so the next pass tries again, rather than the machine sitting for ever
+	// on a source nothing ever selected.
+	let cycling = state.sims.pending();
+	let full = state.plan(&PlanOptions {
+		cycle: cycling.clone(),
+		..PlanOptions::default()
+	});
 	let (restricted, dropped) = state::restrict(&full, &wanted);
 	if restricted.actions.is_empty() {
 		return;
@@ -982,6 +990,7 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 		return;
 	};
 	let journal = netcfgd_apply::apply(&restricted, &mut executor);
+	state.sims.cycled(&cycling);
 	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	let _ = run_state::write_journal(&state.paths.run, &journal);
 	state.reobserve();
@@ -1029,6 +1038,11 @@ fn apply_request(
 		// reconcile loop passes nothing here, which is what makes the default
 		// hold on a machine nobody is watching.
 		restart_wedged: restart_wedged.to_vec(),
+		// A deliberate apply performs a SIM cycle that is waiting, the same as
+		// the reconcile loop would: the operator asked netcfgd to make the
+		// machine match, and a modem sitting on a source nothing selected is
+		// one of the ways it does not.
+		cycle: state.sims.pending(),
 	};
 	let mut executor = match state.executor() {
 		Ok(executor) => executor,

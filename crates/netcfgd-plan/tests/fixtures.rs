@@ -7551,3 +7551,104 @@ fn a_wedged_supplicant_is_called_a_supplicant() {
 		wedged[0]
 	);
 }
+
+/// 0152: a SIM switch cycles the link, because `pre_up` -- where the hook that
+/// drives the mux runs -- fires only on the way up, and a link whose probe is
+/// failing is still up.
+///
+/// The order is the whole point. `link.down` has to come before `pre_up`, and
+/// `pre_up` before `link.up`, or the hook selects a source on a modem that is
+/// about to be reset back past it.
+#[test]
+fn cycling_takes_the_link_down_before_bringing_it_up() {
+	let mut sources = SourceMap::new();
+	sources.add(
+		"netcfgd.conf",
+		"device wwan0 { modem { sim = [\"esim\", \"socket\"] } }\n\
+		 interface wwan0 {\n\
+		 \tconfig = \"dhcp\"\n\
+		 \tpre_up {\nselect-sim\n}\n\
+		 }\n",
+	);
+	let desired = compile(&sources, &mut TestHooks).expect("compiles");
+
+	// The link must be *up*: a cycle is for an interface that is running and
+	// running on the wrong SIM. An interface that is already down is brought
+	// up by the ordinary path and needs no teardown first.
+	let mut observed = observed_with(&["wwan0"]);
+	observed.links[0].up = true;
+
+	let plan = plan(
+		&desired,
+		&observed,
+		&PlanOptions {
+			cycle: vec!["wwan0".to_owned()],
+			..PlanOptions::default()
+		},
+	);
+
+	let names = names(&plan);
+	assert!(names.contains(&"link.down"), "{names:?}");
+	assert!(names.contains(&"link.up"), "{names:?}");
+	// Exactly one, so `position` below is unambiguous: the teardown emits its
+	// own `pre_down`/`down`/`post_down` hooks, and this fixture defines none
+	// of them precisely so that the one hook found is the `pre_up`.
+	assert_eq!(
+		names.iter().filter(|name| **name == "hook.run").count(),
+		1,
+		"{names:?}"
+	);
+	assert!(
+		position(&plan, "link.down") < position(&plan, "hook.run"),
+		"the teardown must precede pre_up: {names:?}"
+	);
+	assert!(
+		position(&plan, "hook.run") < position(&plan, "link.up"),
+		"pre_up must precede link.up: {names:?}"
+	);
+}
+
+/// An interface nobody asked to cycle is left alone, so the option cannot
+/// disrupt a link by being merely present.
+#[test]
+fn an_uncycled_link_is_not_taken_down() {
+	let desired = document("interface wwan0 { config = \"dhcp\" }");
+	let observed = observed_with(&["wwan0"]);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"link.down"),
+		"nothing asked for a cycle: {:?}",
+		names(&plan)
+	);
+}
+
+/// The reason a cycle goes through the planner at all: `managed = false` is
+/// enforced at the action choke point, so an unmanaged device cannot be
+/// cycled by a code path that never asked. A hand-built action handed
+/// straight to an executor would have missed this.
+#[test]
+fn cycling_an_unmanaged_device_changes_nothing() {
+	let desired = document(
+		"device wwan0 {\n\
+		 \tmanaged = false\n\
+		 \tmodem { sim = [\"esim\", \"socket\"] }\n\
+		 }\n\
+		 interface wwan0 { config = \"dhcp\" }\n",
+	);
+	let observed = observed_with(&["wwan0"]);
+
+	let plan = plan(
+		&desired,
+		&observed,
+		&PlanOptions {
+			cycle: vec!["wwan0".to_owned()],
+			..PlanOptions::default()
+		},
+	);
+	assert!(
+		!names(&plan).contains(&"link.down"),
+		"an unmanaged device must not be cycled: {:?}",
+		names(&plan)
+	);
+}
