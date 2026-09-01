@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copied from ~/.claude/tool/style_gate.py -- the source. Keep in sync;
+# fix drift the moment you notice it.
 """The indentation and whitespace gate for private projects.
 
 One tool, merged from three that had grown apart:
