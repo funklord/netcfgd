@@ -1568,6 +1568,41 @@ the same reason: the layout carries a trailing stretch, so `addWidget` would
 put a button after it, which looks like a spacing bug and is an API that
 invites one.
 
+**Thirteen tabs became three groups**, which is the other half of the pass:
+
+    machine        devices, wifi, modems, bluetooth
+    configuration  global, access, dns, profiles, rules, hooks, secrets
+    changes        plan, events
+
+The split is the question an operator arrives with -- what does this machine
+have and what is it doing with it, what has it been told to do, what is about
+to change. A tab per fundamental thing was right while controls were missing,
+because one that is absent cannot be found by anybody while one in the wrong
+tab can; once nothing is invisible, a row of thirteen is a list to read rather
+than a place to look.
+
+**Nested tabs rather than a sidebar, because the second level is where the tabs
+already were.** An operator who knew where `dns` was finds it in two clicks and
+nothing had to be renamed.
+
+**`access` sits next to `global` because they are one subject seen twice**:
+`global` shows the control tiers read-only and `access` is where they are
+edited. Apart, somebody reads a policy on one tab and hunts for where to change
+it on another. And `dns` moved early rather than last -- it used to be last on
+the argument that it is the one tab still useful while every other says no,
+which is a reason to make it *findable*, and the end of a row of thirteen was
+the opposite of that.
+
+**Two things nesting breaks that a build will not catch.**
+`tabs->currentWidget()` returns a *group* now, and a group draws nothing, so
+everything asking "which tab is in front" descends one level -- through one
+function, so nothing forgets. The status bar's `from == currentWidget()` was
+the subtle one: left alone it would have matched nothing at all and quietly
+dropped every pane's summary. And `currentChanged` is connected on all four tab
+widgets, since switching `rules` to `secrets` never touches the outer one and a
+pane refreshing only on a group change would be stale exactly when somebody
+went looking at it.
+
 **The style gate caught the conversion doing the wrong thing**, and was right:
 the row-building continuations were indented with extra *tabs* where the rule
 is tabs for structure and spaces for alignment. Rewritten as one `cells << x;`

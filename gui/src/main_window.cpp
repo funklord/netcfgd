@@ -48,45 +48,70 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	layout->addWidget(where);
 
 	tabs = new QTabWidget(central);
-	devices = new ncfg_devices_view(connection, tabs);
-	modems = new ncfg_modems_view(connection, tabs);
-	global = new ncfg_global_view(connection, tabs);
-	secrets = new ncfg_secrets_view(connection, tabs);
-	profiles = new ncfg_profiles_view(connection, tabs);
-	rules = new ncfg_rules_view(connection, tabs);
-	bluetooth = new ncfg_bluetooth_view(connection, tabs);
-	hooks = new ncfg_hooks_view(connection, tabs);
-	wifi = new ncfg_wifi_view(connection, tabs);
-	access = new ncfg_access_view(connection, tabs);
-	dns = new ncfg_dns_view(connection, tabs);
-	plan = new ncfg_plan_view(connection, tabs);
-	events = new ncfg_events_view(connection, tabs);
-	tabs->addTab(devices, QStringLiteral("devices"));
-	tabs->addTab(wifi, QStringLiteral("wifi"));
-	/* Beside wifi rather than after the diagnostic tabs: a modem is the
-	 * other way this machine reaches a network, and an operator looking
-	 * for one looks where the radios are. */
-	tabs->addTab(modems, QStringLiteral("modems"));
-	/* The configuration's own lists, between what the machine is doing and
-	 * the diagnostic tabs. A tab per fundamental thing, especially where
-	 * the thing is a list: a control that is missing cannot be found by
-	 * anybody, while one in the wrong tab can. Simplifying the window is a
-	 * pass of its own, once every control exists. */
-	/* Last of the configuration tabs and first alphabetically by accident:
-	 * it is the host-wide policy, so it reads as the frame the others sit
-	 * in rather than as another list. */
-	tabs->addTab(global, QStringLiteral("global"));
-	tabs->addTab(profiles, QStringLiteral("profiles"));
-	tabs->addTab(rules, QStringLiteral("rules"));
-	tabs->addTab(bluetooth, QStringLiteral("bluetooth"));
-	tabs->addTab(hooks, QStringLiteral("hooks"));
-	tabs->addTab(secrets, QStringLiteral("secrets"));
-	tabs->addTab(plan, QStringLiteral("plan"));
-	tabs->addTab(events, QStringLiteral("events"));
-	/* Last, because it is the one tab that is useful while every other is
-	 * saying no -- and the one an operator is sent to when it is. */
-	tabs->addTab(dns, QStringLiteral("dns"));
-	tabs->addTab(access, QStringLiteral("access"));
+
+	/* **Three groups, and the split is the question an operator arrives
+	 * with.** Thirteen tabs in one row was the cost of a tab per fundamental
+	 * thing, and that rule was right while controls were still missing: one
+	 * that is absent cannot be found by anybody, while one in the wrong tab
+	 * can. Now that nothing is invisible, the row is a list to read rather
+	 * than a place to look.
+	 *
+	 *   machine        what this machine has, and what it is doing with it
+	 *   configuration  what it has been told to do
+	 *   changes        what is about to happen, and what already did
+	 *
+	 * Nested tabs rather than a sidebar, because the second level is where
+	 * the tabs already were: an operator who knew where `dns` was still finds
+	 * it in two clicks, and nothing had to be renamed. */
+	machine = new QTabWidget(tabs);
+	configuration = new QTabWidget(tabs);
+	changes = new QTabWidget(tabs);
+
+	devices = new ncfg_devices_view(connection, machine);
+	wifi = new ncfg_wifi_view(connection, machine);
+	modems = new ncfg_modems_view(connection, machine);
+	bluetooth = new ncfg_bluetooth_view(connection, machine);
+	machine->addTab(devices, QStringLiteral("devices"));
+	machine->addTab(wifi, QStringLiteral("wifi"));
+	/* Beside wifi: a modem is the other way this machine reaches a network,
+	 * and an operator looking for one looks where the radios are. */
+	machine->addTab(modems, QStringLiteral("modems"));
+	machine->addTab(bluetooth, QStringLiteral("bluetooth"));
+
+	global = new ncfg_global_view(connection, configuration);
+	access = new ncfg_access_view(connection, configuration);
+	dns = new ncfg_dns_view(connection, configuration);
+	profiles = new ncfg_profiles_view(connection, configuration);
+	rules = new ncfg_rules_view(connection, configuration);
+	hooks = new ncfg_hooks_view(connection, configuration);
+	secrets = new ncfg_secrets_view(connection, configuration);
+	/* `global` first because it is the frame the rest sit in, and `access`
+	 * immediately after it because the two are one subject seen twice:
+	 * `global` shows the control tiers read-only and `access` is where they
+	 * are edited. Apart, an operator reads a policy on one tab and hunts for
+	 * where to change it on another. */
+	configuration->addTab(global, QStringLiteral("global"));
+	configuration->addTab(access, QStringLiteral("access"));
+	/* Early rather than last. It used to be last on the argument that it is
+	 * the one tab still useful while every other says no -- which is a reason
+	 * to make it *findable*, and burying it at the end of a row of thirteen
+	 * was the opposite of that. */
+	configuration->addTab(dns, QStringLiteral("dns"));
+	configuration->addTab(profiles, QStringLiteral("profiles"));
+	configuration->addTab(rules, QStringLiteral("rules"));
+	configuration->addTab(hooks, QStringLiteral("hooks"));
+	configuration->addTab(secrets, QStringLiteral("secrets"));
+
+	plan = new ncfg_plan_view(connection, changes);
+	events = new ncfg_events_view(connection, changes);
+	/* The plan before the events: one is what would happen and the other is
+	 * what did, and that is the order they are wanted in. */
+	changes->addTab(plan, QStringLiteral("plan"));
+	changes->addTab(events, QStringLiteral("events"));
+
+	tabs->addTab(machine, QStringLiteral("machine"));
+	tabs->addTab(configuration, QStringLiteral("configuration"));
+	tabs->addTab(changes, QStringLiteral("changes"));
 	layout->addWidget(tabs);
 
 	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
@@ -108,7 +133,13 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(dns, &ncfg_dns_view::changed, this, &ncfg_main_window::reload);
 	connect(plan, &ncfg_plan_view::reported, this, &ncfg_main_window::note);
 	connect(events, &ncfg_events_view::reported, this, &ncfg_main_window::note);
-	connect(tabs, &QTabWidget::currentChanged, this, &ncfg_main_window::tab_changed);
+	/* Every level, not just the outer one: switching from `rules` to `secrets`
+	 * never touches the outer widget, and a pane that refreshed only when the
+	 * *group* changed would be stale exactly when somebody went looking at
+	 * it. */
+	for (QTabWidget *level : { tabs, machine, configuration, changes }) {
+		connect(level, &QTabWidget::currentChanged, this, &ncfg_main_window::tab_changed);
+	}
 
 	setCentralWidget(central);
 
@@ -204,7 +235,7 @@ void ncfg_main_window::refresh()
 		tray->refresh();
 	}
 
-	QWidget *current = tabs->currentWidget();
+	QWidget *current = current_pane();
 	if (current == devices) {
 		devices->refresh();
 	} else if (current == wifi) {
@@ -266,15 +297,30 @@ void ncfg_main_window::note(const QString &summary)
 
 	/* Only the tab in front of the operator gets the status bar. The events
 	 * pane reports on every event that arrives, and without this it would
-	 * overwrite the devices count seconds after anybody read it. */
-	if (from == tabs->currentWidget()) {
+	 * overwrite the devices count seconds after anybody read it.
+	 *
+	 * The *leaf*, not the group: comparing against the outer widget would
+	 * match nothing at all now, and every pane's summary would be dropped. */
+	if (from == current_pane()) {
 		status->setText(summary);
 	}
 }
 
+QWidget *ncfg_main_window::current_pane() const
+{
+	QWidget *current = tabs->currentWidget();
+	/* One level down: an outer tab holds a group and a group draws nothing.
+	 * `qobject_cast` rather than assuming, so a future tab that is a pane in
+	 * its own right still answers for itself. */
+	if (auto *group = qobject_cast<QTabWidget *>(current)) {
+		return group->currentWidget();
+	}
+	return current;
+}
+
 void ncfg_main_window::tab_changed()
 {
-	status->setText(summaries.value(tabs->currentWidget()));
+	status->setText(summaries.value(current_pane()));
 	/* And ask again for the tab now in front of the operator. Without this a
 	 * pane that went stale while another was showing stays stale until the
 	 * next event, and "the tab I am looking at is current" is the property

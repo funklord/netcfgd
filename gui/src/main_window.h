@@ -71,6 +71,14 @@ protected:
 	 * everybody has been surprised by at least once. */
 	void closeEvent(QCloseEvent *event) override;
 
+private:
+	/* The pane the operator is actually looking at.
+	 *
+	 * `tabs->currentWidget()` is a *group* now, and a group has no rows to
+	 * draw. Everything that asks "which tab is in front" descends one level,
+	 * and it is one function so that nothing forgets to. */
+	QWidget *current_pane() const;
+
 private slots:
 	void note(const QString &summary);
 	void tab_changed();
@@ -88,6 +96,13 @@ private:
 	 * asking the daemon on a schedule. */
 	QTimer            *settle;
 	QTabWidget        *tabs;
+	/* The three groups. Thirteen tabs in one row is a list to read rather
+	 * than a place to look, and the grouping is the question an operator
+	 * arrives with: what is this machine doing, what is it configured to do,
+	 * and what is about to change. */
+	QTabWidget        *machine;
+	QTabWidget        *configuration;
+	QTabWidget        *changes;
 	ncfg_devices_view *devices;
 	ncfg_modems_view  *modems;
 	ncfg_global_view  *global;
