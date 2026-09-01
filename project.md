@@ -986,6 +986,40 @@ decides whether this is possible rather than merely well-shaped. It is a
 `make cross`-shaped experiment and it is the next thing to do if the question
 is pursued.
 
+**The tools are the easy half, and that is the surprise.** Most of what netcfgd
+delegates to on Linux is already inside ESP-IDF: `dhcp_start()` for the lease,
+`esp_wifi` for the supplicant and the access point, `LWIP_IPV4_NAPT` for NAT,
+lwIP for PPP, resolution and ping. Those tools exist on Linux because the kernel
+deliberately holds no policy; on an MCU the stack is a library and the policy is
+already yours. And `backend/` is five *driver* crates behind `BackendKind` --
+`netcfgd-supplicant` drives `wpa_supplicant` over its control socket rather than
+being it -- so an `esp_wifi` driver is a sibling crate rather than a
+restructuring. `openvpn` and `radvd` have no counterpart and are features a
+small router may simply not offer.
+
+**What does not port is the two places where "a program" is the design, and
+this is the open question rather than RAM.** `ProbePolicy` is
+`{ command, args, interval, timeout, down_after, up_after, hold_down }`, and
+0119's whole idea is that *an operator's program's exit status is the
+observation* -- chosen so that netcfgd never has to decide what "working"
+means. `HookRef` is the same one layer out: eleven phases, a `sha256` so
+netcfgd knows the file has not changed, a `run_as` to drop to. All of it is
+process vocabulary describing operator-supplied behaviour, and an MCU has no
+processes to describe.
+
+**The probe is load-bearing, which is what makes this hard rather than
+merely awkward.** Its verdict is what 0152 consumes to fall back between SIM
+sources and what decides which uplink wins, so it cannot be dropped as a
+peripheral feature -- remove it and the cellular fallback and the preference
+logic both lose their input.
+
+**So the question to settle before any of this is attempted: what is a probe on
+a machine with no processes?** A registered callback returning a verdict is the
+obvious answer and it changes the property that made 0119 right -- an operator
+could no longer change what "working" means without rebuilding the firmware.
+That is a real loss and it belongs to whoever owns the design, decided
+deliberately rather than discovered halfway through a port.
+
 **And the helper pattern does not merely get expensive there, it stops
 existing.** No fork, no exec, no `/run` contract, no shell hooks. Which is the
 same direction the ModemManager rejection already pointed -- netcfgd owning the
