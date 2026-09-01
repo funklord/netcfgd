@@ -54,8 +54,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	read_netfilter(observed);
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
-	ask_supplicants(observed);
-	read_wifi_association(observed, desired);
+	ask_supplicants(observed, desired);
 	read_advertised(observed, run_dir);
 	read_secret_currency(observed, run_dir, desired);
 	read_tunnel_currency(observed, run_dir, desired);
@@ -255,66 +254,37 @@ fn carried(state: &netcfgd_sys::wg::DeviceState) -> netcfgd_model::ObservedWireG
 	}
 }
 
-/// Whether each running supplicant still answers its control socket.
+/// What each running supplicant will tell us: that it is answering at all, and
+/// which configured network it is on.
 ///
-/// 0085 gave an access point an `answering` field because netcfgd was already
-/// asking hostapd something on every observation and throwing the failure away.
-/// It recorded the supplicant as a real piece of work rather than a line,
-/// because netcfgd asks a station nothing during an observation -- and that was
-/// true when it was written. It is not now: `connect_within` exists (0080),
-/// it pings inside the connect, and its deadline is a parameter for exactly
-/// this case.
+/// **One connection, two facts.** These were two passes and two connects per
+/// supplicant, which doubled the round trips in the observation loop for a
+/// fact the first connection could have carried. Asking is cheap but it is not
+/// free, and this runs every cycle.
 ///
-/// A supplicant that has bound its socket and stopped answering is the failure
-/// this is for. 0080 made a *dead* one visible by its pid file; a wedged one
-/// has a live pid, a socket on disk and a plan that says everything is fine
-/// while the radio associates with nothing -- which from every other angle
-/// netcfgd has looks exactly like a network that is simply not in range.
+/// Asked only of a supplicant netcfgd believes is running, which is the guard
+/// the rest of this module uses against reading a leftover: the socket outlives
+/// the process that bound it (0080). The connection is impatient, because a
+/// supplicant that has stopped answering must not hold the cycle open -- and a
+/// supplicant that has bound its socket and gone mute is the failure this
+/// detects, so a slow answer and no answer are deliberately the same thing.
 ///
-/// Asked only of a supplicant netcfgd believes is running, for the same reason
-/// `read_access_control` is: a control socket outlives the process that bound
-/// it (0080), so the file alone would happily describe a supplicant that exited
-/// an hour ago.
-///
-/// A warning and never a restart, which is 0085's decision unchanged: netcfgd
-/// cannot tell a wedged supplicant from a busy one, and restarting on a missed
-/// deadline would take working radios off the air on loaded machines.
-fn ask_supplicants(observed: &mut Observed) {
-	let dir = netcfgd_supplicant::ctrl_dir();
-	for backend in &mut observed.backends {
-		if backend.kind != netcfgd_model::BackendKind::Supplicant || !backend.running {
-			continue;
-		}
-		backend.answering = Some(netcfgd_supplicant::answers(&dir, &backend.interface));
-	}
-}
-
-/// Which configured network each wireless link is associated with.
-///
-/// The planner needs this to rank links against each other. An interface
-/// carries one `preference` whichever network its radio joined, but the
-/// networks themselves are what an operator ranks -- "the office wifi beats
-/// this ethernet, the guest wifi does not" is a statement about networks, and
-/// it cannot be made about the radio. So a network's `metric` overrides its
-/// interface's `preference` while that network is the one in use, and this is
-/// the only place that can say which one is.
+/// The association is what the planner needs to rank links: an interface
+/// carries one `preference` whichever network its radio joined, but "the office
+/// wifi beats this ethernet, the cafe wifi does not" is a statement about
+/// networks. So a network's `metric` overrides its interface's `preference`
+/// while that network is the one in use, and this is the only place that can
+/// say which one is (0153).
 ///
 /// **From the supplicant rather than from nl80211**, though nl80211 would work
-/// under any backend. netcfgd already asks this exact question through this
-/// exact socket to answer `wifi status` for a client, and two sources for one
-/// fact can disagree -- which would surface as a route metric that contradicts
-/// what the window says the machine is on. The cost is nothing new either:
-/// `ask_supplicants` above already opens these sockets on every observation.
-/// A backend that is not `wpa_supplicant` leaves the field `None`, and `None`
-/// means the interface's own preference stands.
-fn read_wifi_association(observed: &mut Observed, desired: Option<&netcfgd_model::Document>) {
-	let Some(document) = desired else {
-		return;
-	};
+/// under any backend. netcfgd already answers this exact question through this
+/// exact socket to serve `wifi status`, and two sources for one fact can
+/// disagree -- which would surface as a route metric that contradicts what the
+/// window says the machine is associated with. A backend that is not
+/// `wpa_supplicant` leaves the field `None`, and `None` means the interface's
+/// own preference stands.
+fn ask_supplicants(observed: &mut Observed, desired: Option<&netcfgd_model::Document>) {
 	let dir = netcfgd_supplicant::ctrl_dir();
-	// Only of a supplicant netcfgd believes is running, which is the same
-	// guard the rest of this module uses against reading a leftover: the
-	// socket outlives the process that bound it.
 	let running: Vec<String> = observed
 		.backends
 		.iter()
@@ -323,7 +293,27 @@ fn read_wifi_association(observed: &mut Observed, desired: Option<&netcfgd_model
 		.collect();
 
 	for interface in running {
-		let Some((ssid, bssid)) = netcfgd_supplicant::associated(&dir, &interface) else {
+		let client = netcfgd_supplicant::Client::connect_within(
+			&dir,
+			&interface,
+			netcfgd_supplicant::IMPATIENT,
+		);
+		if let Some(backend) = observed
+			.backends
+			.iter_mut()
+			.find(|backend| backend.interface == interface)
+		{
+			backend.answering = Some(client.is_ok());
+		}
+		let Ok(client) = client else {
+			continue;
+		};
+		// The document is what turns an SSID into a network id, so without one
+		// there is nothing to resolve against and the field stays absent.
+		let Some(document) = desired else {
+			continue;
+		};
+		let Some((ssid, bssid)) = netcfgd_supplicant::associated(&client) else {
 			continue;
 		};
 		let Some(network) = netcfgd_model::wifi::network_for(&document.networks, &ssid, &bssid)

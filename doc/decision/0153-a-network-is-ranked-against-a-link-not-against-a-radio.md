@@ -57,9 +57,12 @@ first is the one that decided it:
   disagreement would surface as a route metric that contradicts what the
   window says the machine is associated with -- a symptom nobody would trace
   back to having two association readers.
-- **The cost is not new.** `ask_supplicants` already opens these sockets on
-  every observation to check they answer, at the same cadence, with the same
-  impatient timeout.
+- **The cost is one command, not one connection.** `ask_supplicants` already
+  opens these sockets every observation to check they answer, so the
+  association is read on the connection that check already makes. Written as
+  two passes first, which quietly doubled the connects per supplicant per
+  cycle -- cheap, but paid on every observation forever, and for a fact the
+  first connection was already in a position to carry.
 
 The resolution rule itself -- SSID, or BSSID for a network identified by
 address rather than by name -- moved into `netcfgd_model::wifi::network_for`

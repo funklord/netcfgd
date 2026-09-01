@@ -75,11 +75,12 @@ pub fn answers(dir: &Path, interface: &str) -> bool {
 /// wireless link falls back to its interface's own preference rather than
 /// borrowing a stale network's metric.
 ///
-/// **Impatient, for the reason `answers` is.** This runs on every observation,
-/// and a supplicant that has stopped answering must not hold the cycle open.
+/// **Takes an open client rather than connecting.** The observation already
+/// has one: it connects to decide whether the supplicant answers at all, and
+/// connecting a second time to ask this would double the round trips for a
+/// fact the first connection could have carried.
 #[must_use]
-pub fn associated(dir: &Path, interface: &str) -> Option<(netcfgd_model::Ssid, String)> {
-	let client = Client::connect_within(dir, interface, client::IMPATIENT).ok()?;
+pub fn associated(client: &Client) -> Option<(netcfgd_model::Ssid, String)> {
 	let body = client.ask("STATUS").ok()?;
 	let status = protocol::parse_status(&body);
 	// The supplicant reports the name here already decoded from its own hex,
