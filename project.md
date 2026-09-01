@@ -1543,12 +1543,36 @@ is drift's, and the plan tab answers it. A table mixing them without saying
 which is which is how somebody concludes a rule is installed when it is only
 configured.
 
-**The three read-only tables are near-identical and that is deliberate for
-now.** Each explains itself where it is, which is worth more than the
-duplication costs while the shape of the window is still moving -- and
-collapsing them onto a shared read-only table is exactly the kind of thing the
-simplification pass is for. Recorded so that pass does not have to rediscover
-it.
+**The simplification pass ran, and the duplication is gone.** Seven list views
+share `ncfg_table_view` now: devices, modems, profiles, rules, bluetooth,
+hooks and secrets. The measurement that prompted it was not an estimate -- the
+block from `new QTableWidget` to `layout->addWidget(table)` hashed *identically*
+across five of them.
+
+**What is shared is the plumbing; what is not is each view's subject.** Turning
+a row into strings is where a view earns its file: `secrets` decides that a
+name with no file reads `MISSING`, `modems` decides that a selection which has
+moved reads `switching`. A table that owned those would have five special cases
+and no reason for any of them.
+
+**The note went with it, because it is not decoration.** "No rows" cannot say
+whether a machine has no bluetooth device or whether the daemon refused, and
+those need different things done about them. It is one call now rather than a
+habit each view has to remember.
+
+**81 fewer lines of code, and net +2 lines of file** -- which is the honest way
+round to report it. The files here are mostly explanation, so a line count
+measures prose; what actually changed is that one implementation exists where
+there were seven. `add_control` is a method rather than an exposed layout for
+the same reason: the layout carries a trailing stretch, so `addWidget` would
+put a button after it, which looks like a spacing bug and is an API that
+invites one.
+
+**The style gate caught the conversion doing the wrong thing**, and was right:
+the row-building continuations were indented with extra *tabs* where the rule
+is tabs for structure and spaces for alignment. Rewritten as one `cells << x;`
+per column, which needs no continuation at all and reads better than the
+alignment would have.
 
 **A deb upgrade restarts a running daemon now, and did not before.** Nothing
 started or restarted either service: `--no-enable --no-start` suppressed

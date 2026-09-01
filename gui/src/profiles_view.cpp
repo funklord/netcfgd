@@ -5,19 +5,15 @@
 
 #include "ncfg_connection.h"
 
-#include <QHBoxLayout>
-#include <QHeaderView>
-#include <QLabel>
+#include "table_view.h"
+
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QTableWidget>
+#include <QStringList>
 #include <QVBoxLayout>
 
 namespace {
-
-const char *const column_titles[] = { "profile", "source", "in use" };
-constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(column_titles[0]));
 
 /* The first row, which is the default state rather than a profile. Held as a
  * constant because two places need to recognise it: the row that draws it, and
@@ -29,88 +25,66 @@ const char *const none_chosen = "(none chosen)";
 ncfg_profiles_view::ncfg_profiles_view(ncfg_connection *connection, QWidget *parent)
     : QWidget(parent), connection(connection)
 {
-	auto *layout = new QVBoxLayout(this);
+	QStringList columns;
+	columns << QStringLiteral("profile") << QStringLiteral("source")
+	        << QStringLiteral("in use");
+	table = new ncfg_table_view(columns, QStringLiteral("profiles_note"), this);
 
-	table = new QTableWidget(0, column_count, this);
-	QStringList headers;
-	for (int i = 0; i < column_count; i++) {
-		headers << QString::fromLatin1(column_titles[i]);
-	}
-	table->setHorizontalHeaderLabels(headers);
-	table->verticalHeader()->setVisible(false);
-	table->setSelectionBehavior(QAbstractItemView::SelectRows);
-	table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-	table->horizontalHeader()->setStretchLastSection(true);
-	layout->addWidget(table);
-
-	auto *controls = new QHBoxLayout();
 	use_button = new QPushButton(QStringLiteral("use"), this);
 	use_button->setObjectName(QStringLiteral("use_profile"));
 	use_button->setEnabled(false);
-	controls->addWidget(use_button);
+	table->add_control(use_button);
+
 	save_button = new QPushButton(QStringLiteral("save what is running as..."), this);
 	save_button->setObjectName(QStringLiteral("save_profile"));
-	controls->addWidget(save_button);
-	controls->addStretch();
-	layout->addLayout(controls);
+	table->add_control(save_button);
 
-	note = new QLabel(this);
-	note->setObjectName(QStringLiteral("profiles_note"));
-	note->setWordWrap(true);
-	layout->addWidget(note);
+	auto *layout = new QVBoxLayout(this);
+	layout->setContentsMargins(0, 0, 0, 0);
+	layout->addWidget(table);
 
 	connect(use_button, &QPushButton::clicked, this, &ncfg_profiles_view::use_selected);
 	connect(save_button, &QPushButton::clicked, this, &ncfg_profiles_view::save_current);
-	connect(table, &QTableWidget::doubleClicked, this, &ncfg_profiles_view::use_selected);
-	connect(table, &QTableWidget::itemSelectionChanged, this,
-	    [this]() { use_button->setEnabled(table->currentRow() >= 0); });
+	connect(table, &ncfg_table_view::activated, this, &ncfg_profiles_view::use_selected);
+	connect(table, &ncfg_table_view::selection_changed, this,
+	    [this]() { use_button->setEnabled(table->selected_row() >= 0); });
 }
 
 void ncfg_profiles_view::refresh()
 {
-	QList<ncfg_profile_row> rows;
+	QList<ncfg_profile_row> found;
 	QString chosen;
 	QString error;
 
-	if (!connection->profiles(&rows, &chosen, &error)) {
-		table->setRowCount(0);
-		note->setText(error);
+	if (!connection->profiles(&found, &chosen, &error)) {
+		table->show_error(error);
 		emit reported(error);
 		return;
 	}
 
+	QList<QStringList> rows;
 	/* "None chosen" first, because it is the default and because it is the
 	 * row somebody wants when a profile has just broken something. */
-	table->setRowCount(rows.size() + 1);
-	const QString cells[column_count] = {
-		QString::fromLatin1(none_chosen),
-		QStringLiteral("the machine's own configuration"),
-		chosen.isEmpty() ? QStringLiteral("yes") : QString(),
-	};
-	for (int column = 0; column < column_count; column++) {
-		table->setItem(0, column, new QTableWidgetItem(cells[column]));
-	}
+	QStringList cells;
+	cells << QString::fromLatin1(none_chosen);
+	cells << QStringLiteral("the machine's own configuration");
+	cells << (chosen.isEmpty() ? QStringLiteral("yes") : QString());
+	rows << cells;
 
-	for (int row = 0; row < rows.size(); row++) {
-		const ncfg_profile_row &profile = rows.at(row);
+	for (const ncfg_profile_row &profile : found) {
 		/* A local copy shadows a shipped one of the same name and only the
 		 * copy is listed, which is the rule the loader layers by -- so
 		 * "shipped" here means "and you have not replaced it". */
-		const QString source = profile.shipped ? QStringLiteral("shipped with netcfgd")
-		                                       : QStringLiteral("this machine's");
-		const QString profile_cells[column_count] = {
-			profile.name,
-			source,
-			profile.name == chosen ? QStringLiteral("yes") : QString(),
-		};
-		for (int column = 0; column < column_count; column++) {
-			table->setItem(row + 1, column, new QTableWidgetItem(profile_cells[column]));
-		}
+		QStringList cells;
+		cells << profile.name;
+		cells << (profile.shipped ? QStringLiteral("shipped with netcfgd")
+		                          : QStringLiteral("this machine's"));
+		cells << (profile.name == chosen ? QStringLiteral("yes") : QString());
+		rows << cells;
 	}
-	table->resizeColumnsToContents();
-	table->horizontalHeader()->setStretchLastSection(true);
+	table->show_rows(rows);
 
-	note->setText(QStringLiteral(
+	table->set_note(QStringLiteral(
 	    "A profile is a directory of drop-ins layered over conf.d, so one machine can "
 	    "behave differently by place. Switching is manual and only manual. Changing any "
 	    "setting by hand takes the machine off its profile without changing what is "
@@ -121,19 +95,14 @@ void ncfg_profiles_view::refresh()
 
 void ncfg_profiles_view::use_selected()
 {
-	const int row = table->currentRow();
-	if (row < 0) {
-		return;
-	}
-	const QTableWidgetItem *named = table->item(row, 0);
-	if (!named) {
+	const QString chosen = table->selected_cell(0);
+	if (chosen.isEmpty()) {
 		return;
 	}
 	/* The first row is the default state, and `profile_set` spells that as an
 	 * empty name. The gui never writes netcfgd's own drop-in filename: the
 	 * verb is the daemon's and so is where the selection lives. */
-	const QString name =
-	    named->text() == QString::fromLatin1(none_chosen) ? QString() : named->text();
+	const QString name = chosen == QString::fromLatin1(none_chosen) ? QString() : chosen;
 
 	/* **Asked first, and for the reason the tray is asked first.** The daemon
 	 * reconciles a changed configuration on its own, so writing the selection

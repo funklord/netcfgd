@@ -23,10 +23,8 @@
 
 #include <QWidget>
 
-class QLabel;
-class QTableWidget;
-
 class ncfg_connection;
+class ncfg_table_view;
 
 class ncfg_modems_view : public QWidget {
 	Q_OBJECT
@@ -42,11 +40,10 @@ signals:
 
 private:
 	ncfg_connection *connection;
-	QTableWidget    *table;
-	/* Says why the table is empty, which "no rows" cannot: a machine with no
-	 * modem and a machine whose daemon refused the request look identical
-	 * otherwise. */
-	QLabel          *note;
+	/* The shared read-only table, which carries the note that says why an
+	 * empty one is empty. What is this view's own is turning a modem into
+	 * strings -- the three states below are the whole subject. */
+	ncfg_table_view *table;
 };
 
 #endif /* NCFG_MODEMS_VIEW_H */

@@ -24,11 +24,10 @@
 
 #include <QWidget>
 
-class QLabel;
 class QPushButton;
-class QTableWidget;
 
 class ncfg_connection;
+class ncfg_table_view;
 
 class ncfg_profiles_view : public QWidget {
 	Q_OBJECT
@@ -55,10 +54,9 @@ private slots:
 
 private:
 	ncfg_connection *connection;
-	QTableWidget    *table;
+	ncfg_table_view *table;
 	QPushButton     *use_button;
 	QPushButton     *save_button;
-	QLabel          *note;
 };
 
 #endif /* NCFG_PROFILES_VIEW_H */

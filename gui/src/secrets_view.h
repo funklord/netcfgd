@@ -27,10 +27,8 @@
 
 #include <QWidget>
 
-class QLabel;
-class QTableWidget;
-
 class ncfg_connection;
+class ncfg_table_view;
 
 class ncfg_secrets_view : public QWidget {
 	Q_OBJECT
@@ -46,8 +44,9 @@ signals:
 
 private:
 	ncfg_connection *connection;
-	QTableWidget    *table;
-	QLabel          *note;
+	/* The shared read-only table. What is this view's own is below: turning
+	 * one row into strings, which is where the subject lives. */
+	ncfg_table_view *table;
 };
 
 #endif /* NCFG_SECRETS_VIEW_H */

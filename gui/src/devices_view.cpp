@@ -5,92 +5,66 @@
 
 #include "interface_dialog.h"
 #include "ncfg_connection.h"
+#include "table_view.h"
 
-#include <QHBoxLayout>
-#include <QHeaderView>
 #include <QPushButton>
-#include <QTableWidget>
+#include <QStringList>
 #include <QVBoxLayout>
-
-namespace {
-
-/* The columns, in the order an operator reads them: what it is called, what it
- * is, whether it is working, and what it has. The MAC is last because it is the
- * one nobody looks at first. */
-const char *const column_titles[] = { "interface", "kind", "state", "addresses", "mtu", "mac" };
-constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(column_titles[0]));
-
-} /* namespace */
 
 ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *parent)
     : QWidget(parent), connection(connection)
 {
-	auto *layout = new QVBoxLayout(this);
+	/* In the order an operator reads them: what it is called, what it is,
+	 * whether it is working, and what it has. The MAC is last because it is
+	 * the one nobody looks at first. */
+	QStringList columns;
+	columns << QStringLiteral("interface") << QStringLiteral("kind")
+	        << QStringLiteral("state") << QStringLiteral("addresses")
+	        << QStringLiteral("mtu") << QStringLiteral("mac");
+	table = new ncfg_table_view(columns, QStringLiteral("devices_note"), this);
 
-	table = new QTableWidget(0, column_count, this);
-	QStringList headers;
-	for (int i = 0; i < column_count; i++) {
-		headers << QString::fromLatin1(column_titles[i]);
-	}
-	table->setHorizontalHeaderLabels(headers);
-	table->verticalHeader()->setVisible(false);
-	table->setSelectionBehavior(QAbstractItemView::SelectRows);
-	/* Read-only, and that is a statement rather than a shortcut: nothing is
-	 * changed by typing into an observation. What this client can change it
-	 * changes through plan and apply, where the operator sees the whole
-	 * change before any of it happens. */
-	table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-	table->horizontalHeader()->setStretchLastSection(true);
-	layout->addWidget(table);
-
-	auto *controls = new QHBoxLayout();
 	configure_button = new QPushButton(QStringLiteral("configure"), this);
 	configure_button->setObjectName(QStringLiteral("configure_interface"));
 	configure_button->setEnabled(false);
-	controls->addWidget(configure_button);
-	controls->addStretch();
-	layout->addLayout(controls);
+	table->add_control(configure_button);
+
+	auto *layout = new QVBoxLayout(this);
+	layout->setContentsMargins(0, 0, 0, 0);
+	layout->addWidget(table);
 
 	connect(configure_button, &QPushButton::clicked, this,
 	    &ncfg_devices_view::configure_selected);
-	connect(table, &QTableWidget::doubleClicked, this, &ncfg_devices_view::configure_selected);
-	connect(table, &QTableWidget::itemSelectionChanged, this, [this]() {
-		configure_button->setEnabled(table->currentRow() >= 0);
-	});
+	connect(table, &ncfg_table_view::activated, this, &ncfg_devices_view::configure_selected);
+	connect(table, &ncfg_table_view::selection_changed, this,
+	    [this]() { configure_button->setEnabled(table->selected_row() >= 0); });
 }
 
 void ncfg_devices_view::refresh()
 {
-	QList<ncfg_link_row> rows;
+	QList<ncfg_link_row> found;
 	QString error;
 
-	if (!connection->links(&rows, &error)) {
-		/* The daemon's own words. A refusal names the tier that would
-		 * have been needed (0013), and replacing that with "could not
-		 * load" would throw away the one sentence that says what to do
-		 * about it. */
-		table->setRowCount(0);
+	if (!connection->links(&found, &error)) {
+		/* The daemon's own words. A refusal names the tier that would have
+		 * been needed (0013), and replacing that with "could not load" would
+		 * throw away the one sentence that says what to do about it. */
+		table->show_error(error);
 		emit reported(error);
 		return;
 	}
 
-	table->setRowCount(rows.size());
-	for (int row = 0; row < rows.size(); row++) {
-		const ncfg_link_row &link = rows.at(row);
-		const QString cells[column_count] = {
-			link.name,
-			link.kind,
-			link.state,
-			link.addresses,
-			link.mtu ? QString::number(link.mtu) : QString(),
-			link.mac,
-		};
-		for (int column = 0; column < column_count; column++) {
-			table->setItem(row, column, new QTableWidgetItem(cells[column]));
-		}
+	QList<QStringList> rows;
+	for (const ncfg_link_row &link : found) {
+		QStringList cells;
+		cells << link.name;
+		cells << link.kind;
+		cells << link.state;
+		cells << link.addresses;
+		cells << (link.mtu ? QString::number(link.mtu) : QString());
+		cells << link.mac;
+		rows << cells;
 	}
-	table->resizeColumnsToContents();
-	table->horizontalHeader()->setStretchLastSection(true);
+	table->show_rows(rows);
 
 	emit reported(rows.isEmpty() ? QStringLiteral("no interfaces reported")
 	                 : QStringLiteral("%1 interfaces").arg(rows.size()));
@@ -98,18 +72,14 @@ void ncfg_devices_view::refresh()
 
 void ncfg_devices_view::configure_selected()
 {
-	const int row = table->currentRow();
-	if (row < 0) {
-		return;
-	}
 	/* The name out of the first column, which is where the table puts it. A
 	 * row with no name is a row this view did not draw. */
-	const QTableWidgetItem *named = table->item(row, 0);
-	if (!named || named->text().isEmpty()) {
+	const QString name = table->selected_cell(0);
+	if (name.isEmpty()) {
 		return;
 	}
 
-	ncfg_interface_dialog dialog(connection, named->text(), this);
+	ncfg_interface_dialog dialog(connection, name, this);
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}

@@ -23,10 +23,8 @@
 
 #include <QWidget>
 
-class QLabel;
-class QTableWidget;
-
 class ncfg_connection;
+class ncfg_table_view;
 
 class ncfg_rules_view : public QWidget {
 	Q_OBJECT
@@ -42,10 +40,10 @@ signals:
 
 private:
 	ncfg_connection *connection;
-	QTableWidget    *table;
-	/* Says why the table is empty, which "no rows" cannot: nothing configured
-	 * and a daemon that refused look identical otherwise. */
-	QLabel          *note;
+	/* The shared read-only table: columns, rows, and the sentence underneath
+	 * that says why an empty one is empty. What is this view's own is turning
+	 * a row into strings, which is below. */
+	ncfg_table_view *table;
 };
 
 #endif /* NCFG_RULES_VIEW_H */

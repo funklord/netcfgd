@@ -16,9 +16,9 @@
 #include <QWidget>
 
 class QPushButton;
-class QTableWidget;
 
 class ncfg_connection;
+class ncfg_table_view;
 
 class ncfg_devices_view : public QWidget {
 	Q_OBJECT
@@ -42,7 +42,7 @@ private slots:
 
 private:
 	ncfg_connection *connection;
-	QTableWidget    *table;
+	ncfg_table_view *table;
 	QPushButton     *configure_button;
 };
 
