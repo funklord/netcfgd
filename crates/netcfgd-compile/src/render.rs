@@ -19,7 +19,7 @@
 
 use netcfgd_model::control::Principal;
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
-use netcfgd_model::interface::{BridgeVlan, InterfaceKind};
+use netcfgd_model::interface::{BridgeVlan, InterfaceKind, ProbePolicy};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
 use netcfgd_model::security::{CertSource, EapConfig, EapMethod, Security};
 use netcfgd_model::wifi::WifiNetwork;
@@ -261,23 +261,27 @@ fn render_interface(
 
 	// Every one of these has a block or a key of its own that this does not
 	// write yet. Named so the operator knows what to keep by hand.
+	//
+	// `ingress_redirect` is here and cannot leave: it is not a config key at
+	// all. The compiler synthesises it, and the `ifb` device it points at,
+	// from `ingress_bandwidth` -- so rendering it would make the next compile
+	// synthesise a *second* one on top. What a snapshot would have to write
+	// back is the `ingress_bandwidth` it came from, which the document no
+	// longer holds by the time this sees it.
 	for (present, what) in [
 		(!interface.hooks.is_empty(), "hooks"),
-		(interface.dot1x.is_some(), "dot1x"),
 		(interface.advertise.is_some(), "advertise"),
-		(interface.nat.is_some(), "nat"),
 		(interface.qdisc.is_some(), "qdisc"),
 		(interface.ingress_redirect.is_some(), "ingress_redirect"),
 		(interface.guard.is_some(), "guard"),
-		(interface.ipv6_token.is_some(), "ipv6_token"),
 		(interface.link_settings.is_some(), "ethtool settings"),
-		(interface.preference.is_some(), "preference"),
-		(interface.probe.is_some(), "probe"),
 	] {
 		if present {
 			missing.push(format!("interface {name}: {what}"));
 		}
 	}
+
+	render_interface_keys(interface, &mut body);
 
 	if !interface.enabled {
 		body.push_str("\tenabled = false\n");
@@ -463,6 +467,70 @@ fn render_kind(kind: &InterfaceKind, name: &str, body: &mut String, missing: &mu
 		}
 		other => missing.push(format!("interface {name}: kind {}", kind_name(other))),
 	}
+}
+
+/// The interface keys that are neither addressing nor topology.
+///
+/// Grouped into a function because `render_interface` has a line limit, which
+/// is the same reason its siblings are functions -- not because these belong
+/// together as an idea.
+fn render_interface_keys(interface: &Interface, body: &mut String) {
+	if let Some(preference) = interface.preference {
+		let _ = writeln!(body, "\tpreference = {preference}");
+	}
+	if let Some(token) = &interface.ipv6_token {
+		let _ = writeln!(body, "\tipv6_token = {}", quote(token));
+	}
+	if let Some(nat) = interface.nat {
+		let _ = writeln!(body, "\tnat = {nat}");
+	}
+	if let Some(dot1x) = &interface.dot1x {
+		// The same eight keys a wireless network's EAP uses, which is why
+		// `lower_dot1x_key` shares `WifiKeys` with the wifi parser -- so this
+		// shares the renderer for the same reason, and the two cannot drift
+		// into spelling one thing two ways. The nesting depth is the same as a
+		// network's `wifi` block, so render_eap's indentation is already right.
+		body.push_str("\tdot1x {\n");
+		render_eap(dot1x, body);
+		body.push_str("\t}\n");
+	}
+	if let Some(probe) = &interface.probe {
+		render_probe(probe, body);
+	}
+}
+
+/// How the link is judged to be working, as its own block.
+///
+/// The numbers are omitted where they equal the parser's own defaults, which
+/// is this file's convention rather than a claim that they do not matter --
+/// see the note on that convention against the header's wording.
+///
+/// `command` is unconditional because a probe without one is not a probe: the
+/// parser refuses the block outright, so a rendered profile that left it out
+/// would be one that no longer compiles.
+fn render_probe(probe: &ProbePolicy, body: &mut String) {
+	body.push_str("\tprobe {\n");
+	let _ = writeln!(body, "\t\tcommand = {}", quote(&probe.command));
+	if !probe.args.is_empty() {
+		let args: Vec<String> = probe.args.iter().map(|arg| quote(arg)).collect();
+		let _ = writeln!(body, "\t\targs = {}", list_or_scalar(&args));
+	}
+	for (value, default, key) in [
+		(probe.interval, 30, "interval"),
+		(probe.timeout, 5, "timeout"),
+		(
+			probe.down_after,
+			ProbePolicy::default_down_after(),
+			"down_after",
+		),
+		(probe.up_after, ProbePolicy::default_up_after(), "up_after"),
+		(probe.hold_down, 0, "hold_down"),
+	] {
+		if value != default {
+			let _ = writeln!(body, "\t\t{key} = {value}");
+		}
+	}
+	body.push_str("\t}\n");
 }
 
 /// A port's VLAN membership, as the phrases the parser reads back.
@@ -779,6 +847,64 @@ mod tests {
 			 \tmetered = true\n\
 			 \twifi {\n\
 			 \t\topen = true\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// The per-interface keys a laptop's profile is actually about.
+	///
+	/// `preference` is which uplink wins and `probe` is how the link is judged
+	/// to be working -- the two settings whose whole purpose is to differ
+	/// between the office and home, and so the two a profile most needs to be
+	/// able to save. Both were refused.
+	#[test]
+	fn the_interface_keys_round_trip() {
+		round_trips(
+			"interface eth0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 \tpreference = 100\n\
+			 \tnat = true\n\
+			 \tipv6_token = \"::5\"\n\
+			 \tprobe {\n\
+			 \t\tcommand = \"/usr/bin/ping\"\n\
+			 \t\targs = [\"-c\", \"1\", \"-I\", \"eth0\", \"198.51.100.1\"]\n\
+			 \t\tinterval = 15\n\
+			 \t\ttimeout = 3\n\
+			 \t\tdown_after = 5\n\
+			 \t\tup_after = 3\n\
+			 \t\thold_down = 60\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// A probe with nothing but its command, so the defaults stay unwritten
+	/// and the block still compiles.
+	#[test]
+	fn a_bare_probe_round_trips() {
+		round_trips(
+			"interface eth1 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 \tprobe { command = \"/usr/bin/true\" }\n\
+			 }\n",
+		);
+	}
+
+	/// 802.1X on a wired port, which shares its eight keys with a wireless
+	/// network's EAP -- the parser shares `WifiKeys` between them, so the
+	/// renderer shares `render_eap` for the same reason.
+	#[test]
+	fn a_wired_dot1x_port_round_trips() {
+		round_trips(
+			"interface eth2 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 \tdot1x {\n\
+			 \t\teap = \"tls\"\n\
+			 \t\tidentity = \"desk.corp\"\n\
+			 \t\tca_cert = \"/etc/ssl/certs/corp.pem\"\n\
+			 \t\tclient_cert = \"/etc/ssl/certs/desk.pem\"\n\
+			 \t\tprivate_key = \"@secret:desk-key\"\n\
 			 \t}\n\
 			 }\n",
 		);

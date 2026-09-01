@@ -1557,6 +1557,35 @@ than by effort: those seven say who they are made of and nothing secret, while
 file, so those need a decision about what a snapshot may contain rather than
 more keys.
 
+**`preference` and `probe` render now, which matters more than the count
+suggests.** Which uplink wins and how the link is judged to be working are the
+two settings whose entire purpose is to differ between the office and home --
+so a profile that could not save them could not express the thing profiles
+were built for. `dot1x` came with them for nothing: the parser already shares
+`WifiKeys` between a wired port and a wireless network, so the renderer shares
+`render_eap`.
+
+**`ingress_redirect` is refused and must stay refused**, which is different
+from the rest of the list. It is not a config key: the compiler synthesises it
+and the `ifb` device it points at from `ingress_bandwidth`, so rendering it
+would make the next compile synthesise a second one on top of the first. What
+a snapshot would have to write back is the `ingress_bandwidth` it came from,
+and the document no longer holds that by the time the renderer sees it. A
+derived field is not a missing feature, and treating it as one would be the
+bug.
+
+**Open, and not a worker's to settle: the generated file's own header claims
+more than the renderer does.** It tells its reader the profile "says
+everything explicitly -- including things a person would have left to a
+default", while the code omits every value equal to a default -- `on_drift`,
+`autoconnect`, `priority`, `networking`, the control and remote blocks, and
+now the probe's numbers. Both behaviours are defensible and the round trip
+cannot tell them apart, since a written default compiles equal to an absent
+one. What is not defensible is the artifact describing itself wrongly to the
+person reading it. The existing code's convention was followed here rather
+than the header's wording, so the choice stays open rather than being settled
+by whoever touched it last.
+
 **A model default and a language default are not the same fact, and a bond is
 where they differ.** `BondMode` has `#[default] ActiveBackup`, so the rule
 used everywhere else here -- write a value only when it differs from the
