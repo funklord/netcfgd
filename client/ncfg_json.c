@@ -211,7 +211,7 @@ static int parse_string(parser_t *p, uint32_t *offset, uint32_t *length)
 				 * writing it out would produce invalid UTF-8 that
 				 * a Qt string would then refuse or mangle. */
 				if (p->length - p->at < 2 || p->in[p->at] != '\\' ||
-					p->in[p->at + 1] != 'u') {
+				    p->in[p->at + 1] != 'u') {
 					fail(p, "a high surrogate with no low surrogate");
 					return 0;
 				}
@@ -222,7 +222,7 @@ static int parse_string(parser_t *p, uint32_t *offset, uint32_t *length)
 					return 0;
 				}
 				code_point = 0x10000u + ((code_point - 0xd800u) << 10) +
-						 ((uint32_t)low - 0xdc00u);
+				         ((uint32_t)low - 0xdc00u);
 			} else if (code_point >= 0xdc00u && code_point <= 0xdfffu) {
 				fail(p, "a low surrogate with no high surrogate");
 				return 0;
@@ -540,7 +540,7 @@ ncfg_json_doc_t *ncfg_json_parse(const char *text, size_t length, char *err, siz
 		}
 		continue;
 
-expect_key:
+	expect_key:
 		skip_space(p);
 		if (p->at >= p->length || p->in[p->at] != '"') {
 			fail(p, "an object member with no name");
