@@ -538,6 +538,40 @@ presented as obvious:
     that actually knows, and the failure mode of forgetting is visible --
     a hold nobody released is a hold with a name on it.
 
+  **`guard` is not a second concept, and should not survive as one.** Asked
+  why a guard is needed at all once holds exist, the answer is that it is not:
+  a declared guard *is* a hold whose holder is the document. This record
+  already says derivation is a holder; the configuration is one too, and the
+  only thing that distinguishes the three is where the hold came from and how
+  long it lasts.
+
+      hold = (name, reason)
+        name    what consent releases and what a listing shows
+        reason  what the refusal prints
+
+  So "guarded" stops being a field and becomes a derived predicate -- this
+  link holds at least one hold -- in the same way 0154 made one ranking out of
+  two. Keeping both would be the same mistake a third time: two mechanisms for
+  one idea, each documented in terms of the other.
+
+  **And holds are not restricted to guarded links, which would be circular.**
+  A hold is what makes something guarded; requiring the link to be guarded
+  first is requiring the answer before the question. It would also defeat the
+  case the mechanism exists for -- a resync taking a hold on a link nobody
+  thought to declare in advance, which is exactly the situation configuration
+  cannot anticipate. **Who may take a hold is a permission question**, settled
+  by the tiers in 0013, and not a property of the link.
+
+  **Consent ignores holds for one apply; it never deletes one.** That falls
+  out of collapsing the three sources into one set, and it is the behaviour
+  each of them separately wants. A config-declared hold is back on the next
+  reconcile whatever an operator consented to, because the document still says
+  so -- which is right, since consent is for an action and the declaration is
+  a standing fact. A runtime hold belongs to whoever took it, and an override
+  that deleted it would have one operator silently discarding another
+  process's statement. So `--allow-disruption <name>` means "proceed despite
+  this hold", never "remove it".
+
   **Holds live outside the configuration, because they are runtime state.**
   Set by the copyright holder 2026-09-02, and it separates two things this
   record had been treating as one:
