@@ -398,9 +398,38 @@ presented as obvious:
   is a statement about a connection, and a device that is down is a different
   thing an operator may also want to say. Splitting those two into one field
   is what makes it look like a device property.
-- **`guard`** goes to the **device**. It refuses to touch a thing, and the
-  thing being protected is hardware somebody else may be using -- the same
-  register as `managed`, which is already on the device.
+- **`guard`** goes to the **link**. An earlier draft sent it to the device on
+  the grounds that it protects something somebody else is using -- but what
+  depends on a guarded interface is the *connection*: an NFS root, a
+  replicating database, the session the operator is connected over. None of
+  those needs the adapter to exist, they need the link up with its address.
+  The device-side "do not touch" already exists and is `managed = false`.
+
+  The two are not duplicates, and four states are being asked to fit in fewer
+  words than there are states:
+
+      device.managed = false   never touch this hardware at all
+      link.managed   = false   never touch this connection; the device is
+                               still netcfgd's
+      guard                    manage this link and refuse to disrupt it
+      enabled = false          keep this configuration and do not use it
+      up / down                an operational action, not a configuration
+
+  **`managed` belongs on both, decided by the copyright holder 2026-09-02.**
+  They are not the same statement once a device carries several links. The
+  case that needs it: netcfgd owns `eth0` and its address, and a second
+  address on the same interface is a cluster VIP that keepalived moves. Today
+  that is inexpressible -- `managed = false` on the device hands over the
+  whole adapter, which is far more than was meant. As links, the VIP is one
+  row with `managed = false` beside a row netcfgd owns.
+
+  `link.managed` is a new field, so it is pass 2: pass 1 adds no concepts.
+
+  The last has no expression today. `enabled = false` is the nearest thing
+  and it is a different statement -- it edits the configuration, where an
+  operator taking a link down usually wants it back on the next reconcile.
+  That gap belongs to pass 2, where a link is a profile and "which are
+  active" is already the question being modelled.
 - **`forwarding`** goes to the **link**, though it is a sysctl on the
   interface. It is about what the machine does with traffic, and a machine
   with no connection forwards nothing.
@@ -409,6 +438,53 @@ presented as obvious:
 default-route candidacy, no folding of `network`. Eight fields move to the
 side of a line that already exists, which is what makes it a separable pass
 rather than the first half of one big one.
+
+## 9b. Pass 1's boundary is wrong, found by attempting it
+
+**Measured 2026-09-02 by starting the pass and stopping.** The eight fields
+in 9a do not divide into "hardware, moves cleanly". They divide into two
+groups, and only one of them is a move:
+
+    inert settings      mtu, mac, link_settings
+    structural          kind, master, qdisc, ingress_redirect, bridge_vlans
+
+The first three are values nothing else reasons about: relocate the field,
+fix the references, done. The other five participate in machinery that was
+written when one struct held everything, and moving them is design work
+wearing a refactor's clothes:
+
+- **`kind` has 42 reference sites**, and the planner's are not substitutions.
+  Code holding an `&Interface` must now *find* its device, which is a lookup
+  that does not exist and a signature change wherever the document is not
+  already in scope.
+- **Ingress shaping pairs an interface with an `ifb`** across 23 sites in
+  three crates: it synthesises an `Interface` with `kind: Ifb`, sets
+  `ingress_redirect` on the real one, and moves `ingress_bandwidth_bits` off
+  its qdisc. Under the split that synthetic thing is a **device with no link**
+  -- it carries no address and never will.
+- **Bridge and bond membership** is read off `interface.kind` at assembly time
+  to build the membership list, so the members of a device are computed from
+  a field that is about to live on a different type.
+
+**The `ifb` is the record's own prediction arriving early.** Section 6 says
+the split admits "a device with no link (created and unconfigured)" and calls
+it a state the model must answer for. The ifb is that state, and it exists
+today only as an `Interface` because there was nowhere else to put it. So the
+question is not deferrable to pass 2: it is load-bearing for moving `kind`.
+
+**The revised boundary**, for the holder:
+
+- **Pass 1a**: `mtu`, `mac`, `link_settings` to the device. Genuinely inert,
+  genuinely a move, no new concepts, small.
+- **Pass 1b**: the five structural fields, together with the device-with-no-
+  link question that `ifb` forces. This is a design pass, not a move.
+
+The original pass 1 was scoped from a field list rather than from what the
+fields are used for -- which is the same error as sorting them by name
+instead of by the "would this mean anything unconnected?" test. An MTU means
+something unconnected. So does `kind`, but `kind` is also the answer to
+"what does netcfgd create", and that is a second job the split has to decide
+about rather than inherit.
 
 ## 10. Decided, and what is still open
 
