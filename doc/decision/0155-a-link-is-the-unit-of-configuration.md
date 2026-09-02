@@ -510,7 +510,42 @@ presented as obvious:
   operator told about one guard, who consents to it and is refused again, has
   been sent round the loop the second option was rejected for.
 
-  Does not block pass 1b.
+  **A guard is a set of named holds, and that is the mechanism rather than an
+  implementation detail.** Proposed by the copyright holder 2026-09-02, and it
+  generalises the derivation rule above rather than sitting beside it: once a
+  device records *which* guards reach it, the natural shape is a semaphore.
+  Anything that needs a link undisturbed takes a named hold; the guard lifts
+  when the last holder releases it.
+
+      guard "nfs-root"    taken by the config, because a link block says so
+      guard "db-replica"  taken at runtime by something that needs the link
+      guard "session"     taken by the daemon for the link an operator is on
+
+  Three things fall out, and the third is the one that makes it worth doing:
+
+  - **Derivation is a holder.** A guard reaching `eth0` from `nfs-root` is the
+    hold `nfs-root` placed there. Consent releases that holder's hold and
+    nothing else, which is exactly the rule decided above -- so the two are
+    one mechanism and not two that must agree.
+  - **`--allow-disruption` releases a hold by name.** It already takes a name
+    and is already repeatable, so the flag does not change; what changes is
+    that the name it takes is a holder rather than an interface, which is what
+    the refusal already has to print.
+  - **A guard can be taken by something that is running**, which config alone
+    cannot express. Today `guard` is a line in a file, so protecting a link
+    for the duration of a database resync means editing configuration and
+    remembering to edit it back. A hold can be taken and dropped by the thing
+    that actually knows, and the failure mode of forgetting is visible --
+    a hold nobody released is a hold with a name on it.
+
+  What it needs deciding: whether a runtime hold survives a daemon restart
+  (a hold in `/run` is lost, a hold that persists can outlive its holder), and
+  what happens to holds whose holder is gone. **A semaphore nobody can release
+  is a machine nobody can reconfigure**, so the answer cannot be "they last
+  for ever" -- and it must not be "they vanish on restart" either, since a
+  restart is exactly when a half-finished resync is still half-finished.
+
+  Pass 2 or later. Does not block pass 1b.
 
   `link.managed`, `device.guard`, the inheritance rule and this question are
   all pass 2: pass 1 adds no concepts.
