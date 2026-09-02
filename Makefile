@@ -1561,6 +1561,13 @@ live:
 	@# under NCFG_LIVE and not under unshare: it does its own namespace, and a
 	@# machine that cannot run it should get a skip rather than a failure.
 	@sh tests/live/hwsim.sh
+	@# The same question against the radio this machine actually has, which is
+	@# the one thing hwsim.sh cannot be: a real association, to a real access
+	@# point, resolved against the document a real daemon is running. Reads
+	@# only -- no reconfigure and no write under /run -- so it is safe on the
+	@# machine somebody is using, over the very wifi it asks about. Skips when
+	@# there is no radio, no association, or no root.
+	@sh tests/live/association.sh
 	@# A real PPPoE session, same bucket: /dev/ppp is root-only and the rp-pppoe
 	@# plugin opens it as it loads, so an unprivileged machine cannot dial. It
 	@# makes its own namespaces too, and skips rather than fails without root.
