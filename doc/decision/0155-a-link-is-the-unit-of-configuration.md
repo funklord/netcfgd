@@ -538,12 +538,47 @@ presented as obvious:
     that actually knows, and the failure mode of forgetting is visible --
     a hold nobody released is a hold with a name on it.
 
-  What it needs deciding: whether a runtime hold survives a daemon restart
-  (a hold in `/run` is lost, a hold that persists can outlive its holder), and
-  what happens to holds whose holder is gone. **A semaphore nobody can release
-  is a machine nobody can reconfigure**, so the answer cannot be "they last
-  for ever" -- and it must not be "they vanish on restart" either, since a
-  restart is exactly when a half-finished resync is still half-finished.
+  **Holds live outside the configuration, because they are runtime state.**
+  Set by the copyright holder 2026-09-02, and it separates two things this
+  record had been treating as one:
+
+      declared guard   a standing statement -- "this link carries an NFS
+                       root". True across reboots, part of how the machine is
+                       described. Configuration.
+      hold             a running thing saying "not right now". Runtime state.
+
+  The distinction does most of the work the open question was stuck on. **A
+  declared guard cannot go stale**, because it is not stored anywhere: it is
+  recompiled from the document on every load, so a guard whose reason no
+  longer applies is removed by editing the file that states it, like every
+  other configured fact. Only a *hold* can outlive its holder, which halves
+  the problem.
+
+  For the half that remains, netcfgd already has the right lifetime and it was
+  chosen for a different reason. The unit carries
+  `RuntimeDirectoryPreserve=restart` (0135), so `/run/netcfgd` survives a
+  restart and is removed on a stop or a reboot -- which is exactly what a hold
+  wants:
+
+      restart   the hold survives, and it must: a restart is precisely when a
+                half-finished resync is still half-finished
+      stop      the hold goes, and netcfgd is managing nothing anyway
+      reboot    the hold goes, and so has the process that took it
+
+  So there are three sources and one set, and only the middle one persists:
+
+      configuration   declared guards, recompiled every load, never stale
+      /run            runtime holds, taken over the socket
+      derived         the link-to-device inheritance, computed per plan
+
+  What is left open is smaller than the original question and worth stating as
+  the whole of it: **a holder that dies without releasing leaves a hold until
+  the next stop or reboot.** That is survivable rather than fatal --
+  `--allow-disruption <holder>` already releases one by name, and the fix is
+  that holds must be *listable*, with each one saying where it came from, so
+  an operator asked to override can see what they are overriding. A hold
+  nobody can enumerate is the machine nobody can reconfigure; a hold they can
+  read and release by name is an inconvenience.
 
   Pass 2 or later. Does not block pass 1b.
 
