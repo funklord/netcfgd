@@ -572,6 +572,32 @@ presented as obvious:
   process's statement. So `--allow-disruption <name>` means "proceed despite
   this hold", never "remove it".
 
+  **The one word is `guard`, and the field becomes plural.** Asked whether the
+  collapsed concept should be called a hold instead, the answer is no, but it
+  is the closest of the naming questions in this record and the argument the
+  other way is real.
+
+  `guard` wins on incumbency and on cost. It is what the model, parser,
+  renderer, planner and refusal messages already say, 0010 is cited for it, and
+  configurations already contain `guard { reason = ... }` -- so keeping it
+  means no configuration migration for this key in a pass that has plenty. It
+  also reads correctly for all three sources now they are one set: declared in
+  the configuration, taken by a resync, inherited from another link.
+
+  **The case for `hold` is that the concept is now a reference count**, and
+  semaphore vocabulary is acquire and release. `guard` carries singular
+  baggage: it is `Option<Guard>` today, one per interface, which reads as a
+  boolean property rather than a set. That is the thing to be careful of
+  rather than a reason to rename -- the field becomes `Vec<Guard>` and says
+  so, and the verbs carry the counting: `ncfg guard add`, `guard drop`,
+  `guard list`. What would read badly is `guard` staying singular while
+  behaving like a set.
+
+  Recorded rather than left implicit because the reasoning is what would need
+  revisiting: if the rename is ever right, it belongs inside pass 2, where a
+  configuration migration is already being paid for, rather than as a second
+  one later.
+
   **Holds live outside the configuration, because they are runtime state.**
   Set by the copyright holder 2026-09-02, and it separates two things this
   record had been treating as one:
