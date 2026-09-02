@@ -478,17 +478,39 @@ presented as obvious:
     past what was typed, which is the property `--allow-disruption` exists to
     avoid.
 
-  A third shape worth weighing: consent could follow the guard's *derivation*
-  rather than its extent, releasing a device only where the guard reaching it
-  came from the link being consented to. That keeps a device's own `guard`,
-  and any other link's, in force -- which is the answer that preserves both
-  properties, at the cost of the refusal having to say which guard stopped it.
+  **Decided by the copyright holder 2026-09-02: consent follows the guard's
+  derivation.** Consenting to a link releases a device only where the guard
+  reaching that device came from the link being consented to. A device's own
+  `guard`, and a guard inherited from any other link, stay in force.
 
-  Whichever is chosen, the refusal must keep naming the command that works.
-  A message offering an override that does not release the action is worse
-  than no message, because it sends the operator round the loop twice.
+  It is the only one of the three that gets the two-link case right. A NIC
+  carrying two guarded links is protected by both, and consenting to one must
+  leave the other's protection standing -- which "only the named link" cannot
+  do (it releases nothing) and "the whole stack" cannot do either (it releases
+  both).
 
-  This is the holder's to settle and it does not block pass 1b.
+  **This makes an inherited guard a set with provenance, not a flag.** A
+  device does not record *that* it is guarded but *by what*: each entry is the
+  link the guard came from and the reason that link stated. Consent removes
+  the entries derived from the consented link; the action is refused if any
+  entry remains.
+
+  **And the refusal must name the source, not the device.** This is where the
+  "name a command that works" constraint stops being a slogan. A refusal
+  raised against `eth0` because `nfs-root` is guarded has to offer
+
+      ncfg apply --allow-disruption nfs-root
+
+  because `--allow-disruption eth0` would release nothing: eth0 has no guard
+  of its own, it has an entry derived from `nfs-root`. Offering the device
+  name is the failure this whole question exists to avoid, and it is the
+  natural thing to write, since the device is what the op names.
+
+  Where several entries stop one action, the refusal names all of them: an
+  operator told about one guard, who consents to it and is refused again, has
+  been sent round the loop the second option was rejected for.
+
+  Does not block pass 1b.
 
   `link.managed`, `device.guard`, the inheritance rule and this question are
   all pass 2: pass 1 adds no concepts.
