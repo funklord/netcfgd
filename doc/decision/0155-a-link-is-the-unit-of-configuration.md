@@ -636,6 +636,57 @@ presented as obvious:
   a config-declared guard would be offering an action that undoes itself on
   the next reconcile.
 
+  **A guard may hinge on a script, and where it can it should.** Proposed by
+  the copyright holder, and it is better than what the rest of this section
+  had settled on. The observation behind it: changing a guard should not
+  change the *configuration*, because editing a file is a reconcile with side
+  effects -- and a guard is normally something an automated process knows,
+  not a decision a person makes.
+
+      guard {
+          command = "/usr/local/bin/nfs-still-mounted"
+          reason  = "nfs root"
+      }
+
+  **The exit status is the answer**, which is 0119's rule for probes reused
+  rather than reinvented: netcfgd never has to decide what "still in use"
+  means, because the operator's program already does. Zero means still in
+  use and the guard holds, which is what `mountpoint -q` already answers.
+
+  **It solves the stale-hold problem outright for the automated case.** A
+  runtime hold whose holder died stays until the next stop or reboot; a
+  scripted guard whose subject went away clears itself the next time anything
+  asks, because the script says no. That is the open question above answered
+  rather than mitigated -- for everything that can be expressed as a
+  question, which is most of what takes a guard automatically.
+
+  **Evaluated lazily, and that is the difference from a probe.** A probe is
+  monitoring, so it runs on an interval; a guard only matters when something
+  wants to disrupt the link, so it runs then. A `guard` with an `interval`
+  would be a script running every thirty seconds for ever to answer a
+  question nobody asked.
+
+  **A script that cannot be run holds.** This is the direction the error has
+  to fall, and it is worth stating because both directions look defensible on
+  the page: a missing or broken guard script means netcfgd does not know
+  whether the NFS root is still mounted, and proceeding on not-knowing is how
+  the mount goes away. The refusal must say *which* of the two happened --
+  "the guard script says the link is in use" and "the guard script could not
+  be run" send an operator to different places, and
+  `--allow-disruption` is the way past either.
+
+  **It does not replace runtime holds**, and the three now rank rather than
+  compete. A scripted guard where the question is answerable, because it
+  cannot go stale; a runtime hold where the holder knows something no script
+  can ask about; a plain declared guard where the answer is simply always yes.
+
+  Two things this inherits from 0119 along with the shape. Its command is
+  privileged configuration, for the reason every command in a document is
+  (0117): a file that can name a program is a file that can run one. And it
+  does not port to a machine with no processes, which is the question
+  `project.md` records for the microcontroller port -- a scripted guard is
+  one more thing on the list that a callback would have to replace.
+
   **Holds live outside the configuration, because they are runtime state.**
   Set by the copyright holder 2026-09-02, and it separates two things this
   record had been treating as one:
