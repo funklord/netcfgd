@@ -15,12 +15,19 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
     : QWidget(parent), connection(connection)
 {
 	/* In the order an operator reads them: what it is called, what it is,
-	 * whether it is working, and what it has. The MAC is last because it is
-	 * the one nobody looks at first. */
+	 * whether it is working, what it joined, and what it has. The MAC is last
+	 * because it is the one nobody looks at first.
+	 *
+	 * `network` sits beside `state` rather than at the end because it is part
+	 * of the same answer for a radio: a wireless link that is up is up *on*
+	 * something, and which network that is decides the link's route metric
+	 * (0153). Blank for every wired link, which is most of them -- and a blank
+	 * column is the honest rendering, since a cable has no network to be on. */
 	QStringList columns;
 	columns << QStringLiteral("interface") << QStringLiteral("kind")
-	        << QStringLiteral("state") << QStringLiteral("addresses")
-	        << QStringLiteral("mtu") << QStringLiteral("mac");
+	        << QStringLiteral("state") << QStringLiteral("network")
+	        << QStringLiteral("addresses") << QStringLiteral("mtu")
+	        << QStringLiteral("mac");
 	table = new ncfg_table_view(columns, QStringLiteral("devices_note"), this);
 
 	configure_button = new QPushButton(QStringLiteral("configure"), this);
@@ -59,6 +66,7 @@ void ncfg_devices_view::refresh()
 		cells << link.name;
 		cells << link.kind;
 		cells << link.state;
+		cells << link.network;
 		cells << link.addresses;
 		cells << (link.mtu ? QString::number(link.mtu) : QString());
 		cells << link.mac;

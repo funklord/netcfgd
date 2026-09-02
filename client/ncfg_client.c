@@ -432,6 +432,7 @@ void ncfg_links_free(ncfg_links_t *links)
 		free(links->items[i].kind);
 		free(links->items[i].mac);
 		free(links->items[i].addresses);
+		free(links->items[i].network);
 	}
 	free(links->items);
 	memset(links, 0, sizeof(*links));
@@ -638,7 +639,12 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->wireless = wireless == NCFG_JSON_NONE
 		    ? ncfg_link_is_wireless(item->kind, item->name)
 		    : ncfg_json_bool(doc, wireless, 0);
-		if (!item->name || !item->kind || !item->mac || !item->addresses) {
+		/* Absent for a wired link and for an unassociated radio, and
+		 * member_text gives "" for both -- which is what a screen wants, since
+		 * neither has a network to name. */
+		item->network = member_text(doc, link, "network");
+		if (!item->name || !item->kind || !item->mac || !item->addresses ||
+		    !item->network) {
 			set_error(err, err_size, "out of memory");
 			ncfg_links_free(out);
 			return 0;
@@ -1176,6 +1182,10 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		}
 		item->priority =
 		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "priority"), 0);
+		/* -1 for absent, because 0 is a legal metric and the strongest one.
+		 * The document omits the key entirely when a network is unranked. */
+		item->metric =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "metric"), -1);
 		item->autoconnect =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "autoconnect"), 0);
 		item->hidden = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "hidden"), 0);

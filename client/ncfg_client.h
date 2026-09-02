@@ -159,6 +159,25 @@ typedef struct {
 	 * is, so it is the fallback and never the first test.
 	 */
 	int   wireless;
+	/*
+	 * The configured network this radio is associated to, "" where there is
+	 * none.
+	 *
+	 * The document's id rather than the SSID, because that is what names the
+	 * network everywhere else a client shows one -- and because resolving an
+	 * SSID to a network is netcfgd's job, not a screen's: a network identified
+	 * by BSSID rather than by name has no SSID that could answer.
+	 *
+	 * Empty for a wired link, for a radio that is not associated, and for one
+	 * joined to something the document does not describe. The last is a real
+	 * state rather than an error, since an operator may associate by hand.
+	 *
+	 * Worth showing beside a link because it is what decides that link's route
+	 * metric: a network's `metric` replaces its interface's `preference` while
+	 * that network is the one in use (0153), so "which network" and "how this
+	 * link ranks" are the same question.
+	 */
+	char *network;
 } ncfg_link_t;
 
 typedef struct {
@@ -1002,6 +1021,21 @@ typedef struct {
 	 */
 	char *credential;
 	int   priority;    /* higher wins; 0 when the document names none */
+	/*
+	 * How this network ranks against every other link, or negative where the
+	 * document names none.
+	 *
+	 * **Lower wins, and it is the opposite of `priority` above.** This is a
+	 * route metric on the same scale as an interface's `preference`: while the
+	 * radio is on this network, its interface's routes take this number instead
+	 * of the interface's own (0153). `priority` decides which network to JOIN
+	 * and never leaves wpa_supplicant.
+	 *
+	 * Negative rather than 0 for absent, because 0 is a legal metric and the
+	 * best one -- a client that conflated them would show every unranked
+	 * network as beating every cable.
+	 */
+	int   metric;
 	int   autoconnect; /* whether it may be joined without being asked */
 	int   hidden;      /* whether the document says it does not broadcast */
 } ncfg_saved_network_t;

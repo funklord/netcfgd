@@ -26,11 +26,14 @@ const char *const column_titles[] = {
 };
 constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(column_titles[0]));
 
-/* The document's own columns. `priority` is spelled out as higher-wins in the
- * cell rather than left as a bare number, because a route metric is the other
- * way round and both are on screen in this program. */
+/* The document's own columns. `priority` and `metric` are both spelled out with
+ * their direction in the cell rather than left as bare numbers, because they
+ * run opposite ways and now sit next to each other: `priority` picks which
+ * network to join, `metric` ranks the routes of the one joined against every
+ * other link, including wired ones (0153). Adjacent deliberately -- an operator
+ * comparing them is exactly who must not read them as one scale. */
 const char *const saved_column_titles[] = {
-	"network", "security", "credential", "priority", "autoconnect", "in range"
+	"network", "security", "credential", "priority", "metric", "autoconnect", "in range"
 };
 constexpr int saved_column_count =
     static_cast<int>(sizeof(saved_column_titles) / sizeof(saved_column_titles[0]));
@@ -231,6 +234,11 @@ void ncfg_wifi_view::update_saved()
 			credential,
 			network.priority ? QStringLiteral("%1 (higher wins)").arg(network.priority)
 			           : QString(),
+			/* Negative is "the document ranks this against nothing", which is
+			 * not the same as 0 -- 0 is the strongest metric there is. */
+			network.metric >= 0
+			    ? QStringLiteral("%1 (lower wins)").arg(network.metric)
+			    : QString(),
 			network.autoconnect ? QStringLiteral("yes") : QStringLiteral("no"),
 			range,
 		};

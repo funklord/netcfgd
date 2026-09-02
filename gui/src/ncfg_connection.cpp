@@ -168,6 +168,7 @@ bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 		row.default_route = link.default_route != 0;
 		row.mtu = link.mtu;
 		row.wireless = link.wireless != 0;
+		row.network = from_c(link.network);
 		out->append(row);
 	}
 
@@ -464,6 +465,7 @@ bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString
 		row.credential = QString::fromUtf8(
 		    networks.items[i].credential ? networks.items[i].credential : "");
 		row.priority = networks.items[i].priority;
+		row.metric = networks.items[i].metric;
 		row.autoconnect = networks.items[i].autoconnect != 0;
 		row.hidden = networks.items[i].hidden != 0;
 		out->append(row);

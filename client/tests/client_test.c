@@ -698,7 +698,12 @@ static const char status_response[] =
     "{\"response\":\"status\",\"links\":["
     "{\"name\":\"eth0\",\"kind\":\"\",\"up\":true,\"carrier\":false,\"mtu\":1500,"
     "\"mac\":\"02:00:00:00:00:01\"},"
-    "{\"name\":\"br0\",\"kind\":\"bridge\",\"up\":true,\"carrier\":true,\"mtu\":9000}],"
+    "{\"name\":\"br0\",\"kind\":\"bridge\",\"up\":true,\"carrier\":true,\"mtu\":9000},"
+    /* A radio on a configured network. netcfgd resolves the association to
+     * the document's id before sending it, so what arrives is the network's
+     * name and never an SSID a client would have to match itself. */
+    "{\"name\":\"wlan0\",\"kind\":\"wlan\",\"up\":true,\"carrier\":true,"
+    "\"wireless\":true,\"network\":\"office\",\"mtu\":1500}],"
     "\"addresses\":[{\"interface\":\"eth0\",\"address\":\"192.0.2.1/24\"},"
     "{\"interface\":\"br0\",\"address\":\"10.0.0.1/24\"},"
     "{\"interface\":\"eth0\",\"address\":\"fe80::1/64\"}]}\n";
@@ -718,9 +723,9 @@ static void a_status_becomes_links(void)
 		return;
 	}
 	ok("a status converts to links", 1, NULL);
-	ok("one row per link", links.count == 2u, NULL);
+	ok("one row per link", links.count == 3u, NULL);
 
-	if (links.count == 2u) {
+	if (links.count == 3u) {
 		/* The addresses arrive as their own flat list keyed by
 		 * interface, and joining them is the one thing in this
 		 * conversion that two frontends would have done differently. */
@@ -738,6 +743,15 @@ static void a_status_becomes_links(void)
 		equals("a link with no mac gets an empty string rather than a null",
 		       links.items[1].mac, "");
 		ok("the mtu comes through", links.items[1].mtu == 9000, NULL);
+		/* The association, which is what decides this link's route metric:
+		 * a network's `metric` replaces its interface's `preference` while
+		 * that network is the one in use (0153). */
+		equals("an associated radio names the network it joined",
+		       links.items[2].network, "office");
+		/* And the two links that are not radios say nothing rather than
+		 * something. A cable has no network to be on, and an empty string is
+		 * the honest rendering of that -- not a dash a screen must decode. */
+		equals("a wired link names none", links.items[0].network, "");
 	}
 	ncfg_links_free(&links);
 	staged_close(&staged);
@@ -1707,7 +1721,8 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 	    "{\"response\":\"document\",\"schema_version\":1,\"networks\":["
 	    "{\"id\":\"home\",\"ssid\":\"686f6d65\",\"hidden\":false,"
 	    "\"security\":{\"type\":\"psk\",\"passphrase\":{\"provider\":\"file\","
-	    "\"name\":\"home-secret\"}},\"priority\":100,\"autoconnect\":true},"
+	    "\"name\":\"home-secret\"}},\"priority\":100,\"metric\":50,"
+	    "\"autoconnect\":true},"
 	    /* An open network refers to no secret, and the field is empty rather
 	     * than absent: a screen must be able to tell "needs none" from "has
 	     * one you cannot see", and a blank cell spells both the same way. */
@@ -1731,6 +1746,11 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 			       "home-secret");
 			ok("and its priority, where higher wins",
 			   networks.items[0].priority == 100, NULL);
+			/* The other ranking, and it runs the other way up. Both are on
+			 * one screen, so a reader that took them for one scale would
+			 * order half of it backwards. */
+			ok("and its metric, where lower wins", networks.items[0].metric == 50,
+			   NULL);
 			ok("and whether it joins by itself", networks.items[0].autoconnect == 1,
 			   NULL);
 			/* The second is the one no scan would show: hidden, not
@@ -1744,6 +1764,13 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 			       networks.items[1].credential, "");
 			ok("a priority the document did not name is zero, not invented",
 			   networks.items[1].priority == 0, NULL);
+			/* **Negative, not zero.** A priority the document omits is
+			 * genuinely 0, but 0 is a legal metric and the strongest one
+			 * there is -- so an absent metric read as 0 would rank every
+			 * unranked network above every cable. The two fields default
+			 * differently on purpose. */
+			ok("a metric the document did not name is absent, not zero",
+			   networks.items[1].metric < 0, NULL);
 			ok("and autoconnect false is carried rather than defaulted",
 			   networks.items[1].autoconnect == 0, NULL);
 			ok("and hidden is carried", networks.items[1].hidden == 1, NULL);

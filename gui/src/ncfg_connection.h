@@ -50,6 +50,11 @@ struct ncfg_link_row {
 	 * The last thing observable without sending a packet, and the reason the
 	 * tray can say "connected" rather than "associated". */
 	bool    default_route = false;
+	/* The configured network this radio joined, empty where there is none.
+	 * The document's id, resolved by netcfgd rather than here: a network
+	 * named by BSSID has no SSID a screen could match on. It is also what
+	 * decides this link's route metric (0153). */
+	QString network;
 };
 
 /*
@@ -169,6 +174,10 @@ struct ncfg_saved_network_row {
 	 * wants, not whether the file is there. */
 	QString credential;
 	int     priority = 0;
+	/* Lower wins, and the opposite way up from `priority`. Negative where
+	 * the document ranks this network against nothing -- 0 is a legal
+	 * metric and the strongest one, so the two must not be conflated. */
+	int     metric = -1;
 	bool    autoconnect = false;
 	bool    hidden = false;
 };
