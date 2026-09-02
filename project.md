@@ -6353,6 +6353,90 @@ client then cannot read the config file it was started with.
 
 ---
 
+## 10.10 The model split: where the restructure stands
+
+**2026-09-02.** `Interface` and `Device` were one type doing two jobs, and
+[0155](doc/decision/0155-a-link-is-the-unit-of-configuration.md) splits them.
+Two passes are done and in the tree; the rest is not started.
+
+**Why it was wrong is measured rather than asserted.** `Interface` carried 21
+fields and `Device` five, two of which were policy about connecting rather
+than about hardware -- so the type that should have held the hardware held
+almost none of it. And `WifiNetwork` had grown `addressing`, `routes`, `dns`
+and `hooks` one at a time to catch up with `Interface`, which is two types
+arriving independently at one concept.
+
+**Pass 1a** moved `mtu`, `mac` and `link_settings` to the device: inert
+settings that mean something with nothing connected.
+
+**Pass 1b** moved `kind`, `master`, `qdisc`, `ingress_redirect` and
+`bridge_vlans`. These are structural rather than inert -- they say what
+netcfgd *creates* -- so creation, enslavement, qdiscs, ingress shaping,
+backend start and link teardown are all driven from the device list now. That
+is what makes **a device with no interface** representable, which the `ifb` an
+ingress shaper needs had always been: it carries no address and never will,
+and until this it had to be an `Interface` holding eleven fields of `None`.
+
+**The config moved with the model**, so a `bridge`, `bond`, `vlan`, `tunnel`,
+`qdisc`, `ethtool`, `mtu`, `mac`, `master` or `vlans` is written in a `device`
+block now. Sixteen spellings are named where they appear in an `interface`,
+because the fix is to move a line rather than delete it. An interface with no
+device block of its own gets one synthesised: an operator who wrote only
+`interface eth0 { config = "dhcp" }` has said nothing about the adapter, and
+the honest reading is a physical device with defaults.
+
+**What is not done.** Pass 2 -- links as profiles, attachment, failover
+groups, default-route candidacy -- and all of
+[0156](doc/decision/0156-a-guard-is-one-thing-with-three-origins.md), the
+guard design, which is written up in full and entirely unbuilt.
+
+**Two things this pass taught that are worth carrying.** The first boundary
+was drawn from a field list rather than from what the fields are *used for*,
+and it did not survive contact: `kind` alone has 42 reference sites and none
+of the planner's are substitutions, so pass 1 had to split again. And moving
+the kind samples to devices left `interfaces: Vec::new()` in the witness,
+which silently unpinned `addressing`, `routes`, `probe`, `guard` and
+`preference` -- 4081 lines left the witness and the suite stayed green,
+because a sample that is not there cannot fail. It was caught by reading the
+diff's *key census* rather than its size, which is the check worth repeating
+on any witness that shrinks.
+
+---
+
+## 10.11 Three checks that ran nowhere, found in one day
+
+**2026-09-02.** Not one fault but a class, and the three instances share a
+property that makes them expensive: **each looked exactly like a passing
+check.** Recorded together because the next one will look like that too.
+
+- **The C client's own suite was built and never run.** `conformance` and
+  `test` both name `client/tests/client_test` as a prerequisite, so `check`
+  compiled it for as long as it existed and nothing executed it. Every
+  assertion inside was green by never being asked. Found by writing two new
+  ones, watching them pass locally, and seeing `make check` completely
+  unmoved.
+- **A stale live gui probe skipped all five.** `gui_wifi.sh` finds the probes
+  by glob and runs each, but treated a probe that failed to *compile* as a
+  missing Qt and skipped -- and the skip left the loop. When 0154 removed a
+  network's `priority`, `live_network_dialog` stopped compiling and the whole
+  suite reported "skipping" for days. Running them again immediately found a
+  second regression from the same morning: `fake_supplicant.py` refuses
+  unknown flags on purpose, and netcfgd had started passing `-s`.
+- **The privilege gate read a comment as code.** It ends a match block at the
+  `other =>` arm, recognising it by the words of its message -- and a comment
+  quoting those same words ended the scan early, dropping seven security
+  values and reporting them as deleted.
+
+**The shape to carry.** Two of the three were found only because something
+*else* was being changed, and the third because a gate contradicted code
+believed correct. None would have been found by looking at test output, since
+all three produced output that read as success. **The question that finds
+them is not "did this pass" but "would this have spoken if the answer were
+different"** -- which is `evidence.md`'s rule, met three times in one day in
+one tree.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
