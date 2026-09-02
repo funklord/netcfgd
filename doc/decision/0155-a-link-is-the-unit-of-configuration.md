@@ -572,7 +572,34 @@ presented as obvious:
   process's statement. So `--allow-disruption <name>` means "proceed despite
   this hold", never "remove it".
 
-  **The one word is `guard`, and the field becomes plural.** Asked whether the
+  **One noun with an origin, which is what this tree already does.** The doubt
+  worth recording, because it was raised and it is a fair one: the three
+  sources behave differently enough that they might deserve different words --
+  a declared `guard` and a runtime `hold`. They have different lifetimes,
+  different failure modes, and different answers to whether an operator may
+  remove one.
+
+  The answer is the pattern already in `Origin`. An address can come from the
+  configuration, a DHCP lease, a router advertisement or link-local
+  autoconfiguration -- different lifetimes, different removal rules -- and
+  netcfgd calls them all addresses with an origin recorded. It does not call
+  a DHCP address a lease. That type's own comment is this argument in
+  advance: without knowing which source produced what, "the planner would
+  fight the DHCP client for ownership of its own lease". Which is precisely
+  why the gui needs a source column, and precisely the thing an origin field
+  is for.
+
+  So: one noun, `guard`, carrying where it came from. Two nouns would put the
+  difference in the type name, where every message would have to pick one and
+  every document would explain each in terms of the other -- the habit this
+  design has already produced three times.
+
+  **`hold` survives as the verb.** Guards hold a link; a resync holds a guard;
+  a guard is taken and released. That keeps the semaphore vocabulary, which is
+  the real thing the second noun was reaching for, without a second type to
+  keep in step.
+
+  **The name is `guard`, and the field becomes plural.** Asked whether the
   collapsed concept should be called a hold instead, the answer is no, but it
   is the closest of the naming questions in this record and the argument the
   other way is real.
