@@ -569,10 +569,11 @@ pub struct VethConfig {
 	pub peer: String,
 }
 
-/// What kind of thing an interface is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What kind of thing a device is, and therefore what netcfgd creates.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InterfaceKind {
+	#[default]
 	/// A real NIC.
 	Physical,
 	/// A bridge.
@@ -831,8 +832,6 @@ impl ProbePolicy {
 pub struct Interface {
 	/// Interface name. Sorting key.
 	pub name: String,
-	/// What it is.
-	pub kind: InterfaceKind,
 	/// Whether to bring it up.
 	#[serde(default = "crate::default_true")]
 	pub enabled: bool,
@@ -851,9 +850,6 @@ pub struct Interface {
 	/// Drift behaviour, overriding the global default.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub on_drift: Option<DriftPolicy>,
-	/// Bridge or bond this is a member of.
-	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub master: Option<String>,
 	/// Wired 802.1X. Wifi carries its EAP inside the network profile instead.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub dot1x: Option<EapConfig>,
@@ -876,21 +872,6 @@ pub struct Interface {
 	/// its neighbours.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub forwarding: Option<bool>,
-	/// Where traffic arriving on this interface is redirected to.
-	///
-	/// Synthesised, never written: it is the `ifb` that `ingress_bandwidth`
-	/// asks for. Named in the document rather than derived at apply time so
-	/// that `ncfg plan` can say which device the redirect points at.
-	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub ingress_redirect: Option<String>,
-	/// How this link drains its transmit queue.
-	///
-	/// The root qdisc and nothing below it: decision 0023 draws the same line
-	/// here that 0022 draws for netfilter. netcfgd sets how a link behaves when
-	/// it is congested, because that is a property of the link; it does not
-	/// decide which traffic wins, because that is policy.
-	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub qdisc: Option<QdiscPolicy>,
 	/// Masquerade traffic leaving this interface.
 	///
 	/// The uplink side of a router: every packet going out here leaves with
@@ -946,19 +927,6 @@ pub struct Interface {
 	/// ([0119](../../../doc/decision/0119-a-probe-is-an-observation-and-a-failing-uplink-loses-its-routes.md)).
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub probe: Option<ProbePolicy>,
-	/// VLANs this interface carries, as a bridge port or as a bridge.
-	///
-	/// **Authoritative where present.** A port whose config lists VLANs has
-	/// exactly those, and anything else the kernel holds for it is removed --
-	/// including the VLAN 1 the kernel adds by itself the moment a port joins
-	/// a filtering bridge. Every real trunk setup begins by deleting that
-	/// one, so leaving it because the kernel put it there would mean the
-	/// document does not describe the port.
-	///
-	/// A port the document says nothing about keeps whatever it has. The
-	/// authority is over ports that are configured, not over the bridge.
-	#[serde(default)]
-	pub bridge_vlans: Vec<BridgeVlan>,
 }
 
 /// Whether a tunable is left alone, turned on, or turned off.

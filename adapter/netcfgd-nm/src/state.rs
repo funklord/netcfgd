@@ -180,7 +180,12 @@ fn profiles_of(document: &Document) -> Vec<crate::settings::Profile> {
 				// The *device* is projected in full and says what it is; what
 				// is missing is a profile pretending to configure it.
 				.filter(|interface| {
-					!matches!(interface.kind, netcfgd_model::InterfaceKind::WireGuard(_))
+					// The kind is the device's since 0155 pass 1b, so the
+					// exclusion has to look it up rather than read it here.
+					!document.devices.iter().any(|device| {
+						device.name == interface.name
+							&& matches!(device.kind, netcfgd_model::InterfaceKind::WireGuard(_))
+					})
 				})
 				.map(|interface| {
 					// The device of the same name holds the MTU now, and this

@@ -551,7 +551,7 @@ mod tests {
 	fn a_rejected_configuration_refuses_without_setting_diagnostics() {
 		let config = TestDir::new("reload-rejected-config");
 		let run = TestDir::new("reload-rejected-run");
-		let mut state = state_over(&config, &run, "interface eth0 { kind = \"dummy\" }\n");
+		let mut state = state_over(&config, &run, "device eth0 { kind = \"dummy\" }\n");
 
 		assert!(
 			matches!(state.reload(), Event::Reloaded { ok: true, .. }),

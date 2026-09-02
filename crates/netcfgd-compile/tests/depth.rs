@@ -93,7 +93,7 @@ fn ordinary_nesting_is_nowhere_near_the_limit() {
 	let mut sources = SourceMap::new();
 	sources.add(
 		"ok.conf",
-		"interface eth0 {\n\tconfig = \"dhcp\"\n\tqdisc {\n\t\tkind = \"cake\"\n\t\tbandwidth = \"100mbit\"\n\t}\n}\n",
+		"interface eth0 {\n\tconfig = \"dhcp\"\n}\ndevice eth0 {\n\tqdisc {\n\t\tkind = \"cake\"\n\t\tbandwidth = \"100mbit\"\n\t}\n}\n",
 	);
 	assert!(
 		compile(&sources, &mut NoHooks).is_ok(),

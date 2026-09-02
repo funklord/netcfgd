@@ -75,7 +75,8 @@ fn references(document: &netcfgd_model::Document) -> BTreeMap<String, Vec<String
 			.or_default()
 			.push(what.to_owned());
 	};
-	for interface in &document.interfaces {
+	// Devices: a WireGuard key belongs to the thing being created (0155).
+	for interface in &document.devices {
 		if let netcfgd_model::InterfaceKind::WireGuard(wireguard) = &interface.kind {
 			note(
 				&format!("interface {} (private key)", interface.name),
@@ -93,6 +94,9 @@ fn references(document: &netcfgd_model::Document) -> BTreeMap<String, Vec<String
 		if let netcfgd_model::InterfaceKind::Pppoe(pppoe) = &interface.kind {
 			note(&format!("interface {}", interface.name), &pppoe.password);
 		}
+	}
+
+	for interface in &document.interfaces {
 		if let Some(dot1x) = &interface.dot1x {
 			if let Some(password) = &dot1x.password {
 				note(&format!("interface {} (802.1X)", interface.name), password);

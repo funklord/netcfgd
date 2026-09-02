@@ -374,7 +374,7 @@ fn describe_created(link: &mut ObservedLink, desired: &Document) {
 	use netcfgd_model::InterfaceKind as Kind;
 
 	let Some(interface) = desired
-		.interfaces
+		.devices
 		.iter()
 		.find(|interface| interface.name == link.name)
 	else {
@@ -807,11 +807,13 @@ fn dhcp_waits_for_the_link_but_a_static_address_does_not() {
 fn a_bridge_waits_for_its_members_even_though_it_sorts_first() {
 	let desired = document(
 		r#"
-		interface br0 {
+		device br0 {
 			bridge { members = "eth0" }
+		}
+		interface br0 {
 			config = "10.0.0.1/24"
 		}
-		interface eth0 {
+		device eth0 {
 			master = "br0"
 		}
 		"#,
@@ -843,8 +845,10 @@ fn a_bridge_waits_for_its_members_even_though_it_sorts_first() {
 fn everything_on_a_created_link_waits_for_its_creation() {
 	let desired = document(
 		r#"
-		interface lan10 {
+		device lan10 {
 			vlan   { parent = "eth0"; id = 10 }
+		}
+		interface lan10 {
 			config = "10.0.10.1/24"
 		}
 		"#,
@@ -1127,13 +1131,15 @@ fn a_missing_physical_device_is_reported_not_planned_around() {
 fn the_action_list_is_a_valid_topological_order() {
 	let desired = document(
 		r#"
-		interface br0 {
+		device br0 {
 			bridge { members = "eth0 eth1" }
+		}
+		interface br0 {
 			config = "10.0.0.1/24"
 			routes = "default via 10.0.0.254"
 		}
-		interface eth0 { master = "br0" }
-		interface eth1 { master = "br0" }
+		device eth0 { master = "br0" }
+		device eth1 { master = "br0" }
 		device wan0 { mtu = 1492 }
 		interface wan0 { config = "dhcp" }
 		"#,
@@ -1603,8 +1609,8 @@ interface wlan0 { config = "192.168.9.1/24" }
 #[test]
 fn a_tunnel_that_is_not_up_is_dialled_exactly_once() {
 	for config in [
-		r#"interface t0 { pppoe { parent = "eth0"; username = "u"; password = "@secret:p" } }"#,
-		r#"interface t0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#,
+		r#"device t0 { pppoe { parent = "eth0"; username = "u"; password = "@secret:p" } }"#,
+		r#"device t0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#,
 	] {
 		let desired = document(config);
 		let plan = plan(&desired, &Observed::default(), &PlanOptions::default());
@@ -1621,7 +1627,7 @@ fn a_tunnel_that_is_not_up_is_dialled_exactly_once() {
 /// prerequisite that brings it into existence.
 #[test]
 fn an_openvpn_tunnel_is_started_rather_than_created() {
-	let desired = document(r#"interface vpn0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#);
+	let desired = document(r#"device vpn0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#);
 	// The device does not exist yet, which is the ordinary state before the
 	// daemon has connected.
 	let observed = Observed::default();
@@ -1644,7 +1650,7 @@ fn an_openvpn_tunnel_is_started_rather_than_created() {
 /// And once it is up, nothing starts it again.
 #[test]
 fn a_running_tunnel_is_left_alone() {
-	let desired = document(r#"interface vpn0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#);
+	let desired = document(r#"device vpn0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#);
 	let mut observed = observed_with(&["vpn0"]);
 	observed.links[0].up = true;
 	observed.backends.push(ObservedBackend {
@@ -1671,7 +1677,10 @@ fn a_running_tunnel_is_left_alone() {
 /// rather than a missing feature -- start on one reconcile, stop on the next.
 #[test]
 fn a_tunnel_stops_when_its_block_goes() {
-	let desired = document(r#"interface vpn0 { kind = "dummy"; config = "null" }"#);
+	let desired = document(
+		r#"device vpn0 { kind = "dummy" }
+interface vpn0 { config = "null" }"#,
+	);
 	let mut observed = observed_with(&["vpn0"]);
 	observed.links[0].up = true;
 	observed.backends.push(ObservedBackend {
@@ -1696,7 +1705,10 @@ fn a_tunnel_stops_when_its_block_goes() {
 
 /// An interface whose addresses come from a report.
 fn reported_document() -> Document {
-	document(r#"interface wwan0 { kind = "dummy"; config = "reported" }"#)
+	document(
+		r#"device wwan0 { kind = "dummy" }
+interface wwan0 { config = "reported" }"#,
+	)
 }
 
 /// `wwan0` present, with these addresses reported for it.
@@ -1783,7 +1795,8 @@ fn a_reported_nameserver_is_delivered() {
 	let (desired, mut observed) = reporting_nameservers(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
-interface wwan0 { kind = "dummy"; config = "reported" }
+device wwan0 { kind = "dummy" }
+interface wwan0 { config = "reported" }
 "#,
 		&["8.8.8.8"],
 	);
@@ -1800,7 +1813,8 @@ fn a_synthesised_scope_takes_the_mode_the_host_already_uses() {
 	let (desired, mut observed) = reporting_nameservers(
 		r#"
 global { dns { dns_mode = "resolvconf" } }
-interface wwan0 { kind = "dummy"; config = "reported" }
+device wwan0 { kind = "dummy" }
+interface wwan0 { config = "reported" }
 "#,
 		&["8.8.8.8"],
 	);
@@ -1818,7 +1832,8 @@ interface wwan0 { kind = "dummy"; config = "reported" }
 #[test]
 fn a_host_that_manages_no_dns_still_manages_none() {
 	let (desired, mut observed) = reporting_nameservers(
-		r#"interface wwan0 { kind = "dummy"; config = "reported" }"#,
+		r#"device wwan0 { kind = "dummy" }
+interface wwan0 { config = "reported" }"#,
 		&["8.8.8.8"],
 	);
 
@@ -1837,8 +1852,10 @@ fn a_written_nameserver_comes_before_a_reported_one() {
 	let (desired, mut observed) = reporting_nameservers(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
-interface wwan0 {
+device wwan0 {
 	kind   = "dummy"
+}
+interface wwan0 {
 	config = "reported"
 	dns    = "9.9.9.9"
 }
@@ -1867,8 +1884,10 @@ fn a_nameserver_written_on_an_interface_reaches_the_resolver() {
 	let desired = document(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
-interface eth0 {
+device eth0 {
 	kind   = "dummy"
+}
+interface eth0 {
 	config = "10.0.0.1/24"
 	dns    = "9.9.9.9"
 }
@@ -1903,7 +1922,8 @@ fn a_dns_block_that_asks_for_nothing_plans_nothing() {
 	let desired = document(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
-interface eth0 { kind = "dummy"; config = "10.0.0.1/24"; dns { } }
+device eth0 { kind = "dummy" }
+interface eth0 { config = "10.0.0.1/24"; dns { } }
 "#,
 	);
 	let mut observed = observed_with(&["eth0"]);
@@ -1918,7 +1938,8 @@ fn a_report_without_the_source_contributes_no_nameserver() {
 	let (desired, mut observed) = reporting_nameservers(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
-interface wwan0 { kind = "dummy"; config = "null" }
+device wwan0 { kind = "dummy" }
+interface wwan0 { config = "null" }
 "#,
 		&["8.8.8.8"],
 	);
@@ -1940,7 +1961,8 @@ fn a_tunnels_nameservers_wait_for_the_document_to_ask() {
 	let desired = document(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
-interface vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }
+device vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }
+interface vpn0 { }
 "#,
 	);
 	let mut observed = observed_with(&["vpn0"]);
@@ -1982,8 +2004,10 @@ fn a_dns_block_on_the_tunnel_is_what_asks() {
 	let desired = document(
 		r#"
 global { dns { dns_mode = "dnsmasq" } }
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "/etc/netcfgd/work.ovpn" }
+}
+interface vpn0 {
 	dns { domains = ["corp.example"] }
 }
 "#,
@@ -2015,8 +2039,10 @@ fn a_ppp_sessions_resolvers_follow_the_same_rule() {
 		format!(
 			r#"
 global {{ dns {{ dns_mode = "write_resolv_conf" }} }}
-interface ppp0 {{
+device ppp0 {{
 	pppoe {{ parent = "eth0"; username = "alice"; password = "@secret:dsl" }}
+}}
+interface ppp0 {{
 	{dns}
 }}
 "#
@@ -2062,8 +2088,10 @@ fn an_empty_dns_block_is_enough_to_claim_them() {
 	let desired = document(
 		r#"
 global { dns { dns_mode = "write_resolv_conf" } }
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "/etc/netcfgd/work.ovpn" }
+}
+interface vpn0 {
 	dns { }
 }
 "#,
@@ -2137,7 +2165,7 @@ access_point "after" {
 /// stays the operator's, which is what 0046 protects.
 #[test]
 fn an_edited_ovpn_restarts_the_tunnel() {
-	let desired = document(r#"interface vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }"#);
+	let desired = document(r#"device vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }"#);
 	let mut observed = observed_with(&["vpn0"]);
 	observed.links[0].up = true;
 	observed.backends.push(netcfgd_model::ObservedBackend {
@@ -2168,7 +2196,7 @@ fn an_edited_ovpn_restarts_the_tunnel() {
 /// when netcfgd could not check, which is not the same as a difference.
 #[test]
 fn a_tunnel_whose_file_is_unchanged_or_unreadable_is_left_alone() {
-	let desired = document(r#"interface vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }"#);
+	let desired = document(r#"device vpn0 { openvpn { config = "/etc/netcfgd/work.ovpn" } }"#);
 	for answer in [Some(true), None] {
 		let mut observed = observed_with(&["vpn0"]);
 		observed.links[0].up = true;
@@ -2320,8 +2348,10 @@ access_point "home" {
 fn a_renumbered_delegation_reloads_the_advertisement() {
 	let desired = document(
 		r#"
-interface lan0 {
+device lan0 {
 	kind   = "dummy"
+}
+interface lan0 {
 	config = "@pd:wan0=::1/64"
 	advertise { prefixes = ["@pd:wan0"] }
 }
@@ -2368,8 +2398,10 @@ interface lan0 {
 fn an_advertisement_that_matches_is_not_reloaded() {
 	let desired = document(
 		r#"
-interface lan0 {
+device lan0 {
 	kind   = "dummy"
+}
+interface lan0 {
 	config = "@pd:wan0=::1/64"
 	advertise { prefixes = ["@pd:wan0"] }
 }
@@ -2593,7 +2625,10 @@ fn reported_routes_go_when_the_report_empties() {
 /// of a file somebody dropped in `/run` is not something to invent.
 #[test]
 fn a_report_without_the_source_installs_no_route() {
-	let desired = document(r#"interface wwan0 { kind = "dummy"; config = "null" }"#);
+	let desired = document(
+		r#"device wwan0 { kind = "dummy" }
+interface wwan0 { config = "null" }"#,
+	);
 	let mut observed = reporting(&["10.64.1.23/30"], &["10.64.1.24"]);
 	let plan = settle(&desired, &mut observed);
 	assert!(names(&plan).is_empty(), "got {:?}", names(&plan));
@@ -2684,9 +2719,8 @@ fn no_report_and_an_empty_report_say_different_things() {
 fn wireguard_document(device: &str) -> Document {
 	document(&format!(
 		r#"
-{device}
-
-interface wg0 {{
+device wg0 {{
+	{device}
 	wireguard {{
 		private_key = "@secret:wg0"
 		peer hub {{
@@ -2694,6 +2728,8 @@ interface wg0 {{
 			allowed_ips = "10.0.0.0/24"
 		}}
 	}}
+}}
+interface wg0 {{
 	config = "10.0.0.5/32"
 }}
 "#
@@ -2944,7 +2980,7 @@ fn a_device_being_created_is_not_also_reconfigured() {
 /// here.
 #[test]
 fn unmanaging_a_device_holding_a_wireguard_key_is_not_done_silently() {
-	let desired = wireguard_document("device wg0 { managed = false }");
+	let desired = wireguard_document("managed = false");
 	let observed = wireguard_observed(true);
 
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -2967,7 +3003,7 @@ fn unmanaging_a_device_holding_a_wireguard_key_is_not_done_silently() {
 /// The consent is per device, and it is the whole of what the flag does.
 #[test]
 fn consenting_to_one_device_settles_it() {
-	let desired = wireguard_document("device wg0 { managed = false }");
+	let desired = wireguard_document("managed = false");
 	let observed = wireguard_observed(true);
 	let options = PlanOptions {
 		strand_credentials: vec!["wg0".to_owned()],
@@ -2989,7 +3025,7 @@ fn consenting_to_one_device_settles_it() {
 /// notice becomes something people pass over.
 #[test]
 fn clearing_is_the_answer_and_is_not_reported_as_the_problem() {
-	let desired = wireguard_document(r#"device wg0 { managed = false; on_unmanage = "clear" }"#);
+	let desired = wireguard_document(r#"managed = false; on_unmanage = "clear""#);
 	let plan = plan(&desired, &wireguard_observed(true), &PlanOptions::default());
 	assert!(!plan.strands_credentials(), "got {:?}", plan.stranded);
 }
@@ -2999,7 +3035,7 @@ fn clearing_is_the_answer_and_is_not_reported_as_the_problem() {
 /// it would be a notice about a file.
 #[test]
 fn a_key_that_was_never_loaded_is_not_stranded() {
-	let desired = wireguard_document("device wg0 { managed = false }");
+	let desired = wireguard_document("managed = false");
 	let unkeyed = plan(
 		&desired,
 		&wireguard_observed(false),
@@ -3041,13 +3077,12 @@ fn a_radio_holding_passphrases_is_not_stranding_and_a_key_still_is() {
 	let desired = document(
 		r#"
 device wlan0 { managed = false; wifi { } }
-device wg0   { managed = false }
-
 network "Home" { wifi { psk = "@secret:home" }; config = "dhcp" }
 
 interface wlan0 { config = "dhcp" }
 
-interface wg0 {
+device wg0 {
+	managed = false
 	wireguard {
 		private_key = "@secret:wg0"
 		peer hub {
@@ -3055,6 +3090,8 @@ interface wg0 {
 			allowed_ips = "10.0.0.0/24"
 		}
 	}
+}
+interface wg0 {
 	config = "10.0.0.5/32"
 }
 "#,
@@ -3578,15 +3615,18 @@ interface wlan0 { config = "null" }
 fn an_unmanaged_device_is_not_touched() {
 	let desired = document(
 		r#"
-device probe0 { managed = false }
-
-interface probe0 {
+device probe0 {
+	managed = false
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "10.5.5.1/24"
 }
 
-interface probe1 {
+device probe1 {
 	kind   = "dummy"
+}
+interface probe1 {
 	config = "10.6.6.1/24"
 }
 "#,
@@ -3653,10 +3693,11 @@ fn an_unmanaged_device_is_not_torn_down_either() {
 fn a_cleared_device_is_emptied_and_then_left_alone() {
 	let desired = document(
 		r#"
-device probe0 { managed = false; on_unmanage = "clear" }
-
-interface probe0 {
+device probe0 {
+	managed = false; on_unmanage = "clear"
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "10.5.5.1/24"
 }
 "#,
@@ -3735,10 +3776,11 @@ fn leaving_is_still_what_happens_by_default() {
 fn an_unmanaged_interface_contributes_no_dns_scope() {
 	let desired = document(
 		r#"
-device probe0 { managed = false }
-
-interface probe0 {
+device probe0 {
+	managed = false
 	kind = "dummy"
+}
+interface probe0 {
 	dns  { mode = "write_resolv_conf"; servers = ["10.5.5.53"] }
 }
 "#,
@@ -3958,8 +4000,10 @@ interface br-lan { config = "@pd:wan0=::1/64" }
 fn a_ppp_session_is_dialled_not_created() {
 	let document = document(
 		r#"
-interface ppp0 {
+device ppp0 {
 	pppoe { parent = "eth0"; username = "a"; password = "@secret:dsl" }
+}
+interface ppp0 {
 	routes = "default"
 }
 "#,
@@ -3999,8 +4043,10 @@ interface ppp0 {
 fn a_live_ppp_interface_gets_its_route() {
 	let document = document(
 		r#"
-interface ppp0 {
+device ppp0 {
 	pppoe { parent = "eth0"; username = "a"; password = "@secret:dsl" }
+}
+interface ppp0 {
 	routes = "default"
 }
 "#,
@@ -4038,8 +4084,10 @@ interface ppp0 {
 fn a_configured_port_owns_its_vlan_list() {
 	let document = document(
 		r#"
-interface br0  { bridge { vlan_filtering = true }; config = "null" }
-interface lan1 { master = "br0"; vlans = "10 pvid untagged"; config = "null" }
+device br0 { bridge { vlan_filtering = true } }
+interface br0 { config = "null" }
+device lan1 { master = "br0"; vlans = "10 pvid untagged" }
+interface lan1 { config = "null" }
 "#,
 	);
 	let mut observed = observed_with(&["br0", "lan1"]);
@@ -4091,8 +4139,10 @@ interface lan1 { master = "br0"; vlans = "10 pvid untagged"; config = "null" }
 fn an_unmentioned_port_keeps_its_vlans() {
 	let document = document(
 		r#"
-interface br0   { bridge { vlan_filtering = true }; config = "null" }
-interface other { master = "br0"; config = "null" }
+device br0 { bridge { vlan_filtering = true } }
+interface br0 { config = "null" }
+device other { master = "br0" }
+interface other { config = "null" }
 "#,
 	);
 	let mut observed = observed_with(&["br0", "other"]);
@@ -4126,8 +4176,10 @@ interface other { master = "br0"; config = "null" }
 fn wrong_vlan_flags_are_corrected() {
 	let document = document(
 		r#"
-interface br0  { bridge { vlan_filtering = true }; config = "null" }
-interface lan1 { master = "br0"; vlans = "10 pvid untagged"; config = "null" }
+device br0 { bridge { vlan_filtering = true } }
+interface br0 { config = "null" }
+device lan1 { master = "br0"; vlans = "10 pvid untagged" }
+interface lan1 { config = "null" }
 "#,
 	);
 	let mut observed = observed_with(&["br0", "lan1"]);
@@ -4374,9 +4426,11 @@ fn a_foreign_nat_table_is_reported_not_removed() {
 fn a_qdisc_is_set_once_and_then_left_alone() {
 	let desired = document(
 		r#"
+		device eth0 {
+			qdisc  = "fq_codel"
+		}
 		interface eth0 {
 			config = "10.0.0.2/24"
-			qdisc  = "fq_codel"
 		}
 		"#,
 	);
@@ -4398,12 +4452,14 @@ fn a_qdisc_is_set_once_and_then_left_alone() {
 fn a_cake_at_the_wrong_rate_is_reshaped() {
 	let desired = document(
 		r#"
-		interface eth0 {
-			config = "10.0.0.2/24"
+		device eth0 {
 			qdisc {
 				kind      = "cake"
 				bandwidth = "100mbit"
 			}
+		}
+		interface eth0 {
+			config = "10.0.0.2/24"
 		}
 		"#,
 	);
@@ -4499,13 +4555,15 @@ fn an_absent_qdisc_is_nothing_to_reset() {
 fn ingress_shaping_builds_a_device_a_shaper_and_a_redirect() {
 	let desired = document(
 		r#"
-		interface wan0 {
-			config = "10.0.0.2/24"
+		device wan0 {
 			qdisc {
 				kind              = "cake"
 				bandwidth         = "100mbit"
 				ingress_bandwidth = "50mbit"
 			}
+		}
+		interface wan0 {
+			config = "10.0.0.2/24"
 		}
 		"#,
 	);
@@ -4541,9 +4599,11 @@ fn ingress_shaping_builds_a_device_a_shaper_and_a_redirect() {
 fn removing_ingress_shaping_removes_the_whole_path() {
 	let desired = document(
 		r#"
+		device wan0 {
+			qdisc  = "fq_codel"
+		}
 		interface wan0 {
 			config = "10.0.0.2/24"
-			qdisc  = "fq_codel"
 		}
 		"#,
 	);
@@ -4944,7 +5004,7 @@ fn a_peer_with_an_endpoint_is_not_replaced_on_every_reconcile() {
 fn a_zero_in_the_document_means_what_the_kernel_means_by_one() {
 	let desired = document(
 		r#"
-interface wg0 {
+device wg0 {
 	wireguard {
 		private_key = "@secret:wg0"
 		listen_port = 0
@@ -4955,6 +5015,8 @@ interface wg0 {
 			keepalive   = 0
 		}
 	}
+}
+interface wg0 {
 	config = "10.0.0.5/32"
 }
 "#,
@@ -4988,8 +5050,10 @@ interface wg0 {
 fn an_edited_bridge_setting_is_planned() {
 	let desired = document(
 		r#"
-interface br0 {
+device br0 {
 	bridge { stp = false; forward_delay = 20 }
+}
+interface br0 {
 	config = "10.4.0.1/24"
 }
 "#,
@@ -5026,8 +5090,10 @@ interface br0 {
 fn a_bridge_matching_its_document_plans_nothing() {
 	let desired = document(
 		r#"
-interface br0 {
+device br0 {
 	bridge { stp = true; forward_delay = 4 }
+}
+interface br0 {
 	config = "10.4.0.1/24"
 }
 "#,
@@ -5066,8 +5132,10 @@ interface br0 {
 fn a_bond_with_members_is_told_why_its_mode_cannot_move() {
 	let desired = document(
 		r#"
-interface bond0 {
+device bond0 {
 	bond { members = "port0"; mode = "balance-rr"; miimon = 250 }
+}
+interface bond0 {
 	config = "null"
 }
 "#,
@@ -5113,9 +5181,12 @@ interface bond0 {
 fn an_edited_vlan_id_is_remade() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface work-net {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device work-net {
 	vlan { parent = "base0"; id = 43 }
+}
+interface work-net {
 	config = "10.4.0.1/24"
 }
 "#,
@@ -5171,9 +5242,12 @@ interface work-net {
 fn an_edited_vlan_protocol_is_remade() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface work-net {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device work-net {
 	vlan { parent = "base0"; id = 42; protocol = "dot1ad" }
+}
+interface work-net {
 	config = "null"
 }
 "#,
@@ -5198,9 +5272,12 @@ interface work-net {
 fn a_vlan_matching_its_document_is_not_remade() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface work-net {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device work-net {
 	vlan { parent = "base0"; id = 42 }
+}
+interface work-net {
 	config = "null"
 }
 "#,
@@ -5230,9 +5307,12 @@ interface work-net {
 fn an_interface_of_the_wrong_kind_is_remade() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface mixup {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device mixup {
 	macvlan { parent = "base0"; mode = "bridge" }
+}
+interface mixup {
 	config = "null"
 }
 "#,
@@ -5257,9 +5337,12 @@ interface mixup {
 fn a_vlan_netcfgd_did_not_create_is_only_reported() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface work-net {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device work-net {
 	vlan { parent = "base0"; id = 43 }
+}
+interface work-net {
 	config = "null"
 }
 "#,
@@ -5304,9 +5387,12 @@ interface work-net {
 fn a_guard_refuses_a_recreation_whole() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface work-net {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device work-net {
 	vlan   { parent = "base0"; id = 43 }
+}
+interface work-net {
 	guard  = "the office VLAN carries the phones"
 	config = "10.4.0.1/24"
 }
@@ -5345,9 +5431,12 @@ interface work-net {
 fn a_backend_on_a_remade_interface_is_stopped_first() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface work-net {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device work-net {
 	vlan { parent = "base0"; id = 43 }
+}
+interface work-net {
 	config = "dhcp"
 }
 "#,
@@ -5825,9 +5914,12 @@ fn a_remade_interface_fires_down_and_up_hooks() {
 	let mut sources = SourceMap::new();
 	sources.add(
 		"netcfgd.conf",
-		"interface base0 { kind = \"dummy\"; config = \"null\" }\n\
-		 interface work-net {\n\
+		"device base0 { kind = \"dummy\" }
+interface base0 { config = \"null\" }\n\
+		 device work-net {\n\
 		 \tvlan { parent = \"base0\"; id = 43 }\n\
+		 }\n\
+		 interface work-net {\n\
 		 \tconfig = \"null\"\n\
 		 \tdown {\necho going\n}\n\
 		 \tpost_up {\necho back\n}\n\
@@ -6154,7 +6246,7 @@ fn an_unreadable_hostname_plans_nothing() {
 fn a_backend_that_will_not_stay_up_stops_being_restarted() {
 	let desired = document(
 		r#"
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "/etc/netcfgd/work.ovpn" }
 }
 "#,
@@ -6446,14 +6538,20 @@ fn an_unreadable_privacy_sysctl_plans_nothing() {
 fn a_moved_vlan_parent_is_remade_and_a_vxlan_underlay_is_not() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface base1 { kind = "dummy"; config = "null" }
-interface work-net {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device base1 { kind = "dummy" }
+interface base1 { config = "null" }
+device work-net {
 	vlan { parent = "base1"; id = 42 }
+}
+interface work-net {
 	config = "null"
 }
-interface vx100 {
+device vx100 {
 	vxlan { id = 100; parent = "base1"; remote = "10.9.0.2" }
+}
+interface vx100 {
 	config = "null"
 }
 "#,
@@ -6513,9 +6611,12 @@ interface vx100 {
 fn a_parent_the_document_does_not_name_is_not_compared() {
 	let desired = document(
 		r#"
-interface base0 { kind = "dummy"; config = "null" }
-interface tun-office {
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device tun-office {
 	tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2" }
+}
+interface tun-office {
 	config = "null"
 }
 "#,
@@ -6551,8 +6652,10 @@ interface tun-office {
 fn a_member_of_a_remade_master_is_enslaved_again() {
 	let desired = document(
 		r#"
-interface br0 { bridge { }; config = "null" }
-interface port0 { kind = "dummy"; master = "br0"; config = "null" }
+device br0 { bridge { } }
+interface br0 { config = "null" }
+device port0 { kind = "dummy"; master = "br0" }
+interface port0 { config = "null" }
 "#,
 	);
 	let mut observed = observed_with(&["br0", "port0"]);
@@ -6591,8 +6694,10 @@ interface port0 { kind = "dummy"; master = "br0"; config = "null" }
 fn an_edited_macvlan_mode_is_planned() {
 	let desired = document(
 		r#"
-interface mv0 {
+device mv0 {
 	macvlan { parent = "base0"; mode = "vepa" }
+}
+interface mv0 {
 	config = "null"
 }
 "#,
@@ -6620,8 +6725,10 @@ interface mv0 {
 fn a_macvlan_matching_its_document_plans_nothing() {
 	let desired = document(
 		r#"
-interface mv0 {
+device mv0 {
 	macvlan { parent = "base0"; mode = "bridge" }
+}
+interface mv0 {
 	config = "null"
 }
 "#,
@@ -6653,16 +6760,20 @@ interface mv0 {
 fn a_passthru_macvlan_is_told_why_its_mode_cannot_move() {
 	let leaving = document(
 		r#"
-interface mv0 {
+device mv0 {
 	macvlan { parent = "base0"; mode = "bridge" }
+}
+interface mv0 {
 	config = "null"
 }
 "#,
 	);
 	let entering = document(
 		r#"
-interface mv0 {
+device mv0 {
 	macvlan { parent = "base0"; mode = "passthru" }
+}
+interface mv0 {
 	config = "null"
 }
 "#,
@@ -6702,8 +6813,10 @@ interface mv0 {
 fn a_macvlan_mode_netcfgd_cannot_name_is_left_alone() {
 	let desired = document(
 		r#"
-interface mv0 {
+device mv0 {
 	macvlan { parent = "base0"; mode = "bridge" }
+}
+interface mv0 {
 	config = "null"
 }
 "#,
@@ -6728,8 +6841,10 @@ interface mv0 {
 fn an_edited_tunnel_endpoint_is_planned() {
 	let desired = document(
 		r#"
-interface tun-office {
+device tun-office {
 	tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.9" }
+}
+interface tun-office {
 	config = "null"
 }
 "#,
@@ -6764,8 +6879,10 @@ interface tun-office {
 fn a_tunnel_matching_its_document_plans_nothing() {
 	let desired = document(
 		r#"
-interface tun-office {
+device tun-office {
 	tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2" }
+}
+interface tun-office {
 	config = "null"
 }
 "#,
@@ -6801,8 +6918,10 @@ interface tun-office {
 fn a_geneve_vni_is_told_why_it_cannot_move() {
 	let desired = document(
 		r#"
-interface gnv0 {
+device gnv0 {
 	tunnel { mode = "geneve"; remote = "10.7.0.9"; vni = 501 }
+}
+interface gnv0 {
 	config = "null"
 }
 "#,
@@ -6841,8 +6960,10 @@ interface gnv0 {
 fn an_edited_gre_key_is_planned() {
 	let desired = document(
 		r#"
-interface tun-office {
+device tun-office {
 	tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2"; key = 43 }
+}
+interface tun-office {
 	config = "null"
 }
 "#,
@@ -6884,8 +7005,10 @@ interface tun-office {
 fn a_geneve_remote_in_the_other_family_is_a_sentence() {
 	let desired = document(
 		r#"
-interface gnv0 {
+device gnv0 {
 	tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 }
+}
+interface gnv0 {
 	config = "null"
 }
 "#,
@@ -6926,8 +7049,10 @@ interface gnv0 {
 fn a_vxlan_id_and_port_are_told_why_they_cannot_move() {
 	let desired = document(
 		r#"
-interface vx0 {
+device vx0 {
 	vxlan { id = 101; local = "10.9.0.1"; remote = "10.9.0.9"; port = 4790 }
+}
+interface vx0 {
 	config = "null"
 }
 "#,
@@ -6970,8 +7095,10 @@ interface vx0 {
 fn a_vxlan_matching_its_document_plans_nothing() {
 	let desired = document(
 		r#"
-interface vx0 {
+device vx0 {
 	vxlan { id = 100; local = "10.9.0.1"; remote = "10.9.0.2" }
+}
+interface vx0 {
 	config = "null"
 }
 "#,
@@ -7007,8 +7134,10 @@ interface vx0 {
 fn a_bond_with_no_members_has_its_mode_planned() {
 	let desired = document(
 		r#"
-interface bond0 {
+device bond0 {
 	bond { members = ""; mode = "balance-rr" }
+}
+interface bond0 {
 	config = "null"
 }
 "#,
@@ -7467,12 +7596,16 @@ fn taking_an_interface_down_leaves_somebody_elses_address_alone() {
 fn a_refused_action_is_not_something_to_wait_for() {
 	let desired = document(
 		r#"
-		interface br0 {
+		device br0 {
 			bridge { members = "eth0" }
+		}
+		interface br0 {
 			config = "10.0.0.1/24"
 		}
-		interface eth0 {
+		device eth0 {
 			master = "br0"
+		}
+		interface eth0 {
 			guard  = "nfs root"
 		}
 		"#,

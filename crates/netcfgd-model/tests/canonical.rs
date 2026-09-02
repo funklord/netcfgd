@@ -11,28 +11,42 @@ use netcfgd_model::{
 };
 use std::net::IpAddr;
 
+fn dev(name: &str) -> Device {
+	Device {
+		name: name.to_owned(),
+		r#match: None,
+		managed: true,
+		on_unmanage: netcfgd_model::OnUnmanage::Leave,
+		wifi: None,
+		modem: None,
+		mtu: None,
+		mac: None,
+		link_settings: None,
+		kind: netcfgd_model::InterfaceKind::Physical,
+		master: None,
+		qdisc: None,
+		ingress_redirect: None,
+		bridge_vlans: Vec::new(),
+	}
+}
+
 fn iface(name: &str) -> Interface {
 	Interface {
 		name: name.to_owned(),
-		kind: InterfaceKind::Physical,
 		enabled: true,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,
 		hooks: Vec::new(),
 		on_drift: None,
-		master: None,
 		dot1x: None,
 		advertise: None,
 		forwarding: None,
 		nat: None,
-		qdisc: None,
-		ingress_redirect: None,
 		guard: None,
 		ipv6_token: None,
 		preference: None,
 		probe: None,
-		bridge_vlans: Vec::new(),
 	}
 }
 
@@ -105,6 +119,11 @@ fn insertion_order_does_not_survive_canonicalisation() {
 	forward.networks.push(wifi("alpha"));
 	forward.networks.push(wifi("beta"));
 	forward.devices.push(Device {
+		kind: netcfgd_model::InterfaceKind::Physical,
+		master: None,
+		qdisc: None,
+		ingress_redirect: None,
+		bridge_vlans: Vec::new(),
 		name: "eth0".to_owned(),
 		r#match: None,
 		managed: true,
@@ -123,6 +142,11 @@ fn insertion_order_does_not_survive_canonicalisation() {
 	backward.networks.push(wifi("beta"));
 	backward.networks.push(wifi("alpha"));
 	backward.devices.push(Device {
+		kind: netcfgd_model::InterfaceKind::Physical,
+		master: None,
+		qdisc: None,
+		ingress_redirect: None,
+		bridge_vlans: Vec::new(),
 		name: "eth0".to_owned(),
 		r#match: None,
 		managed: true,
@@ -160,7 +184,8 @@ fn nested_lists_sort_as_well() {
 	let mut eth0 = iface("eth0");
 	eth0.routes.push(route("10.0.0.0/8"));
 	eth0.routes.push(route("default"));
-	eth0.kind = InterfaceKind::Bridge(BridgeConfig {
+	let mut br = dev("eth0");
+	br.kind = InterfaceKind::Bridge(BridgeConfig {
 		members: vec!["eth2".to_owned(), "eth1".to_owned()],
 		stp: false,
 		forward_delay: None,
@@ -170,12 +195,14 @@ fn nested_lists_sort_as_well() {
 		vlan_filtering: false,
 	});
 	a.interfaces.push(eth0);
+	a.devices.push(br);
 
 	let mut b = Document::default();
 	let mut eth0 = iface("eth0");
 	eth0.routes.push(route("default"));
 	eth0.routes.push(route("10.0.0.0/8"));
-	eth0.kind = InterfaceKind::Bridge(BridgeConfig {
+	let mut br = dev("eth0");
+	br.kind = InterfaceKind::Bridge(BridgeConfig {
 		members: vec!["eth1".to_owned(), "eth2".to_owned()],
 		stp: false,
 		forward_delay: None,
@@ -185,6 +212,7 @@ fn nested_lists_sort_as_well() {
 		vlan_filtering: false,
 	});
 	b.interfaces.push(eth0);
+	b.devices.push(br);
 
 	assert_eq!(
 		a.to_json_canonical().expect("valid"),
@@ -617,6 +645,11 @@ fn the_encoding_contains_no_floats() {
 	// numbers the count below insists on -- so it moves here rather than
 	// leaving the guard to fail for the wrong reason.
 	doc.devices.push(netcfgd_model::Device {
+		kind: netcfgd_model::InterfaceKind::Physical,
+		master: None,
+		qdisc: None,
+		ingress_redirect: None,
+		bridge_vlans: Vec::new(),
 		name: "eth0".to_owned(),
 		r#match: None,
 		managed: true,

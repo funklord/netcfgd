@@ -216,6 +216,11 @@ mod tests {
 			mtu: None,
 			mac: None,
 			link_settings: None,
+			kind: netcfgd_model::InterfaceKind::Physical,
+			master: None,
+			qdisc: None,
+			ingress_redirect: None,
+			bridge_vlans: Vec::new(),
 			on_unmanage: OnUnmanage::Leave,
 			wifi: None,
 			modem: Some(ModemPolicy {

@@ -1005,17 +1005,13 @@ mod tests {
 	fn interface(name: &str) -> Interface {
 		Interface {
 			name: name.to_owned(),
-			kind: netcfgd_model::InterfaceKind::Physical,
 			enabled: true,
 			addressing: Vec::new(),
 			routes: Vec::new(),
 			dns: None,
 			hooks: Vec::new(),
 			nat: None,
-			qdisc: None,
-			ingress_redirect: None,
 			on_drift: None,
-			master: None,
 			dot1x: None,
 			advertise: None,
 			forwarding: None,
@@ -1023,7 +1019,6 @@ mod tests {
 			ipv6_token: None,
 			preference: None,
 			probe: None,
-			bridge_vlans: Vec::new(),
 		}
 	}
 

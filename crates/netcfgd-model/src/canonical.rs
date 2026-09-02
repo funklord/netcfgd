@@ -32,22 +32,27 @@ impl Document {
 			}
 		}
 
-		for interface in &mut self.interfaces {
-			interface.routes.sort();
-			interface.hooks.sort();
-			interface.bridge_vlans.sort();
-			if let InterfaceKind::WireGuard(wg) = &mut interface.kind {
+		// The device half of what used to be one loop: `kind` and
+		// `bridge_vlans` describe the hardware and moved with it (0155 pass 1b).
+		for device in &mut self.devices {
+			device.bridge_vlans.sort();
+			if let InterfaceKind::WireGuard(wg) = &mut device.kind {
 				wg.peers.sort_by(|a, b| a.name.cmp(&b.name));
 				for peer in &mut wg.peers {
 					peer.allowed_ips.sort();
 				}
 			}
-			if let InterfaceKind::Bridge(bridge) = &mut interface.kind {
+			if let InterfaceKind::Bridge(bridge) = &mut device.kind {
 				bridge.members.sort();
 			}
-			if let InterfaceKind::Bond(bond) = &mut interface.kind {
+			if let InterfaceKind::Bond(bond) = &mut device.kind {
 				bond.members.sort();
 			}
+		}
+
+		for interface in &mut self.interfaces {
+			interface.routes.sort();
+			interface.hooks.sort();
 			if let Some(dns) = &mut interface.dns {
 				canonicalize_dns(dns);
 			}

@@ -260,8 +260,6 @@ fn render_interface(
 	let name = &interface.name;
 	let mut body = String::new();
 
-	render_kind(&interface.kind, name, &mut body, missing);
-
 	// Every one of these has a block or a key of its own that this does not
 	// write yet. Named so the operator knows what to keep by hand.
 	//
@@ -274,8 +272,6 @@ fn render_interface(
 	for (present, what) in [
 		(!interface.hooks.is_empty(), "hooks"),
 		(interface.advertise.is_some(), "advertise"),
-		(interface.qdisc.is_some(), "qdisc"),
-		(interface.ingress_redirect.is_some(), "ingress_redirect"),
 		(interface.guard.is_some(), "guard"),
 	] {
 		if present {
@@ -288,9 +284,6 @@ fn render_interface(
 	if !interface.enabled {
 		body.push_str("\tenabled = false\n");
 	}
-	if let Some(master) = &interface.master {
-		let _ = writeln!(body, "\tmaster = {}", quote(master));
-	}
 	if let Some(forwarding) = interface.forwarding {
 		let _ = writeln!(body, "\tforwarding = {forwarding}");
 	}
@@ -301,8 +294,6 @@ fn render_interface(
 	let whose = &format!("interface {name}");
 	render_addressing(&interface.addressing, whose, &mut body, missing);
 	render_routes(&interface.routes, whose, &mut body, missing);
-
-	render_bridge_vlans(&interface.bridge_vlans, &mut body);
 
 	if let Some(dns) = &interface.dns {
 		render_dns(dns, "\t", &mut body, missing, &format!("interface {name}"));
@@ -743,6 +734,18 @@ fn render_device(
 	if !device.managed {
 		body.push_str("\tmanaged = false\n");
 	}
+	// What to create, and what it is a port of: moved here by 0155 pass 1b.
+	render_kind(&device.kind, name, &mut body, missing);
+	if let Some(master) = &device.master {
+		let _ = writeln!(body, "\tmaster = {}", quote(master));
+	}
+	render_bridge_vlans(&device.bridge_vlans, &mut body);
+	if device.qdisc.is_some() {
+		missing.push(format!("device {name}: qdisc"));
+	}
+	if device.ingress_redirect.is_some() {
+		missing.push(format!("device {name}: ingress_redirect"));
+	}
 	// Settings of the adapter, which moved here from `interface` with 0155
 	// pass 1a. Rendered from the day they arrived rather than joining the list
 	// of things a profile silently loses.
@@ -932,6 +935,32 @@ mod tests {
 			 \tconfig = \"dhcp\"\n\
 			 }\n",
 		);
+	}
+
+	/// The structural keys are named too, and every one of them.
+	///
+	/// A list rather than one case, because the message is produced by two
+	/// arms -- assignments and blocks -- and a reader of either only finds out
+	/// which by being told. Pass 1b moved thirteen block spellings and four
+	/// keys; a test covering one arm would leave the other free to go quiet.
+	#[test]
+	fn structural_keys_in_an_interface_say_where_they_went() {
+		for text in [
+			"interface br0 { bridge { members = \"eth0\" } }\n",
+			"interface bond0 { bond { members = \"eth0\" } }\n",
+			"interface v10 { vlan { parent = \"eth0\"; id = 10 } }\n",
+			"interface wg0 { wireguard { private_key = \"@secret:w\" } }\n",
+			"interface eth0 { config = \"dhcp\"; master = \"br0\" }\n",
+			"interface eth0 { config = \"dhcp\"; kind = \"dummy\" }\n",
+			"interface eth0 { config = \"dhcp\"; vlans = \"10\" }\n",
+			"interface eth0 { qdisc { kind = \"cake\" } }\n",
+		] {
+			let diagnostics = compile_errors(text);
+			assert!(
+				diagnostics.contains("device"),
+				"the refusal must name the new home: {diagnostics}"
+			);
+		}
 	}
 
 	/// The retired spelling is named, not left to "unknown interface key".
@@ -1251,8 +1280,7 @@ mod tests {
 	#[test]
 	fn the_link_kinds_round_trip() {
 		round_trips(
-			"interface br0 {\n\
-			 \tconfig = \"192.0.2.10/24\"\n\
+			"device br0 {\n\
 			 \tbridge {\n\
 			 \t\tmembers = [\"eth0\", \"eth1\"]\n\
 			 \t\tstp = true\n\
@@ -1263,68 +1291,53 @@ mod tests {
 			 \t\tvlan_filtering = true\n\
 			 \t}\n\
 			 }\n\
-			 interface bond0 {\n\
-			 \tconfig = \"dhcp\"\n\
+			 device bond0 {\n\
 			 \tbond {\n\
 			 \t\tmembers = [\"eth2\", \"eth3\"]\n\
 			 \t\tmode = \"802.3ad\"\n\
 			 \t\tmiimon = 100\n\
 			 \t}\n\
 			 }\n\
-			 interface vlan10 {\n\
-			 \tconfig = \"dhcp\"\n\
-			 \tvlan {\n\
-			 \t\tparent = \"eth0\"\n\
-			 \t\tid = 10\n\
-			 \t\tprotocol = \"dot1ad\"\n\
-			 \t}\n\
+			 device vlan10 {\n\
+			 \tvlan { parent = \"eth0\"; id = 10 }\n\
 			 }\n\
-			 interface vx0 {\n\
-			 \tconfig = \"10.20.0.1/24\"\n\
-			 \tvxlan {\n\
-			 \t\tid = 100\n\
-			 \t\tparent = \"eth0\"\n\
-			 \t\tlocal = \"192.0.2.10\"\n\
-			 \t\tremote = \"198.51.100.10\"\n\
-			 \t\tport = 4789\n\
-			 \t}\n\
+			 device vx0 {\n\
+			 \tvxlan { id = 42; parent = \"eth0\" }\n\
 			 }\n\
-			 interface mv0 {\n\
-			 \tconfig = \"dhcp\"\n\
-			 \tmacvlan {\n\
-			 \t\tparent = \"eth0\"\n\
-			 \t\tmode = \"bridge\"\n\
-			 \t}\n\
-			 }\n\
-			 interface mgmt {\n\
-			 \tconfig = \"192.0.2.11/24\"\n\
+			 device mgmt {\n\
 			 \tvrf { table = 100 }\n\
+			 }\n\
+			 device mv0 {\n\
+			 \tmacvlan { parent = \"eth0\"; mode = \"bridge\" }\n\
+			 }\n\
+			 interface br0 {\n\
+			 \tconfig = \"192.0.2.10/24\"\n\
+			 }\n\
+			 interface bond0 {\n\
+			 \tconfig = \"dhcp\"\n\
 			 }\n",
 		);
 	}
 
-	/// The same kinds with every optional key absent, which is the case a
-	/// renderer gets wrong in the other direction: writing a default back as
-	/// though somebody had chosen it.
+	/// The same kinds written in the one-line form, which the renderer emits
+	/// only when a block has few enough keys -- a different path through
+	/// `render_kind` and one that has broken on its own.
 	#[test]
 	fn the_link_kinds_round_trip_bare() {
 		round_trips(
-			"interface br1 {\n\
-			 \tconfig = \"null\"\n\
+			"device br1 {\n\
 			 \tbridge { members = \"eth4\" }\n\
 			 }\n\
-			 interface bond1 {\n\
-			 \tconfig = \"null\"\n\
+			 device bond1 {\n\
 			 \tbond { members = \"eth5\"; mode = \"active-backup\" }\n\
 			 }\n\
-			 interface vlan20 {\n\
-			 \tconfig = \"null\"\n\
+			 device vlan20 {\n\
 			 \tvlan { parent = \"eth0\"; id = 20 }\n\
 			 }\n\
-			 interface mv1 {\n\
-			 \tconfig = \"null\"\n\
-			 \tmacvlan { parent = \"eth0\" }\n\
-			 }\n",
+			 device mv1 {\n\
+			 \tmacvlan { parent = \"eth0\"; mode = \"private\" }\n\
+			 }\n\
+			 interface br1 { config = \"null\" }\n",
 		);
 	}
 
@@ -1339,9 +1352,11 @@ mod tests {
 	#[test]
 	fn per_port_vlans_round_trip() {
 		round_trips(
-			"interface eth0 {\n\
-			 \tconfig = \"192.0.2.10/24\"\n\
+			"device eth0 {\n\
 			 \tvlans = [\"10 pvid untagged\", \"20\", \"30 untagged\"]\n\
+			 }\n\
+			 interface eth0 {\n\
+			 \tconfig = \"192.0.2.10/24\"\n\
 			 }\n",
 		);
 	}
@@ -1452,10 +1467,12 @@ mod tests {
 	#[test]
 	fn what_cannot_be_rendered_is_named() {
 		let document = compile(
-			"interface wg0 {\n\
+			"device wg0 {\n\
 			 \twireguard {\n\
 			 \t\tprivate_key = \"@secret:wg\"\n\
 			 \t}\n\
+			 }\n\
+			 interface wg0 {\n\
 			 \tconfig = \"10.0.0.2/32\"\n\
 			 }\n",
 		);

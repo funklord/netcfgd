@@ -76,7 +76,7 @@ fn a_static_ethernet_interface_compiles() {
 	let eth0 = &document.interfaces[0];
 	assert_eq!(eth0.name, "eth0");
 	assert_eq!(document.devices[0].mtu, Some(1500));
-	assert_eq!(eth0.kind, InterfaceKind::Physical);
+	assert_eq!(document.devices[0].kind, InterfaceKind::Physical);
 
 	match &eth0.addressing[0] {
 		AddressSource::Static(address) => assert_eq!(address.address, "192.168.1.10/24"),
@@ -353,14 +353,15 @@ fn a_delegated_prefix_is_a_reference() {
 fn a_vlan_block_sets_the_kind() {
 	let document = build_ok(
 		r#"
-		interface lan-10 {
+		device lan-10 {
 			vlan { parent = "eth0"; id = 10 }
+		}
+		interface lan-10 {
 			config = "10.0.10.1/24"
 		}
 		"#,
 	);
-
-	match &document.interfaces[0].kind {
+	match &document.devices[0].kind {
 		InterfaceKind::Vlan(vlan) => {
 			assert_eq!(vlan.parent, "eth0");
 			assert_eq!(vlan.id, 10);
@@ -368,7 +369,6 @@ fn a_vlan_block_sets_the_kind() {
 		other => panic!("expected a vlan, got {other:?}"),
 	}
 }
-
 /// Compilation is deterministic: the same text is the same document, and the
 /// same bytes.
 #[test]
@@ -1197,7 +1197,8 @@ access_point "guest" {
 #[test]
 fn an_interface_name_may_contain_a_dot() {
 	let document = build_ok(
-		r#"interface eth0.42 { vlan { parent = "eth0"; id = 42 }; config = "10.42.0.2/24" }"#,
+		r#"device eth0.42 { vlan { parent = "eth0"; id = 42 } }
+interface eth0.42 { config = "10.42.0.2/24" }"#,
 	);
 	assert!(document
 		.interfaces
@@ -1216,16 +1217,17 @@ fn an_interface_name_may_contain_a_dot() {
 fn bridge_members_become_masters() {
 	let document = build_ok(
 		r#"
-interface br0 { bridge { members = "eth0 eth1" }; config = "dhcp" }
+device br0 { bridge { members = "eth0 eth1" } }
+interface br0 { config = "dhcp" }
 interface eth0 { config = "null" }
 "#,
 	);
 
 	let master_of = |name: &str| {
 		document
-			.interfaces
+			.devices
 			.iter()
-			.find(|interface| interface.name == name)
+			.find(|device| device.name == name)
 			.unwrap_or_else(|| panic!("no {name}"))
 			.master
 			.clone()
@@ -1244,16 +1246,20 @@ interface eth0 { config = "null" }
 fn a_contradictory_membership_is_refused() {
 	let agreed = build_ok(
 		r#"
-interface br0 { bridge { members = "eth0" }; config = "dhcp" }
-interface eth0 { master = "br0"; config = "null" }
+device br0 { bridge { members = "eth0" } }
+interface br0 { config = "dhcp" }
+device eth0 { master = "br0" }
+interface eth0 { config = "null" }
 "#,
 	);
 	assert_eq!(agreed.interfaces.len(), 2);
 
 	let message = errors(
 		r#"
-interface br0 { bridge { members = "eth0" }; config = "dhcp" }
-interface br1 { bridge { members = "eth0" }; config = "dhcp" }
+device br0 { bridge { members = "eth0" } }
+interface br0 { config = "dhcp" }
+device br1 { bridge { members = "eth0" } }
+interface br1 { config = "dhcp" }
 interface eth0 { config = "null" }
 "#,
 	);
@@ -1268,15 +1274,16 @@ fn a_bonding_mode_is_checked_at_compile_time() {
 	use netcfgd_model::BondMode;
 
 	let document = build_ok(
-		r#"interface bond0 { bond { members = "eth0"; mode = "802.3ad" }; config = "dhcp" }"#,
+		r#"device bond0 { bond { members = "eth0"; mode = "802.3ad" } }
+interface bond0 { config = "dhcp" }"#,
 	);
-	let netcfgd_model::InterfaceKind::Bond(bond) = &document.interfaces[0].kind else {
+	let netcfgd_model::InterfaceKind::Bond(bond) = &document.devices[0].kind else {
 		panic!("expected a bond");
 	};
 	assert_eq!(bond.mode, BondMode::Ieee8023ad);
 	assert_eq!(bond.mode.number(), 4);
 
-	let message = errors(r#"interface bond0 { bond { mode = "active_backup" } }"#);
+	let message = errors(r#"device bond0 { bond { mode = "active_backup" } }"#);
 	assert!(message.contains("not a bonding mode"), "got: {message}");
 	assert!(
 		message.contains("active-backup"),
@@ -1284,19 +1291,21 @@ fn a_bonding_mode_is_checked_at_compile_time() {
 	);
 }
 
-/// VXLAN, which had no lowering at all: `interface vx0 { vxlan { ... } }` was
+/// VXLAN, which had no lowering at all: `device vx0 { vxlan { ... } }` was
 /// an unknown block.
 #[test]
 fn vxlan_compiles() {
 	let document = build_ok(
 		r#"
-interface vx100 {
+device vx100 {
 	vxlan { id = 100; parent = "eth0"; local = "10.0.0.1"; remote = "10.0.0.2"; port = 4789 }
+}
+interface vx100 {
 	config = "null"
 }
 "#,
 	);
-	let netcfgd_model::InterfaceKind::Vxlan(vxlan) = &document.interfaces[0].kind else {
+	let netcfgd_model::InterfaceKind::Vxlan(vxlan) = &document.devices[0].kind else {
 		panic!("expected a vxlan");
 	};
 	assert_eq!(vxlan.id, 100);
@@ -1305,24 +1314,27 @@ interface vx100 {
 
 	// A VNI over 24 bits is silently truncated by the kernel, so two tunnels
 	// that look distinct in the config become one.
-	assert!(errors("interface vx0 { vxlan { id = 16777216 } }").contains("24 bits"));
+	assert!(errors("device vx0 { vxlan { id = 16777216 } }").contains("24 bits"));
 	// Mixing families produces a kernel error that names neither end.
-	assert!(errors(
-		r#"interface vx0 { vxlan { id = 1; local = "10.0.0.1"; remote = "fd00::1" } }"#
-	)
-	.contains("same address family"));
-	assert!(errors(r#"interface vx0 { vxlan { parent = "eth0" } }"#).contains("needs an `id`"));
+	assert!(
+		errors(r#"device vx0 { vxlan { id = 1; local = "10.0.0.1"; remote = "fd00::1" } }"#)
+			.contains("same address family")
+	);
+	assert!(errors(r#"device vx0 { vxlan { parent = "eth0" } }"#).contains("needs an `id`"));
 }
 
 /// A veth is a pair and both ends are named at creation.
 #[test]
 fn veth_compiles() {
-	let document = build_ok(r#"interface veth-a { veth { peer = "veth-b" }; config = "null" }"#);
-	let netcfgd_model::InterfaceKind::Veth(veth) = &document.interfaces[0].kind else {
+	let document = build_ok(
+		r#"device veth-a { veth { peer = "veth-b" } }
+interface veth-a { config = "null" }"#,
+	);
+	let netcfgd_model::InterfaceKind::Veth(veth) = &document.devices[0].kind else {
 		panic!("expected a veth");
 	};
 	assert_eq!(veth.peer, "veth-b");
-	assert!(errors("interface veth-a { veth { } }").contains("needs a `peer`"));
+	assert!(errors("device veth-a { veth { } }").contains("needs a `peer`"));
 }
 
 /// `WireGuard`, which had been refused with "lands in M4" since M1.
@@ -1330,7 +1342,7 @@ fn veth_compiles() {
 fn wireguard_compiles() {
 	let document = build_ok(
 		r#"
-interface wg0 {
+device wg0 {
 	wireguard {
 		private_key = "@secret:wg0"
 		listen_port = 51820
@@ -1341,11 +1353,13 @@ interface wg0 {
 			keepalive   = 25
 		}
 	}
+}
+interface wg0 {
 	config = "10.0.0.5/32"
 }
 "#,
 	);
-	let netcfgd_model::InterfaceKind::WireGuard(wg) = &document.interfaces[0].kind else {
+	let netcfgd_model::InterfaceKind::WireGuard(wg) = &document.devices[0].kind else {
 		panic!("expected a wireguard interface");
 	};
 	assert_eq!(wg.listen_port, Some(51820));
@@ -1360,7 +1374,7 @@ interface wg0 {
 fn a_malformed_public_key_is_refused_at_compile_time() {
 	let message = errors(
 		r#"
-interface wg0 {
+device wg0 {
 	wireguard {
 		private_key = "@secret:wg0"
 		peer hub { public_key = "not-a-key"; allowed_ips = "10.0.0.0/24" }
@@ -1377,11 +1391,11 @@ interface wg0 {
 #[test]
 fn a_wireguard_private_key_must_be_a_secret() {
 	let message = errors(
-		r#"interface wg0 { wireguard { private_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" } }"#,
+		r#"device wg0 { wireguard { private_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" } }"#,
 	);
 	assert!(message.contains("secret reference"), "got: {message}");
 
-	let missing = errors(r"interface wg0 { wireguard { listen_port = 51820 } }");
+	let missing = errors(r"device wg0 { wireguard { listen_port = 51820 } }");
 	assert!(missing.contains("needs a `private_key`"), "got: {missing}");
 }
 
@@ -1391,7 +1405,7 @@ fn a_wireguard_private_key_must_be_a_secret() {
 fn a_peer_with_no_allowed_ips_is_refused() {
 	let message = errors(
 		r#"
-interface wg0 {
+device wg0 {
 	wireguard {
 		private_key = "@secret:wg0"
 		peer hub { public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }
@@ -1412,7 +1426,7 @@ interface wg0 {
 fn two_peers_may_not_share_a_public_key() {
 	let message = errors(
 		r#"
-interface wg0 {
+device wg0 {
 	wireguard {
 		private_key = "@secret:wg0"
 		peer a { public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; allowed_ips = "10.0.0.0/24" }
@@ -1432,17 +1446,22 @@ fn the_audit_kinds_compile() {
 
 	let document = build_ok(
 		r#"
-interface mgmt-vrf { vrf { table = 100 }; config = "null" }
-interface base0    { kind = "dummy"; config = "10.7.0.1/24" }
-interface mv0      { macvlan { parent = "base0"; mode = "bridge" }; config = "null" }
-interface gre1     { tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2" }; config = "null" }
-interface tap0     { tap { owner = "qemu" }; config = "null" }
+device mgmt-vrf { vrf { table = 100 } }
+interface mgmt-vrf { config = "null" }
+device base0    { kind = "dummy" }
+interface base0 { config = "10.7.0.1/24" }
+device mv0      { macvlan { parent = "base0"; mode = "bridge" } }
+interface mv0   { config = "null" }
+device gre1     { tunnel { mode = "gre"; local = "10.7.0.1"; remote = "10.7.0.2" } }
+interface gre1  { config = "null" }
+device tap0     { tap { owner = "qemu" } }
+interface tap0  { config = "null" }
 "#,
 	);
 
 	let kind = |name: &str| {
 		document
-			.interfaces
+			.devices
 			.iter()
 			.find(|interface| interface.name == name)
 			.unwrap_or_else(|| panic!("no {name}"))
@@ -1479,7 +1498,7 @@ interface tap0     { tap { owner = "qemu" }; config = "null" }
 /// A VRF with no table isolates traffic into nowhere.
 #[test]
 fn a_vrf_needs_a_table() {
-	let message = errors("interface v { vrf { } }");
+	let message = errors("device v { vrf { } }");
 	assert!(message.contains("needs a `table`"), "got: {message}");
 }
 
@@ -1552,13 +1571,15 @@ fn slaac_takes_a_privacy_setting() {
 /// line it was written on.
 #[test]
 fn a_geneve_tunnel_has_no_parent() {
-	let message = errors(r#"interface g { tunnel { mode = "geneve"; vni = 1; parent = "eth0" } }"#);
+	let message = errors(r#"device g { tunnel { mode = "geneve"; vni = 1; parent = "eth0" } }"#);
 	assert!(message.contains("no underlay interface"), "got: {message}");
 
 	// And the kinds that do have one still take it.
-	let document =
-		build_ok(r#"interface t { tunnel { mode = "gre"; parent = "eth0" }; config = "null" }"#);
-	let netcfgd_model::InterfaceKind::Tunnel(tunnel) = &document.interfaces[0].kind else {
+	let document = build_ok(
+		r#"device t { tunnel { mode = "gre"; parent = "eth0" } }
+interface t { config = "null" }"#,
+	);
+	let netcfgd_model::InterfaceKind::Tunnel(tunnel) = &document.devices[0].kind else {
 		panic!("expected a tunnel");
 	};
 	assert_eq!(tunnel.parent.as_deref(), Some("eth0"));
@@ -1568,12 +1589,12 @@ fn a_geneve_tunnel_has_no_parent() {
 /// build, with an error naming neither the interface nor the field.
 #[test]
 fn a_tunnel_endpoint_must_match_its_encapsulation() {
-	let message = errors(r#"interface t { tunnel { mode = "ipip"; remote = "fd00::1" } }"#);
+	let message = errors(r#"device t { tunnel { mode = "ipip"; remote = "fd00::1" } }"#);
 	assert!(message.contains("IPv4 outer header"), "got: {message}");
 	assert!(message.contains("`remote` is IPv6"), "got: {message}");
 
 	// And the v6 kinds want v6 endpoints.
-	let message = errors(r#"interface t { tunnel { mode = "ip6tnl"; local = "10.0.0.1" } }"#);
+	let message = errors(r#"device t { tunnel { mode = "ip6tnl"; local = "10.0.0.1" } }"#);
 	assert!(message.contains("IPv6 outer header"), "got: {message}");
 }
 
@@ -1582,9 +1603,12 @@ fn a_tunnel_endpoint_must_match_its_encapsulation() {
 /// before the freeze; the refusal happens where the attempt would.
 #[test]
 fn a_tun_device_compiles_and_says_it_cannot_be_created() {
-	let document = build_ok(r#"interface tun0 { tun { }; config = "null" }"#);
+	let document = build_ok(
+		r#"device tun0 { tun { } }
+interface tun0 { config = "null" }"#,
+	);
 	assert!(matches!(
-		document.interfaces[0].kind,
+		document.devices[0].kind,
 		netcfgd_model::InterfaceKind::Tun(_)
 	));
 }
@@ -1593,9 +1617,10 @@ fn a_tun_device_compiles_and_says_it_cannot_be_created() {
 #[test]
 fn the_remaining_bridge_parameters_compile() {
 	let document = build_ok(
-		r#"interface br0 { bridge { hello_time = 3; ageing_time = 60; priority = 4096; vlan_filtering = true }; config = "null" }"#,
+		r#"device br0 { bridge { hello_time = 3; ageing_time = 60; priority = 4096; vlan_filtering = true } }
+interface br0 { config = "null" }"#,
 	);
-	let netcfgd_model::InterfaceKind::Bridge(bridge) = &document.interfaces[0].kind else {
+	let netcfgd_model::InterfaceKind::Bridge(bridge) = &document.devices[0].kind else {
 		panic!("expected a bridge");
 	};
 	assert_eq!(bridge.hello_time, Some(3));
@@ -1604,8 +1629,11 @@ fn the_remaining_bridge_parameters_compile() {
 	assert!(bridge.vlan_filtering);
 	// Off unless asked: a bridge quietly becoming VLAN-aware drops untagged
 	// traffic that used to pass.
-	let plain = build_ok(r#"interface br1 { bridge { }; config = "null" }"#);
-	let netcfgd_model::InterfaceKind::Bridge(bridge) = &plain.interfaces[0].kind else {
+	let plain = build_ok(
+		r#"device br1 { bridge { } }
+interface br1 { config = "null" }"#,
+	);
+	let netcfgd_model::InterfaceKind::Bridge(bridge) = &plain.devices[0].kind else {
 		panic!("expected a bridge");
 	};
 	assert!(!bridge.vlan_filtering);
@@ -1617,18 +1645,20 @@ fn the_remaining_bridge_parameters_compile() {
 fn pppoe_compiles() {
 	let document = build_ok(
 		r#"
-interface ppp0 {
+device ppp0 {
 	pppoe {
 		parent   = "eth0"
 		username = "alice@isp.example"
 		password = "@secret:dsl"
 		service  = "internet"
 	}
+}
+interface ppp0 {
 	routes = "default"
 }
 "#,
 	);
-	let netcfgd_model::InterfaceKind::Pppoe(pppoe) = &document.interfaces[0].kind else {
+	let netcfgd_model::InterfaceKind::Pppoe(pppoe) = &document.devices[0].kind else {
 		panic!("expected a pppoe interface");
 	};
 	assert_eq!(pppoe.parent, "eth0");
@@ -1648,14 +1678,14 @@ interface ppp0 {
 #[test]
 fn a_pppoe_password_must_be_a_secret() {
 	let message = errors(
-		r#"interface ppp0 { pppoe { parent = "eth0"; username = "a"; password = "hunter2" } }"#,
+		r#"device ppp0 { pppoe { parent = "eth0"; username = "a"; password = "hunter2" } }"#,
 	);
 	assert!(message.contains("secret reference"), "got: {message}");
 
-	let missing = errors(r#"interface ppp0 { pppoe { parent = "eth0" } }"#);
+	let missing = errors(r#"device ppp0 { pppoe { parent = "eth0" } }"#);
 	assert!(missing.contains("needs a `username`"), "got: {missing}");
 
-	let parentless = errors(r#"interface ppp0 { pppoe { username = "a" } }"#);
+	let parentless = errors(r#"device ppp0 { pppoe { username = "a" } }"#);
 	assert!(parentless.contains("needs a `parent`"), "got: {parentless}");
 }
 
@@ -1665,21 +1695,22 @@ fn a_pppoe_password_must_be_a_secret() {
 fn bridge_vlans_compile() {
 	let document = build_ok(
 		r#"
-interface br0  { bridge { vlan_filtering = true }; vlans = "10"; config = "null" }
-interface lan1 {
+device br0  { bridge { vlan_filtering = true }; vlans = "10" }
+interface br0 { config = "null" }
+device lan1 {
 	master = "br0"
 	vlans  = "
 		10 pvid untagged
 		20
 		30-32
 	"
-	config = "null"
 }
+interface lan1 { config = "null" }
 "#,
 	);
 	let vlans = |name: &str| {
 		document
-			.interfaces
+			.devices
 			.iter()
 			.find(|interface| interface.name == name)
 			.unwrap_or_else(|| panic!("no {name}"))
@@ -1700,17 +1731,17 @@ interface lan1 {
 /// rather than a name.
 #[test]
 fn an_impossible_vlan_id_is_refused() {
-	assert!(errors(r#"interface p { vlans = "0" }"#).contains("not a VLAN id"));
-	assert!(errors(r#"interface p { vlans = "4095" }"#).contains("not a VLAN id"));
-	assert!(errors(r#"interface p { vlans = "20-10" }"#).contains("counts backwards"));
-	assert!(errors(r#"interface p { vlans = "10 sideways" }"#).contains("not a vlan option"));
+	assert!(errors(r#"device p { vlans = "0" }"#).contains("not a VLAN id"));
+	assert!(errors(r#"device p { vlans = "4095" }"#).contains("not a VLAN id"));
+	assert!(errors(r#"device p { vlans = "20-10" }"#).contains("counts backwards"));
+	assert!(errors(r#"device p { vlans = "10 sideways" }"#).contains("not a vlan option"));
 }
 
 /// A PVID is where untagged ingress lands, so a range of them would be several
 /// answers to one question.
 #[test]
 fn a_range_cannot_be_the_pvid() {
-	let message = errors(r#"interface p { vlans = "10-20 pvid" }"#);
+	let message = errors(r#"device p { vlans = "10-20 pvid" }"#);
 	assert!(message.contains("cannot be the pvid"), "got: {message}");
 }
 
@@ -1725,9 +1756,9 @@ fn a_shaped_rate_is_converted_to_bits() {
 		("2000000", 2_000_000),
 	] {
 		let document = build_ok(&format!(
-			"interface eth0 {{\n\tqdisc {{ kind = \"cake\"; bandwidth = \"{written}\" }}\n}}"
+			"device eth0 {{\n\tqdisc {{ kind = \"cake\"; bandwidth = \"{written}\" }}\n}}"
 		));
-		let qdisc = document.interfaces[0].qdisc.expect("a qdisc");
+		let qdisc = document.devices[0].qdisc.expect("a qdisc");
 		assert_eq!(qdisc.bandwidth_bits, Some(bits), "for {written}");
 	}
 }
@@ -1736,7 +1767,7 @@ fn a_shaped_rate_is_converted_to_bits() {
 /// allowed and the reason the rest are not.
 #[test]
 fn a_classful_scheduler_is_refused_with_the_reason() {
-	let rendered = errors("interface eth0 {\n\tqdisc = \"htb\"\n}");
+	let rendered = errors("device eth0 {\n\tqdisc = \"htb\"\n}");
 	assert!(
 		rendered.contains("not a queueing discipline netcfgd sets"),
 		"got: {rendered}"
@@ -1752,7 +1783,7 @@ fn a_classful_scheduler_is_refused_with_the_reason() {
 #[test]
 fn a_rate_on_a_scheduler_that_cannot_shape_is_refused() {
 	let rendered =
-		errors("interface eth0 {\n\tqdisc { kind = \"fq_codel\"; bandwidth = \"100mbit\" }\n}");
+		errors("device eth0 {\n\tqdisc { kind = \"fq_codel\"; bandwidth = \"100mbit\" }\n}");
 	assert!(
 		rendered.contains("cannot shape to a rate"),
 		"got: {rendered}"
@@ -1762,23 +1793,21 @@ fn a_rate_on_a_scheduler_that_cannot_shape_is_refused() {
 /// A rate that is not a rate says what one looks like.
 #[test]
 fn a_malformed_rate_is_reported() {
-	let rendered = errors("interface eth0 {\n\tqdisc { kind = \"cake\"; bandwidth = \"fast\" }\n}");
+	let rendered = errors("device eth0 {\n\tqdisc { kind = \"cake\"; bandwidth = \"fast\" }\n}");
 	assert!(rendered.contains("is not a rate"), "got: {rendered}");
 
-	let rendered =
-		errors("interface eth0 {\n\tqdisc { kind = \"cake\"; bandwidth = \"0mbit\" }\n}");
+	let rendered = errors("device eth0 {\n\tqdisc { kind = \"cake\"; bandwidth = \"0mbit\" }\n}");
 	assert!(rendered.contains("would pass nothing"), "got: {rendered}");
 }
 
 /// `ingress_bandwidth` expands into a device to shape on and a redirect to it.
 #[test]
 fn ingress_shaping_expands_into_a_device_and_a_redirect() {
-	let document = build_ok(
-		"interface wan0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
-	);
+	let document =
+		build_ok("device wan0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}");
 
 	let wan = document
-		.interfaces
+		.devices
 		.iter()
 		.find(|i| i.name == "wan0")
 		.expect("wan0");
@@ -1787,11 +1816,19 @@ fn ingress_shaping_expands_into_a_device_and_a_redirect() {
 	// the same rate is two places to disagree.
 	assert_eq!(wan.qdisc.expect("a qdisc").ingress_bandwidth_bits, None);
 
+	// **A device, and deliberately not an interface.** An ifb carries no
+	// address and never will: it exists to have traffic redirected onto it so
+	// an egress qdisc can shape what arrived. Before 0155 pass 1b it had to be
+	// an `Interface` because that was the only type that could say `kind`.
 	let ifb = document
-		.interfaces
+		.devices
 		.iter()
 		.find(|i| i.name == "ifb-wan0")
 		.expect("the synthesised ifb");
+	assert!(
+		!document.interfaces.iter().any(|i| i.name == "ifb-wan0"),
+		"the ifb must not also be an interface: it has nothing to address"
+	);
 	assert!(matches!(ifb.kind, netcfgd_model::InterfaceKind::Ifb));
 	let qdisc = ifb.qdisc.expect("a qdisc on the ifb");
 	assert_eq!(qdisc.bandwidth_bits, Some(50_000_000));
@@ -1803,7 +1840,7 @@ fn ingress_shaping_expands_into_a_device_and_a_redirect() {
 #[test]
 fn an_interface_too_long_to_shape_arrivals_on_is_refused() {
 	let rendered = errors(
-		"interface twelvechars0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
+		"device twelvechars0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
 	);
 	assert!(
 		rendered.contains("too long a name to shape arriving traffic"),
@@ -1815,9 +1852,8 @@ fn an_interface_too_long_to_shape_arrivals_on_is_refused() {
 /// Only cake shapes, so only cake can shape arrivals.
 #[test]
 fn ingress_shaping_needs_cake() {
-	let rendered = errors(
-		"interface wan0 {\n\tqdisc { kind = \"fq_codel\"; ingress_bandwidth = \"50mbit\" }\n}",
-	);
+	let rendered =
+		errors("device wan0 {\n\tqdisc { kind = \"fq_codel\"; ingress_bandwidth = \"50mbit\" }\n}");
 	assert!(
 		rendered.contains("cannot shape arriving traffic"),
 		"got: {rendered}"
@@ -1829,7 +1865,8 @@ fn ingress_shaping_needs_cake() {
 #[test]
 fn a_colliding_ifb_name_is_refused() {
 	let rendered = errors(
-		"interface ifb-wan0 { config = \"null\" }\ninterface wan0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
+		"interface ifb-wan0 { config = \"null\" }
+device wan0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
 	);
 	assert!(
 		rendered.contains("needs to create a device of that name"),
@@ -2452,8 +2489,10 @@ fn networking_on_is_the_default_and_is_sayable() {
 	assert_eq!(implied.globals.networking, netcfgd_model::Networking::On);
 	assert!(implied.interfaces[0].enabled);
 
-	let stated =
-		build_ok("global {\n\tnetworking = \"on\"\n}\ninterface eth0 {\n\tconfig = \"dhcp\"\n}\n");
+	let stated = build_ok(
+		"global {\n\tnetworking = \"on\"\n}
+interface eth0 {\n\tconfig = \"dhcp\"\n}\n",
+	);
 	assert_eq!(implied, stated);
 }
 

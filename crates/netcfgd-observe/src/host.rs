@@ -86,7 +86,7 @@ fn read_wireguard_currency(
 		let Some(state) = link.wireguard.as_mut() else {
 			continue;
 		};
-		let Some(config) = document.interfaces.iter().find_map(|interface| {
+		let Some(config) = document.devices.iter().find_map(|interface| {
 			match (&interface.kind, interface.name == link.name) {
 				(netcfgd_model::InterfaceKind::WireGuard(wireguard), true) => Some(wireguard),
 				_ => None,
@@ -450,7 +450,7 @@ fn read_tunnel_currency(
 		if backend.kind != netcfgd_model::BackendKind::OpenVpn || !backend.running {
 			continue;
 		}
-		let Some(config) = document.interfaces.iter().find_map(|interface| {
+		let Some(config) = document.devices.iter().find_map(|interface| {
 			match (&interface.kind, interface.name == backend.interface) {
 				(netcfgd_model::InterfaceKind::OpenVpn(tunnel), true) => Some(&tunnel.config),
 				_ => None,

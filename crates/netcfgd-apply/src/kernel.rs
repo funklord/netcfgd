@@ -246,7 +246,7 @@ impl KernelExecutor {
 			})
 			.collect();
 		self.openvpn = document
-			.interfaces
+			.devices
 			.iter()
 			.filter_map(|interface| match &interface.kind {
 				InterfaceKind::OpenVpn(config) => Some((interface.name.clone(), config.clone())),
@@ -294,7 +294,7 @@ impl KernelExecutor {
 			})
 			.collect();
 		self.pppoe = document
-			.interfaces
+			.devices
 			.iter()
 			.filter_map(|interface| match &interface.kind {
 				InterfaceKind::Pppoe(config) => Some((interface.name.clone(), config.clone())),
@@ -1575,7 +1575,7 @@ fn record_presets(run: &std::path::Path, iface: &str, presets: &[String]) {
 /// they are given is what `new_link` takes.
 fn comparable_kinds(document: &netcfgd_model::Document) -> Vec<(String, InterfaceKind)> {
 	document
-		.interfaces
+		.devices
 		.iter()
 		.filter(|interface| {
 			matches!(
@@ -1592,7 +1592,7 @@ fn bond_configs(
 	document: &netcfgd_model::Document,
 ) -> Vec<(String, netcfgd_model::interface::BondConfig)> {
 	document
-		.interfaces
+		.devices
 		.iter()
 		.filter_map(|interface| match &interface.kind {
 			netcfgd_model::InterfaceKind::Bond(bond) => {
@@ -1608,7 +1608,7 @@ fn bridge_configs(
 	document: &netcfgd_model::Document,
 ) -> Vec<(String, netcfgd_model::interface::BridgeConfig)> {
 	document
-		.interfaces
+		.devices
 		.iter()
 		.filter_map(|interface| match &interface.kind {
 			netcfgd_model::InterfaceKind::Bridge(bridge) => {
@@ -1628,7 +1628,7 @@ fn wireguard_configs(
 	document: &netcfgd_model::Document,
 ) -> Vec<(String, netcfgd_model::interface::WireGuardConfig)> {
 	document
-		.interfaces
+		.devices
 		.iter()
 		.filter_map(|interface| match &interface.kind {
 			netcfgd_model::InterfaceKind::WireGuard(config) => {

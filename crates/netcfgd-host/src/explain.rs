@@ -289,8 +289,20 @@ fn report_for<'a>(
 				.interfaces
 				.iter()
 				.find(|candidate| candidate.name == interface)
+				.map(|candidate| (candidate, document))
 		})
-		.is_some_and(netcfgd_plan::takes_reports);
+		.is_some_and(|(candidate, document)| {
+			// The kind comes from the device of the same name since 0155 pass
+			// 1b; absent means physical, which takes no reports.
+			let kind = document
+				.devices
+				.iter()
+				.find(|device| device.name == candidate.name)
+				.map_or(netcfgd_model::InterfaceKind::Physical, |device| {
+					device.kind.clone()
+				});
+			netcfgd_plan::takes_reports(candidate, &kind)
+		});
 	if !asked {
 		return None;
 	}
@@ -692,12 +704,11 @@ fn render_source(source: &AddressSource) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use netcfgd_model::{Guard, Interface, InterfaceKind, ObservedAddress, ObservedLink, Static};
+	use netcfgd_model::{Guard, Interface, ObservedAddress, ObservedLink, Static};
 
 	fn interface_named(name: &str) -> Interface {
 		Interface {
 			name: name.to_owned(),
-			kind: InterfaceKind::Physical,
 			enabled: true,
 			addressing: vec![AddressSource::Static(Static {
 				address: "10.0.0.1/24".to_owned(),
@@ -709,18 +720,14 @@ mod tests {
 			dns: None,
 			hooks: Vec::new(),
 			on_drift: None,
-			master: None,
 			dot1x: None,
 			advertise: None,
 			forwarding: None,
 			nat: None,
-			qdisc: None,
-			ingress_redirect: None,
 			guard: None,
 			ipv6_token: None,
 			preference: None,
 			probe: None,
-			bridge_vlans: Vec::new(),
 		}
 	}
 

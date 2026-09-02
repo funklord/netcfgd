@@ -61,6 +61,23 @@ pub fn lower(
 			"global" => lower_global_block(&mut document, block, &mut diagnostics),
 			"device" => {
 				if let Some(device) = lower_device(block, &mut diagnostics, sources, provenance) {
+					// Membership and ingress shaping are read off the device
+					// now: both follow from `kind` and `qdisc`, which 0155
+					// pass 1b moved here.
+					let members = match &device.kind {
+						InterfaceKind::Bridge(bridge) => bridge.members.clone(),
+						InterfaceKind::Bond(bond) => bond.members.clone(),
+						_ => Vec::new(),
+					};
+					for member in members {
+						memberships.push((member, device.name.clone(), block.span));
+					}
+					if device
+						.qdisc
+						.is_some_and(|policy| policy.ingress_bandwidth_bits.is_some())
+					{
+						ingress_shapers.push((device.name.clone(), block.span));
+					}
 					document.devices.push(device);
 				}
 			}
@@ -74,20 +91,6 @@ pub fn lower(
 					lower_interface(block, hooks, &mut diagnostics, sources, provenance)
 				{
 					provenance.record(sources, interface_path(&interface.name), block.span);
-					let members = match &interface.kind {
-						InterfaceKind::Bridge(bridge) => bridge.members.clone(),
-						InterfaceKind::Bond(bond) => bond.members.clone(),
-						_ => Vec::new(),
-					};
-					for member in members {
-						memberships.push((member, interface.name.clone(), block.span));
-					}
-					if interface
-						.qdisc
-						.is_some_and(|policy| policy.ingress_bandwidth_bits.is_some())
-					{
-						ingress_shapers.push((interface.name.clone(), block.span));
-					}
 					document.interfaces.push(interface);
 				}
 			}
@@ -196,12 +199,12 @@ fn expand_ingress_shapers(
 		}
 
 		let rate = document
-			.interfaces
+			.devices
 			.iter_mut()
-			.find(|interface| interface.name == *name)
-			.and_then(|interface| {
-				interface.ingress_redirect = Some(device.clone());
-				interface
+			.find(|candidate| candidate.name == *name)
+			.and_then(|shaped| {
+				shaped.ingress_redirect = Some(device.clone());
+				shaped
 					.qdisc
 					.as_mut()
 					.and_then(|policy| policy.ingress_bandwidth_bits.take())
@@ -211,35 +214,72 @@ fn expand_ingress_shapers(
 		}
 	}
 
-	for (device, rate) in wanted {
-		document.interfaces.push(Interface {
-			name: device,
+	// **A device with no interface, which is the state 0155 predicted.** An
+	// `ifb` carries no address and never will: it exists to have traffic
+	// redirected onto it so the egress qdisc can shape what arrived. Before
+	// pass 1b it had to be an `Interface` because that was the only type that
+	// could say `kind`, and it carried eleven fields of `None` to say so.
+	// Now it is what it is.
+	for (name, rate) in wanted {
+		document.devices.push(netcfgd_model::Device {
+			name,
+			r#match: None,
+			managed: true,
+			on_unmanage: netcfgd_model::OnUnmanage::Leave,
+			wifi: None,
+			modem: None,
+			mtu: None,
+			mac: None,
+			link_settings: None,
 			kind: InterfaceKind::Ifb,
-			enabled: true,
-			addressing: Vec::new(),
-			routes: Vec::new(),
-			dns: None,
-			hooks: Vec::new(),
-			nat: None,
+			master: None,
+			ingress_redirect: None,
+			bridge_vlans: Vec::new(),
 			qdisc: Some(QdiscPolicy {
 				kind: QdiscKind::Cake,
 				bandwidth_bits: Some(rate),
 				ingress_bandwidth_bits: None,
 				ingress: true,
 			}),
-			ingress_redirect: None,
-			on_drift: None,
+		});
+	}
+	// **Every interface names hardware, so every interface gets a device.**
+	// An operator who wrote only `interface eth0 { config = "dhcp" }` has said
+	// nothing about the adapter, and the honest reading of that is a physical
+	// device with defaults -- not the absence of one. Without this the device
+	// walks skip such an interface entirely, and the walks are where creation,
+	// enslavement and the "no such device" warning live since 0155 pass 1b.
+	//
+	// Synthesised rather than required, because requiring a `device` block for
+	// every interface would make the common configuration twice as long to say
+	// the same thing.
+	let named: std::collections::HashSet<String> = document
+		.devices
+		.iter()
+		.map(|device| device.name.clone())
+		.collect();
+	for interface in &document.interfaces {
+		if named.contains(&interface.name) {
+			continue;
+		}
+		document.devices.push(netcfgd_model::Device {
+			name: interface.name.clone(),
+			r#match: None,
+			managed: true,
+			on_unmanage: netcfgd_model::OnUnmanage::Leave,
+			wifi: None,
+			modem: None,
+			mtu: None,
+			mac: None,
+			link_settings: None,
+			kind: InterfaceKind::Physical,
 			master: None,
-			dot1x: None,
-			advertise: None,
-			forwarding: None,
-			guard: None,
-			ipv6_token: None,
-			preference: None,
-			probe: None,
+			qdisc: None,
+			ingress_redirect: None,
 			bridge_vlans: Vec::new(),
 		});
 	}
+	document.devices.sort_by(|a, b| a.name.cmp(&b.name));
 
 	document.interfaces.sort_by(|a, b| a.name.cmp(&b.name));
 }
@@ -271,9 +311,9 @@ fn expand_members(
 		}
 
 		if let Some(existing) = document
-			.interfaces
+			.devices
 			.iter_mut()
-			.find(|interface| interface.name == member)
+			.find(|device| device.name == member)
 		{
 			match &existing.master {
 				// Said twice, consistently. Harmless, and common in a config
@@ -289,37 +329,36 @@ fn expand_members(
 							 `master = \"{current}\"`"
 						),
 					)
-					.with_help("an interface has one master; remove one of the two"),
+					.with_help("a device has one master; remove one of the two"),
 				),
 				None => existing.master = Some(master),
 			}
 			continue;
 		}
 
-		// A member with no `interface` block of its own. Creating one is what
+		// A member with no `device` block of its own. Creating one is what
 		// makes `bridge { members = "eth0 eth1" }` work on its own, which is
 		// the shape design section 3.2 uses and the shape somebody converting
 		// from another tool will write.
-		document.interfaces.push(Interface {
+		//
+		// A device rather than an interface since 0155 pass 1b: a bridge port
+		// has no address of its own, so what a member needs is exactly the
+		// device half. That it used to need an `Interface` -- eleven fields of
+		// `None` around one `master` -- is the conflation the pass removed.
+		document.devices.push(netcfgd_model::Device {
 			name: member,
+			r#match: None,
+			managed: true,
+			on_unmanage: netcfgd_model::OnUnmanage::Leave,
+			wifi: None,
+			modem: None,
+			mtu: None,
+			mac: None,
+			link_settings: None,
 			kind: InterfaceKind::Physical,
-			enabled: true,
-			addressing: Vec::new(),
-			routes: Vec::new(),
-			dns: None,
-			hooks: Vec::new(),
-			on_drift: None,
 			master: Some(master),
-			dot1x: None,
-			advertise: None,
-			forwarding: None,
-			nat: None,
 			qdisc: None,
 			ingress_redirect: None,
-			guard: None,
-			ipv6_token: None,
-			preference: None,
-			probe: None,
 			bridge_vlans: Vec::new(),
 		});
 	}
@@ -748,6 +787,92 @@ fn normalise_address(text: &str) -> Option<String> {
 	Some(text.to_ascii_uppercase())
 }
 
+/// The block that says what kind of thing to create.
+///
+/// Shared by `device` and nothing else now, but written as a function rather
+/// than inline because it is the answer to "what does netcfgd create", and
+/// 0155 pass 1b moved that question from `interface` to `device` wholesale.
+/// A caller that wants none of these gets `None` and can say so in its own
+/// words.
+fn lower_kind_block(inner: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
+	match inner.head.as_str() {
+		"bridge" => Some(lower_bridge(inner, diags)),
+		"bond" => lower_bond(inner, diags),
+		"vlan" => lower_vlan(inner, diags),
+		"veth" => lower_veth(inner, diags),
+		"vxlan" => lower_vxlan(inner, diags),
+		"vrf" => lower_vrf(inner, diags),
+		"macvlan" => lower_macvlan(inner, diags),
+		"tunnel" => lower_tunnel(inner, diags),
+		"tun" | "tap" => Some(lower_tun(inner, inner.head == "tap", diags)),
+		"wireguard" => lower_wireguard(inner, diags),
+		"pppoe" => lower_pppoe(inner, diags),
+		"openvpn" => lower_openvpn(inner, diags),
+		_ => None,
+	}
+}
+
+/// Whether a block head names a kind, so a caller can route it before parsing.
+fn is_kind_block(head: &str) -> bool {
+	matches!(
+		head,
+		"bridge"
+			| "bond" | "vlan"
+			| "veth" | "vxlan"
+			| "vrf" | "macvlan"
+			| "tunnel"
+			| "tun" | "tap"
+			| "wireguard"
+			| "pppoe" | "openvpn"
+	)
+}
+
+/// Whether a `device` key describes what to create rather than how it behaves.
+fn is_structural_key(key: &str) -> bool {
+	matches!(key, "master" | "vlans" | "kind" | "qdisc")
+}
+
+/// One structural `key = value` inside a `device` block.
+///
+/// Split from `lower_device` to keep that function under the line limit, and
+/// grouped this way because the four are one subject: what netcfgd makes, what
+/// it is a port of, and how its egress is shaped (0155 pass 1b).
+fn lower_structural_key(device: &mut Device, assignment: &Assignment, diags: &mut Diagnostics) {
+	match assignment.key.as_str() {
+		"master" => device.master = as_string(&assignment.value, diags),
+		"vlans" => {
+			for line in as_lines(&assignment.value, diags) {
+				if let Some(vlans) = parse_bridge_vlan(&line, diags) {
+					device.bridge_vlans.extend(vlans);
+				}
+			}
+		}
+		"kind" => {
+			if let Some(name) = as_string(&assignment.value, diags) {
+				match name.as_str() {
+					"dummy" => device.kind = InterfaceKind::Dummy,
+					"physical" => device.kind = InterfaceKind::Physical,
+					other => diags.push(Diagnostic::new(
+						assignment.span,
+						format!("`{other}` is not a device kind"),
+					)),
+				}
+			}
+		}
+		"qdisc" => {
+			device.qdisc = as_string(&assignment.value, diags).and_then(|name| {
+				qdisc_kind(&name, assignment.span, diags).map(|kind| QdiscPolicy {
+					kind,
+					bandwidth_bits: None,
+					ingress_bandwidth_bits: None,
+					ingress: false,
+				})
+			});
+		}
+		_ => {}
+	}
+}
+
 fn lower_device(
 	block: &Block,
 	diags: &mut Diagnostics,
@@ -765,6 +890,11 @@ fn lower_device(
 		mtu: None,
 		mac: None,
 		link_settings: None,
+		kind: InterfaceKind::Physical,
+		master: None,
+		qdisc: None,
+		ingress_redirect: None,
+		bridge_vlans: Vec::new(),
 	};
 
 	for item in &block.items {
@@ -797,6 +927,12 @@ fn lower_device(
 			// Settings of the adapter, moved here from `interface` by 0155
 			// pass 1a: they mean something whether or not anything is
 			// connected, which is the test that sorts the two types.
+			// What to create, moved here from `interface` by 0155 pass 1b: a
+			// bridge exists before anything runs over it, so the block that
+			// says to make one belongs with the hardware.
+			Item::Assignment(assignment) if is_structural_key(&assignment.key) => {
+				lower_structural_key(&mut device, assignment, diags);
+			}
 			Item::Assignment(assignment) if assignment.key == "mtu" => {
 				// Recorded here now rather than on the interface, so `ncfg
 				// explain` can still say which file set it (0155 pass 1a).
@@ -810,6 +946,14 @@ fn lower_device(
 				assignment.span,
 				format!("unknown device key `{}`", assignment.key),
 			)),
+			Item::Block(inner) if is_kind_block(&inner.head) => {
+				if let Some(kind) = lower_kind_block(inner, diags) {
+					device.kind = kind;
+				}
+			}
+			Item::Block(inner) if inner.head == "qdisc" => {
+				device.qdisc = lower_qdisc(inner, diags);
+			}
 			Item::Block(inner) if inner.head == "ethtool" => {
 				let mut settings = LinkSettings::default();
 				lower_ethtool(inner, &mut settings, diags);
@@ -2235,17 +2379,13 @@ fn lower_interface(
 	let name = require_label(block, diags)?;
 	let mut interface = Interface {
 		name: name.clone(),
-		kind: InterfaceKind::Physical,
 		enabled: true,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,
 		hooks: Vec::new(),
 		nat: None,
-		qdisc: None,
-		ingress_redirect: None,
 		on_drift: None,
-		master: None,
 		dot1x: None,
 		advertise: None,
 		forwarding: None,
@@ -2253,7 +2393,6 @@ fn lower_interface(
 		ipv6_token: None,
 		preference: None,
 		probe: None,
-		bridge_vlans: Vec::new(),
 	};
 	let mut dns = DnsPolicy::default();
 	let mut dns_touched = false;
@@ -2292,6 +2431,24 @@ fn lower_interface(
 				// to "unknown interface key": these describe the adapter, they
 				// mean something with nothing connected, and an operator who
 				// wrote one had a working configuration.
+				// Moved to `device` by 0155 pass 1b: these say what netcfgd
+				// creates, what it is a port of, and how its egress is shaped.
+				// All three are true of the hardware before anything runs over
+				// it, which is the test that sorts the two blocks.
+				"kind" | "master" | "qdisc" | "vlans" => diags.push(
+					Diagnostic::new(
+						assignment.span,
+						format!(
+							"`{}` belongs in the `device` block now, not `interface`",
+							assignment.key
+						),
+					)
+					.with_help(
+						"it describes the hardware rather than a connection over it: \
+						 write `device <name> { ... }` beside this block and move the \
+						 line there unchanged",
+					),
+				),
 				"mtu" | "mac" => diags.push(
 					Diagnostic::new(
 						assignment.span,
@@ -2312,31 +2469,6 @@ fn lower_interface(
 				// unsayable in the config until the pre-freeze audit noticed:
 				// a dummy interface is the ordinary way to hold an address
 				// that does not depend on any cable.
-				"kind" => {
-					if let Some(name) = as_string(&assignment.value, diags) {
-						match name.as_str() {
-							"dummy" => interface.kind = InterfaceKind::Dummy,
-							"physical" => interface.kind = InterfaceKind::Physical,
-							other => diags.push(
-								Diagnostic::new(
-									assignment.span,
-									format!("`{other}` is not a parameterless interface kind"),
-								)
-								.with_help(
-									"one of dummy, physical; everything else is declared by \
-									 its own block, such as `bridge { ... }`",
-								),
-							),
-						}
-					}
-				}
-				"vlans" => {
-					for line in as_lines(&assignment.value, diags) {
-						if let Some(vlans) = parse_bridge_vlan(&line, diags) {
-							interface.bridge_vlans.extend(vlans);
-						}
-					}
-				}
 				"preference" => {
 					provenance.record(sources, field_path(&name, "preference"), assignment.span);
 					interface.preference = as_u32(&assignment.value, diags);
@@ -2374,21 +2506,10 @@ fn lower_interface(
 						interface.enabled = flag;
 					}
 				}
-				"master" => interface.master = as_string(&assignment.value, diags),
 				"forwarding" => interface.forwarding = as_bool(&assignment.value, diags),
 				"nat" => interface.nat = as_bool(&assignment.value, diags),
 				// `qdisc = "fq_codel"`, the shorthand for a scheduler that
 				// needs no parameters -- which is all of them except `cake`.
-				"qdisc" => {
-					interface.qdisc = as_string(&assignment.value, diags).and_then(|name| {
-						qdisc_kind(&name, assignment.span, diags).map(|kind| QdiscPolicy {
-							kind,
-							bandwidth_bits: None,
-							ingress_bandwidth_bits: None,
-							ingress: false,
-						})
-					});
-				}
 				"on_drift" => interface.on_drift = as_drift(&assignment.value, diags),
 				"guard" => {
 					provenance.record(sources, field_path(&name, "guard"), assignment.span);
@@ -2406,19 +2527,7 @@ fn lower_interface(
 				)),
 			},
 			Item::Block(inner) => match inner.head.as_str() {
-				"vlan" => {
-					if let Some(kind) = lower_vlan(inner, diags) {
-						interface.kind = kind;
-					}
-				}
-				"bridge" => interface.kind = lower_bridge(inner, diags),
-				"qdisc" => interface.qdisc = lower_qdisc(inner, diags),
 				"probe" => interface.probe = lower_probe(inner, diags),
-				"bond" => {
-					if let Some(kind) = lower_bond(inner, diags) {
-						interface.kind = kind;
-					}
-				}
 				"dns" => {
 					dns_touched = true;
 					for item in &inner.items {
@@ -2455,34 +2564,17 @@ fn lower_interface(
 						interface.dot1x = Some(config);
 					}
 				}
-				"vxlan" => {
-					if let Some(kind) = lower_vxlan(inner, diags) {
-						interface.kind = kind;
-					}
-				}
-				"vrf" => {
-					if let Some(kind) = lower_vrf(inner, diags) {
-						interface.kind = kind;
-					}
-				}
-				"macvlan" => {
-					if let Some(kind) = lower_macvlan(inner, diags) {
-						interface.kind = kind;
-					}
-				}
-				"tunnel" => {
-					if let Some(kind) = lower_tunnel(inner, diags) {
-						interface.kind = kind;
-					}
-				}
-				"tun" | "tap" => {
-					interface.kind = lower_tun(inner, inner.head == "tap", diags);
-				}
-				"veth" => {
-					if let Some(kind) = lower_veth(inner, diags) {
-						interface.kind = kind;
-					}
-				}
+				head if is_kind_block(head) || head == "qdisc" => diags.push(
+					Diagnostic::new(
+						inner.span,
+						format!("`{head}` belongs in the `device` block now, not `interface`"),
+					)
+					.with_help(
+						"a bridge, bond, vlan, tunnel or qdisc is a property of the \
+						 hardware -- it exists before anything runs over it. Write \
+						 `device <name> { ... }` and move the block there unchanged",
+					),
+				),
 				"ethtool" => diags.push(
 					Diagnostic::new(
 						inner.span,
@@ -2494,21 +2586,6 @@ fn lower_interface(
 						 ethtool { ... } }` and move the block there unchanged",
 					),
 				),
-				"wireguard" => {
-					if let Some(kind) = lower_wireguard(inner, diags) {
-						interface.kind = kind;
-					}
-				}
-				"pppoe" => {
-					if let Some(kind) = lower_pppoe(inner, diags) {
-						interface.kind = kind;
-					}
-				}
-				"openvpn" => {
-					if let Some(kind) = lower_openvpn(inner, diags) {
-						interface.kind = kind;
-					}
-				}
 				"advertise" => interface.advertise = lower_advertise(inner, diags),
 				other => diags.push(Diagnostic::new(
 					inner.span,

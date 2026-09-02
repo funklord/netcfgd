@@ -348,12 +348,14 @@
 # QUEUEING, which is where bufferbloat is fixed. `cake` with the real
 # upstream bandwidth is the answer for nearly every home connection.
 
-#interface eth0 {
-#	config = "dhcp"
+#device eth0 {
 #	qdisc {
 #		kind      = "cake"
 #		bandwidth = "100mbit"
 #	}
+#}
+#interface eth0 {
+#	config = "dhcp"
 #}
 
 # A STABLE IPv6 ADDRESS without giving away the hardware address.
@@ -643,9 +645,7 @@
 #
 # A BRIDGE. Members take no address of their own; the bridge does.
 
-#interface br0 {
-#	config = "192.0.2.10/24"
-#	routes = "default via 192.0.2.1"
+#device br0 {
 #	bridge {
 #		members         = ["eth0", "eth1"]
 #		stp             = true
@@ -653,33 +653,40 @@
 #		vlan_filtering  = false
 #	}
 #}
+#interface br0 {
+#	config = "192.0.2.10/24"
+#	routes = "default via 192.0.2.1"
+#}
 
 # A BOND, for two cables to one switch.
 
-#interface bond0 {
-#	config = "dhcp"
+#device bond0 {
 #	bond {
 #		members = ["eth0", "eth1"]
 #		mode    = "802.3ad"
 #		miimon  = 100
 #	}
 #}
+#interface bond0 {
+#	config = "dhcp"
+#}
 
 # A VLAN. The parent is the physical interface; the id is the tag.
 
-#interface vlan10 {
-#	config = "dhcp"
+#device vlan10 {
 #	vlan {
 #		parent = "eth0"
 #		id     = 10
 #	}
 #}
+#interface vlan10 {
+#	config = "dhcp"
+#}
 
 # WIREGUARD. The private key is a secret reference like every other
 # credential; the peers each carry a public key, which is not secret.
 
-#interface wg0 {
-#	config = "10.9.0.2/24"
+#device wg0 {
 #	wireguard {
 #		private_key = "@secret:wg0"
 #		listen_port = 51820
@@ -691,11 +698,13 @@
 #		}
 #	}
 #}
+#interface wg0 {
+#	config = "10.9.0.2/24"
+#}
 
 # A VXLAN overlay.
 
-#interface vx0 {
-#	config = "10.20.0.1/24"
+#device vx0 {
 #	vxlan {
 #		id     = 100
 #		parent = "eth0"
@@ -704,11 +713,13 @@
 #		port   = 4789
 #	}
 #}
+#interface vx0 {
+#	config = "10.20.0.1/24"
+#}
 
 # A GRE OR IPIP TUNNEL.
 
-#interface gre0 {
-#	config = "10.30.0.1/30"
+#device gre0 {
 #	tunnel {
 #		mode   = "gre"
 #		local  = "192.0.2.10"
@@ -716,63 +727,78 @@
 #		ttl    = 64
 #	}
 #}
+#interface gre0 {
+#	config = "10.30.0.1/30"
+#}
 
 # A MACVLAN, which gives a container its own hardware address on the LAN.
 
-#interface mv0 {
-#	config = "dhcp"
+#device mv0 {
 #	macvlan {
 #		parent = "eth0"
 #		mode   = "bridge"
 #	}
 #}
+#interface mv0 {
+#	config = "dhcp"
+#}
 
 # A VRF, for keeping one set of routes away from another.
 
-#interface mgmt {
-#	config = "192.0.2.10/24"
+#device mgmt {
 #	vrf {
 #		table = 100
 #	}
 #}
+#interface mgmt {
+#	config = "192.0.2.10/24"
+#}
 
 # A DUMMY interface, which is the usual home for a stable service address.
 
+#device dummy0 {
+#	kind   = "dummy"
+#}
 #interface dummy0 {
 #	config = "192.0.2.1/32"
-#	kind   = "dummy"
 #}
 
 # A VETH PAIR, for handing one end to a namespace or a container.
 
-#interface veth0 {
-#	config = "10.40.0.1/24"
+#device veth0 {
 #	veth {
 #		peer = "veth1"
 #	}
 #}
+#interface veth0 {
+#	config = "10.40.0.1/24"
+#}
 
 # PPPoE, which is how a good many DSL connections still work.
 
-#interface ppp0 {
-#	config = "reported"
+#device ppp0 {
 #	pppoe {
 #		parent   = "eth0"
 #		username = "user@isp.example"
 #		password = "@secret:isp"
 #	}
 #}
+#interface ppp0 {
+#	config = "reported"
+#}
 
 # AN OPENVPN TUNNEL, configured by the file OpenVPN already understands.
 # netcfgd starts it and takes the address it reports.
 
-#interface tun0 {
-#	config = "reported"
+#device tun0 {
 #	openvpn {
 #		config   = "/etc/openvpn/client.conf"
 #		username = "you"
 #		password = "@secret:vpn"
 #	}
+#}
+#interface tun0 {
+#	config = "reported"
 #}
 
 

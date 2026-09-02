@@ -53,6 +53,743 @@
   },
   "devices": [
     {
+      "name": "k-bond",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "bond",
+        "members": [
+          "eth1"
+        ],
+        "mode": "802.3ad",
+        "miimon": 100
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-bridge",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "bridge",
+        "members": [
+          "eth0"
+        ],
+        "stp": true,
+        "forward_delay": 4,
+        "hello_time": 2,
+        "ageing_time": 300,
+        "priority": 4096,
+        "vlan_filtering": true
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-dummy",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "dummy"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-ifb",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "ifb"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-macvlan",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "macvlan",
+        "parent": "eth0",
+        "mode": "passthru"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-openvpn",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "open_vpn",
+        "config": "/etc/openvpn/work.ovpn",
+        "username": "vpn-user",
+        "password": {
+          "provider": "file",
+          "name": "vpn"
+        }
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-physical",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "physical"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-pppoe",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "pppoe",
+        "parent": "eth0",
+        "username": "alice",
+        "password": {
+          "provider": "file",
+          "name": "dsl"
+        },
+        "service": "internet",
+        "ac": "BRAS-01"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-tun",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tun",
+        "mode": "tap",
+        "owner": "qemu",
+        "group": "kvm"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-tunnel",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "gretap",
+        "local": "192.0.2.1",
+        "remote": "192.0.2.2",
+        "parent": "eth0",
+        "ttl": 64,
+        "key": 7
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-veth",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "veth",
+        "peer": "veth-b"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-vlan",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "vlan",
+        "parent": "eth0",
+        "id": 42,
+        "protocol": "dot1ad"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-vrf",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "vrf",
+        "table": 100
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-vxlan",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "vxlan",
+        "id": 100,
+        "parent": "eth0",
+        "local": "192.0.2.1",
+        "remote": "192.0.2.2",
+        "port": 4789
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "k-wireguard",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "wire_guard",
+        "private_key": {
+          "provider": "keyring",
+          "name": "wg"
+        },
+        "listen_port": 51820,
+        "fwmark": 42,
+        "peers": [
+          {
+            "name": "hub",
+            "public_key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            "preshared_key": {
+              "provider": "pass",
+              "name": "psk"
+            },
+            "endpoint": "vpn.example:51820",
+            "allowed_ips": [
+              "10.0.0.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "t-geneve",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "geneve"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "t-gre",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "gre"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "t-gretap",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "gretap"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "t-ip6gre",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "ip6gre"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "t-ip6tnl",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "ip6tnl"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "t-ipip",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "ipip"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
+      "name": "t-sit",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "tunnel",
+        "mode": "sit"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ]
+    },
+    {
       "name": "wlan0",
       "match": {
         "mac": "02:00:00:00:00:02",
@@ -92,15 +829,16 @@
         "tso": "off",
         "rx_checksum": "on",
         "tx_checksum": "unmanaged"
-      }
+      },
+      "kind": {
+        "kind": "physical"
+      },
+      "bridge_vlans": []
     }
   ],
   "interfaces": [
     {
       "name": "d-0",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -190,7 +928,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -228,13 +965,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -253,25 +983,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "d-1",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -361,7 +1076,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -399,13 +1113,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -424,25 +1131,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "d-2",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -532,7 +1224,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -570,13 +1261,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -595,25 +1279,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "d-3",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -708,7 +1377,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -746,13 +1414,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -771,25 +1432,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "d-4",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -884,7 +1530,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -922,13 +1567,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -947,25 +1585,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "d-5",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -1060,7 +1683,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -1098,13 +1720,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1123,25 +1738,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "d-6",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -1236,7 +1836,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -1274,13 +1873,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1299,25 +1891,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "d-7",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -1414,7 +1991,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -1452,13 +2028,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1477,30 +2046,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-bond",
-      "kind": {
-        "kind": "bond",
-        "members": [
-          "eth1"
-        ],
-        "mode": "802.3ad",
-        "miimon": 100
-      },
       "enabled": true,
       "addressing": [
         {
@@ -1595,7 +2144,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -1633,13 +2181,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1658,34 +2199,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-bridge",
-      "kind": {
-        "kind": "bridge",
-        "members": [
-          "eth0"
-        ],
-        "stp": true,
-        "forward_delay": 4,
-        "hello_time": 2,
-        "ageing_time": 300,
-        "priority": 4096,
-        "vlan_filtering": true
-      },
       "enabled": true,
       "addressing": [
         {
@@ -1780,7 +2297,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -1818,13 +2334,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -1843,25 +2352,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-dummy",
-      "kind": {
-        "kind": "dummy"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -1956,7 +2450,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -1994,13 +2487,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2019,25 +2505,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-ifb",
-      "kind": {
-        "kind": "ifb"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -2132,7 +2603,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -2170,13 +2640,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2195,27 +2658,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-macvlan",
-      "kind": {
-        "kind": "macvlan",
-        "parent": "eth0",
-        "mode": "passthru"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -2310,7 +2756,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -2348,13 +2793,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2373,31 +2811,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-openvpn",
-      "kind": {
-        "kind": "open_vpn",
-        "config": "/etc/openvpn/work.ovpn",
-        "username": "vpn-user",
-        "password": {
-          "provider": "file",
-          "name": "vpn"
-        }
-      },
       "enabled": true,
       "addressing": [
         {
@@ -2492,7 +2909,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -2530,13 +2946,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2555,25 +2964,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-physical",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -2668,7 +3062,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -2706,13 +3099,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2731,33 +3117,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-pppoe",
-      "kind": {
-        "kind": "pppoe",
-        "parent": "eth0",
-        "username": "alice",
-        "password": {
-          "provider": "file",
-          "name": "dsl"
-        },
-        "service": "internet",
-        "ac": "BRAS-01"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -2852,7 +3215,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -2890,13 +3252,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -2915,28 +3270,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-tun",
-      "kind": {
-        "kind": "tun",
-        "mode": "tap",
-        "owner": "qemu",
-        "group": "kvm"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -3031,7 +3368,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -3069,13 +3405,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3094,31 +3423,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-tunnel",
-      "kind": {
-        "kind": "tunnel",
-        "mode": "gretap",
-        "local": "192.0.2.1",
-        "remote": "192.0.2.2",
-        "parent": "eth0",
-        "ttl": 64,
-        "key": 7
-      },
       "enabled": true,
       "addressing": [
         {
@@ -3213,7 +3521,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -3251,13 +3558,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3276,26 +3576,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-veth",
-      "kind": {
-        "kind": "veth",
-        "peer": "veth-b"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -3390,7 +3674,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -3428,13 +3711,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3453,28 +3729,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-vlan",
-      "kind": {
-        "kind": "vlan",
-        "parent": "eth0",
-        "id": 42,
-        "protocol": "dot1ad"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -3569,7 +3827,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -3607,13 +3864,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3632,26 +3882,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-vrf",
-      "kind": {
-        "kind": "vrf",
-        "table": 100
-      },
       "enabled": true,
       "addressing": [
         {
@@ -3746,7 +3980,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -3784,13 +4017,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3809,30 +4035,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-vxlan",
-      "kind": {
-        "kind": "vxlan",
-        "id": 100,
-        "parent": "eth0",
-        "local": "192.0.2.1",
-        "remote": "192.0.2.2",
-        "port": 4789
-      },
       "enabled": true,
       "addressing": [
         {
@@ -3927,7 +4133,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -3965,13 +4170,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -3990,46 +4188,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "k-wireguard",
-      "kind": {
-        "kind": "wire_guard",
-        "private_key": {
-          "provider": "keyring",
-          "name": "wg"
-        },
-        "listen_port": 51820,
-        "fwmark": 42,
-        "peers": [
-          {
-            "name": "hub",
-            "public_key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
-            "preshared_key": {
-              "provider": "pass",
-              "name": "psk"
-            },
-            "endpoint": "vpn.example:51820",
-            "allowed_ips": [
-              "10.0.0.0/24"
-            ],
-            "keepalive": 25
-          }
-        ]
-      },
       "enabled": true,
       "addressing": [
         {
@@ -4124,7 +4286,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -4162,13 +4323,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4187,25 +4341,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "p-0",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -4300,7 +4439,6 @@
         }
       ],
       "on_drift": "report",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -4338,13 +4476,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4363,25 +4494,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "p-1",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -4476,7 +4592,6 @@
         }
       ],
       "on_drift": "reconcile",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -4514,13 +4629,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4539,25 +4647,10 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     },
     {
       "name": "p-2",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
       "addressing": [
         {
@@ -4652,7 +4745,6 @@
         }
       ],
       "on_drift": "ignore",
-      "master": "br0",
       "dot1x": {
         "method": "peap",
         "identity": "dave",
@@ -4690,13 +4782,6 @@
         "lifetime": 1800
       },
       "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
       "nat": true,
       "guard": {
         "reason": "nfs"
@@ -4715,1258 +4800,7 @@
         "down_after": 3,
         "up_after": 2,
         "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
-    },
-    {
-      "name": "t-geneve",
-      "kind": {
-        "kind": "tunnel",
-        "mode": "geneve"
-      },
-      "enabled": true,
-      "addressing": [
-        {
-          "source": "static",
-          "address": "192.0.2.1/24",
-          "peer": "192.0.2.2",
-          "preferred_lifetime": 3600,
-          "valid_lifetime": 7200
-        },
-        {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
-        },
-        {
-          "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
-          "prefix_delegation": {
-            "hint": "2001:db8::/56",
-            "length": 56
-          }
-        },
-        {
-          "source": "slaac",
-          "privacy": "prefer_temporary"
-        },
-        {
-          "source": "delegated",
-          "prefix": {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 1
-          },
-          "suffix": "::1/64"
-        },
-        {
-          "source": "link_local"
-        },
-        {
-          "source": "reported"
-        }
-      ],
-      "routes": [
-        {
-          "destination": "198.51.100.0/24",
-          "via": "192.0.2.254",
-          "metric": 200,
-          "table": 254,
-          "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
-        }
-      ],
-      "dns": {
-        "mode": "openresolv",
-        "servers": [
-          {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
-          }
-        ],
-        "search": [
-          "example"
-        ],
-        "domains": [
-          {
-            "suffix": "corp.example",
-            "exclusive": true
-          }
-        ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
-      },
-      "hooks": [
-        {
-          "phase": "post_up",
-          "path": "/run/netcfgd/hooks/eth0.0",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "run_as": "nobody",
-          "timeout": 30
-        }
-      ],
-      "on_drift": "reconcile",
-      "master": "br0",
-      "dot1x": {
-        "method": "peap",
-        "identity": "dave",
-        "anonymous_identity": "anonymous",
-        "password": {
-          "provider": "file",
-          "name": "dot1x"
-        },
-        "ca_cert": {
-          "path": "/etc/ssl/ca.pem"
-        },
-        "client_cert": {
-          "path": "/etc/ssl/client.pem"
-        },
-        "private_key": {
-          "stored": {
-            "provider": "exec",
-            "name": "key"
-          }
-        },
-        "phase2": "auth=MSCHAPV2"
-      },
-      "advertise": {
-        "backend": "odhcpd",
-        "prefixes": [
-          {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 0
-          }
-        ],
-        "managed": true,
-        "other_config": true,
-        "dns": true,
-        "lifetime": 1800
-      },
-      "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
-      "nat": true,
-      "guard": {
-        "reason": "nfs"
-      },
-      "ipv6_token": "::5",
-      "preference": 100,
-      "probe": {
-        "command": "/bin/ping",
-        "args": [
-          "-c1",
-          "-W1",
-          "192.0.2.1"
-        ],
-        "interval": 30,
-        "timeout": 5,
-        "down_after": 3,
-        "up_after": 2,
-        "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
-    },
-    {
-      "name": "t-gre",
-      "kind": {
-        "kind": "tunnel",
-        "mode": "gre"
-      },
-      "enabled": true,
-      "addressing": [
-        {
-          "source": "static",
-          "address": "192.0.2.1/24",
-          "peer": "192.0.2.2",
-          "preferred_lifetime": 3600,
-          "valid_lifetime": 7200
-        },
-        {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
-        },
-        {
-          "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
-          "prefix_delegation": {
-            "hint": "2001:db8::/56",
-            "length": 56
-          }
-        },
-        {
-          "source": "slaac",
-          "privacy": "prefer_temporary"
-        },
-        {
-          "source": "delegated",
-          "prefix": {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 1
-          },
-          "suffix": "::1/64"
-        },
-        {
-          "source": "link_local"
-        },
-        {
-          "source": "reported"
-        }
-      ],
-      "routes": [
-        {
-          "destination": "198.51.100.0/24",
-          "via": "192.0.2.254",
-          "metric": 200,
-          "table": 254,
-          "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
-        }
-      ],
-      "dns": {
-        "mode": "openresolv",
-        "servers": [
-          {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
-          }
-        ],
-        "search": [
-          "example"
-        ],
-        "domains": [
-          {
-            "suffix": "corp.example",
-            "exclusive": true
-          }
-        ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
-      },
-      "hooks": [
-        {
-          "phase": "post_up",
-          "path": "/run/netcfgd/hooks/eth0.0",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "run_as": "nobody",
-          "timeout": 30
-        }
-      ],
-      "on_drift": "reconcile",
-      "master": "br0",
-      "dot1x": {
-        "method": "peap",
-        "identity": "dave",
-        "anonymous_identity": "anonymous",
-        "password": {
-          "provider": "file",
-          "name": "dot1x"
-        },
-        "ca_cert": {
-          "path": "/etc/ssl/ca.pem"
-        },
-        "client_cert": {
-          "path": "/etc/ssl/client.pem"
-        },
-        "private_key": {
-          "stored": {
-            "provider": "exec",
-            "name": "key"
-          }
-        },
-        "phase2": "auth=MSCHAPV2"
-      },
-      "advertise": {
-        "backend": "odhcpd",
-        "prefixes": [
-          {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 0
-          }
-        ],
-        "managed": true,
-        "other_config": true,
-        "dns": true,
-        "lifetime": 1800
-      },
-      "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
-      "nat": true,
-      "guard": {
-        "reason": "nfs"
-      },
-      "ipv6_token": "::5",
-      "preference": 100,
-      "probe": {
-        "command": "/bin/ping",
-        "args": [
-          "-c1",
-          "-W1",
-          "192.0.2.1"
-        ],
-        "interval": 30,
-        "timeout": 5,
-        "down_after": 3,
-        "up_after": 2,
-        "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
-    },
-    {
-      "name": "t-gretap",
-      "kind": {
-        "kind": "tunnel",
-        "mode": "gretap"
-      },
-      "enabled": true,
-      "addressing": [
-        {
-          "source": "static",
-          "address": "192.0.2.1/24",
-          "peer": "192.0.2.2",
-          "preferred_lifetime": 3600,
-          "valid_lifetime": 7200
-        },
-        {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
-        },
-        {
-          "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
-          "prefix_delegation": {
-            "hint": "2001:db8::/56",
-            "length": 56
-          }
-        },
-        {
-          "source": "slaac",
-          "privacy": "prefer_temporary"
-        },
-        {
-          "source": "delegated",
-          "prefix": {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 1
-          },
-          "suffix": "::1/64"
-        },
-        {
-          "source": "link_local"
-        },
-        {
-          "source": "reported"
-        }
-      ],
-      "routes": [
-        {
-          "destination": "198.51.100.0/24",
-          "via": "192.0.2.254",
-          "metric": 200,
-          "table": 254,
-          "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
-        }
-      ],
-      "dns": {
-        "mode": "openresolv",
-        "servers": [
-          {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
-          }
-        ],
-        "search": [
-          "example"
-        ],
-        "domains": [
-          {
-            "suffix": "corp.example",
-            "exclusive": true
-          }
-        ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
-      },
-      "hooks": [
-        {
-          "phase": "post_up",
-          "path": "/run/netcfgd/hooks/eth0.0",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "run_as": "nobody",
-          "timeout": 30
-        }
-      ],
-      "on_drift": "reconcile",
-      "master": "br0",
-      "dot1x": {
-        "method": "peap",
-        "identity": "dave",
-        "anonymous_identity": "anonymous",
-        "password": {
-          "provider": "file",
-          "name": "dot1x"
-        },
-        "ca_cert": {
-          "path": "/etc/ssl/ca.pem"
-        },
-        "client_cert": {
-          "path": "/etc/ssl/client.pem"
-        },
-        "private_key": {
-          "stored": {
-            "provider": "exec",
-            "name": "key"
-          }
-        },
-        "phase2": "auth=MSCHAPV2"
-      },
-      "advertise": {
-        "backend": "odhcpd",
-        "prefixes": [
-          {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 0
-          }
-        ],
-        "managed": true,
-        "other_config": true,
-        "dns": true,
-        "lifetime": 1800
-      },
-      "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
-      "nat": true,
-      "guard": {
-        "reason": "nfs"
-      },
-      "ipv6_token": "::5",
-      "preference": 100,
-      "probe": {
-        "command": "/bin/ping",
-        "args": [
-          "-c1",
-          "-W1",
-          "192.0.2.1"
-        ],
-        "interval": 30,
-        "timeout": 5,
-        "down_after": 3,
-        "up_after": 2,
-        "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
-    },
-    {
-      "name": "t-ip6gre",
-      "kind": {
-        "kind": "tunnel",
-        "mode": "ip6gre"
-      },
-      "enabled": true,
-      "addressing": [
-        {
-          "source": "static",
-          "address": "192.0.2.1/24",
-          "peer": "192.0.2.2",
-          "preferred_lifetime": 3600,
-          "valid_lifetime": 7200
-        },
-        {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
-        },
-        {
-          "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
-          "prefix_delegation": {
-            "hint": "2001:db8::/56",
-            "length": 56
-          }
-        },
-        {
-          "source": "slaac",
-          "privacy": "prefer_temporary"
-        },
-        {
-          "source": "delegated",
-          "prefix": {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 1
-          },
-          "suffix": "::1/64"
-        },
-        {
-          "source": "link_local"
-        },
-        {
-          "source": "reported"
-        }
-      ],
-      "routes": [
-        {
-          "destination": "198.51.100.0/24",
-          "via": "192.0.2.254",
-          "metric": 200,
-          "table": 254,
-          "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
-        }
-      ],
-      "dns": {
-        "mode": "openresolv",
-        "servers": [
-          {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
-          }
-        ],
-        "search": [
-          "example"
-        ],
-        "domains": [
-          {
-            "suffix": "corp.example",
-            "exclusive": true
-          }
-        ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
-      },
-      "hooks": [
-        {
-          "phase": "post_up",
-          "path": "/run/netcfgd/hooks/eth0.0",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "run_as": "nobody",
-          "timeout": 30
-        }
-      ],
-      "on_drift": "reconcile",
-      "master": "br0",
-      "dot1x": {
-        "method": "peap",
-        "identity": "dave",
-        "anonymous_identity": "anonymous",
-        "password": {
-          "provider": "file",
-          "name": "dot1x"
-        },
-        "ca_cert": {
-          "path": "/etc/ssl/ca.pem"
-        },
-        "client_cert": {
-          "path": "/etc/ssl/client.pem"
-        },
-        "private_key": {
-          "stored": {
-            "provider": "exec",
-            "name": "key"
-          }
-        },
-        "phase2": "auth=MSCHAPV2"
-      },
-      "advertise": {
-        "backend": "odhcpd",
-        "prefixes": [
-          {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 0
-          }
-        ],
-        "managed": true,
-        "other_config": true,
-        "dns": true,
-        "lifetime": 1800
-      },
-      "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
-      "nat": true,
-      "guard": {
-        "reason": "nfs"
-      },
-      "ipv6_token": "::5",
-      "preference": 100,
-      "probe": {
-        "command": "/bin/ping",
-        "args": [
-          "-c1",
-          "-W1",
-          "192.0.2.1"
-        ],
-        "interval": 30,
-        "timeout": 5,
-        "down_after": 3,
-        "up_after": 2,
-        "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
-    },
-    {
-      "name": "t-ip6tnl",
-      "kind": {
-        "kind": "tunnel",
-        "mode": "ip6tnl"
-      },
-      "enabled": true,
-      "addressing": [
-        {
-          "source": "static",
-          "address": "192.0.2.1/24",
-          "peer": "192.0.2.2",
-          "preferred_lifetime": 3600,
-          "valid_lifetime": 7200
-        },
-        {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
-        },
-        {
-          "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
-          "prefix_delegation": {
-            "hint": "2001:db8::/56",
-            "length": 56
-          }
-        },
-        {
-          "source": "slaac",
-          "privacy": "prefer_temporary"
-        },
-        {
-          "source": "delegated",
-          "prefix": {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 1
-          },
-          "suffix": "::1/64"
-        },
-        {
-          "source": "link_local"
-        },
-        {
-          "source": "reported"
-        }
-      ],
-      "routes": [
-        {
-          "destination": "198.51.100.0/24",
-          "via": "192.0.2.254",
-          "metric": 200,
-          "table": 254,
-          "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
-        }
-      ],
-      "dns": {
-        "mode": "openresolv",
-        "servers": [
-          {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
-          }
-        ],
-        "search": [
-          "example"
-        ],
-        "domains": [
-          {
-            "suffix": "corp.example",
-            "exclusive": true
-          }
-        ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
-      },
-      "hooks": [
-        {
-          "phase": "post_up",
-          "path": "/run/netcfgd/hooks/eth0.0",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "run_as": "nobody",
-          "timeout": 30
-        }
-      ],
-      "on_drift": "reconcile",
-      "master": "br0",
-      "dot1x": {
-        "method": "peap",
-        "identity": "dave",
-        "anonymous_identity": "anonymous",
-        "password": {
-          "provider": "file",
-          "name": "dot1x"
-        },
-        "ca_cert": {
-          "path": "/etc/ssl/ca.pem"
-        },
-        "client_cert": {
-          "path": "/etc/ssl/client.pem"
-        },
-        "private_key": {
-          "stored": {
-            "provider": "exec",
-            "name": "key"
-          }
-        },
-        "phase2": "auth=MSCHAPV2"
-      },
-      "advertise": {
-        "backend": "odhcpd",
-        "prefixes": [
-          {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 0
-          }
-        ],
-        "managed": true,
-        "other_config": true,
-        "dns": true,
-        "lifetime": 1800
-      },
-      "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
-      "nat": true,
-      "guard": {
-        "reason": "nfs"
-      },
-      "ipv6_token": "::5",
-      "preference": 100,
-      "probe": {
-        "command": "/bin/ping",
-        "args": [
-          "-c1",
-          "-W1",
-          "192.0.2.1"
-        ],
-        "interval": 30,
-        "timeout": 5,
-        "down_after": 3,
-        "up_after": 2,
-        "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
-    },
-    {
-      "name": "t-ipip",
-      "kind": {
-        "kind": "tunnel",
-        "mode": "ipip"
-      },
-      "enabled": true,
-      "addressing": [
-        {
-          "source": "static",
-          "address": "192.0.2.1/24",
-          "peer": "192.0.2.2",
-          "preferred_lifetime": 3600,
-          "valid_lifetime": 7200
-        },
-        {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
-        },
-        {
-          "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
-          "prefix_delegation": {
-            "hint": "2001:db8::/56",
-            "length": 56
-          }
-        },
-        {
-          "source": "slaac",
-          "privacy": "prefer_temporary"
-        },
-        {
-          "source": "delegated",
-          "prefix": {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 1
-          },
-          "suffix": "::1/64"
-        },
-        {
-          "source": "link_local"
-        },
-        {
-          "source": "reported"
-        }
-      ],
-      "routes": [
-        {
-          "destination": "198.51.100.0/24",
-          "via": "192.0.2.254",
-          "metric": 200,
-          "table": 254,
-          "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
-        }
-      ],
-      "dns": {
-        "mode": "openresolv",
-        "servers": [
-          {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
-          }
-        ],
-        "search": [
-          "example"
-        ],
-        "domains": [
-          {
-            "suffix": "corp.example",
-            "exclusive": true
-          }
-        ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
-      },
-      "hooks": [
-        {
-          "phase": "post_up",
-          "path": "/run/netcfgd/hooks/eth0.0",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "run_as": "nobody",
-          "timeout": 30
-        }
-      ],
-      "on_drift": "reconcile",
-      "master": "br0",
-      "dot1x": {
-        "method": "peap",
-        "identity": "dave",
-        "anonymous_identity": "anonymous",
-        "password": {
-          "provider": "file",
-          "name": "dot1x"
-        },
-        "ca_cert": {
-          "path": "/etc/ssl/ca.pem"
-        },
-        "client_cert": {
-          "path": "/etc/ssl/client.pem"
-        },
-        "private_key": {
-          "stored": {
-            "provider": "exec",
-            "name": "key"
-          }
-        },
-        "phase2": "auth=MSCHAPV2"
-      },
-      "advertise": {
-        "backend": "odhcpd",
-        "prefixes": [
-          {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 0
-          }
-        ],
-        "managed": true,
-        "other_config": true,
-        "dns": true,
-        "lifetime": 1800
-      },
-      "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
-      "nat": true,
-      "guard": {
-        "reason": "nfs"
-      },
-      "ipv6_token": "::5",
-      "preference": 100,
-      "probe": {
-        "command": "/bin/ping",
-        "args": [
-          "-c1",
-          "-W1",
-          "192.0.2.1"
-        ],
-        "interval": 30,
-        "timeout": 5,
-        "down_after": 3,
-        "up_after": 2,
-        "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
-    },
-    {
-      "name": "t-sit",
-      "kind": {
-        "kind": "tunnel",
-        "mode": "sit"
-      },
-      "enabled": true,
-      "addressing": [
-        {
-          "source": "static",
-          "address": "192.0.2.1/24",
-          "peer": "192.0.2.2",
-          "preferred_lifetime": 3600,
-          "valid_lifetime": 7200
-        },
-        {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
-        },
-        {
-          "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
-          "prefix_delegation": {
-            "hint": "2001:db8::/56",
-            "length": 56
-          }
-        },
-        {
-          "source": "slaac",
-          "privacy": "prefer_temporary"
-        },
-        {
-          "source": "delegated",
-          "prefix": {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 1
-          },
-          "suffix": "::1/64"
-        },
-        {
-          "source": "link_local"
-        },
-        {
-          "source": "reported"
-        }
-      ],
-      "routes": [
-        {
-          "destination": "198.51.100.0/24",
-          "via": "192.0.2.254",
-          "metric": 200,
-          "table": 254,
-          "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
-        }
-      ],
-      "dns": {
-        "mode": "openresolv",
-        "servers": [
-          {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
-          }
-        ],
-        "search": [
-          "example"
-        ],
-        "domains": [
-          {
-            "suffix": "corp.example",
-            "exclusive": true
-          }
-        ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
-      },
-      "hooks": [
-        {
-          "phase": "post_up",
-          "path": "/run/netcfgd/hooks/eth0.0",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "run_as": "nobody",
-          "timeout": 30
-        }
-      ],
-      "on_drift": "reconcile",
-      "master": "br0",
-      "dot1x": {
-        "method": "peap",
-        "identity": "dave",
-        "anonymous_identity": "anonymous",
-        "password": {
-          "provider": "file",
-          "name": "dot1x"
-        },
-        "ca_cert": {
-          "path": "/etc/ssl/ca.pem"
-        },
-        "client_cert": {
-          "path": "/etc/ssl/client.pem"
-        },
-        "private_key": {
-          "stored": {
-            "provider": "exec",
-            "name": "key"
-          }
-        },
-        "phase2": "auth=MSCHAPV2"
-      },
-      "advertise": {
-        "backend": "odhcpd",
-        "prefixes": [
-          {
-            "source": "wan0",
-            "index": 0,
-            "subnet": 0
-          }
-        ],
-        "managed": true,
-        "other_config": true,
-        "dns": true,
-        "lifetime": 1800
-      },
-      "forwarding": true,
-      "ingress_redirect": "ifb-eth0",
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000,
-        "ingress_bandwidth_bits": 50000000,
-        "ingress": true
-      },
-      "nat": true,
-      "guard": {
-        "reason": "nfs"
-      },
-      "ipv6_token": "::5",
-      "preference": 100,
-      "probe": {
-        "command": "/bin/ping",
-        "args": [
-          "-c1",
-          "-W1",
-          "192.0.2.1"
-        ],
-        "interval": 30,
-        "timeout": 5,
-        "down_after": 3,
-        "up_after": 2,
-        "hold_down": 120
-      },
-      "bridge_vlans": [
-        {
-          "vid": 10,
-          "pvid": true,
-          "untagged": true
-        },
-        {
-          "vid": 20,
-          "pvid": false,
-          "untagged": false
-        }
-      ]
+      }
     }
   ],
   "networks": [

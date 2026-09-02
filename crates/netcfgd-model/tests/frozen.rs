@@ -45,7 +45,7 @@ use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{EapConfig, EapMethod, PskConfig, PskProto, Security};
 use netcfgd_model::{
 	AddressSource, CertSource, Control, Dhcp4, Dhcp6, Document, DriftPolicy, Globals,
-	HostnamePolicy, Interface, InterfaceKind, Key, Principal, QdiscKind, QdiscPolicy, RemotePolicy,
+	HostnamePolicy, Interface, InterfaceKind, Key, Principal, QdiscPolicy, RemotePolicy,
 	SecretProvider, SecretRef, Ssid, WifiNetwork,
 };
 use std::path::PathBuf;
@@ -210,10 +210,9 @@ fn dns_policy(mode: DnsMode) -> DnsPolicy {
 
 /// An interface with every optional field set, so `skip_serializing_if` cannot
 /// hide one.
-fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
+fn maximal_interface(name: &str) -> Interface {
 	Interface {
 		name: name.to_owned(),
-		kind,
 		enabled: true,
 		addressing: every_address_source(),
 		routes: vec![Route {
@@ -235,7 +234,6 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 			timeout: Some(30),
 		}],
 		on_drift: Some(DriftPolicy::Reconcile),
-		master: Some("br0".to_owned()),
 		dot1x: Some(EapConfig {
 			method: EapMethod::Peap,
 			identity: "dave".to_owned(),
@@ -260,13 +258,6 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 		}),
 		forwarding: Some(true),
 		nat: Some(true),
-		qdisc: Some(QdiscPolicy {
-			kind: QdiscKind::Cake,
-			bandwidth_bits: Some(100_000_000),
-			ingress_bandwidth_bits: Some(50_000_000),
-			ingress: true,
-		}),
-		ingress_redirect: Some("ifb-eth0".to_owned()),
 		guard: Some(Guard {
 			reason: "nfs".to_owned(),
 		}),
@@ -287,18 +278,6 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 			// default: `hold_down` is skip_serializing_if too.
 			hold_down: 120,
 		}),
-		bridge_vlans: vec![
-			BridgeVlan {
-				vid: 10,
-				pvid: true,
-				untagged: true,
-			},
-			BridgeVlan {
-				vid: 20,
-				pvid: false,
-				untagged: false,
-			},
-		],
 	}
 }
 
@@ -428,13 +407,54 @@ fn credentialled_kinds() -> Vec<(&'static str, InterfaceKind)> {
 
 /// Every interface kind, one interface each.
 ///
+/// A device with every optional field set, so `skip_serializing_if` cannot hide
+/// one.
+///
+/// The other half of `maximal_interface`, and it exists because 0155 pass 1b
+/// moved `kind` here: a sample per `InterfaceKind` is a sample per *device*
+/// now, and the qdisc and port VLANs came with it.
+fn maximal_device(name: &str, kind: InterfaceKind) -> Device {
+	Device {
+		name: name.to_owned(),
+		r#match: None,
+		managed: true,
+		on_unmanage: netcfgd_model::OnUnmanage::Leave,
+		wifi: None,
+		modem: None,
+		mtu: Some(1400),
+		mac: Some("02:00:00:00:00:01".to_owned()),
+		link_settings: None,
+		kind,
+		master: Some("br0".to_owned()),
+		ingress_redirect: Some("ifb-eth0".to_owned()),
+		qdisc: Some(QdiscPolicy {
+			kind: netcfgd_model::QdiscKind::Cake,
+			bandwidth_bits: Some(100_000_000),
+			ingress_bandwidth_bits: Some(50_000_000),
+			ingress: true,
+		}),
+		bridge_vlans: vec![
+			BridgeVlan {
+				vid: 10,
+				pvid: true,
+				untagged: true,
+			},
+			BridgeVlan {
+				vid: 20,
+				pvid: false,
+				untagged: false,
+			},
+		],
+	}
+}
+
 /// **Guarded the same way `every_address_source` is, and for the same reason it
 /// needed guarding twice.** That fix was made for `AddressSource` alone and this
 /// list kept the hole: `InterfaceKind::OpenVpn` was added, the frozen surface
 /// did not move, and the gate stayed green. A witness is a sample document and
 /// a sample cannot notice a variant nobody put in it, so *every* list of
 /// variants in this file needs the check, not only the one caught first.
-fn every_kind() -> Vec<Interface> {
+fn every_kind() -> Vec<Device> {
 	// Exhaustive, never a wildcard: adding a variant stops this file compiling
 	// until somebody writes an arm, and writing the arm is what reminds them to
 	// add the sample. That reminder is the whole mechanism -- the assertion
@@ -492,12 +512,12 @@ fn every_kind() -> Vec<Interface> {
 	);
 
 	all.into_iter()
-		.map(|(name, kind)| maximal_interface(&format!("k-{name}"), kind))
+		.map(|(name, kind)| maximal_device(&format!("k-{name}"), kind))
 		.collect()
 }
 
 /// Every tunnel kind, which the single interface above cannot cover.
-fn every_tunnel_kind() -> Vec<Interface> {
+fn every_tunnel_kind() -> Vec<Device> {
 	[
 		TunnelKind::Gre,
 		TunnelKind::Gretap,
@@ -508,7 +528,7 @@ fn every_tunnel_kind() -> Vec<Interface> {
 		TunnelKind::Geneve,
 	]
 	.into_iter()
-	.map(|kind| Interface {
+	.map(|kind| Device {
 		name: format!("t-{}", kind.name()),
 		kind: InterfaceKind::Tunnel(TunnelConfig {
 			mode: kind,
@@ -518,7 +538,7 @@ fn every_tunnel_kind() -> Vec<Interface> {
 			ttl: None,
 			key: None,
 		}),
-		..maximal_interface("t", InterfaceKind::Physical)
+		..maximal_device("t", InterfaceKind::Physical)
 	})
 	.collect()
 }
@@ -606,6 +626,11 @@ fn every_network() -> Vec<WifiNetwork> {
 /// what pins that neither can vanish from the schema unnoticed.
 fn every_device() -> Vec<Device> {
 	vec![Device {
+		kind: InterfaceKind::Physical,
+		master: None,
+		qdisc: None,
+		ingress_redirect: None,
+		bridge_vlans: Vec::new(),
 		name: "wlan0".to_owned(),
 		r#match: Some(DeviceMatch {
 			mac: Some("02:00:00:00:00:02".to_owned()),
@@ -697,7 +722,16 @@ fn witness() -> Document {
 			},
 		},
 		devices: every_device(),
-		interfaces: every_kind(),
+		// One maximal interface per device, which is what keeps the interface
+		// half of the witness alive. Setting this to an empty vector while
+		// moving `kind` to the device silently unpinned `addressing`,
+		// `routes`, `probe`, `guard` and `preference` -- 4081 lines left the
+		// witness and the suite stayed green, because a sample that is not
+		// there cannot fail.
+		interfaces: every_kind()
+			.iter()
+			.map(|device| maximal_interface(&device.name))
+			.collect(),
 		networks: every_network(),
 		rules: vec![RoutingRule {
 			id: "vpn".to_owned(),
@@ -730,12 +764,13 @@ fn witness() -> Document {
 			}),
 		}],
 	};
-	document.interfaces.extend(every_tunnel_kind());
+	document.devices.extend(every_kind());
+	document.devices.extend(every_tunnel_kind());
 
 	// Every remaining enum variant that the shapes above did not reach. A
 	// variant with no witness is a variant that can be renamed silently.
 	for (index, mode) in every_dns_mode().into_iter().enumerate() {
-		let mut interface = maximal_interface(&format!("d-{index}"), InterfaceKind::Physical);
+		let mut interface = maximal_interface(&format!("d-{index}"));
 		interface.dns = Some(dns_policy(mode));
 		document.interfaces.push(interface);
 	}
@@ -747,7 +782,7 @@ fn witness() -> Document {
 	.into_iter()
 	.enumerate()
 	{
-		let mut interface = maximal_interface(&format!("p-{index}"), InterfaceKind::Physical);
+		let mut interface = maximal_interface(&format!("p-{index}"));
 		interface.on_drift = Some(drift);
 		document.interfaces.push(interface);
 	}

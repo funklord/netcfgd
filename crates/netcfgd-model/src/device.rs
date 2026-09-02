@@ -1,6 +1,6 @@
 //! Per-device policy: what netcfgd may touch, and how a radio behaves.
 
-use crate::interface::LinkSettings;
+use crate::interface::{BridgeVlan, InterfaceKind, LinkSettings, QdiscPolicy};
 use serde::{Deserialize, Serialize};
 
 /// How a device is identified.
@@ -191,6 +191,52 @@ pub struct Device {
 	/// Driver-level settings. Unimplemented; see [`LinkSettings`].
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub link_settings: Option<LinkSettings>,
+	// ---- moved from `Interface` by 0155 pass 1b ----
+	//
+	// The structural half: what netcfgd creates, what it is a port of, and how
+	// its egress is shaped. Unlike pass 1a's three, these are not inert -- they
+	// drive creation and membership, which is why they moved separately.
+	/// What it is, and therefore what netcfgd creates.
+	///
+	/// Defaulted, unlike on `Interface` where it lived before: most devices
+	/// are physical and say nothing, and a `device` block that exists only to
+	/// set an MTU should not have to declare a kind it did not choose. On an
+	/// interface every block named something netcfgd might create, so the
+	/// field being required cost nothing; on a device it would make the common
+	/// block the verbose one.
+	#[serde(default)]
+	pub kind: InterfaceKind,
+	/// Bridge or bond this is a member of.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub master: Option<String>,
+	/// How this link drains its transmit queue.
+	///
+	/// The root qdisc and nothing below it: decision 0023 draws the same line
+	/// here that 0022 draws for netfilter. netcfgd sets how a link behaves when
+	/// it is congested, because that is a property of the link; it does not
+	/// decide which traffic wins, because that is policy.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub qdisc: Option<QdiscPolicy>,
+	/// Where traffic arriving on this interface is redirected to.
+	///
+	/// Synthesised, never written: it is the `ifb` that `ingress_bandwidth`
+	/// asks for. Named in the document rather than derived at apply time so
+	/// that `ncfg plan` can say which device the redirect points at.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub ingress_redirect: Option<String>,
+	/// VLANs this interface carries, as a bridge port or as a bridge.
+	///
+	/// **Authoritative where present.** A port whose config lists VLANs has
+	/// exactly those, and anything else the kernel holds for it is removed --
+	/// including the VLAN 1 the kernel adds by itself the moment a port joins
+	/// a filtering bridge. Every real trunk setup begins by deleting that
+	/// one, so leaving it because the kernel put it there would mean the
+	/// document does not describe the port.
+	///
+	/// A port the document says nothing about keeps whatever it has. The
+	/// authority is over ports that are configured, not over the bridge.
+	#[serde(default)]
+	pub bridge_vlans: Vec<BridgeVlan>,
 }
 
 /// What hardware address a radio presents.

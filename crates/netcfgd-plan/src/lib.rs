@@ -788,7 +788,7 @@ fn prepare(desired: &Document, observed: &Observed, options: &PlanOptions) -> Bu
 	// has to be known when an action against it is considered, whatever order
 	// the interfaces sort in.
 	builder.appearing = desired
-		.interfaces
+		.devices
 		.iter()
 		.filter_map(|interface| match &interface.kind {
 			InterfaceKind::Veth(veth) => Some(veth.peer.clone()),
@@ -903,8 +903,13 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	// enslavement done before the master is addressed or brought up -- and a
 	// master may sort before its own members. Passing over the list three
 	// times is simpler and more obviously correct than back-patching edges.
-	for interface in &desired.interfaces {
-		builder.plan_link_creation(interface, observed);
+	// **Devices, not interfaces.** What netcfgd creates is stated on the device
+	// since 0155 pass 1b, and driving creation from that list is what lets a
+	// device exist with nothing running over it -- an `ifb` carries no address
+	// and never will, and before this it had to be an interface to be created
+	// at all.
+	for device in &desired.devices {
+		builder.plan_link_creation(device, observed);
 	}
 	// Before the attributes pass, and that is not tidiness: `link.up` is where
 	// the kernel decides whether to solicit a router at all, and it does not
@@ -915,16 +920,36 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 	builder.plan_accept_ra(desired, observed);
 	for interface in &desired.interfaces {
 		builder.plan_link_attributes(interface, observed);
-		// In the attributes pass rather than the contents one: a WireGuard
-		// device's port and peers are properties of the link, and the pass that
-		// runs later is the one a tunnel's dial lives in -- which is where
-		// planning the same work twice cost a session once already.
-		builder.plan_wireguard(interface, observed);
-		builder.plan_bridge(interface, observed);
-		builder.plan_bond(interface, observed);
-		builder.plan_macvlan(interface, observed);
-		builder.plan_tunnel(interface, observed);
-		builder.plan_vxlan(interface, observed);
+	}
+	// The contents of a created thing, which follow from its `kind` and so are
+	// driven from the device list (0155 pass 1b).
+	//
+	// In this pass rather than the contents one: a WireGuard device's port and
+	// peers are properties of the link, and the pass that runs later is the one
+	// a tunnel's dial lives in -- which is where planning the same work twice
+	// cost a session once already.
+	for device in &desired.devices {
+		// The backend that creates a tunnel is also the backend that keeps it
+		// up, so this is planned whether or not the link exists -- putting it
+		// inside the "link is absent" branch meant a running tunnel whose
+		// daemon had died was never restarted (0155 pass 1b).
+		if matches!(
+			device.kind,
+			InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
+		) {
+			builder.plan_ppp_session(&device.name, observed);
+		}
+		// Enslavement follows from `master`, which is the device's since 0155
+		// pass 1b -- and a bridge port need not have an interface at all, so
+		// planning it from the interface walk misses exactly the members that
+		// were only ever ports.
+		builder.plan_master(&device.name, observed.link(&device.name));
+		builder.plan_wireguard(device, observed);
+		builder.plan_bridge(device, observed);
+		builder.plan_bond(device, observed);
+		builder.plan_macvlan(device, observed);
+		builder.plan_tunnel(device, observed);
+		builder.plan_vxlan(device, observed);
 	}
 	for interface in &desired.interfaces {
 		builder.plan_interface_contents(interface, observed);
@@ -1180,6 +1205,18 @@ impl Builder {
 			.collect()
 	}
 
+	/// What kind of thing this name is, from the device of the same name.
+	///
+	/// `Physical` where no device block exists, which is the honest default:
+	/// an interface naming hardware netcfgd was never told about is hardware
+	/// netcfgd does not create. Added by 0155 pass 1b, when `kind` moved to
+	/// the device and the paths that walk interfaces still needed to ask.
+	fn kind_of(&self, name: &str) -> InterfaceKind {
+		self.devices
+			.get(name)
+			.map_or(InterfaceKind::Physical, |device| device.kind.clone())
+	}
+
 	fn link_up_of(&self, name: &str) -> Option<u32> {
 		self.link_up
 			.iter()
@@ -1244,7 +1281,12 @@ impl Builder {
 	///
 	/// A port the document says nothing about is left alone entirely. The
 	/// authority is over ports that are configured, not over the bridge.
-	fn plan_bridge_vlans(&mut self, interface: &Interface, observed: &Observed, base: &[u32]) {
+	fn plan_bridge_vlans(
+		&mut self,
+		interface: &netcfgd_model::Device,
+		observed: &Observed,
+		base: &[u32],
+	) {
 		if interface.bridge_vlans.is_empty() {
 			return;
 		}
@@ -1252,7 +1294,7 @@ impl Builder {
 		// A VLAN on the bridge device itself is a SELF operation; one on a
 		// port is MASTER. Getting it backwards is accepted by the kernel and
 		// configures the wrong device.
-		let on_self = matches!(interface.kind, InterfaceKind::Bridge(_));
+		let on_self = matches!(self.kind_of(&interface.name), InterfaceKind::Bridge(_));
 
 		// A link this plan is about to create has no VLANs yet, which is not
 		// the same as having none to compare against -- returning early here
@@ -1282,7 +1324,7 @@ impl Builder {
 		if existing.is_none() && !interface.bridge_vlans.iter().any(|vlan| vlan.vid == 1) {
 			self.push(
 				Op::BridgeVlanDel {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					vid: 1,
 					on_self,
 				},
@@ -1305,7 +1347,7 @@ impl Builder {
 			}
 			self.push(
 				Op::BridgeVlanAdd {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					vid: wanted.vid,
 					pvid: wanted.pvid,
 					untagged: wanted.untagged,
@@ -1314,7 +1356,7 @@ impl Builder {
 				Reason::absent(name, "vlans", render_vlan(*wanted)),
 				base.to_vec(),
 				Some(Op::BridgeVlanDel {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					vid: wanted.vid,
 					on_self,
 				}),
@@ -1331,14 +1373,14 @@ impl Builder {
 			}
 			self.push(
 				Op::BridgeVlanDel {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					vid: present.vid,
 					on_self,
 				},
 				Reason::unwanted(name, "vlans", present.vid.to_string()),
 				base.to_vec(),
 				Some(Op::BridgeVlanAdd {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					vid: present.vid,
 					pvid: present.pvid,
 					untagged: present.untagged,
@@ -1357,8 +1399,10 @@ impl Builder {
 	/// contents is skipped for exactly the tunnels this is about. The question
 	/// is about a backend, so it is asked where backends are.
 	fn plan_stale_tunnels(&mut self, desired: &Document, observed: &Observed) {
-		for interface in &desired.interfaces {
-			self.restart_stale_tunnel(interface, observed);
+		// Devices: the `openvpn` block is theirs since 0155 pass 1b, and a
+		// tunnel need not have an interface at all until it reports one.
+		for device in &desired.devices {
+			self.restart_stale_tunnel(&device.name, observed);
 		}
 	}
 
@@ -1426,14 +1470,13 @@ impl Builder {
 		);
 	}
 
-	fn restart_stale_tunnel(&mut self, interface: &Interface, observed: &Observed) {
-		if !matches!(interface.kind, InterfaceKind::OpenVpn(_)) {
+	fn restart_stale_tunnel(&mut self, name: &str, observed: &Observed) {
+		if !matches!(self.kind_of(name), InterfaceKind::OpenVpn(_)) {
 			return;
 		}
-		let name = &interface.name;
 		let stale = observed.backends.iter().any(|backend| {
 			backend.kind == BackendKind::OpenVpn
-				&& &backend.interface == name
+				&& backend.interface == name
 				&& backend.running
 				&& backend.config_matches == Some(false)
 		});
@@ -1458,12 +1501,12 @@ impl Builder {
 		let stop = self.push_root(
 			Op::BackendStop {
 				kind: BackendKind::OpenVpn,
-				iface: name.clone(),
+				iface: name.to_owned(),
 			},
 			reason.clone(),
 			Some(Op::BackendStart {
 				kind: BackendKind::OpenVpn,
-				iface: name.clone(),
+				iface: name.to_owned(),
 			}),
 		);
 		if stop == u32::MAX {
@@ -1472,13 +1515,13 @@ impl Builder {
 		self.push(
 			Op::BackendStart {
 				kind: BackendKind::OpenVpn,
-				iface: name.clone(),
+				iface: name.to_owned(),
 			},
 			reason,
 			vec![stop],
 			Some(Op::BackendStop {
 				kind: BackendKind::OpenVpn,
-				iface: name.clone(),
+				iface: name.to_owned(),
 			}),
 		);
 	}
@@ -1498,13 +1541,25 @@ impl Builder {
 		base: &[u32],
 	) -> Vec<u32> {
 		if interface.dot1x.is_some() {
-			return self.plan_backend(interface, BackendKind::Supplicant, "dot1x", observed, base);
+			return self.plan_backend(
+				&interface.name,
+				BackendKind::Supplicant,
+				"dot1x",
+				observed,
+				base,
+			);
 		}
-		if matches!(interface.kind, InterfaceKind::Pppoe(_)) {
-			return self.plan_backend(interface, BackendKind::Pppoe, "pppoe", observed, base);
+		if matches!(self.kind_of(&interface.name), InterfaceKind::Pppoe(_)) {
+			return self.plan_backend(&interface.name, BackendKind::Pppoe, "pppoe", observed, base);
 		}
-		if matches!(interface.kind, InterfaceKind::OpenVpn(_)) {
-			return self.plan_backend(interface, BackendKind::OpenVpn, "openvpn", observed, base);
+		if matches!(self.kind_of(&interface.name), InterfaceKind::OpenVpn(_)) {
+			return self.plan_backend(
+				&interface.name,
+				BackendKind::OpenVpn,
+				"openvpn",
+				observed,
+				base,
+			);
 		}
 
 		// Before the supplicant, because a radio that runs an access point does
@@ -1518,7 +1573,7 @@ impl Builder {
 			.any(|name| name == &interface.name)
 		{
 			return self.plan_backend(
-				interface,
+				&interface.name,
 				BackendKind::AccessPoint,
 				"access_point",
 				observed,
@@ -1528,7 +1583,13 @@ impl Builder {
 		if self.radios.iter().any(|name| name == &interface.name) {
 			// The field named is the `device` block's, not the interface's,
 			// because that is where somebody would go to turn this off.
-			return self.plan_backend(interface, BackendKind::Supplicant, "wifi", observed, base);
+			return self.plan_backend(
+				&interface.name,
+				BackendKind::Supplicant,
+				"wifi",
+				observed,
+				base,
+			);
 		}
 		Vec::new()
 	}
@@ -1548,20 +1609,26 @@ impl Builder {
 	/// action that must fail, and it fails *first* -- so the apply stops
 	/// before the `backend.start` that would have created the device, and the
 	/// tunnel never comes up at all. Found exactly that way.
-	fn plan_ppp_session(&mut self, interface: &Interface, observed: &Observed) {
-		let name = &interface.name;
+	/// **Named rather than given an interface, because there may not be one.**
+	/// A tunnel declared only as `device vpn0 { openvpn { ... } }` has no
+	/// addressing to state until the daemon reports one, and 0155 pass 1b made
+	/// that expressible -- so the session has to be planned from the device
+	/// walk, which is also where the thing that creates it is planned.
+	fn plan_ppp_session(&mut self, name: &str, observed: &Observed) {
 		let base = self.gate(name);
 		// An OpenVPN handshake negotiates asynchronously the same way PPP
 		// does, so a tunnel with no device yet takes this path too.
-		let (kind, field) = match interface.kind {
+		let (kind, field) = match self.kind_of(name) {
 			InterfaceKind::OpenVpn(_) => (BackendKind::OpenVpn, "openvpn"),
 			_ => (BackendKind::Pppoe, "pppoe"),
 		};
-		self.plan_backend(interface, kind, field, observed, &base);
-		self.warn(
-			name,
-			"the tunnel is not up yet; addressing and routes are planned once it is",
-		);
+		self.plan_backend(name, kind, field, observed, &base);
+		if observed.link(name).is_none() {
+			self.warn(
+				name,
+				"the tunnel is not up yet; addressing and routes are planned once it is",
+			);
+		}
 	}
 
 	/// Rule 1: create a link before anything references it.
@@ -1585,7 +1652,7 @@ impl Builder {
 				let field = format!("hooks[{}]", phase.name());
 				self.push(
 					Op::HookRun {
-						iface: name.clone(),
+						iface: name.to_owned(),
 						phase,
 						path: hook.path.clone(),
 						value: None,
@@ -1633,7 +1700,9 @@ impl Builder {
 			let Some(link) = observed.link(&interface.name) else {
 				continue;
 			};
-			let Some((field, desired_value, seen)) = recreation_reason(interface, link) else {
+			let kind = self.kind_of(&interface.name);
+			let Some((field, desired_value, seen)) = recreation_reason(interface, &kind, link)
+			else {
 				continue;
 			};
 			let name = &interface.name;
@@ -1662,7 +1731,7 @@ impl Builder {
 				let id = self.push(
 					Op::BackendStop {
 						kind: backend.kind,
-						iface: name.clone(),
+						iface: name.to_owned(),
 					},
 					Reason::differs(
 						name,
@@ -1673,7 +1742,7 @@ impl Builder {
 					Vec::new(),
 					Some(Op::BackendStart {
 						kind: backend.kind,
-						iface: name.clone(),
+						iface: name.to_owned(),
 					}),
 				);
 				stopped.push(id);
@@ -1709,21 +1778,24 @@ impl Builder {
 		recreating
 	}
 
-	fn plan_link_creation(&mut self, interface: &Interface, observed: &Observed) {
+	fn plan_link_creation(&mut self, interface: &netcfgd_model::Device, observed: &Observed) {
 		if observed.link(&interface.name).is_some() {
 			return;
 		}
 		if matches!(
-			interface.kind,
+			self.kind_of(&interface.name),
 			InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
 		) {
 			// A PPP interface is created by `pppd` when the session comes up,
 			// and a tunnel by `openvpn`, not by netlink. Planning a
 			// `link.create` for either would emit an action that must fail;
-			// the `backend.start` below is what brings it into existence.
+			// starting the backend is what brings it into existence -- which
+			// is why it is planned here, from the device walk, rather than
+			// from the interface one. A tunnel need not have an interface at
+			// all until it reports an address (0155 pass 1b).
 			return;
 		}
-		if matches!(interface.kind, InterfaceKind::Physical) {
+		if matches!(self.kind_of(&interface.name), InterfaceKind::Physical) {
 			// A physical device that is not present is not something a plan
 			// can fix. Say so rather than emitting actions that must fail.
 			self.warn(
@@ -1780,7 +1852,7 @@ impl Builder {
 	/// of the key it loaded and the observer compares it against a digest of
 	/// what the store holds now, which is decision 0053's trick played on a
 	/// secret instead of on a file.
-	fn plan_wireguard(&mut self, interface: &Interface, observed: &Observed) {
+	fn plan_wireguard(&mut self, interface: &netcfgd_model::Device, observed: &Observed) {
 		let InterfaceKind::WireGuard(config) = &interface.kind else {
 			return;
 		};
@@ -1846,7 +1918,7 @@ impl Builder {
 		if let Some((field, desired, seen)) = field {
 			self.push(
 				Op::WgSetDevice {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					// A reference, never a value: section 2's rule holds in a
 					// plan as much as in the document, and this one goes to
 					// `/run/netcfgd/plan.last.json`.
@@ -1864,7 +1936,7 @@ impl Builder {
 				// a `WgSetPeers` out of, and claiming otherwise would revert a
 				// revocation into something that is not what was there.
 				Some(Op::WgSetDevice {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					private_key_ref: config.private_key.name.clone(),
 					listen_port: running.listen_port,
 					fwmark: running.fwmark,
@@ -1893,7 +1965,7 @@ impl Builder {
 			let key = peer.public_key.render();
 			self.push(
 				Op::WgSetPeers {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					peers: config.peers.clone(),
 				},
 				Reason::differs(
@@ -1908,7 +1980,7 @@ impl Builder {
 		} else if desired_peers != running_peers {
 			self.push(
 				Op::WgSetPeers {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					peers: config.peers.clone(),
 				},
 				Reason::differs(
@@ -1938,7 +2010,7 @@ impl Builder {
 	/// answers `ENOTEMPTY` otherwise, which the first version of this found by
 	/// failing an apply and then planning the same action again on the next
 	/// reconcile. `miimon` has no such rule and moves on a live bond.
-	fn plan_bond(&mut self, interface: &Interface, observed: &Observed) {
+	fn plan_bond(&mut self, interface: &netcfgd_model::Device, observed: &Observed) {
 		let InterfaceKind::Bond(bond) = &interface.kind else {
 			return;
 		};
@@ -2013,7 +2085,7 @@ impl Builder {
 	/// arrived at with an access point's band: an absent `forward_delay` means
 	/// "whatever the kernel picked", and comparing that against the kernel's
 	/// answer would rebuild a bridge on every reconcile.
-	fn plan_bridge(&mut self, interface: &Interface, observed: &Observed) {
+	fn plan_bridge(&mut self, interface: &netcfgd_model::Device, observed: &Observed) {
 		let InterfaceKind::Bridge(bridge) = &interface.kind else {
 			return;
 		};
@@ -2073,7 +2145,7 @@ impl Builder {
 	///
 	/// A mode netcfgd has no word for is not compared. That is the `source` mode,
 	/// or something newer, on a macvlan somebody else configured.
-	fn plan_macvlan(&mut self, interface: &Interface, observed: &Observed) {
+	fn plan_macvlan(&mut self, interface: &netcfgd_model::Device, observed: &Observed) {
 		let InterfaceKind::Macvlan(macvlan) = &interface.kind else {
 			return;
 		};
@@ -2126,7 +2198,7 @@ impl Builder {
 	/// tunnel with no `ttl` in its block means "whatever the kernel chose", and
 	/// comparing that against what it chose would rebuild the tunnel on every
 	/// reconcile.
-	fn plan_tunnel(&mut self, interface: &Interface, observed: &Observed) {
+	fn plan_tunnel(&mut self, interface: &netcfgd_model::Device, observed: &Observed) {
 		let InterfaceKind::Tunnel(tunnel) = &interface.kind else {
 			return;
 		};
@@ -2216,7 +2288,7 @@ impl Builder {
 	/// value differs. Both were measured (0058). So both get a sentence, and the
 	/// nest the executor sends omits them -- which is what leaves the endpoints
 	/// correctable rather than losing them to a refusal beside them.
-	fn plan_vxlan(&mut self, interface: &Interface, observed: &Observed) {
+	fn plan_vxlan(&mut self, interface: &netcfgd_model::Device, observed: &Observed) {
 		let InterfaceKind::Vxlan(vxlan) = &interface.kind else {
 			return;
 		};
@@ -2308,13 +2380,13 @@ impl Builder {
 		// asserted the action was present rather than how many there were.
 		if link.is_none()
 			&& matches!(
-				interface.kind,
+				self.kind_of(&interface.name),
 				InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
 			) {
 			return;
 		}
 		if link.is_none()
-			&& matches!(interface.kind, InterfaceKind::Physical)
+			&& matches!(self.kind_of(&interface.name), InterfaceKind::Physical)
 			&& !self.appearing.iter().any(|peer| peer == name)
 		{
 			// Absent hardware. Planning for a NIC that is not plugged in would
@@ -2378,15 +2450,30 @@ impl Builder {
 				);
 			}
 		}
+	}
 
+	/// Whether this link is enslaved to the bridge or bond the document says.
+	///
+	/// Split out of `plan_link_attributes` to keep it under the line limit,
+	/// and it is a clean seam: being a port of something is the one attribute
+	/// that moved to the device with 0155 pass 1b, so it is also the one whose
+	/// wanted value is looked up rather than read off the interface.
+	fn plan_master(&mut self, name: &str, link: Option<&netcfgd_model::ObservedLink>) {
+		// The master is the device's since 0155 pass 1b: being a port of a
+		// bridge is a fact about the hardware, not about a connection.
+		let wanted_master = self
+			.devices
+			.get(name)
+			.and_then(|device| device.master.clone());
+		let gate = self.gate(name);
 		match (
-			&interface.master,
+			wanted_master.as_ref(),
 			link.and_then(|link| link.master.as_ref()),
 		) {
 			(Some(desired), current) if current != Some(desired) => {
 				let id = self.push(
 					Op::LinkSetMaster {
-						name: name.clone(),
+						name: name.to_owned(),
 						master: desired.clone(),
 					},
 					Reason::differs(
@@ -2396,18 +2483,22 @@ impl Builder {
 						current.cloned().unwrap_or_else(|| "<absent>".to_owned()),
 					),
 					gate,
-					Some(Op::LinkUnsetMaster { name: name.clone() }),
+					Some(Op::LinkUnsetMaster {
+						name: name.to_owned(),
+					}),
 				);
 				// Rule 2: the master waits for this.
 				self.enslavements.push((desired.clone(), id));
 			}
 			(None, Some(current)) => {
 				self.push(
-					Op::LinkUnsetMaster { name: name.clone() },
+					Op::LinkUnsetMaster {
+						name: name.to_owned(),
+					},
 					Reason::unwanted(name, "master", current.clone()),
 					gate,
 					Some(Op::LinkSetMaster {
-						name: name.clone(),
+						name: name.to_owned(),
 						master: current.clone(),
 					}),
 				);
@@ -2451,13 +2542,13 @@ impl Builder {
 		{
 			let id = self.push(
 				Op::AddrDel {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					addr: address.address.clone(),
 				},
 				Reason::unwanted(name, why.field, address.address.clone()),
 				deps.clone(),
 				Some(Op::AddrAdd {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					addr: address.address.clone(),
 					preferred_lifetime: None,
 					valid_lifetime: None,
@@ -2488,14 +2579,14 @@ impl Builder {
 		let link = observed.link(name);
 		if link.is_none()
 			&& matches!(
-				interface.kind,
+				self.kind_of(&interface.name),
 				InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
 			) {
-			self.plan_ppp_session(interface, observed);
+			self.plan_ppp_session(&interface.name, observed);
 			return;
 		}
 		if link.is_none()
-			&& matches!(interface.kind, InterfaceKind::Physical)
+			&& matches!(self.kind_of(&interface.name), InterfaceKind::Physical)
 			&& !self.appearing.iter().any(|peer| peer == name)
 		{
 			// Absent hardware. Planning for a NIC that is not plugged in would
@@ -2599,7 +2690,11 @@ impl Builder {
 		// earlier. Decision 0008 puts wired 802.1X on the same supplicant as
 		// wifi, so this is the same op either way.
 		let authentication = self.plan_prerequisite(interface, observed, &base);
-		self.plan_bridge_vlans(interface, observed, &base);
+		// Port VLANs live on the device (0155 pass 1b). Absent means there are
+		// none to plan, which is the ordinary case.
+		if let Some(device) = self.devices.get(&interface.name).cloned() {
+			self.plan_bridge_vlans(&device, observed, &base);
+		}
 
 		let mut addressing_ids = Vec::new();
 		for (index, source) in interface.addressing.iter().enumerate() {
@@ -2614,7 +2709,7 @@ impl Builder {
 			));
 		}
 
-		for route in &routes_for(interface, observed) {
+		for route in &routes_for(interface, &self.kind_of(&interface.name), observed) {
 			self.plan_route(interface, route, observed, &base);
 		}
 
@@ -2682,7 +2777,7 @@ impl Builder {
 		let mut deps = base.to_vec();
 		deps.extend(addressing.iter().copied());
 		self.plan_backend(
-			interface,
+			&interface.name,
 			BackendKind::RouterAdvert,
 			"advertise",
 			observed,
@@ -2751,7 +2846,7 @@ impl Builder {
 				// is down, so this does not wait for link.up.
 				let id = self.push(
 					Op::AddrAdd {
-						iface: name.clone(),
+						iface: name.to_owned(),
 						addr: address.address.clone(),
 						preferred_lifetime: address.preferred_lifetime,
 						valid_lifetime: address.valid_lifetime,
@@ -2759,7 +2854,7 @@ impl Builder {
 					Reason::absent(name, field, address.address.clone()),
 					base.to_vec(),
 					Some(Op::AddrDel {
-						iface: name.clone(),
+						iface: name.to_owned(),
 						addr: address.address.clone(),
 					}),
 				);
@@ -2767,10 +2862,10 @@ impl Builder {
 				vec![id]
 			}
 			AddressSource::Dhcp4(_) => {
-				self.plan_backend(interface, BackendKind::Dhcp4, &field, observed, base)
+				self.plan_backend(&interface.name, BackendKind::Dhcp4, &field, observed, base)
 			}
 			AddressSource::Dhcp6(_) => {
-				self.plan_backend(interface, BackendKind::Dhcp6, &field, observed, base)
+				self.plan_backend(&interface.name, BackendKind::Dhcp6, &field, observed, base)
 			}
 			AddressSource::Slaac(_) => {
 				// SLAAC is the kernel's own: given a router advertisement it
@@ -2868,7 +2963,7 @@ impl Builder {
 			// on a link that is down, so this does not wait for `link.up`.
 			let id = self.push(
 				Op::AddrAdd {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					addr: address.clone(),
 					preferred_lifetime: None,
 					valid_lifetime: None,
@@ -2876,7 +2971,7 @@ impl Builder {
 				Reason::absent(name, field, format!("{address} (reported)")),
 				base.to_vec(),
 				Some(Op::AddrDel {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					addr: address.clone(),
 				}),
 			);
@@ -2961,7 +3056,7 @@ impl Builder {
 		// addresses do.
 		let id = self.push(
 			Op::AddrAdd {
-				iface: name.clone(),
+				iface: name.to_owned(),
 				addr: address.clone(),
 				preferred_lifetime: None,
 				valid_lifetime: None,
@@ -2969,7 +3064,7 @@ impl Builder {
 			Reason::absent(name, field, format!("{address} (from {source})")),
 			base.to_vec(),
 			Some(Op::AddrDel {
-				iface: name.clone(),
+				iface: name.to_owned(),
 				addr: address.clone(),
 			}),
 		);
@@ -2979,13 +3074,12 @@ impl Builder {
 
 	fn plan_backend(
 		&mut self,
-		interface: &Interface,
+		name: &str,
 		kind: BackendKind,
 		field: &str,
 		observed: &Observed,
 		base: &[u32],
 	) -> Vec<u32> {
-		let name = &interface.name;
 		if observed.backend_running(kind, name) {
 			return Vec::new();
 		}
@@ -3013,13 +3107,13 @@ impl Builder {
 		let id = self.push(
 			Op::BackendStart {
 				kind,
-				iface: name.clone(),
+				iface: name.to_owned(),
 			},
 			Reason::absent(name, field, format!("{kind:?}")),
 			deps,
 			Some(Op::BackendStop {
 				kind,
-				iface: name.clone(),
+				iface: name.to_owned(),
 			}),
 		);
 		vec![id]
@@ -3100,13 +3194,13 @@ impl Builder {
 
 		self.push(
 			Op::RouteAdd {
-				iface: name.clone(),
+				iface: name.to_owned(),
 				route: Box::new(route.clone()),
 			},
 			Reason::absent(name, "routes", render_route(route)),
 			deps,
 			Some(Op::RouteDel {
-				iface: name.clone(),
+				iface: name.to_owned(),
 				route: Box::new(route.clone()),
 			}),
 		);
@@ -3346,7 +3440,8 @@ impl Builder {
 	/// makes it idempotent without recorded state. Recorded state is needed
 	/// only to know whether netcfgd may reset one.
 	fn plan_qdisc(&mut self, desired: &Document, observed: &Observed) {
-		for interface in &desired.interfaces {
+		// Devices: a qdisc shapes the egress of hardware (0155 pass 1b).
+		for interface in &desired.devices {
 			let link = observed.link(&interface.name);
 			let current = link.and_then(|link| link.qdisc.as_deref());
 			let current_rate = link.and_then(|link| link.qdisc_bandwidth_bits);
@@ -3438,7 +3533,8 @@ impl Builder {
 	/// shaper is traffic that is not being shaped, which is worse than not
 	/// redirecting it at all.
 	fn plan_ingress(&mut self, desired: &Document, observed: &Observed) {
-		for interface in &desired.interfaces {
+		// Devices: a qdisc shapes the egress of hardware (0155 pass 1b).
+		for interface in &desired.devices {
 			let current = observed
 				.link(&interface.name)
 				.and_then(|link| link.ingress_redirect.as_deref());
@@ -3788,7 +3884,7 @@ impl Builder {
 		{
 			self.push(
 				Op::HookRun {
-					iface: name.clone(),
+					iface: name.to_owned(),
 					phase: HookPhase::Carrier,
 					path: hook.path.clone(),
 					value: Some(now.to_owned()),
@@ -3876,7 +3972,7 @@ impl Builder {
 			{
 				self.push(
 					Op::HookRun {
-						iface: name.clone(),
+						iface: name.to_owned(),
 						phase: HookPhase::Lease,
 						path: hook.path.clone(),
 						// `NCFG_ADDR`, which is the one thing a lease script wants
@@ -4176,9 +4272,11 @@ impl Builder {
 					// And when the bearer drops, the report stops naming the
 					// gateway, this stops being true, and the route goes -- the
 					// same withdrawal the address gets, for the same reason.
-					routes_for(interface, observed).iter().any(|desired| {
-						route_matches(&with_metric(desired, interface.preference), route)
-					})
+					routes_for(interface, &self.kind_of(&interface.name), observed)
+						.iter()
+						.any(|desired| {
+							route_matches(&with_metric(desired, interface.preference), route)
+						})
 				});
 			if wanted {
 				continue;
@@ -4343,20 +4441,19 @@ impl Builder {
 			),
 			// The session *is* the interface, so the question is whether the
 			// document still declares one.
+			// **The device, not the interface.** A tunnel need not have an
+			// interface block at all -- it has nothing to address until the
+			// daemon reports something -- so asking the interface list whether
+			// anything wants this backend answers no and stops a working
+			// tunnel (0155 pass 1b).
 			BackendKind::Pppoe => (
-				on_interface(&|interface| matches!(interface.kind, InterfaceKind::Pppoe(_))),
+				matches!(self.kind_of(&backend.interface), InterfaceKind::Pppoe(_)),
 				"pppoe",
 			),
-			// And a tunnel is an interface for the same reason (decision 0046).
 			BackendKind::OpenVpn => (
-				on_interface(&|interface| matches!(interface.kind, InterfaceKind::OpenVpn(_))),
+				matches!(self.kind_of(&backend.interface), InterfaceKind::OpenVpn(_)),
 				"openvpn",
 			),
-			// Not started by the planner, so not stopped by it either. A
-			// WireGuard device is configured at creation and a DNS delivery is
-			// an action rather than a process; router advertisement is not
-			// implemented. Reporting them as unwanted would stop something
-			// netcfgd never started.
 			BackendKind::RouterAdvert => (
 				on_interface(&|interface| interface.advertise.is_some()),
 				"advertise",
@@ -4808,10 +4905,16 @@ impl Builder {
 			if !link.ownership.may_remove() {
 				continue;
 			}
+			// **Devices, not interfaces.** What the document asks to exist is
+			// stated on the device since 0155 pass 1b, and a device need not
+			// have an interface: an `ifb` carries no address and never will,
+			// so asking the interface list whether anything wants it answers
+			// no and deletes the thing that was just created -- an apply that
+			// never converges.
 			if desired
-				.interfaces
+				.devices
 				.iter()
-				.any(|interface| interface.name == link.name)
+				.any(|device| device.name == link.name)
 			{
 				continue;
 			}
@@ -4873,10 +4976,11 @@ fn recreatable_kind(kind: &InterfaceKind) -> Option<&'static str> {
 /// Returns the dotted field, what the document says and what the kernel has --
 /// the three things a `Reason` carries, because that is what this is for.
 fn recreation_reason(
-	interface: &Interface,
+	_interface: &Interface,
+	kind: &InterfaceKind,
 	link: &netcfgd_model::ObservedLink,
 ) -> Option<(&'static str, String, String)> {
-	let wanted = recreatable_kind(&interface.kind)?;
+	let wanted = recreatable_kind(kind)?;
 	// An empty kind is a device with no `LINKINFO` at all -- a NIC, or the
 	// loopback. It is not compared: the document says this is a dummy and the
 	// kernel says nothing, and the honest reading of that is "somebody else's
@@ -4890,7 +4994,7 @@ fn recreation_reason(
 	// therefore the same remedy. A VXLAN's and a tunnel's underlay is *not* here:
 	// it lives in their own nest, the kernel moves it, and `plan_vxlan` and
 	// `plan_tunnel` correct it in place.
-	let stated_parent = match &interface.kind {
+	let stated_parent = match kind {
 		InterfaceKind::Vlan(vlan) => Some(vlan.parent.as_str()),
 		InterfaceKind::Macvlan(macvlan) => Some(macvlan.parent.as_str()),
 		_ => None,
@@ -4900,7 +5004,7 @@ fn recreation_reason(
 			return Some(("parent", parent.to_owned(), seen.to_owned()));
 		}
 	}
-	let InterfaceKind::Vlan(vlan) = &interface.kind else {
+	let InterfaceKind::Vlan(vlan) = kind else {
 		return None;
 	};
 	// Only where the kernel answered. A VLAN whose `INFO_DATA` did not arrive,
@@ -5068,12 +5172,12 @@ fn render_route(route: &Route) -> String {
 /// worth guaranteeing rather than observing, and the failure it prevents is the
 /// loud one -- a plan that installs a route and deletes it on the next
 /// reconcile, forever.
-fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
+fn routes_for(interface: &Interface, kind: &InterfaceKind, observed: &Observed) -> Vec<Route> {
 	interface
 		.routes
 		.iter()
 		.cloned()
-		.chain(reported_routes(interface, observed))
+		.chain(reported_routes(interface, kind, observed))
 		.collect()
 }
 
@@ -5106,15 +5210,12 @@ fn routes_for(interface: &Interface, observed: &Observed) -> Vec<Route> {
 /// install a route down that link and deliberately not enough to change where
 /// every query on the machine goes (decision 0049).
 #[must_use]
-pub fn takes_reports(interface: &Interface) -> bool {
+pub fn takes_reports(interface: &Interface, kind: &InterfaceKind) -> bool {
 	interface
 		.addressing
 		.iter()
 		.any(|source| matches!(source, AddressSource::Reported(_)))
-		|| matches!(
-			interface.kind,
-			InterfaceKind::OpenVpn(_) | InterfaceKind::Pppoe(_)
-		)
+		|| matches!(kind, InterfaceKind::OpenVpn(_) | InterfaceKind::Pppoe(_))
 }
 
 /// The routes a report implies for one interface.
@@ -5135,8 +5236,8 @@ pub fn takes_reports(interface: &Interface) -> bool {
 ///
 /// Empty unless the document gave netcfgd a reason to believe the report; see
 /// [`takes_reports`].
-fn reported_routes(interface: &Interface, observed: &Observed) -> Vec<Route> {
-	if !takes_reports(interface) {
+fn reported_routes(interface: &Interface, kind: &InterfaceKind, observed: &Observed) -> Vec<Route> {
+	if !takes_reports(interface, kind) {
 		return Vec::new();
 	}
 	let reports = || {

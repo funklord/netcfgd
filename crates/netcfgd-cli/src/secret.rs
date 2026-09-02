@@ -269,7 +269,7 @@ mod tests {
 	fn every_kind_of_reference_is_found() {
 		let document = document(
 			r#"
-interface wg0 {
+device wg0 {
 	wireguard {
 		private_key = "@secret:shared"
 		peer office {
@@ -280,7 +280,7 @@ interface wg0 {
 	}
 }
 
-interface dsl0 {
+device dsl0 {
 	pppoe {
 		parent   = "eth0"
 		username = "user"

@@ -103,6 +103,13 @@ mac_policy
 managed
 master
 members
+# The two `on_unmanage` values, which the extractor sweeps in by proximity the
+# way it does the security and protocol words. Newly visible rather than newly
+# accepted: 0155 pass 1b moved arms around inside `lower_device` and brought
+# them within the scan's reach. Neither grants anything -- they choose what
+# happens to a device netcfgd is walking away from.
+clear
+leave
 metered
 metric
 miimon
