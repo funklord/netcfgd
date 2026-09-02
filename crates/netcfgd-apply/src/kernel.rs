@@ -3312,6 +3312,45 @@ pub fn certs_dir() -> std::path::PathBuf {
 pub fn resolver() -> netcfgd_secret::Resolver {
 	netcfgd_secret::Resolver::with_secrets_dir(secrets_dir()).materialising_into(certs_dir())
 }
+/// The command line netcfgd starts `wpa_supplicant` with.
+///
+/// A function rather than a chain of `.arg()` calls so that the flags can be
+/// asserted on. The udhcpc path already worked this way and already carries a
+/// test pinning the flags it cannot lose; this one did not, and lost one.
+fn supplicant_arguments(
+	driver: &str,
+	interface: &str,
+	dir: &std::path::Path,
+	pidfile: &std::path::Path,
+) -> Vec<String> {
+	vec![
+		"-B".to_owned(),
+		format!("-D{driver}"),
+		// **Without this the supplicant logs nowhere at all.** `-B` daemonises,
+		// and a daemonised `wpa_supplicant` that was not told to use syslog
+		// writes to a stdout nothing is reading. Every association failure,
+		// authentication error, disconnect reason and roaming decision is simply
+		// gone -- on the one component whose faults an operator most needs to
+		// read.
+		//
+		// Found the expensive way: an hour of a real wifi outage was diagnosed
+		// with dhcpcd's log and netcfgd's, because the supplicant had none, and
+		// a `journalctl -t wpa_supplicant` over the outage returned "no entries"
+		// -- which reads exactly like a supplicant that had nothing to say.
+		"-s".to_owned(),
+		"-i".to_owned(),
+		interface.to_owned(),
+		"-C".to_owned(),
+		dir.display().to_string(),
+		// So that a supplicant which died can be told from one that is running,
+		// which the control socket alone cannot say: a socket outlives the
+		// process that bound it. The path is its own marker -- it names the
+		// interface and netcfgd chose it, so no other command line has it.
+		// Decision 0080.
+		"-P".to_owned(),
+		pidfile.display().to_string(),
+	]
+}
 
 /// Start a `wpa_supplicant` that holds no state.
 ///
@@ -3469,19 +3508,7 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 	})?;
 
 	let status = Command::new(&program)
-		.arg("-B")
-		.arg(format!("-D{driver}"))
-		.arg("-i")
-		.arg(iface)
-		.arg("-C")
-		.arg(&dir)
-		// So that a supplicant which died can be told from one that is running,
-		// which the control socket alone cannot say: a socket outlives the
-		// process that bound it. The path is its own marker -- it names the
-		// interface and netcfgd chose it, so no other command line has it.
-		// Decision 0080.
-		.arg("-P")
-		.arg(&pidfile)
+		.args(supplicant_arguments(driver, iface, &dir, &pidfile))
 		.status()
 		.map_err(|error| format!("could not run {}: {error}", program.display()))?;
 	if !status.success() {
@@ -3815,6 +3842,51 @@ mod tests {
 				"{family} both replaces and silences: {args:?}"
 			);
 		}
+	}
+}
+
+#[cfg(test)]
+mod supplicant_argument_tests {
+	use super::supplicant_arguments;
+	use std::path::Path;
+
+	/// The flags the supplicant cannot lose, pinned the way udhcpc's are.
+	///
+	/// This test exists because one of them was already missing. `-s` was never
+	/// passed, so on every netcfgd machine `wpa_supplicant` daemonised and
+	/// logged nowhere -- and the absence is invisible in exactly the way that
+	/// matters: a journal query for the supplicant returns "no entries", which
+	/// is what a healthy quiet supplicant also returns.
+	#[test]
+	fn the_load_bearing_flags_are_all_there() {
+		let args = supplicant_arguments(
+			"nl80211,wext",
+			"wlan0",
+			Path::new("/run/wpa_supplicant"),
+			Path::new("/run/netcfgd/supplicant/wlan0.pid"),
+		);
+
+		// Without `-B` it never returns, without `-s` it logs nowhere, without
+		// `-C` there is no control socket to configure it through, and without
+		// `-P` netcfgd cannot tell its own supplicant from somebody else's
+		// (0080).
+		for flag in ["-B", "-s", "-C", "-P"] {
+			assert!(
+				args.iter().any(|argument| argument == flag),
+				"wpa_supplicant lost {flag}: {args:?}"
+			);
+		}
+		assert!(
+			args.iter().any(|argument| argument == "-Dnl80211,wext"),
+			"the driver is not named: {args:?}"
+		);
+		// The interface follows `-i` rather than merely appearing somewhere:
+		// a list containing the right words in the wrong order is a different
+		// command line.
+		assert!(
+			args.windows(2).any(|pair| pair == ["-i", "wlan0"]),
+			"the interface does not follow -i: {args:?}"
+		);
 	}
 }
 
