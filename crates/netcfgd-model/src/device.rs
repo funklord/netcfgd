@@ -1,5 +1,6 @@
 //! Per-device policy: what netcfgd may touch, and how a radio behaves.
 
+use crate::interface::LinkSettings;
 use serde::{Deserialize, Serialize};
 
 /// How a device is identified.
@@ -176,6 +177,20 @@ pub struct Device {
 	/// Cellular policy, for modem devices. See [`ModemPolicy`].
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub modem: Option<ModemPolicy>,
+	// ---- moved from `Interface` by 0155 pass 1a ----
+	//
+	// Settings of the hardware itself: they mean something whether or not
+	// anything is connected, which is the test 0155 section 2 sorts by. They
+	// sat on `Interface` because `Interface` was doing both jobs.
+	/// MTU.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub mtu: Option<u32>,
+	/// Hardware address to set.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub mac: Option<String>,
+	/// Driver-level settings. Unimplemented; see [`LinkSettings`].
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub link_settings: Option<LinkSettings>,
 }
 
 /// What hardware address a radio presents.

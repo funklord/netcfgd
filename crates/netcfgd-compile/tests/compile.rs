@@ -63,11 +63,11 @@ fn errors(text: &str) -> String {
 fn a_static_ethernet_interface_compiles() {
 	let document = build_ok(
 		r#"
+		device eth0 { mtu = 1500 }
 		interface eth0 {
 			config = "192.168.1.10/24"
 			routes = "default via 192.168.1.1"
 			dns    = "192.168.1.1 1.1.1.1"
-			mtu    = 1500
 		}
 		"#,
 	);
@@ -75,7 +75,7 @@ fn a_static_ethernet_interface_compiles() {
 	assert_eq!(document.interfaces.len(), 1);
 	let eth0 = &document.interfaces[0];
 	assert_eq!(eth0.name, "eth0");
-	assert_eq!(eth0.mtu, Some(1500));
+	assert_eq!(document.devices[0].mtu, Some(1500));
 	assert_eq!(eth0.kind, InterfaceKind::Physical);
 
 	match &eth0.addressing[0] {
@@ -138,10 +138,11 @@ fn comments_and_semicolons_are_accepted() {
 	let document = build_ok(
 		r#"
 		# the uplink
-		interface eth0 { config = "dhcp"; mtu = 9000 } # jumbo
+		device eth0 { mtu = 9000 } # jumbo
+		interface eth0 { config = "dhcp" }
 		"#,
 	);
-	assert_eq!(document.interfaces[0].mtu, Some(9000));
+	assert_eq!(document.devices[0].mtu, Some(9000));
 }
 
 /// Drop-in precedence: later files win for scalar keys.
@@ -187,7 +188,7 @@ fn override_replaces_a_block_entirely() {
 	let mut sources = SourceMap::new();
 	sources.add(
 		"netcfgd.conf",
-		"interface eth0 { config = \"dhcp\"\nmtu = 1500 }",
+		"interface eth0 { config = \"dhcp\"\nenabled = false }",
 	);
 	sources.add(
 		"conf.d/10-lan.conf",
@@ -196,10 +197,10 @@ fn override_replaces_a_block_entirely() {
 
 	let document = compile(&sources, &mut NoHooks).expect("compiles");
 	assert_eq!(document.interfaces.len(), 1);
-	// Wholesale, not merged: the mtu from the first definition is gone. A
-	// merge would make the result depend on which keys the earlier block
-	// happened to set.
-	assert_eq!(document.interfaces[0].mtu, None);
+	// Wholesale, not merged: `enabled = false` from the first definition is
+	// gone. A merge would make the result depend on which keys the earlier
+	// block happened to set.
+	assert!(document.interfaces[0].enabled);
 	assert!(matches!(
 		document.interfaces[0].addressing[0],
 		AddressSource::Static(_)
@@ -398,7 +399,7 @@ fn compiling_twice_gives_identical_bytes() {
 #[test]
 fn a_diagnostic_names_file_line_and_column() {
 	let mut sources = SourceMap::new();
-	sources.add("netcfgd.conf", "interface eth0 {\n\tmtu = \"big\"\n}\n");
+	sources.add("netcfgd.conf", "device eth0 {\n\tmtu = \"big\"\n}\n");
 
 	let diagnostics = compile(&sources, &mut NoHooks).expect_err("must refuse");
 	let rendered = diagnostics.render(&sources);
@@ -415,8 +416,10 @@ fn every_error_is_reported_not_only_the_first() {
 	let mut sources = SourceMap::new();
 	sources.add(
 		"netcfgd.conf",
-		"interface eth0 {\n\
+		"device eth0 {\n\
 		 \tmtu = \"big\"\n\
+		 }\n\
+		 interface eth0 {\n\
 		 \tnonsense = 1\n\
 		 \tconfig = \"999.999.999.999/24\"\n\
 		 }\n",
@@ -435,7 +438,7 @@ fn every_error_is_reported_not_only_the_first() {
 /// letting the `.` surface as an unexpected character.
 #[test]
 fn a_float_is_refused_by_name() {
-	let rendered = errors("interface eth0 { mtu = 15.5 }");
+	let rendered = errors("device eth0 { mtu = 15.5 }");
 	assert!(rendered.contains("integers"), "got: {rendered}");
 }
 
@@ -1036,13 +1039,13 @@ fn ethtool_settings_compile_even_though_nothing_applies_them() {
 
 	let document = build_ok(
 		r#"
-interface eth0 {
+device eth0 {
 	ethtool { gro = "off"; tso = "off"; rx_ring = 4096; wol = "g" }
-	config = "dhcp"
 }
+interface eth0 { config = "dhcp" }
 "#,
 	);
-	let settings = document.interfaces[0]
+	let settings = document.devices[0]
 		.link_settings
 		.as_ref()
 		.expect("link settings");
@@ -1054,18 +1057,19 @@ interface eth0 {
 	// touch this" and "netcfgd requires this off" are different instructions.
 	assert_eq!(settings.gso, Toggle::Unmanaged);
 
-	assert!(
-		errors(r#"interface eth0 { ethtool { duplex = "sideways" } }"#)
-			.contains("not a duplex setting")
-	);
+	assert!(errors(r#"device eth0 { ethtool { duplex = "sideways" } }"#)
+		.contains("not a duplex setting"));
 }
 
 /// An empty `ethtool` block asks for nothing, and must not produce a settings
 /// object -- an action that changes nothing does not belong in a plan.
 #[test]
 fn an_empty_ethtool_block_produces_nothing() {
-	let document = build_ok(r#"interface eth0 { ethtool { }; config = "dhcp" }"#);
-	assert!(document.interfaces[0].link_settings.is_none());
+	let document = build_ok(
+		r#"device eth0 { ethtool { } }
+interface eth0 { config = "dhcp" }"#,
+	);
+	assert!(document.devices[0].link_settings.is_none());
 }
 
 /// An access point is bound to one radio, unlike a `network`, which

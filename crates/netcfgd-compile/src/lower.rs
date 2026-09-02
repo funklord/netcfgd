@@ -60,7 +60,7 @@ pub fn lower(
 		match block.head.as_str() {
 			"global" => lower_global_block(&mut document, block, &mut diagnostics),
 			"device" => {
-				if let Some(device) = lower_device(block, &mut diagnostics) {
+				if let Some(device) = lower_device(block, &mut diagnostics, sources, provenance) {
 					document.devices.push(device);
 				}
 			}
@@ -216,8 +216,6 @@ fn expand_ingress_shapers(
 			name: device,
 			kind: InterfaceKind::Ifb,
 			enabled: true,
-			mtu: None,
-			mac: None,
 			addressing: Vec::new(),
 			routes: Vec::new(),
 			dns: None,
@@ -237,7 +235,6 @@ fn expand_ingress_shapers(
 			forwarding: None,
 			guard: None,
 			ipv6_token: None,
-			link_settings: None,
 			preference: None,
 			probe: None,
 			bridge_vlans: Vec::new(),
@@ -307,8 +304,6 @@ fn expand_members(
 			name: member,
 			kind: InterfaceKind::Physical,
 			enabled: true,
-			mtu: None,
-			mac: None,
 			addressing: Vec::new(),
 			routes: Vec::new(),
 			dns: None,
@@ -323,7 +318,6 @@ fn expand_members(
 			ingress_redirect: None,
 			guard: None,
 			ipv6_token: None,
-			link_settings: None,
 			preference: None,
 			probe: None,
 			bridge_vlans: Vec::new(),
@@ -754,7 +748,12 @@ fn normalise_address(text: &str) -> Option<String> {
 	Some(text.to_ascii_uppercase())
 }
 
-fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
+fn lower_device(
+	block: &Block,
+	diags: &mut Diagnostics,
+	sources: &SourceMap,
+	provenance: &mut Provenance,
+) -> Option<Device> {
 	let name = require_label(block, diags)?;
 	let mut device = Device {
 		name,
@@ -763,6 +762,9 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
 		modem: None,
+		mtu: None,
+		mac: None,
+		link_settings: None,
 	};
 
 	for item in &block.items {
@@ -792,10 +794,29 @@ fn lower_device(block: &Block, diags: &mut Diagnostics) -> Option<Device> {
 					}
 				}
 			}
+			// Settings of the adapter, moved here from `interface` by 0155
+			// pass 1a: they mean something whether or not anything is
+			// connected, which is the test that sorts the two types.
+			Item::Assignment(assignment) if assignment.key == "mtu" => {
+				// Recorded here now rather than on the interface, so `ncfg
+				// explain` can still say which file set it (0155 pass 1a).
+				provenance.record(sources, field_path(&device.name, "mtu"), assignment.span);
+				device.mtu = as_u32(&assignment.value, diags);
+			}
+			Item::Assignment(assignment) if assignment.key == "mac" => {
+				device.mac = as_string(&assignment.value, diags);
+			}
 			Item::Assignment(assignment) => diags.push(Diagnostic::new(
 				assignment.span,
 				format!("unknown device key `{}`", assignment.key),
 			)),
+			Item::Block(inner) if inner.head == "ethtool" => {
+				let mut settings = LinkSettings::default();
+				lower_ethtool(inner, &mut settings, diags);
+				if !settings.is_empty() {
+					device.link_settings = Some(settings);
+				}
+			}
 			Item::Block(inner) if inner.head == "wifi" => {
 				device.wifi = Some(lower_wifi_device(inner, diags));
 			}
@@ -2216,8 +2237,6 @@ fn lower_interface(
 		name: name.clone(),
 		kind: InterfaceKind::Physical,
 		enabled: true,
-		mtu: None,
-		mac: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,
@@ -2232,7 +2251,6 @@ fn lower_interface(
 		forwarding: None,
 		guard: None,
 		ipv6_token: None,
-		link_settings: None,
 		preference: None,
 		probe: None,
 		bridge_vlans: Vec::new(),
@@ -2270,11 +2288,25 @@ fn lower_interface(
 						}
 					}
 				}
-				"mtu" => {
-					provenance.record(sources, field_path(&name, "mtu"), assignment.span);
-					interface.mtu = as_u32(&assignment.value, diags);
-				}
-				"mac" => interface.mac = as_string(&assignment.value, diags),
+				// Moved to `device` by 0155 pass 1a, and named rather than left
+				// to "unknown interface key": these describe the adapter, they
+				// mean something with nothing connected, and an operator who
+				// wrote one had a working configuration.
+				"mtu" | "mac" => diags.push(
+					Diagnostic::new(
+						assignment.span,
+						format!(
+							"`{}` belongs in the `device` block now, not `interface`",
+							assignment.key
+						),
+					)
+					.with_help(
+						"it describes the hardware rather than a connection over it, so \
+						 it means something whether or not anything is connected: write \
+						 `device <name> { ... }` beside this block and move the line \
+						 there unchanged",
+					),
+				),
 				// The kinds with no parameters, which therefore have no block
 				// to be declared by. `dummy` was creatable by the executor and
 				// unsayable in the config until the pre-freeze audit noticed:
@@ -2451,13 +2483,17 @@ fn lower_interface(
 						interface.kind = kind;
 					}
 				}
-				"ethtool" => {
-					let mut settings = LinkSettings::default();
-					lower_ethtool(inner, &mut settings, diags);
-					if !settings.is_empty() {
-						interface.link_settings = Some(settings);
-					}
-				}
+				"ethtool" => diags.push(
+					Diagnostic::new(
+						inner.span,
+						"`ethtool` belongs in the `device` block now, not `interface`".to_owned(),
+					)
+					.with_help(
+						"speed, duplex and autonegotiation are settings of the adapter \
+						 rather than of a connection over it: write `device <name> { \
+						 ethtool { ... } }` and move the block there unchanged",
+					),
+				),
 				"wireguard" => {
 					if let Some(kind) = lower_wireguard(inner, diags) {
 						interface.kind = kind;

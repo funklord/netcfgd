@@ -557,7 +557,9 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	// boolean with a default inside netcfgd. It is probed by the daemon when an
 	// interface becomes addressed, not planned -- a probe is not a change, and
 	// an action that ran on every apply would make no plan ever converge.
-	for interface in &desired.interfaces {
+	// Devices rather than interfaces: an `ethtool` block describes the adapter
+	// and moved there with 0155 pass 1a.
+	for interface in &desired.devices {
 		// The offloads are applied; the rest of the `ethtool` block is not, and
 		// says so field by field rather than as one blanket sentence -- an
 		// operator who set only `gro` should not be told their config is
@@ -795,6 +797,11 @@ fn prepare(desired: &Document, observed: &Observed, options: &PlanOptions) -> Bu
 		.collect();
 
 	builder.radios = radios_of(desired, observed);
+	builder.devices = desired
+		.devices
+		.iter()
+		.map(|device| (device.name.clone(), device.clone()))
+		.collect();
 	builder.network_metrics = desired
 		.networks
 		.iter()
@@ -978,6 +985,15 @@ struct Builder {
 	/// `interface` block -- so it is collected up front instead of looked up
 	/// per action.
 	radios: Vec<String>,
+	/// Every device, by name.
+	///
+	/// The join between the two lists, which 0155 pass 1a made necessary: an
+	/// interface's MTU and MAC describe the adapter and now live on its
+	/// device, while the planner still walks interfaces. Cloned up front for
+	/// the reason `network_metrics` is -- the action paths do not carry the
+	/// document, and threading it through every one of them to reach two
+	/// fields would be a wider change than the move itself.
+	devices: std::collections::HashMap<String, netcfgd_model::Device>,
 	/// Each network's `metric`, by network id.
 	///
 	/// Precomputed rather than looked up through the document, because the
@@ -2307,7 +2323,17 @@ impl Builder {
 		}
 		let gate = self.gate(name);
 
-		if let Some(mtu) = interface.mtu {
+		// The adapter's settings, from the device of the same name (0155).
+		// Absent is not an error: a device block is optional, and an interface
+		// with no device simply states no MTU or MAC.
+		// Copied out rather than held: the pushes below take `&mut self`, and a
+		// live borrow of `self.devices` across them is what the borrow checker
+		// objects to. Two small values, so the copy costs nothing.
+		let hardware = self.devices.get(&interface.name);
+		let wanted_mtu = hardware.and_then(|device| device.mtu);
+		let wanted_mac = hardware.and_then(|device| device.mac.clone());
+
+		if let Some(mtu) = wanted_mtu {
 			if link.is_none_or(|link| link.mtu != mtu) {
 				let previous = link.map(|link| link.mtu);
 				self.push(
@@ -2330,7 +2356,7 @@ impl Builder {
 			}
 		}
 
-		if let Some(mac) = &interface.mac {
+		if let Some(mac) = &wanted_mac {
 			if link.is_none_or(|link| link.mac.as_deref() != Some(mac.as_str())) {
 				let previous = link.and_then(|link| link.mac.clone());
 				self.push(
@@ -3100,7 +3126,10 @@ impl Builder {
 	/// which is the same posture netcfgd takes to every other object it did
 	/// not install.
 	fn plan_offloads(&mut self, desired: &Document, observed: &Observed) {
-		for interface in &desired.interfaces {
+		// Offloads belong to the adapter, so this walks devices now rather
+		// than interfaces (0155 pass 1a). A device with no interface still
+		// gets its offloads, which it could not before.
+		for interface in &desired.devices {
 			let Some(settings) = &interface.link_settings else {
 				continue;
 			};

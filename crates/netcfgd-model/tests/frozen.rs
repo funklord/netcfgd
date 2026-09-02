@@ -215,8 +215,6 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 		name: name.to_owned(),
 		kind,
 		enabled: true,
-		mtu: Some(1400),
-		mac: Some("02:00:00:00:00:01".to_owned()),
 		addressing: every_address_source(),
 		routes: vec![Route {
 			destination: "198.51.100.0/24".to_owned(),
@@ -301,19 +299,6 @@ fn maximal_interface(name: &str, kind: InterfaceKind) -> Interface {
 				untagged: false,
 			},
 		],
-		link_settings: Some(LinkSettings {
-			autoneg: Toggle::Off,
-			speed: Some(1000),
-			duplex: Some("full".to_owned()),
-			wol: Some("g".to_owned()),
-			rx_ring: Some(4096),
-			tx_ring: Some(4096),
-			gro: Toggle::Off,
-			gso: Toggle::On,
-			tso: Toggle::Off,
-			rx_checksum: Toggle::On,
-			tx_checksum: Toggle::Unmanaged,
-		}),
 	}
 }
 
@@ -629,6 +614,25 @@ fn every_device() -> Vec<Device> {
 			name_glob: Some("wl*".to_owned()),
 		}),
 		managed: true,
+		// Moved here from the interface sample with 0155 pass 1a. The witness
+		// has to show them on this side or the move is unpinned: a field that
+		// left one type and never arrived in the other would look identical to
+		// a field that was simply dropped.
+		mtu: Some(1400),
+		mac: Some("02:00:00:00:00:01".to_owned()),
+		link_settings: Some(LinkSettings {
+			autoneg: Toggle::Off,
+			speed: Some(1000),
+			duplex: Some("full".to_owned()),
+			wol: Some("g".to_owned()),
+			rx_ring: Some(4096),
+			tx_ring: Some(4096),
+			gro: Toggle::Off,
+			gso: Toggle::On,
+			tso: Toggle::Off,
+			rx_checksum: Toggle::On,
+			tx_checksum: Toggle::Unmanaged,
+		}),
 		// The witness carries the non-default so a spelling change moves
 		// the bytes: a field that is always at its default serialises to
 		// nothing and is pinned by nothing.

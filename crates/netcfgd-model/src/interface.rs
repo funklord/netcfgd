@@ -836,12 +836,6 @@ pub struct Interface {
 	/// Whether to bring it up.
 	#[serde(default = "crate::default_true")]
 	pub enabled: bool,
-	/// MTU.
-	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub mtu: Option<u32>,
-	/// Hardware address to set.
-	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub mac: Option<String>,
 	/// How addresses are acquired. Ordered; a composition, not alternatives.
 	#[serde(default)]
 	pub addressing: Vec<AddressSource>,
@@ -924,9 +918,6 @@ pub struct Interface {
 	/// anything that has to be found.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub ipv6_token: Option<String>,
-	/// Driver-level settings. Unimplemented; see [`LinkSettings`].
-	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub link_settings: Option<LinkSettings>,
 	/// How this interface ranks against others that can reach the same place.
 	///
 	/// Lower wins, as in a route metric -- which is what it becomes: a route

@@ -423,7 +423,30 @@ presented as obvious:
   whole adapter, which is far more than was meant. As links, the VIP is one
   row with `managed = false` beside a row netcfgd owns.
 
-  `link.managed` is a new field, so it is pass 2: pass 1 adds no concepts.
+  **`guard` belongs on both as well, and it is inherited downward.** Set by
+  the copyright holder 2026-09-02. A guard on a link must protect every device
+  that link runs over, or it protects nothing: guarding the NFS-root link and
+  then reconfiguring the bond underneath takes the link down by another route,
+  and the refusal an operator was promised never fires.
+
+  So the rule is that a guarded link guards its whole stack:
+
+      link "nfs-root" (guarded)  ->  bond0  ->  eth0, eth1
+
+  all four refuse disruptive actions, and only the link had to say so.
+
+  A device may also be guarded in its own right, for the case where the thing
+  depending on it is not a link netcfgd knows about -- an adapter passed
+  through to a virtual machine, say.
+
+  **Inheritance is the reason this cannot be left to an operator writing
+  `guard` in several places.** A stack is discovered rather than declared: the
+  members of a bond, the parent of a VLAN, the ports of a bridge. Asking
+  somebody to restate a guard at every level is asking them to keep a
+  derivation up to date by hand, and the failure is silent.
+
+  `link.managed`, `device.guard` and the inheritance rule are all new, so they
+  are pass 2: pass 1 adds no concepts.
 
   The last has no expression today. `enabled = false` is the nearest thing
   and it is a different statement -- it edits the configuration, where an

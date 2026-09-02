@@ -298,10 +298,16 @@
 
 # THE REST OF AN INTERFACE.
 
+# A `device` block is the hardware; an `interface` block is what runs over it.
+# The split is which side a setting means something on: an MTU means something
+# with nothing plugged in, an address does not.
+
+#device eth0 {
+#	mtu = 1492
+#	mac = "02:00:5e:10:00:01"
+#}
 #interface eth0 {
 #	config      = "dhcp"
-#	mtu         = 1492
-#	mac         = "02:00:5e:10:00:01"
 #	enabled     = true
 #	preference  = 100
 #	forwarding  = true
@@ -424,8 +430,7 @@
 # because "leave this one alone" is a different instruction from "turn it
 # off", and a boolean could not say it.
 
-#interface eth0 {
-#	config = "dhcp"
+#device eth0 {
 #	ethtool {
 #		autoneg      = "on"
 #		gro          = "on"
@@ -436,6 +441,7 @@
 #		wol          = "off"
 #	}
 #}
+#interface eth0 { config = "dhcp" }
 
 # AN ACCESS POINT. netcfgd generates hostapd's configuration under /run and
 # runs it; this is the whole of what you write.

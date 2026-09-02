@@ -43,8 +43,16 @@ const NAMESPACE: uuid::Uuid = uuid::uuid!("4ed6290d-3761-405c-8ad8-0d40f258ee63"
 pub(crate) enum Profile {
 	/// A `network` block: an SSID netcfgd knows how to join.
 	Network(Box<WifiNetwork>),
-	/// An `interface` block: a link netcfgd configures.
-	Interface(Box<Interface>),
+	/// An `interface` block: a link netcfgd configures, carrying the MTU of
+	/// the device of the same name.
+	///
+	/// **The MTU travels separately because the two models disagree about
+	/// where it lives.** `NetworkManager` keeps it on the connection; since
+	/// 0155 pass 1a netcfgd keeps it on the hardware, which is the honest
+	/// place -- an MTU means something with nothing plugged in. The adapter's
+	/// job is to bridge that, so the join happens where the document is still
+	/// in scope rather than by handing this type a lookup it cannot do.
+	Interface(Box<Interface>, Option<u32>),
 }
 
 impl Profile {
@@ -58,7 +66,7 @@ impl Profile {
 	pub(crate) fn identity(&self) -> String {
 		match self {
 			Self::Network(network) => format!("network:{}", network.id),
-			Self::Interface(interface) => format!("interface:{}", interface.name),
+			Self::Interface(interface, _) => format!("interface:{}", interface.name),
 		}
 	}
 
@@ -67,7 +75,7 @@ impl Profile {
 	pub(crate) fn id(&self) -> String {
 		match self {
 			Self::Network(network) => network.id.clone(),
-			Self::Interface(interface) => interface.name.clone(),
+			Self::Interface(interface, _) => interface.name.clone(),
 		}
 	}
 
@@ -76,7 +84,7 @@ impl Profile {
 	pub(crate) fn kind(&self) -> &'static str {
 		match self {
 			Self::Network(_) => "802-11-wireless",
-			Self::Interface(_) => "802-3-ethernet",
+			Self::Interface(..) => "802-3-ethernet",
 		}
 	}
 
@@ -85,7 +93,7 @@ impl Profile {
 	pub(crate) fn addressing(&self) -> &[AddressSource] {
 		match self {
 			Self::Network(network) => &network.addressing,
-			Self::Interface(interface) => &interface.addressing,
+			Self::Interface(interface, _) => &interface.addressing,
 		}
 	}
 
@@ -94,7 +102,7 @@ impl Profile {
 	pub(crate) fn dns(&self) -> Option<&netcfgd_model::DnsPolicy> {
 		match self {
 			Self::Network(network) => network.dns.as_ref(),
-			Self::Interface(interface) => interface.dns.as_ref(),
+			Self::Interface(interface, _) => interface.dns.as_ref(),
 		}
 	}
 
@@ -103,7 +111,7 @@ impl Profile {
 	pub(crate) fn routes(&self) -> &[netcfgd_model::Route] {
 		match self {
 			Self::Network(network) => &network.routes,
-			Self::Interface(interface) => &interface.routes,
+			Self::Interface(interface, _) => &interface.routes,
 		}
 	}
 
@@ -116,7 +124,7 @@ impl Profile {
 	pub(crate) fn interface(&self) -> Option<String> {
 		match self {
 			Self::Network(_) => None,
-			Self::Interface(interface) => Some(interface.name.clone()),
+			Self::Interface(interface, _) => Some(interface.name.clone()),
 		}
 	}
 }
@@ -367,12 +375,13 @@ pub(crate) fn settings_of(profile: &Profile) -> Dict {
 
 			insert_ip(&mut dict, profile);
 		}
-		Profile::Interface(interface) => {
+		Profile::Interface(_, mtu) => {
 			let mut ethernet = Group::new();
-			// The one per-connection option that lives on an interface rather
-			// than a network: netcfgd has no per-SSID MTU, and a client asking
-			// for one is told so in the file it gets back.
-			if let Some(mtu) = interface.mtu {
+			// The one per-connection option NM keeps that netcfgd keeps on the
+			// hardware: there is no per-SSID MTU, and a client asking for one
+			// is told so in the file it gets back. Carried on the profile
+			// since 0155 pass 1a moved it to the device.
+			if let Some(mtu) = *mtu {
 				ethernet.insert("mtu".to_owned(), number(mtu));
 			}
 			dict.insert("802-3-ethernet".to_owned(), ethernet);
@@ -998,8 +1007,6 @@ mod tests {
 			name: name.to_owned(),
 			kind: netcfgd_model::InterfaceKind::Physical,
 			enabled: true,
-			mtu: None,
-			mac: None,
 			addressing: Vec::new(),
 			routes: Vec::new(),
 			dns: None,
@@ -1014,7 +1021,6 @@ mod tests {
 			forwarding: None,
 			guard: None,
 			ipv6_token: None,
-			link_settings: None,
 			preference: None,
 			probe: None,
 			bridge_vlans: Vec::new(),
@@ -1055,7 +1061,7 @@ mod tests {
 		// rather than a photograph of it.
 		assert_eq!(first, "7b9da559-bfbe-5bf1-82b1-bc18e6e2e81a");
 		assert_eq!(
-			uuid_of(&Profile::Interface(Box::new(interface("wlan0")))),
+			uuid_of(&Profile::Interface(Box::new(interface("wlan0")), None)),
 			"b76831ed-4c06-5109-8f0c-53321dab799e"
 		);
 	}
@@ -1065,7 +1071,7 @@ mod tests {
 	#[test]
 	fn the_two_kinds_of_profile_cannot_collide() {
 		let as_network = network("wlan0", Security::Open);
-		let as_interface = Profile::Interface(Box::new(interface("wlan0")));
+		let as_interface = Profile::Interface(Box::new(interface("wlan0")), None);
 		assert_ne!(uuid_of(&as_network), uuid_of(&as_interface));
 		assert_eq!(as_network.identity(), "network:wlan0");
 		assert_eq!(as_interface.identity(), "interface:wlan0");
@@ -1163,7 +1169,7 @@ mod tests {
 
 		let mut network = match network("Quiet", Security::Open) {
 			Profile::Network(network) => *network,
-			Profile::Interface(_) => unreachable!("built as a network"),
+			Profile::Interface(_, _) => unreachable!("built as a network"),
 		};
 		network.dns = Some(DnsPolicy {
 			servers: vec![DnsServer {

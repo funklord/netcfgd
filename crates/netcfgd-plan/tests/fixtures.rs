@@ -702,10 +702,10 @@ fn settle(desired: &Document, observed: &mut Observed) -> Plan {
 fn a_static_interface_is_brought_up_in_order() {
 	let desired = document(
 		r#"
+		device eth0 { mtu = 9000 }
 		interface eth0 {
 			config = "192.168.1.10/24"
 			routes = "default via 192.168.1.1"
-			mtu    = 9000
 		}
 		"#,
 	);
@@ -1134,7 +1134,8 @@ fn the_action_list_is_a_valid_topological_order() {
 		}
 		interface eth0 { master = "br0" }
 		interface eth1 { master = "br0" }
-		interface wan0 { config = "dhcp"; mtu = 1492 }
+		device wan0 { mtu = 1492 }
+		interface wan0 { config = "dhcp" }
 		"#,
 	);
 	let mut observed = observed_with(&["eth0", "eth1", "wan0"]);
@@ -1162,10 +1163,10 @@ fn the_action_list_is_a_valid_topological_order() {
 fn every_action_explains_itself() {
 	let desired = document(
 		r#"
+		device eth0 { mtu = 9000 }
 		interface eth0 {
 			config = "192.168.1.10/24"
 			routes = "default via 192.168.1.1"
-			mtu    = 9000
 		}
 		"#,
 	);
@@ -1493,8 +1494,10 @@ fn removing_dot1x_stops_the_supplicant() {
 fn recognised_but_unimplemented_features_are_named_in_the_plan() {
 	let document = document(
 		r#"
-interface eth0 {
+device eth0 {
 	ethtool { gro = "off"; speed = 1000; wol = "g" }
+}
+interface eth0 {
 	config = "null"
 }
 "#,
@@ -4791,9 +4794,11 @@ fn a_token_nobody_asked_about_is_left_alone() {
 fn an_offload_is_set_once_and_then_left_alone() {
 	let desired = document(
 		r#"
+		device eth0 {
+			ethtool { gro = "off" }
+		}
 		interface eth0 {
 			config  = "10.0.0.2/24"
-			ethtool { gro = "off" }
 		}
 		"#,
 	);
@@ -4816,9 +4821,11 @@ fn an_offload_is_set_once_and_then_left_alone() {
 fn an_offload_already_correct_plans_nothing() {
 	let desired = document(
 		r#"
+		device eth0 {
+			ethtool { gro = "on" }
+		}
 		interface eth0 {
 			config  = "10.0.0.2/24"
-			ethtool { gro = "on" }
 		}
 		"#,
 	);
@@ -4844,9 +4851,11 @@ fn an_offload_already_correct_plans_nothing() {
 fn an_unmentioned_offload_is_not_in_the_request() {
 	let desired = document(
 		r#"
+		device eth0 {
+			ethtool { gro = "off" }
+		}
 		interface eth0 {
 			config  = "10.0.0.2/24"
-			ethtool { gro = "off" }
 		}
 		"#,
 	);
@@ -4872,9 +4881,11 @@ fn an_unmentioned_offload_is_not_in_the_request() {
 fn transmit_checksumming_covers_every_spelling() {
 	let desired = document(
 		r#"
+		device eth0 {
+			ethtool { tx_checksum = "off" }
+		}
 		interface eth0 {
 			config  = "10.0.0.2/24"
-			ethtool { tx_checksum = "off" }
 		}
 		"#,
 	);

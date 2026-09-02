@@ -102,7 +102,12 @@ fn declared(
 		"declared in the configuration",
 		location(provenance, &path),
 	));
-	if let Some(mtu) = interface.mtu {
+	// The MTU describes the adapter and lives on the device now (0155 pass
+	// 1a). Looked up rather than dropped: `explain` exists to say where a
+	// value came from, and a value that quietly stopped being explainable
+	// would be the feature failing silently.
+	let device = document.devices.iter().find(|device| device.name == name);
+	if let Some(mtu) = device.and_then(|device| device.mtu) {
 		facts.push(sourced(
 			"desired",
 			format!("mtu {mtu}"),
@@ -694,8 +699,6 @@ mod tests {
 			name: name.to_owned(),
 			kind: InterfaceKind::Physical,
 			enabled: true,
-			mtu: None,
-			mac: None,
 			addressing: vec![AddressSource::Static(Static {
 				address: "10.0.0.1/24".to_owned(),
 				peer: None,
@@ -715,7 +718,6 @@ mod tests {
 			ingress_redirect: None,
 			guard: None,
 			ipv6_token: None,
-			link_settings: None,
 			preference: None,
 			probe: None,
 			bridge_vlans: Vec::new(),

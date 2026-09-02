@@ -213,6 +213,9 @@ mod tests {
 			name: "wwan0".to_owned(),
 			r#match: None,
 			managed: true,
+			mtu: None,
+			mac: None,
+			link_settings: None,
 			on_unmanage: OnUnmanage::Leave,
 			wifi: None,
 			modem: Some(ModemPolicy {

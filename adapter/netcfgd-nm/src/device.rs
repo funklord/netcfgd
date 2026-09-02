@@ -438,7 +438,7 @@ impl Device {
 			.into_iter()
 			.filter(|(profile, _)| match profile {
 				crate::settings::Profile::Network(_) => radio,
-				crate::settings::Profile::Interface(interface) => {
+				crate::settings::Profile::Interface(interface, _) => {
 					!radio && interface.name == self.interface
 				}
 			})

@@ -277,7 +277,6 @@ fn render_interface(
 		(interface.qdisc.is_some(), "qdisc"),
 		(interface.ingress_redirect.is_some(), "ingress_redirect"),
 		(interface.guard.is_some(), "guard"),
-		(interface.link_settings.is_some(), "ethtool settings"),
 	] {
 		if present {
 			missing.push(format!("interface {name}: {what}"));
@@ -288,12 +287,6 @@ fn render_interface(
 
 	if !interface.enabled {
 		body.push_str("\tenabled = false\n");
-	}
-	if let Some(mtu) = interface.mtu {
-		let _ = writeln!(body, "\tmtu = {mtu}");
-	}
-	if let Some(mac) = &interface.mac {
-		let _ = writeln!(body, "\tmac = {}", quote(mac));
 	}
 	if let Some(master) = &interface.master {
 		let _ = writeln!(body, "\tmaster = {}", quote(master));
@@ -742,9 +735,22 @@ fn render_device(
 		missing.push(format!("device {name}: a wifi policy"));
 	}
 
+	if device.link_settings.is_some() {
+		missing.push(format!("device {name}: ethtool settings"));
+	}
+
 	let mut body = String::new();
 	if !device.managed {
 		body.push_str("\tmanaged = false\n");
+	}
+	// Settings of the adapter, which moved here from `interface` with 0155
+	// pass 1a. Rendered from the day they arrived rather than joining the list
+	// of things a profile silently loses.
+	if let Some(mtu) = device.mtu {
+		let _ = writeln!(body, "\tmtu = {mtu}");
+	}
+	if let Some(mac) = &device.mac {
+		let _ = writeln!(body, "\tmac = {}", quote(mac));
 	}
 	// Was dropped in silence, and this is the expensive one to lose. `Clear`
 	// exists because walking away from a device otherwise strands credentials
@@ -909,6 +915,45 @@ mod tests {
 		assert_eq!(before, after, "rendered as:\n{rendered}");
 	}
 
+	/// The adapter's settings round-trip from the device block they moved to.
+	///
+	/// Worth its own case because a profile save renders the whole document:
+	/// a field that moved type and was not taught to the renderer would be
+	/// silently dropped from every saved profile, which is the failure mode
+	/// 0155 pass 1a most easily creates.
+	#[test]
+	fn a_devices_hardware_settings_round_trip() {
+		round_trips(
+			"device eth0 {\n\
+			 \tmtu = 9000\n\
+			 \tmac = \"02:00:00:00:00:01\"\n\
+			 }\n\
+			 interface eth0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 }\n",
+		);
+	}
+
+	/// The retired spelling is named, not left to "unknown interface key".
+	///
+	/// An operator who wrote `mtu` inside `interface` had a working
+	/// configuration, and the fix is to move a line rather than to delete it
+	/// -- so the refusal says where it goes (0155 pass 1a).
+	#[test]
+	fn hardware_keys_in_an_interface_say_where_they_went() {
+		for text in [
+			"interface eth0 { config = \"dhcp\"; mtu = 9000 }\n",
+			"interface eth0 { config = \"dhcp\"; mac = \"02:00:00:00:00:01\" }\n",
+			"interface eth0 { config = \"dhcp\"; ethtool { gro = \"off\" } }\n",
+		] {
+			let diagnostics = compile_errors(text);
+			assert!(
+				diagnostics.contains("device"),
+				"the refusal must name the new home: {diagnostics}"
+			);
+		}
+	}
+
 	#[test]
 	fn a_dhcp_interface_round_trips() {
 		round_trips("interface eth0 {\n\tconfig = \"dhcp\"\n}\n");
@@ -920,7 +965,6 @@ mod tests {
 			"interface eth0 {\n\
 			 \tconfig = [\"192.0.2.10/24\", \"2001:db8::10/64\"]\n\
 			 \troutes = [\"default via 192.0.2.1\", \"default via 2001:db8::1\"]\n\
-			 \tmtu = 9000\n\
 			 }\n",
 		);
 	}

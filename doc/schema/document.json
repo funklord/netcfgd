@@ -77,6 +77,21 @@
           "socket"
         ],
         "apn": "im.cxn"
+      },
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "link_settings": {
+        "autoneg": "off",
+        "speed": 1000,
+        "duplex": "full",
+        "wol": "g",
+        "rx_ring": 4096,
+        "tx_ring": 4096,
+        "gro": "off",
+        "gso": "on",
+        "tso": "off",
+        "rx_checksum": "on",
+        "tx_checksum": "unmanaged"
       }
     }
   ],
@@ -87,8 +102,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -227,19 +240,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -273,8 +273,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -413,19 +411,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -459,8 +444,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -599,19 +582,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -645,8 +615,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -790,19 +758,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -836,8 +791,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -981,19 +934,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -1027,8 +967,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -1172,19 +1110,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -1218,8 +1143,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -1363,19 +1286,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -1409,8 +1319,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -1556,19 +1464,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -1607,8 +1502,6 @@
         "miimon": 100
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -1752,19 +1645,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -1807,8 +1687,6 @@
         "vlan_filtering": true
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -1952,19 +1830,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -1998,8 +1863,6 @@
         "kind": "dummy"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -2143,19 +2006,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -2189,8 +2039,6 @@
         "kind": "ifb"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -2334,19 +2182,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -2382,8 +2217,6 @@
         "mode": "passthru"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -2527,19 +2360,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -2579,8 +2399,6 @@
         }
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -2724,19 +2542,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -2770,8 +2575,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -2915,19 +2718,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -2969,8 +2759,6 @@
         "ac": "BRAS-01"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -3114,19 +2902,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -3163,8 +2938,6 @@
         "group": "kvm"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -3308,19 +3081,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -3360,8 +3120,6 @@
         "key": 7
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -3505,19 +3263,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -3552,8 +3297,6 @@
         "peer": "veth-b"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -3697,19 +3440,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -3746,8 +3476,6 @@
         "protocol": "dot1ad"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -3891,19 +3619,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -3938,8 +3653,6 @@
         "table": 100
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -4083,19 +3796,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -4134,8 +3834,6 @@
         "port": 4789
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -4279,19 +3977,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -4346,8 +4031,6 @@
         ]
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -4491,19 +4174,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -4537,8 +4207,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -4682,19 +4350,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -4728,8 +4383,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -4873,19 +4526,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -4919,8 +4559,6 @@
         "kind": "physical"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -5064,19 +4702,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -5111,8 +4736,6 @@
         "mode": "geneve"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -5256,19 +4879,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -5303,8 +4913,6 @@
         "mode": "gre"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -5448,19 +5056,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -5495,8 +5090,6 @@
         "mode": "gretap"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -5640,19 +5233,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -5687,8 +5267,6 @@
         "mode": "ip6gre"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -5832,19 +5410,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -5879,8 +5444,6 @@
         "mode": "ip6tnl"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -6024,19 +5587,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -6071,8 +5621,6 @@
         "mode": "ipip"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -6216,19 +5764,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",
@@ -6263,8 +5798,6 @@
         "mode": "sit"
       },
       "enabled": true,
-      "mtu": 1400,
-      "mac": "02:00:00:00:00:01",
       "addressing": [
         {
           "source": "static",
@@ -6408,19 +5941,6 @@
         "reason": "nfs"
       },
       "ipv6_token": "::5",
-      "link_settings": {
-        "autoneg": "off",
-        "speed": 1000,
-        "duplex": "full",
-        "wol": "g",
-        "rx_ring": 4096,
-        "tx_ring": 4096,
-        "gro": "off",
-        "gso": "on",
-        "tso": "off",
-        "rx_checksum": "on",
-        "tx_checksum": "unmanaged"
-      },
       "preference": 100,
       "probe": {
         "command": "/bin/ping",

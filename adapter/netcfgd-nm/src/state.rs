@@ -182,7 +182,16 @@ fn profiles_of(document: &Document) -> Vec<crate::settings::Profile> {
 				.filter(|interface| {
 					!matches!(interface.kind, netcfgd_model::InterfaceKind::WireGuard(_))
 				})
-				.map(|interface| crate::settings::Profile::Interface(Box::new(interface.clone()))),
+				.map(|interface| {
+					// The device of the same name holds the MTU now, and this
+					// is where both lists are still in scope.
+					let mtu = document
+						.devices
+						.iter()
+						.find(|device| device.name == interface.name)
+						.and_then(|device| device.mtu);
+					crate::settings::Profile::Interface(Box::new(interface.clone()), mtu)
+				}),
 		)
 		.collect()
 }
@@ -433,7 +442,7 @@ impl State {
 						}
 					}
 				}
-				crate::settings::Profile::Interface(interface) => {
+				crate::settings::Profile::Interface(interface, _) => {
 					// A radio's interface block is not separately active: the
 					// network it joined is the activation, and reporting both
 					// would put two connections on one device.
@@ -549,7 +558,7 @@ impl State {
 			// interface is the state being asked for. Saying so beats either
 			// failing at something that is already true or pretending to have
 			// done something.
-			Some(crate::settings::Profile::Interface(interface_block)) => {
+			Some(crate::settings::Profile::Interface(interface_block, _)) => {
 				if self.link(&interface_block.name).is_some_and(|link| link.up) {
 					Ok(())
 				} else {
@@ -578,7 +587,7 @@ impl State {
 			Some(crate::settings::Profile::Network(_)) => {
 				crate::client::disconnect(&self.socket, &activation.interface)
 			}
-			Some(crate::settings::Profile::Interface(_)) => Err(format!(
+			Some(crate::settings::Profile::Interface(..)) => Err(format!(
 				"`{}` is up because /etc/netcfgd says it should be. Taking it down means \
 				 changing that -- `enabled = false` on the interface, then `ncfg apply` -- \
 				 rather than a request that the next reconcile would undo",

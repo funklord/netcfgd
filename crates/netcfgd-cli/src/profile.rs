@@ -274,12 +274,12 @@ mod tests {
 		}
 		std::fs::write(
 			root.join("etc/netcfgd.conf"),
-			"interface eth0 {\n\tconfig = \"dhcp\"\n}\n",
+			"interface eth0 {\n\tconfig = \"dhcp\"\n}\ndevice eth0 { mtu = 1500 }\n",
 		)
 		.expect("a config file");
 		std::fs::write(
 			root.join("etc/profile/office/10-office.conf"),
-			"override interface eth0 {\n\tconfig = \"dhcp\"\n\tmtu = 9000\n}\n",
+			"override interface eth0 {\n\tconfig = \"dhcp\"\n}\noverride device eth0 { mtu = 9000 }\n",
 		)
 		.expect("a profile file");
 
@@ -372,7 +372,7 @@ mod tests {
 
 		crate::drop_in::put_text(
 			"50-mine",
-			"override interface eth0 { mtu = 1400 }\n".to_owned(),
+			"override device eth0 { mtu = 1400 }\n".to_owned(),
 			false,
 			"`50-mine`",
 			&options,
@@ -382,7 +382,7 @@ mod tests {
 		assert_eq!(active(&options).expect("compiles"), None, "on none now");
 		assert!(root.join("etc/conf.d/05-profile-office.conf").exists());
 		let (document, _) = crate::compile(&options).expect("compiles");
-		assert_eq!(document.interfaces[0].mtu, Some(1400), "the edit won");
+		assert_eq!(document.devices[0].mtu, Some(1400), "the edit won");
 	}
 
 	/// A name with no directory is refused rather than written. Writing it
@@ -425,7 +425,7 @@ mod tests {
 		set(&["office".to_owned()], &options).expect("set");
 		crate::drop_in::put_text(
 			"50-mine",
-			"override interface eth0 { mtu = 1400 }\n".to_owned(),
+			"override device eth0 { mtu = 1400 }\n".to_owned(),
 			false,
 			"`50-mine`",
 			&options,
@@ -433,12 +433,12 @@ mod tests {
 		.expect("the edit compiles");
 
 		let (running, _) = crate::compile(&options).expect("compiles");
-		assert_eq!(running.interfaces[0].mtu, Some(1400));
+		assert_eq!(running.devices[0].mtu, Some(1400));
 
 		save(&["office-v2".to_owned()], &options).expect("save");
 
 		let (after, _) = crate::compile(&options).expect("compiles");
-		assert_eq!(after.interfaces[0].mtu, Some(1400), "nothing moved");
+		assert_eq!(after.devices[0].mtu, Some(1400), "nothing moved");
 		assert_eq!(
 			after.globals.profile.as_deref(),
 			Some("office-v2"),

@@ -813,12 +813,12 @@ mod layering {
 	/// reason it is the one that wins.
 	#[test]
 	fn the_runtime_layer_is_read_last() {
-		let factory = tree("f1", &[("netcfgd.conf", "interface eth0 { mtu = 1500 }\n")]);
+		let factory = tree("f1", &[("netcfgd.conf", "device eth0 { mtu = 1500 }\n")]);
 		let runtime = tree(
 			"r1",
 			&[(
 				"conf.d/10-local.conf",
-				"override interface eth0 { mtu = 9000 }\n",
+				"override device eth0 { mtu = 9000 }\n",
 			)],
 		);
 
@@ -833,7 +833,7 @@ mod layering {
 	/// install, and no runtime config is a freshly flashed image.
 	#[test]
 	fn a_missing_layer_is_not_an_error() {
-		let present = tree("f2", &[("netcfgd.conf", "interface eth0 { mtu = 1500 }\n")]);
+		let present = tree("f2", &[("netcfgd.conf", "device eth0 { mtu = 1500 }\n")]);
 		let absent = present.join("nothing-here");
 
 		assert_eq!(load_layered(&absent, &present).expect("load").len(), 1);
@@ -847,7 +847,7 @@ mod layering {
 	/// see named as both positions.
 	#[test]
 	fn one_directory_named_twice_is_read_once() {
-		let dir = tree("f3", &[("netcfgd.conf", "interface eth0 { mtu = 1500 }\n")]);
+		let dir = tree("f3", &[("netcfgd.conf", "device eth0 { mtu = 1500 }\n")]);
 		assert_eq!(load_layered(&dir, &dir).expect("load").len(), 1);
 	}
 
@@ -905,7 +905,7 @@ mod layering {
 	fn no_profile_reads_only_the_base() {
 		let base = tree(
 			"p0",
-			&[("conf.d/10-base.conf", "interface eth0 { mtu = 1500 }\n")],
+			&[("conf.d/10-base.conf", "device eth0 { mtu = 1500 }\n")],
 		);
 		let sources = load_with_profile(&base, &base).expect("load");
 		assert_eq!(names(&sources).len(), 1, "{:?}", names(&sources));
@@ -924,9 +924,9 @@ mod layering {
 				),
 				(
 					"profile/office/10-office.conf",
-					"override interface eth0 { mtu = 9000 }\n",
+					"override device eth0 { mtu = 9000 }\n",
 				),
-				("netcfgd.conf", "interface eth0 { mtu = 1500 }\n"),
+				("netcfgd.conf", "device eth0 { mtu = 1500 }\n"),
 			],
 		);
 		let before = netcfgd_compile::compile(
@@ -935,7 +935,7 @@ mod layering {
 		)
 		.expect("compiles");
 		assert_eq!(before.globals.profile.as_deref(), Some("office"));
-		assert_eq!(before.interfaces[0].mtu, Some(9000));
+		assert_eq!(before.devices[0].mtu, Some(9000));
 
 		let folded = adopt_profile(&base, &base)
 			.expect("fold")
@@ -949,7 +949,7 @@ mod layering {
 		.expect("compiles");
 		assert_eq!(after.globals.profile, None, "on no profile now");
 		assert_eq!(
-			after.interfaces[0].mtu,
+			after.devices[0].mtu,
 			Some(9000),
 			"and running exactly what it was"
 		);
@@ -967,10 +967,7 @@ mod layering {
 	/// nothing to fold, and a settings edit is just a settings edit.
 	#[test]
 	fn folding_with_no_profile_chosen_does_nothing() {
-		let base = tree(
-			"pa2",
-			&[("netcfgd.conf", "interface eth0 { mtu = 1500 }\n")],
-		);
+		let base = tree("pa2", &[("netcfgd.conf", "device eth0 { mtu = 1500 }\n")]);
 		assert_eq!(adopt_profile(&base, &base).expect("fold"), None);
 	}
 
@@ -989,13 +986,13 @@ mod layering {
 				),
 				(
 					"profile/office/10-office.conf",
-					"override interface eth0 { mtu = 9000 }\n",
+					"override device eth0 { mtu = 9000 }\n",
 				),
 				(
 					"conf.d/50-middle.conf",
-					"override interface eth0 { mtu = 1280 }\n",
+					"override device eth0 { mtu = 1280 }\n",
 				),
-				("netcfgd.conf", "interface eth0 { mtu = 1500 }\n"),
+				("netcfgd.conf", "device eth0 { mtu = 1500 }\n"),
 			],
 		);
 
@@ -1014,7 +1011,7 @@ mod layering {
 			&mut netcfgd_compile::NoHooks,
 		)
 		.expect("compiles");
-		assert_eq!(after.interfaces[0].mtu, Some(9000), "unchanged either way");
+		assert_eq!(after.devices[0].mtu, Some(9000), "unchanged either way");
 	}
 
 	/// The proof, exercised. A drop-in sorting after the folded file would
@@ -1031,16 +1028,16 @@ mod layering {
 				),
 				(
 					"profile/office/10-office.conf",
-					"override interface eth0 { mtu = 9000 }\n",
+					"override device eth0 { mtu = 9000 }\n",
 				),
 				// Sorts after both positions the fold may take, so neither
 				// reproduces the precedence the profile had: the profile used
 				// to be read after this file and now cannot be.
 				(
 					"conf.d/zzz-late.conf",
-					"override interface eth0 { mtu = 1280 }\n",
+					"override device eth0 { mtu = 1280 }\n",
 				),
-				("netcfgd.conf", "interface eth0 { mtu = 1500 }\n"),
+				("netcfgd.conf", "device eth0 { mtu = 1500 }\n"),
 			],
 		);
 
@@ -1078,7 +1075,7 @@ mod layering {
 				),
 				(
 					"profile/office/10-office.conf",
-					"interface eth0 { mtu = 9000 }\n",
+					"device eth0 { mtu = 9000 }\n",
 				),
 			],
 		);
@@ -1109,7 +1106,7 @@ mod layering {
 				),
 				(
 					"profile/office/10-office.conf",
-					"interface eth0 { mtu = 9000 }\n",
+					"device eth0 { mtu = 9000 }\n",
 				),
 			],
 		);
@@ -1118,11 +1115,7 @@ mod layering {
 		let document =
 			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).expect("it compiles");
 		assert_eq!(document.globals.profile.as_deref(), Some("office"));
-		assert_eq!(
-			document.interfaces[0].mtu,
-			Some(9000),
-			"the profile was read"
-		);
+		assert_eq!(document.devices[0].mtu, Some(9000), "the profile was read");
 	}
 
 	/// The guard reads the drop-in `ncfg profile` owns, and only that one. A
@@ -1137,7 +1130,7 @@ mod layering {
 				("conf.d/10-base.conf", "global { profile = \"office\" }\n"),
 				(
 					"profile/office/10-office.conf",
-					"interface eth0 { mtu = 9000 }\n",
+					"device eth0 { mtu = 9000 }\n",
 				),
 			],
 		);
@@ -1155,14 +1148,11 @@ mod layering {
 				("conf.d/10-base.conf", "global { profile = \"office\" }\n"),
 				(
 					"profile/office/10-office.conf",
-					"interface eth0 { mtu = 9000 }\n",
+					"device eth0 { mtu = 9000 }\n",
 				),
 				// A profile that was not chosen is not read, which is the
 				// point of choosing.
-				(
-					"profile/home/10-home.conf",
-					"interface eth0 { mtu = 1400 }\n",
-				),
+				("profile/home/10-home.conf", "device eth0 { mtu = 1400 }\n"),
 			],
 		);
 
@@ -1173,7 +1163,7 @@ mod layering {
 
 		let document =
 			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).expect("it compiles");
-		assert_eq!(document.interfaces[0].mtu, Some(9000), "the profile won");
+		assert_eq!(document.devices[0].mtu, Some(9000), "the profile won");
 	}
 
 	/// The operator's copy of a shipped profile layers over it, which is the
@@ -1187,7 +1177,7 @@ mod layering {
 				("conf.d/10-base.conf", "global { profile = \"offline\" }\n"),
 				(
 					"profile/offline/10-off.conf",
-					"interface eth0 { mtu = 1280 }\n",
+					"device eth0 { mtu = 1280 }\n",
 				),
 			],
 		);
@@ -1195,7 +1185,7 @@ mod layering {
 			"p2r",
 			&[(
 				"profile/offline/20-mine.conf",
-				"override interface eth0 { mtu = 1500 }\n",
+				"override device eth0 { mtu = 1500 }\n",
 			)],
 		);
 
@@ -1203,7 +1193,7 @@ mod layering {
 		let document =
 			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).expect("it compiles");
 		assert_eq!(
-			document.interfaces[0].mtu,
+			document.devices[0].mtu,
 			Some(1500),
 			"the operator's copy layered over the shipped one"
 		);

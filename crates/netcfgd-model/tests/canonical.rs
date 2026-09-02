@@ -16,8 +16,6 @@ fn iface(name: &str) -> Interface {
 		name: name.to_owned(),
 		kind: InterfaceKind::Physical,
 		enabled: true,
-		mtu: None,
-		mac: None,
 		addressing: Vec::new(),
 		routes: Vec::new(),
 		dns: None,
@@ -32,7 +30,6 @@ fn iface(name: &str) -> Interface {
 		ingress_redirect: None,
 		guard: None,
 		ipv6_token: None,
-		link_settings: None,
 		preference: None,
 		probe: None,
 		bridge_vlans: Vec::new(),
@@ -111,6 +108,9 @@ fn insertion_order_does_not_survive_canonicalisation() {
 		name: "eth0".to_owned(),
 		r#match: None,
 		managed: true,
+		mtu: None,
+		mac: None,
+		link_settings: None,
 		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
 		modem: None,
@@ -126,6 +126,9 @@ fn insertion_order_does_not_survive_canonicalisation() {
 		name: "eth0".to_owned(),
 		r#match: None,
 		managed: true,
+		mtu: None,
+		mac: None,
+		link_settings: None,
 		on_unmanage: netcfgd_model::OnUnmanage::Leave,
 		wifi: None,
 		modem: None,
@@ -604,13 +607,26 @@ fn a_delegated_address_carries_a_reference_not_a_prefix() {
 fn the_encoding_contains_no_floats() {
 	let mut doc = Document::default();
 	let mut eth0 = iface("eth0");
-	eth0.mtu = Some(1500);
 	eth0.addressing.push(AddressSource::Dhcp4(Dhcp4 {
 		metric: Some(100),
 		request_options: vec![121, 249],
 		..Dhcp4::default()
 	}));
 	doc.interfaces.push(eth0);
+	// The MTU is on the device since 0155 pass 1a, and it is one of the five
+	// numbers the count below insists on -- so it moves here rather than
+	// leaving the guard to fail for the wrong reason.
+	doc.devices.push(netcfgd_model::Device {
+		name: "eth0".to_owned(),
+		r#match: None,
+		managed: true,
+		mtu: Some(1500),
+		mac: None,
+		link_settings: None,
+		on_unmanage: netcfgd_model::OnUnmanage::Leave,
+		wifi: None,
+		modem: None,
+	});
 	doc.globals.confirm_default = Some(120);
 
 	let json = doc.to_json_canonical().expect("valid");
