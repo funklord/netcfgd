@@ -190,6 +190,16 @@ def parse_netcfgd_argv(argv):
 			pidfile = rest.pop(0)
 		elif flag.startswith("-D"):
 			continue  # the driver; a fake radio has none
+		elif flag == "-s":
+			# Log to syslog. netcfgd passes it so a real supplicant's faults
+			# are readable at all -- before that it daemonised and wrote to a
+			# stdout nothing was reading. A fake has no syslog to write to and
+			# nothing to say, so accepting it is the whole of the behaviour.
+			#
+			# Accepted rather than ignored by a catch-all: this fake refuses
+			# flags it does not know on purpose, because a flag netcfgd starts
+			# passing that the fake silently swallows is a flag no test covers.
+			continue
 		else:
 			print(f"fake_supplicant: unhandled flag {flag}", file=sys.stderr)
 			return False

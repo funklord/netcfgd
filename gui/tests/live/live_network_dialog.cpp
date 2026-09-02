@@ -87,9 +87,9 @@ int main(int argc, char **argv)
 		auto *security = dialog.findChild<QComboBox *>(QStringLiteral("network_security"));
 		auto *credential =
 		    dialog.findChild<QLineEdit *>(QStringLiteral("network_credential"));
-		auto *priority = dialog.findChild<QSpinBox *>(QStringLiteral("network_priority"));
+		auto *metric = dialog.findChild<QSpinBox *>(QStringLiteral("network_metric"));
 		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
-		if (!id || !security || !credential || !priority || !save) {
+		if (!id || !security || !credential || !metric || !save) {
 			check("the dialog has the fields it needs", false);
 			return 1;
 		}
@@ -98,15 +98,15 @@ int main(int argc, char **argv)
 		id->setText(QStringLiteral("by-hand"));
 		security->setCurrentIndex(security->findData(QStringLiteral("psk")));
 		credential->setText(QStringLiteral("hunter2hunter2"));
-		priority->setValue(42);
+		metric->setValue(42);
 		check("and will not save a network it cannot write", save->isEnabled());
 		save->click();
 
 		ncfg_saved_network_row written;
 		check("netcfgd compiled the hand-written network",
 		    saved_named(&connection, QStringLiteral("by-hand"), &written));
-		check("with the priority it was given", written.priority == 42,
-		    QString::number(written.priority));
+		check("with the metric it was given", written.metric == 42,
+		    QString::number(written.metric));
 		check("and its security type", written.security == QStringLiteral("psk"),
 		    written.security);
 	}
@@ -121,7 +121,7 @@ int main(int argc, char **argv)
 		}
 		ncfg_network_dialog dialog(&connection, existing);
 		auto *id = dialog.findChild<QLineEdit *>(QStringLiteral("network_id"));
-		auto *priority = dialog.findChild<QSpinBox *>(QStringLiteral("network_priority"));
+		auto *metric = dialog.findChild<QSpinBox *>(QStringLiteral("network_metric"));
 		auto *autoconnect =
 		    dialog.findChild<QCheckBox *>(QStringLiteral("network_autoconnect"));
 		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
@@ -129,18 +129,18 @@ int main(int argc, char **argv)
 		/* The id is the block's name and the file's: changing it would write a
 		 * second network and leave the first. */
 		check("the name of an existing network cannot be edited", id->isReadOnly());
-		check("and the dialog opens on what is set", priority->value() == 42,
-		    QString::number(priority->value()));
+		check("and the dialog opens on what is set", metric->value() == 42,
+		    QString::number(metric->value()));
 
-		priority->setValue(7);
+		metric->setValue(7);
 		autoconnect->setChecked(false);
 		save->click();
 
 		ncfg_saved_network_row after;
 		check("the change reached the document",
 		    saved_named(&connection, QStringLiteral("by-hand"), &after) &&
-		        after.priority == 7,
-		    QString::number(after.priority));
+		        after.metric == 7,
+		    QString::number(after.metric));
 		check("and so did the other one", after.autoconnect == false);
 	}
 

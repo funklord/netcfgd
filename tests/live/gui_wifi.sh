@@ -52,9 +52,25 @@ for project in $probes; do
 	name=$(basename "$project" .pro)
 	build="$repo/gui/tests/live/build/$name"
 	mkdir -p "$build"
-	(cd "$build" && qmake6 "$project" >/dev/null && make >/dev/null 2>&1) ||
-		skip "$name will not build (is qt6-base-dev complete?)"
-	[ -x "$build/$name" ] || skip "$name did not build"
+	# **A probe that will not compile is a failure, not a skip.** The skip was
+	# written for a machine without a complete Qt, and it caught something
+	# else entirely: a probe gone stale against the code it tests. When 0154
+	# removed a network's `priority`, `live_network_dialog` stopped compiling
+	# and this line turned that into "skipping" -- which silently stopped all
+	# five probes running, including the ones that still built.
+	#
+	# The two are told apart by asking whether Qt is there, once, above. Past
+	# that point a build failure is the tree's fault and says so.
+	if ! (cd "$build" && qmake6 "$project" >/dev/null && make >/dev/null 2>&1); then
+		echo "gui_wifi.sh: FAIL: $name does not build against this tree" >&2
+		echo "gui_wifi.sh:   qt6 is present, so this is a stale probe rather" >&2
+		echo "gui_wifi.sh:   than a missing dependency; build it by hand to see" >&2
+		exit 1
+	fi
+	[ -x "$build/$name" ] || {
+		echo "gui_wifi.sh: FAIL: $name built nothing" >&2
+		exit 1
+	}
 done
 
 # Short, because a unix socket path has to fit in SUN_LEN.
