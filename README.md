@@ -46,6 +46,26 @@ make gui            # the Qt client, if you want it
 sudo make install-gui
 ```
 
+[fmake](../fmake) builds the Qt client with no build file and nothing
+beyond the Python standard library:
+
+    python3 ~/src/fmake/fmake    # netcfgd-gui, the same program `make gui` builds
+
+**Not `/usr/bin/fmake`**, which is older than fixes this needs. **And the
+daemon and the CLI are not fmake's**, which is the part worth stating
+plainly rather than leaving a reader to try it: they are a Cargo workspace
+of twenty-one crates, and fmake drives rustc directly -- one crate root,
+one artifact -- so it resolves no workspace, no inter-crate dependency and
+nothing from a registry. `make build` is how the daemon gets built, and
+that is not a gap anybody should try to close with a config file.
+
+What `fmake.toml` says is only the boundary between the two halves: which
+four directories hold the Rust, and that the client is called netcfgd-gui.
+It builds the twelve `gui/src/` sources, the eleven mocs and both
+`client/` sources into one program -- where the project's own Makefiles
+build `client/libncfg_client.a` first and link it, which is the same
+program by a shorter route.
+
 ### What you need installed
 
 **To build the daemon and the CLI** — Debian and derivatives:

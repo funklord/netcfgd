@@ -1,0 +1,34 @@
+# netcfgd builds in two halves and fmake owns one of them.
+#
+# The daemon and the CLI are a Cargo workspace of twenty-one crates. fmake
+# drives rustc directly -- one crate root plus what `mod' draws in, one
+# artifact -- which is a different thing from Cargo: it does not resolve a
+# workspace, inter-crate dependencies, features, or anything from a registry.
+# So that half is excluded rather than half-attempted, and `make build` is
+# how the daemon is built. These four directories are where every .rs lives.
+#
+# Left alone, fmake reads them and stops before compiling anything, because
+# sixteen of the eighteen crate roots are `src/lib.rs` and a target is named
+# for what it is rooted in:
+#
+#     !!! two targets are both called 'lib':
+#         crates/netcfgd-cli/src/lib.rs
+#         crates/netcfgd-daemon/src/lib.rs
+#
+# which is correct and unhelpful -- the name Cargo would use is in the
+# Cargo.toml beside it, and fmake does not read those. Reported to fmake.
+[project]
+exclude = ["crates", "backend", "adapter", "fuzz"]
+
+# The Qt client, `make gui`. fmake names a target after the directory its
+# root TU sits in; `gui` is a directory in the way here, so it falls back to
+# ncfg_gui, which is nobody's name for it. gui/Makefile calls it netcfgd-gui
+# and so does `make install-gui`.
+#
+# Worth knowing that fmake builds this in one graph where the project keeps
+# two: gui/Makefile builds ../client/libncfg_client.a first and links it,
+# and fmake compiles the client sources straight into the program because
+# symbol closure reaches them. Same program, one fewer artifact, and no
+# CLIENT_DIR to keep pointed anywhere.
+[target.gui]
+name = "netcfgd-gui"

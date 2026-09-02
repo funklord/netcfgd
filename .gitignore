@@ -54,3 +54,8 @@ debian/*.substvars
 debian/*.debhelper
 debian/*.debhelper.log
 debian/debhelper-build-stamp
+
+# fmake's object cache and the client it leaves at the top level.
+# make writes its own build output under build/ instead.
+.fmake/
+/netcfgd-gui
