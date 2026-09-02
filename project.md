@@ -156,11 +156,24 @@ one.
 
 ```
 
-Device {                              // per-device policy, not addressing
+Device {                              // the hardware, and what to make of it
   name     : string                   // "wlan0"
   match    : DeviceMatch?             // prefer matching over naming; see note
   managed  : bool = true              // false => netcfgd never touches it
   wifi     : WifiDevicePolicy?
+  modem    : ModemPolicy?             // sim order and apn; see 0150, 0152
+
+  // Moved here from Interface by 0155. The test that sorts a field between
+  // the two: would this still mean something with nothing connected? An mtu
+  // would; an address would not.
+  mtu      : u32?
+  mac      : string?
+  link_settings    : LinkSettings?    // the `ethtool` block; speed, offloads
+  kind     : InterfaceKind = Physical // what netcfgd creates, if anything
+  master   : string?                  // bridge/bond membership -- a port
+  qdisc    : QdiscPolicy?             // root qdisc only; see 0023
+  ingress_redirect : string?          // synthesised ifb; see 0023 amendment
+  bridge_vlans     : [BridgeVlan]     // the `vlans` key; per-port filtering
 }
 
 DeviceMatch {                         // all present fields must match
@@ -180,28 +193,25 @@ WifiDevicePolicy {
   powersave    : enum { Default, On, Off } = Default
 }
 
-Interface {
-  name        : string
-  kind        : InterfaceKind
+Interface {                           // what runs over a Device of the same
+  name        : string                // name -- see 0155, and 0156 for `guard`
   enabled     : bool = true
-  mtu         : u32?
-  mac         : string?
   addressing  : [AddressSource]       // ordered; may be empty
   routes      : [Route]               // sorted canonically
   dns         : DnsPolicy?            // merges over globals
   hooks       : [HookRef]             // references only, never inline shell
   on_drift    : DriftPolicy?          // overrides globals
-  master      : string?               // bridge/bond membership
+  probe       : ProbePolicy?          // does this link carry traffic; see 0119
+  preference  : u32?                  // lower wins; ranks against a network's
+                                      // `metric`, which is the same scale
   guard       : Guard?                // something depends on this; see 0010
   dot1x       : EapConfig?            // wired 802.1X; see 0008
   advertise   : RaPolicy?             // RA handoff to odhcpd/radvd; see 0009
   forwarding  : bool?                 // sysctl only, never a firewall rule
   nat         : bool?                 // masquerade what leaves here; see 0022
-  qdisc       : QdiscPolicy?          // root qdisc only; see 0023
-  ingress_redirect : string?          // synthesised ifb; see 0023 amendment
 }
 
-InterfaceKind =
+InterfaceKind =                       // a Device's, since 0155
   | Physical
   | Bridge    { members: [string], stp: bool, forward_delay: u32? }
   | Bond      { members: [string], mode: string, miimon: u32? }
@@ -3474,30 +3484,36 @@ generator that checks what it generated rather than what that does is a test
 of nothing. Commenting the `interface` block out of the generated text fails
 it.
 
-**This is a symptom of something larger that is not settled.** The shipped
-`netcfgd.conf.example` documents wireless as `device` plus `network` and no
-`interface` block, and `ncfg wifi add` writes a `network` block and nothing
-else. Both configure **nothing**: measured, device + network plans "nothing to
-do". So the documented way in has never produced a working radio, which is the
-same wall the original report hit from the other side.
+**This was a symptom of something larger, and it is settled now.** The shipped
+`netcfgd.conf.example` documented wireless as `device` plus `network` and no
+`interface` block, and `ncfg wifi add` wrote a `network` block and nothing
+else. Both configured **nothing**: measured, device + network planned "nothing
+to do". So the documented way in had never produced a working radio, which is
+the same wall the original report hit from the other side.
 
-Two readings, and they are materially different:
+Two readings were recorded here, held open deliberately because which one was
+wrong was a real question and the person who knew was not the one who noticed.
+**Answered by [0155](doc/decision/0155-a-link-is-the-unit-of-configuration.md),
+which took the second: the planner was wrong.**
 
-- **The code is right.** An `interface` block is netcfgd's statement that a
-  link's configuration is its to manage, and a `device` block is policy *about*
-  hardware rather than a claim on it. That fits `managed = false` living on
-  `device`, and it fits netcfgd only ever touching what the configuration
-  names. Then the example is incomplete and `ncfg wifi add` should write an
-  interface block too.
-- **The planner is wrong.** A managed radio with a `wifi { }` section is a
-  claim on it, and requiring a second block is ceremony. Then the planner
-  should visit devices that have no interface block.
+A `device` block is not policy *about* hardware, it is the hardware -- and
+since pass 1b it says what netcfgd creates, so creation, enslavement, qdiscs,
+ingress shaping, backend start and teardown are all driven from the device
+list. A device with no interface block is visited, which it had to be for a
+reason neither reading anticipated: an `ifb` carries no address and never
+will, so requiring an interface for it meant an `Interface` holding eleven
+fields of `None`. And an interface with no device block of its own now gets
+one synthesised, so the two lists join on the name rather than one of them
+being optional.
 
-`project.md` is authoritative over code and it currently says the first is
-unnecessary, so this is the case the working practice says to flag rather than
-resolve: which one is wrong is a real question, and the person who knows is not
-the one who noticed. Activation writes both blocks meanwhile, because a switch
-that reports success and changes nothing is worse than either answer.
+The first reading was not merely the loser; it was the one this document
+asserted, which is why the entry is rewritten rather than appended to. A
+reader finding both would believe whichever sounded more careful, and the
+stale one always does.
+
+Activation writing both blocks was the stopgap while this was open. It is now
+what the model asks for rather than a workaround, and the example's shape --
+`device` plus `network` -- is correct as documented.
 
 **0127's writes had never once worked on a packaged install, and the reason
 was one line in netcfgd's own systemd unit**
@@ -6111,7 +6127,7 @@ gathered here so a new session does not have to find them.
   its configuration directory whenever anything in it changes, where a
   diagnostic is what a malformed file is supposed to produce. Blocks now nest
   at most 32 deep, which is about ten times the language's real depth
-  (`interface` holds `qdisc` holds its keys, and that is three), and past it
+  (`device` holds `qdisc` holds its keys, and that is three), and past it
   the message names the nesting and suggests the usual cause — an unclosed
   block earlier in the file. Removing the bound makes the test binary die with
   `fatal runtime error: stack overflow`, which is how it was checked.
