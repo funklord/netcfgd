@@ -675,10 +675,34 @@ presented as obvious:
   be run" send an operator to different places, and
   `--allow-disruption` is the way past either.
 
-  **It does not replace runtime holds**, and the three now rank rather than
-  compete. A scripted guard where the question is answerable, because it
-  cannot go stale; a runtime hold where the holder knows something no script
-  can ask about; a plain declared guard where the answer is simply always yes.
+  **It does not replace runtime holds, and neither replaces the other.** Set
+  by the copyright holder: both are wanted. An earlier draft said the three
+  "rank rather than compete", which reads as a preference order and is wrong.
+  They answer different questions, and a design with only one of them fails a
+  case the other covers:
+
+      declared guard    the answer is always yes while this is configured
+      scripted guard    ask this program; it knows and it cannot go stale
+      runtime hold      the holder knows something no program can be asked
+
+  The third is not a fallback for the second. A resync that has reached step
+  four of nine can say so and nothing outside it can be asked -- there is no
+  file to stat and no mount to test, only a process that knows. Equally the
+  second is not a tidier version of the third: a script survives the death of
+  whatever set it up, which is the whole reason it cannot go stale.
+
+  **So all three are evaluated, and the refusal names every one that holds.**
+  The natural implementation short-circuits on the first hold and stops, and
+  that is exactly the behaviour rejected above: an operator told about one
+  guard, who consents to it and is refused again by a second, has been sent
+  round the loop the derivation rule exists to prevent. The cost of asking
+  every guard on a link is a handful of scripts on a rare action, and the
+  saving is a second round trip for a person.
+
+  **A scripted guard carries a name like any other**, so consent is uniform:
+  `--allow-disruption nfs-root` proceeds past the guard named `nfs-root`
+  whether it is declared, scripted or held, and nothing about the override has
+  to know which kind it was.
 
   Two things this inherits from 0119 along with the shape. Its command is
   privileged configuration, for the reason every command in a document is
