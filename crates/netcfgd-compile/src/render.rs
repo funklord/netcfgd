@@ -654,9 +654,6 @@ fn render_network(
 		}
 		Security::Eap(eap) => render_eap(eap, &mut body),
 	}
-	if network.priority != 0 {
-		let _ = writeln!(body, "\t\tpriority = {}", network.priority);
-	}
 	if !network.autoconnect {
 		body.push_str("\t\tautoconnect = false\n");
 	}
@@ -881,6 +878,20 @@ mod tests {
 		}
 	}
 
+	/// The diagnostics a file produces, for a case that must not compile.
+	///
+	/// Panics when it *does* compile, because a test asserting on a refusal
+	/// that silently stopped happening would otherwise pass by finding no text
+	/// it was looking for in an empty string.
+	fn compile_errors(text: &str) -> String {
+		let mut sources = SourceMap::new();
+		sources.add("test.conf", text);
+		match crate::compile(&sources, &mut crate::NoHooks) {
+			Ok(_) => panic!("this was supposed to be refused, and compiled"),
+			Err(diagnostics) => diagnostics.render(&sources),
+		}
+	}
+
 	/// The gate this module exists behind: render, read it back, and the
 	/// document must be the same one.
 	///
@@ -954,21 +965,38 @@ mod tests {
 		);
 	}
 
-	/// Both rankings at once, because they are separately easy to get wrong:
-	/// `priority` belongs inside `wifi` and `metric` beside `metered`, and a
-	/// renderer that writes either in the other's place produces a profile the
-	/// parser refuses. The two numbers are deliberately different so a swap
-	/// cannot pass.
+	/// The metric belongs beside `metered` and not inside `wifi`, and a
+	/// renderer that writes it in the wrong place produces a profile the parser
+	/// refuses. Worth its own case because the two halves of the block are
+	/// written by different functions.
 	#[test]
-	fn a_networks_priority_and_metric_both_round_trip() {
+	fn a_networks_metric_round_trips() {
 		round_trips(
 			"network \"Office\" {\n\
 			 \tmetric = 50\n\
 			 \twifi {\n\
 			 \t\tpsk = \"@secret:office\"\n\
-			 \t\tpriority = 9\n\
 			 \t}\n\
 			 }\n",
+		);
+	}
+
+	/// The retired key is refused, and refused with the one thing an operator
+	/// needs: that the replacement runs the other way up. A message saying only
+	/// that the key was unknown would leave inverting the number to chance, and
+	/// getting it backwards is silent -- the machine simply prefers the wrong
+	/// network (0154).
+	#[test]
+	fn the_retired_priority_says_what_to_write_instead() {
+		let text = "network \"Office\" {\n\twifi { psk = \"@secret:o\"; priority = 9 }\n}\n";
+		let diagnostics = compile_errors(text);
+		assert!(
+			diagnostics.contains("metric"),
+			"the refusal must name the replacement: {diagnostics}"
+		);
+		assert!(
+			diagnostics.contains("lower"),
+			"and say which way it ranks, or the number gets copied: {diagnostics}"
 		);
 	}
 
@@ -976,9 +1004,9 @@ mod tests {
 	fn a_wifi_network_round_trips() {
 		round_trips(
 			"network \"Cafe\" {\n\
+			 \tmetric = 5\n\
 			 \twifi {\n\
 			 \t\tpsk = \"@secret:cafe\"\n\
-			 \t\tpriority = 5\n\
 			 \t}\n\
 			 }\n\
 			 network \"Open Hotspot\" {\n\

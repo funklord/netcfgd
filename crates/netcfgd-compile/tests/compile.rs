@@ -681,7 +681,8 @@ device wlan0 {
 }
 
 network "HomeFiber" {
-	wifi   { psk = "@secret:HomeFiber"; priority = 30 }
+	metric = 30
+	wifi   { psk = "@secret:HomeFiber" }
 	config = "dhcp"
 }
 
@@ -691,13 +692,14 @@ network "Office" {
 		identity = "dave"
 		password = "@secret:Office"
 		ca_cert  = "/etc/ssl/certs/office.pem"
-		priority = 20
 	}
+	metric = 60
 	config = "dhcp"
 }
 
 network "Phone Hotspot" {
-	wifi    { psk = "@secret:Hotspot"; priority = 5 }
+	wifi    { psk = "@secret:Hotspot" }
+	metric  = 600
 	config  = "dhcp"
 	metered = true
 }
@@ -725,7 +727,13 @@ network "Phone Hotspot" {
 		home.ssid.as_ref().expect("a stated ssid").as_bytes(),
 		b"HomeFiber"
 	);
-	assert_eq!(home.priority, 30);
+	// The ordering the old `priority` expressed, inverted rather than copied:
+	// HomeFiber was the most preferred at 30 where higher won, so it is the
+	// most preferred at 30 where lower wins -- and the other two moved past
+	// it rather than this one moving (0154).
+	assert_eq!(home.metric, Some(30));
+	assert_eq!(document.networks[1].metric, Some(60));
+	assert_eq!(document.networks[2].metric, Some(600));
 	assert!(matches!(home.security, netcfgd_model::Security::Psk(_)));
 
 	// A space in an SSID is ordinary and must survive being a block label.

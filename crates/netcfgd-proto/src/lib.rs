@@ -140,7 +140,7 @@ pub enum Request {
 		hidden: bool,
 		/// Higher wins when several are in range.
 		#[serde(skip_serializing_if = "Option::is_none", default)]
-		priority: Option<u32>,
+		metric: Option<u32>,
 		/// 802.1X, for a campus or corporate network.
 		///
 		/// Absent for an ordinary personal network, which is what the rest of
@@ -430,7 +430,7 @@ impl Request {
 	/// The obvious alternative is wrong and was measured before this was
 	/// written: deserialising, re-serialising and refusing any member the round
 	/// trip dropped needs no table and cannot drift -- and it refuses valid
-	/// requests, because `confirm`, `id`, `passphrase`, `proto` and `priority`
+	/// requests, because `confirm`, `id`, `passphrase`, `proto` and `metric`
 	/// are all `skip_serializing_if = "Option::is_none"`. A client sending
 	/// `{"request":"apply","confirm":null}` would have lost a member it was
 	/// entitled to send, and item 5 of that same checklist is "tell absent from
@@ -473,7 +473,7 @@ impl Request {
 				"passphrase",
 				"proto",
 				"hidden",
-				"priority",
+				"metric",
 				"eap",
 			],
 			Self::WifiConnect { .. } => &["interface", "network"],
@@ -1038,7 +1038,7 @@ mod shape_tests {
 				passphrase: Some("secret".to_owned()),
 				proto: Some("wpa3".to_owned()),
 				hidden: true,
-				priority: Some(10),
+				metric: Some(10),
 				// Populated, because this list exists so that serde emits
 				// every member and the table can be compared against it. A
 				// `None` here would leave `eap` out of the emitted keys and

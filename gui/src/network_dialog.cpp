@@ -148,15 +148,23 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	    : QStringLiteral("the passphrase"));
 	form->addRow(QStringLiteral("passphrase"), credential);
 
-	priority = new QSpinBox(this);
-	priority->setObjectName(QStringLiteral("network_priority"));
-	priority->setRange(0, 1000);
-	priority->setValue(existing.priority);
-	priority->setSpecialValueText(QStringLiteral("unset"));
-	priority->setToolTip(QStringLiteral(
-	    "Higher wins when several configured networks are in range. Note this is "
-	    "the opposite of a route metric, where lower wins."));
-	form->addRow(QStringLiteral("priority"), priority);
+	metric = new QSpinBox(this);
+	metric->setObjectName(QStringLiteral("network_metric"));
+	/* The same range the interface dialog offers for `preference`, because
+	 * they are the same number on the same scale and get compared against each
+	 * other. Two ranges would imply two scales. */
+	metric->setRange(0, 4000);
+	metric->setValue(existing.metric >= 0 ? existing.metric : 0);
+	metric->setSpecialValueText(QStringLiteral("unset"));
+	/* **Stands on its own.** The tooltip this replaced had to explain a second
+	 * ranking that ran the other way; there is only one now, so this says what
+	 * the number does rather than what it is not (0154). */
+	metric->setToolTip(QStringLiteral(
+	    "How much this network is preferred -- lower wins. It ranks against every "
+	    "other link on the machine, wired ones included, and also decides which "
+	    "network to join when several are in range. Unset leaves the interface's "
+	    "own preference in force."));
+	form->addRow(QStringLiteral("metric (lower wins)"), metric);
 
 	addressing = new QComboBox(this);
 	addressing->setObjectName(QStringLiteral("network_addressing"));
@@ -284,9 +292,6 @@ QString ncfg_network_dialog::block_text() const
 		wifi << QStringLiteral("\t\topen = true");
 	}
 
-	if (priority->value() > 0) {
-		wifi << QStringLiteral("\t\tpriority = %1").arg(priority->value());
-	}
 	/* Written only when it is false: true is the default, and a block that
 	 * restates every default is one nobody can read for what is unusual. */
 	if (!autoconnect->isChecked()) {
@@ -306,6 +311,12 @@ QString ncfg_network_dialog::block_text() const
 	}
 	if (hidden->isChecked()) {
 		block << QStringLiteral("\thidden = true");
+	}
+	/* Beside `metered` rather than inside `wifi`, which is where the parser
+	 * reads it: a metric ranks this network against every link on the machine,
+	 * so it is not a property of the radio. */
+	if (metric->value() > 0) {
+		block << QStringLiteral("\tmetric = %1").arg(metric->value());
 	}
 	if (metered->isChecked()) {
 		block << QStringLiteral("\tmetered = true");

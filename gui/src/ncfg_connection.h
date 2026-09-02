@@ -173,10 +173,9 @@ struct ncfg_saved_network_row {
 	 * reference rather than a presence: the document says what the network
 	 * wants, not whether the file is there. */
 	QString credential;
-	int     priority = 0;
-	/* Lower wins, and the opposite way up from `priority`. Negative where
-	 * the document ranks this network against nothing -- 0 is a legal
-	 * metric and the strongest one, so the two must not be conflated. */
+	/* Lower wins. Negative where the document ranks this network against
+	 * nothing -- 0 is a legal metric and the strongest one, so an absent
+	 * metric must not arrive as 0. */
 	int     metric = -1;
 	bool    autoconnect = false;
 	bool    hidden = false;

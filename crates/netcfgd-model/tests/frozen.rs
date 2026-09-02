@@ -572,7 +572,6 @@ fn every_network() -> Vec<WifiNetwork> {
 			ssid: Some(Ssid::new(name.as_bytes().to_vec()).expect("an ssid")),
 			hidden: true,
 			security,
-			priority: 30,
 			// The other ranking, and the opposite scale: lower wins
 			// here, higher wins above (0153).
 			metric: Some(300),
@@ -596,7 +595,6 @@ fn every_network() -> Vec<WifiNetwork> {
 		ssid: Some(Ssid::new(b"roaming".to_vec()).expect("an ssid")),
 		hidden: false,
 		security: Security::Owe,
-		priority: 10,
 		metric: Some(20),
 		autoconnect: true,
 		metered: false,
@@ -838,6 +836,40 @@ fn the_witness_round_trips() {
 /// it is -- what matters is that `from_json` still declines a document it
 /// cannot claim to understand, which is the behaviour a rolling upgrade will
 /// need whenever there is finally something to roll.
+/// The previous version's own output is refused, not quietly misread.
+///
+/// 0154 removed a network's `priority`, and `/run/netcfgd/last-good.json` on
+/// any machine that has been running netcfgd still contains one. Every struct
+/// here is `deny_unknown_fields`, so that file stops parsing at the upgrade --
+/// which is the wanted behaviour and is worth pinning rather than leaving to a
+/// derive somebody could relax.
+///
+/// **Refusing beats accepting here**, even though the file is netcfgd's own
+/// output rather than an operator's text. A `priority` silently dropped is a
+/// ranking silently dropped, and the replacement runs the other way up: the
+/// same number left in place would mean the opposite of what it used to. The
+/// cost of refusing is one unavailable rollback window until the next apply
+/// writes a fresh file, which `read_last_good` already degrades to gracefully.
+#[test]
+fn a_document_carrying_the_retired_priority_is_refused() {
+	// Injected into a network object rather than built from the struct, for
+	// the reason the test below gives: this build cannot produce the field at
+	// all, so the only way to test the reader is to hand it bytes from the
+	// version that could.
+	let text = witness().to_json_canonical().expect("serialises").replacen(
+		"\"hidden\":",
+		"\"priority\": 30, \"hidden\":",
+		1,
+	);
+
+	let error = Document::from_json(&text).expect_err("a retired field must be refused");
+	let rendered = error.to_string();
+	assert!(
+		rendered.contains("priority"),
+		"the refusal has to name the field somebody has to remove: {rendered}"
+	);
+}
+
 #[test]
 fn a_document_from_a_future_major_is_refused() {
 	// Patched in the text rather than the struct: the *serialiser* validates

@@ -13,7 +13,7 @@
  * a box an operator could type a block into would be 0117's remote code
  * execution with a nicer font. The dialog composes the block from choices it
  * made; what an operator types is only ever a *value* in a key this file
- * chose -- an identity, a certificate path, a priority.
+ * chose -- an identity, a certificate path, a metric.
  *
  * **The credential is not shown and does not have to be re-entered.** netcfgd
  * writes `psk = "@secret:<id>"` and keeps the passphrase in the secret store,
@@ -78,7 +78,7 @@ private:
 	QLineEdit   *ca_cert;
 	QLineEdit   *client_cert;
 	QLineEdit   *credential;
-	QSpinBox    *priority;
+	QSpinBox    *metric;
 	QCheckBox   *autoconnect;
 	QCheckBox   *hidden;
 	QCheckBox   *metered;

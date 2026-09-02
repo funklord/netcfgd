@@ -297,7 +297,20 @@ pub(crate) fn settings_of(profile: &Profile) -> Dict {
 	}
 	if let Profile::Network(network) = profile {
 		connection.insert("autoconnect".to_owned(), flag(network.autoconnect));
-		connection.insert("autoconnect-priority".to_owned(), signed(network.priority));
+		// **Scaled, not clamped.** NetworkManager takes -999..999 where the
+		// model's rank runs to 4096, and clamping would map every metric below
+		// about 3100 onto the same number -- which is to say it would throw the
+		// ordering away for exactly the networks an operator ranked. The
+		// inversion itself is the model's, shared with the supplicant driver,
+		// because two copies of a sign flip are two chances to get it backwards
+		// and a wrong one is silent.
+		if let Some(rank) = netcfgd_model::wifi::join_rank(network.metric) {
+			let scaled = i64::from(rank) * 999 / i64::from(netcfgd_model::wifi::RANK_CEILING);
+			connection.insert(
+				"autoconnect-priority".to_owned(),
+				signed(i32::try_from(scaled).unwrap_or(0)),
+			);
+		}
 		// NM's `connection.metered` is a tri-state and netcfgd's is a boolean,
 		// so `false` becomes an explicit "no" rather than "unknown". An
 		// operator who wrote `metered = false` said something, and reporting it
@@ -963,7 +976,6 @@ mod tests {
 			ssid: Some(Ssid::new(id.as_bytes().to_vec()).expect("a valid ssid")),
 			hidden: false,
 			security,
-			priority: 0,
 			metric: None,
 			autoconnect: true,
 			metered: false,

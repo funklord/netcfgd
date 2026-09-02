@@ -1,6 +1,6 @@
 # 0153: a network is ranked against a link, not against a radio
 
-Status: accepted
+Status: accepted, amended by [0154](0154-one-number-ranks-a-network.md)
 Date: 2026-09-02
 Milestone: M9; link selection
 

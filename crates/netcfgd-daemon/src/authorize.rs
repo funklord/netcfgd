@@ -700,7 +700,7 @@ mod tests {
 			passphrase: Some("hunter2hunter2".to_owned()),
 			proto: None,
 			hidden: false,
-			priority: None,
+			metric: None,
 			eap: None,
 		};
 

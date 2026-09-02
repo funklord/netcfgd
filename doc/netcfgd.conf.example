@@ -479,9 +479,9 @@
 # lives in the secret store.
 
 #network "Home" {
+#	metric = 100
 #	wifi {
-#		psk      = "@secret:home"
-#		priority = 100
+#		psk = "@secret:home"
 #	}
 #}
 
@@ -508,31 +508,26 @@
 #}
 #network "Office" {
 #	metric = 50
-#	wifi {
-#		psk      = "@secret:office"
-#		priority = 100
-#	}
+#	wifi { psk = "@secret:office" }
 #}
 #network "Cafe" {
 #	metric = 600
-#	wifi {
-#		psk      = "@secret:cafe"
-#		priority = 50
-#	}
+#	wifi { psk = "@secret:cafe" }
 #}
 
 # On "Office" the wifi carries the default route (50 beats eth0's 100); on
 # "Cafe" the cable does (100 beats 600). The radio never changed.
 #
-# `metric` and `priority` are different questions and different scales, which
-# is why they are two words:
+# `metric` answers both senses of "which network do I prefer": it ranks this
+# network's routes against every other link, and it decides which network to
+# join when several are in range. netcfgd derives what the supplicant needs
+# from it, so there is one number and one direction.
 #
-#   priority  higher wins, and it chooses which network in range to JOIN.
-#             It is wpa_supplicant's own vocabulary and it never leaves the
-#             supplicant.
-#   metric    lower wins, and it ranks the routes of the network already
-#             joined against every other link. It never influences which
-#             network is chosen.
+# A network used to carry a separate `priority` for the joining half, running
+# the other way up. It was retired: two numbers, opposite directions, one idea,
+# and each could only be documented in terms of the other. A configuration
+# still naming it is told what to write instead -- and told that the number
+# must be inverted rather than copied.
 #
 # A network with no `metric` leaves its interface's `preference` alone, which
 # is what every configuration written before this existed does.

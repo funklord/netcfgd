@@ -73,8 +73,10 @@ pub struct Profile {
 	pub ssid: Ssid,
 	/// Not broadcast, so it has to be probed for.
 	pub hidden: bool,
-	/// Higher wins when several are in range.
-	pub priority: Option<u32>,
+	/// How much this network is preferred: lower wins, and it ranks its
+	/// routes against every other link as well as deciding which network to
+	/// join (0154).
+	pub metric: Option<u32>,
 	/// How it is protected, and therefore what credential it wants.
 	pub security: Security,
 }
@@ -216,12 +218,9 @@ pub fn render(profile: &Profile) -> String {
 			}
 		}
 	}
-	if let Some(priority) = profile.priority {
-		keys.push(format!("priority = {priority}"));
-	}
 	// One key per line for an enterprise network. The single-line form reads
-	// well for `psk` and `priority` and badly for seven keys, and this file is
-	// meant to be edited by hand afterwards.
+	// well for `psk` alone and badly for seven keys, and this file is meant to
+	// be edited by hand afterwards.
 	if keys.len() > 3 {
 		text.push_str("\twifi {\n");
 		for key in &keys {
@@ -230,6 +229,12 @@ pub fn render(profile: &Profile) -> String {
 		text.push_str("\t}\n");
 	} else {
 		let _ = writeln!(text, "\twifi {{ {} }}", keys.join("; "));
+	}
+	// Beside the `wifi` block rather than inside it, because that is where the
+	// parser reads it: a metric ranks this network against every link on the
+	// machine, wired ones included, so it is not a property of the radio.
+	if let Some(metric) = profile.metric {
+		let _ = writeln!(text, "\tmetric = {metric}");
 	}
 	text.push_str("}\n");
 	text
@@ -592,7 +597,7 @@ mod tests {
 			id: "Corp".to_owned(),
 			ssid: Ssid::new(b"Corp".to_vec()).expect("a short ssid"),
 			hidden: false,
-			priority: None,
+			metric: None,
 			security: Security::Eap {
 				method: "peap".to_owned(),
 				identity: Some("you@example.ac.uk".to_owned()),
@@ -640,7 +645,7 @@ mod tests {
 				id: bad.to_owned(),
 				ssid: Ssid::new(b"x".to_vec()).expect("a short ssid"),
 				hidden: false,
-				priority: None,
+				metric: None,
 				security: Security::Open,
 			};
 			let error = install(&config, &dir.join("factory"), &profile, None)

@@ -836,14 +836,14 @@ static void adding_a_network_sends_typed_fields_only(void)
 		.passphrase = "hunter2",
 		.proto = "wpa3",
 		.hidden = 1,
-		.priority = 10,
+		.metric = 10,
 	};
 	if (ncfg_client_wifi_add(staged.client, &full, err, sizeof(err))) {
 		equals("an add carries the typed fields and nothing else",
 		       received(staged.server, sent, sizeof(sent)),
 		       "{\"request\":\"wifi_add\",\"ssid\":\"686f6d65\",\"id\":\"home\","
 		       "\"passphrase\":\"hunter2\",\"proto\":\"wpa3\",\"hidden\":true,"
-		       "\"priority\":10}\n");
+		       "\"metric\":10}\n");
 	} else {
 		ok("an add carries the typed fields and nothing else", 0, err);
 	}
@@ -856,7 +856,7 @@ static void adding_a_network_sends_typed_fields_only(void)
 		.passphrase = NULL,
 		.proto = NULL,
 		.hidden = 0,
-		.priority = -1,
+		.metric = -1,
 	};
 	if (ncfg_client_wifi_add(staged.client, &open, err, sizeof(err))) {
 		equals("and an open network mentions nothing it does not have",
@@ -905,7 +905,7 @@ static void an_enterprise_network_sends_a_nested_eap_object(void)
 		.passphrase = "hunter2",
 		.proto = NULL,
 		.hidden = 0,
-		.priority = -1,
+		.metric = -1,
 		.eap = &eap,
 	};
 	if (ncfg_client_wifi_add(staged.client, &corp, err, sizeof(err))) {
@@ -927,7 +927,7 @@ static void an_enterprise_network_sends_a_nested_eap_object(void)
 	};
 	const ncfg_network_t incomplete = {
 		.ssid = "656475726f616d",
-		.priority = -1,
+		.metric = -1,
 		.eap = &nameless,
 	};
 	ok("an enterprise network with no identity is refused before it is sent",
@@ -1721,13 +1721,13 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 	    "{\"response\":\"document\",\"schema_version\":1,\"networks\":["
 	    "{\"id\":\"home\",\"ssid\":\"686f6d65\",\"hidden\":false,"
 	    "\"security\":{\"type\":\"psk\",\"passphrase\":{\"provider\":\"file\","
-	    "\"name\":\"home-secret\"}},\"priority\":100,\"metric\":50,"
+	    "\"name\":\"home-secret\"}},\"metric\":50,"
 	    "\"autoconnect\":true},"
 	    /* An open network refers to no secret, and the field is empty rather
 	     * than absent: a screen must be able to tell "needs none" from "has
 	     * one you cannot see", and a blank cell spells both the same way. */
 	    "{\"id\":\"campus\",\"ssid\":\"63616d707573\",\"hidden\":true,"
-	    "\"security\":{\"type\":\"open\"},\"priority\":0,\"autoconnect\":false}"
+	    "\"security\":{\"type\":\"open\"},\"autoconnect\":false}"
 	    "],\"globals\":{}}\n")) {
 		return;
 	}
@@ -1744,8 +1744,6 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 			 * without being able to read one. */
 			equals("and the secret it refers to", networks.items[0].credential,
 			       "home-secret");
-			ok("and its priority, where higher wins",
-			   networks.items[0].priority == 100, NULL);
 			/* The other ranking, and it runs the other way up. Both are on
 			 * one screen, so a reader that took them for one scale would
 			 * order half of it backwards. */
@@ -1754,21 +1752,17 @@ static void saved_networks_come_from_the_document_not_a_scan(void)
 			ok("and whether it joins by itself", networks.items[0].autoconnect == 1,
 			   NULL);
 			/* The second is the one no scan would show: hidden, not
-			 * autoconnecting, and with a priority the document did not
-			 * set. A reader that defaulted these would look right on
-			 * the first row and wrong on this one. */
+			 * autoconnecting, and with no metric at all. A reader that
+			 * defaulted these would look right on the first row and
+			 * wrong on this one. */
 			equals("the second is there too", networks.items[1].id, "campus");
 			equals("with a different security type", networks.items[1].security,
 			       "open");
 			equals("and an open network refers to no secret",
 			       networks.items[1].credential, "");
-			ok("a priority the document did not name is zero, not invented",
-			   networks.items[1].priority == 0, NULL);
-			/* **Negative, not zero.** A priority the document omits is
-			 * genuinely 0, but 0 is a legal metric and the strongest one
-			 * there is -- so an absent metric read as 0 would rank every
-			 * unranked network above every cable. The two fields default
-			 * differently on purpose. */
+			/* **Negative, not zero.** 0 is a legal metric and the
+			 * strongest one there is, so an absent metric read as 0
+			 * would rank every unranked network above every cable. */
 			ok("a metric the document did not name is absent, not zero",
 			   networks.items[1].metric < 0, NULL);
 			ok("and autoconnect false is carried rather than defaulted",

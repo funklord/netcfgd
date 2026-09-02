@@ -133,6 +133,11 @@ preference
 prefix
 prefixes
 preshared_key
+# Retired by 0154 and replaced by `metric`, but still matched by the compiler
+# so that a configuration naming it gets told what to write instead -- and told
+# the number inverts rather than copies. Listed here because the gate asks what
+# every matched key grants, and a key whose only effect is a diagnostic grants
+# nothing at all.
 priority
 private
 private_key

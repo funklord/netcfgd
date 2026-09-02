@@ -758,7 +758,7 @@ pub(crate) struct Wanted<'a> {
 	pub(crate) passphrase: Option<&'a str>,
 	pub(crate) proto: Option<&'a str>,
 	pub(crate) hidden: bool,
-	pub(crate) priority: Option<u32>,
+	pub(crate) metric: Option<u32>,
 	pub(crate) eap: Option<&'a netcfgd_proto::EapRequest>,
 }
 
@@ -819,7 +819,7 @@ pub(crate) fn configure_network(
 		passphrase,
 		proto,
 		hidden,
-		priority,
+		metric,
 		eap,
 	} = *wanted;
 	let Ok(ssid) = Ssid::from_hex(ssid_hex) else {
@@ -901,7 +901,7 @@ pub(crate) fn configure_network(
 		id,
 		ssid,
 		hidden,
-		priority,
+		metric,
 		security,
 	};
 

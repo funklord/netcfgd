@@ -72,7 +72,6 @@ fn wifi(id: &str) -> WifiNetwork {
 			},
 			proto: PskProto::Wpa2Wpa3,
 		}),
-		priority: 0,
 		metric: None,
 		autoconnect: true,
 		metered: false,

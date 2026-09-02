@@ -148,7 +148,6 @@ fn network(id: &str, ssid: &str, security: Security) -> WifiNetwork {
 		ssid: Some(Ssid::new(ssid.as_bytes().to_vec()).expect("ssid")),
 		hidden: false,
 		security,
-		priority: 0,
 		metric: None,
 		autoconnect: true,
 		metered: false,

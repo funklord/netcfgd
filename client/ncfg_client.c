@@ -1180,8 +1180,6 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 				item->credential = dup_string("");
 			}
 		}
-		item->priority =
-		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "priority"), 0);
 		/* -1 for absent, because 0 is a legal metric and the strongest one.
 		 * The document omits the key entirely when a network is unranked. */
 		item->metric =
@@ -2075,9 +2073,9 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
 			at += (size_t)span;
 		}
 	}
-	if (built && network->priority >= 0) {
-		int span = snprintf(request + at, sizeof(request) - at, ",\"priority\":%d",
-		            network->priority);
+	if (built && network->metric >= 0) {
+		int span = snprintf(request + at, sizeof(request) - at, ",\"metric\":%d",
+		            network->metric);
 		built = span >= 0 && (size_t)span < sizeof(request) - at;
 		if (built) {
 			at += (size_t)span;

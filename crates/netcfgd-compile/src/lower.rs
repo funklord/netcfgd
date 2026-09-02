@@ -1240,7 +1240,6 @@ fn station_placeholder() -> WifiNetwork {
 		ssid: None,
 		hidden: false,
 		security: Security::Open,
-		priority: 0,
 		metric: None,
 		autoconnect: true,
 		metered: false,
@@ -1616,7 +1615,6 @@ fn lower_network(
 		ssid,
 		hidden: false,
 		security: Security::Open,
-		priority: 0,
 		metric: None,
 		autoconnect: true,
 		metered: false,
@@ -1908,11 +1906,20 @@ fn lower_wifi_key(
 		"ca_cert" => keys.ca_cert = as_cert_source(&assignment.value, diags),
 		"client_cert" => keys.client_cert = as_cert_source(&assignment.value, diags),
 		"phase2" => keys.phase2 = as_string(&assignment.value, diags),
-		"priority" => {
-			if let Some(value) = as_u32(&assignment.value, diags) {
-				network.priority = i32::try_from(value).unwrap_or(i32::MAX);
-			}
-		}
+		// Retired by 0154, and named rather than left to "unknown wifi key".
+		// An operator who wrote `priority` had a working configuration, and
+		// the replacement runs the OTHER WAY UP -- so the one thing they must
+		// not do is copy the number across. A message that only said the key
+		// was unknown would leave inverting it to chance.
+		"priority" => diags.push(Diagnostic::new(
+			assignment.span,
+			"`priority` has been replaced by `metric`, which goes beside \
+			 `metered` rather than inside `wifi` -- and ranks the other way \
+			 up, lower winning. It now decides both which network to join and \
+			 how its routes rank against every other link, so a high \
+			 `priority` becomes a low `metric`"
+				.to_owned(),
+		)),
 		"autoconnect" => {
 			if let Some(flag) = as_bool(&assignment.value, diags) {
 				network.autoconnect = flag;
@@ -1978,7 +1985,6 @@ fn lower_dot1x_key(keys: &mut WifiKeys, assignment: &Assignment, diags: &mut Dia
 				ssid: None,
 				hidden: false,
 				security: Security::Open,
-				priority: 0,
 				metric: None,
 				autoconnect: true,
 				metered: false,

@@ -28,7 +28,7 @@ use std::process::ExitCode;
 /// what earns a flag is what a network cannot be *joined* without (`hidden`,
 /// and the security), what has to be decided while the passphrase is in hand
 /// (`open`), and the one thing an operator adding a second network immediately
-/// wants (`priority`).
+/// wants (`metric`).
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Wanted {
 	/// `--interface`: which radio, on a machine with more than one.
@@ -41,8 +41,9 @@ pub(crate) struct Wanted {
 	pub(crate) interface: Option<String>,
 	/// `--id`: the block's label, when the SSID is not usable as one.
 	pub(crate) id: Option<String>,
-	/// `--priority`: higher wins, and 0 is the model's default.
-	pub(crate) priority: Option<u32>,
+	/// `--metric`: lower wins, and absent leaves the interface's own
+	/// `preference` in force.
+	pub(crate) metric: Option<u32>,
 	/// `--open`: no security at all.
 	pub(crate) open: bool,
 	/// `--wpa2` or `--wpa3`, pinning one generation.
@@ -415,7 +416,7 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		id: id.clone(),
 		ssid,
 		hidden: wanted.hidden,
-		priority: wanted.priority,
+		metric: wanted.metric,
 		security: security_of(wanted),
 	};
 
@@ -590,7 +591,7 @@ fn add_over_socket(
 		passphrase: credential.map(str::to_owned),
 		proto: wanted.proto.map(str::to_owned),
 		hidden: profile.hidden,
-		priority: profile.priority,
+		metric: profile.metric,
 		eap: wanted.eap.map(|method| {
 			Box::new(netcfgd_proto::EapRequest {
 				method: method.to_owned(),
@@ -946,7 +947,7 @@ mod tests {
 			id: id.to_owned(),
 			ssid: ssid.clone(),
 			hidden: wanted.hidden,
-			priority: wanted.priority,
+			metric: wanted.metric,
 			security: security_of(wanted),
 		})
 	}
@@ -967,7 +968,7 @@ mod tests {
 		assert!(!text.contains("ssid ="), "{text}");
 		// Neither default is written out.
 		assert!(!text.contains("proto"), "{text}");
-		assert!(!text.contains("priority"), "{text}");
+		assert!(!text.contains("metric"), "{text}");
 	}
 
 	#[test]
@@ -996,7 +997,7 @@ mod tests {
 			&Wanted {
 				interface: None,
 				id: None,
-				priority: Some(30),
+				metric: Some(30),
 				open: false,
 				proto: Some("wpa3"),
 				hidden: true,
@@ -1010,7 +1011,7 @@ mod tests {
 		);
 		assert!(text.contains("hidden = true"), "{text}");
 		assert!(text.contains("proto = \"wpa3\""), "{text}");
-		assert!(text.contains("priority = 30"), "{text}");
+		assert!(text.contains("metric = 30"), "{text}");
 	}
 
 	/// An enterprise network reaches the file with the keys the supplicant

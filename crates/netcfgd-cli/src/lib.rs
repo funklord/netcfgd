@@ -139,7 +139,7 @@ options for `wifi add`:
   --open                   no security at all, and no passphrase asked for
   --wpa2, --wpa3           pin one generation; the default negotiates both
   --hidden                 the SSID is not broadcast, so probe for it
-  --priority N             higher wins when several are in range
+  --metric N               lower wins; ranks this network against every link
 
 options for `wifi add` on an enterprise network (802.1X):
   --eap METHOD             peap, ttls, tls or pwd. What is asked for at the
@@ -322,11 +322,21 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 			"--wifi" => options.control.wifi = Some(take_value("--wifi")?),
 			"--admin" => options.control.admin = Some(take_value("--admin")?),
 			"--id" => options.wifi.id = Some(take_value("--id")?),
-			"--priority" => {
-				let value = take_value("--priority")?;
-				options.wifi.priority = Some(value.parse().map_err(|_| {
-					format!("--priority wants a number, and higher wins, not `{value}`")
+			"--metric" => {
+				let value = take_value("--metric")?;
+				options.wifi.metric = Some(value.parse().map_err(|_| {
+					format!("--metric wants a number, and lower wins, not `{value}`")
 				})?);
+			}
+			// Named rather than left to "unknown flag". Somebody's script has
+			// this in it, and the replacement runs the OTHER WAY UP -- so the
+			// one thing they must not do is pass the same number through.
+			"--priority" => {
+				return Err("--priority has been replaced by --metric, which ranks the \
+				            other way up: lower wins, and it now sets both which \
+				            network to join and how its routes rank against every \
+				            other link"
+					.to_owned())
 			}
 			"--open" => options.wifi.open = true,
 			"--wpa2" => options.wifi.proto = Some("wpa2"),
@@ -1716,7 +1726,7 @@ mod tests {
 		}
 		let (_, positional) = split(&["--confirm-within", "30", "scan"]);
 		assert_eq!(positional, vec!["scan".to_owned()]);
-		let (_, positional) = split(&["--priority", "30", "add", "Home"]);
+		let (_, positional) = split(&["--metric", "30", "add", "Home"]);
 		assert_eq!(positional, vec!["add".to_owned(), "Home".to_owned()]);
 	}
 
@@ -1731,7 +1741,7 @@ mod tests {
 
 	#[test]
 	fn a_missing_value_is_an_error_rather_than_a_default() {
-		let owned = vec!["--priority".to_owned()];
+		let owned = vec!["--metric".to_owned()];
 		match parse_options(&owned) {
 			Ok(_) => panic!("a value-taking option with no value must be refused"),
 			Err(error) => assert!(error.contains("needs a value"), "{error}"),

@@ -295,7 +295,7 @@ fn every_request_sample() -> Vec<Request> {
 			passphrase: Some("hunter2".to_owned()),
 			proto: Some("wpa3".to_owned()),
 			hidden: true,
-			priority: Some(10),
+			metric: Some(10),
 			eap: None,
 		},
 		Request::WifiAdd {
@@ -304,7 +304,7 @@ fn every_request_sample() -> Vec<Request> {
 			passphrase: None,
 			proto: None,
 			hidden: false,
-			priority: None,
+			metric: None,
 			eap: None,
 		},
 		Request::WifiDisconnect {
@@ -333,7 +333,7 @@ fn enterprise_samples() -> Vec<Request> {
 			passphrase: Some("NOT-A-REAL-SECRET".to_owned()),
 			proto: None,
 			hidden: false,
-			priority: None,
+			metric: None,
 			eap: Some(Box::new(netcfgd_proto::EapRequest {
 				method: "peap".to_owned(),
 				identity: "you@corp.example".to_owned(),

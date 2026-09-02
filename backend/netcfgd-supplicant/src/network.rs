@@ -240,10 +240,10 @@ pub fn settings(
 		));
 	}
 
-	// `wpa_supplicant`'s priority is unsigned and higher wins, which matches the
-	// model's ordering but not its range.
-	if network.priority != 0 {
-		out.push(Setting::plain("priority", network.priority.to_string()));
+	// The supplicant still orders networks and still needs telling; what it is
+	// told is derived rather than asked for (0154).
+	if let Some(priority) = netcfgd_model::wifi::join_rank(network.metric) {
+		out.push(Setting::plain("priority", priority.to_string()));
 	}
 
 	match &network.security {

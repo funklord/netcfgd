@@ -26,14 +26,13 @@ const char *const column_titles[] = {
 };
 constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(column_titles[0]));
 
-/* The document's own columns. `priority` and `metric` are both spelled out with
- * their direction in the cell rather than left as bare numbers, because they
- * run opposite ways and now sit next to each other: `priority` picks which
- * network to join, `metric` ranks the routes of the one joined against every
- * other link, including wired ones (0153). Adjacent deliberately -- an operator
- * comparing them is exactly who must not read them as one scale. */
+/* The document's own columns. `metric` keeps its direction in the cell rather
+ * than being left a bare number: it is a route metric, so lower wins, and the
+ * surprise is worth spending a word on. There used to be a `priority` beside it
+ * running the other way, and each column had to be explained in terms of the
+ * other -- 0154 collapsed them, and this is what that looks like from here. */
 const char *const saved_column_titles[] = {
-	"network", "security", "credential", "priority", "metric", "autoconnect", "in range"
+	"network", "security", "credential", "metric", "autoconnect", "in range"
 };
 constexpr int saved_column_count =
     static_cast<int>(sizeof(saved_column_titles) / sizeof(saved_column_titles[0]));
@@ -232,8 +231,6 @@ void ncfg_wifi_view::update_saved()
 			network.name.isEmpty() ? network.id : network.name,
 			network.security,
 			credential,
-			network.priority ? QStringLiteral("%1 (higher wins)").arg(network.priority)
-			           : QString(),
 			/* Negative is "the document ranks this against nothing", which is
 			 * not the same as 0 -- 0 is the strongest metric there is. */
 			network.metric >= 0

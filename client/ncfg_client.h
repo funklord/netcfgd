@@ -496,7 +496,16 @@ typedef struct {
 	const char *passphrase; /* NULL for an open network */
 	const char *proto;      /* NULL, "wpa2" or "wpa3" */
 	int         hidden;
-	int         priority; /* negative to leave it out */
+	/*
+	 * How much this network is preferred: lower wins, negative to leave it
+	 * out.
+	 *
+	 * One number for both senses of the word. It is a route metric, directly
+	 * comparable with an interface's `preference`, and netcfgd derives the
+	 * backend's own join order from it -- so a client asks for this and never
+	 * for a `priority` running the other way (0154).
+	 */
+	int         metric;
 	/*
 	 * NULL for an ordinary network. With one, `proto` must be NULL: it pins
 	 * the generation protecting a passphrase, and an enterprise network
@@ -995,9 +1004,9 @@ int ncfg_client_radios(ncfg_client_t *client, ncfg_radios_t *out, char *err, siz
  * ncfg_access_point_display() with `named` set from whether `name` is
  * non-empty, so that one rule spells these for every screen.
  *
- * `priority` is the document's, where higher wins -- wpa_supplicant's
- * convention, and the opposite of a route metric. A screen showing both should
- * not imply they order the same way.
+ * `metric` is the document's, and lower wins. There is deliberately no second
+ * ranking beside it: a network used to carry a higher-wins `priority` as well,
+ * and a screen showing both had to explain each in terms of the other (0154).
  */
 typedef struct {
 	char *id;          /* the network's id in the document; how to name it */
@@ -1020,16 +1029,15 @@ typedef struct {
 	 * the reference does.
 	 */
 	char *credential;
-	int   priority;    /* higher wins; 0 when the document names none */
 	/*
 	 * How this network ranks against every other link, or negative where the
 	 * document names none.
 	 *
-	 * **Lower wins, and it is the opposite of `priority` above.** This is a
-	 * route metric on the same scale as an interface's `preference`: while the
-	 * radio is on this network, its interface's routes take this number instead
-	 * of the interface's own (0153). `priority` decides which network to JOIN
-	 * and never leaves wpa_supplicant.
+	 * **Lower wins**, and it is a route metric on the same scale as an
+	 * interface's `preference`: while the radio is on this network, its
+	 * interface's routes take this number instead of the interface's own
+	 * (0153). It also decides which network to join, a job a separate
+	 * higher-wins `priority` used to do until 0154 collapsed the two.
 	 *
 	 * Negative rather than 0 for absent, because 0 is a legal metric and the
 	 * best one -- a client that conflated them would show every unranked

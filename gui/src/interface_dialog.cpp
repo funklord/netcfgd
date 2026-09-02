@@ -97,11 +97,12 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	preference->setRange(0, 4000);
 	preference->setSpecialValueText(QStringLiteral("unset"));
 	/* Said in the widget, because it is the opposite of a wifi network's
-	 * priority and both are settable in this program. */
+	 * metric and both are settable in this program -- and since 0154 they are
+	 * the same scale, so this no longer has to warn about a second one. */
 	preference->setToolTip(QStringLiteral(
 	    "Which interface wins when several could carry the default route. LOWER is "
 	    "better -- this is how a wired cable takes over from wifi. Note it is the "
-	    "opposite way round from a wireless network's priority, where higher wins."));
+	    "same scale as a wireless network's metric, so the two compare directly."));
 	form->addRow(QStringLiteral("preference (lower wins)"), preference);
 
 	mtu = new QSpinBox(this);

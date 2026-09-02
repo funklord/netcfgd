@@ -40,7 +40,6 @@ fn network(ssid: &str, security: Security) -> WifiNetwork {
 		ssid: Some(Ssid::new(ssid.as_bytes().to_vec()).expect("ssid")),
 		hidden: false,
 		security,
-		priority: 0,
 		metric: None,
 		autoconnect: true,
 		metered: false,
@@ -1027,4 +1026,48 @@ fn fast_transition_is_visible_in_the_scan_flags() {
 	assert!(!results[1].does_fast_transition(), "{}", results[1].flags);
 	// Both are secured, so the new test is not accidentally reading that.
 	assert!(results[0].is_secured() && results[1].is_secured());
+}
+
+/// The join order the supplicant is given runs opposite to the metric.
+///
+/// **The relationship, not either number.** What must hold is that a network an
+/// operator prefers -- the lower metric -- is the one the supplicant tries
+/// first, which for it means the *higher* priority. Pinning the two values
+/// would pass just as happily against a ceiling somebody changed for good
+/// reason, and would say nothing about the inversion.
+///
+/// That inversion is the whole risk in 0154: getting it backwards is silent,
+/// because the machine still joins a network and still comes up. It just
+/// prefers the wrong one, and nothing anywhere says so.
+#[test]
+fn a_lower_metric_becomes_a_higher_join_priority() {
+	let (resolver, security, _dir) = psk("hunter2hunter2", PskProto::Wpa2Wpa3);
+
+	let priority_of = |metric: Option<u32>| -> Option<u32> {
+		let mut wanted = network("home", security.clone());
+		wanted.metric = metric;
+		rendered(&wanted, &resolver)
+			.iter()
+			.find_map(|line| {
+				line.strip_prefix("SET_NETWORK 0 priority ")
+					.map(str::to_owned)
+			})
+			.map(|value| value.parse().expect("a number"))
+	};
+
+	let preferred = priority_of(Some(50)).expect("a ranked network is given a priority");
+	let spare = priority_of(Some(600)).expect("a ranked network is given a priority");
+	assert!(
+		preferred > spare,
+		"metric 50 must outrank metric 600, got {preferred} against {spare}"
+	);
+
+	// And a network the document did not rank is told nothing, rather than
+	// being handed the ceiling and silently becoming the most preferred thing
+	// on the machine.
+	assert_eq!(
+		priority_of(None),
+		None,
+		"an unranked network states no priority"
+	);
 }

@@ -159,10 +159,8 @@ pub struct WifiNetwork {
 	pub hidden: bool,
 	/// How it is secured.
 	pub security: Security,
-	/// Higher wins when several known networks are in range.
-	#[serde(default)]
-	pub priority: i32,
-	/// How this network ranks against every other link on the machine.
+	/// How much this network is preferred, on one scale, for both questions
+	/// that word can mean.
 	///
 	/// **Lower wins, and it is a route metric** -- the same number and the
 	/// same scale as an interface's `preference`, because it becomes the same
@@ -176,14 +174,17 @@ pub struct WifiNetwork {
 	/// wireless side has to be the network, because that is the thing that
 	/// changes.
 	///
-	/// **Not `priority`, and the two do different jobs.** `priority` is
-	/// `wpa_supplicant`'s own word for which SSID to join out of those in
-	/// range, higher winning; this is what happens to the routes afterwards.
-	/// Named `metric` rather than `preference` so that one block does not
-	/// carry two near-synonyms ranking in opposite directions.
+	/// **It also decides which network to join**, which is the job the
+	/// separate `priority` used to do. `wpa_supplicant` still needs an
+	/// ordering and still gets one; netcfgd derives it here rather than
+	/// asking an operator for a second number that runs the other way up
+	/// (0154). Nothing is lost, because a supplicant priority only ever
+	/// separates networks that are in range at the same moment, and a network
+	/// preferred for its routes is the one to join.
 	///
-	/// Absent means the interface's `preference` applies unchanged, which is
-	/// what every machine that has never needed this gets.
+	/// Absent means the interface's `preference` applies unchanged and the
+	/// supplicant is told nothing, which is what every machine that has never
+	/// needed this gets.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub metric: Option<u32>,
 	/// Whether to join without being asked.
@@ -262,4 +263,39 @@ pub fn network_for<'a>(
 			|stated| stated == ssid,
 		)
 	})
+}
+
+/// The highest rank a derived join order takes, for a metric of 0.
+///
+/// Above any metric worth writing -- an interface's `preference` is offered in
+/// the same range -- and small enough to scale into a narrower range without
+/// the arithmetic needing care.
+pub const RANK_CEILING: u32 = 4096;
+
+/// Which network to join first, derived from how its routes rank.
+///
+/// **The directions are opposite, which is the whole reason this exists.** A
+/// metric is a route metric: lower wins, and it is comparable with an
+/// interface's `preference`. Every backend that orders networks for joining --
+/// `wpa_supplicant`'s `priority`, `NetworkManager`'s `autoconnect-priority` --
+/// counts the other way, higher winning. Asking an operator for both numbers
+/// was asking them to hold two scales at once for one idea, and every tooltip
+/// describing either had to explain the other (0154).
+///
+/// Subtracted from a ceiling rather than negated, because a backend treats a
+/// missing priority as 0 and 0 is a legitimate metric -- the best one. A metric
+/// at or past the ceiling floors at 0 rather than wrapping, so an absurd number
+/// ranks last instead of first.
+///
+/// `None` where the network names no metric, and then the backend is told
+/// nothing at all: that is its own default, and writing a number there would
+/// invent a ranking the document did not ask for.
+///
+/// **Shared rather than written per backend.** Two copies of an inversion are
+/// two chances to inject the sign error this is here to prevent, and a wrong
+/// one is silent -- the machine simply prefers the wrong network. A backend
+/// whose own range is narrower scales this result rather than recomputing it.
+#[must_use]
+pub fn join_rank(metric: Option<u32>) -> Option<u32> {
+	metric.map(|metric| RANK_CEILING.saturating_sub(metric))
 }

@@ -348,7 +348,7 @@ bool ncfg_connection::wifi_add(const QString &ssid, const QString &id,
 	network.passphrase = passphrase.isEmpty() ? nullptr : passphrase_bytes.constData();
 	network.proto = proto.isEmpty() ? nullptr : proto_bytes.constData();
 	network.hidden = hidden ? 1 : 0;
-	network.priority = -1;
+	network.metric = -1;
 
 	/* Held at this scope for the same reason as the members above: the C
 	 * layer reads the pointers during the call, and a QByteArray built inside
@@ -464,7 +464,6 @@ bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString
 		    QString::fromUtf8(networks.items[i].security ? networks.items[i].security : "");
 		row.credential = QString::fromUtf8(
 		    networks.items[i].credential ? networks.items[i].credential : "");
-		row.priority = networks.items[i].priority;
 		row.metric = networks.items[i].metric;
 		row.autoconnect = networks.items[i].autoconnect != 0;
 		row.hidden = networks.items[i].hidden != 0;

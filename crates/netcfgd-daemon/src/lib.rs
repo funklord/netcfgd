@@ -1231,7 +1231,7 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 			passphrase,
 			proto,
 			hidden,
-			priority,
+			metric,
 			eap,
 		} => add_network_request(
 			state,
@@ -1241,7 +1241,7 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 				passphrase: passphrase.as_deref(),
 				proto: proto.as_deref(),
 				hidden: *hidden,
-				priority: *priority,
+				metric: *metric,
 				eap: eap.as_deref(),
 			},
 		),

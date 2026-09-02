@@ -6465,7 +6465,6 @@
           }
         }
       },
-      "priority": 30,
       "metric": 300,
       "autoconnect": true,
       "metered": true,
@@ -6553,7 +6552,6 @@
       "security": {
         "type": "open"
       },
-      "priority": 30,
       "metric": 300,
       "autoconnect": true,
       "metered": true,
@@ -6641,7 +6639,6 @@
       "security": {
         "type": "owe"
       },
-      "priority": 30,
       "metric": 300,
       "autoconnect": true,
       "metered": true,
@@ -6734,7 +6731,6 @@
         },
         "proto": "wpa2_wpa3"
       },
-      "priority": 30,
       "metric": 300,
       "autoconnect": true,
       "metered": true,
@@ -6822,7 +6818,6 @@
       "security": {
         "type": "owe"
       },
-      "priority": 10,
       "metric": 20,
       "autoconnect": true,
       "metered": false,
