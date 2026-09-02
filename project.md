@@ -6287,6 +6287,72 @@ gathered here so a new session does not have to find them.
 
 ---
 
+## 10.9 Open: a laptop lost carrier nine times in an hour, unexplained
+
+**2026-09-02.** A machine running netcfgd from the deb installed at 09:40 lost
+carrier on its radio at 10:12 and eight more times between 10:48 and 11:02,
+never recovering, and the operator switched the machine back to NetworkManager
+at 11:08 to get working again. This is recorded rather than resolved, because
+an unexplained fault in code that had just changed is not a coincidence
+anybody gets to keep.
+
+**What is known.** `dhcpcd` reported every carrier loss. netcfgd itself logged
+nothing at all for the hour. The daemon was `active` throughout with
+`NRestarts=0` and `Result=success`, and the run-state under `/run/netcfgd` had
+been written normally at startup.
+
+**Two mechanisms in that day's change were ruled out with evidence**, not with
+reasoning:
+
+- The observation now asks the supplicant `STATUS` on every cycle (0153).
+  `Client::connect_within` sets a one-second read timeout, and `answers()`
+  already performed a command-and-wait via `ping()`, so the new call is a
+  second *bounded* round trip rather than a place the loop can hang.
+- Those per-cycle connections do not accumulate: `Client`'s `Drop` unlinks the
+  socket it bound.
+
+**What the silence does and does not mean.** netcfgd is declarative and
+*wpa_supplicant* owns re-association, so a daemon whose plan is already
+satisfied has nothing to do when a carrier drops and nothing to say. An hour
+of silence is therefore consistent with a wedged daemon **and** with a
+correctly idle one. The log cannot separate them.
+
+**The instrument that would have separated them did not exist**, which is the
+finding this outage actually produced. netcfgd started `wpa_supplicant` with
+`-B` and never `-s`, so the supplicant daemonised and logged nowhere: no
+association failures, no authentication errors, no disconnect reasons, on
+every netcfgd machine ever deployed. A `journalctl -t wpa_supplicant` over the
+outage returned "no entries", which is indistinguishable from a healthy quiet
+supplicant -- and was nearly quoted as though it meant one. Fixed, with the
+arguments moved into a function and a test pinning the flags, mirroring the
+guard the udhcpc path already had and this one did not.
+
+**What would settle it** is the version experiment: run the previous deb and
+see whether the behaviour follows the build. It has not been run, because it
+means putting netcfgd back on the operator's only radio after they have just
+recovered a working machine, and that is their call rather than a worker's.
+A rerun now has something the original did not: a supplicant log.
+
+**Two claims made during the diagnosis were wrong and are recorded as such**,
+since both were stated confidently and neither survived checking. Repeated MAC
+changes in the log were attributed to netcfgd thrashing the address; they
+coincide with NetworkManager starting, and NM randomises the MAC per scan by
+default, so they are almost certainly the recovery rather than the fault. And
+the installed GUI was called a month stale on the strength of an Aug 5
+timestamp, which is a fixed reproducible-build date baked into every deb this
+tree produces -- `dpkg -c` shows the same date inside a package built that
+morning.
+
+**Two pre-existing faults were found on the way** and are not this outage:
+`netcfgd.service` grants `cap_setuid`, `cap_setgid` and `cap_sys_chroot` in
+`CapabilityBoundingSet` but not in `AmbientCapabilities`, so the `dhcpcd` it
+spawns cannot chroot or drop privileges and runs as unconfined root instead --
+visible only as two lines it logs each time. And stopping netcfgd removes its
+`RuntimeDirectory` while `KillMode=process` leaves `dhcpcd` running, so the
+client then cannot read the config file it was started with.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
