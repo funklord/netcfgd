@@ -445,8 +445,53 @@ presented as obvious:
   somebody to restate a guard at every level is asking them to keep a
   derivation up to date by hand, and the failure is silent.
 
-  `link.managed`, `device.guard` and the inheritance rule are all new, so they
-  are pass 2: pass 1 adds no concepts.
+  **The override already exists and must not be duplicated.** Asked whether a
+  `-f`/`--force` was needed to get past a guard, the answer measured in the
+  tree is no: `Builder::refused` lets an op through when its interface is in
+  `PlanOptions::allow_disruption`, and the refusal it raises otherwise carries
+  `override_with: "ncfg apply --allow-disruption <iface>"` -- it hands the
+  operator the exact command. The help text says the design out loud:
+
+      --allow-disruption IFACE consent to disrupting one guarded interface;
+                               repeatable, and deliberately not a blanket --force
+
+  That is stronger than a force flag and the difference is tested: consent for
+  `eth0` releases eth0's stale address while `eth1` stays protected, which a
+  blanket flag could not express. `--strand-credentials DEV` is the same shape
+  for a different refusal. **So pass 2 adds no new escape hatch**, and anybody
+  reaching for one should read this paragraph first.
+
+  **What inheritance does open is whether consent inherits too, and it has no
+  obvious answer.** Once a guarded link protects its whole stack:
+
+      link "nfs-root" (guarded)  ->  bond0  ->  eth0, eth1
+
+  what should `ncfg apply --allow-disruption nfs-root` release?
+
+  - **Only the named link.** Consent then does not reach `bond0`, so the
+    action the operator just consented to is still refused -- by a guard they
+    never wrote, inherited from the link they were talking about. The override
+    fails at exactly the moment it is needed.
+  - **The whole stack the guard reached.** Consent then silently covers three
+    devices the operator did not name. That is defensible, since the guard
+    they are overriding is the one that spread there -- but it widens consent
+    past what was typed, which is the property `--allow-disruption` exists to
+    avoid.
+
+  A third shape worth weighing: consent could follow the guard's *derivation*
+  rather than its extent, releasing a device only where the guard reaching it
+  came from the link being consented to. That keeps a device's own `guard`,
+  and any other link's, in force -- which is the answer that preserves both
+  properties, at the cost of the refusal having to say which guard stopped it.
+
+  Whichever is chosen, the refusal must keep naming the command that works.
+  A message offering an override that does not release the action is worse
+  than no message, because it sends the operator round the loop twice.
+
+  This is the holder's to settle and it does not block pass 1b.
+
+  `link.managed`, `device.guard`, the inheritance rule and this question are
+  all pass 2: pass 1 adds no concepts.
 
   The last has no expression today. `enabled = false` is the nearest thing
   and it is a different statement -- it edits the configuration, where an
