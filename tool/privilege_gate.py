@@ -41,7 +41,20 @@ ORDINARY = pathlib.Path("tool/privilege-ordinary.txt")
 
 def accepted():
 	"""Keys the compiler matches, from every `match ....key.as_str()`."""
-	lines = LOWER.read_text().splitlines()
+	# **Comments are blanked, not read.** The scan below ends a block at the
+	# `other =>` arm, which it recognises by the words of its message -- and a
+	# comment is free to quote those same words. One did: an arm documenting a
+	# retired key explained that it was "named rather than left to `unknown
+	# wifi key`", which ended the block early and silently dropped every arm
+	# below it. Seven security values went missing and were reported as stale,
+	# which reads as somebody having removed them.
+	#
+	# Blanking rather than skipping, so line numbers still mean what they say
+	# if this ever reports one.
+	lines = [
+		"" if line.lstrip().startswith("//") else line
+		for line in LOWER.read_text().splitlines()
+	]
 	found, index = set(), 0
 	while index < len(lines):
 		if "match" in lines[index] and ".key.as_str()" in lines[index]:
