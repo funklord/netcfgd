@@ -87,9 +87,10 @@ int main(int argc, char **argv)
 	ncfg_interface_dialog dialog(&connection, iface);
 	auto *addressing = dialog.findChild<QComboBox *>(QStringLiteral("iface_addressing"));
 	auto *preference = dialog.findChild<QSpinBox *>(QStringLiteral("iface_preference"));
+	auto *mtu = dialog.findChild<QSpinBox *>(QStringLiteral("iface_mtu"));
 	auto *detection = dialog.findChild<QComboBox *>(QStringLiteral("iface_detection"));
 	auto *save = dialog.findChild<QPushButton *>(QStringLiteral("iface_save"));
-	if (!addressing || !preference || !detection || !save) {
+	if (!addressing || !preference || !mtu || !detection || !save) {
 		check("the dialog has the fields it needs", false);
 		return 1;
 	}
@@ -119,6 +120,12 @@ int main(int argc, char **argv)
 
 	addressing->setCurrentIndex(addressing->findData(QStringLiteral("dhcp")));
 	preference->setValue(50);
+	/* **The MTU, because it is the field that moved.** 0155 pass 1a put it on
+	 * the device, and this dialog went on writing it inside `interface` -- a
+	 * block the compiler refuses. Nothing caught that: this test set every
+	 * other field and not this one, so the check below on whether netcfgd
+	 * compiled the result had nothing to compile wrongly. */
+	mtu->setValue(1492);
 	detection->setCurrentIndex(at);
 	save->click();
 
@@ -128,6 +135,10 @@ int main(int argc, char **argv)
 	check("the drop-in is there", written.exists(), written.fileName());
 	if (written.open(QIODevice::ReadOnly)) {
 		const QString text = QString::fromUtf8(written.readAll());
+		check("the mtu was written as a device block, not an interface key",
+		    text.contains(QStringLiteral("device gui-probe0 {")) &&
+		        text.contains(QStringLiteral("mtu = 1492")),
+		    text);
 		check("the preference was written", text.contains(QStringLiteral("preference = 50")),
 		    text);
 		check("and a probe block", text.contains(QStringLiteral("probe {")), text);

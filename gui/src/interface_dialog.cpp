@@ -363,9 +363,6 @@ QString ncfg_interface_dialog::block_text() const
 	if (preference->value() > 0) {
 		body << QStringLiteral("\tpreference = %1").arg(preference->value());
 	}
-	if (mtu->value() > 0) {
-		body << QStringLiteral("\tmtu = %1").arg(mtu->value());
-	}
 	/* Only when false: enabled is true unless a document says otherwise, and a
 	 * block restating every default is one nobody can read for what is
 	 * unusual. */
@@ -417,6 +414,17 @@ QString ncfg_interface_dialog::block_text() const
 	block << QStringLiteral("# Written by netcfgd's gui. Ordinary netcfgd configuration:");
 	block << QStringLiteral("# edit it, diff it, commit it, or delete it.");
 	block << QString();
+	/* **The MTU is the adapter's and goes in a `device` block** -- decision
+	 * 0155 pass 1a moved it, and the compiler refuses it inside `interface`.
+	 * Written as a second block in the same file rather than a second file:
+	 * one screen wrote both, and splitting them across drop-ins would leave an
+	 * operator deleting one and wondering why the other survived. */
+	if (mtu->value() > 0) {
+		block << QStringLiteral("device %1 {").arg(interface);
+		block << QStringLiteral("\tmtu = %1").arg(mtu->value());
+		block << QStringLiteral("}");
+		block << QString();
+	}
 	block << QStringLiteral("interface %1 {").arg(interface);
 	block << body;
 	block << QStringLiteral("}");
