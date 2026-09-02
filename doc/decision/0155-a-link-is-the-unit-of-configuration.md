@@ -598,6 +598,44 @@ presented as obvious:
   configuration migration is already being paid for, rather than as a second
   one later.
 
+  **The name is optional to write and never absent in the model.** Proposed by
+  the copyright holder: an unnamed guard is one with an empty name, dropped by
+  dropping without a name, so a machine that needs one guard says one thing and
+  a machine that needs five says five. The graduation is right and it costs no
+  configuration migration -- `guard { reason = "nfs root" }` keeps working
+  exactly as written.
+
+  **The amendment is that an empty name is safe in the configuration and not at
+  runtime.** There is one document, so one unnamed guard, and nothing to
+  collide. There are many callers, so two processes each taking "the unnamed
+  guard" get one slot between them -- and the first release lifts it while the
+  second still needs the link alone. That is the exact failure the counting
+  exists to prevent, arriving in the case that looks simplest.
+
+  So a runtime caller that omits a name gets one derived from the peer.
+  netcfgd already reads `SO_PEERCRED` to decide the tier (0013), so it knows
+  who asked without being told. `ncfg guard drop <link>` with no name then
+  means "drop mine", which is what somebody typing it means, and two anonymous
+  holders no longer share a slot.
+
+  **Dropping everything is possible and asymmetric, and the asymmetry has to
+  be said out loud.** A config-declared guard cannot be dropped at runtime:
+  it is recompiled from the document, so it returns on the next reconcile.
+  `guard drop --all` therefore means every *runtime* hold, and it has to
+  report what it removed -- name, reason and holder for each -- because
+  removing three of somebody's holds silently is how a resync gets disrupted
+  by an operator who thought the link was idle. An operator who runs it and
+  finds one guard still standing must be told it is the document's and which
+  file says so, or they will run it again and conclude the command is broken.
+
+  **The gui edits them, and by this program's own rule a list of things earns
+  a tab.** The columns are the ones a person needs to decide whether to
+  override: the link, the name, the reason, and the source -- and the source
+  is not decoration, because it says which rows the window can actually remove
+  and which send the reader to a file. A view that offered a delete button on
+  a config-declared guard would be offering an action that undoes itself on
+  the next reconcile.
+
   **Holds live outside the configuration, because they are runtime state.**
   Set by the copyright holder 2026-09-02, and it separates two things this
   record had been treating as one:
