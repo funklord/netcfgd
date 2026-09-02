@@ -107,8 +107,8 @@ ncfg-link:
 # can build the tree. BUDGET_GATES measure *this* machine, and running them
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
-                 nm-containment packaging conformance test adapters gui \
-                 linkage
+                 nm-containment packaging client-test conformance test \
+                 adapters gui linkage
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -281,6 +281,20 @@ clippy:
 # built last week.
 client/tests/client_test: FORCE
 	@$(MAKE) --no-print-directory -C client tests/client_test
+
+# The C client's own suite, run rather than merely built.
+#
+# `conformance` and `test` both name the binary as a prerequisite, so `check`
+# has always *compiled* it -- and nothing has ever executed it. Every assertion
+# inside was green by never being asked, which is the vacuous pass in its
+# purest form: the gate that would have spoken was not run, and a suite that
+# compiles looks exactly like a suite that passes.
+#
+# Found when two new assertions about the link and network conversion passed
+# locally and left `make check` completely unmoved. `client/Makefile` has had
+# the target the whole time; only the wiring was missing.
+client-test: client/tests/client_test
+	@$(MAKE) --no-print-directory -C client test
 
 # The two client implementations, asked the same questions.
 #
