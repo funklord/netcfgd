@@ -1,6 +1,7 @@
 # 0155: a link is the unit of configuration
 
-Status: proposed -- this record exists to be decided, not to record a decision
+Status: accepted -- shape 3a, in two passes, decided by the copyright holder
+        2026-09-02
 Date: 2026-09-02
 Milestone: M9; model
 
@@ -184,7 +185,8 @@ does not have to be re-invented if one ever does.
 What makes this worth doing is what it *absorbs*. Four mechanisms in this tree
 are the same mechanism:
 
-- **Bonding**, which is this already, at the link layer, with `miimon`.
+- **Bonding**, which is the same *shape* at the link layer, with `miimon` --
+  though a bond is not itself a group; see section 6.
 - **Wifi network selection.** One radio, many configured networks, one
   associated -- steered today by a derived join order (0154).
 - **SIM source cycling.** [0152](0152-a-sim-source-is-kept-until-the-probe-says-otherwise.md)
@@ -225,13 +227,43 @@ carrier gating its routes and its metric ordering them.
 
 ## 6. The four awkward cases
 
-**Bridges, bonds, VLANs.** These are created by netcfgd *and* carry traffic,
-so they appear in both lists, joined by name: the device entry says to make
-it, the link entry says what it does. That is not a wart -- it mirrors what
-they are -- but it admits two new states the model must answer for: a device
-with no link (created and unconfigured), and a link naming a device that does
-not exist yet. Today `InterfaceKind` conflates the two and neither state is
-representable.
+**Bridges, bonds, VLANs. Decided: they are devices.** Not groups, and not
+links. They are created by netcfgd *and* carry traffic, so they appear in both
+lists joined by name -- the device entry says to make it, a link entry says
+what it does.
+
+**A bridge is not a group, and the distinction is not a technicality.** A
+group is failover: its members are *substitutes*, each able to carry the
+traffic alone, and exactly one does. A bridge joins its members: they are
+*components*, the aggregate carries the traffic, and no member is the thing on
+its own. A bond is the same -- even in `active-backup`, where only one member
+passes traffic, the members are paths to one destination rather than
+alternative connections.
+
+**The test that sorts them is whether a member has its own addressing.**
+
+    bridge port     no address of its own -- enslaved      -> a device
+    bond slave      no address of its own -- enslaved      -> a device
+    group member    its own address, metric, probe, dns    -> a link
+
+So `members` on a bridge or bond names devices; `members` on a group names
+links. Same word, because it is the same relationship -- a set this thing is
+made of, or chooses between -- and the sentence above is what tells a reader
+which. Sharing `members`, `mode` and a monitor between them is deliberate
+(section 4); being the same *concept* is not claimed.
+
+**And a bridge cannot become the link**, which is the question that had to be
+asked because collapsing the pair would be simpler. It cannot, for the reason
+that settled section 3: several links may attach to one bridge, since a bridge
+can hold aliases. A one-block form would have to be repeated or referenced per
+address, which is two blocks again with the relationship left implicit. The
+same argument rules out collapsing a bond or a VLAN.
+
+The split admits two states the model must answer for: a device with no link
+(created and unconfigured -- a bridge waiting for its addresses, which is a
+real state during boot), and a link naming a device that does not exist yet.
+Today `InterfaceKind` conflates device and link, so neither state is
+representable and both are silently impossible.
 
 **Modem SIM and APN.** Currently `device.modem { sim = [...], apn = "..." }`.
 Under the split, the APN is a *link* -- it is how the modem attaches and gets
@@ -328,13 +360,79 @@ carrier nine times in an hour and never recovered, and that is unexplained --
 see `project.md`. This record is a design improvement and must not be allowed
 to read as a response to that fault.
 
-## 10. For the holder to decide
+## 9a. Pass 1, field by field
 
-1. **3a or 3b** -- profile or instance. Everything else follows.
-2. **Whether groups are in the first cut** or come after. They are the best
-   argument for the restructure and also the largest new mechanism.
-3. **Whether this is one pass or several.** The obvious seam is to split
-   `Device` and `Interface` properly first -- moving `mtu`, `mac`, `qdisc`
-   and the rest to where they belong -- and fold `network` into `link` second.
-   Two smaller breaks rather than one large one, at the price of two
-   migrations for anybody who has written a config.
+The test from section 2, applied to every field `Interface` carries today:
+**would this still mean something if nothing were connected?**
+
+    field              to        why
+    -----              --        ---
+    kind               device    what to create -- a bridge exists before it
+                                 carries anything
+    master             device    which bridge or bond this is a port of; a
+                                 port relationship, not a connection
+    mtu                device    a property of the hardware
+    mac                device    MAC policy belongs to the adapter
+    link_settings      device    speed, duplex, autonegotiation
+    qdisc              device    queueing on the egress of the device
+    ingress_redirect   device    the ifb pairing; goes with qdisc
+    bridge_vlans       device    per-port VLAN filtering -- a port's config
+
+    addressing         link      the connection's addresses
+    routes             link      what it installs when up
+    dns                link      the scope it brings
+    hooks              link      run for this connection
+    probe              link      decides whether this connection works
+    preference         link      how this connection ranks (becomes `metric`)
+    nat                link      about traffic, meaningless with none
+    advertise          link      router advertisements onto this connection
+    forwarding         link      what the machine does with traffic here
+    on_drift           link      policy about this configuration
+    name               both      the join key between the two lists
+
+Three are genuine judgement calls and are recorded as such rather than
+presented as obvious:
+
+- **`enabled`** goes to the **link**. It reads as an admin up/down of the
+  device, and under 3a it is not: "keep this configuration and do not use it"
+  is a statement about a connection, and a device that is down is a different
+  thing an operator may also want to say. Splitting those two into one field
+  is what makes it look like a device property.
+- **`guard`** goes to the **device**. It refuses to touch a thing, and the
+  thing being protected is hardware somebody else may be using -- the same
+  register as `managed`, which is already on the device.
+- **`forwarding`** goes to the **link**, though it is a sysctl on the
+  interface. It is about what the machine does with traffic, and a machine
+  with no connection forwards nothing.
+
+**Pass 1 introduces no new concepts.** No attachment, no groups, no
+default-route candidacy, no folding of `network`. Eight fields move to the
+side of a line that already exists, which is what makes it a separable pass
+rather than the first half of one big one.
+
+## 10. Decided, and what is still open
+
+**Decided by the copyright holder, 2026-09-02:**
+
+1. **Shape 3a** -- a link is a profile. Which links are active is observed,
+   not configured.
+2. **Two passes**, at the price of two migrations for anybody who has written
+   a config:
+   - **Pass 1: separate device from link.** Move `mtu`, `mac`, `qdisc`,
+     `link_settings` and the rest of the hardware fields off `Interface` and
+     onto `Device`, which today holds five fields and almost none of the
+     hardware. No new concepts, no `network` folding: this pass only puts
+     existing fields on the right side of a line that already exists.
+   - **Pass 2: fold `network` into `link`**, and introduce attachment,
+     default-route candidacy and groups.
+3. **Bridges, bonds and VLANs are devices** -- section 6.
+
+**Still open, and not blocking pass 1:**
+
+- Whether groups land in pass 2 or a third pass. They are the best argument
+  for the restructure and also the largest new mechanism, and pass 2 is
+  already large without them.
+- Whether a group's fallback rule is per-group or global, and whether a group
+  may be a member of another group.
+- How a tunnel's dependency on another link being up is expressed. Neither
+  list says it today and the split does not add it.
