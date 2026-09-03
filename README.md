@@ -259,9 +259,19 @@ wired first, with every command checked. Start there.
 ```sh
 make build          # release build
 sudo make install   # the daemon and the CLI; honours DESTDIR
+
 make gui            # the Qt client, if you want it
+fmake               # the same client, from no build file
 sudo make install-gui
 ```
+
+[fmake](../fmake) is one Python file with nothing beyond the standard
+library, so it builds the client on a machine that has not got this
+project's toolchain set up. It covers the client and not the daemon: the
+daemon and the CLI are a Cargo workspace of twenty-one crates, and fmake
+drives `rustc` directly — one crate root, one artifact — so it resolves no
+workspace, no inter-crate dependency and nothing from a registry. `make
+build` is the way for that half.
 
 Then pick your init: `make install-systemd`, `install-openrc` or
 `install-procd`. Installing does **not** enable or start anything, and does
