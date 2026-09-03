@@ -6522,6 +6522,37 @@ one tree.
   `backend/netcfgd-supplicant/tests/live.rs` spawns the supplicant and
   waits for its socket. About fifty candidates were read.
 
+- **A fifth, in the shell tests, and it is fixed rather than recorded.** The
+  sweep above covered `wg.rs`'s `NCFG_LIVE` asserts and not the `skip()`
+  functions in `tests/live/*.sh`, so that population was never looked at. Two
+  of the fifty scripts there — `modem_at.sh` and `bluetooth.sh`, both added in
+  the same recent session — printed `skipping:` and exited **0** under
+  `NCFG_LIVE=1`, the flag whose whole purpose is to forbid that. The other 48
+  already carried the correct form, which is `helper.sh:42`.
+
+  Demonstrated rather than read off, in three runs with `PATH` emptied inside
+  the script so the python3 check fires: the pre-fix copy exits 0 under
+  `NCFG_LIVE=1`; the fixed one exits 1 naming the reason; and without the flag
+  it still exits 0, because a skip has to stay a skip. Both scripts then pass
+  normally, and `bluetooth.sh` still skips unprivileged.
+
+  `make live` is unaffected: it invokes both at `Makefile:1553` and `1559`
+  **without** the flag, so what changed is only what happens when somebody
+  sets it deliberately.
+
+  The instrument was wrong first, which is the part worth keeping. The initial
+  probe put `PATH=` in front of `timeout`, so `timeout` itself was not found
+  and all three runs returned 127 — a measurement of the probe rather than of
+  the code, and it would have read as "no difference" to anyone skimming the
+  exit codes. `timeout 60 env PATH= /bin/sh <script>` is the form that asks
+  the question, and the absolute `/bin/sh` is load-bearing for the same
+  reason.
+
+  The population is swept now: all 50 `skip()` functions in `tests/live/`
+  honour the flag, checked by reading each function body rather than by
+  grepping the file, since a script can mention `NCFG_LIVE` somewhere other
+  than the place that decides.
+
 ---
 
 ## 11. Reference

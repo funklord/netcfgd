@@ -37,6 +37,10 @@ set -eu
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 
 skip() {
+	if [ -n "${NCFG_LIVE:-}" ]; then
+		echo "bluetooth.sh: NCFG_LIVE is set but this cannot run: $1" >&2
+		exit 1
+	fi
 	echo "bluetooth.sh: skipping: $1"
 	exit 0
 }

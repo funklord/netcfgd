@@ -23,6 +23,10 @@ helper="$repo/helper/netcfgd-modem-at"
 fake="$repo/tests/live/fake_at_modem.py"
 
 skip() {
+	if [ -n "${NCFG_LIVE:-}" ]; then
+		echo "modem_at.sh: NCFG_LIVE is set but this cannot run: $1" >&2
+		exit 1
+	fi
 	echo "modem_at.sh: skipping: $1"
 	exit 0
 }
