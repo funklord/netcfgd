@@ -6859,20 +6859,76 @@ compiler names the line, the key and the block to move it to, because the
 restructure deliberately kept sixteen spellings as errors that say "move this
 line" rather than "unknown key".
 
-**Why nobody saw it, and this is the part worth keeping.** Every one of these
-scripts passed for me earlier the same day — against a binary built from a
-branch that predated the move. `build-and-commit.md` states the rule this
-breaks: *never conclude that a test passes from a binary the build step did
-not rebuild*. The live scripts invoke `target/debug/netcfgd` by path and do
-not build it, so a stale binary makes the whole suite report on code that is
-no longer there. That is a second instance of 10.11's class — a check that
-ran and told you nothing — and it is the worst-behaved instance so far,
-because the number it reported was 108 passing checks rather than a skip.
+**Why nobody saw it.** Whoever landed passes 1a and 1b did not run `make
+live`; there is no subtler explanation, and the suite fails on the first
+script it reaches.
 
-**What would keep it from recurring**: `make live` depends on the debug build
-the scripts actually run, so the suite cannot be pointed at a stale artifact.
-That is a Makefile change with a real cost — it makes every live run a build
-first — and is the holder's call rather than a worker's.
+**And an earlier version of this entry blamed the suite for that, wrongly.**
+It said the live scripts invoke `target/debug/netcfgd` by path without
+building it, so a stale binary could make the whole suite report on code that
+is not there — and proposed a Makefile change to fix it. The scripts do
+invoke by path, but **`make live` builds the workspace and makes the `ncfg`
+symlink before running anything** (`Makefile:1373-1374`). There was nothing to
+fix.
+
+What actually happened is that *I* ran the scripts directly, bypassing that
+build, and read 108 passing checks off a binary from a branch predating the
+move. `build-and-commit.md` names exactly this — *never conclude a test passes
+from a binary the build step did not rebuild* — and the rule applies to the
+person running a script by hand, which is who it was written for. The
+misattribution is kept here because it is the same shape as everything else in
+10.12: a wrong instrument, and the reflex to blame the thing measured rather
+than the measurement.
+
+---
+
+## 10.16 Open: `on_unmanage = "clear"` no longer removes the device
+
+**2026-09-03**, and it is corroborated rather than inferred: two live suites
+that share no fixture and no code path agree on it.
+
+`device X { managed = false; on_unmanage = "clear" }` is documented as
+removing everything netcfgd owns on that device and then letting go — and
+0037 makes the device netcfgd *created* part of what it owns. It does not
+happen. `unmanage.sh` asks for the dummy it created to be gone and finds it
+present; `strand.sh` asks whether applying the clear "takes the device, and
+the key, away" and gets `yes` where it wants `no`. Every other check in both
+suites passes.
+
+**It is behaviour, not a stale fixture.** The merged block was compiled and
+read back before either conclusion:
+
+    device probe0 { managed = false; on_unmanage = "clear"; kind = "dummy" }
+    -> managed False, on_unmanage 'clear', kind {'kind': 'dummy'}
+
+So the document says what it is meant to say, and the teardown is what has
+changed. The suspect is 0155's pass 1b, which moved `kind` onto the device and
+with it "creation, enslavement, qdiscs, ingress shaping, backend start and
+link teardown ... driven from the device list now" (10.10). `managed` and
+`kind` now live on the same object, so a teardown that consults `managed`
+before deciding whether the device is netcfgd's to remove would decline
+exactly here — where the operator has said *both* that it is unmanaged and
+that clearing should remove it.
+
+**Both tests were passing before the restructure and are the only two that
+exercise this**, which is why it survived: nothing else in the suite asks a
+device to be removed as part of being handed over.
+
+**A third instance, from the other direction.** `nm.sh`'s "a link that goes
+away leaves the device list" unmanages `quiet0`, deletes the link, and expects
+NetworkManager's list to lose it. It reports `dummy:unmanaged` — the device is
+still there. That test's own comment explains what it depends on: *"a dummy the
+document says should exist is one netcfgd creates again ... `managed = false`
+is the documented way to say an interface is somebody else's, and it is what
+makes 'gone' stay gone."* So `managed = false` is not stopping re-creation,
+where the other two are about it not permitting removal. One question, asked
+twice in each direction.
+
+Not fixed here. The fix decides what `managed = false` means for a device
+netcfgd brought into existence — both whether it may remove one and whether it
+must decline to create one — which is 0037's question re-asked by 0155, and is
+the holder's rather than a worker's. What is fixed is the fixtures, so all
+three checks now fail for the real reason instead of on a compile error.
 
 ---
 

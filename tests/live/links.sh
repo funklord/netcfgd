@@ -35,73 +35,98 @@ trap 'rm -rf "$work"' EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface bond0 {
+device bond0 {
 	bond { members = "veth-a veth-b"; mode = "active-backup"; miimon = 100 }
+}
+interface bond0 {
 	config = "null"
 }
 
-interface veth-a { veth { peer = "veth-b" }; config = "null" }
+device veth-a { veth { peer = "veth-b" } }
+interface veth-a { config = "null" }
 
-interface br0 {
+device br0 {
 	bridge { stp = true; forward_delay = 4 }
+}
+interface br0 {
 	config = "10.9.0.1/24"
 }
 
-interface br0.42 {
+device br0.42 {
 	vlan { parent = "br0"; id = 42; protocol = "dot1ad" }
+}
+interface br0.42 {
 	config = "null"
 }
 
-interface vx100 {
+device vx100 {
 	vxlan { id = 100; parent = "br0"; local = "10.9.0.1"; remote = "10.9.0.2"; port = 4789 }
+}
+interface vx100 {
 	config = "null"
 }
 
 # A VLAN whose name does not encode its id, which is the only operator decision
 # 0059's silence ever depended on: renaming `br0.42` to `br0.43` is a create and
 # a delete already, and this one is not.
-interface work-net {
+device work-net {
 	vlan   { parent = "br0"; id = 77 }
+}
+interface work-net {
 	config = "10.6.0.1/24"
 }
 
 # Declared as one kind here and edited into another below.
-interface flip0 { kind = "dummy"; config = "null" }
+device flip0 { kind = "dummy" }
+interface flip0 { config = "null" }
 
 # Everything below came out of the pre-freeze format audit.
-interface mgmt-vrf { vrf { table = 100 }; config = "null" }
-interface base0    { kind = "dummy"; config = "10.7.0.1/24" }
+device mgmt-vrf { vrf { table = 100 } }
+interface mgmt-vrf { config = "null" }
+device base0 { kind = "dummy" }
+interface base0 { config = "10.7.0.1/24" }
 # A second parent, for the checks that move a virtual link from one to another.
-interface base1    { kind = "dummy"; config = "null" }
-interface mv0      { macvlan { parent = "base0"; mode = "bridge" }; config = "null" }
-interface gre1     { tunnel { mode = "gre"; parent = "base0"; local = "10.7.0.1"; remote = "10.7.0.2"; key = 42 }; config = "null" }
-interface sit1     { tunnel { mode = "sit"; local = "10.7.0.1"; remote = "10.7.0.3"; ttl = 64 }; config = "null" }
-interface gnv0     { tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 }; config = "null" }
+device base1 { kind = "dummy" }
+interface base1 { config = "null" }
+device mv0 { macvlan { parent = "base0"; mode = "bridge" } }
+interface mv0 { config = "null" }
+device gre1 { tunnel { mode = "gre"; parent = "base0"; local = "10.7.0.1"; remote = "10.7.0.2"; key = 42 } }
+interface gre1 { config = "null" }
+device sit1 { tunnel { mode = "sit"; local = "10.7.0.1"; remote = "10.7.0.3"; ttl = 64 } }
+interface sit1 { config = "null" }
+device gnv0 { tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 } }
+interface gnv0 { config = "null" }
 
 # Per-port VLAN membership: how a switch is provisioned on a current kernel.
-interface brv2 { bridge { vlan_filtering = true }; vlans = "10"; config = "null" }
+device brv2 { bridge { vlan_filtering = true }; vlans = "10" }
+interface brv2 { config = "null" }
 # Driver offloads. A veth is the right device for once: it takes the features
 # message, unlike the ring, link-mode and wake-on-LAN messages -- which is
 # exactly why those three are still unimplemented.
-interface off0 {
+device off0 {
 	veth    { peer = "off0p" }
 	ethtool { gso = "off"; tso = "on" }
+}
+interface off0 {
 	config  = "null"
 }
 
 # An IPv6 interface identifier. A veth, deliberately: the kernel refuses a
 # token on any device that does not do neighbour discovery, so a dummy gets
 # "Device does not do neighbour discovery" and would test only the error path.
-interface tok0 {
+device tok0 {
 	veth       { peer = "tok0p" }
+}
+interface tok0 {
 	ipv6_token = "::5"
 	config     = "null"
 }
 
 # A filtering bridge the config gives no vlans to. The kernel puts vlan 1 on it
 # and netcfgd must leave it there -- the authority is over what is configured.
-interface brkeep { bridge { vlan_filtering = true }; config = "null" }
-interface lan1 {
+device brkeep { bridge { vlan_filtering = true } }
+interface brkeep { config = "null" }
+device lan1 {
 	veth   { peer = "lan1p" }
 	master = "brv2"
 	vlans  = "
@@ -109,6 +134,8 @@ interface lan1 {
 		20
 		30-32
 	"
+}
+interface lan1 {
 	config = "null"
 }
 CONF
@@ -455,7 +482,10 @@ contains "and the next plan has nothing to do" \
 # An interface that exists as a different kind entirely. Before 0059 this planned
 # a `link.up` and nothing else, on a device that was not what the document said.
 contains "the interface starts as a dummy" "$(detail flip0)" "dummy"
-sed -i 's|interface flip0 { kind = "dummy"|interface flip0 { macvlan { parent = "base0"; mode = "bridge" }|' \
+# The kind lives on the device since 0155's pass 1b, so the edit that changes
+# it edits the device block. Rewriting the `interface` line instead matched
+# nothing and the three checks below reported the unchanged machine.
+sed -i 's|device flip0 { kind = "dummy" }|device flip0 { macvlan { parent = "base0"; mode = "bridge" } }|' \
 	"$work/etc/netcfgd.conf"
 flip_plan=$("$ncfg" plan 2>&1 || true)
 contains "a wrong kind plans a delete"  "$flip_plan" "link.delete flip0"
@@ -471,8 +501,10 @@ contains "and the next plan has nothing to do" \
 # so nothing in /run records it as netcfgd's.
 ip link add link br0 name hand-vlan type vlan id 90
 cat >> "$work/etc/netcfgd.conf" <<'CONF'
-interface hand-vlan {
+device hand-vlan {
 	vlan   { parent = "br0"; id = 91 }
+}
+interface hand-vlan {
 	config = "null"
 }
 CONF

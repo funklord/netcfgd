@@ -90,11 +90,13 @@ export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface ncbr0 {
-	config = "null"
+device ncbr0 {
 	bridge {
 		members = []
 	}
+}
+interface ncbr0 {
+	config = "null"
 }
 CONF
 

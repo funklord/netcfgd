@@ -26,6 +26,12 @@ set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 shim="$repo/adapter/netcfgd-nm/target/debug/netcfgd-nm"
+# **Defined, because `set -u` is on and this was used undefined.** One wait
+# loop below asks `$ncfg plan`, and with the variable unset the script died
+# there with "parameter not set" rather than failing a check -- so the failure
+# named the shell and not the thing under test. `make live` builds the
+# workspace and makes this symlink before running any script.
+ncfg="$repo/target/debug/ncfg"
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -114,25 +120,33 @@ global {
 	}
 }
 
-interface probe0 {
+device probe0 {
 	kind   = "dummy"
+}
+interface probe0 {
 	config = ["10.7.7.1/24", "2001:db8:7::1/64"]
 	routes = ["default via 10.7.7.254", "10.9.0.0/16 via 10.7.7.9 metric 600"]
 }
 
-interface quiet0 {
+device quiet0 {
 	kind = "dummy"
+}
+interface quiet0 {
 }
 
 # A bridge with something on it, for the two kinds whose NM properties are
 # answerable from what netcfgd already observes.
-interface port0 {
+device port0 {
 	kind   = "dummy"
 	master = "br0"
 }
+interface port0 {
+}
 
-interface br0 {
+device br0 {
 	bridge { stp = false }
+}
+interface br0 {
 	config = "10.6.6.1/24"
 }
 
@@ -140,14 +154,16 @@ interface br0 {
 # (0077). The id and the parent are the two properties libnm asks for that
 # nothing else here has, and netcfgd observes both only because 0059 and 0060
 # needed them for the planner.
-interface tagged0 {
+device tagged0 {
 	vlan { parent = "probe0"; id = 42 }
+}
+interface tagged0 {
 	config = "10.42.0.1/24"
 }
 
 # A tunnel, for the one link kind that is not `Generic` to the shim. The
 # private key is written beside this file at run time; nothing here is a key.
-interface wg0 {
+device wg0 {
 	wireguard {
 		private_key = "@secret:wg0"
 		listen_port = 51822
@@ -156,15 +172,16 @@ interface wg0 {
 			allowed_ips = "10.8.0.0/24"
 		}
 	}
+}
+interface wg0 {
 	config = "10.8.0.2/32"
 }
 
 device radio0 {
 	wifi { backend = "wpa_supplicant" }
-}
-
-interface radio0 {
 	kind = "dummy"
+}
+interface radio0 {
 }
 
 # WPA3 deliberately, and not the WPA2 the scan flags say. The shim guesses
@@ -175,7 +192,8 @@ interface radio0 {
 network "HomeFiber" {
 	metered = true
 	config  = "dhcp"
-	wifi { psk = "@secret:home"; proto = "wpa3"; priority = 30 }
+	wifi   { psk = "@secret:home"; proto = "wpa3" }
+	metric = 100
 	dns { servers = ["9.9.9.9"]; search = ["quad9.example"] }
 }
 
@@ -335,7 +353,12 @@ fi
 # this check is about.
 cat >> "$work/etc/netcfgd.conf" <<'UNMANAGE'
 
-device quiet0 {
+# `override`, because the base config now defines this device (0155 moved
+# `kind` onto it) and a second plain definition is a redefinition error. An
+# override replaces the block whole, so the kind is restated rather than
+# inherited -- dropping it would stop netcfgd creating the dummy at all.
+override device quiet0 {
+	kind    = "dummy"
 	managed = false
 }
 UNMANAGE
@@ -861,7 +884,14 @@ else
 				org.freedesktop.NetworkManager.Settings.Connection GetSettings 2>/dev/null |
 				python3 "$repo/tests/live/nm_setting.py" connection "$1"
 		}
-		check "a network reports the priority it was given" "$(option priority)" "30"
+		# **The metric, scaled into NM's range, not the number written.** 0154
+		# replaced `wifi { priority }` with a network-level `metric` that runs
+		# the other way up, and `settings.rs` reports `join_rank(metric)`
+		# scaled from the model's 4096 ceiling into NM's 999. metric 100 is
+		# therefore 974 here, and asserting that rather than the raw number is
+		# what pins the scaling.
+		check "a network reports its metric, scaled into NM's range" \
+			"$(option priority)" "974"
 		# 1 is NM_METERED_YES. netcfgd's flag is a boolean, so `false` becomes
 		# an explicit "no" rather than "unknown" -- an operator who wrote it
 		# said something, and reporting unknown would have a desktop guess.
@@ -894,10 +924,16 @@ else
 
 	check "metered comes back as a network key" \
 		"$(grep -c 'metered = true' "$opts" 2>/dev/null || true)" "1"
-	# Priority goes inside the wifi block, which is where netcfgd keeps the
-	# keys a station uses to choose between networks.
-	check "priority goes inside the wifi block" \
-		"$(grep -c 'wifi { open = true; priority = 42 }' "$opts" 2>/dev/null || true)" "1"
+	# **A metric beside `metered`, not a priority inside `wifi`.** The shim
+	# wrote `priority` in the wifi block until 2026-09-03 -- a key 0154 had
+	# removed -- so `nmcli connection add ... autoconnect-priority` produced a
+	# file netcfgd refuses, and the loader compiles the directory as one
+	# document, so it took every other block with it. This check agreed with
+	# the shim and could not see it.
+	check "the wifi block carries only the security now" \
+		"$(grep -c 'wifi { open = true }' "$opts" 2>/dev/null || true)" "1"
+	check "and NM's autoconnect-priority becomes a network metric" \
+		"$(grep -c 'metric = 3924' "$opts" 2>/dev/null || true)" "1"
 	check "and the nameservers become a dns block" \
 		"$(grep -c 'dns { servers = \["1.1.1.1"\]; search = \["example.com"\] }' "$opts" 2>/dev/null || true)" "1"
 	check "which netcfgd accepts" \

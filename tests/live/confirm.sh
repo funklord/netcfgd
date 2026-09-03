@@ -51,8 +51,10 @@ trap cleanup EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface probe0 {
+device probe0 {
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "10.9.9.1/24"
 }
 CONF

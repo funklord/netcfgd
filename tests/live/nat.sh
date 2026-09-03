@@ -119,14 +119,18 @@ start_daemon() {
 # A LAN side that forwards and an uplink that translates: the smallest thing
 # that is actually a router.
 write_config <<'CONF'
-interface lan0 {
+device lan0 {
 	kind       = "dummy"
+}
+interface lan0 {
 	config     = "192.168.9.1/24"
 	forwarding = true
 }
 
-interface wan0 {
+device wan0 {
 	kind   = "dummy"
+}
+interface wan0 {
 	config = "10.9.9.2/24"
 	nat    = true
 }
@@ -159,20 +163,26 @@ check "re-applying changes nothing" "$(uplinks)" "wan0"
 # Adding an uplink rewrites the whole table. The one already there has to
 # survive that, which is the part a wholesale replacement can get wrong.
 write_config <<'CONF'
-interface lan0 {
+device lan0 {
 	kind       = "dummy"
+}
+interface lan0 {
 	config     = "192.168.9.1/24"
 	forwarding = true
 }
 
-interface wan0 {
+device wan0 {
 	kind   = "dummy"
+}
+interface wan0 {
 	config = "10.9.9.2/24"
 	nat    = true
 }
 
-interface wan1 {
+device wan1 {
 	kind   = "dummy"
+}
+interface wan1 {
 	config = "10.9.10.2/24"
 	nat    = true
 }
@@ -182,19 +192,25 @@ check "both uplinks are masqueraded" "$(uplinks)" "wan0 wan1"
 
 # And removing one leaves the other alone.
 write_config <<'CONF'
-interface lan0 {
+device lan0 {
 	kind       = "dummy"
+}
+interface lan0 {
 	config     = "192.168.9.1/24"
 	forwarding = true
 }
 
-interface wan0 {
+device wan0 {
 	kind   = "dummy"
+}
+interface wan0 {
 	config = "10.9.9.2/24"
 }
 
-interface wan1 {
+device wan1 {
 	kind   = "dummy"
+}
+interface wan1 {
 	config = "10.9.10.2/24"
 	nat    = true
 }
@@ -206,18 +222,24 @@ check "only the remaining uplink is masqueraded" "$(uplinks)" "wan1"
 # so nothing is planned, and the machine keeps translating after the config
 # stopped asking. The table has to go, not just its rules.
 write_config <<'CONF'
-interface lan0 {
+device lan0 {
 	kind   = "dummy"
+}
+interface lan0 {
 	config = "192.168.9.1/24"
 }
 
-interface wan0 {
+device wan0 {
 	kind   = "dummy"
+}
+interface wan0 {
 	config = "10.9.9.2/24"
 }
 
-interface wan1 {
+device wan1 {
 	kind   = "dummy"
+}
+interface wan1 {
 	config = "10.9.10.2/24"
 }
 CONF

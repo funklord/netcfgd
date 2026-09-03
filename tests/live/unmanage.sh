@@ -57,8 +57,10 @@ ip link add borrowed0 type dummy
 
 managed_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
-interface probe0 {
+device probe0 {
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "10.5.5.1/24"
 	routes = "default via 10.5.5.254"
 }
@@ -71,11 +73,13 @@ CONF
 
 unmanaged_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
-device probe0    { managed = false$1 }
+device probe0 {
+	managed = false$1
+	kind    = "dummy"
+}
 device borrowed0 { managed = false$1 }
 
 interface probe0 {
-	kind   = "dummy"
 	config = "10.5.5.1/24"
 	routes = "default via 10.5.5.254"
 }

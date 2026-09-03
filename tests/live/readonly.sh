@@ -103,8 +103,10 @@ daemon_says() {
 
 # What the image ships.
 cat > "$work/factory/netcfgd.conf" <<'CONF'
-interface probe0 {
+device probe0 {
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "192.168.1.1/24"
 }
 CONF
@@ -112,7 +114,6 @@ CONF
 # What the operator changed on this particular unit.
 cat > "$work/etc/conf.d/10-local.conf" <<'CONF'
 override interface probe0 {
-	kind   = "dummy"
 	config = "10.44.0.1/24"
 }
 CONF

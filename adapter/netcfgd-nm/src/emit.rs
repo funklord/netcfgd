@@ -358,22 +358,40 @@ fn routes(settings: &Dict) -> Result<Vec<String>, Unsupported> {
 ///
 /// Returns [`Unsupported::NegativePriority`] for a priority the DSL cannot
 /// write.
-fn station_options(settings: &Dict) -> Result<Vec<String>, Unsupported> {
-	let mut options = Vec::new();
-	if let Some(priority) = signed(settings, "connection", "autoconnect-priority") {
-		if priority < 0 {
-			// netcfgd's `priority` is written as an unsigned number in the
-			// DSL, so a negative one cannot be expressed. Refusing by name
-			// beats writing a file that will not compile, or clamping to zero,
-			// which would turn a network the operator deliberately
-			// deprioritised into an ordinary one.
-			return Err(Unsupported::NegativePriority { given: priority });
-		}
-		if priority != 0 {
-			options.push(format!("priority = {priority}"));
-		}
+/// `NetworkManager`'s `autoconnect-priority`, as netcfgd's network `metric`.
+///
+/// **The inverse of what `settings.rs` reports**, and it has to be: that side
+/// scales `join_rank(metric)` down into NM's 0..999, so this scales back up
+/// and undoes the inversion. Two conversions that are not inverses would make
+/// a profile change its own ranking every time a desktop client read it back
+/// and wrote it out.
+///
+/// **This wrote `priority = N` inside the `wifi` block until 2026-09-03**, a
+/// key 0154 had removed -- so `nmcli connection add ... autoconnect-priority`
+/// produced a file netcfgd refuses, and because the loader compiles the
+/// directory as one document it took every other block down with it. The read
+/// direction had been updated for 0154 and the write direction had not.
+fn network_metric(settings: &Dict) -> Result<Option<u32>, Unsupported> {
+	let Some(priority) = signed(settings, "connection", "autoconnect-priority") else {
+		return Ok(None);
+	};
+	if priority < 0 {
+		// A metric counts up from zero, so a negative priority cannot be
+		// expressed. Refusing by name beats writing a file that will not
+		// compile, or clamping, which would turn a network the operator
+		// deliberately deprioritised into an ordinary one.
+		return Err(Unsupported::NegativePriority { given: priority });
 	}
-	Ok(options)
+	if priority == 0 {
+		// NM's default. Saying nothing leaves the interface's `preference` in
+		// charge, which is what an unranked network should do.
+		return Ok(None);
+	}
+	let ceiling = i64::from(netcfgd_model::wifi::RANK_CEILING);
+	let rank = i64::from(priority) * ceiling / 999;
+	Ok(Some(
+		u32::try_from(ceiling.saturating_sub(rank).max(0)).unwrap_or(0),
+	))
 }
 
 /// The `dns` block a profile's nameservers and search domains become.
@@ -522,10 +540,6 @@ pub(crate) fn network_block_keeping_secret(
 
 	let key_mgmt = string(settings, "802-11-wireless-security", "key-mgmt");
 	let mut secret = None;
-	// Keys that belong inside the `wifi` block rather than beside it, which is
-	// where netcfgd's DSL puts the ones a station uses to choose between
-	// networks.
-	let mut extra: Vec<String> = Vec::new();
 	let security = match key_mgmt.as_deref() {
 		None => "open = true".to_owned(),
 		Some("owe") => "owe = true".to_owned(),
@@ -566,7 +580,7 @@ pub(crate) fn network_block_keeping_secret(
 
 	// The per-connection options. Parsed before anything is written, so a
 	// refusal happens before a file exists rather than after.
-	extra.extend(station_options(settings)?);
+	let metric = network_metric(settings)?;
 	let metered = signed(settings, "connection", "metered") == Some(1);
 
 	let mut text = String::new();
@@ -591,6 +605,12 @@ pub(crate) fn network_block_keeping_secret(
 	if metered {
 		text.push_str("\tmetered = true\n");
 	}
+	// Beside `metered`, which is where 0154 put it: a metric ranks this
+	// network against every link on the machine rather than describing the
+	// radio, so it is not a `wifi` key.
+	if let Some(metric) = metric {
+		let _ = writeln!(text, "\tmetric = {metric}");
+	}
 	// The SSID as hex whenever it is not exactly the label. An SSID is octets
 	// and the label is text, so a network whose name has a space, or is not
 	// UTF-8 at all, needs both -- and writing the hex form unconditionally
@@ -598,9 +618,10 @@ pub(crate) fn network_block_keeping_secret(
 	if ssid.as_bytes() != id.as_bytes() {
 		let _ = writeln!(text, "\tssid = \"{}\"", ssid.to_hex());
 	}
-	let mut wifi = vec![security];
-	wifi.extend(extra);
-	let _ = writeln!(text, "\twifi {{ {} }}", wifi.join("; "));
+	// One key today. It was a list because `autoconnect-priority` was written
+	// in here as `priority` until 0154 moved it out to a network-level
+	// `metric`, and nothing else has ever belonged inside `wifi`.
+	let _ = writeln!(text, "\twifi {{ {security} }}");
 	if flag(settings, "802-11-wireless", "hidden") == Some(true) {
 		text.push_str("\thidden = true\n");
 	}
@@ -892,13 +913,21 @@ mod tests {
 
 		let emitted = network_block(&settings).expect("it renders");
 		assert!(emitted.text.contains("metered = true"), "{}", emitted.text);
-		// Priority lives inside the `wifi` block, which is where netcfgd puts
-		// the keys a station uses to choose between networks.
+		// **A `metric` beside `metered`, not a `priority` inside `wifi`.**
+		// 0154 removed that key, and this assertion agreed with the shim in
+		// writing it -- so both were wrong together and the test could not
+		// catch a file netcfgd refuses to compile. `wifi` now carries only
+		// the security.
 		assert!(
-			emitted.text.contains("wifi { open = true; priority = 42 }"),
+			emitted.text.contains("wifi { open = true }"),
 			"{}",
 			emitted.text
 		);
+		// NM's 42 of 999 scaled up to the model's ceiling and inverted, which
+		// is exactly what `settings.rs` undoes when it reports the same
+		// profile back. Asserting the number rather than its presence is what
+		// makes the two directions provably inverse.
+		assert!(emitted.text.contains("metric = 3924"), "{}", emitted.text);
 		assert!(
 			emitted
 				.text

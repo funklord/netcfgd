@@ -48,15 +48,19 @@ trap cleanup EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface eth-lan {
+device eth-lan {
 	veth       { peer = "eth-peer" }
+}
+interface eth-lan {
 	preference = 100
 	config     = "10.1.0.2/24"
 	routes     = "default via 10.1.0.1"
 }
 
-interface wl-fake {
+device wl-fake {
 	veth       { peer = "wl-peer" }
+}
+interface wl-fake {
 	preference = 600
 	config     = "10.2.0.2/24"
 	routes     = "default via 10.2.0.1"

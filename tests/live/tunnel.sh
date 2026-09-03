@@ -205,10 +205,12 @@ OVPN
 # and "the tunnel's server was not delivered" would pass for the wrong one.
 cat > "$work/etc/netcfgd.conf" <<CONF
 global { dns { dns_mode = "write_resolv_conf" } }
+device vpn0 {
+	openvpn { config = "$work/etc/work.ovpn" }
+}
 interface vpn0 {
 	preference = 700
 	routes     = "default"
-	openvpn { config = "$work/etc/work.ovpn" }
 }
 CONF
 
@@ -309,11 +311,13 @@ check "and nothing was delivered, because the document did not ask" \
 # scope-capable resolver and this check is about the gate rather than the mode.
 cat > "$work/etc/netcfgd.conf" <<CONF
 global { dns { dns_mode = "write_resolv_conf" } }
+device vpn0 {
+	openvpn { config = "$work/etc/work.ovpn" }
+}
 interface vpn0 {
 	preference = 700
 	routes     = "default"
 	dns        = "9.9.9.9"
-	openvpn { config = "$work/etc/work.ovpn" }
 }
 CONF
 "$ncfg" apply > "$work/dns.txt" 2>&1 || true
@@ -331,7 +335,8 @@ check "and the next plan has nothing to do" \
 # that is gone black-holes traffic another interface would have carried, which
 # is the same failure a stale modem report causes.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface vpn0 { kind = "dummy"; config = "null" }
+device vpn0 { kind = "dummy" }
+interface vpn0 { config = "null" }
 CONF
 "$ncfg" apply > "$work/stop.txt" 2>&1 || true
 # "Names no routes" rather than "the file is gone", because both are correct
