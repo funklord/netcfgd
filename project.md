@@ -6469,6 +6469,59 @@ them is not "did this pass" but "would this have spoken if the answer were
 different"** -- which is `evidence.md`'s rule, met three times in one day in
 one tree.
 
+- **Four gates here can report success having checked nothing.** Reported
+  from claude-guidelines 2026-09-03, from a sweep of all seventeen trees
+  for that one shape. Recorded rather than fixed; each is this project's
+  call.
+
+  - **`Makefile:1614` and `1616`, `deny`** -- `command -v cargo-deny
+    >/dev/null && $(CARGO) deny check || echo "deny: cargo-deny not
+    installed, skipping"`. `A && B || C` fires `C` when **B** fails, not
+    only when A does, so a real supply-chain failure is reported as the
+    tool being absent and the target exits 0. This Makefile states the
+    correct idiom at ~151 -- *"`if cond; then check; fi` ... yields 0 when
+    the tool is absent, and the check's own status when it is present, so a
+    genuine formatting failure still breaks the `&&`"* -- and `fmt`,
+    `clippy`, `gui` and `adapters` all use it. `deny` is the only one that
+    does not, and repeats it at 1616 for cargo-audit and at 1625/1627 in
+    the adapter loop, where the `|| exit 1` at 1628 can never fire because
+    both brace groups always yield 0. Currently truthful by accident:
+    cargo-deny is not installed on the machine this was found on.
+
+  - **`Makefile:1196`, `size`** -- `[ -f "$$bin" ] || continue` silently
+    drops a binary named in `size-budget.txt` that is not on disk. That
+    file holds exactly one entry, so a rename or a `-p` change takes the
+    total to 0, which is under the limit. Demonstrated over an empty
+    `target/release`: `size: installed 0 of 2685464`, exit 0. Both sibling
+    budget gates refuse this -- `linkage:1138` and `footprint:1230` each
+    make the missing binary its own failure.
+
+  - **`Makefile:738`, `version-check`** -- `if [ -n "$$changelog" ] && [
+    "$$file" != "$$changelog" ]`. An empty `$changelog` (no
+    dpkg-parsechangelog, which is every Alpine/musl machine this project
+    ships an `apk` target for, or a changelog it cannot parse) skips the
+    comparison and still prints "in step". It is the sole prerequisite of
+    `deb`. raidcfgd fixed exactly this and documents it at its
+    `Makefile:727-731`.
+
+  - **`crates/netcfgd-sys/tests/wg.rs:181, 237, 240`, `NCFG_LIVE`** --
+    wg.rs:3-5 says the flag *"turns a skip into a failure so `make live`
+    cannot pass by doing nothing"*, and `Makefile:1379` sets it. Three of
+    the five bail-out paths carry the assert; three do not. Demonstrated
+    unprivileged with `NCFG_LIVE=1`: `a_tunnel_round_trips_through_the_
+    kernel` correctly FAILED, while
+    `removing_a_peer_from_the_document_removes_it_from_the_kernel` printed
+    "skipping: cannot create a link" and reported **ok** -- under the flag
+    whose entire purpose is to forbid that, on the test covering decision
+    1. The `Netlink::open()` paths at 181 and 237 have no assert at all.
+
+  Dismissed as sound, so the negative is on record: `FMT_OK`/`CLIPPY_OK`
+  probe the subcommand rather than a binary name; all six `tool/*_gate.py`
+  carry an explicit "would check nothing" refusal; `determinism.sh` asks
+  `docker info` rather than `command -v docker`;
+  `backend/netcfgd-supplicant/tests/live.rs` spawns the supplicant and
+  waits for its socket. About fifty candidates were read.
+
 ---
 
 ## 11. Reference
