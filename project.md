@@ -6597,15 +6597,31 @@ invokes it, `NCFG_LIVE=1` where the Makefile sets it:
 knowing:
 
 - **`association.sh`, which is the only live test of a network's `metric`
-  outranking its interface's `preference` (0153).** It skips because the probe
-  is not built, and building it would not be enough: it refuses without root by
-  design, and it needs a *real* association to a network the document
-  describes. So the feature's live coverage has run exactly once, by hand, on
-  the machine its author was sitting at. The planner half is properly covered —
-  `crates/netcfgd-plan/tests/fixtures.rs` asserts that a metric outranks a
-  preference, that an absent metric leaves the preference alone, and that an
-  association to an undescribed network falls back — but those are fixtures,
-  and the field they read is filled by resolving a live association.
+  outranking its interface's `preference` (0153).** The planner half is
+  properly covered — `crates/netcfgd-plan/tests/fixtures.rs` asserts that a
+  metric outranks a preference, that an absent metric leaves the preference
+  alone, and that an association to an undescribed network falls back — but
+  those are fixtures, and the field they read is filled by resolving a live
+  association. That resolution has been exercised exactly once, by hand, on
+  the machine its author was sitting at.
+
+  **Its first blocker was measured rather than predicted, and it was not the
+  one this entry first named.** `cargo build -p netcfgd-host --example
+  live_association` takes five seconds, and with the probe present the script
+  advances two gates and stops at a third: *no netcfgd is running to compare
+  against*. It wants `/run/netcfgd/netcfgd.sock` so it can set the observation
+  path's answer beside `ncfg wifi status`, and on this machine netcfgd is
+  installed and `enabled` but `inactive`, with NetworkManager holding the
+  radio.
+
+  So the remaining distance is not a build. It is **starting netcfgd on a
+  machine somebody is using, over the radio in question** — which is the same
+  act 10.9 says is the holder's call rather than a worker's, for the same
+  reason. Two of the script's assertions were verified without going there:
+  the probe refuses unprivileged, exiting 2 with the documented message, which
+  is the refusal that stops a powerless run reporting a clean pass; and the
+  probe writes nothing, checked by reading it for `File`, `OpenOptions` and
+  any persist call rather than by trusting the comment that says so.
 - **`hwsim.sh`**, needing real root for module loading and phy namespace moves.
   It is the one that drives actual virtual radios.
 - **`ap.sh`**, needing `hostapd`, which is not installed.
@@ -6647,12 +6663,50 @@ somebody else's correct code:
   which is the only reason this took one command to resolve rather than an
   afternoon.
 
-The shape is `evidence.md`'s, met three times in an hour: **a probe checked
-against the mechanism its author had in mind rather than against the failure it
-is meant to catch.** So a coverage claim about this tree has to name its
-invocation, and a surprising result about a test's own honesty should be
-re-measured before it is written down — twice here the apparatus was wrong and
-the code was right.
+**A fifth, from asking the machine what hardware it has**, and it is the one
+that would have done real damage to this section. `ls /sys/class/net/*/wireless`
+returned nothing and was very nearly written down as *this machine has no
+wireless hardware*, which would have made the paragraph above claim the live
+suite runs on virtual interfaces because there is nothing else. There is a
+radio: `wlp0s20f3`, up, with `lspci` naming the controller.
+
+**The mechanism first written here for that was also wrong**, which is why it
+is worth the space. The draft said the glob asked the wrong sysfs node — that
+cfg80211 creates `phy80211` and `wireless` is the older interface. Plausible,
+and false: both nodes exist on this machine. The real cause is that `ls`
+without `-d` lists a directory's *contents*, and `wireless/` is empty, so the
+path matched and printed nothing. `ls -d` shows it. A reduction that fires
+reliably tells you *where* to look and nothing about *why*, and the wrong
+mechanism was caught only by verifying the sentence before committing it —
+having already been written into this file as fact.
+
+**An empty result from a wrong instrument reads exactly like an empty result
+from a right one**, whichever way the instrument is wrong, and the sibling
+probe that disagrees — `ip -br link` — took one command.
+
+The same slip a sixth time, in the same sitting, checking whether root was
+reachable: `sudo -n true 2>&1 | head -1 && echo yes` printed **yes** while the
+output beside it said `sudo: a password is required`. The `&&` reads the
+pipeline's status, which is `head`'s. This is the first error in this list
+repeating after being written down, which is worth more than the error: a note
+about a fault does not stop the hand that makes it, and the only thing that has
+actually caught this one is reading the output rather than the status.
+
+The shape is `evidence.md`'s, met six times across two sittings: **a probe
+checked against the mechanism its author had in mind rather than against the
+failure it is meant to catch.** So a coverage claim about this tree has to name
+its invocation, and a surprising result about a test's own honesty should be
+re-measured before it is written down — three times here the apparatus was
+wrong and the code was right, and the sixth was a repeat of the first after it
+had been written down.
+
+The count is the point rather than an embarrassment. Six wrong instruments and
+zero wrong findings about the software, in a sitting whose whole subject was
+measurement, is the ratio `evidence.md` predicts: *"when a result surprises
+you, the apparatus is where the error usually is."* Every one of them was
+caught by a second reading that cost one command — `ip -br link` against the
+sysfs glob, a captured status against a pipeline's, the script's own refusal
+message against a wrapper. None was caught by being careful.
 
 ---
 
