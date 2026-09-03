@@ -203,7 +203,7 @@ fn set(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 	// is large, deliberate, and cannot be undone from the far end of a link it
 	// just took down.
 	println!(
-		"`ncfg plan` shows what that changes; `ncfg apply --confirm 60` \
+		"`ncfg plan` shows what that changes; `ncfg apply --confirm-within 60` \
 	          keeps a way back"
 	);
 	Ok(ExitCode::SUCCESS)

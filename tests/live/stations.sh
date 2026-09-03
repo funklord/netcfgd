@@ -84,8 +84,10 @@ done
 
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
+device ap0 {
+	kind = "dummy"
+}
 interface ap0 {
-	kind   = "dummy"
 	config = "192.168.9.1/24"
 }
 

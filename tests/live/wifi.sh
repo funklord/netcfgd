@@ -70,7 +70,8 @@ device lo {
 }
 
 network "HomeFiber" {
-	wifi   { psk = "@secret:HomeFiber"; proto = "wpa3"; priority = 30 }
+	wifi   { psk = "@secret:HomeFiber"; proto = "wpa3" }
+	metric = 100
 	config = "dhcp"
 }
 
@@ -163,8 +164,14 @@ check "WPA3 means SAE, and offers fast transition" \
 	"$("$cli" -p "$work/ctrl" -i lo get_network 0 key_mgmt)" "SAE FT-SAE"
 check "WPA3 means protected management frames" \
 	"$("$cli" -p "$work/ctrl" -i lo get_network 0 ieee80211w)" "2"
-check "the priority carried through" \
-	"$("$cli" -p "$work/ctrl" -i lo get_network 0 priority)" "30"
+# **The metric reaches the supplicant as a priority, inverted.** 0154 replaced
+# `wifi { priority }` with a network-level `metric` that ranks the network
+# against every link on the machine, and route metrics run the other way up --
+# lower wins -- so `join_rank` hands the supplicant `4096 - metric`. Asserting
+# the derived number rather than the one written is the point: it is the only
+# check that the inversion happens exactly once.
+check "the metric reaches the supplicant, inverted into a priority" \
+	"$("$cli" -p "$work/ctrl" -i lo get_network 0 priority)" "3996"
 check "the passphrase resolved from the secrets directory" \
 	"$("$cli" -p "$work/ctrl" -i lo get_network 0 psk)" "*"
 

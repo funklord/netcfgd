@@ -98,17 +98,20 @@ global {
 		admin = "any"
 	}
 }
+device lo {
+	mtu = 1500
+}
 interface lo {
 	config = "null"
-	mtu = 1500
 }
 CONF
 
 # The operator's own profile, and the shipped one beside it. `mtu` because it
-# is observable in the compiled document without touching the machine.
+# is observable in the compiled document without touching the machine -- and
+# on the `device`, not the `interface`, since 0155's restructure moved what is
+# true of hardware whether or not anything is connected.
 cat > "$work/etc/profile/office/10-office.conf" <<'CONF'
-override interface lo {
-	config = "null"
+override device lo {
 	mtu = 9000
 }
 CONF
@@ -148,7 +151,7 @@ check "the daemon reports the profile it compiled" "$("$ncfg" profile get 2>&1)"
 # *for*. Reported from the document, so this fails if the profile directory
 # was selected but never read.
 mtu=$("$ncfg" show 2>/dev/null |
-	python3 -c 'import sys,json; print(json.load(sys.stdin)["interfaces"][0].get("mtu"))' 2>/dev/null ||
+	python3 -c 'import sys,json; print(json.load(sys.stdin)["devices"][0].get("mtu"))' 2>/dev/null ||
 	echo "unreadable")
 check "the chosen profile's drop-in is in force" "$mtu" "9000"
 
@@ -184,7 +187,7 @@ check "the shipped profile turns networking off and downs the link" "$off" "off 
 # conflated when the feature was described.
 check "unsetting goes back to none chosen" "$("$ncfg" profile get 2>&1)" "no profile chosen"
 mtu=$("$ncfg" show 2>/dev/null |
-	python3 -c 'import sys,json; print(json.load(sys.stdin)["interfaces"][0].get("mtu"))' 2>/dev/null ||
+	python3 -c 'import sys,json; print(json.load(sys.stdin)["devices"][0].get("mtu"))' 2>/dev/null ||
 	echo "unreadable")
 check "and the machine's own configuration is back" "$mtu" "1500"
 

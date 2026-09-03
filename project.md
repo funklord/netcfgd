@@ -755,6 +755,28 @@ It is not adopted, for one structural reason and three local ones:
 
 `gui/` is not a candidate at all while Qt needs `moc`.
 
+**That last sentence has been overtaken, and the correction arrived by way of
+the README rather than by re-running the evaluation.** `fmake` builds the Qt
+client now — `python3 ~/src/fmake/fmake` produces `netcfgd-gui`, the same
+program `make gui` builds, from the twelve `gui/src/` sources, the eleven mocs
+and both `client/` sources. So the moc objection is answered; the archive
+objection above is not, and is still what keeps `client/` on its own Makefile
+(fmake links the library sources into the binary rather than emitting
+`libncfg_client.a`, which `make gui` builds first and links).
+
+Two cautions that belong with it, moved here from the README because they are
+about building this tree rather than about using netcfgd:
+
+- **Not `/usr/bin/fmake`**, which is older than fixes this needs. The checkout
+  at `../fmake` is the one that works.
+- **The daemon and the CLI are not fmake's, and that is not a gap to close.**
+  They are a Cargo workspace of twenty-one crates; fmake drives rustc directly
+  — one crate root, one artifact — so it resolves no workspace, no inter-crate
+  dependency and nothing from a registry. `make build` is how the daemon gets
+  built. What `fmake.toml` states is only the boundary between the two halves:
+  which four directories hold the Rust, and that the client is called
+  netcfgd-gui.
+
 **What the check was worth anyway:** it sent someone to read `client/Makefile` against the dependency rules the family treats as load-bearing, and it holds — `%.o: %.c $(HEADERS)` and `tests/client_test: … $(HEADERS)` make every object *and the test binary* depend on both headers explicitly, so the stale-object-versus-library ABI trap cannot happen here. Verified by touching a header and watching the test binary rebuild. The first measurement of that said it did **not** rebuild, and was wrong: `stat` reports whole seconds, and the rebuild landed inside one. Nanosecond timestamps settled it.
 
 ### Verifying — the method, which has earned its keep
@@ -6707,6 +6729,103 @@ you, the apparatus is where the error usually is."* Every one of them was
 caught by a second reading that cost one command — `ip -br link` against the
 sysfs glob, a captured status against a pipeline's, the script's own refusal
 message against a wrapper. None was caught by being careful.
+
+---
+
+## 10.13 Open: netcfgd starts a second supplicant on its own orphan
+
+**2026-09-03, measured on this machine**, and it is very likely 10.9's
+mechanism. The service was `inactive (dead)` and its cgroup still held **two
+`wpa_supplicant` processes on `wlp0s20f3`**, both reparented to init:
+
+    1305   07:47:49  -B -Dnl80211,wext     -i wlp0s20f3 -C /run/wpa_supplicant -P /run/netcfgd/supplicant/wlp0s20f3.pid
+    82149  15:31:25  -B -Dnl80211,wext -s  -i wlp0s20f3 -C /run/wpa_supplicant -P /run/netcfgd/supplicant/wlp0s20f3.pid
+
+One per netcfgd run: the boot start and the 15:31 start. `/run/netcfgd` does
+not exist, NetworkManager holds the radio with its own supplicant, and the
+machine's network is working — so this is a leak rather than an outage in
+progress.
+
+**The chain, and every link is a decision that is right on its own.**
+
+- `KillMode=process` deliberately keeps the supplicant alive across a stop
+  (0134, 0142), so `systemctl stop netcfgd` does not take the network down.
+- `RuntimeDirectoryPreserve=restart` deletes `/run/netcfgd` on a real stop,
+  taking the pid file with it. **Not the cause**: `pid_by_marker` exists for
+  exactly this and scans `/proc` for the `-P` path netcfgd composed, which
+  both orphans still carry in their own `argv` (0140).
+- Adoption is gated on `backend_is_reachable`, deliberately: adopting an
+  unreachable supplicant once captured the radio with a dead process and
+  locked NetworkManager out too, which the comment at `kernel.rs:1985` records
+  as "three defensible changes composing into a trap".
+- `Conflicts=NetworkManager.service` hands the radio to NM on stop. NM's own
+  supplicant then rebinds `/run/wpa_supplicant/<iface>`, so netcfgd's orphan
+  loses its control socket and becomes **unreachable** — and therefore
+  unadoptable.
+- A declined adoption **falls through to the start path**:
+  `BackendKind::Supplicant => start_supplicant(iface)`.
+
+**The guard that should catch it is looking the other way.**
+`start_supplicant` does refuse a second supplicant, and its message names this
+exact consequence — *"two on one radio drop the association, which takes the
+address and the default route with it"*. But it refuses on
+`contention::contenders`, which detects **another manager** by reading that
+manager's own state. At 15:31 `Conflicts=` had already stopped NM, so there
+was no contender, and netcfgd started a second supplicant beside its own live
+orphan.
+
+So an unreachable orphan of netcfgd's own is invisible to both checks: not
+adoptable, because it cannot be reached; not a contender, because it is not
+somebody else's; and never stopped, because 0134 says an unannounced stop
+holds. **It is neither adopted nor refused nor killed, and one accumulates per
+stop/start cycle.** The comment at `kernel.rs:1993` says declining "costs
+nothing by comparison: netcfgd refuses the radio, says why, and whoever can
+drive it keeps it" — the refusal it describes is not what the code does.
+
+**Why this is likely 10.9 and is not yet proof.** Two supplicants on one radio
+produce exactly what 10.9 records: repeated carrier loss, no recovery, and
+netcfgd silent because its own plan was satisfied. The mechanism is now
+demonstrated. What is missing is that these two orphans date from 2026-09-03,
+and the outage was 2026-09-02 — so whether two were live in *that* window is
+not recorded anywhere, and with the supplicant then logging nowhere (the `-s`
+fault, since fixed) it probably cannot be recovered. A recurrence is
+diagnosable now in a way that one was not.
+
+**Not fixed, because the fix is a decision that touches three records.** The
+shape that looks right: an orphan carrying **netcfgd's own marker** for this
+interface, found by `pid_by_marker` and not reachable, is neither adoptable nor
+ignorable — so refuse the radio and say so, or stop it. Stopping it is not the
+0141 case, because the marker proves it is netcfgd's own process rather than
+somebody else's; but it does bear on 0134's "an unannounced stop holds", and
+choosing between refusing and stopping is the holder's.
+
+**Recovering by hand**, meanwhile, is `kill` on any `wpa_supplicant` whose
+`argv` contains `/run/netcfgd/supplicant/`, while netcfgd is not running:
+
+    for p in $(pgrep -x wpa_supplicant); do
+            grep -qa /run/netcfgd/supplicant/ /proc/$p/cmdline && echo "$p"
+    done
+
+**Written that way on purpose.** The obvious form,
+`pgrep -af 'P /run/netcfgd/supplicant/'`, matches the shell that runs it —
+the whole eval is that shell's command line — so it reports one pid too many
+and, in a loop, never exits. `running-code.md` records 38 of those alive on
+one machine, the oldest 19 days. `pgrep -x` matches the process *name*, which
+a shell cannot satisfy.
+
+## 10.14 Bluetooth is written and has never run
+
+Recorded because the README now points here for what is proven. The
+`bluetooth` block, the two backends and the adapter compile and are covered by
+fixtures, and `tests/live/bluetooth.sh` exists — but it needs real root for
+`/dev/vhci` and **has never been executed**, on this machine or any other. Its
+skip was one of the two that reported success under `NCFG_LIVE=1` until
+2026-09-03 (10.11), which is how it stayed invisible: the suite was reporting a
+pass for a script that ran nothing.
+
+So Bluetooth's status is *written, unverified* — a weaker claim than every
+other feature in the README, and the one to say out loud if anybody asks what
+to try first.
 
 ---
 
