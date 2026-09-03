@@ -6301,6 +6301,24 @@ gathered here so a new session does not have to find them.
 - **A copy of a check is not the check.** The same verifier re-implemented `commit-msg`'s tooling-attribution pattern from memory and left out its scrubbing of the two names `.claude` and `CLAUDE.md` — so it flagged two commits, one of which was *the commit that taught the hook that difference*. The rule the hook encodes is narrow on purpose: those two names are unavoidable when a message says where the shared tooling lives, and neither is a plausible spelling of attribution. Reading the flagged message rather than trusting the flag is what separated "the message is wrong" from "the check is wrong", and it was the check. Where a gate exists, run *it*; a paraphrase of a gate is a second implementation that will disagree with the first.
 - **A note written to stand alone stops making sense where it is folded.** Squashing the small `project.md` folds into the change each describes is what the no-docs-only rule asks for, and it broke three of them: a fold that opened "Two of them are pppd's behaviour" was pointing at a findings list only a standalone commit had, and after the merge the pronoun had no antecedent at all. The other twenty-one read fine, because they opened with a statement rather than a reference. **Prose that survives being moved is prose that names its subject**, and the ones that did not were repaired by naming it — with the replacement asserted rather than assumed, since an edit that silently matches nothing is the failure recorded two entries above.
 
+
+- **The `rss` budget passed with 244 KB of headroom, on a machine that was
+  not idle.** Measured 2026-09-02 during a full `make check`: `rss: netcfgd
+  peak 4620 KB of 4864 limit`, of which the gate attributes 512 KB to
+  netcfgd itself and 2720 KB to the measuring process' share. That is a 5%
+  margin, and peak RSS is not a property of the binary alone -- allocator
+  behaviour and what the kernel is doing for everything else on the box both
+  move it. The run happened while several other projects were building, with
+  the load average above 100 on twelve cores.
+
+  So two things follow, and only the second is a suggestion. **A pass here
+  is a statement about this machine at that moment rather than a portable
+  one** -- which the gate does not claim, but a reader seeing green may
+  assume. And **the first red from this gate should be reproduced idle
+  before it is read as a regression**, because a 5% margin is within what a
+  loaded machine can move on its own. Reported from claude-guidelines, which
+  was running the gate to check that some documentation commits had broken
+  nothing; they had not, and this is the only thing the run turned up.
 ---
 
 ## 10.9 Open: a laptop lost carrier nine times in an hour, unexplained
