@@ -1053,6 +1053,10 @@ fn apply_request(
 		},
 		None => None,
 	};
+	// Taken before the plan and cleared only after it ran, which is the order
+	// `reconcile_drift` uses: a plan that could not be applied leaves the note
+	// in place so the next attempt still performs the cycle.
+	let cycling = state.sims.pending();
 	let options = PlanOptions {
 		confirm_window: window,
 		revert_to: last_good.as_ref().map(netcfgd_host::document_hash),
@@ -1067,13 +1071,24 @@ fn apply_request(
 		// the reconcile loop would: the operator asked netcfgd to make the
 		// machine match, and a modem sitting on a source nothing selected is
 		// one of the ways it does not.
-		cycle: state.sims.pending(),
+		cycle: cycling.clone(),
 	};
 	let mut executor = match state.executor() {
 		Ok(executor) => executor,
 		Err(message) => return Response::error(message),
 	};
 	let (_, journal) = state.apply(&options, &mut executor);
+	// **Cleared here as well as in the reconcile loop, and it was not.** The
+	// note that a modem is waiting for its link to be cycled is taken before
+	// the plan and forgotten after the plan ran; `reconcile_drift` did both
+	// and this path did only the first. So an `ncfg apply` performed the cycle
+	// and left the note, and every apply after it cycled the link again --
+	// taking the link down and up on a machine that had already switched SIM.
+	//
+	// The reconcile loop would eventually have cleared it, but only on a pass
+	// that found something to reconcile: it returns before taking the notes
+	// when nothing is drifting, which on a converged machine is every pass.
+	state.sims.cycled(&cycling);
 	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	state.reobserve();
 

@@ -7085,6 +7085,45 @@ accessor rather than a gap.
 
 ---
 
+## 10.19 A SIM cycle note that only one of its two readers cleared
+
+**2026-09-04**, from sweeping the modem code with the same lens. It is a real
+asymmetry, and the symptom is narrower than it first looked -- which is the
+part worth writing down, because three reproduction attempts failed before the
+narrowing.
+
+`Sims::pending` records that a modem's link has to be cycled for a new SIM
+source to take. It is read at two sites. `reconcile_drift` takes the list
+before planning and calls `cycled()` after applying, deliberately in that
+order so a plan that could not be applied leaves the note for the next pass.
+`apply_request` -- a deliberate `ncfg apply` -- passed the same list into its
+plan options and **never cleared it**. There is exactly one call to `cycled()`
+in the tree, which is how this was found.
+
+**What it costs is a lie in the modems tab, not a flapping link.** The note's
+other reader is `Sims::status`, which fills `cycle_pending` on every
+`modem_list`, and the gui's `state_of` tests that field *first*: a stale note
+makes the tab report **"switching"** for ever, where the truth is "fallen
+back". That view's own comment says telling those two apart is the whole
+reason it exists -- *"a fallback that succeeded looks like a machine
+configured that way unless something says otherwise"*.
+
+**The flapping-link reading was not demonstrated and is not claimed.** Four
+fixtures were built to make a stale note cycle the link on a second apply --
+`config = "null"`, then a static address, then `on_drift = "report"` so the
+reconcile loop could not consume the note first, each with two applies -- and
+every one behaved identically with the fix and without it. On a default
+machine the reconcile loop performs the cycle and clears the note before any
+deliberate apply sees it, which is why the window is narrow. What could not be
+built is a case where the stale note produced a second `link.down`, so that
+consequence stays a reading of the planner rather than a measurement.
+
+So the fix is the two paths agreeing, and the honest claim is the status
+field. Recorded this way because a fix whose symptom is asserted rather than
+shown is the kind that gets quoted later as though it had been measured.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
