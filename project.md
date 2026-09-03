@@ -6576,6 +6576,86 @@ one tree.
 
 ---
 
+## 10.12 What the live suite actually executes here, and what it never has
+
+**2026-09-03, measured on the development machine**, prompted by asking whether
+the wifi and ethernet work is tested. "The suite passes" and "this code has
+been exercised" are different claims, and nothing wrote down which of them
+`make live` supports. This is that, so the next reader inherits a number
+rather than an impression.
+
+**What runs, and what it proves.** Each script invoked the way the Makefile
+invokes it, `NCFG_LIVE=1` where the Makefile sets it:
+
+- **Wireless, 128 checks against a real `wpa_supplicant`** — `wifi` 13,
+  `wifi_journey` 22, `enterprise` 23, `roam` 9, `displace` 16, `revive` 10,
+  `dot1x` 20, `stations` 15. All pass.
+- **Wired, 162 checks** — `links` 108, `switch` 4, `drift` 12, `dhcpcd` 38.
+  All pass.
+
+**Three never execute on a machine like this one**, and that is the part worth
+knowing:
+
+- **`association.sh`, which is the only live test of a network's `metric`
+  outranking its interface's `preference` (0153).** It skips because the probe
+  is not built, and building it would not be enough: it refuses without root by
+  design, and it needs a *real* association to a network the document
+  describes. So the feature's live coverage has run exactly once, by hand, on
+  the machine its author was sitting at. The planner half is properly covered —
+  `crates/netcfgd-plan/tests/fixtures.rs` asserts that a metric outranks a
+  preference, that an absent metric leaves the preference alone, and that an
+  association to an undescribed network falls back — but those are fixtures,
+  and the field they read is filled by resolving a live association.
+- **`hwsim.sh`**, needing real root for module loading and phy namespace moves.
+  It is the one that drives actual virtual radios.
+- **`ap.sh`**, needing `hostapd`, which is not installed.
+
+All three skip honestly and none is invoked with `NCFG_LIVE`, so they are
+allowed to.
+
+**Read this next to 10.9.** Those 290 live checks pass against virtual
+interfaces inside a namespace; the one time this code met a real radio for an
+hour it lost carrier nine times and nothing could say why. The suite is not
+weak — it is aimed at what a namespace can hold, and a radio that stops
+associating is not that.
+
+### The invocation is part of the test, and getting it wrong invents findings
+
+**Three different launch forms are in use and they are not interchangeable**,
+which is the reusable part of this measurement:
+
+    unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"   # most of them
+    sh tests/live/dhcpcd.sh                                 # makes its own
+    sh tests/live/hwsim.sh                                  # wants real root
+
+Taking the same measurement three times with the wrong form produced three
+confident wrong answers in one sitting, every one of which read as a defect in
+somebody else's correct code:
+
+- **A pipeline's `$?` is the last process's.** `... | tail -3; echo $?` reported
+  `association.sh` exiting **0** under `NCFG_LIVE=1` — the exact vacuous-skip
+  fault fixed hours earlier — and it was `tail`'s status. That script's `skip()`
+  is correct and exits 1. Capturing into a variable and reading the status of
+  the command itself is what settled it.
+- **Bare, where the Makefile uses a namespace.** Run without `unshare -rn`,
+  every wireless script skips for want of a dummy link, which reads exactly
+  like "the wifi suite does not run here". Under the real invocation all eight
+  run and pass.
+- **Namespaced, where the script makes its own.** `dhcpcd.sh` refuses inside a
+  plain `unshare -rn`, because `setgroups` is forbidden there and `dhcpcd`
+  cannot drop privileges. Its refusal names the cause and says to run it bare,
+  which is the only reason this took one command to resolve rather than an
+  afternoon.
+
+The shape is `evidence.md`'s, met three times in an hour: **a probe checked
+against the mechanism its author had in mind rather than against the failure it
+is meant to catch.** So a coverage claim about this tree has to name its
+invocation, and a surprising result about a test's own honesty should be
+re-measured before it is written down — twice here the apparatus was wrong and
+the code was right.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
