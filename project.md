@@ -6829,6 +6829,53 @@ to try first.
 
 ---
 
+## 10.15 Open: `make live` is broken at HEAD by the restructure's own success
+
+**2026-09-03.** Passes 1a and 1b of [0155](doc/decision/0155-a-link-is-the-unit-of-configuration.md)
+moved `mtu`, `mac`, `link_settings`, `kind`, `master`, `qdisc`,
+`ingress_redirect` and `bridge_vlans` from `interface` to `device`, and 10.10
+records that "the config moved with the model". **The live fixtures did not
+move with it.** `make live` now fails on the first script it reaches, so
+nothing after that runs at all.
+
+Measured by re-running each script against a freshly built binary:
+
+- `wifi.sh` used `wifi { priority = 30 }`, which [0154](doc/decision/0154-one-number-ranks-a-network.md)
+  replaced with a network-level `metric`. **Fixed**, and its assertion now
+  reads the derived supplicant priority — `4096 - metric` via `join_rank` —
+  rather than the number written, which is the only check that the inversion
+  happens exactly once.
+- `stations.sh` had `kind = "dummy"` in an `interface`. **Fixed.**
+- `profile.sh` had `mtu` in an `interface`. **Fixed**, onto the device.
+- **Fifteen more are stale and are not fixed**: `privacy`, `nat`, `qdisc`,
+  `links`, `nm`, `ingress`, `rules`, `ap`, `report`, `hooks`, `acl`,
+  `unmanage`, `readonly`, `portal`, `helper`, `drift`, `confirm` and
+  `altname` carry roughly 79 moved keys between them, counted by an `awk`
+  range over `interface` blocks — crude, so treat it as a scale rather than a
+  tally. `links.sh` is the largest and the one `make live` hits first.
+
+The fix per file is mechanical and the diagnostic does most of it: the
+compiler names the line, the key and the block to move it to, because the
+restructure deliberately kept sixteen spellings as errors that say "move this
+line" rather than "unknown key".
+
+**Why nobody saw it, and this is the part worth keeping.** Every one of these
+scripts passed for me earlier the same day — against a binary built from a
+branch that predated the move. `build-and-commit.md` states the rule this
+breaks: *never conclude that a test passes from a binary the build step did
+not rebuild*. The live scripts invoke `target/debug/netcfgd` by path and do
+not build it, so a stale binary makes the whole suite report on code that is
+no longer there. That is a second instance of 10.11's class — a check that
+ran and told you nothing — and it is the worst-behaved instance so far,
+because the number it reported was 108 passing checks rather than a skip.
+
+**What would keep it from recurring**: `make live` depends on the debug build
+the scripts actually run, so the suite cannot be pointed at a stale artifact.
+That is a Makefile change with a real cost — it makes every live run a build
+first — and is the holder's call rather than a worker's.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
