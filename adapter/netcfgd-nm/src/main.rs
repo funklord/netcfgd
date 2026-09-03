@@ -349,13 +349,27 @@ fn publish(
 		let path = device::path_for(*number);
 		// Each interface separately, because the object carries two: removing
 		// the last one is what takes the node out of the tree and emits
-		// InterfacesRemoved. Only one of the four per-kind interfaces is on any
-		// given object, so three of these find nothing and that is not an
+		// InterfacesRemoved. Only one per-kind interface is on any given
+		// object, so all but one of these find nothing and that is not an
 		// error.
+		//
+		// **One arm per `device::Flavour`, and it must stay that way.** This
+		// listed four of the eight the add path below serves -- `Bridge`,
+		// `Bond`, `Vlan` and `WireGuard` were added later and never added
+		// here -- so those four left their own interface at the path when the
+		// device went away. `.Device` was removed, which is what libnm reads,
+		// so the device correctly vanished from `nmcli` and the leak was
+		// invisible from there: what remained was an exported node nobody
+		// could reach, one per departed device, for the life of the process.
+		// Measured on a VLAN: eleven objects served for ten devices.
 		let _ = server.remove::<device::Wireless, _>(&path);
 		let _ = server.remove::<device::Wired, _>(&path);
 		let _ = server.remove::<device::Generic, _>(&path);
 		let _ = server.remove::<device::Loopback, _>(&path);
+		let _ = server.remove::<device::Bridge, _>(&path);
+		let _ = server.remove::<device::Bond, _>(&path);
+		let _ = server.remove::<device::Vlan, _>(&path);
+		let _ = server.remove::<device::WireGuard, _>(&path);
 		let _ = server.remove::<ipconfig::Ip4Config, _>(ipconfig::path_for(*number, false));
 		let _ = server.remove::<ipconfig::Ip6Config, _>(ipconfig::path_for(*number, true));
 		server

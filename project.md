@@ -6997,6 +6997,43 @@ by disabling the emit and watching `nm.sh` fail again.
 
 ---
 
+## 10.17 Fixed: the shim left an object behind for four device kinds
+
+**2026-09-04.** Found while tracing 10.16's third case, and it is not that
+bug: it survived it, and no test could see it.
+
+A device object carries `.Device` plus one per-kind interface, and removing
+the *last* interface is what takes the node out of the object tree. The
+removal path listed four kinds -- `Wireless`, `Wired`, `Generic`, `Loopback`
+-- while the add path serves eight. `Bridge`, `Bond`, `Vlan` and `WireGuard`
+were added to the add path later and never to the removal path, so a device of
+one of those kinds left its own interface exported at the path after its link
+went away.
+
+**Invisible from every direction anybody was looking.** libnm builds its
+device cache from `.Device`, which *was* removed -- so `nmcli` correctly
+stopped listing the device, and the existing check that a departed link leaves
+the device list passed while four of eight kinds leaked. What remained was an
+exported node nobody could reach, one per departed device, for the life of the
+process.
+
+Measured with `busctl tree`, which counts what is actually served rather than
+what a client can see: **eleven objects for ten devices** after a VLAN was
+unmanaged and deleted. That comparison is the new check, and it is the only
+one that can fail for this -- proved by taking the four lines out again and
+watching it go back to eleven.
+
+**Why the obvious test could not catch it**, which is the part worth keeping:
+the suite tested device removal on `quiet0`, a dummy, and a dummy is
+`Generic` -- one of the four that *was* removed. A test that exercises one
+member of a set says nothing about the others, and here the set had drifted
+into two halves that behaved differently. The new check picks a VLAN
+deliberately, and asserts against the object tree rather than against the
+client's view, because the client's view is exactly what was right while the
+tree was wrong.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.

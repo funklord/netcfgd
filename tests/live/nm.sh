@@ -1216,6 +1216,50 @@ PYEOF
 	fi
 fi
 
+# **The same again for a VLAN, because a dummy cannot see this class.** A
+# device object carries one per-kind interface beside `.Device`, and removing
+# the *last* interface is what takes the node out of the tree and emits
+# InterfacesRemoved. The removal path listed four of the eight kinds the add
+# path serves, so a bridge, bond, VLAN or WireGuard device left its own
+# interface behind, the node never emptied, and libnm went on reporting a
+# device whose link was gone. quiet0 is a dummy, which is `Generic`, which was
+# one of the four -- so the check above passed while four kinds were broken.
+cat >> "$work/etc/netcfgd.conf" <<'UNMANAGE2'
+
+override device tagged0 {
+	vlan    { parent = "probe0"; id = 42 }
+	managed = false
+}
+UNMANAGE2
+waited=0
+until [ "$("$ncfg" plan 2>&1 | grep -c 'tagged0' || true)" = "0" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 60 ] && break
+	sleep 0.1
+done
+ip link del tagged0
+waited=0
+until [ -z "$(field tagged0)" ]; do
+	waited=$((waited + 1))
+	if [ "$waited" -gt 100 ]; then
+		break
+	fi
+	sleep 0.1
+done
+check "a vlan that goes away leaves the device list too" "$(field tagged0)" ""
+
+# **And its object goes with it.** The check above passes either way, which is
+# why this one is here: libnm reads `.Device`, so removing that alone makes a
+# device invisible while its per-kind interface stays exported at the same
+# path for ever. `busctl tree` counts what is actually served, so a node left
+# behind by an unremoved interface shows up here and nowhere else.
+if command -v busctl >/dev/null 2>&1; then
+	check "and no object is left behind at its path" \
+		"$(busctl --user --address="$address" tree org.freedesktop.NetworkManager \
+		     2>/dev/null | grep -c "/Devices/" || true)" \
+		"$(devices | wc -l)"
+fi
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "nm.sh: all checks passed"
