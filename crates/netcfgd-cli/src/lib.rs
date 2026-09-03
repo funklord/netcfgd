@@ -88,6 +88,10 @@ usage:
                              unset               go back to no profile chosen,
                                                  which is the default and is
                                                  not a profile called `none`
+  ncfg modem [status]      which SIM source each modem is on, and whether it
+                           is still waiting for its link to be cycled. Reports
+                           only: the order is the config's and the choice is
+                           netcfgd's
   ncfg secret SUBCOMMAND   credentials the config refers to. SUBCOMMAND is:
                              set NAME            store the value of
                                                  `@secret:NAME`, asked for at
@@ -243,6 +247,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"explain" => command_explain(&positional, &options),
 		"monitor" => command_monitor(&options),
 		"wifi" => command_wifi(&positional, &options),
+		"modem" => command_modem(&positional, &options),
 		"control" => control::run(&positional, &options),
 		"config" => drop_in::run(&positional, &options),
 		"profile" => profile::run(&positional, &options),
@@ -1164,6 +1169,77 @@ pub(crate) fn access_point_name(name: Option<&str>, ssid: &str) -> String {
 		Some("") => "(hidden)".to_owned(),
 		Some(text) => text.to_owned(),
 	}
+}
+
+/// `ncfg modem` -- which SIM source each modem is on.
+///
+/// Read-only, and `observe` rather than `admin`: it reports what the document
+/// lists and what netcfgd has selected from it. Choosing a source is not a
+/// verb, deliberately -- 0152 makes the order the operator's and the choice
+/// netcfgd's, and a command that overrode the choice would be netcfgd's
+/// fallback being fought by hand.
+fn command_modem(positional: &[String], options: &Options) -> Result<ExitCode, String> {
+	// One subcommand and it is the default, so `ncfg modem` on its own works.
+	// A name that is not `status` is refused rather than ignored: silently
+	// listing for `ncfg modem swtich` would read as the typo having worked.
+	match positional.first().map(String::as_str) {
+		None | Some("status") => {}
+		Some(other) => {
+			return Err(format!(
+				"unknown modem subcommand `{other}`; `ncfg modem` and \
+				 `ncfg modem status` both report what each modem is on"
+			));
+		}
+	}
+
+	let run_dir = state::resolve_dir(options.run_dir.as_deref());
+	let socket = client::socket_path(&run_dir);
+	match client::ask(&socket, &netcfgd_proto::Request::ModemList)? {
+		client::Answer::Modems { modems } => {
+			render_modems(&modems, options.json)?;
+			Ok(ExitCode::SUCCESS)
+		}
+		client::Answer::Error { message } => Err(message),
+		other => Err(format!("the daemon sent {}", other.describe())),
+	}
+}
+
+/// The modems, as a person reads them.
+///
+/// **`cycle_pending` is the column this was written for.** It is the
+/// difference between a modem that has switched and one that is still waiting
+/// for its link to come back, and until this verb existed it was reachable
+/// only through the gui -- so a fault that left the flag set had nothing that
+/// could see it from a script.
+fn render_modems(modems: &[netcfgd_proto::ModemStatus], json: bool) -> Result<(), String> {
+	if json {
+		let text = serde_json::to_string(modems)
+			.map_err(|error| format!("cannot render modems as json: {error}"))?;
+		println!("{text}");
+		return Ok(());
+	}
+	if modems.is_empty() {
+		println!("no device in the configuration has a `modem` block");
+		return Ok(());
+	}
+	for modem in modems {
+		let selected = modem.selected.as_deref().unwrap_or("none listed");
+		let state = if modem.cycle_pending {
+			"switching"
+		} else if modem.sim.len() > 1 && modem.selected.as_ref() != modem.sim.first() {
+			"fallen back"
+		} else {
+			"on its first choice"
+		};
+		println!("{}  {selected}  {state}", modem.device);
+		if !modem.sim.is_empty() {
+			println!("    sources: {}", modem.sim.join(", "));
+		}
+		if let Some(apn) = &modem.apn {
+			println!("    apn: {apn}");
+		}
+	}
+	Ok(())
 }
 
 /// The radios, and what netcfgd is doing about each.

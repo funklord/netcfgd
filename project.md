@@ -7108,19 +7108,42 @@ back". That view's own comment says telling those two apart is the whole
 reason it exists -- *"a fallback that succeeded looks like a machine
 configured that way unless something says otherwise"*.
 
-**The flapping-link reading was not demonstrated and is not claimed.** Four
-fixtures were built to make a stale note cycle the link on a second apply --
-`config = "null"`, then a static address, then `on_drift = "report"` so the
-reconcile loop could not consume the note first, each with two applies -- and
-every one behaved identically with the fix and without it. On a default
-machine the reconcile loop performs the cycle and clears the note before any
-deliberate apply sees it, which is why the window is narrow. What could not be
-built is a case where the stale note produced a second `link.down`, so that
-consequence stays a reading of the planner rather than a measurement.
+**Why it could not be reproduced, which took a verb to find out.** Five
+fixtures failed to make a stale note do anything -- `config = "null"`, a
+static address, `on_drift = "report"` so the loop could not reconcile, each
+with two applies -- and then `ncfg modem --json` polled every 50ms for six
+seconds never once saw `cycle_pending` set, though the log showed the advance
+happening.
+
+The answer is in `reconciling_interfaces`, and it is not a race that happens
+to go one way: **setting the note is itself what makes the loop act.** That
+filter includes any interface where `sims.is_pending`, deliberately, so the
+cycle is not planned and then dropped by `restrict`. So `advance` sets the
+note, the same pass finds the interface reconcilable *because* the note is
+set, cycles it and clears. A deliberate apply cannot get there first.
+
+**The window that is left is real and narrow**, and it is the one the fix
+closes: an `ncfg apply` that performs the cycle leaves the note, and the next
+loop pass finds the interface still pending, plans nothing -- the cycle having
+already happened -- and returns on `restricted.actions.is_empty()` before
+reaching the clear. The note then survives indefinitely, and `cycle_pending`
+with it. So the symptom is the status field, permanently, and the flapping
+link is not a consequence at all: by the time the note is stale the cycle has
+been done.
 
 So the fix is the two paths agreeing, and the honest claim is the status
 field. Recorded this way because a fix whose symptom is asserted rather than
-shown is the kind that gets quoted later as though it had been measured.
+shown is the kind that gets quoted later as though it had been measured -- and
+the first version of this entry said "the window is narrow" without being able
+to say why, which is the same fault one step smaller.
+
+**`ncfg modem` exists because of this.** `cycle_pending` was reachable only
+through the gui's modems tab, so a fault that left it set had nothing that
+could see it from a script -- and the six seconds of polling that finally
+explained the timing were not possible until the verb was there. It reports
+and does not choose: 0152 makes the order the operator's and the choice
+netcfgd's, and a command that overrode the choice would be netcfgd's fallback
+being fought by hand.
 
 ---
 

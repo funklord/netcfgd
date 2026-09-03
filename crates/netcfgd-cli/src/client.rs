@@ -44,6 +44,11 @@ pub(crate) enum Answer {
 		/// The one in effect, or none.
 		chosen: Option<String>,
 	},
+	/// The modems this machine has, and which SIM source each is on.
+	Modems {
+		/// One per device carrying a `modem` block.
+		modems: Vec<netcfgd_proto::ModemStatus>,
+	},
 	/// The radios this machine has.
 	Radios {
 		/// One per wireless interface.
@@ -72,6 +77,7 @@ impl Answer {
 			Self::WifiStatus(_) => "a radio status".to_owned(),
 			Self::ApStations(_) => "a station list".to_owned(),
 			Self::Radios { .. } => "a radio list".to_owned(),
+			Self::Modems { .. } => "a modem list".to_owned(),
 			Self::Profiles { .. } => "a profile list".to_owned(),
 			Self::Error { message } => format!("an error: {message}"),
 			Self::Unexpected(value) => {
