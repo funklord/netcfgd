@@ -73,6 +73,22 @@ pub(crate) fn reload_answer(event: &Event) -> Response {
 	}
 }
 
+/// The links, as a set a client would notice changing.
+///
+/// Sorted so that the kernel's ordering is not mistaken for a change: netlink
+/// does not promise to report links in the same order twice, and comparing
+/// two unsorted lists would report movement on a machine where nothing
+/// happened.
+fn link_shape(observed: &netcfgd_model::Observed) -> Vec<(String, bool)> {
+	let mut shape: Vec<(String, bool)> = observed
+		.links
+		.iter()
+		.map(|link| (link.name.clone(), link.up))
+		.collect();
+	shape.sort();
+	shape
+}
+
 impl State {
 	/// Read the config and the kernel once.
 	///
@@ -154,13 +170,25 @@ impl State {
 		}
 	}
 
-	/// Re-read the kernel.
-	pub(crate) fn reobserve(&mut self) {
+	/// Re-read the kernel, reporting whether the set of links moved.
+	///
+	/// **The link set rather than the whole observation**, because the caller
+	/// uses this to decide whether to tell subscribers the machine changed, and
+	/// the rest of an observation carries values that move on their own -- a
+	/// probe verdict, a lease timer -- which would make an idle machine emit
+	/// events for ever.
+	///
+	/// Names and their up state: a device appearing or going away is what a
+	/// client's device list is built from, and a link going down without
+	/// leaving is the other thing that changes what a device *is* to somebody
+	/// watching.
+	pub(crate) fn reobserve(&mut self) -> bool {
 		let prior = run_state::prior_state(&self.paths.run);
 		// The document goes in so the observation can answer one question it
 		// otherwise could not: whether a running access point still holds the
 		// passphrase the secret store has (decision 0052). Only a boolean comes
 		// back out.
+		let before = link_shape(&self.observed);
 		if let Ok(observed) =
 			netcfgd_observe::current(&prior, &self.paths.run, self.desired.as_ref())
 		{
@@ -172,6 +200,7 @@ impl State {
 			self.probes.apply(&mut self.observed);
 			let _ = run_state::write_observed(&self.paths.run, &self.observed);
 		}
+		link_shape(&self.observed) != before
 	}
 
 	/// What would change.

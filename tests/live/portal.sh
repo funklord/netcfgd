@@ -121,8 +121,14 @@ device portal0 {
 }
 interface portal0 {
 	config = "10.3.3.1/24"
-	# `report`, so taking the address away below stays taken away long enough
-	# for the daemon to observe the interface bare. Under `reconcile` it puts
+	# **Escaped, because this heredoc is unquoted.** It has to be, for \$log
+	# below -- and that means a backtick in a comment is command substitution:
+	# the shell ran \`report\` and \`reconcile\` as commands, printed "not
+	# found" for each, and replaced them with their empty output, so the
+	# comment netcfgd stored had the two words silently removed.
+	#
+	# \`report\`, so taking the address away below stays taken away long enough
+	# for the daemon to observe the interface bare. Under \`reconcile\` it puts
 	# the address back within the same pass, so the machine never looks
 	# unaddressed and the transition the probe fires on never happens -- which
 	# is true of the real thing too and is worth knowing.

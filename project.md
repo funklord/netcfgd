@@ -6949,7 +6949,7 @@ Proved by removing the two lines again and watching both suites go back to
 one failing check each, then restoring them: the fix is what makes them pass,
 rather than something else that changed in the same pass.
 
-**A third case is NOT this bug, and both of the obvious suspects are cleared.** `nm.sh`'s "a link that goes
+**A third case was NOT this bug, and had its own cause.** `nm.sh`'s "a link that goes
 away leaves the device list" unmanages `quiet0`, deletes the link, and expects
 NetworkManager's list to lose it. It reports `dummy:unmanaged` — the device is
 still there. That test's own comment explains what it depends on: *"a dummy the
@@ -6959,15 +6959,41 @@ makes 'gone' stay gone."* So `managed = false` is not stopping re-creation,
 where the other two are about it not permitting removal. One question, asked
 twice in each direction.
 
-That one is still open. netcfgd is not re-creating the link: asked to plan an
-unmanaged dummy that does not exist, it answers `nothing to do` and warns that
-the block is read and not acted on. And the shim is not inventing it: its
-`adopt` retains device numbers only for names present in `observed.links`, so
-a deleted link is retired. That leaves the observation itself and the
-`InterfacesRemoved` signal the test's own comment says the check depends on --
-*"nmcli asks libnm's cache, which is only correct if InterfacesRemoved
-fired"* -- and neither has been measured. It is reproducible rather than
-flaky: two runs, same result.
+**Fixed 2026-09-03, and it was in netcfgd rather than in the shim.** Both
+obvious suspects were cleared first: netcfgd is not re-creating the link
+(asked to plan an unmanaged dummy that does not exist it answers `nothing to
+do`), and the shim is not inventing it (its `adopt` retains device numbers
+only for names present in `observed.links`). What was left was the thing that
+tells the shim to look again.
+
+**The shim redraws on any netcfgd event and has no other trigger, and netcfgd
+emitted none.** `Event::Observed` is documented as *"the kernel reported a
+change"* and both of its emit sites were after an apply -- `applied N actions`
+and `reconciled N actions` -- so the stream carried what netcfgd *did*, not
+what the machine *is*. For a managed device that is nearly the same thing.
+For an unmanaged one, which netcfgd deliberately never acts on, it is nothing
+at all: the device drifts by definition and is never reconciled, so deleting
+its link produced no event, the shim never refreshed, and it went on serving a
+device whose link was gone.
+
+Measured, with the control the other way up:
+
+    delete a MANAGED link    2 events (drift, then reconciled 3 actions)
+    delete an UNMANAGED link 0 events
+
+The daemon now broadcasts `Observed` when the set of links it can see moves.
+**The link set and not the whole observation**, because the rest of an
+observation carries values that move on their own -- a probe verdict, a lease
+timer -- and comparing all of it would make an idle machine emit for ever. The
+shape compared is names and up state, sorted, since netlink does not promise
+to report links in the same order twice and an unsorted comparison would
+report movement on a machine where nothing happened.
+
+Both halves measured rather than assumed: one event when an unmanaged link is
+deleted, and **zero over 24 seconds on an idle machine**. Proved load-bearing
+by disabling the emit and watching `nm.sh` fail again.
+
+`make live` passes end to end now -- 51 suites, no failing checks.
 
 ---
 

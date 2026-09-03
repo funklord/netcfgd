@@ -258,7 +258,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		advance_failed_sims(&mut state, probe_changed);
 
 		if kernel_changed || config_changed || probe_changed || ticked {
-			state.reobserve();
+			announce_links(state.reobserve(), &mut subscribers);
 			let drift = state.detect_drift();
 			for event in &drift {
 				server::broadcast(&mut subscribers, event);
@@ -585,6 +585,31 @@ fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 		subscribers,
 		&Event::Observed {
 			summary: format!("applied {} actions", journal.done()),
+		},
+	);
+}
+
+/// Tell subscribers the kernel's link set moved.
+///
+/// **A link appearing or going away is an event even when netcfgd does nothing
+/// about it.** `Event::Observed` is documented as "the kernel reported a
+/// change" and was emitted only after an apply -- so a client subscribing to
+/// the stream heard about the machine only when netcfgd acted on it.
+///
+/// That is exactly wrong for an unmanaged device, which netcfgd deliberately
+/// never acts on. Deleting one produced no drift, no reconcile and no event,
+/// and the `NetworkManager` shim -- which redraws on any event and has no other
+/// trigger -- went on serving a device whose link was gone, reporting it as
+/// `unmanaged` for ever. Measured before the fix: two events for deleting a
+/// managed link, none at all for an unmanaged one.
+fn announce_links(moved: bool, subscribers: &mut Vec<std::sync::mpsc::SyncSender<Event>>) {
+	if !moved {
+		return;
+	}
+	server::broadcast(
+		subscribers,
+		&Event::Observed {
+			summary: "the links the kernel reports have changed".to_owned(),
 		},
 	);
 }
