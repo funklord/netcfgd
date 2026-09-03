@@ -76,8 +76,12 @@ class Session:
 		os.makedirs(f"{self.work}/run")
 		with open(f"{self.work}/etc/netcfgd.conf", "w") as handle:
 			handle.write(
-			    'interface probe0 {\n\tkind = "dummy"\n\tconfig = "10.11.0.1/24"\n}\n'
-			    'interface probe1 {\n\tkind = "dummy"\n\tconfig = "reported"\n}\n'
+			    # The kind is the device's since 0155 pass 1b; the interface
+			    # block stays because it is what says the link is netcfgd's.
+			    'device probe0 {\n\tkind = "dummy"\n}\n'
+			    'interface probe0 {\n\tconfig = "10.11.0.1/24"\n}\n'
+			    'device probe1 {\n\tkind = "dummy"\n}\n'
+			    'interface probe1 {\n\tconfig = "reported"\n}\n'
 			)
 		# Something outside netcfgd, reporting an interface netcfgd has not
 		# configured. `ncfg status` has marked these since the modem work and
