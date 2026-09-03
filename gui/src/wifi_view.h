@@ -98,6 +98,14 @@ private:
 	/* The chosen radio's state, kept so `scan` and `join` can be disabled
 	 * without asking the daemon again. */
 	ncfg_radio_row   chosen_radio;
+	/* Whether the last refresh could reach netcfgd at all.
+	 *
+	 * The buttons below are decided from what the daemon last said, so a
+	 * refresh that could not ask it must not leave them offering actions
+	 * against a machine this view can no longer see. Kept rather than
+	 * clearing the radio list, because a daemon that blips should not also
+	 * lose the radio the operator picked. */
+	bool             reachable = true;
 	QTableWidget    *table;
 	/* The rows as the daemon sent them, because the table holds rendered text
 	 * and `add` needs the exact SSID octets as hex. Re-drawing from a QString

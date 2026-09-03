@@ -292,8 +292,21 @@ void ncfg_wifi_view::refresh()
 	if (!connection->links(&rows, &error)) {
 		status->setText(error);
 		emit reported(error);
+		/* **Everything that decides what the buttons offer is below this, and
+		 * this return used to reach none of it.** Three of the four ways out
+		 * of `refresh` call `selection_changed` and this one did not, so a
+		 * daemon that stopped answering -- or refused `links` for want of the
+		 * observe tier -- left `scan`, `join`, `leave` and `add` enabled
+		 * exactly as the last good refresh had them, pointing at a radio this
+		 * view can no longer see. */
+		reachable = false;
+		table->setRowCount(0);
+		chosen_radio = ncfg_radio_row();
+		update_contention();
+		selection_changed();
 		return;
 	}
+	reachable = true;
 
 	const QString previous = chosen_interface();
 	QStringList radios;
@@ -569,7 +582,11 @@ void ncfg_wifi_view::leave()
 
 void ncfg_wifi_view::selection_changed()
 {
-	const bool have_radio = !chosen_interface().isEmpty();
+	/* A radio this view can act on, which needs netcfgd to have answered:
+	 * the combo keeps its entries across a blip so the operator's choice
+	 * survives, and they are not something to offer actions against while
+	 * nothing can be asked about them. */
+	const bool have_radio = reachable && !chosen_interface().isEmpty();
 	const int row = table->currentRow();
 	const QTableWidgetItem *configured = row >= 0 ? table->item(row, 3) : nullptr;
 

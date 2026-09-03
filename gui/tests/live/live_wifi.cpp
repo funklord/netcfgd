@@ -273,6 +273,32 @@ int main(int argc, char **argv)
 	check("and the banner goes when the other manager does",
 	    !contention_shown(&view));
 
+	/* 6. A daemon that goes away leaves nothing enabled.
+	 *
+	 * `refresh` decides what the buttons offer from what netcfgd last said,
+	 * and its `links` failure used to return before any of that -- so the
+	 * buttons kept exactly what the previous refresh had given them, against
+	 * a radio the view could no longer see. Three of the four ways out of
+	 * that function updated the buttons and one did not.
+	 *
+	 * **The view has to be populated first for this to mean anything.** A
+	 * freshly built one starts with everything disabled whatever `refresh`
+	 * does, so a check against a new view passes with the fault in place --
+	 * measured, before this was written this way. Re-pointing the live
+	 * connection at a socket that is not there is what makes it a transition
+	 * rather than an initial state, and it is last because it leaves the
+	 * connection closed. */
+	QPushButton *leave = button(&view, "disconnect");
+	check("the radio is usable before the daemon goes",
+	    scan->isEnabled() && leave && leave->isEnabled());
+
+	QString gone_why;
+	connection.open(QStringLiteral("/nonexistent/netcfgd.sock"), &gone_why);
+	view.refresh();
+	check("a daemon that goes away leaves scanning disabled", !scan->isEnabled());
+	check("and joining", !join->isEnabled());
+	check("and leaving", leave && !leave->isEnabled());
+
 	printf("\n");
 	if (failures) {
 		printf("live_wifi: %d failed\n", failures);

@@ -7147,6 +7147,58 @@ being fought by hand.
 
 ---
 
+## 10.20 A view that lost the daemon kept offering to use it
+
+**2026-09-04**, from sweeping every gui button for the two things that go
+wrong: no connection behind it, and a state that stops being updated.
+
+`ncfg_wifi_view::refresh` decides what `scan`, `join`, `leave`, `add` and
+`activate radio` offer, and it has four ways out. Three call
+`selection_changed`, which is where those decisions are made. **The fourth is
+the `links` failure and it returned before any of it** -- so a daemon that
+stopped answering, or refused `links` for want of the observe tier, left every
+button exactly as the last good refresh had them, offering actions against a
+radio the view could no longer see.
+
+`ncfg_global_view` had the right shape all along and is worth naming as the
+counter-example: its own error path disables `networking_button` explicitly
+before returning. One view diverged from a pattern its sibling kept.
+
+The fix keeps the radio list rather than clearing it -- a daemon that blips
+should not also lose the radio the operator picked -- and adds a `reachable`
+flag that `selection_changed` folds into `have_radio`, so everything derived
+from it disables at once.
+
+**The first test written for this passed with the fault in place**, which is
+the part worth keeping. It built a fresh view against a dead socket and
+asserted the buttons were disabled -- and a freshly built view starts disabled
+whatever `refresh` does, so the check could not fail. What makes it a test is
+that the view is *populated from a live daemon first* and the connection is
+then re-pointed at a socket that is not there: `open` closes the old client, so
+the next `refresh` takes the failure path with the buttons already enabled.
+Confirmed by reintroducing the fault and watching two of the three checks go
+red.
+
+**Two of three, not three.** `join` stays disabled either way, because it
+needs a configured network selected in the table and that precondition was
+already false. It is kept as a correct assertion about the state, but `scan`
+and `leave` are the two that discriminate, and a later reader should not think
+otherwise.
+
+**What the sweep cleared.** All 20 buttons in the gui have a connection --
+including the two an out-parameter helper builds, which a first pass reported
+as unconnected because it searched for the local name rather than the members
+they are handed to. Every other view that updates button state does it on all
+paths: `access_view` sets its three together on one condition, `wifi_view`'s
+own `selection_changed` covers the rest, and the buttons that are never
+disabled are ones with no precondition to check -- `add by hand` writes a
+`network` block, which is a place rather than a device and needs no radio to
+exist. Admin-tier actions deliberately stay enabled and report the daemon's
+refusal, which names the tier; `add_network_dialog`'s certificate chooser is
+the one exception, because storing mid-dialog would lose the form.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
