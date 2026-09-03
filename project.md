@@ -7199,6 +7199,43 @@ the one exception, because storing mid-dialog would lose the form.
 
 ---
 
+## 10.21 An empty `dns { }` was rendered as nothing
+
+**2026-09-04**, from sweeping dns and routing. One fault, and it is the idiom
+the README leads with.
+
+`dns { }` on an interface or a network says *use the nameservers this network
+hands out* -- 0007 makes a per-interface policy a scope in its own right
+rather than an overlay, so the block being **present and empty** differs from
+its being **absent**. `render_dns` writes nothing when every field is at its
+default, which is right for `global`, where the block carries no meaning of
+its own, and wrong for the other two. A profile saved from an interface with
+`dns { }` came back without it, and that interface would ignore the lease's
+resolvers.
+
+Caught by the round-trip proof rather than shipped, as with 10.18, and the
+refusal named `interface eth0` -- the message improved in that entry earning
+its keep the first time it was used in anger.
+
+`render_dns` reports whether it wrote anything now, and the two callers where
+an empty block is itself the statement emit one when it did not. Covered by a
+test proved to fail with the fix removed.
+
+**What the sweep cleared, so the next one starts elsewhere.** Routes carry
+every field they can: `src` and `onlink` had already been fixed by the same
+lens, with the comment saying so, and `scope` and `proto` are named as
+unrenderable rather than dropped -- no route phrase can express them. Every
+`match` on `DnsMode` in the tree is exhaustive, so a ninth mode would be a
+compile error rather than a silent no-op. A routing domain under a mode that
+cannot express one is **refused at compile time** -- *"dns scope globals uses
+routing domains, which mode write_resolv_conf cannot express"* -- which is
+better than the warning I went looking for. And `same_rule` omits `family`,
+`priority` and `id` from its comparison, all three correctly: the first two
+are the key the caller matched on, and `id` is a diagnostic name that never
+reaches the kernel, so comparing it would reinstall a rule somebody renamed.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.

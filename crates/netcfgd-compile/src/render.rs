@@ -140,7 +140,7 @@ fn render_globals(document: &Document, text: &mut String, missing: &mut Unrender
 			let _ = writeln!(body, "\thostname = {}", quote(name));
 		}
 	}
-	render_dns(&globals.dns, "\t", &mut body, missing, "global");
+	let _ = render_dns(&globals.dns, "\t", &mut body, missing, "global");
 
 	let control = &globals.control;
 	if *control != netcfgd_model::control::Control::default() {
@@ -184,7 +184,7 @@ fn render_dns(
 	body: &mut String,
 	missing: &mut Unrenderable,
 	whose: &str,
-) {
+) -> bool {
 	if !dns.options.is_empty() {
 		missing.push(format!("{whose}: dns options"));
 	}
@@ -230,7 +230,7 @@ fn render_dns(
 	let default = DnsPolicy::default();
 	let mode_differs = dns.mode != default.mode;
 	if servers.is_empty() && dns.search.is_empty() && domains.is_empty() && !mode_differs {
-		return;
+		return false;
 	}
 	let _ = writeln!(body, "{indent}dns {{");
 	if let Some(mode) = mode {
@@ -249,6 +249,7 @@ fn render_dns(
 		let _ = writeln!(body, "{indent}\tdomains = [{}]", domains.join(", "));
 	}
 	let _ = writeln!(body, "{indent}}}");
+	true
 }
 
 fn render_interface(
@@ -296,7 +297,17 @@ fn render_interface(
 	render_routes(&interface.routes, whose, &mut body, missing);
 
 	if let Some(dns) = &interface.dns {
-		render_dns(dns, "\t", &mut body, missing, &format!("interface {name}"));
+		// **An empty `dns { }` is not nothing, and dropping it changed what
+		// the interface does.** On an interface it means "use the nameservers
+		// this network hands out" -- 0007 makes a per-interface policy a scope
+		// in its own right rather than an overlay -- so the difference between
+		// the block being absent and being empty is the difference between
+		// ignoring a lease's resolvers and taking them. `render_dns` writes
+		// nothing when every field is at its default, which is right for
+		// `global`, where the block carries no meaning of its own.
+		if !render_dns(dns, "\t", &mut body, missing, &format!("interface {name}")) {
+			body.push_str("\tdns { }\n");
+		}
 	}
 
 	let head = opening("interface", name, overrides);
@@ -678,7 +689,10 @@ fn render_network(
 	render_addressing(&network.addressing, whose, &mut body, missing);
 	render_routes(&network.routes, whose, &mut body, missing);
 	if let Some(dns) = &network.dns {
-		render_dns(dns, "\t", &mut body, missing, whose);
+		// Present and empty says the same thing here as on an interface.
+		if !render_dns(dns, "\t", &mut body, missing, whose) {
+			body.push_str("\tdns { }\n");
+		}
 	}
 	// Refused rather than rendered, matching an interface's hooks: the phase
 	// blocks have a shape of their own and neither side writes them yet.
@@ -1514,6 +1528,19 @@ mod tests {
 			 \t}\n\
 			 }\n",
 		);
+	}
+
+	/// **An empty `dns { }` is a statement, not an absence.** On an interface
+	/// or a network it says "use the nameservers this network hands out" --
+	/// 0007 makes a per-interface policy a scope in its own right -- so the
+	/// block being present and empty differs from its being absent, and a
+	/// profile that lost it would come back ignoring the lease's resolvers.
+	/// The renderer writes nothing when every field is at its default, which
+	/// is right for `global` and was wrong for these two.
+	#[test]
+	fn an_empty_dns_block_survives_where_it_means_something() {
+		round_trips("interface eth0 {\n\tconfig = \"dhcp\"\n\tdns { }\n}\n");
+		round_trips("network \"H\" {\n\twifi { open = true }\n\tdns { }\n}\n");
 	}
 
 	/// The refusal, which is the other half of the contract. A wireguard
