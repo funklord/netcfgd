@@ -4213,11 +4213,20 @@ impl Builder {
 	fn plan_teardown(&mut self, desired: &Document, observed: &Observed) {
 		self.tearing_down = true;
 
-		// A device being cleared is decided about as if its `interface` block
-		// were not there: the desired state is that netcfgd owns nothing on
+		// A device being cleared is decided about as if it were not in the
+		// document at all: the desired state is that netcfgd owns nothing on
 		// it, and every teardown pass already knows how to remove what the
 		// document does not want. Filtering the document once beats teaching
 		// four passes about a policy none of them otherwise cares about.
+		//
+		// **Both lists, and the device list is the one that was missing.**
+		// This filtered only `interfaces`, which was complete while a link's
+		// existence was stated there. 0155 pass 1b moved that onto the device,
+		// and `teardown_links` reads `desired.devices` accordingly -- so a
+		// clearing device stayed in the list, read as wanted, and was never
+		// deleted. `on_unmanage = "clear"` withdrew the addresses and routes
+		// and left the device standing, which is the one thing it exists to
+		// take away.
 		let filtered;
 		let desired = if self.clearing.is_empty() {
 			desired
@@ -4225,6 +4234,8 @@ impl Builder {
 			let mut copy = desired.clone();
 			copy.interfaces
 				.retain(|interface| !self.clearing.iter().any(|name| name == &interface.name));
+			copy.devices
+				.retain(|device| !self.clearing.iter().any(|name| name == &device.name));
 			filtered = copy;
 			&filtered
 		};

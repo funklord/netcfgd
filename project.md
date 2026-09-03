@@ -6882,7 +6882,7 @@ than the measurement.
 
 ---
 
-## 10.16 Open: `on_unmanage = "clear"` no longer removes the device
+## 10.16 Fixed: `on_unmanage = "clear"` did not remove the device
 
 **2026-09-03**, and it is corroborated rather than inferred: two live suites
 that share no fixture and no code path agree on it.
@@ -6914,7 +6914,21 @@ that clearing should remove it.
 exercise this**, which is why it survived: nothing else in the suite asks a
 device to be removed as part of being handed over.
 
-**A third instance, from the other direction.** `nm.sh`'s "a link that goes
+**Fixed 2026-09-03, and it was one line in the wrong list.**
+`plan_teardown` filters the clearing device out of the desired document so
+that the four teardown passes see it as unwanted -- and it filtered only
+`copy.interfaces`. That was complete while a link's existence was stated on
+the interface. Pass 1b moved it to the device, and `teardown_links` reads
+`desired.devices` accordingly, with a comment saying why -- so the clearing
+device stayed in the list it now consults, read as wanted, and was never
+deleted. The filter never learned about the move. It retains on both lists
+now.
+
+Proved by removing the two lines again and watching both suites go back to
+one failing check each, then restoring them: the fix is what makes them pass,
+rather than something else that changed in the same pass.
+
+**A third case is NOT this bug, and both of the obvious suspects are cleared.** `nm.sh`'s "a link that goes
 away leaves the device list" unmanages `quiet0`, deletes the link, and expects
 NetworkManager's list to lose it. It reports `dummy:unmanaged` — the device is
 still there. That test's own comment explains what it depends on: *"a dummy the
@@ -6924,11 +6938,15 @@ makes 'gone' stay gone."* So `managed = false` is not stopping re-creation,
 where the other two are about it not permitting removal. One question, asked
 twice in each direction.
 
-Not fixed here. The fix decides what `managed = false` means for a device
-netcfgd brought into existence — both whether it may remove one and whether it
-must decline to create one — which is 0037's question re-asked by 0155, and is
-the holder's rather than a worker's. What is fixed is the fixtures, so all
-three checks now fail for the real reason instead of on a compile error.
+That one is still open. netcfgd is not re-creating the link: asked to plan an
+unmanaged dummy that does not exist, it answers `nothing to do` and warns that
+the block is read and not acted on. And the shim is not inventing it: its
+`adopt` retains device numbers only for names present in `observed.links`, so
+a deleted link is retired. That leaves the observation itself and the
+`InterfacesRemoved` signal the test's own comment says the check depends on --
+*"nmcli asks libnm's cache, which is only correct if InterfacesRemoved
+fired"* -- and neither has been measured. It is reproducible rather than
+flaky: two runs, same result.
 
 ---
 
