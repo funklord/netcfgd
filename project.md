@@ -5714,6 +5714,27 @@ holder's rather than a worker's:
   nowhere is what sent the next reader looking: `git log --grep` for `eb0af01`
   finds nothing, and the natural conclusion is that the work was lost rather
   than re-hashed.
+- **The profiles thread exists under two sets of shas, and the older set is
+  what older notes name.** `19446fb`, `9944640` and `5974a8c` were committed
+  in `/home/nabbe/src/netcfgd` on 2026-08-31 and never pushed from there; the
+  same three reached `origin/master` on 2026-09-01 as `6546f27`, `afbde94`
+  and `c89f0d5`, rebased onto the style-gate thread that tree had never
+  fetched. Recorded for the reason the entry above is: `git log --grep` on an
+  old sha finds nothing, and the natural conclusion is that the work was
+  lost rather than re-hashed.
+
+  **The two trees are reconciled, and the notes calling one of them
+  dangerous are spent.** `/home/nabbe/src/netcfgd` was reset to
+  `origin/master` on 2026-09-03, having stood three ahead and sixty-eight
+  behind. Nothing was discarded that is not published: `git cherry -v
+  origin/master master` reported all three as already upstream by patch-id,
+  corroborated independently by the three subjects appearing in
+  `origin/master` at identical author dates under different shas, and by an
+  empty `git diff master origin/master` over every file the three touched.
+  The old shas stay reflog-reachable there. A merge would have conflicted in
+  `Makefile` and `adapter/netcfgd-nm/src/client.rs` re-applying changes that
+  were already present, which is the trap the patch-id check exists to spot.
+
 
 
 Not work anybody should do unasked. Each is recorded where it arose; they are
