@@ -89,8 +89,10 @@ log=$work/transcript
 # reason a script can be written once and behave correctly under both.
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
-interface drifty0 {
+device drifty0 {
 	kind     = "dummy"
+}
+interface drifty0 {
 	config   = "10.9.0.1/24"
 	on_drift = "$1"
 	on drift {

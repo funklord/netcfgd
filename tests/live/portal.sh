@@ -117,9 +117,9 @@ done
 cat > "$work/etc/netcfgd.conf" <<CONF
 device portal0 {
 	wifi { portal_check = "http://127.0.0.1:8731/generate_204" }
+	kind = "dummy"
 }
 interface portal0 {
-	kind   = "dummy"
 	config = "10.3.3.1/24"
 	# `report`, so taking the address away below stays taken away long enough
 	# for the daemon to observe the interface bare. Under `reconcile` it puts

@@ -101,14 +101,16 @@ while [ ! -e "$work/run/netcfgd.sock" ]; do
 done
 
 write_config <<'CONF'
-interface wan0 {
+device wan0 {
 	veth   { peer = "wan0p" }
-	config = "10.6.0.1/24"
 	qdisc {
 		kind              = "cake"
 		bandwidth         = "100mbit"
 		ingress_bandwidth = "50mbit"
 	}
+}
+interface wan0 {
+	config = "10.6.0.1/24"
 }
 CONF
 
@@ -147,13 +149,15 @@ check "a second plan has nothing to do" \
 # Dropping the key takes the whole path away, including the device netcfgd
 # created for it.
 write_config <<'CONF'
-interface wan0 {
+device wan0 {
 	veth   { peer = "wan0p" }
-	config = "10.6.0.1/24"
 	qdisc {
 		kind      = "cake"
 		bandwidth = "100mbit"
 	}
+}
+interface wan0 {
+	config = "10.6.0.1/24"
 }
 CONF
 apply "dropping ingress shaping"

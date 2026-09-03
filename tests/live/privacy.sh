@@ -69,13 +69,17 @@ tempaddr() { cat "/proc/sys/net/ipv6/conf/$1/use_tempaddr" 2>/dev/null || echo "
 first_line() { "$ncfg" plan 2>&1 | head -1; }
 
 write_config <<'CONF'
-interface priv0 {
+device priv0 {
 	kind   = "dummy"
+}
+interface priv0 {
 	config = "slaac privacy prefer_temporary"
 }
 
-interface plain0 {
+device plain0 {
 	kind   = "dummy"
+}
+interface plain0 {
 	config = "slaac"
 }
 CONF
@@ -91,13 +95,17 @@ check "a second plan has nothing to do" "$(first_line)" "nothing to do"
 # this, deleting the key from the config leaves the machine in a state the
 # document no longer describes, which constraint 1 does not allow.
 write_config <<'CONF'
-interface priv0 {
+device priv0 {
 	kind   = "dummy"
+}
+interface priv0 {
 	config = "slaac"
 }
 
-interface plain0 {
+device plain0 {
 	kind   = "dummy"
+}
+interface plain0 {
 	config = "slaac"
 }
 CONF
@@ -123,18 +131,24 @@ check "and then there is nothing to do" "$(first_line)" "nothing to do"
 ip link add mid0 type dummy
 echo 1 > /proc/sys/net/ipv6/conf/mid0/use_tempaddr
 write_config <<'CONF'
+device priv0 {
+	kind   = "dummy"
+}
 interface priv0 {
-	kind   = "dummy"
 	config = "slaac"
 }
 
+device plain0 {
+	kind   = "dummy"
+}
 interface plain0 {
-	kind   = "dummy"
 	config = "slaac"
 }
 
-interface mid0 {
+device mid0 {
 	kind   = "dummy"
+}
+interface mid0 {
 	config = "slaac privacy prefer_temporary"
 }
 CONF
@@ -155,23 +169,31 @@ check "and the kernel ends up at 2"    "$(tempaddr mid0)" "2"
 ip link add hand0 type dummy
 echo 2 > /proc/sys/net/ipv6/conf/hand0/use_tempaddr
 write_config <<'CONF'
+device priv0 {
+	kind   = "dummy"
+}
 interface priv0 {
-	kind   = "dummy"
 	config = "slaac"
 }
 
+device plain0 {
+	kind   = "dummy"
+}
 interface plain0 {
-	kind   = "dummy"
 	config = "slaac"
 }
 
-interface mid0 {
+device mid0 {
 	kind   = "dummy"
+}
+interface mid0 {
 	config = "slaac privacy prefer_temporary"
 }
 
-interface hand0 {
+device hand0 {
 	kind   = "dummy"
+}
+interface hand0 {
 	config = "slaac"
 }
 CONF

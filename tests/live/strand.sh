@@ -68,9 +68,8 @@ chmod 600 "$work/etc/secrets/wg0"
 
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
-$1
-
-interface wg0 {
+device wg0 {
+	$1
 	wireguard {
 		private_key = "@secret:wg0"
 		listen_port = 51820
@@ -79,6 +78,8 @@ interface wg0 {
 			allowed_ips = "10.0.0.0/24"
 		}
 	}
+}
+interface wg0 {
 	config = "10.0.0.5/32"
 }
 CONF
@@ -104,7 +105,7 @@ print([l.get("private_key_loaded") for l in links if l["name"] == "wg0"][0])
 
 # --------------------------------------------- walking away is not done quietly
 
-write_config 'device wg0 { managed = false }'
+write_config 'managed = false'
 "$ncfg" plan > "$work/plan.txt" 2>&1 || true
 check "unmanaging it is reported as stranding a credential" \
 	"$(grep -c 'stranded: unmanaging wg0' "$work/plan.txt" || true)" "1"
@@ -147,7 +148,7 @@ check "consenting to a different device does not settle this one" \
 
 # `on_unmanage = "clear"` deletes the link netcfgd created, and the key goes
 # with it. That is the whole point of pointing at it.
-write_config 'device wg0 { managed = false; on_unmanage = "clear" }'
+write_config 'managed = false; on_unmanage = "clear"'
 "$ncfg" plan > "$work/clear.txt" 2>&1 || true
 check "clearing is not reported as the problem" \
 	"$(grep -c 'stranded:' "$work/clear.txt" || true)" "0"

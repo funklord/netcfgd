@@ -170,13 +170,15 @@ sleep 1
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global { dns { dns_mode = "write_resolv_conf" } }
 
-interface ppp0 {
-	routes = "default"
+device ppp0 {
 	pppoe {
 		parent   = "cpe0"
 		username = "alice@isp.example"
 		password = "@secret:dsl"
 	}
+}
+interface ppp0 {
+	routes = "default"
 	dns { }
 }
 CONF
@@ -253,7 +255,8 @@ decoy=$!
 # and pppd's ip-down script empties the report on the way out.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global { dns { dns_mode = "write_resolv_conf" } }
-interface ppp0 { kind = "dummy"; config = "null" }
+device ppp0 { kind = "dummy" }
+interface ppp0 { config = "null" }
 CONF
 "$ncfg" apply > "$work/stop.txt" 2>&1 || true
 waited=0

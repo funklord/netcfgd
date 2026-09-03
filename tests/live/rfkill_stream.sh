@@ -82,7 +82,8 @@ mkfifo "$work/rfkill"
 # has nothing to do and every reconcile is a no-op. What is being counted is
 # whether it looked at all.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface quiet0 { kind = "dummy" }
+device quiet0 { kind = "dummy" }
+interface quiet0 { }
 CONF
 
 # Holds the write end open so the daemon's read blocks rather than seeing EOF,

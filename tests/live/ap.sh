@@ -74,8 +74,10 @@ printf '%s' "$passphrase" > "$work/etc/secrets/guest"
 chmod 600 "$work/etc/secrets/guest"
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface ap0 {
+device ap0 {
 	kind   = "dummy"
+}
+interface ap0 {
 	config = "192.168.9.1/24"
 }
 
@@ -172,8 +174,10 @@ check "and nothing is asked to stop" \
 # and reads the file netcfgd pointed it at.
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface ap0 {
+device ap0 {
 	kind   = "dummy"
+}
+interface ap0 {
 	config = "192.168.9.1/24"
 }
 
@@ -226,8 +230,10 @@ check "and did not mistake the record for an address" \
 # An access point whose block goes away must not leave a list behind. The next
 # person to look would find an ACL and believe it.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface ap0 {
+device ap0 {
 	kind   = "dummy"
+}
+interface ap0 {
 	config = "192.168.9.1/24"
 }
 
@@ -248,8 +254,10 @@ check "and stops naming it in the configuration" \
 # station, so the plan says which one this is rather than leaving an operator to
 # find out from the far side of a radio.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface ap0 {
+device ap0 {
 	kind   = "dummy"
+}
+interface ap0 {
 	config = "192.168.9.1/24"
 }
 

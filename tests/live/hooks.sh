@@ -59,8 +59,10 @@ check() {
 log=$work/transcript
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
-interface hooked0 {
+device hooked0 {
 	kind    = "dummy"
+}
+interface hooked0 {
 	config  = "10.5.0.1/24"
 	enabled = $1
 	pre_up {
@@ -253,8 +255,10 @@ check "and the tampered line never ran" "$(grep -c tampered "$log" || true)" "0"
 # in that same plan and the address arrives seconds later.
 : > "$log"
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface leased0 {
+device leased0 {
 	kind   = "dummy"
+}
+interface leased0 {
 	# A static address beside the lease, so netcfgd's own address is on the same
 	# interface: it sorts *before* the one the client adds, so a comparison that
 	# forgot to exclude what netcfgd installed would pick this one and the
@@ -322,8 +326,10 @@ contains "with the new address" "$(tail -1 "$log")" "addr=192.168.77.9/24"
 : > "$log"
 ip link add carr0 type veth peer name carr0p
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface carr0 {
+device carr0 {
 	veth   { peer = "carr0p" }
+}
+interface carr0 {
 	config = "10.7.7.1/24"
 	on carrier {
 	echo "carrier reason=\$NCFG_REASON iface=\$NCFG_IFACE addresses=\$(ip -br addr show carr0 | grep -c 10.7.7.1 || true)" >> $log

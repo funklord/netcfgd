@@ -119,10 +119,12 @@ start_daemon() {
 # veth rather than dummy: a dummy has no transmit queue, so the kernel keeps it
 # on `noqueue` and a scheduler set on it would be testing nothing.
 write_config <<'CONF'
-interface veth0 {
+device veth0 {
 	veth   { peer = "veth1" }
-	config = "10.7.0.1/24"
 	qdisc  = "fq_codel"
+}
+interface veth0 {
+	config = "10.7.0.1/24"
 }
 CONF
 
@@ -138,13 +140,15 @@ check "a second plan has nothing to do" \
 # The rate. Both what netcfgd thinks and -- the point of this file -- what the
 # kernel actually holds, read by something that is not netcfgd.
 write_config <<'CONF'
-interface veth0 {
+device veth0 {
 	veth   { peer = "veth1" }
-	config = "10.7.0.1/24"
 	qdisc {
 		kind      = "cake"
 		bandwidth = "100mbit"
 	}
+}
+interface veth0 {
+	config = "10.7.0.1/24"
 }
 CONF
 apply "shaping the link"
@@ -165,13 +169,15 @@ fi
 # Changing only the rate still reshapes: the kind matches, and a comparison
 # that stopped there would leave the line at the old number.
 write_config <<'CONF'
-interface veth0 {
+device veth0 {
 	veth   { peer = "veth1" }
-	config = "10.7.0.1/24"
 	qdisc {
 		kind      = "cake"
 		bandwidth = "50mbit"
 	}
+}
+interface veth0 {
+	config = "10.7.0.1/24"
 }
 CONF
 apply "changing only the rate"
@@ -180,8 +186,10 @@ check "a rate change alone is noticed" "$(rate_of veth0)" "50000000"
 # Dropping `qdisc` restores the kernel default rather than leaving cake in
 # place. There is no "no qdisc", so this is a replacement, not a removal.
 write_config <<'CONF'
-interface veth0 {
+device veth0 {
 	veth   { peer = "veth1" }
+}
+interface veth0 {
 	config = "10.7.0.1/24"
 }
 CONF
@@ -271,9 +279,11 @@ if [ -n "$tc" ]; then
 	# left alone. Both halves matter: a netcfgd that reset everything would
 	# satisfy the first check and fail nothing else.
 	write_config <<'CONF'
+device veth0 {
+	qdisc = "fq_codel"
+}
 interface veth0 {
 	config = "10.7.0.1/24"
-	qdisc = "fq_codel"
 }
 CONF
 	apply "asking for fq_codel again"

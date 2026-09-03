@@ -79,13 +79,15 @@ ip link add eth-wan type dummy
 ip link set eth-wan up
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface ppp0 {
-	routes = "default"
+device ppp0 {
 	pppoe {
 		parent   = "eth-wan"
 		username = "alice@isp.example"
 		password = "@secret:dsl"
 	}
+}
+interface ppp0 {
+	routes = "default"
 	dns { }
 }
 CONF

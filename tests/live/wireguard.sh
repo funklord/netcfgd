@@ -91,12 +91,14 @@ spare=$(wg genkey | wg pubkey)
 # assert a difference it introduced itself.
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
-interface wg0 {
+device wg0 {
 	wireguard {
 		private_key = "@secret:wg0"
 		listen_port = $1
 		$2
 	}
+}
+interface wg0 {
 	config = "10.0.0.5/32"
 }
 CONF

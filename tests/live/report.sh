@@ -66,8 +66,10 @@ ip link set wwan0 up
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
 ${2:-}
-interface wwan0 {
+device wwan0 {
 	kind   = "dummy"
+}
+interface wwan0 {
 	config = "$1"
 }
 CONF
@@ -275,8 +277,10 @@ report < /dev/null
 # routes rather than leaving them with the daemon, and a metric the kernel did
 # not accept would make the taking pointless.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface wwan0 {
+device wwan0 {
 	kind       = "dummy"
+}
+interface wwan0 {
 	config     = "reported"
 	preference = 700
 }
@@ -328,8 +332,10 @@ report < /dev/null
 report < /dev/null
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global { dns { dns_mode = "write_resolv_conf" } }
-interface wwan0 {
+device wwan0 {
 	kind   = "dummy"
+}
+interface wwan0 {
 	config = "10.9.9.1/24"
 	dns    = "9.9.9.9"
 }

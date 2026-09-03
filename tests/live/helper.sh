@@ -82,8 +82,10 @@ ip link add wwan0 type dummy
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global { dns { dns_mode = "write_resolv_conf" } }
 
-interface wwan0 {
+device wwan0 {
 	kind   = "dummy"
+}
+interface wwan0 {
 	config = "reported"
 }
 CONF

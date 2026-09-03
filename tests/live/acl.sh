@@ -84,8 +84,10 @@ ncfg="$repo/target/debug/ncfg"
 
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF
-interface ap0 {
+device ap0 {
 	kind   = "dummy"
+}
+interface ap0 {
 	config = "null"
 }
 
@@ -366,8 +368,10 @@ check "and nothing is converged against a list that could not be read" \
 # killed and restarted here -- reusing the wedged process is the point, because
 # it is the only one that produces the state.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface ap0 {
+device ap0 {
 	kind   = "dummy"
+}
+interface ap0 {
 	config = "192.168.9.1/24"
 }
 CONF
@@ -421,8 +425,10 @@ write_config ""
 warm_fake || true
 # The document no longer names an access point on ap0, so the plan stops it.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface ap0 {
+device ap0 {
 	kind   = "dummy"
+}
+interface ap0 {
 	config = "192.168.9.1/24"
 }
 CONF

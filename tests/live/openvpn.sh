@@ -144,7 +144,7 @@ this is not valid openvpn configuration at all
 OVPN
 
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "$work/etc/work.ovpn" }
 }
 CONF
@@ -232,7 +232,8 @@ check "without keeping a copy of the file it will not read" \
 # had killed a process by name instead, nothing would appear there, and an
 # operator's own tunnels would be at risk.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface vpn0 { kind = "dummy"; config = "null" }
+device vpn0 { kind = "dummy" }
+interface vpn0 { config = "null" }
 CONF
 "$ncfg" apply > "$work/stop.txt" 2>&1 || true
 
@@ -252,13 +253,14 @@ check "and the daemon goes" \
 # management reply -- without it the client could return any line at all and
 # nothing would notice, which is exactly what breaking the parse showed.
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "$work/etc/work.ovpn" }
 }
 CONF
 FAKE_OPENVPN_REFUSES_SIGNAL=1 "$ncfg" apply > /dev/null 2>&1 || true
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface vpn0 { kind = "dummy"; config = "null" }
+device vpn0 { kind = "dummy" }
+interface vpn0 { config = "null" }
 CONF
 FAKE_OPENVPN_REFUSES_SIGNAL=1 "$ncfg" apply > "$work/refusedstop.txt" 2>&1 || true
 check "a daemon that refuses to stop is reported, not recorded as stopped" \
@@ -282,7 +284,7 @@ mkdir -p "$work/etc/secrets"
 printf '%s' 'correct-horse-battery' > "$work/etc/secrets/vpn"
 chmod 600 "$work/etc/secrets/vpn"
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface vpn0 {
+device vpn0 {
 	openvpn {
 		config   = "$work/etc/work.ovpn"
 		username = "vpn-user"
@@ -317,14 +319,15 @@ check "and nowhere under /run except the file that needs it" \
 # reboot anyway, but a password beside a tunnel that is not running is one
 # nobody is watching.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface vpn0 { kind = "dummy"; config = "null" }
+device vpn0 { kind = "dummy" }
+interface vpn0 { config = "null" }
 CONF
 "$ncfg" apply > /dev/null 2>&1 || true
 check "and are removed when the tunnel is stopped" \
 	"$([ -f "$auth" ] && echo yes || echo no)" "no"
 
 check "a username without a password is refused, not left to prompt" \
-	"$(printf 'interface vpn0 { openvpn { config = "/x.ovpn"; username = "u" } }\n' \
+	"$(printf 'device vpn0 { openvpn { config = "/x.ovpn"; username = "u" } }\n' \
 	     > "$work/etc/netcfgd.conf"; \
 	   "$ncfg" plan 2>&1 | grep -c 'both `username` and `password`' || true)" "1"
 
@@ -334,7 +337,7 @@ check "a username without a password is refused, not left to prompt" \
 # message, rather than by openvpn against a file the operator may not realise
 # netcfgd chose.
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "$work/etc/absent.ovpn" }
 }
 CONF
@@ -345,7 +348,7 @@ check "a configuration that is not there is named" \
 # And when the daemon itself refuses, its words are what the operator sees --
 # not an exit status. Same treatment hostapd gets.
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "$work/etc/work.ovpn" }
 }
 CONF
@@ -356,10 +359,10 @@ check "and a daemon that will not start is quoted rather than counted" \
 # ------------------------------------------------------------- the compiler
 
 check "a relative path is refused where the line is, not later" \
-	"$(printf 'interface vpn0 { openvpn { config = "work.ovpn" } }\n' > "$work/etc/netcfgd.conf"; \
+	"$(printf 'device vpn0 { openvpn { config = "work.ovpn" } }\n' > "$work/etc/netcfgd.conf"; \
 	   "$ncfg" plan 2>&1 | grep -c 'is not an absolute path' || true)" "1"
 check "and an unknown key says where the rest belongs" \
-	"$(printf 'interface vpn0 { openvpn { config = "/x.ovpn"; remote = "vpn.example" } }\n' \
+	"$(printf 'device vpn0 { openvpn { config = "/x.ovpn"; remote = "vpn.example" } }\n' \
 	     > "$work/etc/netcfgd.conf"; \
 	   "$ncfg" plan 2>&1 | grep -c 'unknown openvpn key' || true)" "1"
 
@@ -375,7 +378,7 @@ check "and an unknown key says where the rest belongs" \
 # where this was first seen, in a run that left a daemon behind about every other
 # time.
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "$work/etc/work.ovpn" }
 }
 CONF
@@ -387,7 +390,8 @@ check "and its socket is not there yet, which is the whole point" \
 	"$([ -S "$work/run/openvpn/vpn0.sock" ] && echo yes || echo no)" "no"
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-interface vpn0 { kind = "dummy"; config = "null" }
+device vpn0 { kind = "dummy" }
+interface vpn0 { config = "null" }
 CONF
 "$ncfg" apply > "$work/slow-stop.txt" 2>&1 || true
 waited=0
@@ -417,7 +421,7 @@ check "and the pid file goes with it" \
 # `kill` rather than a stop through the management socket, deliberately: what is
 # under test is netcfgd noticing something it did not do.
 cat > "$work/etc/netcfgd.conf" <<CONF
-interface vpn0 {
+device vpn0 {
 	openvpn { config = "$work/etc/work.ovpn" }
 }
 CONF

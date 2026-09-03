@@ -82,8 +82,10 @@ apply() {
 }
 
 write_config <<'CONF'
-interface probe0 {
+device probe0 {
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "10.9.9.1/24"
 }
 
@@ -124,8 +126,10 @@ check "a second plan has nothing to do" \
 # add; if the add went first it would be EEXIST and the config would silently
 # not take effect.
 write_config <<'CONF'
-interface probe0 {
+device probe0 {
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "10.9.9.1/24"
 }
 
@@ -150,8 +154,10 @@ check "and there is still only one rule at that priority" "$(rule_count 1000)" "
 # check alone would not have caught a regression.
 ip rule add priority 2000 from 172.16.0.0/12 lookup 200
 write_config <<'CONF'
-interface probe0 {
+device probe0 {
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "10.9.9.1/24"
 }
 
@@ -182,8 +188,10 @@ ip rule del priority 2000
 
 # Dropping the rule from the config withdraws it.
 write_config <<'CONF'
-interface probe0 {
+device probe0 {
 	kind   = "dummy"
+}
+interface probe0 {
 	config = "10.9.9.1/24"
 }
 CONF
