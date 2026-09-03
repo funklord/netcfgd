@@ -764,11 +764,26 @@ objection above is not, and is still what keeps `client/` on its own Makefile
 (fmake links the library sources into the binary rather than emitting
 `libncfg_client.a`, which `make gui` builds first and links).
 
+**Run against this tree on 2026-09-03**, as `harmonization.md`'s README rule
+requires before the line is written: plain `fmake`, no flags, on a clean
+`git archive HEAD` in a scratch directory. It compiled 49 translation units
+and linked `netcfgd-gui`, a 656 KB ELF that starts and parses its arguments.
+It also reported *"13 test programs not built by default ... `fmake test`
+builds and runs them"*, which is the right default for a README line about
+building the client. **Nothing failed, so there is nothing to signal to
+fmake** -- the two limits below are scope rather than faults, and
+`fmake.toml` already records them as reported.
+
 Two cautions that belong with it, moved here from the README because they are
 about building this tree rather than about using netcfgd:
 
-- **Not `/usr/bin/fmake`**, which is older than fixes this needs. The checkout
-  at `../fmake` is the one that works.
+- ~~**Not `/usr/bin/fmake`**, which is older than fixes this needs.~~
+  **Measured 2026-09-03 and no longer true**: the packaged `fmake 1.0
+  (2b3a3038)` builds the client from a clean `git archive HEAD`, exit 0, as
+  does the checkout's `f18a5df2`. Both produce a working ELF. The caution was
+  carried in the README unchecked for long enough to go stale, which is what
+  the README rule's *try it before writing it* is for -- so the README says
+  plain `fmake` now.
 - **The daemon and the CLI are not fmake's, and that is not a gap to close.**
   They are a Cargo workspace of twenty-one crates; fmake drives rustc directly
   — one crate root, one artifact — so it resolves no workspace, no inter-crate
