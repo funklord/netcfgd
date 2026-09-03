@@ -635,6 +635,17 @@ fn render_network(
 		Security::Owe => body.push_str("\t\towe = true\n"),
 		Security::Psk(psk) => {
 			let _ = writeln!(body, "\t\tpsk = {}", quote(&secret_ref(&psk.passphrase)));
+			// **Dropped in silence until 2026-09-04, and it is the one field
+			// here whose loss weakens a network rather than merely changing
+			// it.** The default is WPA2 and WPA3 together, so a profile saved
+			// from a `proto = "wpa3"` network came back accepting WPA2 -- a
+			// downgrade an operator had deliberately excluded. `profile save`
+			// refused rather than writing it, because the round-trip proof
+			// caught the difference, so nothing was ever lost on disk; what
+			// was lost was the ability to save such a profile at all.
+			if psk.proto != netcfgd_model::security::PskProto::default() {
+				let _ = writeln!(body, "\t\tproto = {}", quote(proto_name(psk.proto)));
+			}
 		}
 		Security::Eap(eap) => render_eap(eap, &mut body),
 	}
@@ -795,6 +806,18 @@ fn list_or_scalar(values: &[String]) -> String {
 		only.clone()
 	} else {
 		format!("[{}]", values.join(", "))
+	}
+}
+
+/// A PSK generation, spelled as the parser reads it back.
+///
+/// `wpa2+wpa3` and `wpa2wpa3` both parse; the first is written because it is
+/// the one the example file and the diagnostics use.
+fn proto_name(proto: netcfgd_model::security::PskProto) -> &'static str {
+	match proto {
+		netcfgd_model::security::PskProto::Wpa2 => "wpa2",
+		netcfgd_model::security::PskProto::Wpa3 => "wpa3",
+		netcfgd_model::security::PskProto::Wpa2Wpa3 => "wpa2+wpa3",
 	}
 }
 
@@ -1443,6 +1466,38 @@ mod tests {
 			 \t\tidentity = \"someone\"\n\
 			 \t\tpassword = \"@secret:pwd\"\n\
 			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// **Every PSK generation, because the default is the permissive one.**
+	/// `proto` was dropped here until 2026-09-04, and it is the one wifi field
+	/// whose loss weakens a network: the default is WPA2 and WPA3 together, so
+	/// a `proto = "wpa3"` network came back accepting WPA2 -- a downgrade the
+	/// operator had deliberately excluded. Asserting the round trip for all
+	/// three is what stops the default silently absorbing the other two.
+	#[test]
+	fn every_psk_generation_round_trips() {
+		for proto in ["wpa2", "wpa3", "wpa2+wpa3"] {
+			round_trips(&format!(
+				"network \"H\" {{\n\twifi {{ psk = \"@secret:h\"; proto = \"{proto}\" }}\n}}\n"
+			));
+		}
+	}
+
+	/// A wifi network carrying everything a network can carry, because the
+	/// fields were added one at a time and each was rendered by whoever added
+	/// it. One block asserts they all survive together.
+	#[test]
+	fn a_fully_populated_network_round_trips() {
+		round_trips(
+			"network \"Home\" {\n\
+			 \tssid = \"486f6d65204e6574\"\n\
+			 \thidden = true\n\
+			 \tmetered = true\n\
+			 \tmetric = 250\n\
+			 \tbssid = [\"aa:bb:cc:dd:ee:ff\", \"11:22:33:44:55:66\"]\n\
+			 \twifi { psk = \"@secret:home\"; proto = \"wpa3\" }\n\
 			 }\n",
 		);
 	}

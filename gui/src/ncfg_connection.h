@@ -169,6 +169,12 @@ struct ncfg_saved_network_row {
 	QString name;
 	QString ssid;
 	QString security;
+	/* The PSK generation this network pins -- "wpa2", "wpa3" -- or empty for
+	 * one that accepts both, and for every kind that is not a PSK. Carried so
+	 * that an editor can put the combo back where the document had it: a
+	 * dialog that cannot restore this writes a block without it, and a network
+	 * that refused WPA2 quietly starts accepting it again. */
+	QString proto;
 	/* The secret this network refers to, or empty where it needs none. A
 	 * reference rather than a presence: the document says what the network
 	 * wants, not whether the file is there. */

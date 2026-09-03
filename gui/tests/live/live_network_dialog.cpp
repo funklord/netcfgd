@@ -99,6 +99,11 @@ int main(int argc, char **argv)
 		security->setCurrentIndex(security->findData(QStringLiteral("psk")));
 		credential->setText(QStringLiteral("hunter2hunter2"));
 		metric->setValue(42);
+		/* Pinned to WPA3, which is the state an edit can silently widen. */
+		auto *proto = dialog.findChild<QComboBox *>(QStringLiteral("network_proto"));
+		if (proto) {
+			proto->setCurrentIndex(proto->findData(QStringLiteral("wpa3")));
+		}
 		check("and will not save a network it cannot write", save->isEnabled());
 		save->click();
 
@@ -109,6 +114,8 @@ int main(int argc, char **argv)
 		    QString::number(written.metric));
 		check("and its security type", written.security == QStringLiteral("psk"),
 		    written.security);
+		check("and the generation it was pinned to", written.proto == QStringLiteral("wpa3"),
+		    written.proto);
 	}
 
 	/* 2. Opening it again and changing one thing, with the passphrase left
@@ -132,6 +139,18 @@ int main(int argc, char **argv)
 		check("and the dialog opens on what is set", metric->value() == 42,
 		    QString::number(metric->value()));
 
+		/* **The generation the document holds, put back in the combo.** This
+		 * is the check the bug needed: the dialog restored the security kind
+		 * and not the generation, so it opened at "negotiate WPA2 and WPA3"
+		 * for a network that refused WPA2 -- and `block_text` writes the
+		 * generation only when the combo names one, so pressing save widened
+		 * the network without saying anything. Nothing else here touches it,
+		 * which is what makes the assertion after the save meaningful. */
+		auto *proto = dialog.findChild<QComboBox *>(QStringLiteral("network_proto"));
+		check("the dialog opens on the generation the document holds",
+		    proto && proto->currentData().toString() == QStringLiteral("wpa3"),
+		    proto ? proto->currentData().toString() : QStringLiteral("<no combo>"));
+
 		metric->setValue(7);
 		autoconnect->setChecked(false);
 		save->click();
@@ -142,6 +161,8 @@ int main(int argc, char **argv)
 		        after.metric == 7,
 		    QString::number(after.metric));
 		check("and so did the other one", after.autoconnect == false);
+		check("and editing did not widen the generation",
+		    after.proto == QStringLiteral("wpa3"), after.proto);
 	}
 
 	/* 3. The credential survived, which is the failure that would be silent.

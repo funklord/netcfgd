@@ -462,6 +462,7 @@ bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString
 		row.ssid = QString::fromUtf8(networks.items[i].ssid ? networks.items[i].ssid : "");
 		row.security =
 		    QString::fromUtf8(networks.items[i].security ? networks.items[i].security : "");
+		row.proto = QString::fromUtf8(networks.items[i].proto ? networks.items[i].proto : "");
 		row.credential = QString::fromUtf8(
 		    networks.items[i].credential ? networks.items[i].credential : "");
 		row.metric = networks.items[i].metric;

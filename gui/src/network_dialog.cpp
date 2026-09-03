@@ -115,6 +115,19 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	proto = new QComboBox(this);
 	proto->setObjectName(QStringLiteral("network_proto"));
 	fill(proto, protos, sizeof(protos) / sizeof(protos[0]));
+	/* **Restored, like the security above it.** Without this the combo opened
+	 * at "negotiate WPA2 and WPA3" whatever the document said, and
+	 * `block_text` writes the generation only when the combo names one -- so
+	 * opening a `proto = "wpa3"` network and pressing save silently widened it
+	 * to accept WPA2 again. The kind was put back and the generation was not,
+	 * which is the whole of the fault: one of two fields on the same object
+	 * was wired. */
+	if (editing) {
+		const int at = proto->findData(existing.proto);
+		if (at >= 0) {
+			proto->setCurrentIndex(at);
+		}
+	}
 	form->addRow(QStringLiteral("generation"), proto);
 
 	eap_method = new QComboBox(this);

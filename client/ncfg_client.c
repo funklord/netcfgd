@@ -1103,6 +1103,7 @@ void ncfg_saved_networks_free(ncfg_saved_networks_t *networks)
 		free(networks->items[i].name);
 		free(networks->items[i].ssid);
 		free(networks->items[i].security);
+		free(networks->items[i].proto);
 		free(networks->items[i].credential);
 	}
 	free(networks->items);
@@ -1161,6 +1162,12 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		item->name = member_text(doc, entry, "id");
 		uint32_t security = ncfg_json_member(doc, entry, "security");
 		item->security = member_text(doc, security, "type");
+		/* **The PSK generation, beside the kind.** Absent for every other
+		 * kind, and absent for a PSK network that did not pin one. A client
+		 * that reads the kind and not this cannot show the difference between
+		 * a network that accepts WPA2 and one that refuses it -- and an editor
+		 * that then writes the block back drops the refusal. */
+		item->proto = member_text(doc, security, "proto");
 		/* Whichever of the three a network of this kind refers to. An open or
 		 * OWE network names none of them and the field stays empty, which is
 		 * the honest answer rather than a dash a screen has to interpret. */

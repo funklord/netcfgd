@@ -7034,6 +7034,57 @@ tree was wrong.
 
 ---
 
+## 10.18 Two wifi faults, both a generation that stopped being pinned
+
+**2026-09-04**, from a sweep of wifi and the gui using the lens the day's
+earlier bugs suggested: *a value with two consumers where only some are wired*.
+Both instances are the same field, `proto`, and both weaken a network rather
+than merely changing it -- the default is WPA2 and WPA3 together, so anything
+that loses the pin lets WPA2 back in on a network whose operator excluded it.
+
+**The renderer dropped it.** `render_network` wrote the passphrase and not the
+generation, so `ncfg profile save` on any network with `proto` set could not
+reproduce the machine. Nothing was lost on disk -- the round-trip proof refused
+the save, which is what that proof is for -- but the feature was unusable for
+those networks, and the refusal did not say which block was at fault.
+
+**The gui dropped it on every edit.** `ncfg_network_dialog` restored the
+security *kind* from the document when opening an existing network and did not
+restore the generation, so the combo showed "negotiate WPA2 and WPA3" whatever
+the document said. `block_text` writes the generation only when the combo names
+one. So opening a `proto = "wpa3"` network and pressing save -- to change the
+metric, or nothing at all -- silently widened it. One of two fields on the same
+object was wired.
+
+The gui half needed the value carried four layers: the document JSON already
+had it beside `type`, and the C client, its header, the gui's row and the
+dialog each had to learn it.
+
+**Both are covered by a check that fails without the fix**, confirmed by
+sabotage with the edit verified as applied first -- twice, because the first
+attempt at sabotaging the renderer used a regex that did not match, and a
+sabotage that did not apply is indistinguishable from a check that cannot
+fail. The gui probe is the sharper of the two: it pins the fixture network to
+WPA3 when creating it, asserts the dialog reopens on WPA3, edits *something
+else*, and asserts the generation survived.
+
+**And the refusal now names the block.** Finding the renderer fault meant
+halving a configuration by hand six times, because the proof said only that the
+two documents differed. It reports the section and the name now -- `network
+"Home"` -- which is the question somebody actually has.
+
+**Three lenses came up empty and are recorded so the next sweep starts
+elsewhere**: every `match` on `Security` is exhaustive but one, and that one is
+a passphrase extractor where `None` is right for the other three kinds --
+hostapd refuses `Eap` by name and renders `Owe`, so there is no silent-open
+path; all 28 gui signals are connected, checked by fully qualified
+`&class::signal` rather than by name, since `changed` alone appears on four
+classes and a bare name check passes vacuously; and every method on
+`ncfg_connection` has a caller but `is_open`, which is an unused inline
+accessor rather than a gap.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.

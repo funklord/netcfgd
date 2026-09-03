@@ -1796,6 +1796,41 @@ pub fn restore_profile(config_dir: &Path, name: &str) -> io::Result<()> {
 	)
 }
 
+/// Which part of the document the snapshot failed to reproduce.
+///
+/// **Named rather than left to a bisect.** The refusal above is the round-trip
+/// proof doing its job, and it used to say only that the two differed -- so
+/// finding out which field the renderer had dropped meant halving a
+/// configuration by hand until it saved. Measured once, on a `proto = "wpa3"`
+/// network whose generation was not being written: six trials to find it.
+///
+/// A section and a name, not a field diff. The documents are large and the
+/// answer wanted is "where do I look", which the block that differs gives
+/// while a full comparison would bury it.
+fn difference(expected: &netcfgd_model::Document, after: &netcfgd_model::Document) -> String {
+	if expected.globals != after.globals {
+		return " The `global` block is what differs.".to_owned();
+	}
+	for want in &expected.interfaces {
+		if after.interfaces.iter().find(|got| got.name == want.name) != Some(want) {
+			return format!(" `interface {}` is what differs.", want.name);
+		}
+	}
+	for want in &expected.devices {
+		if after.devices.iter().find(|got| got.name == want.name) != Some(want) {
+			return format!(" `device {}` is what differs.", want.name);
+		}
+	}
+	for want in &expected.networks {
+		if after.networks.iter().find(|got| got.id == want.id) != Some(want) {
+			return format!(" `network \"{}\"` is what differs.", want.id);
+		}
+	}
+	// A block that is in one document and not the other, or a list this does
+	// not walk. Saying so beats naming a block that is in fact identical.
+	" The two differ in a block this cannot name.".to_owned()
+}
+
 /// Take the folded profile files out of `conf.d`, returning what was removed.
 ///
 /// `ncfg profile save` writes the running configuration into a profile, and
@@ -2033,7 +2068,11 @@ fn write_profile_snapshot(
 		return Err(format!(
 			"saving `{name}` would not reproduce what this machine is running, \
 			 so nothing was kept. That is a fault in the snapshot rather than \
-			 in your configuration; write the profile by hand and please report it"
+			 in your configuration; write the profile by hand and please \
+			 report it.{}",
+			after
+				.as_ref()
+				.map_or(String::new(), |after| difference(&expected, after))
 		));
 	}
 

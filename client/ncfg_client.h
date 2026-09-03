@@ -1012,7 +1012,10 @@ typedef struct {
 	char *id;          /* the network's id in the document; how to name it */
 	char *name;        /* the SSID as text, "" when it is not text */
 	char *ssid;        /* lowercase hex; always present */
-	char *security;    /* "psk", "eap", "open", "owe", or "" if unstated */
+	char *security;
+	/* The PSK generation this network pins -- "wpa2", "wpa3" -- or NULL for
+	 * one that accepts both, and for every kind that is not a PSK. */
+	char *proto;    /* "psk", "eap", "open", "owe", or "" if unstated */
 	/*
 	 * The secret this network refers to, or "" where it needs none.
 	 *
