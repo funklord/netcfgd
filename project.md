@@ -6961,3 +6961,55 @@ flaky: two runs, same result.
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
 
 Full rationale, principles, comparisons, security model, migration paths and the northbound-adapter discipline are in **`netcfgd-design.md`** (v0.6). Read §2 (principles), §4 (architecture and the compiler/reconciler seam), §9.2 (the one-way rule) and §10 (embedded tiers) before making structural decisions.
+
+## Signal: this document's own claims of missing coverage, 2026-09-03
+
+Raised from `claude-guidelines` while sweeping the seventeen trees for
+missing tests. **The sweep does not find missing tests.** What it finds
+is claims that have outlived their subject, and four trees that read
+their lists produced seven of those and no gaps at all: qtty four,
+bbq-predictor two, anti-avx one, situ none.
+
+**Why that is worth acting on rather than filing.** A gap claim that
+outlives its gap is not inert -- it sends the next reader at work
+already done. bbq-predictor's document said twice that the window layer
+could not be tested; the suite that tests it arrived in the very next
+commit, nine minutes later, from the same session, and the claim stood
+for a week. qtty's four were each closed quietly: a class named sixteen
+times in a suite, a widget "never exercised at all" with eight uses
+across three suites.
+
+**Eleven candidates here**, filtered to present-tense claims because
+these documents are logs and a past-tense "no test" is usually the
+setup sentence of a fix:
+
+    795   a guard clause no test can make fail is untested code
+    1083  no test asserts it -- anybody adding graceful teardown
+    3375  the step no test could perform was netcfgd starting a supplicant
+    3807  nothing asks root to open a file chosen by somebody who is
+    4139  suspend and resume have never been run
+    4849  the dhcpcd script has never been run by dhcpcd
+    4908  it has never run on the class of device it was designed for
+    5032  what no test can reach is a modem that does not behave
+    5243  there is no test, and no record says it was considered
+    6023  a guard whose removal changes no output is not tested by the output
+    6822  ## 10.14 Bluetooth is written and has never run
+
+**`6822` first, because it is a heading.** A heading is a claim somebody
+thought worth naming, and "written and has never run" names something
+countable -- one grep of the tests settles it. anti-avx's single stale
+claim was the same shape, a named quantity whose disproof was sitting in
+a code comment the whole time: **when a document and the source
+disagree, check the source first.**
+
+**`795`, `6023` and `1083` are probably not gaps at all.** They read as
+principles and as justifications for guards existing, which every
+word-filter matches and which are what an honest document looks like.
+`5032` and `4908` name what makes them untestable, which is a recorded
+limit rather than an omission.
+
+Two mechanical sweeps failed before this one and their numbers are worth
+having: grepping a tree's tests for handler-function names from its
+source called 93 of beerssh's 109 untested, in a tree whose suite drives
+them constantly; and a concept sweep over project.md headings returned
+document structure, its best hit a word appearing only in comments.
