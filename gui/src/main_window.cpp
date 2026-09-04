@@ -271,6 +271,23 @@ void ncfg_main_window::reload()
 {
 	devices->refresh();
 	plan->refresh();
+	/* **The tray too, which this did not do.** `reload` is the path a
+	 * configuration change takes -- the profiles view emits `changed` into it
+	 * when an operator switches profile -- and the tray's menu carries a
+	 * checkmark saying which profile is in use. Without this the mark stayed on
+	 * the old one until something unrelated moved: the daemon's event stream
+	 * starts a 400ms settle timer that calls `refresh`, which does rebuild the
+	 * tray, so a switch that reconciles something heals itself and a switch
+	 * that reconciles nothing does not.
+	 *
+	 * The other direction was already right: the tray's own `choose_profile`
+	 * refreshes itself before emitting `changed`. This is the same value with
+	 * two consumers where only one was wired.
+	 *
+	 * No loop: `ncfg_tray::refresh` rebuilds the menu and emits nothing. */
+	if (tray) {
+		tray->refresh();
+	}
 	tab_changed();
 }
 

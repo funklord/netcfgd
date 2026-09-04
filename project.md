@@ -8313,3 +8313,58 @@ hash from the document rather than a re-hash of the file, so a tampered
 script fails the phase. That list is built from `document.interfaces`, which
 is complete for as long as only interface hooks are ever run -- and is the
 same list that would need to grow if network hooks ever do.
+
+## 10.35 cli and gui: a probe that blocked itself, and a menu nobody told
+
+Swept on 2026-09-04. 10.20 had already swept GUI behaviour for the
+lost-daemon lens, so this used the two that have paid since: a fixed name
+shared by every writer, and a value with two consumers where only one is
+wired.
+
+**`can_write_dir` used a fixed probe filename, and a leftover made a
+writable directory read as read-only for ever.** `ncfg wifi add` decides
+whether to write the drop-in itself or ask the daemon by creating
+`.ncfg-write-probe` with `O_CREAT|O_EXCL` and removing it. `EEXIST` is
+indistinguishable from "cannot write" to that call, so a probe left behind by
+a process killed between the create and the remove makes every later run take
+the socket path, and two invocations racing make one of them answer wrongly
+while the other holds the name. Measured: with the file present, the probe
+fails on a directory `access(W_OK)` calls writable.
+
+This is decision **0121's** rule -- a temporary named after its target is one
+path for every writer -- at a site that record did not reach. It carries the
+pid and a counter now, so a stray one from a crash never blocks a later run;
+it is a dotfile, and the config loader ignores those, which was checked
+rather than assumed. The test plants a leftover under the old fixed name and
+fails when the name goes back to being fixed.
+
+**And the tray's profile menu was not told when the profile changed.**
+`ncfg_main_window::reload` is the path a configuration change takes -- the
+profiles view emits `changed` into it when an operator switches profile --
+and it refreshed the devices table and the plan and not the tray, whose menu
+carries a checkmark saying which profile is in use. `refresh` does rebuild
+the tray, and the daemon's event stream starts a 400ms settle timer that
+calls it, so a switch that reconciles something heals itself within half a
+second and **a switch that reconciles nothing does not**.
+
+The other direction was already right, which is what makes this the familiar
+shape rather than an oversight in both: the tray's own `choose_profile`
+refreshes itself before emitting `changed`. One value, two consumers, one of
+them wired.
+
+**Verified by reading rather than by a test, and that is a limit worth
+stating.** `gui/tests/tray_icon.cpp` already records why: `isSystemTrayAvailable`
+is false under both the offscreen and the minimal platform, measured, so
+`ncfg_tray::create` returns nullptr and there is no object for a test to
+drive. What was checked is that `ncfg_tray::refresh` rebuilds the menu and
+emits nothing, so the new call cannot loop back into `reload`.
+
+**Where the sweep looked and found nothing.** The CLI's top-level command
+list and its dispatch agree, compared by extracting both rather than reading
+one -- and the first extraction under-reported the dispatch by missing
+`"a" | "b"` arms, which is why it was re-derived from the match block itself.
+Every subcommand family answers an unknown argument with an enumeration, and
+each of those enumerations matches its help text: `profile`, `config`,
+`control`, `wifi`, `secret` and `modem`. The only file the CLI writes outside
+tests is this probe; the secret store already sets its mode on the open,
+which is where the rest of this week's `write_private` fixes came from.
