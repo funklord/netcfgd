@@ -310,8 +310,17 @@ impl<'a> Lexer<'a> {
 	/// This is the one irregular production in the grammar (section 3). A hook
 	/// body is arbitrary shell, so brace counting would mean parsing shell;
 	/// terminating on a lone `}` line needs no shell knowledge and is
-	/// explainable in one sentence of documentation. Braces nested inside the
-	/// shell are irrelevant.
+	/// explainable in one sentence of documentation.
+	///
+	/// **Braces nested inside the shell are not irrelevant, which this said
+	/// for as long as it existed.** A shell function is the commonest
+	/// multi-line construct there is and it closes with a `}` alone on a line,
+	/// so writing one inside a hook ends the body early and the rest of the
+	/// shell is then read as configuration -- which fails somewhere else,
+	/// talking about `=` and `{` at a line the operator wrote shell on. The
+	/// rule is right and the cost is real, so the sentence of documentation
+	/// the paragraph above promises is now actually written, in the README,
+	/// with the one-line form that works.
 	///
 	/// # Errors
 	///

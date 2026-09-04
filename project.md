@@ -8426,3 +8426,48 @@ two tests about layering and not the one holding the new assertion, which was
 called `removing_is_idempotent_...`. A filter that matches the wrong tests
 reports a green run in the same words as a real one. Re-run against the test
 by name, the sabotage failed it.
+
+## 10.37 compile and parser: an include with no end, and a rule nobody wrote down
+
+Swept on 2026-09-04 by feeding the parser what a parser is for -- malformed
+and extreme input -- rather than by reading it. Eleven inputs: an unterminated
+block, a stray close, an unterminated string, 500-deep nesting, a
+hundred-thousand-character token, invalid UTF-8, an embedded NUL, an integer
+overflow, an absurd prefix length, a device node, and twenty thousand
+interfaces. **No crash and no panic in any of them**, which is the result
+worth recording as much as the two that hung.
+
+**`include "/dev/zero"` allocates until memory runs out.** `read_to_string`
+reads to the end and a character device has none. Measured under a 1 GiB
+address-space cap: it took the whole gigabyte and reported "out of memory" --
+in a daemon whose RSS budget this project gates on at under five megabytes, so
+the ceiling `make check` enforces is defeated entirely by one line of
+configuration. A fifo is the same shape and blocks instead. Cycle detection
+was already there; file type was not.
+
+Refused by **type rather than by size**, deliberately: the type is the honest
+question. A configuration include is a file somebody wrote, and any byte limit
+here would be invented. A regular file that is absurdly large is still an
+operator having made one, and it ends.
+
+**A shell function inside a hook body ends the body early**, and the error
+lands on the operator's shell talking about configuration syntax:
+`expected ``=`` or ``{`` after ``greet```. The rule is that a body ends at the
+first line containing only `}`, and the lexer's own comment argues for it
+soundly -- brace counting would mean parsing shell -- then finishes "Braces
+nested inside the shell are irrelevant", which is false. A shell function is
+the commonest multi-line construct there is and it closes with a lone `}`.
+
+The design's answer is that the rule is "explainable in one sentence of
+documentation", and **that sentence had never been written**: it appears in
+no decision record, not in `project.md`, and not in the README's Hooks
+section. It does now, with the one-line form that works, and the comment no
+longer claims the cost away. The rule itself is kept: the alternatives are
+parsing shell, or a column rule that every existing config would fail.
+
+**Measured and not acted on**, so nobody has to measure it again: compiling is
+superlinear in the number of devices -- 500 in 67ms, 1000 in 171, 2000 in 497,
+4000 in 1482, so doubling the input roughly triples the time. Twenty thousand
+devices is what "hung" in the first sweep at a ten-second bound; it finishes.
+A real machine has tens of interfaces, so this changes nothing anybody would
+do, and the numbers are here rather than a fix.

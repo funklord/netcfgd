@@ -195,6 +195,22 @@ on the `carrier`, `lease`, `roam`, `portal` and `drift` events. `pre_up` runs
 *before* the link comes up, deliberately, and an already-correct interface runs
 no hooks at all.
 
+**A hook body ends at the first line containing only `}`.** netcfgd does not
+parse the shell inside one, so it cannot tell your braces from its own -- which
+means a shell function or brace group must not put its closing brace alone on a
+line. Write
+
+```
+post_up {
+greet() { echo hello; }
+greet
+}
+```
+
+rather than spreading `greet() {` and its `}` over three lines: the lone `}`
+would end the hook there, and everything after it would be read as
+configuration.
+
 ## Nothing changes until you say so
 
 - **`ncfg plan`** prints every action, in order, with the desired and observed
