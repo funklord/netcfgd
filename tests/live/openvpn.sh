@@ -149,6 +149,40 @@ device vpn0 {
 }
 CONF
 
+# **No fake running and no socket, established rather than assumed.**
+#
+# Each section below starts a tunnel and reads what netcfgd does about it, and
+# several of them leave one running on purpose -- a daemon that refuses to
+# stop is the whole subject of one. netcfgd then does the correct thing with
+# the leftover on the next section's first apply: it recognises the process as
+# its own by the socket path in its argv and *adopts* it (0140), starting
+# nothing and reporting success. The section that follows is then asking its
+# question of the previous section's daemon.
+#
+# Measured before this: `openvpn.sh` failed 1 to 6 checks on roughly half its
+# runs, with two signatures. A leftover holding its socket made a later
+# section read `ok backend.start` for a configuration it never validated; a
+# leftover that had already removed its socket made netcfgd adopt it and bind
+# no socket at all, so a teardown found nothing running and planned nothing --
+# which is the `nothing to do` the refusal check reported for months.
+#
+# `pkill` alone is not enough, because it returns as soon as the signal is
+# sent. What the next section needs is the absence, so that is what this waits
+# for.
+settle() {
+	pkill -f "$fake" 2>/dev/null || true
+	rm -f "$work/run/openvpn/vpn0.sock"
+	waited=0
+	while pgrep -f "$fake" >/dev/null 2>&1 || [ -S "$work/run/openvpn/vpn0.sock" ]; do
+		waited=$((waited + 1))
+		if [ "$waited" -gt 50 ]; then
+			echo "openvpn.sh: a fake openvpn outlived five seconds of settling" >&2
+			break
+		fi
+		sleep 0.1
+	done
+}
+
 # ------------------------------------------------------------------- starting
 
 "$ncfg" plan > "$work/plan.txt" 2>&1 || true
@@ -265,14 +299,15 @@ CONF
 FAKE_OPENVPN_REFUSES_SIGNAL=1 "$ncfg" apply > "$work/refusedstop.txt" 2>&1 || true
 check "a daemon that refuses to stop is reported, not recorded as stopped" \
 	"$(grep -c 'could not stop the openvpn tunnel on vpn0' "$work/refusedstop.txt" || true)" "1"
-pkill -f "$fake" 2>/dev/null || true
-rm -f "$work/run/openvpn/vpn0.sock"
+settle
 
 # Stopping a tunnel that is already gone is the state this was asked to
 # produce, so it is success rather than an error to report.
 "$ncfg" apply > "$work/stop2.txt" 2>&1 || true
 check "stopping one that is already stopped is not an error" \
 	"$(grep -c 'could not stop' "$work/stop2.txt" || true)" "0"
+
+settle
 
 # --------------------------------------------------------------- credentials
 
@@ -331,6 +366,8 @@ check "a username without a password is refused, not left to prompt" \
 	     > "$work/etc/netcfgd.conf"; \
 	   "$ncfg" plan 2>&1 | grep -c 'both `username` and `password`' || true)" "1"
 
+settle
+
 # ------------------------------------------------------------------ refusals
 
 # A path with no file behind it. Refused by netcfgd with the path in the
@@ -365,6 +402,8 @@ check "and an unknown key says where the rest belongs" \
 	"$(printf 'device vpn0 { openvpn { config = "/x.ovpn"; remote = "vpn.example" } }\n' \
 	     > "$work/etc/netcfgd.conf"; \
 	   "$ncfg" plan 2>&1 | grep -c 'unknown openvpn key' || true)" "1"
+
+settle
 
 # ------------------------------------------- stopping one that is still starting
 
@@ -410,6 +449,8 @@ else
 fi
 check "and the pid file goes with it" \
 	"$([ -e "$work/run/openvpn/vpn0.pid" ] && echo yes || echo no)" "no"
+
+settle
 
 # ------------------------------------------------- a daemon that died on its own
 

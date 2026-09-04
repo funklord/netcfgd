@@ -8114,3 +8114,95 @@ and stays open. It has two structural causes closed under it (0121 and
 0122), three passes and two failures across five container runs, and the
 note there already says the useful thing: if it recurs it is something else.
 Re-running the same instrument would not have added to that.
+
+## 10.32 openvpn: a tunnel whose config went missing, said nothing
+
+Swept on 2026-09-04, starting from the one live check that had been failing
+all week. It produced a real netcfgd defect and an explanation for the flake,
+and only one of the two is closed.
+
+**A `.ovpn` that cannot be read was passed over in silence.** Point a
+running tunnel's `config` at a file that does not exist and `ncfg apply`
+answers `nothing to do`, on every apply, for ever. The daemon goes on
+running the configuration it was started with, the machine does not match
+the document, and netcfgd calls it converged. Reproduced deterministically
+outside the flaky suite, twice running.
+
+Both gates that could have caught it decline, each for a good reason.
+`backend.start` is not planned because the backend is running.
+`config_matches` is `None` because the desired file cannot be hashed -- and
+its doc comment says why that is deliberate: "restarting a working tunnel on
+that would be a VPN dropped for a question nobody answered". Neither is
+wrong. What was missing is that nobody said anything.
+
+So the observation carries `config_present` beside `config_matches`: the
+half of that `None` which is a fault rather than an unknown. The planner
+turns it into a sentence and **still does not restart** -- the tunnel that is
+up remains the best thing available while the document names a file that is
+not there. The test pins both directions, because warning on every healthy
+tunnel would be worse than the silence it replaces.
+
+**The planner cannot read the filesystem, and that is why the fact travels
+through the observation.** `netcfgd-plan` contains no `fs::` call at all;
+the comparison is made where the file is and only the answer moves. Adding
+the field cost one line at each of 32 construction sites, 30 of them in
+tests.
+
+### 10.32.1 The openvpn suite's flake: the cascade closed, the residue open
+
+The mechanism is established. Several sections leave a tunnel running on
+purpose -- a daemon that refuses to stop is the whole subject of one -- and
+netcfgd then does the correct thing with the leftover on the next section's
+first apply: it recognises the process as its own by the socket path in its
+argv and **adopts** it (0140), starting nothing and reporting success. The
+section that follows is then asking its question of the previous section's
+daemon.
+
+Two signatures, both instrumented rather than reasoned:
+
+    passing runs   sock=yes   two `argv` lines in the fake's log
+    failing runs   sock=no    one `argv` line
+
+One line is netcfgd never having started that section's daemon. The fake
+removes its own socket when told to stop, as openvpn does, so for a moment
+it is a live process carrying the marker and holding no socket -- adopted,
+and no socket ever appears, so the teardown finds nothing running and plans
+nothing. That is the `nothing to do` the refusal check has been reporting.
+
+`settle` -- pkill, then wait for the absence rather than assume it -- is
+called before the four sections that need a clean slate. Measured over
+fourteen runs each:
+
+    baseline    8 of 14 runs failed, 28 failed checks, five cascades of five
+    settle      6 of 14 runs failed,  6 failed checks, no cascade at all
+
+**The cascade is gone and the single check is not.** Every remaining failure
+is the same refusal check, and it is left open rather than explained away.
+
+**Two fixes were tried and withdrawn, and the numbers are why.** Waiting for
+the management socket after the start looked exact -- `sock=no` and `nothing
+to do` went together on every failing run -- and measured 3 failures in 12
+against 6 in 14 without it, which is not a difference at this sample size;
+the socket is absent because of adoption rather than slowness, so waiting
+cannot help. Calling `settle` inside the stopping section as well measured 6
+in 14, the same. Small samples produced a 1-in-8 reading for one variant and
+6-in-14 for the same code later, which is the whole reason the baseline was
+re-measured at the same sample size before anything was claimed.
+
+### 10.32.2 `ncfg apply` prints no warnings, and every warning this week is one
+
+Found while checking that the new warning reaches an operator. `print_plan`
+renders `plan.warnings` and is called by `ncfg plan` alone; `ncfg apply`
+prints the journal, which carries none. Warnings do reach every other client
+-- they travel in the `Plan` response, which is how the GUI gets them, and
+0086's note records a gap of exactly this shape being closed for contention
+warnings.
+
+It matters because "say it rather than emitting an action that must fail" is
+the idiom four of this week's fixes chose: `vlans` on a device in no bridge,
+the kernel's fallback tunnel devices, a veth whose peer name is taken, and
+now this one. An operator who runs `ncfg apply` and not `ncfg plan` sees
+none of them.
+
+Not changed here: a command's output is an interface, and adding lines to it
+is the copyright holder's call rather than a sweep's.
