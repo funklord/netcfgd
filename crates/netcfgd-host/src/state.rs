@@ -538,9 +538,33 @@ impl OwnedState {
 			}
 		}
 
-		for applied in &effects.applied_dns {
-			self.dns.retain(|existing| existing.scope != applied.scope);
-			self.dns.push(applied.clone());
+		// **What was delivered is the whole of what is applied, so this
+		// replaces rather than merges.** It merged, and a scope the document
+		// stopped having was therefore recorded as applied for ever: the
+		// planner saw it missing from the desired set on every pass, asked for
+		// a re-delivery on every pass, and the plan never converged. The record
+		// was add-only and nothing could take an entry out of it.
+		//
+		// Replacing is right because `deliver` writes the resolver file whole
+		// from every scope it is given -- so a scope absent from a delivery is
+		// absent from the file, and a record saying otherwise is simply wrong.
+		// Each `dns.apply` in a plan delivers the same complete set, which is
+		// why the last entry per scope is taken rather than the first.
+		//
+		// An empty `applied_dns` means nothing was delivered at all, which is
+		// not the same as everything having gone: it leaves the record alone.
+		// And a caller that did not use `with_context` delivers one scope
+		// instead of all of them; the cost of that is one extra delivery on the
+		// next pass, never a wrong file, because the file is written from the
+		// document rather than from this record.
+		if !effects.applied_dns.is_empty() {
+			let mut delivered: Vec<netcfgd_model::AppliedDns> = Vec::new();
+			for applied in &effects.applied_dns {
+				delivered.retain(|existing| existing.scope != applied.scope);
+				delivered.push(applied.clone());
+			}
+			delivered.sort_by(|a, b| a.scope.cmp(&b.scope));
+			self.dns = delivered;
 		}
 	}
 }

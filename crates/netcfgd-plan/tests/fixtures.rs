@@ -5450,6 +5450,65 @@ device work-net {
 	);
 }
 
+/// A DNS scope the document stopped having is swept out of the resolver file.
+///
+/// `plan_dns` walks what is *desired*, so a scope that went away was never
+/// visited and its nameservers stayed in `/etc/resolv.conf` for ever, with
+/// `ncfg plan` reporting `nothing to do` beside them. Measured: removing a
+/// `dns` block left `nameserver 10.0.0.53` in the file, and any unrelated
+/// change to another scope then swept it out -- which is what says the
+/// executor was right and the plan was silent. One delivery is the whole
+/// repair, because the file is written whole from every scope.
+///
+/// The second case is the safety one and is not a detail. With no scope left
+/// to deliver, netcfgd manages no DNS at all, and asking for a delivery would
+/// write the empty `resolv.conf` that `plan_dns` already carries a warning to
+/// prevent -- so a machine whose last `dns` block goes keeps what it has.
+#[test]
+fn a_dns_scope_that_left_the_document_is_delivered_away() {
+	let still_managed = document(
+		"global { dns { mode = \"write_resolv_conf\" } }\n\
+		 device e0 { kind = \"dummy\" }\ninterface e0 { config = \"null\" }\n",
+	);
+	let nothing_managed =
+		document("device e0 { kind = \"dummy\" }\ninterface e0 { config = \"null\" }\n");
+
+	for (desired, planned) in [(&still_managed, true), (&nothing_managed, false)] {
+		let mut observed = observed_with(&["e0"]);
+		observed.links[0].up = true;
+		// **The globals scope is recorded as already delivered and matching**,
+		// so the ordinary loop has nothing to say and the departed scope is the
+		// only thing that can produce a delivery. Without this the test passed
+		// with the fix removed: globals had no record, the loop planned an
+		// apply for it, and the assertion read that as the repair working.
+		if desired == &still_managed {
+			observed.dns.push(AppliedDns {
+				scope: "globals".to_owned(),
+				policy: netcfgd_model::DnsPolicy {
+					mode: netcfgd_model::DnsMode::WriteResolvConf,
+					..netcfgd_model::DnsPolicy::default()
+				},
+			});
+		}
+		// What netcfgd delivered when the interface still had a `dns` block.
+		observed.dns.push(AppliedDns {
+			scope: "e0".to_owned(),
+			policy: netcfgd_model::DnsPolicy {
+				mode: netcfgd_model::DnsMode::WriteResolvConf,
+				..netcfgd_model::DnsPolicy::default()
+			},
+		});
+
+		let plan = plan(desired, &observed, &PlanOptions::default());
+		assert_eq!(
+			names(&plan).contains(&"dns.apply"),
+			planned,
+			"a departed scope should plan a delivery = {planned}: {:?}",
+			names(&plan)
+		);
+	}
+}
+
 /// A `.ovpn` that cannot be read is said, not passed over in silence.
 ///
 /// `config_matches` is deliberately `None` when the file cannot be read, so a

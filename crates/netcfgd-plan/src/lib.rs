@@ -4432,6 +4432,42 @@ impl Builder {
 			});
 		}
 
+		// **A scope netcfgd applied and the document no longer has.** The loop
+		// below walks what is *desired*, so a scope that went away was never
+		// visited and its nameservers stayed in the resolver file for ever,
+		// with `ncfg plan` saying `nothing to do` beside them. Measured:
+		// removing a `dns` block left `nameserver 10.0.0.53` in the file, and
+		// then any unrelated change to another scope swept it out -- which is
+		// what says the executor was right and the plan was silent. The file
+		// is written whole on any delivery, so one re-delivery is the whole
+		// of the repair.
+		//
+		// Only where a scope remains to deliver, and that is not a detail: with
+		// none left netcfgd manages no DNS at all, and rewriting the file from
+		// nothing is the empty `resolv.conf` the warning above exists to
+		// prevent. A machine whose last `dns` block goes keeps what it has,
+		// which is the same answer `plan_qdisc` gives a qdisc netcfgd did not
+		// set.
+		let departed: Vec<&str> = observed
+			.dns
+			.iter()
+			.map(|applied| applied.scope.as_str())
+			.filter(|scope| !scopes.iter().any(|(name, _)| name == scope))
+			.collect();
+		if let (Some((scope, policy)), false) = (scopes.first(), departed.is_empty()) {
+			// Named for the reader rather than for the executor, which
+			// delivers every scope on any `dns.apply` whatever this says.
+			self.push(
+				Op::DnsApply {
+					scope: scope.clone(),
+					policy: Box::new(policy.clone()),
+				},
+				Reason::unwanted(scope, "dns", departed.join(", ")),
+				Vec::new(),
+				None,
+			);
+		}
+
 		for (scope, policy) in scopes {
 			let previous = observed.dns_for(&scope);
 			if previous == Some(&policy) {

@@ -8206,3 +8206,60 @@ none of them.
 
 Not changed here: a command's output is an interface, and adding lines to it
 is the copyright holder's call rather than a sweep's.
+
+## 10.33 dns: a resolver entry that outlived the block that asked for it
+
+Swept on 2026-09-04. 10.21 had already swept this area for the rendering
+lens and cleared `DnsMode` exhaustiveness, routing domains and `same_rule`,
+so this one used the lens that has paid all week -- **a plan that can never
+converge, and a state that can never be taken back**.
+
+**Removing a `dns` block left its nameservers in `/etc/resolv.conf` for
+ever.** Measured end to end: set `servers = ["10.0.0.53"]` on an interface,
+apply, remove the block, apply again -- the file still says `nameserver
+10.0.0.53` and `ncfg plan` says `nothing to do`. The machine resolves
+through a server the configuration no longer mentions and netcfgd calls it
+converged.
+
+**What separated the executor from the planner is one experiment.** Forcing
+an unrelated change -- a `search` domain on `globals` -- made the file
+correct immediately: any `dns.apply` delivers *every* scope, so the file is
+written whole and the departed entry vanishes. The executor had been right
+all along; `plan_dns` walks what is desired, so a scope that went away was
+never visited and nothing asked for the delivery that would have swept it
+out.
+
+**The repair exposed a second fault underneath it**, the same two-layer
+shape as 10.25 and 10.28. Asking for a re-delivery made the file correct
+and the plan non-convergent: `dns.apply globals` on every pass, for ever.
+`State::absorb` recorded delivered scopes by retain-and-push, so the applied
+record was **add-only** -- a scope that stopped being delivered stayed in it,
+the planner saw it departed on every pass, and nothing could ever take it
+out. It replaces the record with what was delivered now, which is right
+because a delivery writes the file whole: a scope absent from one is absent
+from the file, and a record saying otherwise is simply wrong.
+
+**The safety case is not a detail, and it is what the second half of the
+test pins.** With no scope left to deliver, netcfgd manages no DNS at all,
+and asking for a delivery would write the empty `resolv.conf` that
+`plan_dns` already carries a warning to prevent -- a machine's DNS gone
+because its last `dns` block went. So a document that stops managing DNS
+entirely leaves the file alone, which is the answer `plan_qdisc` gives for a
+qdisc netcfgd did not set.
+
+**The first version of that test passed with the fix removed**, and the
+reason is worth keeping: the fixture left `globals` with no applied record,
+so the ordinary loop planned a delivery for it and the assertion read that
+as the repair working. The departed scope has to be the *only* thing that
+can produce an action, which means recording `globals` as already delivered
+and matching. Caught by sabotaging the fix and watching the test not care.
+
+**Where the sweep looked and found nothing.** Every resolver path netcfgd
+writes is redirectable for testing -- `NCFG_RESOLV_CONF`, `NCFG_DNSMASQ_CONF`
+and `NCFG_UNBOUND_CONF` -- and the comment on the second pair says the first
+exists "because a test very nearly rewrote this machine's", which is why
+nothing here ran without checking that first. The `write_resolv_conf`
+lifecycle converges at every step now: servers set, servers changed, search
+dropped, block removed. The one-write lag in `observed.json` after a
+clearing apply is the snapshot rather than the plan -- the next command
+writes it correctly and the plan was already right.
