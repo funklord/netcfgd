@@ -49,9 +49,7 @@ impl HookSink for RunHooks {
 			format!("#!/bin/sh\n{body}")
 		};
 
-		fs::write(&path, &script)
-			.map_err(|error| format!("could not write {}: {error}", path.display()))?;
-		set_executable(&path)?;
+		write_private(&path, script.as_bytes())?;
 
 		self.written += 1;
 		Ok(HookRef {
@@ -64,18 +62,42 @@ impl HookSink for RunHooks {
 	}
 }
 
+/// Write a hook script that is 0700 from the instant it exists.
+///
+/// **The mode goes on the open.** This was `fs::write` followed by a chmod to
+/// 0700, which puts the body into a world-readable file and tightens it
+/// afterwards -- so the script is exposed for the window, and a descriptor
+/// opened in it keeps reading after the chmod. `RuntimeDirectoryMode=0755` in
+/// the unit, so `/run/netcfgd` is traversable by anyone on the machine, and a
+/// hook body is an operator's own shell: whatever they put in it.
+///
+/// The mode itself is the reason the old comment gave and it still holds: the
+/// hook runs as root and nobody else needs to read it, let alone write it. A
+/// world-writable hook is a root shell for whoever finds it.
 #[cfg(unix)]
-fn set_executable(path: &std::path::Path) -> Result<(), String> {
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+	use std::io::Write as _;
+	use std::os::unix::fs::OpenOptionsExt as _;
 	use std::os::unix::fs::PermissionsExt;
-	// 0700: the hook runs as root and nobody else needs to read it, let alone
-	// write it. A world-writable hook is a root shell for whoever finds it.
+
+	let mut file = fs::OpenOptions::new()
+		.write(true)
+		.create(true)
+		.truncate(true)
+		.mode(0o700)
+		.open(path)
+		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
+	// A file that already existed keeps its own mode through `open`, so one
+	// left wider by an older build is tightened rather than trusted.
 	fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-		.map_err(|error| format!("could not set permissions on {}: {error}", path.display()))
+		.map_err(|error| format!("could not set permissions on {}: {error}", path.display()))?;
+	file.write_all(bytes)
+		.map_err(|error| format!("could not write {}: {error}", path.display()))
 }
 
 #[cfg(not(unix))]
-fn set_executable(_path: &std::path::Path) -> Result<(), String> {
-	Ok(())
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+	fs::write(path, bytes).map_err(|error| format!("could not write {}: {error}", path.display()))
 }
 
 /// SHA-256, from the model so that the hash written here and the hash

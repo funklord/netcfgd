@@ -8263,3 +8263,53 @@ lifecycle converges at every step now: servers set, servers changed, search
 dropped, block removed. The one-write lag in `observed.json` after a
 clearing apply is the snapshot rather than the plan -- the next command
 writes it correctly and the plan was already right.
+
+## 10.34 hooks: the fault 0096 closed for interfaces, still open for networks
+
+Swept on 2026-09-04. Two findings, and the first is the project's own recorded
+fault living on in the block type nobody looked at.
+
+**A hook on a `network` runs at no phase, and nothing said so.** The config
+language accepts one, `canonicalize` validates its path, the compiler
+materialises it into `/run/netcfgd/hooks/` and hashes it into the document,
+and `ncfg profile save` renders it back. Every consumer of hooks in the tree
+reads `desired.interfaces`: the three daemon sites for `drift`, `portal` and
+`roam`, the planner's phase walks, and `warn_unfired_hooks` itself.
+
+The comment on `FIRED_PHASES` describes exactly this state as the fault 0096
+closed -- "nine of the eleven were parsed, materialised into
+`/run/netcfgd/hooks/`, hashed into the document and never executed, which
+reads exactly like a working feature: the file is there, the plan mentions
+nothing, and the script never runs" -- and adds that the warning stays
+"because a list that is complete today is not one that stays complete". It
+was closed for one of the **two** block types that carry hooks, and the
+warning that closed it walks the same one.
+
+Warned rather than implemented: which phase a hook on a network should fire
+at is a design question, and 0061's rule is that a key netcfgd recognises and
+does not act on is named at plan time. The warning says so per network and
+points at the interface that joins it. The test's control is a network with
+no hooks, which must stay quiet.
+
+**And a hook script was world-readable between being written and being
+tightened.** `materialise` wrote the body with `fs::write` and chmodded to
+0700 afterwards -- the third instance this week of the same shape, after
+`write_ppp_options` and the two WireGuard key records, and the one with the
+most at stake: the file is executed as root and its contents are whatever
+shell the operator wrote, which may be anything. `RuntimeDirectoryMode=0755`
+makes `/run/netcfgd` traversable, so the window is reachable. The mode goes
+on the open now. The old comment's reason was already right and is kept: a
+world-writable hook is a root shell for whoever finds it.
+
+**Where the sweep looked and found nothing.** `run_as` and `timeout` are
+`Option` fields the runner honours and the executor passes as `None`, which
+looks like a live gap and is not: the hook syntax is an inline body with no
+key for either, so nothing can set them. 0123 records that deliberately, and
+re-measuring confirmed the config language still has no such key -- the only
+drift is that 0123 says the runner "never reads" them, which stopped being
+true when the runner learned to. The sha256 verification is real and not the
+vacuous shape it could have been: `hook_hashes` carries the *compiler's*
+hash from the document rather than a re-hash of the file, so a tampered
+script fails the phase. That list is built from `document.interfaces`, which
+is complete for as long as only interface hooks are ever run -- and is the
+same list that would need to grow if network hooks ever do.
