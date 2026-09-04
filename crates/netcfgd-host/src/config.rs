@@ -118,6 +118,30 @@ fn add_file_within(
 		));
 	}
 
+	// **A regular file, and nothing else.** `read_to_string` reads until the
+	// end, and a character device has none: `include "/dev/zero"` allocated
+	// until memory ran out -- measured, it took a whole gigabyte under a cap
+	// and reported "out of memory" -- in a daemon whose RSS budget this
+	// project gates on at under five megabytes. A fifo is the same shape and
+	// blocks instead.
+	//
+	// A file type rather than a size limit, because the type is the honest
+	// question: a configuration include is a file somebody wrote, and no
+	// number here would be anything but invented. A regular file that is
+	// absurdly large is still an operator having made one, and it ends.
+	let kind = fs::metadata(path)
+		.map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))?
+		.file_type();
+	if !kind.is_file() {
+		return Err(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!(
+				"{}: not a regular file, so it cannot be included -- a device or a \
+				 fifo has no end to read to",
+				path.display()
+			),
+		));
+	}
 	let text = fs::read_to_string(path)
 		.map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))?;
 	open.push(identity);
