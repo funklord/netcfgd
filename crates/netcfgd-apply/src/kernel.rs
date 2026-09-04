@@ -1004,6 +1004,12 @@ impl Executor for KernelExecutor {
 				Ok(())
 			}
 			Op::BackendStart { kind, iface } => {
+				// **Before the per-kind dispatch below, because most of it
+				// returns early.** Adoption used to live in `start_backend`,
+				// which five of these seven kinds never reach.
+				if adopt_running_backend(*kind, iface)? {
+					return Ok(());
+				}
 				// PPPoE and hostapd first, and before `start_backend`: both are
 				// configured from parts of the document the op does not carry
 				// -- a session's credentials, an access point's whole block --
@@ -1949,13 +1955,23 @@ fn udhcpc_start_args(
 	]
 }
 
-fn start_backend(
-	kind: netcfgd_model::BackendKind,
-	iface: &str,
-	metric: Option<u32>,
-) -> Result<(), String> {
-	use netcfgd_model::BackendKind;
-
+/// Take over a backend netcfgd already started, if one is still running.
+///
+/// **Called for every kind, which it was not.** The block below used to sit
+/// inside `start_backend`, and `execute` answers `BackendStart` for pppoe,
+/// hostapd, radvd, dhcp6 and openvpn *before* reaching it -- so 0140's
+/// recovery ran for the supplicant and dhcp4 and for nothing else, although
+/// `backend_pid_file` answers for six kinds. Measured with a fake openvpn: a
+/// second apply after the run directory was cleared, which is what a stop and
+/// start leaves behind, doubled the processes instead of adopting the one that
+/// was there.
+///
+/// Returns whether the caller should stop, having adopted.
+///
+/// # Errors
+///
+/// A pid file that cannot be written, which is the only thing this does.
+fn adopt_running_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<bool, String> {
 	// **Adopt anything netcfgd already started, before deciding to start it.**
 	//
 	// 0140 recovered the supplicant this way and 0143 did dhcpcd through its
@@ -1992,6 +2008,16 @@ fn start_backend(
 	// Declining to adopt costs nothing by comparison: netcfgd refuses the radio,
 	// says why, and whoever can drive it keeps it.
 	if let Some((pidfile, marker)) = backend_pid_file(kind, &run_dir_path(), iface) {
+		// **A pid file that still names a live process means it is already
+		// running, and starting it again is the thing this exists to
+		// prevent.** The condition below reads "no pid file we can trust",
+		// which is the case adoption is *for* -- but falling through when the
+		// file does check out started a second daemon beside a first that
+		// netcfgd had just recorded. Reached whenever one apply carries two
+		// starts for one backend, which is exactly how this was found.
+		if marker.starts_with('/') && netcfgd_sys::process::pid_of(&pidfile, &marker).is_some() {
+			return Ok(true);
+		}
 		if marker.starts_with('/')
 			&& netcfgd_sys::process::pid_of(&pidfile, &marker).is_none()
 			&& backend_is_reachable(kind, iface)
@@ -2007,10 +2033,20 @@ fn start_backend(
 				eprintln!(
 					"netcfgd: adopted the {kind:?} backend already running on {iface} (pid {pid}); it is netcfgd's, by the `{marker}` it was started with"
 				);
-				return Ok(());
+				return Ok(true);
 			}
 		}
 	}
+	Ok(false)
+}
+
+fn start_backend(
+	kind: netcfgd_model::BackendKind,
+	iface: &str,
+	metric: Option<u32>,
+) -> Result<(), String> {
+	use netcfgd_model::BackendKind;
+
 	match kind {
 		BackendKind::Dhcp4 => {
 			// Where the metric goes, and why it is dhcpcd's alone, is on
@@ -2434,6 +2470,23 @@ pub fn backend_pid_file(
 			Some((
 				netcfgd_openvpn::pid_path(run, iface),
 				socket.to_string_lossy().into_owned(),
+			))
+		}
+		// **pppd carries netcfgd's options file in its own argv**, as
+		// `file <path>`, for as long as the session lives -- which is 0140's
+		// shape exactly. It had no entry here at all, so a `pppd` left running
+		// by `KillMode=process` could be neither found nor adopted, and the
+		// next start put a second one on the same link with `persist` and
+		// `maxfail 0` telling both to retry for ever.
+		//
+		// The pid file is netcfgd's own record rather than pppd's: pppd
+		// daemonises, so the pid netcfgd could observe at exec time is not the
+		// one that survives, and the marker scan is what fills this in.
+		BackendKind::Pppoe => {
+			let options = run.join("ppp").join(iface);
+			Some((
+				run.join("ppp").join(format!("{iface}.pid")),
+				options.to_string_lossy().into_owned(),
 			))
 		}
 		BackendKind::RouterAdvert => {

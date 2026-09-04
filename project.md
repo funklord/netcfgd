@@ -7236,7 +7236,7 @@ reaches the kernel, so comparing it would reinstall a rule somebody renamed.
 
 ---
 
-## 10.22 Open: pppoe is the one backend with no way to be reclaimed
+## 10.22 Fixed: every backend can be reclaimed now, and one was dialled twice
 
 **2026-09-04**, from sweeping the vpn and tunnel code. Established by reading
 and **not demonstrated**, for the reason `ppp.sh` gives about itself: `/dev/ppp`
@@ -7276,10 +7276,44 @@ so the recovery is a table entry rather than a new mechanism. What it also
 needs is a `backend_is_reachable` answer for pppoe, since adoption is gated on
 being able to talk to what is adopted, and pppoe has none of that plumbing.
 
-Not fixed, because the smaller half -- refusing to start beside a marked
-`pppd` -- is a guard I cannot see fail on this machine, and the fuller half is
-designing adoption for a backend I cannot exercise. Both are the holder's call
-against hardware that exists.
+**Fixed, and looking for the guard found two larger faults above it.**
+
+**First: the adoption ran for two kinds out of seven.** `execute` answers
+`Op::BackendStart` for pppoe, hostapd, radvd, dhcp6 and openvpn and returns
+early, *before* `start_backend` -- and the adoption block lived inside
+`start_backend`. So 0140's recovery reached the supplicant and dhcp4 and
+nothing else, although `backend_pid_file` answers for six kinds. It is its own
+function now, called once at the top of the `BackendStart` arm where every
+kind passes.
+
+Measured with `openvpn.sh`'s fake, counting from `/proc` rather than `pgrep`
+-- which matches its own command line: one apply, then the run directory
+cleared, which is what a stop and a start leave behind. **Two processes became
+four.** After the fix the second apply says *"adopted the OpenVpn backend
+already running on vpn0"* and there is one.
+
+**Second: a tunnel that was not up was dialled twice, on every apply.** The
+device walk plans the dial unconditionally since 0155 pass 1b -- so a tunnel
+whose daemon died is restarted -- and the interface walk still planned it when
+the link was absent. Both fired on a machine whose tunnel had never come up.
+
+`plan_interface_attributes` carries a comment saying this exact fault was
+found and fixed once, *"and the fixture that covered this asserted the action
+was present rather than how many there were"*. **The fixture counts, and had
+gone blind anyway**: its configuration is a bare `device` block, so after 0155
+split the walks the duplicate needed both an interface and a device to appear,
+and it had only the device. It passed with the fault reintroduced, measured.
+Giving it an `interface` block is the whole repair, and it fails properly now.
+
+**Third, and the original finding: `Pppoe` has a table entry.** The marker is
+the options file `pppd` carries in its own argv as `file <path>`; the pid file
+is netcfgd's own record, because pppd daemonises and the pid seen at exec is
+not the one that survives.
+
+One more came out of the measurement: adoption fell through to starting when
+the pid file *did* check out, which is the "already running" case. It returns
+early there now -- reachable whenever one apply carries two starts for one
+backend, which is how it was seen at all.
 
 ---
 

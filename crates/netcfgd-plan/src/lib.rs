@@ -2577,12 +2577,22 @@ impl Builder {
 	fn plan_interface_contents(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let link = observed.link(name);
+		// **The dial belongs to the device walk, and calling it here as well
+		// was two `backend.start` actions for one session.** The comment on
+		// `plan_interface_attributes` records this being fixed once already;
+		// 0155 pass 1b then moved the dial onto the device walk, which calls
+		// it unconditionally so a tunnel whose daemon died is restarted, and
+		// left this call behind. With the link absent both fired, so every
+		// apply on a machine whose tunnel was not up started two daemons --
+		// measured with a fake openvpn: one apply, two processes.
+		//
+		// The early return stays. A tunnel with no link has nothing to address
+		// or route, and the rest of this function is about exactly that.
 		if link.is_none()
 			&& matches!(
 				self.kind_of(&interface.name),
 				InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
 			) {
-			self.plan_ppp_session(&interface.name, observed);
 			return;
 		}
 		if link.is_none()

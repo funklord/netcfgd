@@ -1606,11 +1606,22 @@ interface wlan0 { config = "192.168.9.1/24" }
 /// daemon twice -- and the fixture that covered this asserted the action was
 /// *present* rather than how many there were, which is why it went unnoticed
 /// from the day `PPPoE` was written.
+///
+/// **And then this test stopped being able to see it.** It counted, which was
+/// the fix, but its configuration was a bare `device` block -- so after 0155
+/// pass 1b moved the dial onto the device walk and left the old call in the
+/// interface walk, the duplicate needed *both* an interface and a device to
+/// appear, and this had only the device. It passed with the fault
+/// reintroduced, measured. The `interface` blocks below are the whole
+/// difference: a test for a duplicate between two walks has to give both
+/// walks something to find.
 #[test]
 fn a_tunnel_that_is_not_up_is_dialled_exactly_once() {
 	for config in [
-		r#"device t0 { pppoe { parent = "eth0"; username = "u"; password = "@secret:p" } }"#,
-		r#"device t0 { openvpn { config = "/etc/openvpn/work.ovpn" } }"#,
+		r#"device t0 { pppoe { parent = "eth0"; username = "u"; password = "@secret:p" } }
+		   interface t0 { config = "null" }"#,
+		r#"device t0 { openvpn { config = "/etc/openvpn/work.ovpn" } }
+		   interface t0 { config = "null" }"#,
 	] {
 		let desired = document(config);
 		let plan = plan(&desired, &Observed::default(), &PlanOptions::default());
