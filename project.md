@@ -8629,3 +8629,57 @@ before anything is written: `../escape`, `/etc/passwd`, `a/b` and the empty
 string are each refused by name, and a profile that does not exist is refused
 with the list of those that do. The lifecycle is idempotent -- set, unset, set
 again, set twice -- and leaves exactly one file in `conf.d`.
+
+## 10.41 plan and apply: the "cannot be undone" mark says something untrue
+
+Swept on 2026-09-04. Most of this week's fixes landed in these two crates, so
+this took the one mechanism nothing had questioned: the `inverse` an action
+declares, and the safety claim built on it.
+
+**`revert` does not use inverses.** It reads the last-good document, makes it
+the desired state, and re-plans. `Action::inverse` is consumed by exactly one
+thing -- `Plan::irreversible()` -- and that drives two user-facing claims: a
+warning per action, *"link.set_bridge cannot be undone; commit-confirm will
+not revert it"*, and a column in the GUI's plan table reading **"NO -- confirm
+cannot undo this"** in the stop colour.
+
+**Measured, and the claim is false.** A bridge's `ageing_time`, whose
+`link.set_bridge` is pushed with `inverse: None` and therefore carries the
+warning:
+
+    baseline        ageing_time 30000
+    after apply     ageing_time 90000   (with --confirm-within 60)
+    after revert    ageing_time 30000
+
+The revert restored it, and the bridge survived. A `qdisc.set`, which *does*
+declare an inverse and so carries no warning, reverts identically. The mark
+separates two things that behave the same.
+
+It reads as false for the same reason on every site: the last-good document
+describes the previous state, so anything the configuration determines comes
+back. What a revert genuinely cannot put back is *transient* state -- a
+dropped VPN session, a deauthenticated station, a released lease -- and that
+is a property of what an action disturbs, not of whether an `Op` can be
+inverted. `link.delete` is marked irreversible and its link is recreated from
+the document, addresses and routes included; what is lost is the moment it was
+gone.
+
+**This is a contradiction between the design and the code, so it is recorded
+rather than resolved.** `action.rs` opens by saying each action "declares its
+inverse so commit-confirm can revert without deriving one", and commit-confirm
+derives one anyway, from the document. Either the revert should use the
+inverses the design provides, or the reversibility mark should be redefined
+around disruption and the `inverse` field reconsidered. Both are the
+copyright holder's call: one changes how a safety feature works, the other
+removes a red warning from a client, and picking either from inside a sweep
+is the thing `working-practice.md` says not to do.
+
+**One thing that looked like a severe bug and is not, with the evidence that
+settled it.** The first attempt at this reverted and found the bridge *gone*.
+The daemon's own log explained it: "no previous configuration recorded, so a
+revert would undo everything netcfgd does from here. `ncfg apply
+--confirm-within N` works from the first apply." The window had been armed on
+a machine with no last-good, so the last-good was nothing, and reverting to
+nothing correctly tore everything down. netcfgd said so at the time. Reading
+the log rather than the symptom is what kept that out of this record as a
+finding.
