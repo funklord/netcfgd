@@ -7923,3 +7923,70 @@ fake-supplicant processes between 13 and 22 hours old, all orphaned to init
 from earlier live runs, with 27 `ncfg-*` directories in `/tmp`. Reported
 rather than killed: they are not this session's to reap, and `/tmp` here is
 a 16 GB tmpfs at 2%, so nothing is at risk yet.
+
+## 10.30 tunnel and veth: two plans that could never converge
+
+Swept on 2026-09-04. The tunnel encoding is correct -- a properly named GRE
+gets its remote, local, underlay device, ttl and both keys, a SIT gets its
+endpoints, and both converge on the second plan. What the sweep found is two
+configurations that a plan accepted and could never satisfy, which is the
+same family as 10.29's `vlans`, met twice more in one afternoon.
+
+**The kernel's own fallback tunnel devices cannot be configured, and naming
+one failed for ever.** Every tunnel module registers a device when it loads,
+so a fresh network namespace on this machine already holds `gre0`,
+`gretap0`, `erspan0`, `sit0` and `tunl0`. That device refuses everything,
+measured with iproute2 rather than inferred:
+
+    ip link set gre0 type gre local ... remote ...   RTNETLINK: Invalid argument
+    ip link del gre0                                 silent, and gre0 is still there
+    ip link add gre0 type gre ...                    RTNETLINK: File exists
+
+So `device gre0 { tunnel { ... } }` produced a `link.set_tunnel` that failed
+on every apply with a bare `Invalid argument`, for ever. It matters because
+`gre0` is the name an operator reaches for first -- this sweep's own first
+test config chose it without thinking.
+
+**The discriminating control is what says whose fault it is.** A *normal*
+pre-existing GRE tunnel, one netcfgd did not create, takes the same change
+happily: `ip link set greX type gre local ... remote 10.0.0.9` moves it.
+So the refusal is not about ownership, not about how netcfgd encodes the
+request, and not about adoption -- it is this specific device. The names are
+fixed by the modules, so the check is a list rather than a rule, and the
+list is what the modules register.
+
+**A veth whose peer name is taken failed for ever too, and blamed the wrong
+device.** A veth is created in pairs, so `device w0 { veth { peer = "taken"
+} }` where `taken` exists answers EEXIST -- and the error names the device
+being created rather than the one in the way, so an operator reads "could
+not create w0: File exists" about a `w0` that does not exist. Reachable
+without anybody doing anything strange: a veth's other end can be moved to
+another namespace, leaving the name occupied here.
+
+**Declining the create was half a fix, and the half that was missing is the
+interesting part.** With the create gone, the passes after it still planned
+`link.up w0`, which failed with "no interface named w0" on every reconcile
+-- the same non-convergence by a different action. The planner already had
+`appearing`, a list of names that will exist by the end of a plan without
+anything naming them directly, which is exactly the opposite question. It
+has `declined` beside it now, and both places that ask "is this device
+absent and not coming" consult it.
+
+**Where the sweep came up empty, with what was looked at.** `TunnelConfig`'s
+six fields are all applied and all compared -- mode through
+`recreation_reason`, the rest in `plan_tunnel`, with geneve's VNI and remote
+family called out as refusals rather than attempted. The GRE key is written
+with its flag bits, which is what keeps `key = 0` from differing from itself
+for ever, and read back through the same flag. `VethConfig` has one field
+and both ends of a pair converge whether one end is declared or both.
+
+**One thing found and left alone**, because the fix is a compile-time
+consistency check and the cost of getting it wrong is refusing a working
+configuration: two `veth` blocks may name different peers of each other --
+`v0 { peer = "v1" }` beside `v1 { peer = "vX" }` -- and nothing says so. The
+plan creates the pair from the first block, the second `link.create` fails
+with EEXIST and skips the two `link.up`s beside it, and the next reconcile
+brings them up and converges. So it costs one failed apply and recovers,
+while `v1`'s stated peer is silently not what it asked for. Recorded rather
+than fixed: it wants `expand_members`-shaped agreement checking in the
+compiler, which is its own piece of work.

@@ -5430,6 +5430,92 @@ device work-net {
 	);
 }
 
+/// The kernel's own fallback tunnel device is named, not configured for ever.
+///
+/// Every tunnel module registers a device when it loads -- `gre0`, `tunl0`,
+/// `sit0` and the rest -- and that device refuses everything. Measured with
+/// iproute2: setting its endpoints answers EINVAL, deleting it silently does
+/// nothing and leaves it there, and adding one of the same name answers
+/// EEXIST. Naming one in a document therefore produced a `link.set_tunnel`
+/// that failed on every apply for ever, with a bare `Invalid argument`.
+///
+/// `gre0` is the name an operator reaches for first, which is what makes this
+/// worth a sentence rather than an errno. The control is a tunnel of the same
+/// kind under another name: it must still be corrected, or the guard would
+/// have closed the feature rather than the hole.
+#[test]
+fn a_fallback_tunnel_device_is_named_rather_than_configured() {
+	for (name, planned) in [("gre0", false), ("wan-gre", true)] {
+		let desired = document(&format!(
+			"device base0 {{ kind = \"dummy\" }}\n\
+			 device {name} {{ tunnel {{ mode = \"gre\"; local = \"10.0.0.1\"; remote = \"10.0.0.2\" }} }}\n\
+			 interface base0 {{ config = \"null\" }}\ninterface {name} {{ config = \"null\" }}\n"
+		));
+		let mut observed = observed_with(&["base0", name]);
+		for link in &mut observed.links {
+			link.up = true;
+			link.ownership = Ownership::Ours;
+		}
+		"gre".clone_into(&mut observed.links[1].kind);
+		// The kernel's fallback reports no endpoints, which is what the plan
+		// would otherwise try to correct.
+		observed.links[1].tunnel = Some(netcfgd_model::ObservedTunnel {
+			local: None,
+			remote: None,
+			ttl: None,
+			key: None,
+		});
+
+		let plan = plan(&desired, &observed, &PlanOptions::default());
+		assert_eq!(
+			names(&plan).contains(&"link.set_tunnel"),
+			planned,
+			"{name}: link.set_tunnel should be planned = {planned}: {:?}",
+			names(&plan)
+		);
+	}
+}
+
+/// A veth whose peer name is taken is said once, not retried for ever.
+///
+/// Creating a veth creates both ends at once, so a peer name already in use
+/// answers EEXIST -- and the message names the device being created rather
+/// than the one in the way, so an operator reads "could not create w0: File
+/// exists" about a `w0` that does not exist. The same action was then planned
+/// again on every reconcile, because nothing about the failure changes the
+/// state it was computed from.
+///
+/// The second half is what the first fix missed: declining the create left a
+/// `link.up` behind that failed with "no interface named w0", which is the
+/// same non-convergence by a different action.
+#[test]
+fn a_veth_whose_peer_name_is_taken_is_refused_rather_than_retried() {
+	let desired =
+		document("device w0 { veth { peer = \"taken\" } }\ninterface w0 { config = \"null\" }\n");
+	let mut observed = observed_with(&["taken"]);
+	observed.links[0].up = true;
+	observed.links[0].ownership = Ownership::Foreign;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"link.create"),
+		"a veth was planned against a name already taken: {:?}",
+		names(&plan)
+	);
+	assert!(
+		!names(&plan).contains(&"link.up"),
+		"a declined device was still brought up: {:?}",
+		names(&plan)
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("peer `taken`")),
+		"nothing said why: {:?}",
+		plan.warnings
+	);
+}
+
 /// `vlans` on a device that is in no bridge is said once, not attempted for ever.
 ///
 /// It was planned for anything carrying the key. A device that is neither a

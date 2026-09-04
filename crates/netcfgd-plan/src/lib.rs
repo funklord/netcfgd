@@ -1071,6 +1071,16 @@ struct Builder {
 	/// peer is configured on the *next* apply, which a daemon reaches on its
 	/// own and `ncfg apply --oneshot` never does.
 	appearing: Vec<String>,
+	/// Devices this plan has declined to create, having already said why.
+	///
+	/// `appearing` is the opposite question -- names that will exist by the
+	/// end of this plan without anything naming them directly. This is for a
+	/// device that will NOT exist, so the passes after the creation one do not
+	/// plan against a name nothing is going to bring into being. Without it a
+	/// declined create still left a `link.up` failing with "no interface named
+	/// w0" on every reconcile, which is the same non-convergence the decline
+	/// was added to remove.
+	declined: Vec<String>,
 	/// Whether the document has any wifi network to join.
 	///
 	/// **No longer a condition for running a supplicant, and the reason it was
@@ -1902,6 +1912,33 @@ impl Builder {
 			);
 			return;
 		}
+		// **A veth is created in pairs, so its peer's name has to be free
+		// too.** Creating one whose peer name is already taken answers EEXIST
+		// -- and the message names the device being created rather than the
+		// one in the way, so an operator reads "could not create w0: File
+		// exists" about a `w0` that does not exist. Worse, the same action is
+		// planned again on the next reconcile and every one after, because
+		// nothing about the failure changes the state it was computed from.
+		//
+		// The idiom is the one directly above: say it rather than emitting an
+		// action that must fail. Reachable without anybody doing anything odd
+		// -- a veth's other end can be moved to another namespace, leaving the
+		// name occupied here.
+		if let InterfaceKind::Veth(veth) = &interface.kind {
+			if observed.link(&veth.peer).is_some() {
+				self.warn(
+					&interface.name,
+					format!(
+						"{} is a veth whose peer `{}` is a device that already exists, so the \
+						 pair cannot be created -- the kernel refuses both ends at once and \
+						 names only {}. Rename the peer, or remove the device holding the name",
+						interface.name, veth.peer, interface.name
+					),
+				);
+				self.declined.push(interface.name.clone());
+				return;
+			}
+		}
 		// Root for an interface that was simply absent, and after the delete for
 		// one being remade -- `plan_recreation` leaves that delete's id in the
 		// gates, so this is the same call for both and neither has to know which
@@ -2344,6 +2381,33 @@ impl Builder {
 		let Some(running) = link.tunnel else {
 			return;
 		};
+		// **The kernel's own fallback device cannot be configured at all**, and
+		// naming one produced a plan that failed on every apply for ever with a
+		// bare `Invalid argument`. Each tunnel module registers a device when
+		// it loads -- `gre0`, `tunl0`, `sit0` and the rest -- and that device
+		// refuses everything: `ip link set gre0 type gre local ... remote ...`
+		// answers EINVAL, `ip link del gre0` silently does nothing and leaves
+		// it there, and `ip link add gre0 ...` answers EEXIST. All three
+		// measured with iproute2, so the refusal is the kernel's rather than
+		// anything about how netcfgd encodes the request -- a normal
+		// pre-existing tunnel of the same kind takes the same change happily,
+		// which is what says ownership is not the discriminator here.
+		//
+		// It matters because `gre0` is the name an operator reaches for first.
+		// Say it once, and plan nothing that cannot succeed -- 0061's rule
+		// again, and the same shape as `vlans` on a device in no bridge.
+		if is_fallback_tunnel(name) {
+			self.warn(
+				name,
+				format!(
+					"{name} is the kernel's own fallback tunnel device, which is created when \
+					 the module loads and cannot be configured, deleted or replaced -- its \
+					 endpoints and ttl are refused with EINVAL however they are set. Give the \
+					 tunnel another name, such as `{name}-wan`"
+				),
+			);
+			return;
+		}
 		let geneve = tunnel.mode == netcfgd_model::TunnelKind::Geneve;
 		// A geneve VNI is refused outright, so it is said rather than tried. The
 		// nest the executor sends leaves the VNI out on a change for exactly this
@@ -2518,6 +2582,13 @@ impl Builder {
 				self.kind_of(&interface.name),
 				InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
 			) {
+			return;
+		}
+		// A device the creation pass declined, having said why. Nothing will
+		// bring it into existence, so an action against it is one that must
+		// fail -- the same reasoning as the absent hardware below, for a name
+		// absent by decision rather than by accident.
+		if link.is_none() && self.declined.iter().any(|declined| declined == name) {
 			return;
 		}
 		if link.is_none()
@@ -2728,6 +2799,13 @@ impl Builder {
 				self.kind_of(&interface.name),
 				InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_)
 			) {
+			return;
+		}
+		// A device the creation pass declined, having said why. Nothing will
+		// bring it into existence, so an action against it is one that must
+		// fail -- the same reasoning as the absent hardware below, for a name
+		// absent by decision rather than by accident.
+		if link.is_none() && self.declined.iter().any(|declined| declined == name) {
 			return;
 		}
 		if link.is_none()
@@ -5107,6 +5185,21 @@ impl Builder {
 ///
 /// Exhaustive on purpose: a kind added later has to decide which of the two it
 /// is, in this function, rather than defaulting into "delete it and try again".
+/// Whether this name belongs to a tunnel module's own fallback device.
+///
+/// Each of these is registered by its module at load time and is not a device
+/// anybody can configure: the kernel refuses a change to its endpoints, refuses
+/// to delete it, and refuses to create another of the same name. The set is
+/// fixed by the modules rather than by policy, so it is a list rather than a
+/// rule -- `ip_gre` registers the first three, `ip6_gre` the next two, and
+/// `ipip`, `sit` and `ip6_tunnel` one each.
+fn is_fallback_tunnel(name: &str) -> bool {
+	matches!(
+		name,
+		"gre0" | "gretap0" | "erspan0" | "ip6gre0" | "ip6gretap0" | "tunl0" | "sit0" | "ip6tnl0"
+	)
+}
+
 fn recreatable_kind(kind: &InterfaceKind) -> Option<&'static str> {
 	match kind {
 		InterfaceKind::Bridge(_) => Some("bridge"),
