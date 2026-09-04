@@ -5450,6 +5450,43 @@ device work-net {
 	);
 }
 
+/// Turning forwarding on and accepting advertisements happen in one plan.
+///
+/// `ObservedAcceptRa::effective` is computed in the observer from the
+/// forwarding sysctl as it was, so a plan that turns forwarding on in the same
+/// pass invalidates it. `settled` was then true, no `accept_ra` was planned,
+/// and the apply left an interface forwarding with `accept_ra` at 1 --
+/// advertisements ignored, SLAAC obtaining no address -- until a second apply
+/// happened to run. A daemon hides that; `--oneshot` at boot does not.
+///
+/// The same shape `plan_bridge_vlans` records for a bridge this plan is about
+/// to create: a value read before the plan cannot answer a question the plan
+/// is about to change.
+#[test]
+fn accept_ra_is_decided_against_the_forwarding_this_plan_sets() {
+	let desired = document("interface e0 {\n\tconfig = \"slaac\"\n\tforwarding = true\n}\n");
+	let mut observed = observed_with(&["e0"]);
+	observed.links[0].up = true;
+	// The kernel's default, on an interface that does not forward yet: so
+	// `effective` is true, and reading it alone says there is nothing to do.
+	observed.links[0].accept_ra = Some(netcfgd_model::ObservedAcceptRa {
+		value: 1,
+		effective: true,
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		names(&plan).contains(&"sysctl.set_forwarding"),
+		"forwarding was not planned: {:?}",
+		names(&plan)
+	);
+	assert!(
+		names(&plan).contains(&"sysctl.set_accept_ra"),
+		"the plan turns forwarding on and leaves advertisements ignored: {:?}",
+		names(&plan)
+	);
+}
+
 /// A hook on a `network` runs at no phase, and now says so.
 ///
 /// The config language accepts one, `canonicalize` validates its path, the

@@ -4054,7 +4054,31 @@ impl Builder {
 			// asks for SLAAC, and nothing to do where netcfgd's own value is
 			// already back at the default.
 			let settled = match current {
-				Some(state) if asked => state.effective,
+				// **Against the forwarding this plan will produce, not the one
+				// it observed.** `effective` is computed in the observer from
+				// the forwarding sysctl as it was, and a plan turning
+				// forwarding on in the same pass invalidates it: `settled` was
+				// then true, no `accept_ra` was planned, and the apply left the
+				// interface forwarding with `accept_ra` at 1 -- advertisements
+				// ignored, SLAAC obtaining no address -- until a second apply
+				// happened to run. Measured: two applies to converge where one
+				// should do, which a daemon hides and `--oneshot` at boot does
+				// not.
+				//
+				// This is the shape `plan_bridge_vlans` already records for a
+				// bridge this plan is about to create: a value read before the
+				// plan cannot answer a question the plan is about to change.
+				//
+				// Where the document says nothing about forwarding, the
+				// observation is still the answer, and it can be recovered
+				// exactly: `effective` is false with `value == 1` only when the
+				// interface forwards.
+				Some(state) if asked => {
+					let forwards = interface
+						.forwarding
+						.unwrap_or(state.value == 1 && !state.effective);
+					state.value == 2 || (state.value == 1 && !forwards)
+				}
 				Some(state) => state.value == wanted,
 				// An interface this plan is about to create has nothing to read
 				// yet. The write is planned and gated on the creation, as its

@@ -8471,3 +8471,64 @@ superlinear in the number of devices -- 500 in 67ms, 1000 in 171, 2000 in 497,
 devices is what "hung" in the first sweep at a ten-second bound; it finishes.
 A real machine has tens of interfaces, so this changes nothing anybody would
 do, and the numbers are here rather than a fix.
+
+## 10.38 observe and netlink: a sysctl decided against a value the plan was changing
+
+Swept on 2026-09-04. 10.28 had already swept the netlink attribute widths, so
+this used the lens that has paid most this week -- something computed from an
+observation the same plan invalidates -- and the netlink layer itself came out
+clean.
+
+**`accept_ra` was decided against the forwarding netcfgd was about to turn
+on.** `ObservedAcceptRa::effective` is computed in the observer as
+`value == 2 || (value == 1 && !forwards)`, reading the forwarding sysctl as it
+was. A router's configuration -- `config = "slaac"` with `forwarding = true`
+-- therefore looked settled while forwarding was still off, so no `accept_ra`
+action was planned, and the apply left the interface forwarding with
+`accept_ra` at 1. **That is advertisements ignored and SLAAC obtaining no
+address**, which is the exact fault `slaac.sh`'s header describes, until a
+second apply happened to run.
+
+Measured before and after: three applies to converge became one.
+
+    before   apply 1: 2 actions, accept_ra=1
+             apply 2: 1 action,  accept_ra=2
+    after    apply 1: 3 actions, accept_ra=2
+
+A daemon hides this, because it reconciles again within moments. `ncfg apply
+--oneshot` at boot does not, and a router configured that way comes up
+ignoring the advertisements it was told to accept.
+
+**The project had already met and named this shape.** `plan_bridge_vlans`
+carries the comment: "A link this plan is about to create has no VLANs yet,
+which is not the same as having none to compare against -- returning early
+here meant a freshly created bridge got its VLANs on the *next* reconcile
+instead of this one." Same fault, different field, and the fix is the same
+move: decide against what the plan will produce.
+
+Where the document says nothing about forwarding the observation is still the
+answer, and it is recovered exactly rather than guessed: `effective` is false
+with `value == 1` only when the interface forwards, so the observed forwarding
+is derivable from the two fields already present and no model change was
+needed.
+
+**Where the sweep looked and found nothing, with the method.** The netlink
+attribute walker refuses a length below the header size and one beyond the
+buffer, and advances by an aligned length clamped to what is left -- so the
+classic parser bug, an attribute of length zero looping for ever, cannot
+happen, and the module says there is a test for it. The three sysctls the
+planner can write -- `forwarding`, `use_tempaddr`, `accept_ra` -- are all
+three read back by the observer, and dropping them from the document hands
+each back to the kernel's default rather than leaving it set, which is the
+teardown 10.33's DNS scope was missing. The one
+`unwrap_or(false)` in the observer is an unreadable forwarding sysctl treated
+as off, which its comment argues for and which is the kernel's own default.
+NAT converges on a machine with no `nft` binary at all, and warns that nothing
+will reach the translation without `forwarding`.
+
+**A method note.** The first run of the sysctl lifecycle used `privacy` as an
+interface key; it is a modifier on a `slaac` address, so the configuration was
+refused and every reading in that run was of a config that never compiled. The
+numbers looked like a clean result -- three sysctls unchanged -- and meant
+nothing. The rule is the one this file keeps arriving at: a probe that could
+not have succeeded reports absence in the same words as a real one.
