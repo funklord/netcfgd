@@ -407,6 +407,35 @@ fn warn_unfired_hooks(builder: &mut Builder, desired: &Document) {
 			});
 		}
 	}
+
+	// **A hook on a `network` runs at no phase at all**, and nothing said so.
+	// The config language accepts one, `canonicalize` validates its path, the
+	// compiler materialises it into `/run/netcfgd/hooks/` and hashes it into
+	// the document, and `ncfg profile save` renders it back -- and every
+	// consumer of hooks in the tree reads `desired.interfaces`. That is the
+	// state the comment on `FIRED_PHASES` describes as the fault 0096 closed
+	// for interfaces: "the file is there, the plan mentions nothing, and the
+	// script never runs". It was closed for one of the two block types that
+	// carry hooks, and the warning that closed it walks the same one.
+	//
+	// Said per network rather than per phase, because the answer does not
+	// depend on which phase was asked for: none of them fires here.
+	for network in &desired.networks {
+		if network.hooks.is_empty() {
+			continue;
+		}
+		builder.warnings.push(Warning {
+			message: format!(
+				"network `{}` declares {} hook(s), and a hook on a network is not run \
+				 by this build at any phase -- the scripts are materialised and hashed, \
+				 so nothing about the config is wrong, but nothing executes them. Move \
+				 them to the `interface` that joins the network",
+				network.id,
+				network.hooks.len()
+			),
+			interface: None,
+		});
+	}
 }
 
 /// A daemon that is there and is not answering.

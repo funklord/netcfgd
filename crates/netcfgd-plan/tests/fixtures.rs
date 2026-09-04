@@ -5450,6 +5450,50 @@ device work-net {
 	);
 }
 
+/// A hook on a `network` runs at no phase, and now says so.
+///
+/// The config language accepts one, `canonicalize` validates its path, the
+/// compiler materialises it into `/run/netcfgd/hooks/` and hashes it into the
+/// document, and `ncfg profile save` renders it back -- while every consumer
+/// of hooks in the tree reads `desired.interfaces`. That is exactly the state
+/// the comment on `FIRED_PHASES` describes as the fault 0096 closed for
+/// interfaces: the file is there, the plan mentions nothing, and the script
+/// never runs. It was closed for one of the two block types that carry hooks.
+///
+/// The control is a network with no hooks, which must stay quiet.
+#[test]
+fn a_hook_on_a_network_is_reported_as_running_at_no_phase() {
+	// The hook is pushed rather than written in the config, because this
+	// fixture compiles with `NoHooks`: materialising a body needs a filesystem
+	// and a plan test has no business having one. What the planner sees is the
+	// `HookRef` either way.
+	let without = document(
+		"device e0 { kind = \"dummy\" }\ninterface e0 { config = \"null\" }\n\
+		 network \"home\" { wifi { psk = \"@secret:x\"; proto = \"wpa2\" } }\n",
+	);
+	let mut with_hook = without.clone();
+	with_hook.networks[0].hooks.push(netcfgd_model::HookRef {
+		phase: HookPhase::PostUp,
+		path: "/run/netcfgd/hooks/home.post_up.0".to_owned(),
+		sha256: "0".repeat(64),
+		run_as: None,
+		timeout: None,
+	});
+
+	for (desired, warns) in [(&with_hook, true), (&without, false)] {
+		let observed = observed_with(&["e0"]);
+		let plan = plan(desired, &observed, &PlanOptions::default());
+		assert_eq!(
+			plan.warnings.iter().any(|warning| warning
+				.message
+				.contains("not run by this build at any phase")),
+			warns,
+			"network hooks should warn = {warns}: {:?}",
+			plan.warnings
+		);
+	}
+}
+
 /// A DNS scope the document stopped having is swept out of the resolver file.
 ///
 /// `plan_dns` walks what is *desired*, so a scope that went away was never
