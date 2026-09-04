@@ -151,9 +151,36 @@ impl Sims {
 	}
 
 	/// Forget the notes that a plan has now acted on.
-	pub(crate) fn cycled(&mut self, devices: &[String]) {
+	///
+	/// **A note is dropped only where its cycle actually happened.** Both call
+	/// sites used to clear every note the moment `apply` returned, and `apply`
+	/// returns a journal rather than a result -- so a `link.down` that failed
+	/// forgot the note anyway, and nothing retried. The modem then sat on the
+	/// source it had, with the new one published to `/run` and `pre_up` never
+	/// fired, until something unrelated cycled the link. The comment at the
+	/// call site already claimed this behaviour; the code did not have it.
+	///
+	/// The condition is per device rather than per plan, and that matters in
+	/// both directions. Clearing on a whole-plan success would keep the note
+	/// alive whenever anything else in the plan failed -- a wifi backend, an
+	/// unrelated address -- and every apply after would take a working link
+	/// down and up again, which is the flapping the call site's other comment
+	/// records having just fixed.
+	///
+	/// A device with no records at all clears, and that is the right answer
+	/// rather than an oversight: the planner emits a cycle only for a link
+	/// that is *up*, because a link that is down runs `pre_up` on its way up
+	/// regardless. No records means no cycle was needed.
+	pub(crate) fn cycled(&mut self, devices: &[String], journal: &netcfgd_apply::Journal) {
 		for device in devices {
-			self.pending.remove(device);
+			let happened = journal
+				.records
+				.iter()
+				.filter(|record| record.interface.as_deref() == Some(device.as_str()))
+				.all(|record| record.outcome == netcfgd_apply::journal::Outcome::Done);
+			if happened {
+				self.pending.remove(device);
+			}
 		}
 	}
 
@@ -372,6 +399,84 @@ mod tests {
 		let body = read(run.path());
 		assert!(body.contains("apn=im.cxn"), "{body}");
 		assert!(!body.contains("sim="), "{body}");
+	}
+
+	/// A journal holding one record for `wwan0` with the given outcome.
+	fn journal(outcome: netcfgd_apply::journal::Outcome) -> netcfgd_apply::Journal {
+		let mut journal = netcfgd_apply::Journal::default();
+		journal.push(netcfgd_apply::journal::Record {
+			id: 1,
+			op: "link.down".to_owned(),
+			interface: Some("wwan0".to_owned()),
+			reason: netcfgd_plan::Reason::absent("wwan0", "modem.sim", "b"),
+			outcome,
+			error: None,
+		});
+		journal
+	}
+
+	/// A cycle that failed keeps its note, so the next apply tries again.
+	///
+	/// Both call sites cleared every note the moment `apply` returned, and
+	/// `apply` returns a journal rather than a result -- so a `link.down` that
+	/// failed forgot the note and nothing retried, leaving the modem on its old
+	/// source with the new one published and `pre_up` never fired.
+	#[test]
+	fn a_cycle_that_failed_keeps_its_note() {
+		let run = tempdir();
+		let document = document(&["a", "b"], None);
+		let mut sims = Sims::default();
+		sims.sync(&document, run.path());
+		assert_eq!(
+			sims.advance(&document, "wwan0", run.path()).as_deref(),
+			Some("b")
+		);
+
+		let waiting = sims.pending();
+		sims.cycled(&waiting, &journal(netcfgd_apply::journal::Outcome::Failed));
+		assert!(
+			sims.is_pending("wwan0"),
+			"a cycle whose link.down failed must still be waiting"
+		);
+
+		// And the note goes once the cycle really happened, or every later
+		// apply would take a working link down and up again.
+		sims.cycled(&waiting, &journal(netcfgd_apply::journal::Outcome::Done));
+		assert!(
+			!sims.is_pending("wwan0"),
+			"a cycle that ran is finished with"
+		);
+	}
+
+	/// An unrelated failure elsewhere in the plan does not hold the note.
+	///
+	/// The condition is per device rather than per plan: clearing on a
+	/// whole-plan success would keep the note alive whenever a wifi backend or
+	/// an unrelated address failed, and every apply after would flap a link
+	/// that had already switched.
+	#[test]
+	fn a_failure_on_another_interface_does_not_hold_the_note() {
+		let run = tempdir();
+		let document = document(&["a", "b"], None);
+		let mut sims = Sims::default();
+		sims.sync(&document, run.path());
+		sims.advance(&document, "wwan0", run.path());
+
+		let mut mixed = journal(netcfgd_apply::journal::Outcome::Done);
+		mixed.push(netcfgd_apply::journal::Record {
+			id: 2,
+			op: "backend.start".to_owned(),
+			interface: Some("wlan0".to_owned()),
+			reason: netcfgd_plan::Reason::absent("wlan0", "backend", "supplicant"),
+			outcome: netcfgd_apply::journal::Outcome::Failed,
+			error: Some("no supplicant".to_owned()),
+		});
+		let waiting = sims.pending();
+		sims.cycled(&waiting, &mixed);
+		assert!(
+			!sims.is_pending("wwan0"),
+			"another interface's failure is not this one's"
+		);
 	}
 
 	struct TempDir(PathBuf);

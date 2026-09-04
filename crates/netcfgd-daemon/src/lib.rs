@@ -1015,7 +1015,7 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 		return;
 	};
 	let journal = netcfgd_apply::apply(&restricted, &mut executor);
-	state.sims.cycled(&cycling);
+	state.sims.cycled(&cycling, &journal);
 	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	let _ = run_state::write_journal(&state.paths.run, &journal);
 	state.reobserve();
@@ -1088,7 +1088,7 @@ fn apply_request(
 	// The reconcile loop would eventually have cleared it, but only on a pass
 	// that found something to reconcile: it returns before taking the notes
 	// when nothing is drifting, which on a converged machine is every pass.
-	state.sims.cycled(&cycling);
+	state.sims.cycled(&cycling, &journal);
 	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	state.reobserve();
 
