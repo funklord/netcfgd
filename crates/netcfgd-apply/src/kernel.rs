@@ -344,6 +344,18 @@ impl KernelExecutor {
 
 		let path = write_ppp_options(iface, config, password.expose())?;
 
+		// **A failed dial deliberately leaves this file behind.** It was
+		// briefly changed to remove it, on the reasoning that a password
+		// should not outlive the session -- and the measurement went the other
+		// way. The file is 0600 and netcfgd runs as root, so the only reader
+		// is a user who can already read `/etc/netcfgd/secrets`; there is no
+		// exposure to remove. What removing it costs is real: `tests/live/
+		// ppp.sh` validates the options against a real pppd precisely by
+		// reading the file a failed dial left, which is the only way this
+		// project can check what it hands pppd on a machine with no DSL line.
+		//
+		// A session that genuinely ran has its files taken back by
+		// `stop_pppoe`; this is the case where none ever existed.
 		let program = ["/usr/sbin/pppd", "/sbin/pppd", "/usr/bin/pppd"]
 			.into_iter()
 			.map(std::path::PathBuf::from)
@@ -455,11 +467,47 @@ impl KernelExecutor {
 			// state this was asked to produce. Deliberately not an error: an
 			// apply that has already been run once, or a session that died on
 			// its own, both land here.
+			//
+			// The files still go, and this branch is the one that matters most
+			// for them: a session that died on its own leaves its options file
+			// -- with the password in it -- behind.
+			Self::remove_ppp_files(&self.run_dir, iface);
 			return Ok(());
 		};
 		netcfgd_sys::process::terminate(pid).map_err(|error| {
 			format!("could not stop the pppoe session on {iface} (pid {pid} from {path}): {error}")
-		})
+		})?;
+		// **After the session is gone, and it was not being done at all.** The
+		// stop removed the report and left the options file, the two scripts
+		// and the pid file standing -- so a PPPoE password stayed readable in
+		// `/run` for as long as the machine was up, on an interface that had
+		// been taken down or removed from the configuration entirely. It
+		// survives a daemon restart too, because `RuntimeDirectoryPreserve` is
+		// `restart` (0142).
+		//
+		// Not before the terminate: `pppd_pid` identifies netcfgd's own pppd
+		// by the options path in its argv, so a stop that failed must leave the
+		// evidence for the next attempt to find.
+		Self::remove_ppp_files(&self.run_dir, iface);
+		Ok(())
+	}
+
+	/// The four files a `PPPoE` session leaves in `/run/netcfgd/ppp`.
+	///
+	/// Named rather than swept: a wildcard over that directory would take a
+	/// concurrent session's files, and the names are all knowable from the
+	/// interface. The pid file is netcfgd's own record rather than pppd's,
+	/// which is why it is here and not left to pppd's exit.
+	fn remove_ppp_files(run_dir: &std::path::Path, iface: &str) {
+		let dir = run_dir.join("ppp");
+		for name in [
+			iface.to_owned(),
+			format!("{iface}.up"),
+			format!("{iface}.down"),
+			format!("{iface}.pid"),
+		] {
+			let _ = std::fs::remove_file(dir.join(name));
+		}
 	}
 
 	/// The pid of the `pppd` netcfgd started for this interface, if it is
@@ -2722,6 +2770,7 @@ fn write_ppp_options(
 	password: &str,
 ) -> Result<std::path::PathBuf, String> {
 	use std::io::Write;
+	use std::os::unix::fs::OpenOptionsExt;
 	use std::os::unix::fs::PermissionsExt;
 
 	let dir = run_dir_path().join("ppp");
@@ -2730,10 +2779,30 @@ fn write_ppp_options(
 	let (up, down) = write_ppp_scripts(iface)?;
 	let text = ppp_options(iface, config, password, &up, &down);
 
-	let mut file = std::fs::File::create(&path)
+	// **The mode goes on the open, not after it.** This was written as
+	// create-then-chmod, with a comment arguing that putting the chmod before
+	// the write closed the window -- and that argument is about time, while
+	// what it has to protect is a descriptor. `File::create` makes the file
+	// world-readable first, so a local process that opens it in that instant
+	// holds a readable descriptor that the later chmod does not revoke, and it
+	// reads the password written afterwards. Measured: an fd opened at 0644
+	// returns the content written after a chmod to 0600.
+	//
+	// It is reachable rather than theoretical -- `RuntimeDirectoryMode=0755`
+	// in the unit, so `/run/netcfgd` is traversable by anyone on the machine.
+	// `netcfgd_host::config::write_atomically` had already settled this same
+	// question for stored secrets by setting the mode on the open; this is
+	// that answer, applied where it was missed.
+	let mut file = std::fs::OpenOptions::new()
+		.write(true)
+		.create(true)
+		.truncate(true)
+		.mode(0o600)
+		.open(&path)
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-	// Before the content, not after: a window where the password is readable
-	// is a window, however short.
+	// A file that already existed keeps its old mode through `open`, so an
+	// options file left at a wider mode by an earlier build is tightened here
+	// rather than trusted.
 	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
 		.map_err(|error| format!("cannot secure {}: {error}", path.display()))?;
 	file.write_all(text.as_bytes())
