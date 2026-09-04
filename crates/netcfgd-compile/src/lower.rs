@@ -156,6 +156,19 @@ const IFNAMSIZ_MAX: usize = 15;
 /// The same shape as [`expand_members`], and for the same reason: the model
 /// holds what the kernel works in, and the config holds what an operator wants
 /// to say.
+/// Whether the document already declares something by this name.
+///
+/// **Devices as well as interfaces.** 0155 pass 1a made `device` the block
+/// that declares a link, so a check that read only `interfaces` could not see
+/// the spelling an operator now reaches for.
+fn declares(document: &Document, name: &str) -> bool {
+	document
+		.interfaces
+		.iter()
+		.any(|interface| interface.name == name)
+		|| document.devices.iter().any(|device| device.name == name)
+}
+
 fn expand_ingress_shapers(
 	document: &mut Document,
 	shapers: &[(String, crate::diag::Span)],
@@ -180,14 +193,20 @@ fn expand_ingress_shapers(
 			continue;
 		}
 
-		// A name collision means the operator already has an interface called
+		// A name collision means the operator already has something called
 		// `ifb-something`. Refused rather than merged: netcfgd would otherwise
 		// take over a device somebody else declared.
-		if document
-			.interfaces
-			.iter()
-			.any(|interface| interface.name == device)
-		{
+		//
+		// **Devices as well as interfaces**, and the device half was missing.
+		// 0155 pass 1a made `device` the block that declares a link, so the
+		// spelling an operator now reaches for was the one this could not see
+		// -- the collision was still caught, by the generic duplicate-device
+		// check, which tells them "duplicate device entry: ifb-e0" about a
+		// device they wrote exactly once and says nothing about the ingress
+		// shaping that needs the name. The whole point of this check is the
+		// sentence, so a check that fires only for the retired spelling is a
+		// sentence nobody gets.
+		if declares(document, &device) {
 			diags.push(Diagnostic::new(
 				*span,
 				format!(

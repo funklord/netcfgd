@@ -1862,16 +1862,29 @@ fn ingress_shaping_needs_cake() {
 
 /// A device that would collide with one the operator declared is refused
 /// rather than taken over.
+///
+/// **Both spellings**, and the `device` half was missing. 0155 pass 1a made
+/// `device` the block that declares a link, so the spelling an operator now
+/// reaches for was the one this check could not see. The collision was still
+/// caught -- by the generic duplicate-device check, which says "duplicate
+/// device entry: ifb-wan0" about a device they wrote exactly once and says
+/// nothing about the ingress shaping needing that name. The whole purpose of
+/// this check is the sentence, so firing only for the retired spelling made
+/// it a sentence nobody would get.
 #[test]
 fn a_colliding_ifb_name_is_refused() {
-	let rendered = errors(
-		"interface ifb-wan0 { config = \"null\" }
-device wan0 {\n\tqdisc { kind = \"cake\"; ingress_bandwidth = \"50mbit\" }\n}",
-	);
-	assert!(
-		rendered.contains("needs to create a device of that name"),
-		"got: {rendered}"
-	);
+	for collision in [
+		"interface ifb-wan0 { config = \"null\" }",
+		"device ifb-wan0 { kind = \"dummy\" }",
+	] {
+		let rendered = errors(&format!(
+			"{collision}\ndevice wan0 {{\n\tqdisc {{ kind = \"cake\"; ingress_bandwidth = \"50mbit\" }}\n}}"
+		));
+		assert!(
+			rendered.contains("needs to create a device of that name"),
+			"`{collision}` got: {rendered}"
+		);
+	}
 }
 
 /// The request half of prefix delegation, which had no spelling until now.

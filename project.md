@@ -7990,3 +7990,110 @@ brings them up and converges. So it costs one failed apply and recovers,
 while `v1`'s stated peer is silently not what it asked for. Recorded rather
 than fixed: it wants `expand_members`-shaped agreement checking in the
 compiler, which is its own piece of work.
+
+## 10.31 qdisc and shaping: one message nobody would get, and a lifecycle that holds
+
+Swept on 2026-09-04. This is the first area this week where the sweep's main
+lens found almost nothing: the qdisc and shaping code is in good order, and
+what it turned up is a diagnostic that stopped being reachable when the
+schema moved.
+
+**The ifb collision check read the retired spelling.** Asking for
+`ingress_bandwidth` makes netcfgd synthesise a device called `ifb-<name>`,
+and `expand_ingress_shapers` refuses rather than merging when the operator
+already declares something by that name -- "netcfgd would otherwise take
+over a device somebody else declared". The check looked in
+`document.interfaces` only, and 0155 pass 1a made `device` the block that
+declares a link.
+
+The collision was still caught, which is why this is a diagnostic bug rather
+than a safety one: the generic duplicate-device check refuses the
+configuration. What it says is `duplicate device entry: ifb-e0`, about a
+device the operator wrote exactly once, with nothing about the ingress
+shaping that needs the name. The whole purpose of the dedicated check is
+that sentence, so firing only for the spelling nobody writes any more made
+it a sentence nobody would get. Verified with a control, which is what
+separated the two: the `interface` form produced the good message all along
+and the `device` form produced the confusing one.
+
+**The rest holds, and was checked against an independent witness rather than
+against netcfgd's own observation.** `tc` is not installed on this machine,
+so the readings are `ip link show`'s, which is iproute2 asking the kernel:
+
+    fq_codel with no rate      set, converges
+    cake at 100mbit            replaces fq_codel, converges
+    cake at 50mbit             rate change only, converges
+    qdisc removed              reset to noqueue, converges
+
+and the ingress path end to end, which is the more interesting half because
+it is three objects rather than one:
+
+    ingress_bandwidth on       ifb-e0 created, both qdiscs set, redirect made
+    rate changed               only the ifb's qdisc replanned
+    ingress_bandwidth off      redirect cleared, ifb deleted
+
+Every step converged on the next plan. That matters more than the individual
+actions: three of this week's findings were plans that could never converge,
+and this is the subsystem where that lens came up empty.
+
+**Where else it was pointed.** `plan_qdisc` compares kind, rate and the
+ingress flag, and does not compare `ingress_bandwidth_bits` -- correctly,
+because the compiler moves that onto the synthesised ifb's own qdisc, which
+is a device in `desired.devices` and so is compared by the same walk. The
+planner reads devices rather than interfaces, which 0155 pass 1b already
+corrected here. A missing scheduler module is diagnosed by name rather than
+by errno, and retrying it on the next reconcile is right where it was wrong
+for `gre0`: a module can be installed, where the kernel's fallback tunnel
+device can never be configured.
+
+### 10.31.1 The openvpn flake got worse, and the machine is carrying 55 orphans
+
+The `openvpn.sh` intermittent recorded in 10.29.1 blocked this sweep's gate
+and is now measured further, because it changed character during the day.
+
+**It is not this sweep's change, established rather than argued.** `make
+live` was run on the committed tree, on the same machine, minutes after the
+failing run: it failed the same suite. The changes here are compiler-only
+and on the ingress-shaping expansion path, which `openvpn.sh` never
+exercises, but the experiment is what settles it rather than the reasoning
+-- the same experiment 10.29.1 records having skipped in favour of a `git
+stash` that removed only uncommitted work.
+
+    earlier today, make live      green four times, 1079 checks
+    later, with these changes     6 openvpn checks failed, twice
+    later, committed tree         1 openvpn check failed
+    openvpn.sh standalone         0 and 1 failures, the old rate
+
+So the suite degraded over the session on both trees, and it degrades under
+`make live` while staying at its old rate standalone -- which points at
+state the fifty suites before it leave behind, not at the suite.
+
+**The state is measured.** 55 processes orphaned to init from live runs, the
+oldest 23 hours: 22 from `displace.sh`, 20 from `revive.sh`, 8 from
+`gui_wifi.sh`, mostly `fake_supplicant` (42) and `udhcpc` (36 command-line
+matches across them). And 88 deleted files held open, all of them small logs
+under work directories that no longer exist.
+
+**The cleanup traps run and leave the processes anyway**, which is the part
+worth keeping: every leaked process's work directory is *gone*, so
+`rm -rf "$work"` executed. `displace.sh`'s trap kills its daemon, its
+foreign supplicant, and anything named by a pid file under
+`$work/run/supplicant/` -- and the leaked processes carry exactly such a
+`-P` path on their command lines. So the trap ran, the pid file it looks for
+was not there when it looked, and the process survived holding a deleted
+log. A mechanism is not established beyond that and none is guessed here;
+the candidate to check first is that netcfgd's own stop removes the pid file
+whether or not the process went, which would leave the script nothing to
+find.
+
+**Nothing was killed.** The newest orphan was two minutes old and belonged
+to a live run in flight, and the guidelines' rule about a concurrent run's
+state applies exactly here. `/tmp` is a 16 GB tmpfs at 2%, so there is no
+disk pressure -- what is at risk is the next run's result, which is the
+thing already being lost.
+
+**The container failure recorded in section 10 is untouched by this sweep**
+and stays open. It has two structural causes closed under it (0121 and
+0122), three passes and two failures across five container runs, and the
+note there already says the useful thing: if it recurs it is something else.
+Re-running the same instrument would not have added to that.
