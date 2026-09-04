@@ -7674,3 +7674,92 @@ is no second list to disagree with it; and the quirk helpers are standalone
 tools an operator wires through `pre_up`, not something netcfgd invokes, so
 there is no dispatch table to fall out of step. The APN and SIM selection
 are published for a hook and that is the whole of the design, not a gap.
+
+## 10.27 wireguard and vxlan: a walk that 0155 left behind
+
+Swept on 2026-09-04 with the same lens as 10.25 and 10.26. The WireGuard
+and VXLAN code is in good order -- what the sweep found was one walk that a
+schema change had orphaned, and it was not specific to either kind.
+
+**A link of the wrong kind was accepted in silence, for every kind.** A
+`vx0` that is a dummy in the kernel while the document calls it a VXLAN
+produced `nothing to do`. Not a wrong action -- no action, and not even the
+warning `plan_recreation` exists to print. Reproduced for a bridge, a
+WireGuard device and a VXLAN in one config.
+
+The check was never broken. `plan_recreation` walked `desired.interfaces`,
+and `kind` has lived on a `device` since **0155 pass 1a**, which also moved
+link creation to the device walk. Pass 1b then made a device with no
+`interface` block the normal arrangement -- "a tunnel need not have an
+interface at all until it reports an address" is the planner's own comment,
+a few hundred lines from the walk that assumed the opposite. So the
+recreation check applied to exactly the devices that happened to have an
+interface block, and to no others.
+
+**What identified the walk rather than the check was one experiment**:
+adding `interface vx0 { config = "null" }` to the same configuration made
+the warning fire, unchanged and correct. That is the discriminating case --
+the two configurations differ in a block that has nothing to do with kinds.
+
+`recreation_reason` took an `&Interface` it never used, `_interface`,
+which is the tell in the signature: the walk needed the name, and `kind_of`
+already reads from the device map. Devices now drive it, and the interface
+is looked up only for the down hooks, which a device without one has none
+of.
+
+**Three copies of one prefix parser, and the executor's was the odd one.**
+`wanted_peers` filters `allowed_ips` through `netcfgd_plan::net::parse_cidr`
+and says in its comment that `configure_wireguard` "filters the same way".
+It did not: the executor had a local `parse_prefix` taking the length as any
+`u8`, so it accepted `10.0.0.0/33` where the planner drops it -- and a
+prefix the plan discards while the apply sends it is a peer list that
+differs from the kernel for ever.
+
+It is unreachable today and was verified so rather than assumed: the
+compiler refuses such a prefix with a third copy of the rule that *does*
+check the maximum, and nothing deserializes a `Document` from JSON, so the
+compiler is the only door. The executor calls the planner's function now, so
+there are two copies rather than three and the two that remain are the ones
+with an argument for existing.
+
+**Both WireGuard key records were written before they were tightened.**
+`record_key` and `record_presets` used `fs::write` then `set_permissions`,
+which is worse than the shape 10.26 fixed in `write_ppp_options`: there the
+content was written after the chmod, so only an empty file was exposed,
+while here the content itself sits in a world-readable file until the chmod
+lands. What is in them is a digest of 32 octets of kernel randomness, so
+this is the design's stated intent being honoured rather than an exposure
+being closed -- but the intent is 0600, and a mode that arrives late is not
+the mode the file had. Both go through one helper that sets the mode on the
+open.
+
+**And the key records now go with the link.** `Op::LinkDelete` left
+`/run/netcfgd/wireguard/<iface>.key.sha256` and its preset sibling standing.
+The reason this is worth more than tidiness is that their **absence is
+load-bearing**: the observer reads "no record" as "netcfgd did not configure
+this device, so it has nothing to say about the key", which stops being true
+the moment a record outlives the device it describes. Removed by name,
+unconditionally -- a deleted link's kind is exactly what is no longer there
+to ask, and the files do not exist for anything that was not a WireGuard
+device.
+
+**Where the sweep came up empty, with what was looked at.** `plan_vxlan`
+compares all five fields the model has and the observer reads all five back,
+`id` `parent` `local` `remote` `port`, with the family checked separately
+because a VXLAN cannot change the family of its group. `plan_wireguard`
+compares `listen_port`, `fwmark`, the private key by digest and the peer
+list, and normalises both sides through one function -- its comment records
+an earlier version that normalised only the document's side, which the live
+test could not catch because its peers have no endpoint and so agreed for
+the wrong reason. The peer comparison covers every field of
+`ObservedWgPeer` except the two `comparable` deliberately blanks. VXLAN
+round-trips through the renderer with all five fields.
+
+**One reading in this sweep was wrong and is worth recording as a method
+note.** The shim's `Flavour` add path appeared to serve six of eight
+variants, missing `Loopback` and `Wireless` -- which would have been the
+mirror of the removal-list bug fixed earlier this session. It was an
+artifact of reading the match through a `sed` window that cut it short. All
+eight are there. A truncated view manufactures an absence that reads exactly
+like a finding, and the correction cost one command that did not choose a
+line range.

@@ -790,7 +790,15 @@ impl KernelExecutor {
 				allowed_ips: peer
 					.allowed_ips
 					.iter()
-					.filter_map(|prefix| parse_prefix(prefix))
+					// **The planner's own parser, not a third copy.** This
+					// was a local one that took the length as any `u8`, so it
+					// accepted `10.0.0.0/33` where `wanted_peers` drops it --
+					// and a prefix the plan discards while the apply sends it
+					// is a peer list that differs from the kernel for ever.
+					// Unreachable today, because the compiler refuses such a
+					// prefix with the same rule the planner uses; the point is
+					// that it was the odd one of three and nothing said so.
+					.filter_map(|prefix| netcfgd_plan::net::parse_cidr(prefix))
 					.collect(),
 				keepalive: peer.keepalive,
 			});
@@ -959,6 +967,19 @@ impl Executor for KernelExecutor {
 					.delete_link(index)
 					.map_err(|error| format!("could not delete {name}: {error}"))?;
 				self.effects.deleted_links.push(name.clone());
+				// **The key records go with the link.** They were left behind,
+				// and their ABSENCE is load-bearing: the observer reads "no
+				// record" as "netcfgd did not configure this device, so it has
+				// nothing to say about the key" -- which stops being true the
+				// moment a record outlives the device it describes.
+				//
+				// Unconditional rather than gated on the kind, because a
+				// deleted link's kind is exactly what is no longer there to
+				// ask, and the files simply do not exist for anything that was
+				// not a WireGuard device. Named rather than swept, so a
+				// concurrent device's records are not in reach.
+				let _ = std::fs::remove_file(key_record_path(&self.run_dir, name));
+				let _ = std::fs::remove_file(preset_record_path(&self.run_dir, name));
 				Ok(())
 			}
 			Op::LinkSetMtu { name, mtu } => {
@@ -1584,10 +1605,40 @@ fn record_key(run: &std::path::Path, iface: &str, private: &[u8; 32]) {
 		let _ = std::fs::create_dir_all(parent);
 	}
 	let digest = netcfgd_model::hash::sha256_hex(private);
-	if std::fs::write(&path, &digest).is_ok() {
-		let _ =
-			std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
-	}
+	write_private(&path, digest.as_bytes());
+}
+
+/// Write a file that is 0600 from the instant it exists.
+///
+/// **The mode goes on the open.** Both callers used `fs::write` followed by
+/// `set_permissions`, which writes the content into a world-readable file and
+/// tightens it afterwards -- so the content is exposed for the window, not
+/// merely the empty file, and a descriptor opened in that window keeps reading
+/// after the chmod. `RuntimeDirectoryMode=0755` in the unit means anyone on the
+/// machine can traverse `/run/netcfgd` to try.
+///
+/// What is in these files is a digest of 32 octets of kernel randomness, so
+/// this is the design's stated intent being honoured rather than an exposure
+/// being closed -- but the intent is 0600, and a mode that arrives late is not
+/// the mode the file had. `write_ppp_options` had the same shape for a file
+/// holding a password outright.
+fn write_private(path: &std::path::Path, bytes: &[u8]) {
+	use std::io::Write as _;
+	use std::os::unix::fs::OpenOptionsExt as _;
+
+	let Ok(mut file) = std::fs::OpenOptions::new()
+		.write(true)
+		.create(true)
+		.truncate(true)
+		.mode(0o600)
+		.open(path)
+	else {
+		return;
+	};
+	// A file that already existed keeps its own mode through `open`, so one
+	// left wider by an older build is tightened rather than trusted.
+	let _ = std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+	let _ = file.write_all(bytes);
 }
 
 /// Where netcfgd records which preshared key each peer was given.
@@ -1615,10 +1666,7 @@ fn record_presets(run: &std::path::Path, iface: &str, presets: &[String]) {
 		let _ = std::fs::remove_file(&path);
 		return;
 	}
-	if std::fs::write(&path, presets.join("\n")).is_ok() {
-		let _ =
-			std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
-	}
+	write_private(&path, presets.join("\n").as_bytes());
 }
 
 /// Every interface whose kind's own settings are corrected on a live device.
@@ -3388,12 +3436,6 @@ fn resolve_endpoint(text: &str) -> Result<std::net::SocketAddr, String> {
 		.map_err(|error| format!("cannot resolve endpoint `{text}`: {error}"))?
 		.next()
 		.ok_or_else(|| format!("`{text}` resolved to no address"))
-}
-
-/// `address/length`.
-fn parse_prefix(text: &str) -> Option<(std::net::IpAddr, u8)> {
-	let (address, length) = text.split_once('/')?;
-	Some((address.parse().ok()?, length.parse().ok()?))
 }
 
 /// Where `file` secrets live.
