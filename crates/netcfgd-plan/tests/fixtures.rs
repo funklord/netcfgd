@@ -5388,6 +5388,48 @@ interface work-net {
 	);
 }
 
+/// A device with no `interface` block is still checked for its kind.
+///
+/// `plan_recreation` walked `desired.interfaces` while `kind` has lived on a
+/// `device` since 0155 pass 1a, and pass 1b made a device without an interface
+/// block the normal arrangement for a tunnel. So a link of the wrong kind
+/// produced `nothing to do` -- no recreation, and not even the warning the
+/// function exists to print. Adding an `interface` block made the same
+/// configuration warn, which is what identified the walk rather than the check
+/// as the fault.
+///
+/// Asserted on a link netcfgd owns, so the recreation is planned rather than
+/// refused; the ownership half is `a_link_netcfgd_did_not_create_is_not_remade`
+/// above.
+#[test]
+fn a_device_with_no_interface_block_is_still_remade_for_its_kind() {
+	let desired = document(
+		r#"
+device base0 { kind = "dummy" }
+interface base0 { config = "null" }
+device work-net {
+	vlan { parent = "base0"; id = 43 }
+}
+"#,
+	);
+	let mut observed = observed_with(&["base0", "work-net"]);
+	"dummy".clone_into(&mut observed.links[1].kind);
+	observed.links[1].up = true;
+	observed.links[1].ownership = Ownership::Ours;
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		names(&plan).contains(&"link.delete"),
+		"a device whose kind is wrong was not remade: {:?}",
+		names(&plan)
+	);
+	assert!(
+		names(&plan).contains(&"link.create"),
+		"the device was deleted and not made again: {:?}",
+		names(&plan)
+	);
+}
+
 /// A guard refuses the deletion, and then nothing else happens either.
 ///
 /// The interaction that has to hold: a refused delete must not leave the rest of

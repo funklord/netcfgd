@@ -1733,16 +1733,37 @@ impl Builder {
 	/// name does not join the returned list.
 	fn plan_recreation(&mut self, desired: &Document, observed: &Observed) -> Vec<String> {
 		let mut recreating = Vec::new();
-		for interface in &desired.interfaces {
-			let Some(link) = observed.link(&interface.name) else {
+		// **Devices, not interfaces.** `kind` lives on a `device` since 0155
+		// pass 1a, and link creation was moved to the device walk with it --
+		// but this walk was left on `desired.interfaces`, so a device with no
+		// `interface` block of its own was never considered for recreation.
+		// 0155 pass 1b makes that arrangement the normal one: a tunnel need
+		// not have an interface at all until it reports an address.
+		//
+		// What it cost is silence rather than a wrong action. A `vx0` that is
+		// a dummy in the kernel while the document calls it a VXLAN produced
+		// `nothing to do` -- no recreation, and not even the warning this
+		// function exists to print, which fired correctly the moment an
+		// `interface vx0 { }` block was added and said nothing about it
+		// otherwise. Measured on all three of a bridge, a WireGuard device and
+		// a VXLAN.
+		for device in &desired.devices {
+			let Some(link) = observed.link(&device.name) else {
 				continue;
 			};
-			let kind = self.kind_of(&interface.name);
-			let Some((field, desired_value, seen)) = recreation_reason(interface, &kind, link)
-			else {
+			let kind = self.kind_of(&device.name);
+			let Some((field, desired_value, seen)) = recreation_reason(&kind, link) else {
 				continue;
 			};
-			let name = &interface.name;
+			let name = &device.name;
+			// A device need not have an `interface` block, and after 0155 pass
+			// 1b commonly does not. Where there is one its hooks fire, and
+			// where there is none there are no hooks to fire -- which is the
+			// only thing the interface was ever needed for here.
+			let interface = desired
+				.interfaces
+				.iter()
+				.find(|candidate| candidate.name == *name);
 			if !link.ownership.may_remove() {
 				self.warn(
 					name,
@@ -1788,7 +1809,9 @@ impl Builder {
 			// hook is concerned -- and it comes back in this same plan, where
 			// `pre_up` and `post_up` fire again because the creation pass plans it
 			// as absent. Firing `down` here is what makes those two symmetrical.
-			stopped.extend(self.plan_hooks(interface, HookPhase::Down, &[]));
+			if let Some(interface) = interface {
+				stopped.extend(self.plan_hooks(interface, HookPhase::Down, &[]));
+			}
 			let id = self.push(
 				Op::LinkDelete { name: name.clone() },
 				Reason::differs(name, field, desired_value, seen),
@@ -1808,7 +1831,9 @@ impl Builder {
 			if id == u32::MAX {
 				continue;
 			}
-			self.plan_hooks(interface, HookPhase::PostDown, &[id]);
+			if let Some(interface) = interface {
+				self.plan_hooks(interface, HookPhase::PostDown, &[id]);
+			}
 			self.gates.push((name.clone(), id));
 			recreating.push(name.clone());
 		}
@@ -5034,7 +5059,6 @@ fn recreatable_kind(kind: &InterfaceKind) -> Option<&'static str> {
 /// Returns the dotted field, what the document says and what the kernel has --
 /// the three things a `Reason` carries, because that is what this is for.
 fn recreation_reason(
-	_interface: &Interface,
 	kind: &InterfaceKind,
 	link: &netcfgd_model::ObservedLink,
 ) -> Option<(&'static str, String, String)> {
