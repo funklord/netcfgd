@@ -8532,3 +8532,54 @@ refused and every reading in that run was of a config that never compiled. The
 numbers looked like a clean result -- three sysctls unchanged -- and meant
 nothing. The rule is the one this file keeps arriving at: a probe that could
 not have succeeded reports absence in the same words as a real one.
+
+## 10.39 wifi: three radio settings the README promised and the build ignores
+
+Swept on 2026-09-04. 10.18 had already taken this area with the
+two-consumers lens, so this one asked the other question that has paid all
+week -- what is recognised and never acted on -- and found three, with the
+aggravating detail that the README named all three as features.
+
+**`regdom`, `powersave` and `scan_randomization` have no consumer anywhere.**
+They are parsed by `lower_wifi_device`, kept in `WifiDevicePolicy`, rendered
+back by `ncfg profile save` -- and read by nothing. No planner compares them,
+no executor writes them, and `WifiSetRegdom` is an `Op` variant that exists in
+`action.rs` and is constructed nowhere: its only two mentions are its own
+declaration and its name string.
+
+That is what decision 0061 exists to prevent, and the README made it worse
+than the Bluetooth case of 10.25. Its feature table said
+
+    | power and privacy | powersave, scan MAC randomisation, regulatory
+                          domain per device |
+
+so an operator had been told they work. `ncfg plan` says otherwise now, and
+the row is split: `mac_policy` genuinely gives each network a fresh hardware
+address and keeps its line, while the other three are marked as understood
+and not acted on yet, pointing at the warning.
+
+Said only where the document states them. A radio at its defaults is not
+asking for anything, and three warnings on every wireless device would be
+noise rather than news -- the mistake `plan_dns`'s empty-scope guard already
+records having made once. The control in the test is a `wifi { }` block with
+nothing set, which must stay quiet.
+
+**Where the sweep looked and found nothing, with the method.** The
+supplicant's own parsers were given seventeen malformed replies -- an empty
+body, a header with no rows, a row with one field, a row with eight, non-numeric
+frequencies and signals, a two-hundred-thousand-character line, tabs with
+nothing between them, control characters and a BOM, a truncated `\x` escape,
+`\xZZ`, a trailing backslash, a bare `=`, a key with no value, and a
+seventy-thousand-character key and value -- through `parse_scan_results`,
+`parse_network_list`, `parse_status`, `parse_mobility_domain`, `printf_decode`
+and `is_event`. All seventeen survived; nothing panicked. `mac_policy` is
+genuinely applied, reaching the supplicant through `configure_networks`, and
+`portal_check` and `backend` both have real consumers.
+
+**A method note.** The first pass at this counted field mentions with
+`grep -c "\.$field"` per crate, which reported zero for five of the seven
+fields including two that are used constantly. Reading a field through a local
+binding is invisible to that pattern. The count that meant anything was by
+name across each crate, and then by hand at each site -- a count inherits the
+shape of the query, and a query written for one spelling answers about that
+spelling rather than about the code.

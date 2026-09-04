@@ -581,6 +581,7 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_eap_without_ca(builder, desired);
 	warn_access_points(builder, desired);
 	warn_bluetooth(builder, desired);
+	warn_wifi_device_policy(builder, desired);
 	warn_unfired_hooks(builder, desired);
 	// `portal_check` was here, as "recognised and not applied", from 0061 until
 	// 0095 gave it the shape 0061 specified: an operator's URL rather than a
@@ -644,6 +645,58 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 ///
 /// One warning per device rather than one for the list, because the id is what
 /// the operator wrote and what they will look for.
+/// Say which radio settings this build stores and does not act on.
+///
+/// Three of `WifiDevicePolicy`'s fields have no consumer anywhere: no planner
+/// reads them, no executor writes them, and `WifiSetRegdom` is an `Op` variant
+/// nothing constructs. They are parsed, kept in the document and rendered back
+/// by `ncfg profile save`, which is the shape decision 0061 exists to prevent
+/// -- and the README's feature table advertises all three by name, so an
+/// operator has been told they work.
+///
+/// Only where the document states them. A radio at its defaults is not asking
+/// for anything, and three warnings on every wireless device would be noise
+/// rather than news -- which is the mistake `plan_dns`'s empty-scope guard
+/// records having made once already.
+fn warn_wifi_device_policy(builder: &mut Builder, desired: &Document) {
+	for device in &desired.devices {
+		let Some(wifi) = &device.wifi else {
+			continue;
+		};
+		let mut stated: Vec<&str> = Vec::new();
+		if wifi.regdom.is_some() {
+			stated.push("`regdom`");
+		}
+		if wifi.powersave != netcfgd_model::device::Powersave::Default {
+			stated.push("`powersave`");
+		}
+		if wifi.scan_randomization {
+			stated.push("`scan_randomization`");
+		}
+		if stated.is_empty() {
+			continue;
+		}
+		builder.warnings.push(Warning {
+			message: format!(
+				"{} on {} {} understood and not acted on by this build: nothing sets \
+				 the regulatory domain, the power-saving mode or the scanning address. \
+				 The setting is kept, so a configuration written now still means this \
+				 when the code arrives",
+				// "a, b and c" rather than "a and b and c", which is what
+				// joining on " and " gives for three.
+				match stated.as_slice() {
+					[one] => (*one).to_owned(),
+					[rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+					[] => unreachable!("returned above when empty"),
+				},
+				device.name,
+				if stated.len() == 1 { "is" } else { "are" }
+			),
+			interface: Some(device.name.clone()),
+		});
+	}
+}
+
 fn warn_bluetooth(builder: &mut Builder, desired: &Document) {
 	for device in &desired.bluetooth {
 		builder.warnings.push(Warning {

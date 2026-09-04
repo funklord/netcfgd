@@ -63,7 +63,8 @@ netcfgd speaks netlink directly — there is no `ip` invocation anywhere.
 | scanning | `ncfg wifi scan` lists what is in range, with signal and security |
 | joining and leaving | `ncfg wifi connect ID` and `ncfg wifi disconnect`, keeping the configuration either way |
 | radio on/off | over the control socket, which the GUI and the tray use; rfkill state is observed and streamed as events |
-| power and privacy | powersave, scan MAC randomisation, regulatory domain per device |
+| privacy | `mac_policy` gives each network a fresh hardware address, or keeps the permanent one |
+| power and regulatory domain | `powersave`, `scan_randomization` and `regdom` are understood and **not acted on yet** — `ncfg plan` says so where a config sets them |
 | joining without an editor | `ncfg wifi add SSID` writes the block and stores the credential |
 
 A network is a *place you sometimes are*, so it is a top-level block rather

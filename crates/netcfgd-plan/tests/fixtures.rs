@@ -5450,6 +5450,42 @@ device work-net {
 	);
 }
 
+/// Radio settings this build stores and does not act on are named.
+///
+/// `regdom`, `powersave` and `scan_randomization` have no consumer anywhere:
+/// no planner reads them, no executor writes them, and `WifiSetRegdom` is an
+/// `Op` variant nothing constructs. They are parsed, kept in the document and
+/// rendered back by `ncfg profile save` -- and the README's feature table
+/// advertised all three by name, so an operator had been told they work. That
+/// is what decision 0061 exists to prevent.
+///
+/// The control is a radio at its defaults, which must stay quiet: three
+/// warnings on every wireless device would be noise rather than news.
+#[test]
+fn radio_settings_this_build_ignores_are_named() {
+	let stated = document(
+		"device wlan0 { kind = \"dummy\"; wifi { regdom = \"SE\"; powersave = \"off\" } }\n\
+		 interface wlan0 { config = \"null\" }\n",
+	);
+	let defaults = document(
+		"device wlan0 { kind = \"dummy\"; wifi { } }\ninterface wlan0 { config = \"null\" }\n",
+	);
+
+	for (desired, warns) in [(&stated, true), (&defaults, false)] {
+		let mut observed = observed_with(&["wlan0"]);
+		observed.links[0].up = true;
+		let plan = plan(desired, &observed, &PlanOptions::default());
+		assert_eq!(
+			plan.warnings
+				.iter()
+				.any(|warning| warning.message.contains("not acted on by this build")),
+			warns,
+			"stated settings should warn = {warns}: {:?}",
+			plan.warnings
+		);
+	}
+}
+
 /// Turning forwarding on and accepting advertisements happen in one plan.
 ///
 /// `ObservedAcceptRa::effective` is computed in the observer from the
