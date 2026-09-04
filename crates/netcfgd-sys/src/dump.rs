@@ -381,10 +381,17 @@ fn bridge_info(data: &[u8]) -> BridgeInfo {
 		forward_delay: attrs.get(ifla_br::FORWARD_DELAY).and_then(|a| a.u32()),
 		hello_time: attrs.get(ifla_br::HELLO_TIME).and_then(|a| a.u32()),
 		ageing_time: attrs.get(ifla_br::AGEING_TIME).and_then(|a| a.u32()),
-		priority: attrs
-			.get(ifla_br::PRIORITY)
-			.and_then(|a| a.u32())
-			.and_then(|value| u16::try_from(value).ok()),
+		// **Two bytes, not four.** `IFLA_BR_PRIORITY` is a `__u16` in
+		// `if_link.h`, and `u32()` needs four bytes or it returns nothing --
+		// so this read a bridge's priority as absent on every kernel, always.
+		// Nothing noticed because the planner did not compare the field; the
+		// moment it did, the apply set the priority and the observation still
+		// said `<absent>`, and the plan asked for it again for ever. The
+		// writer had it right, which is what makes the two-byte width the
+		// answer rather than a guess. `u16()`'s own doc names this trap:
+		// netlink is not consistent about integer widths and the header gives
+		// no hint.
+		priority: attrs.get(ifla_br::PRIORITY).and_then(|a| a.u16()),
 		vlan_filtering: attrs
 			.get(ifla_br::VLAN_FILTERING)
 			.and_then(|attr| attr.u8())
@@ -830,4 +837,47 @@ pub fn decode_bridge_vlans(payload: &[u8]) -> Vec<BridgeVlanRecord> {
 	}
 	out.sort_unstable();
 	out
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{bridge_info, ifla_br};
+
+	/// One netlink attribute, padded to four bytes as the wire format requires.
+	fn attr(kind: u16, payload: &[u8]) -> Vec<u8> {
+		let len = u16::try_from(4 + payload.len()).expect("small");
+		let mut out = len.to_ne_bytes().to_vec();
+		out.extend_from_slice(&kind.to_ne_bytes());
+		out.extend_from_slice(payload);
+		while out.len() % 4 != 0 {
+			out.push(0);
+		}
+		out
+	}
+
+	/// A bridge's priority is two bytes, and was read as four.
+	///
+	/// `IFLA_BR_PRIORITY` is a `__u16` in `if_link.h`, and the accessor for a
+	/// `u32` needs four bytes or it returns nothing -- so this field read as
+	/// absent on every kernel, always. Nothing noticed because the planner did
+	/// not compare it; the moment it did, an apply set the priority and the
+	/// observation still said `<absent>`, so the plan asked for it again for
+	/// ever.
+	///
+	/// The `ageing_time` beside it is the control: a genuine `u32` in the same
+	/// blob, so a test that read both as the same width would fail on one of
+	/// them whichever width it chose.
+	#[test]
+	fn a_bridge_priority_is_two_bytes_wide() {
+		let mut data = attr(ifla_br::AGEING_TIME, &30_000_u32.to_ne_bytes());
+		data.extend(attr(ifla_br::PRIORITY, &200_u16.to_ne_bytes()));
+
+		let info = bridge_info(&data);
+		assert_eq!(info.priority, Some(200), "a two-byte priority was not read");
+		assert_eq!(
+			info.ageing_time,
+			Some(30_000),
+			"the u32 control did not read"
+		);
+	}
 }
