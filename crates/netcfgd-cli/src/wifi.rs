@@ -529,8 +529,32 @@ fn can_write(target: &Path) -> bool {
 }
 
 /// The probe itself, on a directory that exists.
+///
+/// **The name is this writer's, not the probe's.** It was a fixed
+/// `.ncfg-write-probe`, and `create_new` fails with `EEXIST` on a file that is
+/// already there -- so one left behind by a process killed between the create
+/// and the remove made this answer "not writable" about a directory that is
+/// writable, for ever, and two invocations racing made one of them answer it
+/// wrongly for as long as the other held the name. Measured: with the file
+/// present, `O_CREAT|O_EXCL` fails on a directory `access(W_OK)` says is
+/// writable.
+///
+/// This is 0121's rule -- a temporary named after its target is one path for
+/// every writer -- met at a site that record did not reach. A name carrying
+/// the pid and a counter cannot collide with another process, and a stray one
+/// from a crash never blocks a later run: it is a dotfile, which the config
+/// loader ignores.
 fn can_write_dir(directory: &Path) -> bool {
-	let probe = directory.join(".ncfg-write-probe");
+	use std::sync::atomic::{AtomicU64, Ordering};
+
+	/// Distinguishes one probe from the next within a process.
+	static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+	let probe = directory.join(format!(
+		".ncfg-write-probe.{}.{}",
+		std::process::id(),
+		SEQUENCE.fetch_add(1, Ordering::Relaxed)
+	));
 	match std::fs::OpenOptions::new()
 		.write(true)
 		.create_new(true)
@@ -835,6 +859,36 @@ fn check_passphrase(passphrase: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+
+	/// A probe left behind must not make a writable directory look read-only.
+	///
+	/// The name was fixed, and `create_new` fails with `EEXIST` on a file that
+	/// is already there -- so one left by a process killed between the create
+	/// and the remove answered "not writable" for ever, and two invocations
+	/// racing made one of them answer wrongly while the other held the name.
+	/// 0121's rule at a site that record did not reach.
+	#[test]
+	fn a_leftover_probe_does_not_make_a_directory_look_read_only() {
+		let dir = netcfgd_testdir::TestDir::new("write-probe");
+		// Exactly what a killed run leaves, under the old fixed name.
+		std::fs::write(dir.path().join(".ncfg-write-probe"), b"").expect("the leftover");
+
+		assert!(
+			super::can_write_dir(dir.path()),
+			"a writable directory read as read-only because of a stale probe"
+		);
+		// And the probe this call made is gone, whatever it was called.
+		let strays: Vec<_> = std::fs::read_dir(dir.path())
+			.expect("readable")
+			.flatten()
+			.map(|entry| entry.file_name().to_string_lossy().into_owned())
+			.filter(|name| name.starts_with(".ncfg-write-probe."))
+			.collect();
+		assert!(
+			strays.is_empty(),
+			"the probe left itself behind: {strays:?}"
+		);
+	}
 
 	/// What `ncfg wifi add` writes on a fresh machine plans a supplicant.
 	///
