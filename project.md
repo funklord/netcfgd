@@ -7356,8 +7356,31 @@ carry an absolute path netcfgd composed, which is what 0140 asks for, while
 `Dhcp4` and `Dhcp6` carry a bare interface name and are excluded by the
 `starts_with('/')` guard -- so neither DHCP client's behaviour moved. Verified
 by reading both entries, and by the live suite passing `dhcpcd.sh`,
-`dhcp.sh` and `openvpn.sh` afterwards. **`ap.sh` skips for want of hostapd, so
-`AccessPoint`'s new adoption path is the one thing here nothing has executed.**
+`dhcp.sh` and `openvpn.sh` afterwards.
+
+**`ap.sh` has since been run, without installing anything.** It needs the
+hostapd *binary* and not the service, and both it and
+`netcfgd_hostapd::binary` fall back to `PATH` after the four sbin
+directories -- so the package can be fetched and unpacked as an ordinary
+user and put on `PATH` for the one run:
+
+    apt-get download hostapd && dpkg-deb -x hostapd_*.deb root
+    PATH="$PWD/root/usr/sbin:$PATH" sh tests/live/ap.sh
+
+Checked before relying on it: the two search orders agree, which is the thing
+`ap.sh`'s own comment warns about -- *"a test that found hostapd somewhere
+netcfgd does not look would pass while netcfgd reported it missing"*. Against
+a real hostapd 2.10 it passes 32 checks.
+
+**What that closed, and what it did not.** The apply reaches
+`Op::BackendStart` for an access point, so the adoption hoisted in 10.22 now
+executes for `AccessPoint` -- on its *nothing to adopt* branch, since no
+hostapd is running. That is worth something precise: `ap.sh` asserts *"the
+apply failed"* and *"a failed start is still asked for on the next plan"*, and
+both would break if the hoist wrongly reported an adoption, so the run is
+evidence the new call does not misfire there. **Adopting a live hostapd is
+still unexercised**, and cannot be here: hostapd needs a radio to come up, and
+`unshare -rn` has none.
 
 ---
 
