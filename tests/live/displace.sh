@@ -51,9 +51,27 @@ cleanup() {
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
 	wait "$daemon" 2>/dev/null || true
 	[ -n "$foreign" ] && kill "$foreign" 2>/dev/null
-	for pidfile in "$work"/run/supplicant/*.pid; do
+	# **Every client netcfgd started, not only the supplicants.** netcfgd
+	# records a pid at `$work/run/<program>/<iface>.pid` for udhcpc, odhcp6c,
+	# dhcpcd and pppd exactly as it does for the supplicant, and a loop that
+	# globbed `supplicant` alone left the rest orphaned to init -- holding a
+	# work directory this trap then deleted, so they ran on with their stdout
+	# pointing at a log that no longer existed. Measured across a day of
+	# running the suite: 55 such processes, the oldest 23 hours.
+	#
+	# Killed only where the pid is still the process the file names. A pid
+	# file outlives the process it names and pids are recycled, so a blind
+	# kill can reach something else entirely; requiring this run's work
+	# directory in the command line is netcfgd's own ownership test, and it
+	# costs one read. `cat | tr` rather than a redirection because with `<`
+	# it is the shell that complains about a missing file, and its complaint
+	# does not go through the redirection -- which `helper.sh` found first.
+	for pidfile in "$work"/run/*/*.pid; do
 		[ -e "$pidfile" ] || continue
-		kill "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null || true
+		pid=$(cat "$pidfile" 2>/dev/null) || continue
+		case "$(cat "/proc/$pid/cmdline" 2>/dev/null | tr -d '\0')" in
+		*"$work"*) kill "$pid" 2>/dev/null || true ;;
+		esac
 	done
 	rm -rf "$work"
 }
@@ -194,6 +212,21 @@ kill "$daemon" 2>/dev/null || true
 wait "$daemon" 2>/dev/null || true
 daemon=
 rm -f "$work/run/netcfgd.sock" "$work/run/owned.json"
+# **Stop the supplicant before erasing the record that names it.** Section 2
+# left one running, on purpose: netcfgd does not kill its backends when it
+# stops (0134). The `rm -rf` below is what makes this section's scenario --
+# a manager that leaves no socket -- and it used to take the pid file with
+# it while the process was still alive, so the trap at the top had nothing
+# left to kill and every run of this script leaked one supplicant. Measured:
+# one per run, and 22 of them on this machine before it was found.
+#
+# It also makes the scenario honest rather than merely tidy. Section 3 asks
+# what netcfgd does when no supplicant is running and no socket exists; a
+# stray one from section 2 still holding the radio is not that.
+for pidfile in "$work"/run/supplicant/*.pid; do
+	[ -e "$pidfile" ] || continue
+	kill "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null || true
+done
 rm -rf "$work/run/supplicant"
 # No socket anywhere: this is what a D-Bus-driven manager leaves.
 rm -f "$work/ctrl/radio0"

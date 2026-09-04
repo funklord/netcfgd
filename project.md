@@ -8046,51 +8046,68 @@ by errno, and retrying it on the next reconcile is right where it was wrong
 for `gre0`: a module can be installed, where the kernel's fallback tunnel
 device can never be configured.
 
-### 10.31.1 The openvpn flake got worse, and the machine is carrying 55 orphans
+### 10.31.1 The live suites' orphaned-process leak, found and closed
 
-The `openvpn.sh` intermittent recorded in 10.29.1 blocked this sweep's gate
-and is now measured further, because it changed character during the day.
+Every run of five suites left a process behind, orphaned to init, holding a
+work directory the run had just deleted. 55 of them had accumulated on this
+machine, the oldest 23 hours, with 88 deleted files held open. The count is
+zero now, and a full `make live` creates none.
 
-**It is not this sweep's change, established rather than argued.** `make
-live` was run on the committed tree, on the same machine, minutes after the
-failing run: it failed the same suite. The changes here are compiler-only
-and on the ingress-shaping expansion path, which `openvpn.sh` never
-exercises, but the experiment is what settles it rather than the reasoning
--- the same experiment 10.29.1 records having skipped in favour of a `git
-stash` that removed only uncommitted work.
+**The mechanism, established by instrumenting rather than by reasoning.**
+Two different faults wore the same symptom:
 
-    earlier today, make live      green four times, 1079 checks
-    later, with these changes     6 openvpn checks failed, twice
-    later, committed tree         1 openvpn check failed
-    openvpn.sh standalone         0 and 1 failures, the old rate
+- **A cleanup that globbed one program.** Five scripts killed whatever
+  `$work/run/supplicant/*.pid` named. netcfgd records a pid at
+  `$work/run/<program>/<iface>.pid` for `udhcpc`, `odhcp6c`, `dhcpcd` and
+  `pppd` in exactly the same way, so every client that was not a supplicant
+  survived. `gui_wifi.sh` leaked a `udhcpc` per run for this reason -- and
+  it was found only by listing what actually leaked, because instrumenting
+  its cleanup showed the pid file present, the pid correct and the kill
+  landing. The suspect was the supplicant; the leak was the DHCP client.
 
-So the suite degraded over the session on both trees, and it degrades under
-`make live` while staying at its old rate standalone -- which points at
-state the fifty suites before it leave behind, not at the suite.
+- **A record the scenario destroys on purpose.** `displace.sh` section 3 and
+  `orphan.sh` both erase netcfgd's run directory while a supplicant is still
+  running -- that *is* the case they exercise, since netcfgd tears nothing
+  down when it stops (0134). Instrumenting the trap showed
+  `pidfiles=[] alive=[1]`: the file gone, the process there, and nothing
+  left for the loop to read.
 
-**The state is measured.** 55 processes orphaned to init from live runs, the
-oldest 23 hours: 22 from `displace.sh`, 20 from `revive.sh`, 8 from
-`gui_wifi.sh`, mostly `fake_supplicant` (42) and `udhcpc` (36 command-line
-matches across them). And 88 deleted files held open, all of them small logs
-under work directories that no longer exist.
+**The fixes are shaped by which fault they answer.** The five cleanups now
+walk `$work/run/*/*.pid`, and kill only where `/proc/<pid>/cmdline` still
+mentions this run's work directory -- a pid file outlives the process it
+names and pids are recycled, so the command line is what makes the kill safe,
+which is netcfgd's own ownership test. `displace.sh` stops the supplicant
+*before* erasing the record that names it, which also makes its own scenario
+honest: section 3 asks what netcfgd does when nothing is running, and a stray
+supplicant from section 2 was not that. `orphan.sh`, whose whole subject is
+the record being destroyed, sweeps `/proc` for its own `mktemp` path -- a
+sweep that cannot reach a concurrent run, because the path is unique to this
+one.
 
-**The cleanup traps run and leave the processes anyway**, which is the part
-worth keeping: every leaked process's work directory is *gone*, so
-`rm -rf "$work"` executed. `displace.sh`'s trap kills its daemon, its
-foreign supplicant, and anything named by a pid file under
-`$work/run/supplicant/` -- and the leaked processes carry exactly such a
-`-P` path on their command lines. So the trap ran, the pid file it looks for
-was not there when it looked, and the process survived holding a deleted
-log. A mechanism is not established beyond that and none is guessed here;
-the candidate to check first is that netcfgd's own stop removes the pid file
-whether or not the process went, which would leave the script nothing to
-find.
+**Measured per suite, before and after**, each run standalone with the
+process table diffed across it:
 
-**Nothing was killed.** The newest orphan was two minutes old and belonged
-to a live run in flight, and the guidelines' rule about a concurrent run's
-state applies exactly here. `/tmp` is a 16 GB tmpfs at 2%, so there is no
-disk pressure -- what is at risk is the next run's result, which is the
-thing already being lost.
+    displace      1 leaked per run  ->  0, over three runs
+    gui_wifi      1 leaked per run  ->  0
+    orphan        1 leaked per run  ->  0
+    enterprise, wifi_journey, revive, stations   0 -> 0
+    full `make live`                             0 created
+
+**And the openvpn flake is partly explained by it, which is worth
+separating.** With 55 orphans on the machine, `openvpn.sh` failed 5 and 6
+checks; with the machine clean it fails 1 -- the single long-standing check
+recorded in 10.29.1, which predates all of this and remains open. So the
+debris was aggravating a flake rather than causing it, and the aggravation
+is gone.
+
+**The 71 abandoned processes were reaped, by a criterion rather than by
+hand.** Each was signalled only after its work directory was confirmed
+deleted, which is what makes it certainly abandoned: no live run can be
+using a tree that is not there. The one exception -- a `fake_hostapd` whose
+directory still existed -- was 19 hours old, from a cleanup whose own retry
+loop had given up, and its directory was removed with it. Earlier in the day
+the same processes were deliberately left alone, correctly: the newest was
+then two minutes old and belonged to a run in flight.
 
 **The container failure recorded in section 10 is untouched by this sweep**
 and stays open. It has two structural causes closed under it (0121 and

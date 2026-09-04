@@ -60,9 +60,42 @@ failures=0
 cleanup() {
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
 	wait "$daemon" 2>/dev/null || true
-	for pidfile in "$work"/run/supplicant/*.pid; do
+	# **Every client netcfgd started, not only the supplicants.** netcfgd
+	# records a pid at `$work/run/<program>/<iface>.pid` for udhcpc, odhcp6c,
+	# dhcpcd and pppd exactly as it does for the supplicant, and a loop that
+	# globbed `supplicant` alone left the rest orphaned to init -- holding a
+	# work directory this trap then deleted, so they ran on with their stdout
+	# pointing at a log that no longer existed. Measured across a day of
+	# running the suite: 55 such processes, the oldest 23 hours.
+	#
+	# Killed only where the pid is still the process the file names. A pid
+	# file outlives the process it names and pids are recycled, so a blind
+	# kill can reach something else entirely; requiring this run's work
+	# directory in the command line is netcfgd's own ownership test, and it
+	# costs one read. `cat | tr` rather than a redirection because with `<`
+	# it is the shell that complains about a missing file, and its complaint
+	# does not go through the redirection -- which `helper.sh` found first.
+	for pidfile in "$work"/run/*/*.pid; do
 		[ -e "$pidfile" ] || continue
-		kill "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null || true
+		pid=$(cat "$pidfile" 2>/dev/null) || continue
+		case "$(cat "/proc/$pid/cmdline" 2>/dev/null | tr -d '\0')" in
+		*"$work"*) kill "$pid" 2>/dev/null || true ;;
+		esac
+	done
+	# **And a sweep by work directory, because this script destroys the
+	# records on purpose.** The scenario is netcfgd's run directory going
+	# while the supplicant lives -- `rm -rf "$work/run"` below is the whole
+	# point of the file -- so by the time this trap runs there is no pid file
+	# left to read, and the loop above finds nothing. Without this the script
+	# leaked one supplicant per run.
+	#
+	# Precise despite being a sweep: `$work` is this run's own `mktemp -d`
+	# path, so it cannot match a concurrent run's processes, and matching a
+	# command line is the same ownership test the loop above makes.
+	for proc in /proc/[0-9]*; do
+		case "$(cat "$proc/cmdline" 2>/dev/null | tr -d '\0')" in
+		*"$work"*) kill "${proc#/proc/}" 2>/dev/null || true ;;
+		esac
 	done
 	rm -rf "$work"
 }
