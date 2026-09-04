@@ -2155,25 +2155,65 @@ impl Builder {
 		let Some(running) = observed.link(name).and_then(|link| link.bridge) else {
 			return;
 		};
+		// **Destructured, so that a field added to `BridgeConfig` is a compile
+		// error here rather than a setting nobody compares.** This walk had
+		// three of the six: `ageing_time`, `priority` and `vlan_filtering`
+		// were parsed, sent inside `link.create` and read back by the
+		// observer, and never compared -- so editing any of them on a bridge
+		// that already existed planned nothing and changed nothing, silently.
+		// The comment above names `stp` and `forward_delay` because those are
+		// the two the fix was written for; the rest arrived later and nothing
+		// said they had to be added here too.
+		let netcfgd_model::interface::BridgeConfig {
+			// Enslavement, not a bridge setting: a member is corrected through
+			// its own device's `master`, which `plan_link_attributes` owns.
+			members: _,
+			stp,
+			forward_delay,
+			hello_time,
+			ageing_time,
+			priority,
+			vlan_filtering,
+		} = bridge;
 		let differs =
 			|desired: Option<u32>, seen: Option<u32>| desired.is_some() && desired != seen;
-		let field = if bridge.stp != running.stp {
-			Some((
-				"bridge.stp",
-				bridge.stp.to_string(),
-				running.stp.to_string(),
-			))
-		} else if differs(bridge.forward_delay, running.forward_delay) {
+		let differs_u16 =
+			|desired: Option<u16>, seen: Option<u16>| desired.is_some() && desired != seen;
+		let field = if *stp != running.stp {
+			Some(("bridge.stp", stp.to_string(), running.stp.to_string()))
+		} else if differs(*forward_delay, running.forward_delay) {
 			Some((
 				"bridge.forward_delay",
-				render_seconds(bridge.forward_delay),
+				render_seconds(*forward_delay),
 				render_seconds(running.forward_delay),
 			))
-		} else if differs(bridge.hello_time, running.hello_time) {
+		} else if differs(*hello_time, running.hello_time) {
 			Some((
 				"bridge.hello_time",
-				render_seconds(bridge.hello_time),
+				render_seconds(*hello_time),
 				render_seconds(running.hello_time),
+			))
+		} else if differs(*ageing_time, running.ageing_time) {
+			Some((
+				"bridge.ageing_time",
+				render_seconds(*ageing_time),
+				render_seconds(running.ageing_time),
+			))
+		} else if differs_u16(*priority, running.priority) {
+			Some((
+				"bridge.priority",
+				render_option(*priority),
+				render_option(running.priority),
+			))
+		} else if *vlan_filtering != running.vlan_filtering {
+			// A bool, so compared like `stp` rather than through `differs`:
+			// there is no "the document did not say" to distinguish, and a
+			// bridge whose per-port VLANs are configured needs this on --
+			// the executor says so by name when it is off.
+			Some((
+				"bridge.vlan_filtering",
+				vlan_filtering.to_string(),
+				running.vlan_filtering.to_string(),
 			))
 		} else {
 			None

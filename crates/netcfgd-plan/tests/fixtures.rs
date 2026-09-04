@@ -5430,6 +5430,68 @@ device work-net {
 	);
 }
 
+/// Every bridge setting is compared, not the three somebody remembered.
+///
+/// `plan_bridge` had `stp`, `forward_delay` and `hello_time`, and the model
+/// has six. `ageing_time`, `priority` and `vlan_filtering` were parsed, sent
+/// inside `link.create` and read back by the observer, and never compared --
+/// so editing any of them on a bridge that already existed planned nothing and
+/// changed nothing, in silence. The doc comment on that function names the two
+/// fields the original fix was written for, which is why the rest were never
+/// added to it.
+///
+/// A case per field, because a single case would pass on the first difference
+/// the chain happens to find and say nothing about the others.
+#[test]
+fn every_bridge_setting_is_compared() {
+	for (field, edit) in [
+		(
+			"bridge.ageing_time",
+			"device br0 { bridge { ageing_time = 900 } } ",
+		),
+		(
+			"bridge.priority",
+			"device br0 { bridge { priority = 200 } } ",
+		),
+		(
+			"bridge.vlan_filtering",
+			"device br0 { bridge { vlan_filtering = true } } ",
+		),
+	] {
+		let desired = document(&format!("{edit}\ninterface br0 {{ config = \"null\" }}\n"));
+		let mut observed = observed_with(&["br0"]);
+		"bridge".clone_into(&mut observed.links[0].kind);
+		observed.links[0].up = true;
+		observed.links[0].ownership = Ownership::Ours;
+		// What the kernel has: a bridge with none of the three set.
+		observed.links[0].bridge = Some(netcfgd_model::ObservedBridge {
+			stp: false,
+			forward_delay: None,
+			hello_time: None,
+			ageing_time: Some(300),
+			priority: Some(100),
+			vlan_filtering: false,
+		});
+
+		let plan = plan(&desired, &observed, &PlanOptions::default());
+		assert!(
+			names(&plan).contains(&"link.set_bridge"),
+			"{field} drifted and nothing was planned: {:?}",
+			names(&plan)
+		);
+		assert!(
+			plan.actions
+				.iter()
+				.any(|action| action.reason.field == field),
+			"the plan did not name {field}: {:?}",
+			plan.actions
+				.iter()
+				.map(|action| action.reason.field.clone())
+				.collect::<Vec<_>>()
+		);
+	}
+}
+
 /// A guard refuses the deletion, and then nothing else happens either.
 ///
 /// The interaction that has to hold: a refused delete must not leave the rest of

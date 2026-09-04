@@ -7763,3 +7763,63 @@ artifact of reading the match through a `sed` window that cut it short. All
 eight are there. A truncated view manufactures an absence that reads exactly
 like a finding, and the correction cost one command that did not choose a
 line range.
+
+## 10.28 bridge and bond: three settings nobody compared, and the bug under them
+
+Swept on 2026-09-04. The bond is complete. The bridge had a field list short
+by half, and closing it uncovered a second fault the first had been hiding
+-- the same two-layer shape as 10.25, where fixing `Document::eq` exposed
+`canonicalize`.
+
+**`plan_bridge` compared three of the six settings.** `stp`, `forward_delay`
+and `hello_time` were in the chain; `ageing_time`, `priority` and
+`vlan_filtering` were not. All six are parsed, all six are sent inside
+`link.create`, and the observer reads all six back -- so a freshly created
+bridge got them and an existing one silently did not. Measured: editing
+`hello_time` planned `link.set_bridge`; editing only `ageing_time` and
+`priority` gave `nothing to do`.
+
+The tell is in the function's own doc comment, which explains the gap it was
+written to close: "a bridge's `stp` and `forward_delay` are sent inside
+`link.create` and were never sent again". Those are exactly the two it
+compares, plus one added later. The other three arrived with the model and
+nothing said they had to be added here as well. The walk destructures
+`BridgeConfig` now, so a seventh field is a compile error rather than a
+setting nobody compares.
+
+**And the first plan after that fix did not converge.** `bridge.priority:
+200 (was <absent>)` came back on every pass: the apply set it and the
+observation still said absent. `IFLA_BR_PRIORITY` is a `__u16` in
+`if_link.h`, the writer sends two bytes, and the reader asked for a `u32` --
+which returns nothing rather than a truncated value, so **a bridge's
+priority read as absent on every kernel, always**. The accessor's own
+documentation names the trap: netlink is not consistent about integer widths
+and the header gives no hint.
+
+It could not be seen while the planner ignored the field. That is what makes
+it worth recording as a pair rather than as two bugs: the missing comparison
+was not merely beside the width fault, it was what made the width fault
+unobservable. `ip -d link show` reports `priority 200` on the same bridge,
+which is the independent witness that the value lands and the reader was the
+half at fault.
+
+**A width sweep over the whole attribute table, since one had gone wrong.**
+Every constant `ops.rs` writes was paired with the accessor `dump.rs` reads
+it through: 16 attributes across bridge, bond, VLAN, VXLAN, GRE, GENEVE,
+IPTUN and macvlan. No other mismatch. The two written as raw
+`to_ne_bytes()` -- `IFLA_BR_PRIORITY` and `IFLA_VLAN_ID` -- are both `u16`
+on both sides. The first version of that sweep printed nothing at all, which
+reads exactly like a clean result and was a pairing bug in the probe: the
+reader's module prefix is `ifla_br` and the writer's constant is
+`IFLA_BR_...`, so nothing matched. A probe that produces an empty table is
+not evidence until it has been shown to produce a full one.
+
+**Where it came up empty, with what was looked at.** `plan_bond` compares
+both fields the model has, and guards the mode against the kernel's refusal
+to change it on a bond with members -- a warning rather than an action,
+which is the same idiom `plan_vxlan` uses for a VNI. Bond widths agree on
+both sides. A bridge's membership can be written two ways, `members` on the
+bridge and `master` on the device, and `expand_members` refuses a device
+that lists itself and reports a conflict where the two disagree, so they
+cannot drift apart in silence. Both kinds round-trip through the renderer
+with every field.
