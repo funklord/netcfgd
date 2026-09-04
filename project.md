@@ -8368,3 +8368,61 @@ each of those enumerations matches its help text: `profile`, `config`,
 `control`, `wifi`, `secret` and `modem`. The only file the CLI writes outside
 tests is this probe; the secret store already sets its mode on the open,
 which is where the rest of this week's `write_private` fixes came from.
+
+## 10.36 daemon and socket: a removal that reported itself as a no-op
+
+Swept on 2026-09-04. The authorization core is sound and the two findings are
+in what surrounds it -- one of them a command that told an operator the
+opposite of what it had done.
+
+**`ncfg config rm` removed the drop-in and said it was not there.**
+`remove_drop_in` returns `Result<(), String>` and returns `Ok` both for a file
+it removed and for one that was never there, so the caller had no way to tell
+and printed the not-found sentence on the success path. Measured: `put site`
+creates `site.conf`, `rm site` empties the directory and prints "a drop-in
+called `site` is not in /etc/netcfgd", exit 0.
+
+That is worse than a cosmetic wrong word. An operator reads it as a failed
+removal and goes looking for a file that has gone -- or removes it again by
+hand, or edits around it. The function reports `bool` now and the caller
+picks the sentence, using the same words the daemon path already used for
+the same event, because an operator should not have to tell which route the
+request took.
+
+**And a bare `-` could not be used, though the help documents it.** `ncfg
+config put NAME [FILE]` accepts a file, `-`, or nothing, and `put` implements
+all three -- `None | Some("-")` reads standard input. The option classifier
+caught anything starting with a dash first and answered `unknown option -`,
+so the one form the help spells out by name was the one form that did not
+work. A bare dash is a positional argument by convention everywhere; it is
+one here now, and an unknown flag is still refused, which is what that arm
+exists for.
+
+**Where the sweep looked and found nothing, with the method.** `tier_of` is
+an exhaustive match with no wildcard, so a new `Request` variant is a compile
+error rather than a request nobody classified; `answer` has exactly one
+caller and it is behind `permitted`, so there is no path into the handlers
+that skips the gate; and `permitted` asks both the tier gate and the content
+gate, with a test that fails if either is dropped. The content gate's
+privilege scan does recurse into nested blocks -- `Item::Block(inner) =>
+walk_block(inner, found)` -- which matters because hooks only ever appear
+nested inside an `interface`, and a scan that stopped at the top level would
+have let an unprivileged caller send one. The drop-in name validator refuses
+`..`, a path separator, an empty name and a dotfile, and nothing was written
+outside `conf.d` when each was tried.
+
+**One thing looked at and deliberately left.** The control socket is bound and
+then chmodded from the policy -- 0666 where a tier is `Any`, 0660 where it
+opens beyond root, 0600 otherwise -- which is the create-then-chmod shape
+three of this week's fixes closed. It is not the same case: a Unix socket
+cannot take its mode on the open, `connect` needs write permission so the
+default 0755 admits nobody during the window, and the tier check runs on
+every request regardless. The mode is defence in depth over a gate that does
+not depend on it.
+
+**A method note, because it nearly stood as a pass.** The first sabotage of
+the `remove_drop_in` fix reported success: `cargo test --lib drop_in` selected
+two tests about layering and not the one holding the new assertion, which was
+called `removing_is_idempotent_...`. A filter that matches the wrong tests
+reports a green run in the same words as a real one. Re-run against the test
+by name, the sabotage failed it.

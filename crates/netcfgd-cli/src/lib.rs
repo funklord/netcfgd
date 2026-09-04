@@ -384,6 +384,13 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 			// three, `wifi add` takes one. An unknown *option* is still an
 			// error, because a typo in a flag silently ignored is how somebody
 			// thinks they passed --confirm-within and did not.
+			// **A bare `-` is a positional argument, not an option.** It is
+			// the conventional spelling of "standard input", `ncfg config
+			// put` implements it -- `None | Some("-")` reads stdin there --
+			// and the help documents it. This arm caught it first and
+			// answered `unknown option -`, so the one form the help spells
+			// out was the one that could not be used.
+			"-" => positional.push("-".to_owned()),
 			other if other.starts_with('-') => return Err(format!("unknown option `{other}`")),
 			other => positional.push(other.to_owned()),
 		}
@@ -1719,6 +1726,26 @@ fn describe(op: &str, reason: &netcfgd_plan::Reason) -> String {
 
 #[cfg(test)]
 mod tests {
+
+	/// A bare `-` reaches a command as a filename rather than as an option.
+	///
+	/// The help documents three ways to give `ncfg config put` its text -- a
+	/// file, `-`, or nothing -- and `put` implements all three: `None |
+	/// Some("-")` reads standard input. The classifier below caught anything
+	/// starting with a dash first and answered `unknown option -`, so the one
+	/// form the help spells out by name was the one that could not be used.
+	#[test]
+	fn a_bare_dash_is_a_filename_and_not_an_option() {
+		let arguments = ["put".to_owned(), "site".to_owned(), "-".to_owned()];
+		let (_, positional) = super::parse_options(&arguments).expect("a bare dash parses");
+		assert_eq!(positional.last().map(String::as_str), Some("-"));
+
+		// And a real typo is still refused, which is what that arm is for.
+		assert!(
+			super::parse_options(&["put".to_owned(), "--nope".to_owned()]).is_err(),
+			"an unknown flag was accepted as a positional"
+		);
+	}
 	use super::{access_point_name, is_radio, parse_options};
 
 	fn split(arguments: &[&str]) -> (super::Options, Vec<String>) {
