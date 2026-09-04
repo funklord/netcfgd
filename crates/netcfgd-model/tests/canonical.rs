@@ -106,6 +106,37 @@ fn encoding_is_stable_across_runs() {
 	assert_eq!(first, second);
 }
 
+/// And Bluetooth devices sort with everything else.
+///
+/// Left out of `canonicalize` for as long as the field existed, and invisible
+/// while `Document`'s equality also omitted it: with neither walk covering
+/// `bluetooth`, order could not produce a spurious difference because no
+/// difference was visible at all. Fixing equality made this reachable, so the
+/// two belong to one repair rather than two.
+#[test]
+fn bluetooth_devices_sort_with_everything_else() {
+	let device = |id: &str| netcfgd_model::bluetooth::BluetoothDevice {
+		id: id.to_owned(),
+		address: "11:22:33:44:55:66".to_owned(),
+		profile: netcfgd_model::bluetooth::BluetoothProfile::Pan,
+		autoconnect: true,
+	};
+	let mut forward = Document::default();
+	forward.bluetooth.push(device("alpha"));
+	forward.bluetooth.push(device("beta"));
+	let mut backward = Document::default();
+	backward.bluetooth.push(device("beta"));
+	backward.bluetooth.push(device("alpha"));
+
+	assert_ne!(
+		forward, backward,
+		"unsorted, the two orders are different states"
+	);
+	forward.canonicalize();
+	backward.canonicalize();
+	assert_eq!(forward, backward, "canonicalised, the order is gone");
+}
+
 /// The property that makes plan diffs trustworthy: two documents describing
 /// the same state encode identically however their parts were ordered. This is
 /// the case that actually arises, since drop-in files are read in filename
@@ -510,6 +541,46 @@ fn generated_by_is_excluded_from_equality() {
 	};
 
 	assert_eq!(a, b);
+}
+
+/// Everything else IS state, and `bluetooth` was the one that got left out.
+///
+/// `Document`'s equality is hand-written so that `generated_by` can be
+/// excluded, and for as long as the `bluetooth` field existed it was omitted
+/// too -- so two documents differing only in a Bluetooth device compared
+/// equal. The reconciler saw no change to apply, and `ncfg profile save`
+/// accepted a snapshot with a wrong address as reproducing the machine.
+///
+/// The real guard is that `eq` destructures `Self`, which makes the next
+/// added field a compile error. This asserts the case that was broken, since
+/// a compile-time guard leaves no failing test behind to show it was ever
+/// alive.
+#[test]
+fn a_bluetooth_device_is_part_of_a_document_s_identity() {
+	let device = |address: &str| netcfgd_model::bluetooth::BluetoothDevice {
+		id: "phone".to_owned(),
+		address: address.to_owned(),
+		profile: netcfgd_model::bluetooth::BluetoothProfile::Pan,
+		autoconnect: true,
+	};
+	let a = Document {
+		bluetooth: vec![device("11:22:33:44:55:66")],
+		..Document::default()
+	};
+	let b = Document {
+		bluetooth: vec![device("99:99:99:99:99:99")],
+		..Document::default()
+	};
+
+	assert_ne!(
+		a, b,
+		"two documents differing only in Bluetooth are not the same state"
+	);
+	assert_ne!(
+		a,
+		Document::default(),
+		"a device present is not the same as none"
+	);
 }
 
 /// An SSID is octets, not text. This one is not valid UTF-8 and must survive

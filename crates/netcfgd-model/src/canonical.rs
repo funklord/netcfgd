@@ -18,6 +18,12 @@ impl Document {
 		self.devices.sort_by(|a, b| a.name.cmp(&b.name));
 		self.interfaces.sort_by(|a, b| a.name.cmp(&b.name));
 		self.networks.sort_by(|a, b| a.id.cmp(&b.id));
+		// Sorted for the same reason the others are, and missed for as long as
+		// the field existed. It went unnoticed because `Document`'s equality
+		// omitted `bluetooth` as well: with neither walk covering it, order
+		// could not produce a spurious difference because no difference was
+		// visible at all. Fixing equality is what made this reachable.
+		self.bluetooth.sort_by(|a, b| a.id.cmp(&b.id));
 		self.rules.sort();
 		self.access_points.sort_by(|a, b| a.id.cmp(&b.id));
 

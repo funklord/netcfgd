@@ -273,13 +273,33 @@ pub struct Document {
 // and the reconciler would see a change where there is none.
 impl PartialEq for Document {
 	fn eq(&self, other: &Self) -> bool {
-		self.schema_version == other.schema_version
-			&& self.globals == other.globals
-			&& self.devices == other.devices
-			&& self.interfaces == other.interfaces
-			&& self.networks == other.networks
-			&& self.rules == other.rules
-			&& self.access_points == other.access_points
+		// **Destructured rather than written field by field**, so that adding
+		// a field to `Document` is a compile error here rather than a silent
+		// omission from equality. It was written the other way and `bluetooth`
+		// was missed for as long as the field existed: two documents whose
+		// only difference was a Bluetooth device compared EQUAL, so the
+		// reconciler saw no change to apply and `ncfg profile save` accepted a
+		// snapshot that did not reproduce the machine. A list that must agree
+		// with a struct and is maintained by hand does not stay agreeing.
+		let Self {
+			schema_version,
+			generated_by: _,
+			globals,
+			devices,
+			interfaces,
+			networks,
+			bluetooth,
+			rules,
+			access_points,
+		} = self;
+		*schema_version == other.schema_version
+			&& *globals == other.globals
+			&& *devices == other.devices
+			&& *interfaces == other.interfaces
+			&& *networks == other.networks
+			&& *bluetooth == other.bluetooth
+			&& *rules == other.rules
+			&& *access_points == other.access_points
 	}
 }
 
