@@ -139,6 +139,7 @@ pub(crate) fn set_radio(
 		.map(|_| ())
 	} else {
 		netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, &name)
+			.map(|_| ())
 	};
 
 	if let Err(message) = result {

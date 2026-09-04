@@ -234,15 +234,26 @@ pub(crate) fn remove_named(
 
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
-	with_profile_taken_off(&config_dir, &factory_dir, name, || {
+	// **Which sentence depends on whether anything was there**, and this said
+	// the second one either way: a drop-in it had just removed was reported as
+	// "is not in", so an operator read a successful removal as a failed one and
+	// went looking for a file that had gone. `remove_drop_in` reports it now.
+	let removed = with_profile_taken_off(&config_dir, &factory_dir, name, || {
 		config::remove_drop_in(&config_dir, &factory_dir, name)
 	})?;
-	println!("{subject} is not in {}", config_dir.display());
+	if removed {
+		// The same words the daemon path uses, because it is the same event
+		// and an operator should not have to tell which route it took.
+		println!("netcfgd no longer has {subject}");
+	} else {
+		println!("{subject} is not in {}", config_dir.display());
+	}
 	Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(test)]
 mod tests {
+
 	use super::*;
 
 	/// A config tree with one interface, and a run directory with no socket.

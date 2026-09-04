@@ -1315,7 +1315,8 @@ fn delete_config_request(state: &mut State, name: &str) -> Response {
 	match refold_on_failure(
 		state,
 		folded.as_deref(),
-		netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, name),
+		netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, name)
+			.map(|_| ()),
 	) {
 		Ok(()) => {
 			state.reload();
@@ -1494,7 +1495,7 @@ fn set_profile_request(state: &mut State, name: Option<&str>) -> Response {
 			&state.paths.factory,
 			drop_in,
 		) {
-			Ok(()) => {
+			Ok(_) => {
 				state.reload();
 				Response::Ok
 			}

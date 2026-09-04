@@ -651,7 +651,15 @@ mod layering {
 		std::fs::create_dir_all(config.join("conf.d")).expect("a config directory");
 
 		// Absent is success: the state asked for is the state that holds.
-		assert!(super::remove_drop_in(&config, &factory, "never-existed").is_ok());
+		// **False, not just `Ok`.** It returned `Ok(())` for a drop-in it had
+		// removed and for one that was never there, so `ncfg config rm`
+		// printed "is not in" on the success path and told an operator their
+		// removal had not happened.
+		assert_eq!(
+			super::remove_drop_in(&config, &factory, "never-existed"),
+			Ok(false),
+			"removing nothing was reported as removing something"
+		);
 		assert!(super::remove_secret(&config, "never-existed").is_ok());
 
 		install_drop_in(
@@ -662,7 +670,11 @@ mod layering {
 			false,
 		)
 		.expect("written");
-		assert!(super::remove_drop_in(&config, &factory, "thing").is_ok());
+		assert_eq!(
+			super::remove_drop_in(&config, &factory, "thing"),
+			Ok(true),
+			"removing a drop-in was reported as finding nothing"
+		);
 		assert!(!config.join("conf.d/thing.conf").exists());
 	}
 
@@ -1582,13 +1594,18 @@ pub fn install_probe(
 ///
 /// A name that cannot be used, a removal that failed, or a configuration that
 /// would no longer compile -- in which case the file is put back.
-pub fn remove_drop_in(config_dir: &Path, factory_dir: &Path, name: &str) -> Result<(), String> {
+pub fn remove_drop_in(config_dir: &Path, factory_dir: &Path, name: &str) -> Result<bool, String> {
 	crate::wifi_profile::usable_id(name)
 		.map_err(|why| format!("`{name}` cannot be used as a name here: {why}"))?;
 
 	let path = config_dir.join("conf.d").join(format!("{name}.conf"));
+	// **Whether anything was there is the caller's to report**, and it had no
+	// way to know: this returned `Ok(())` for a drop-in it removed and for one
+	// that was never there, so `ncfg config rm` printed "is not in" on the
+	// success path and told an operator their removal had not happened. It
+	// had.
 	let Ok(previous) = std::fs::read(&path) else {
-		return Ok(());
+		return Ok(false);
 	};
 	std::fs::remove_file(&path)
 		.map_err(|error| format!("could not remove {}: {error}", path.display()))?;
@@ -1607,7 +1624,7 @@ pub fn remove_drop_in(config_dir: &Path, factory_dir: &Path, name: &str) -> Resu
 			 back:\n{rendered}"
 		));
 	}
-	Ok(())
+	Ok(true)
 }
 
 /// Remove a stored credential.
