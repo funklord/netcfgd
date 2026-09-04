@@ -265,6 +265,15 @@ mod tests {
 	}
 
 	/// The report's useful half: which blocks refer to this name.
+	///
+	/// **The name claimed exhaustiveness and the enumeration was short by
+	/// two.** An `OpenVPN` tunnel's password and an access point's passphrase
+	/// were both absent from the walk, so `ncfg secret set` told an operator
+	/// that a credential their configuration names is used by nothing -- which
+	/// invites deleting it. No assertion can fail about a shape it does not
+	/// name, so the fixture below carries one of every block that can hold a
+	/// secret, and the walk itself now destructures `Document` so a new block
+	/// list cannot be missed the way `access_points` was.
 	#[test]
 	fn every_kind_of_reference_is_found() {
 		let document = document(
@@ -288,7 +297,24 @@ device dsl0 {
 	}
 }
 
+device vpn0 {
+	openvpn {
+		config   = "/etc/openvpn/work.ovpn"
+		username = "user"
+		password = "@secret:shared"
+	}
+}
+
+device ap0 {
+	kind = "dummy"
+}
+
 network home {
+	wifi { psk = "@secret:shared" }
+}
+
+access_point guest {
+	device = "ap0"
 	wifi { psk = "@secret:shared" }
 }
 "#,
@@ -297,7 +323,9 @@ network home {
 		assert_eq!(
 			users,
 			[
+				"access point guest",
 				"interface dsl0",
+				"interface vpn0",
 				"interface wg0 (peer office)",
 				"interface wg0 (private key)",
 				"network home",

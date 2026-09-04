@@ -66,8 +66,69 @@ pub fn referring_to(document: &netcfgd_model::Document, name: &str) -> Vec<Strin
 	references(document).remove(name).unwrap_or_default()
 }
 
+/// Every secret one `Security` refers to, however the block that holds it is
+/// spelled.
+///
+/// Shared by `network` and `access_point` because they carry the same type,
+/// and a second copy of this match is a second chance to miss a variant when
+/// the model grows one -- which is exactly how access points came to be left
+/// out of the walk in the first place.
+fn note_security(
+	note: &mut impl FnMut(&str, &netcfgd_model::SecretRef),
+	what: &str,
+	security: &netcfgd_model::Security,
+) {
+	match security {
+		netcfgd_model::Security::Psk(psk) => note(what, &psk.passphrase),
+		netcfgd_model::Security::Eap(eap) => {
+			if let Some(password) = &eap.password {
+				note(what, password);
+			}
+			if let Some(netcfgd_model::CertSource::Stored(key)) = &eap.private_key {
+				note(&format!("{what} (client key)"), key);
+			}
+			// The certificates too, now that they can be stored content: a
+			// client sends `ca_cert = "@secret:corp-ca"` and this is what
+			// tells the operator the store has it.
+			for (source, which) in [
+				(&eap.ca_cert, "CA certificate"),
+				(&eap.client_cert, "client certificate"),
+			] {
+				if let Some(netcfgd_model::CertSource::Stored(reference)) = source {
+					note(&format!("{what} ({which})"), reference);
+				}
+			}
+		}
+		netcfgd_model::Security::Open | netcfgd_model::Security::Owe => {}
+	}
+}
+
 /// Every `@secret:` reference in a document, by name.
+///
+/// **The document is destructured**, so a block list added to `Document` is a
+/// compile error here rather than a walk that quietly does not cover it. It
+/// was written against `document.` field accesses and `access_points` was
+/// never walked at all: a stored hostapd passphrase reported as used by
+/// nothing, in a document that named it, which invites deleting a live
+/// credential. A list of fields maintained by hand does not stay agreeing with
+/// the struct it walks.
 fn references(document: &netcfgd_model::Document) -> BTreeMap<String, Vec<String>> {
+	let netcfgd_model::Document {
+		// Neither a schema version nor provenance can name a secret.
+		schema_version: _,
+		generated_by: _,
+		// Globals hold policy, not credentials.
+		globals: _,
+		devices,
+		interfaces,
+		networks,
+		// A Bluetooth device is an address and a profile; there is no pairing
+		// key in the model yet. When one arrives this stops compiling.
+		bluetooth: _,
+		// A routing rule is selectors and a table.
+		rules: _,
+		access_points,
+	} = document;
 	let mut users: BTreeMap<String, Vec<String>> = BTreeMap::new();
 	let mut note = |what: &str, reference: &netcfgd_model::SecretRef| {
 		users
@@ -76,7 +137,7 @@ fn references(document: &netcfgd_model::Document) -> BTreeMap<String, Vec<String
 			.push(what.to_owned());
 	};
 	// Devices: a WireGuard key belongs to the thing being created (0155).
-	for interface in &document.devices {
+	for interface in devices {
 		if let netcfgd_model::InterfaceKind::WireGuard(wireguard) = &interface.kind {
 			note(
 				&format!("interface {} (private key)", interface.name),
@@ -94,9 +155,17 @@ fn references(document: &netcfgd_model::Document) -> BTreeMap<String, Vec<String
 		if let netcfgd_model::InterfaceKind::Pppoe(pppoe) = &interface.kind {
 			note(&format!("interface {}", interface.name), &pppoe.password);
 		}
+		// And an OpenVPN tunnel's, which was missed for as long as the field
+		// existed: a stored `.ovpn` password reported as used by nothing, in a
+		// document that named it, which invites deleting a live credential.
+		if let netcfgd_model::InterfaceKind::OpenVpn(openvpn) = &interface.kind {
+			if let Some(password) = &openvpn.password {
+				note(&format!("interface {}", interface.name), password);
+			}
+		}
 	}
 
-	for interface in &document.interfaces {
+	for interface in interfaces {
 		if let Some(dot1x) = &interface.dot1x {
 			if let Some(password) = &dot1x.password {
 				note(&format!("interface {} (802.1X)", interface.name), password);
@@ -113,32 +182,22 @@ fn references(document: &netcfgd_model::Document) -> BTreeMap<String, Vec<String
 			}
 		}
 	}
-	for network in &document.networks {
-		match &network.security {
-			netcfgd_model::Security::Psk(psk) => {
-				note(&format!("network {}", network.id), &psk.passphrase);
-			}
-			netcfgd_model::Security::Eap(eap) => {
-				if let Some(password) = &eap.password {
-					note(&format!("network {}", network.id), password);
-				}
-				if let Some(netcfgd_model::CertSource::Stored(key)) = &eap.private_key {
-					note(&format!("network {} (client key)", network.id), key);
-				}
-				// The certificates too, now that they can be stored content:
-				// a client sends `ca_cert = "@secret:corp-ca"` and this is
-				// what tells the operator the store has it.
-				for (source, what) in [
-					(&eap.ca_cert, "CA certificate"),
-					(&eap.client_cert, "client certificate"),
-				] {
-					if let Some(netcfgd_model::CertSource::Stored(reference)) = source {
-						note(&format!("network {} ({what})", network.id), reference);
-					}
-				}
-			}
-			netcfgd_model::Security::Open | netcfgd_model::Security::Owe => {}
-		}
+	for network in networks {
+		note_security(
+			&mut note,
+			&format!("network {}", network.id),
+			&network.security,
+		);
+	}
+	// Access points too. The list was walked for networks only, so a hostapd
+	// passphrase this command had stored was reported as used by nothing --
+	// the same shape as the OpenVPN password above, in a different block.
+	for access_point in access_points {
+		note_security(
+			&mut note,
+			&format!("access point {}", access_point.id),
+			&access_point.security,
+		);
 	}
 	for found in users.values_mut() {
 		found.sort_unstable();
