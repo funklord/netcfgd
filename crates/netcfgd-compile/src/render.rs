@@ -316,12 +316,16 @@ fn render_interface(
 
 /// What kind of link this is, as its own block.
 ///
-/// The topology kinds are here and the tunnels are not yet. They are separated
-/// by what they carry rather than by effort: a bridge, a bond, a VLAN and a
-/// macvlan say who they are made of and nothing secret, while `wireguard` has
-/// peers and a private key and `openvpn` names an operator's file, so those
-/// need decisions about what a snapshot is allowed to contain rather than more
-/// keys.
+/// The topology kinds are here, and `pppoe` with them. What is still refused
+/// is `wireguard`, whose peer list and private key are a bigger question than
+/// more keys, and `openvpn`, which names an operator's file. Those need
+/// decisions about what a snapshot is allowed to contain.
+///
+/// `pppoe` was refused on that same reasoning and should not have been: its
+/// password is a [`SecretRef`], a type incapable of carrying the value, and
+/// rendering one as `@secret:name` is what a network's `psk` has always done.
+/// The refusal cost a whole `ncfg profile save` on any machine whose WAN is
+/// DSL or fibre, which is exactly the machine profiles exist for.
 ///
 /// A default is written only where the parser's default differs, so a bond
 /// that never named a mode does not acquire one -- the round trip compares
@@ -413,6 +417,34 @@ fn render_kind(kind: &InterfaceKind, name: &str, body: &mut String, missing: &mu
 		}
 		InterfaceKind::Veth(veth) => {
 			let _ = writeln!(body, "\tveth {{ peer = {} }}", quote(&veth.peer));
+		}
+		// **PPPoE, which the paragraph above used to defer.** Its reason was
+		// that a kind carrying a secret needs a decision about what a snapshot
+		// may contain -- and for a `SecretRef` that decision is already made
+		// and already relied on: a network's `psk` renders as `@secret:name`,
+		// because the type is incapable of carrying the value. A password here
+		// is the same type and gets the same answer.
+		//
+		// It matters because a DSL or fibre WAN is exactly the machine a
+		// profile is for, and refusing the kind meant `ncfg profile save`
+		// failed outright on one -- not the WAN saved wrongly, the whole save
+		// refused.
+		InterfaceKind::Pppoe(pppoe) => {
+			body.push_str("\tpppoe {\n");
+			let _ = writeln!(body, "\t\tparent = {}", quote(&pppoe.parent));
+			let _ = writeln!(body, "\t\tusername = {}", quote(&pppoe.username));
+			let _ = writeln!(
+				body,
+				"\t\tpassword = {}",
+				quote(&secret_ref(&pppoe.password))
+			);
+			if let Some(service) = &pppoe.service {
+				let _ = writeln!(body, "\t\tservice = {}", quote(service));
+			}
+			if let Some(ac) = &pppoe.ac {
+				let _ = writeln!(body, "\t\tac = {}", quote(ac));
+			}
+			body.push_str("\t}\n");
 		}
 		other => missing.push(format!("interface {name}: kind {}", kind_name(other))),
 	}
@@ -1587,6 +1619,23 @@ mod tests {
 	fn an_empty_dns_block_survives_where_it_means_something() {
 		round_trips("interface eth0 {\n\tconfig = \"dhcp\"\n\tdns { }\n}\n");
 		round_trips("network \"H\" {\n\twifi { open = true }\n\tdns { }\n}\n");
+	}
+
+	/// A `PPPoE` session, with and without the optional provider names.
+	///
+	/// Refused wholesale until 2026-09-04, so `ncfg profile save` failed
+	/// outright on any machine whose WAN is DSL or fibre. The password is
+	/// asserted as a reference in both provider spellings, because the one
+	/// thing a snapshot must never do is carry the value -- and `@secret:` and
+	/// `@secret:keyring:` are different references to different stores.
+	#[test]
+	fn a_pppoe_session_round_trips() {
+		round_trips(
+			"device ppp0 {\n\tpppoe {\n\t\tparent = \"e0\"\n\t\tusername = \"u\"\n\t\tpassword = \"@secret:p\"\n\t}\n}\n",
+		);
+		round_trips(
+			"device ppp0 {\n\tpppoe {\n\t\tparent = \"e0\"\n\t\tusername = \"u\"\n\t\tpassword = \"@secret:keyring:p\"\n\t\tservice = \"svc\"\n\t\tac = \"conc\"\n\t}\n}\n",
+		);
 	}
 
 	/// Every Bluetooth profile, and both sides of `autoconnect`.

@@ -7561,3 +7561,116 @@ mention `access_points` and then asking which never mention `bluetooth` put
 `canonical.rs` on the page in one command. Where such a list exists,
 destructuring turns the next omission into a compile error, and that is
 worth more than the test that catches this one.
+
+## 10.26 modem and ppp: one walk short in two places, and a window that was argued away
+
+Swept the modem and PPP code on 2026-09-04, with the lens 10.25 ended on:
+which hand-maintained list has to agree with a struct, and what makes it
+stay agreeing. It paid twice more, and the two worst findings were not in
+the modem or PPP code at all -- they were in what that code shares.
+
+**The secret walk was two shapes short.** `netcfgd_host::secrets::references`
+is the single walk that answers "what uses this credential", deliberately
+shared with the socket so that -- in its own comment -- "two walks would be
+two chances to miss a shape when the model grows one". The one walk missed
+two of the six fields in the model that can hold a `SecretRef`:
+
+- an **OpenVPN tunnel's password**, which the devices loop never looked for;
+- an **access point's passphrase**, because the loop over `access_points`
+  did not exist. `Security` was walked for networks only.
+
+Measured in one document holding all four shapes: a PPPoE password reported
+`used by: interface ppp0` and an OpenVPN password in the same file reported
+`note: nothing in the configuration refers to @secret:vpnpw yet`. That is
+the message that invites an operator to delete a live credential.
+
+The test guarding it is named `every_kind_of_reference_is_found`, and its
+enumeration was short by exactly those two -- a name quantifying over a
+population it does not derive, which `evidence.md` already has an entry for.
+So the fix is not only the two arms: `references` now **destructures
+`Document`**, which makes a new block list a compile error rather than a
+walk that quietly does not cover it, and the `Security` match is factored so
+networks and access points cannot drift apart. That is the same structural
+guard as 10.25's `Document::eq`, arrived at independently in a different
+crate on the same day -- which is what suggests the class is worth looking
+for rather than the instances.
+
+**The options file's mode was argued about in the wrong dimension.**
+`write_ppp_options` used `File::create` then `set_permissions(0600)`, with a
+comment saying the chmod goes "before the content, not after" because "a
+window where the password is readable is a window, however short". That
+argument is about *time*, and what it has to protect is a *descriptor*:
+`File::create` makes the file world-readable first, and a process that opens
+it in that instant holds a readable descriptor the later chmod does not
+revoke. Measured directly -- an fd opened at 0644 returns the password
+written after a chmod to 0600.
+
+Reachable rather than theoretical: `RuntimeDirectoryMode=0755` in the unit,
+so `/run/netcfgd` is traversable by anyone on the machine. And the answer
+was already in this tree -- `netcfgd_host::config::write_atomically` sets
+the mode on the open, and says why. The mode goes on the open here now.
+
+**The live check cannot see this fix, and that is worth saying.** `ppp.sh`
+asserts the file is 0600, which was true before and after; a race window is
+not observable from the artifact it leaves. What is guarded is the outcome,
+not the window, and the window is closed by construction.
+
+**A SIM cycle that failed forgot it had to happen.** `Sims::cycled` was
+called unconditionally after `apply` in both call sites, and `apply` returns
+a journal rather than a result -- so a `link.down` that failed cleared the
+note anyway and nothing retried. The modem then sat on its old source with
+the new one published to `/run` and `pre_up` never fired, until something
+unrelated cycled the link. The call site's own comment claimed the opposite
+behaviour: "a plan that could not be applied leaves the note in place so the
+next attempt still performs the cycle". It was true only for a plan that
+could not be *built* -- an executor that would not open returns before
+reaching the clear.
+
+The condition is per device rather than per plan, and both directions are
+pinned by a test that fails when the other is chosen. Clearing on
+`journal.succeeded()` would hold the note alive whenever anything unrelated
+failed, and every apply after would take a working link down and up -- which
+is the flapping the same call site records having just fixed. A device with
+no records clears, and that is right rather than an oversight: the planner
+emits a cycle only for a link that is *up*, because a link that is down runs
+`pre_up` on its way up regardless.
+
+**A PPPoE session's files are taken back when it stops.** `stop_pppoe`
+removed the report and left the options file, the two scripts and the pid
+file standing, where every other stop in `kernel.rs` removes its own. Four
+names, listed rather than swept, after the terminate rather than before --
+`pppd_pid` identifies netcfgd's own pppd by the options path in its argv, so
+a stop that failed must leave the evidence for the next attempt.
+
+**And a thing deliberately NOT changed, with the measurement that decided
+it.** A dial that fails leaves its options file behind: a stop is planned
+only for a backend observed running, so nothing collects one that never came
+up. That was fixed, and the fix was reverted. The file is 0600 and netcfgd
+runs as root, so its only reader is somebody who can already read
+`/etc/netcfgd/secrets` -- there is no exposure to remove. What removing it
+costs is real: `ppp.sh` validates the options against a real pppd precisely
+by reading the file a failed dial left, which is the only way this project
+can check what it hands pppd on a machine with no DSL line. The reasoning is
+in the code now so the next reader does not re-fix it.
+
+**`PPPoE` renders, so a DSL machine can save a profile.** `render_kind`
+refused it, along with WireGuard and OpenVPN, on the reasoning that a kind
+carrying a secret "needs decisions about what a snapshot is allowed to
+contain". For a `SecretRef` that decision was already made and already
+relied on -- a network's `psk` renders as `@secret:name`, because the type
+is incapable of carrying the value -- and PPPoE's password is that same
+type. The refusal cost a whole `ncfg profile save` on any machine whose WAN
+is DSL or fibre, which is exactly the machine profiles are for. WireGuard
+and OpenVPN are still refused and still named: a peer list and an operator's
+file are genuinely bigger questions than more keys.
+
+**Where the sweep came up empty, so the next one starts elsewhere.** The
+modem code itself held nothing. `Sims::sync` clamps rather than resets and
+handles an empty source list at both ends (`saturating_sub` and the
+`index + 1 >= len` guard agree that a list of none has nowhere to go);
+`advance` stops at the last source rather than wrapping, per 0152; there is
+exactly **one** place that decides a device is a modem, `modems()`, so there
+is no second list to disagree with it; and the quirk helpers are standalone
+tools an operator wires through `pre_up`, not something netcfgd invokes, so
+there is no dispatch table to fall out of step. The APN and SIM selection
+are published for a hook and that is the whole of the design, not a gap.
