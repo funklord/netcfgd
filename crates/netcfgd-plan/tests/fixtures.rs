@@ -357,6 +357,7 @@ fn started_backend(
 		}),
 		secret_matches: access_point.map(|_| true),
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	}
 }
@@ -1052,6 +1053,7 @@ fn a_lease_address_is_left_to_its_backend() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 	// The lease produced this, and it is tagged as ours.
@@ -1085,6 +1087,7 @@ fn removing_dhcp_stops_the_backend() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -1472,6 +1475,7 @@ fn removing_dot1x_stops_the_supplicant() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -1673,6 +1677,7 @@ fn a_running_tunnel_is_left_alone() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut observed);
@@ -1703,6 +1708,7 @@ interface vpn0 { config = "null" }"#,
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -2153,6 +2159,7 @@ access_point "after" {
 		}),
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -2188,6 +2195,7 @@ fn an_edited_ovpn_restarts_the_tunnel() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: Some(false),
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -2220,6 +2228,7 @@ fn a_tunnel_whose_file_is_unchanged_or_unreadable_is_left_alone() {
 			started_with: None,
 			secret_matches: None,
 			config_matches: answer,
+			config_present: None,
 			advertised: Vec::new(),
 		});
 
@@ -2262,6 +2271,7 @@ access_point "home" {
 		}),
 		secret_matches: Some(false),
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -2301,6 +2311,7 @@ access_point "home" {
 		}),
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -2340,6 +2351,7 @@ access_point "home" {
 		}),
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -2384,6 +2396,7 @@ interface lan0 {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	// And the address it derived from the new one, so the only thing left to
@@ -2433,6 +2446,7 @@ interface lan0 {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	observed.addresses.push(netcfgd_model::ObservedAddress {
@@ -3122,6 +3136,7 @@ interface wg0 {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -3188,6 +3203,7 @@ fn running_access_point(
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 }
@@ -3399,6 +3415,7 @@ fn an_unreachable_access_point_is_not_converged_against() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 	let plan = settle(&desired, &mut unreachable);
@@ -3435,6 +3452,7 @@ fn an_access_point_stops_when_its_block_goes() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -3530,6 +3548,7 @@ interface wlan0 { config = "null" }
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 	let plan = plan(&desired, &observed, &PlanOptions::default());
@@ -4073,6 +4092,7 @@ interface ppp0 {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -5428,6 +5448,55 @@ device work-net {
 		"the device was deleted and not made again: {:?}",
 		names(&plan)
 	);
+}
+
+/// A `.ovpn` that cannot be read is said, not passed over in silence.
+///
+/// `config_matches` is deliberately `None` when the file cannot be read, so a
+/// working tunnel is never dropped over an unanswered question -- and that
+/// left an operator who mistyped the path with `nothing to do` on every apply,
+/// for ever, while the daemon went on running the configuration it was started
+/// with. Measured before the fix: two applies running, both silent, the
+/// machine not matching the document and netcfgd calling it converged.
+///
+/// The control beside it is a readable config, which must stay quiet: a
+/// warning on every healthy tunnel would be worse than the silence it
+/// replaces.
+#[test]
+fn an_unreadable_openvpn_config_is_reported_without_dropping_the_tunnel() {
+	for (present, warns) in [(Some(false), true), (Some(true), false), (None, false)] {
+		let desired = document("device vpn0 { openvpn { config = \"/etc/openvpn/work.ovpn\" } }\n");
+		let mut observed = observed_with(&["vpn0"]);
+		observed.links[0].up = true;
+		observed.backends.push(ObservedBackend {
+			kind: BackendKind::OpenVpn,
+			interface: "vpn0".to_owned(),
+			running: true,
+			answering: None,
+			access_control: None,
+			started_with: None,
+			secret_matches: None,
+			config_matches: None,
+			config_present: present,
+			advertised: Vec::new(),
+		});
+
+		let plan = plan(&desired, &observed, &PlanOptions::default());
+		assert_eq!(
+			plan.warnings
+				.iter()
+				.any(|warning| warning.message.contains("cannot be read")),
+			warns,
+			"config_present {present:?} should warn = {warns}: {:?}",
+			plan.warnings
+		);
+		// And never at the price of the tunnel: no restart, either way.
+		assert!(
+			!names(&plan).contains(&"backend.stop"),
+			"the tunnel was dropped over an unreadable file: {:?}",
+			names(&plan)
+		);
+	}
 }
 
 /// The kernel's own fallback tunnel device is named, not configured for ever.
@@ -7446,6 +7515,7 @@ fn a_wedged_daemon_is_named_and_a_silent_one_is_not() {
 			started_with: None,
 			secret_matches: None,
 			config_matches: None,
+			config_present: None,
 			advertised: Vec::new(),
 		});
 
@@ -7547,6 +7617,7 @@ fn a_daemon_that_is_not_running_is_not_called_wedged() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 
@@ -7931,6 +8002,7 @@ fn a_wedged_supplicant_is_called_a_supplicant() {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 

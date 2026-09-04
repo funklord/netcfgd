@@ -1554,6 +1554,35 @@ impl Builder {
 		if !matches!(self.kind_of(name), InterfaceKind::OpenVpn(_)) {
 			return;
 		}
+		// **A `.ovpn` that is not there is said, not passed over in silence.**
+		// `config_matches` is deliberately `None` when the file cannot be read,
+		// so that a working tunnel is never dropped over an unanswered question
+		// -- and that left an operator who mistyped the path with `nothing to
+		// do` on every apply, for ever, while the daemon went on running the
+		// configuration it was started with. Measured: two applies running,
+		// both silent, with the machine not matching the document and netcfgd
+		// calling it converged.
+		//
+		// Still no restart, for the reason the `None` exists: the tunnel that
+		// is up is the best thing available while the document names a file
+		// that does not exist. What changes is that the operator is told.
+		if observed.backends.iter().any(|backend| {
+			backend.interface == name
+				&& backend.kind == BackendKind::OpenVpn
+				&& backend.running
+				&& backend.config_present == Some(false)
+		}) {
+			self.warn(
+				name,
+				format!(
+					"the openvpn configuration for {name} cannot be read, so netcfgd cannot \
+					 tell whether the running tunnel still matches it -- the tunnel is left \
+					 alone rather than dropped, and it is still running the file it was \
+					 started with"
+				),
+			);
+			return;
+		}
 		let stale = observed.backends.iter().any(|backend| {
 			backend.kind == BackendKind::OpenVpn
 				&& backend.interface == name

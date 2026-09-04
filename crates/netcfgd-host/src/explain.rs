@@ -948,6 +948,7 @@ mod tests {
 			}),
 			secret_matches: Some(false),
 			config_matches: None,
+			config_present: None,
 			advertised: Vec::new(),
 		});
 

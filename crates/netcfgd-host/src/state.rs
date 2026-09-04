@@ -532,6 +532,7 @@ impl OwnedState {
 					started_with: None,
 					secret_matches: None,
 					config_matches: None,
+					config_present: None,
 					advertised: Vec::new(),
 				});
 			}

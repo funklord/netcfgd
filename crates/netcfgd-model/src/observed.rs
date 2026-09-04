@@ -936,6 +936,25 @@ pub struct ObservedBackend {
 	/// question nobody answered.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub config_matches: Option<bool>,
+	/// Whether the `.ovpn` the document names could be read at all.
+	///
+	/// [`ObservedBackend::config_matches`] is deliberately `None` when the file
+	/// cannot be read, so that a working tunnel is never dropped over a question
+	/// nobody answered -- and that left the operator with silence. A document
+	/// pointing at a file that is not there produced `nothing to do` on every
+	/// apply, for ever, while the daemon went on running the configuration it
+	/// was started with. The machine did not match the document and netcfgd
+	/// called it converged.
+	///
+	/// So this carries the half of that `None` which is a fault rather than an
+	/// unknown, and the planner turns it into a sentence. It does not restart
+	/// anything: the tunnel that is up is still the best thing available while
+	/// the document names a file that does not exist.
+	///
+	/// `None` means nothing asked -- not a running `OpenVPN` tunnel, or no entry
+	/// in the document for it.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub config_present: Option<bool>,
 	/// The prefixes a running router advertisement daemon was last given.
 	///
 	/// Only ever present for [`BackendKind::RouterAdvert`], and read from the

@@ -396,6 +396,7 @@ fn backends(observed: &mut Observed) {
 			started_with: None,
 			secret_matches: None,
 			config_matches: None,
+			config_present: None,
 			advertised: Vec::new(),
 		});
 	}
@@ -416,6 +417,7 @@ fn backends(observed: &mut Observed) {
 			started_with: None,
 			secret_matches: None,
 			config_matches: None,
+			config_present: None,
 			advertised: Vec::new(),
 		});
 	}
@@ -432,6 +434,7 @@ fn backends(observed: &mut Observed) {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 	// The one backend that carries what it was last given, which is how a
@@ -445,6 +448,7 @@ fn backends(observed: &mut Observed) {
 		started_with: None,
 		secret_matches: None,
 		config_matches: None,
+		config_present: None,
 		advertised: vec!["2001:db8:1234::/64".to_owned()],
 	});
 	// And the identity an access point was started with, which is the other
@@ -462,6 +466,7 @@ fn backends(observed: &mut Observed) {
 		started_with: None,
 		secret_matches: None,
 		config_matches: Some(false),
+		config_present: None,
 		advertised: Vec::new(),
 	});
 	observed.backends.push(ObservedBackend {
@@ -479,6 +484,7 @@ fn backends(observed: &mut Observed) {
 		// secret takes in an observation (decision 0052).
 		secret_matches: Some(true),
 		config_matches: None,
+		config_present: None,
 		advertised: Vec::new(),
 	});
 }

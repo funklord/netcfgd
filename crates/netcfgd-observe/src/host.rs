@@ -458,6 +458,11 @@ fn read_tunnel_currency(
 		}) else {
 			continue;
 		};
+		// Asked before the record, because it is a fact about the document
+		// rather than about netcfgd's own bookkeeping: a `.ovpn` that cannot
+		// be read is a fault whether or not there is a hash to compare it to.
+		let current = netcfgd_openvpn::hash_of(config);
+		backend.config_present = Some(current.is_some());
 		let Ok(recorded) = fs::read_to_string(netcfgd_openvpn::config_hash_path(
 			run_dir,
 			&backend.interface,
@@ -466,8 +471,7 @@ fn read_tunnel_currency(
 			// cleared underneath a running tunnel. Nothing may be concluded.
 			continue;
 		};
-		backend.config_matches =
-			netcfgd_openvpn::hash_of(config).map(|current| current == recorded.trim());
+		backend.config_matches = current.map(|current| current == recorded.trim());
 	}
 }
 
