@@ -7317,6 +7317,50 @@ backend, which is how it was seen at all.
 
 ---
 
+## 10.23 dhcp and addressing: a sweep that found nothing, and what it looked at
+
+**2026-09-04.** Written down because an empty sweep and an unperformed one read
+identically otherwise, and because the four lenses used here had each found a
+fault somewhere else the same day. What they license is starting the next
+sweep elsewhere.
+
+**Duplicate actions between the two walks**, which is the lens the tunnel
+double-dial in 10.22 came from. Plans built for `dhcp`, `dhcp6`, `slaac`,
+`link_local`, two static addresses, and all four composed on one interface:
+no action and no warning appears twice in any of them.
+
+**Fields carried by one consumer and not another**, which found the wifi
+generation and the empty dns block. Every addressing form round-trips through
+`ncfg profile save` -- dhcp, dhcp6, slaac, link_local, static, `null`, and a
+composed list -- and `reported` is refused by name rather than dropped. The
+model fields absent from the renderer are absent from the *config language*
+too: `client_id`, `hostname_mode`, `request_options` and `rapid_commit` have
+no keys in the compiler, so a compiled document always holds their defaults
+and a round trip cannot lose them. `Dhcp4::metric` is derived from the
+interface's preference rather than written, which `dhcpcd_start_args` records.
+
+**An address somebody else put there.** A third party's `10.0.0.1/24` on an
+interface whose document asks for the same address plans nothing, applies
+nothing and converges -- no second add, no fight.
+
+**Ownership across a wiped run directory**, which is the shape that produced
+10.13, 10.19 and 10.22. Apply an address, clear `/run/netcfgd` as a stop and
+start would, change the document, apply again: netcfgd removes the address it
+put there and adds the new one. Ownership survives the loss of the run state
+here, where the backend records did not.
+
+**One thing this sweep did check about its own author's work.** 10.22's hoist
+gives adoption to four kinds that never had it, so their markers were read
+rather than assumed: `AccessPoint`, `RouterAdvert`, `OpenVpn` and `Pppoe` all
+carry an absolute path netcfgd composed, which is what 0140 asks for, while
+`Dhcp4` and `Dhcp6` carry a bare interface name and are excluded by the
+`starts_with('/')` guard -- so neither DHCP client's behaviour moved. Verified
+by reading both entries, and by the live suite passing `dhcpcd.sh`,
+`dhcp.sh` and `openvpn.sh` afterwards. **`ap.sh` skips for want of hostapd, so
+`AccessPoint`'s new adoption path is the one thing here nothing has executed.**
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
