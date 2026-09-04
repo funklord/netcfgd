@@ -666,6 +666,69 @@ mod layering {
 	}
 
 	/// Removing is idempotent, and removing a drop-in that others rely on is
+	/// Choosing a profile whose drop-in does not compile is refused.
+	///
+	/// The check ran through `load_layered`, which does not read the selected
+	/// profile's directory -- so `ncfg profile set` wrote the selection,
+	/// compiled a configuration that excluded the very profile it had just
+	/// chosen, and reported success. A profile whose drop-in does not parse
+	/// was accepted, and every command after it failed on the config until
+	/// somebody thought to run `profile unset`.
+	///
+	/// The control beside it is a profile that does compile, which must still
+	/// be selectable: verifying against the profile is the point, and refusing
+	/// every profile would be a worse answer than accepting a broken one.
+	#[test]
+	fn a_profile_whose_drop_in_does_not_compile_is_not_chosen() {
+		let directory = netcfgd_testdir::TestDir::new("host-profile-broken");
+		let config = directory.join("etc");
+		let factory = directory.join("factory");
+		std::fs::create_dir_all(config.join("conf.d")).expect("a config directory");
+		std::fs::create_dir_all(config.join("profile/broken")).expect("a profile");
+		std::fs::create_dir_all(config.join("profile/fine")).expect("a profile");
+		std::fs::write(
+			config.join("netcfgd.conf"),
+			"device e0 { kind = \"dummy\" }\n",
+		)
+		.expect("a base config");
+		std::fs::write(
+			config.join("profile/broken/00.conf"),
+			"this is not config\n",
+		)
+		.expect("a broken drop-in");
+		std::fs::write(
+			config.join("profile/fine/00.conf"),
+			"override device e0 { mtu = 1400 }\n",
+		)
+		.expect("a good drop-in");
+
+		let select = |name: &str| {
+			super::install_drop_in(
+				&config,
+				&factory,
+				super::PROFILE_DROP_IN,
+				&format!("global {{\n\tprofile = \"{name}\"\n}}\n"),
+				true,
+			)
+		};
+
+		assert!(
+			select("broken").is_err(),
+			"a profile whose drop-in does not compile was chosen"
+		);
+		assert!(
+			!config
+				.join("conf.d")
+				.join(format!("{}.conf", super::PROFILE_DROP_IN))
+				.exists(),
+			"the refused selection was left behind"
+		);
+		assert!(
+			select("fine").is_ok(),
+			"a profile that compiles was refused"
+		);
+	}
+
 	/// refused with the file put back.
 	#[test]
 	fn removing_is_idempotent_and_a_removal_that_breaks_the_config_is_undone() {
@@ -1334,7 +1397,19 @@ pub fn install_drop_in(
 	write_atomically(&path, text.as_bytes(), 0o644)
 		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
 
-	let sources = match load_layered(factory_dir, config_dir) {
+	// **With the profile, not without it.** This verified through
+	// `load_layered`, which does not read the selected profile's directory --
+	// so `ncfg profile set` wrote a selection, compiled a configuration that
+	// excluded the very profile it had just chosen, and reported success. A
+	// profile whose drop-in does not parse was accepted, and every command
+	// after it failed on the config until somebody ran `profile unset`.
+	//
+	// Safe for the other callers because they fold the profile away first:
+	// `with_profile_taken_off` clears the selection before a hand edit, so by
+	// this point there is no profile and the two loaders give the same answer.
+	// Where one *is* selected -- the daemon's own `ConfigPut`, and this path --
+	// including it is what the machine will actually load.
+	let sources = match load_with_profile(factory_dir, config_dir) {
 		Ok(sources) => sources,
 		Err(error) => {
 			restore(&path, previous.as_deref());

@@ -8583,3 +8583,49 @@ binding is invisible to that pattern. The count that meant anything was by
 name across each crate, and then by hand at each site -- a count inherits the
 shape of the query, and a query written for one spelling answers about that
 spelling rather than about the code.
+
+## 10.40 profiles: a selection verified against a configuration without it
+
+Swept on 2026-09-04, over code this session wrote, which is the reason to be
+harder on it rather than softer: a frame that has just been right is the one
+nobody checks.
+
+**`ncfg profile set` accepted a profile whose drop-in does not compile.**
+`install_drop_in` writes the selection and then verifies -- and verified
+through `load_layered`, which does not read the selected profile's directory.
+So it compiled a configuration that excluded the very profile the drop-in had
+just chosen, found it fine, and reported success. Every command afterwards
+failed on the configuration: `ncfg show`, and `ncfg profile get` itself, which
+answered with a parse error where the profile's name should be.
+
+The machine was recoverable -- `profile unset` works in that state and
+`profile list` still runs, which was checked rather than assumed -- so this is
+a bad half-hour rather than a wedged host. What makes it worth fixing is that
+the pattern is established three times over in the same file and this path is
+the one that missed it: `config put` compiles what it wrote and rolls back,
+`config rm` refuses a removal that would stop the configuration compiling and
+puts the file back, and `profile save` has a round-trip proof.
+
+It verifies through `load_with_profile` now. That is safe for the other
+callers rather than merely tolerable: every hand-edit path goes through
+`with_profile_taken_off`, which clears the selection before writing, so by the
+time the check runs there is no profile and the two loaders give the same
+answer. The one path where a profile *is* selected is this one, and the
+daemon's own `ConfigPut` -- and there, including it is what the machine will
+actually load.
+
+**Two neighbouring behaviours were checked and are right.** A hand edit with a
+profile in force still works: the profile is folded into `05-profile-<name>.conf`,
+the selection is cleared, the drop-in lands. Two attempts at that failed
+during the sweep and both were the configuration genuinely being wrong -- a
+redefinition without `override`, and `mtu` on an `interface` rather than a
+`device` -- each with a diagnostic naming the file, the line and the remedy.
+Reading those as a regression in the fix would have been the easy mistake;
+the way to tell was to write the edit the diagnostic asked for and watch it
+succeed.
+
+**Where the sweep looked and found nothing.** Profile names are validated
+before anything is written: `../escape`, `/etc/passwd`, `a/b` and the empty
+string are each refused by name, and a profile that does not exist is refused
+with the list of those that do. The lifecycle is idempotent -- set, unset, set
+again, set twice -- and leaves exactly one file in `conf.d`.
