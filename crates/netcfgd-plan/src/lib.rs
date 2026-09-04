@@ -1333,6 +1333,39 @@ impl Builder {
 		// configures the wrong device.
 		let on_self = matches!(self.kind_of(&interface.name), InterfaceKind::Bridge(_));
 
+		// **Per-port VLANs need a port, and this planned them for anything.**
+		// A `vlans` on a device that is neither a bridge nor enslaved to one
+		// produced a plan that could not converge: the kernel answers
+		// EOPNOTSUPP, so the apply failed, and the same action was planned
+		// again on the next reconcile and every one after -- measured, three
+		// applies running, each red on the same line.
+		//
+		// Enslavement is asked of the document and of the kernel, because
+		// either can be the honest answer: the document says `master` for a
+		// port netcfgd enslaves itself, and a device already in a bridge
+		// reports one whether or not netcfgd put it there. Only when both are
+		// silent is the configuration certainly impossible, and then it is
+		// said once rather than attempted for ever -- 0061's rule, which is
+		// that a key netcfgd recognises and cannot act on is named at plan
+		// time.
+		if !on_self
+			&& interface.master.is_none()
+			&& observed
+				.link(name)
+				.and_then(|link| link.master.as_ref())
+				.is_none()
+		{
+			self.warn(
+				name,
+				format!(
+					"{name} has `vlans` and is neither a bridge nor a member of one, so there \
+					 are no per-port vlans to set -- put it in a bridge with `master`, or give \
+					 it a `bridge` block of its own"
+				),
+			);
+			return;
+		}
+
 		// A link this plan is about to create has no VLANs yet, which is not
 		// the same as having none to compare against -- returning early here
 		// meant a freshly created bridge got its VLANs on the *next* reconcile

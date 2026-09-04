@@ -5430,6 +5430,62 @@ device work-net {
 	);
 }
 
+/// `vlans` on a device that is in no bridge is said once, not attempted for ever.
+///
+/// It was planned for anything carrying the key. A device that is neither a
+/// bridge nor enslaved to one has no per-port vlans, the kernel answers
+/// EOPNOTSUPP, and the same action was planned again on every reconcile --
+/// measured as three applies running, each red on the same line, with no way
+/// for the machine to converge.
+///
+/// The enslaved case is the control beside it: it must still be planned, or
+/// the fix would have closed a working feature to silence a broken one.
+#[test]
+fn vlans_without_a_bridge_are_refused_rather_than_retried() {
+	let alone = document(
+		"device lone0 { kind = \"dummy\"; vlans = \"10\" }\ninterface lone0 { config = \"null\" }\n",
+	);
+	let mut observed = observed_with(&["lone0"]);
+	observed.links[0].up = true;
+	observed.links[0].ownership = Ownership::Ours;
+
+	let alone_plan = plan(&alone, &observed, &PlanOptions::default());
+	assert!(
+		!names(&alone_plan).contains(&"bridge.vlan.add"),
+		"a vlan was planned for a device with no bridge: {:?}",
+		names(&alone_plan)
+	);
+	assert!(
+		alone_plan
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("neither a bridge nor")),
+		"nothing said why the vlans were dropped: {:?}",
+		alone_plan.warnings
+	);
+
+	// The control: enslaved, so the same key is planned.
+	let member = document(
+		"device br0 { bridge { members = [\"p0\"]; vlan_filtering = true } }\n\
+		 device p0 { kind = \"dummy\"; vlans = \"20\" }\n\
+		 interface br0 { config = \"null\" }\ninterface p0 { config = \"null\" }\n",
+	);
+	let mut observed = observed_with(&["br0", "p0"]);
+	for link in &mut observed.links {
+		link.up = true;
+		link.ownership = Ownership::Ours;
+	}
+	"bridge".clone_into(&mut observed.links[0].kind);
+	observed.links[1].master = Some("br0".to_owned());
+
+	let with_port = plan(&member, &observed, &PlanOptions::default());
+	assert!(
+		names(&with_port).contains(&"bridge.vlan.add"),
+		"a real bridge port did not get its vlan: {:?}",
+		names(&with_port)
+	);
+}
+
 /// Every bridge setting is compared, not the three somebody remembered.
 ///
 /// `plan_bridge` had `stp`, `forward_delay` and `hello_time`, and the model

@@ -1178,7 +1178,22 @@ impl Executor for KernelExecutor {
 							add: false,
 						},
 					)
-					.map_err(|error| format!("cannot remove vlan {vid} from {iface}: {error}"))
+					.map_err(|error| {
+						// The same reading the add path gives it. Only that
+						// one explained EOPNOTSUPP, so a removal against a
+						// device with no per-port vlans reported the bare
+						// errno -- and the removal is the half that runs
+						// first, clearing the kernel's default vlan 1, so it
+						// was the message an operator actually met.
+						if error.raw_os_error() == Some(95) {
+							format!(
+								"cannot remove vlan {vid} from {iface}: the bridge does not \
+								 have `vlan_filtering = true`, so it has no per-port vlans"
+							)
+						} else {
+							format!("cannot remove vlan {vid} from {iface}: {error}")
+						}
+					})
 			}
 			Op::AccessControlAdd {
 				iface,

@@ -7823,3 +7823,103 @@ bridge and `master` on the device, and `expand_members` refuses a device
 that lists itself and reports a conflict where the two disagree, so they
 cannot drift apart in silence. Both kinds round-trip through the renderer
 with every field.
+
+## 10.29 vlan and macvlan: a plan that could never converge
+
+Swept on 2026-09-04. The VLAN and macvlan code is sound -- both kinds create
+correctly alongside their parent in one plan, apply their protocol and mode,
+and converge. What the sweep found is next to them, in the per-port VLANs a
+bridge port carries.
+
+**`vlans` on a device in no bridge produced a plan that could not
+converge.** `plan_bridge_vlans` planned for anything carrying the key. A
+device that is neither a bridge nor enslaved to one has no per-port vlans,
+so the kernel answers EOPNOTSUPP, the apply fails, and the identical action
+is planned again on the next reconcile and every one after. Measured as
+three applies running, each red on the same line, with no state the machine
+could reach that would stop it.
+
+The failure an operator actually meets is the *removal* rather than the
+addition: `plan_bridge_vlans` pre-emptively clears the kernel's default vlan
+1 on a link it is creating, so that runs first and fails first. And only the
+add path explained EOPNOTSUPP -- the del path reported the bare errno. Both
+explain it now.
+
+The guard asks the document and the kernel, because either can hold the
+honest answer: the document says `master` for a port netcfgd enslaves
+itself, and a device already in a bridge reports one whether or not netcfgd
+put it there. Only when both are silent is the configuration certainly
+impossible, and then it is said once as a warning rather than attempted for
+ever -- 0061's rule, that a key netcfgd recognises and cannot act on is
+named at plan time.
+
+**A warning rather than a compile-time refusal, deliberately.** Refusing at
+compile time was the first instinct and was rejected on a case that cannot
+be seen from the parser: a port whose enslavement netcfgd does not perform
+still has per-port vlans, and the document need not say `master` for the
+kernel to. A warning cannot break that configuration; a refusal could. The
+test pins both directions -- a guard dropped fails it, and a guard widened
+to `!on_self` fails it too, because that widening would close a working
+feature to silence a broken one.
+
+**Where the sweep came up empty, with what was looked at.** `VlanConfig`'s
+three fields are all applied and all compared -- `id` and `protocol` through
+`recreation_reason`, which recreates rather than edits because the kernel
+takes both on a live device and ignores them, and `parent` the same way.
+`MacvlanConfig`'s two are covered: the mode by `plan_macvlan`, which
+documents the kernel's refusal to move between `passthru` and the rest, and
+the parent by the same recreation path. `plan_bridge_vlans` compares all
+three fields of a `BridgeVlan` on the add side and matches on `vid` alone on
+the remove side, which is right rather than asymmetric -- an add with the
+same vid replaces the flags.
+
+The VLAN protocol is big-endian on both the writing and reading sides, and
+was checked because 10.28's priority fault was a width disagreement: it did
+not appear in that sweep's table, since the reader decodes it through
+`be_u16` rather than through the accessor the sweep paired on. A sweep that
+pairs on one spelling says nothing about the values written in another.
+`MacvlanMode`'s numbering matches in both directions, 1/2/4/8, and the
+kernel's fifth mode `source` at 16 is deliberately absent from the model --
+`plan_macvlan` says so and declines to compare a mode it has no word for.
+
+### 10.29.1 A "harmless" wait added to a test, which broke it
+
+Found while gating 10.29 and worth keeping for the shape rather than the
+defect: `openvpn.sh`'s check that a daemon refusing to stop is reported
+failed under `make live`, in a suite nothing in this sweep touches.
+
+**The comfortable explanation fit and was wrong.** The script starts a fake
+openvpn with `FAKE_OPENVPN_REFUSES_SIGNAL=1` and applies the teardown
+immediately after, with no wait for the management socket to appear -- while
+the same script waits for exactly that in two other places. A stop reaching
+a daemon that has not bound its socket is correctly reported as "already
+stopped", a success, so the error line the check greps for never appears.
+That story fit the symptom and fit the file's own idiom.
+
+A wait was added on the strength of it. The check then failed again on the
+next full run, and removing the wait made `make live` green. **The edit was
+the cause rather than the cure**, in a suite whose timing its author
+understood and the editor did not. Measured under `make live`: green on the
+committed tree and green again with the wait removed (1079 checks, four runs
+today), red on both runs that carried it.
+
+Why a wait breaks it is not established, and no third guess is recorded
+here. What is established is that it does.
+
+**Two method errors on the way, both mine.** Running the suite after
+`git stash` and seeing it still fail read as "not mine" -- but stash removes
+only *uncommitted* work, and there was a committed change from an hour
+earlier that a real baseline had to predate. And the standalone rate, 2
+failures in 5 runs, was quoted as evidence about the same thing the
+`make live` runs were measuring; standalone and under-make-live are
+different populations, and the suite is green in the second and flaky in the
+first even with nothing edited.
+
+**So the standalone flake is real, unexplained and still open.** The next
+lead is that it passes standalone in isolation and fails after other suites
+have run, which points at state one of them leaves. The machine was carrying
+a `netcfgd --no-apply-on-start` 13 hours old plus several `udhcpc` and
+fake-supplicant processes between 13 and 22 hours old, all orphaned to init
+from earlier live runs, with 27 `ncfg-*` directories in `/tmp`. Reported
+rather than killed: they are not this session's to reap, and `/tmp` here is
+a 16 GB tmpfs at 2%, so nothing is at risk yet.
