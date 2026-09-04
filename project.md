@@ -7384,6 +7384,45 @@ still unexercised**, and cannot be here: hostapd needs a radio to come up, and
 
 ---
 
+## 10.24 hostapd and access points: swept against the real parser, nothing found
+
+**2026-09-04**, and the first sweep here with an **oracle** rather than a
+reading: hostapd 2.10, unpacked as an ordinary user by the method in 10.23, so
+what netcfgd generates was judged by the program that has to read it.
+
+**Field coverage is complete.** Every field on `AccessPoint` reaches the
+rendered configuration except `id`, which is the block's label and not a
+hostapd setting.
+
+**Nine valid shapes were generated and parsed**: wpa2, wpa3, wpa2+wpa3, open,
+owe, hidden, a regulatory domain, 5 GHz on channel 36 and 2.4 GHz on channel
+6. hostapd reports no configuration error for any of them. The oracle is
+`ap.sh`'s -- hostapd exits nonzero either way for want of a radio, so what
+separates a file it understood is whether it complained about a line.
+
+**Five invalid shapes were refused by netcfgd before a file was written**, each
+naming the access point and the fault: channel 6 with `band = "5"`, channel 36
+with `band = "2.4"`, channel 999, channel 0, and `regdom = "ZZZZ"` -- the last
+saying it wants an ISO 3166-1 alpha-2 code. So the band and channel are
+validated against each other rather than handed to hostapd to reject.
+
+**Channel 0 looked like a false refusal and is not.** hostapd spells automatic
+channel selection `channel=0`, so refusing it reads at first like a missing
+feature. netcfgd expresses ACS by *omitting* `channel`, which renders
+`channel=0` -- and an absent channel was generated and parsed to confirm it.
+Naming 0 explicitly is therefore not a second way to ask for the same thing,
+it is a channel number that does not exist, which is what the message says.
+
+**Two instrument errors, both mine, both silent.** The first sweep reported
+every PSK shape as writing no configuration while open and owe worked -- the
+secret file was mode 0644 and only the PSK shapes read one. The second read
+"no configuration written" as a fault when it was the refusal above doing its
+job; what distinguished them was running one case with its output shown
+instead of counted. A sweep that reports a count and not a reason cannot tell
+a refusal from a failure.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
