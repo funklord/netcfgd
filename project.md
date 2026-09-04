@@ -7236,6 +7236,53 @@ reaches the kernel, so comparing it would reinstall a rule somebody renamed.
 
 ---
 
+## 10.22 Open: pppoe is the one backend with no way to be reclaimed
+
+**2026-09-04**, from sweeping the vpn and tunnel code. Established by reading
+and **not demonstrated**, for the reason `ppp.sh` gives about itself: `/dev/ppp`
+needs real root, so no session can be dialled on this machine and no second
+`pppd` can be produced to watch.
+
+It is 10.13's family, one backend over. `backend_pid_file` -- the table 0140's
+recovery reads -- answers for `OpenVpn`, `RouterAdvert`, `Supplicant`,
+`AccessPoint`, `Dhcp4` and `Dhcp6`, and falls through to `None` for the rest.
+`WireGuard` is kernel-side and `Dns` is host-wide, so neither wants an entry.
+**`Pppoe` is a per-interface process netcfgd starts, and has none.**
+
+`start_pppoe` has no guard of its own either, where `start_supplicant` refuses
+by name -- *"is already managing `<iface>`, so netcfgd will not start a second
+supplicant on it"*. So nothing between the plan and the exec asks whether one
+is already running.
+
+**What decides it is where the running list comes from.** `observed.backends`
+is `prior.backends.clone()` -- what the previous run *recorded starting*, kept
+in `/run/netcfgd` -- rather than anything probed from the system. So
+`backend_running(Pppoe, iface)` answers from a file, and
+`RuntimeDirectoryPreserve=restart` keeps that file across a `systemctl
+restart` and removes it on a real stop. A stop then start therefore meets a
+live `pppd` it has no record of, cannot adopt, and is not stopped from
+starting again -- with `persist` and `maxfail 0` in the options file both
+sessions retry for ever.
+
+**The window is narrower than the supplicant's** and worth stating as such: a
+restart preserves the record, so only a deliberate stop-then-start, or a
+package removal and reinstall, reaches it. That is exactly the sequence 10.13
+was found in.
+
+**The marker it would need already exists.** `write_ppp_options` composes
+`/run/netcfgd/ppp/<iface>` and `pppd` carries it in `argv` as `file <path>`
+for as long as it lives, which is the same shape 0140 uses everywhere else --
+so the recovery is a table entry rather than a new mechanism. What it also
+needs is a `backend_is_reachable` answer for pppoe, since adoption is gated on
+being able to talk to what is adopted, and pppoe has none of that plumbing.
+
+Not fixed, because the smaller half -- refusing to start beside a marked
+`pppd` -- is a guard I cannot see fail on this machine, and the fuller half is
+designing adoption for a backend I cannot exercise. Both are the holder's call
+against hardware that exists.
+
+---
+
 ## 11. Reference
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
