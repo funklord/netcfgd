@@ -7914,3 +7914,35 @@ fn an_unknown_association_falls_back_to_the_preference() {
 		.collect();
 	assert_eq!(metrics, vec![Some(600)], "{:?}", names(&plan));
 }
+
+/// A `bluetooth` block is read and says so.
+///
+/// **The silence this catches is the one `warn_unapplied` exists for.** A
+/// bluetooth device compiles, canonicalises, appears in `ncfg show` and is in
+/// the frozen schema, and the planner does nothing with it -- so a plan
+/// described everything else the machine would do and never mentioned the
+/// headphones somebody wrote down. 0061 settled that a recognised-and-inert
+/// key is warned about at plan time rather than refused at compile time.
+///
+/// One per device, asserted by count rather than by presence: a warning for
+/// the list would name neither, and it is the id an operator looks for.
+#[test]
+fn a_bluetooth_block_is_warned_about_rather_than_silently_ignored() {
+	let desired = document(
+		r#"bluetooth "headphones" { address = "AA:BB:CC:DD:EE:FF"; profile = "a2dp-sink" }
+		   bluetooth "phone" { address = "11:22:33:44:55:66"; profile = "pan" }"#,
+	);
+	let plan = plan(&desired, &Observed::default(), &PlanOptions::default());
+
+	let named: Vec<&str> = plan
+		.warnings
+		.iter()
+		.filter(|w| w.message.contains("is understood and not acted on"))
+		.map(|w| w.message.as_str())
+		.collect();
+	assert_eq!(named.len(), 2, "one per device, got {:?}", plan.warnings);
+	assert!(
+		named.iter().any(|m| m.contains("headphones")) && named.iter().any(|m| m.contains("phone")),
+		"each warning names its own device: {named:?}"
+	);
+}

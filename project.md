@@ -7480,3 +7480,84 @@ having: grepping a tree's tests for handler-function names from its
 source called 93 of beerssh's 109 untested, in a tree whose suite drives
 them constantly; and a concept sweep over project.md headings returned
 document structure, its best hit a word appearing only in comments.
+
+## 10.25 Bluetooth: three lists that had to agree, and none of them did
+
+Swept the Bluetooth code on 2026-09-04. It found the worst defect of this
+sweep series, and it was not in the Bluetooth code -- it was in `Document`,
+where every block meets.
+
+**`Document::eq` did not compare `bluetooth`.** The impl is hand-written so
+that `generated_by` can be excluded from equality, with a comment saying
+exactly why. `bluetooth` was simply absent from the list of fields it does
+compare, and had been for as long as the field existed. So **two documents
+whose only difference was a Bluetooth device compared equal**, which means
+anything asking "has the configuration changed" answered no.
+
+The reachable consequence today is `ncfg profile save`. Its proof is that
+what the machine compiles to after the save must equal what it was running,
+and that proof was blind: a snapshot rendering a **wrong address** was
+written to disk and accepted, verified by sabotage. Before the renderer
+learned Bluetooth this could not bite, because a document with a Bluetooth
+block was refused outright -- which is why an eight-month-old omission
+surfaced on the day the refusal was lifted.
+
+**And fixing equality immediately exposed a second omission of the same
+shape.** `canonicalize()` sorts `devices`, `interfaces`, `networks`, `rules`
+and `access_points`, and did not sort `bluetooth` -- while the field's own
+doc comment says "sorted by id". That could not produce a symptom while
+equality ignored the field: with neither walk covering it, order could not
+make two documents differ because nothing could make them differ. So the
+two are one repair rather than two, and the second was found only by the
+first.
+
+**The guard is structural rather than another test.** `eq` now destructures
+`Self`, so adding a field to `Document` is a compile error in the impl
+instead of a silent omission -- the proof lives in the code rather than in
+somebody remembering. A compile-time guard leaves no failing test behind to
+show it was ever alive, so `a_bluetooth_device_is_part_of_a_document_s_identity`
+asserts the case that was actually broken, and it fails when the field is
+removed from the comparison.
+
+Three more lists were behind, all found by the same question:
+
+- **The planner said nothing at all.** `warn_unapplied` covers
+  eap-without-ca, access points, unfired hooks and ethtool, and had no
+  Bluetooth arm -- so a `bluetooth` block compiled, appeared in `ncfg show`,
+  and `ncfg plan` was silent about it. That is decision 0061 broken by
+  omission: a recognised key that is inert must say so at plan time.
+  `warn_bluetooth` now emits one warning per device naming what does not
+  happen.
+- **The renderer refused the block wholesale**, so `ncfg profile save`
+  failed on any machine with one -- and a machine with headphones written
+  down is a laptop, which is what profiles are for. Four fields and a closed
+  set of five profile names; the refusal cost more than the rendering does.
+- **The override set in `write_snapshot` did not list Bluetooth ids.** With
+  the renderer fixed, the save was then refused for a *redefinition*: a
+  block the base defines and the snapshot restates needs `override`, exactly
+  as an interface does. A new capability defeated by a list that had not
+  moved -- the same shape as the other three, one layer up.
+
+`difference()` also gained a Bluetooth arm, so the refusal names the block
+rather than saying it cannot. That is what turned the wrong-address sabotage
+from a silent pass into `` `bluetooth "phone"` is what differs ``.
+
+**What this sweep did not touch, said plainly.** Nothing pairs a device,
+connects it, or brings a `pan` link up; there is still no backend. The
+warning says so in as many words, which is the point of it. `bluetooth.sh`
+remains unrun for the reason in 10.14 -- it needs real root for `/dev/vhci`
+-- so adapter observation is still proved only by that script's own
+reasoning and not by a run.
+
+**The lens that found it, for whoever sweeps next.** Every defect this
+series has produced is *two walks over the same set where one was updated
+and the other was not*: the teardown filter against the device list, the
+shim's removal list against the eight link flavours, the renderer against
+the GUI for wifi `proto`, and now four walks against `Document`'s fields.
+The productive query was not "read the Bluetooth code" -- the Bluetooth
+code is fine -- but **"which hand-maintained list has to agree with a struct
+definition, and what makes it stay agreeing?"** Grepping for files that
+mention `access_points` and then asking which never mention `bluetooth` put
+`canonical.rs` on the page in one command. Where such a list exists,
+destructuring turns the next omission into a compile error, and that is
+worth more than the test that catches this one.

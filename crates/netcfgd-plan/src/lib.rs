@@ -551,6 +551,7 @@ fn warn_eap_without_ca(builder: &mut Builder, desired: &Document) {
 fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_eap_without_ca(builder, desired);
 	warn_access_points(builder, desired);
+	warn_bluetooth(builder, desired);
 	warn_unfired_hooks(builder, desired);
 	// `portal_check` was here, as "recognised and not applied", from 0061 until
 	// 0095 gave it the shape 0061 specified: an operator's URL rather than a
@@ -593,6 +594,42 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 				});
 			}
 		}
+	}
+}
+
+/// Say that a `bluetooth` block is read and not acted on.
+///
+/// **0061's shape, for the one block that had no warning.** A `bluetooth`
+/// device compiles, canonicalises, appears in `ncfg show` and is carried in
+/// the frozen schema -- and nothing plans anything from it: the planner's only
+/// mention of the list is an empty one. So an operator who wrote a pair of
+/// headphones down got a plan that described everything *else* the machine
+/// would do and said nothing about them, which is the silence this function's
+/// own contract forbids: *"a plan that omits something without saying so
+/// reports 'nothing to do' about a config that asked for two things"*.
+///
+/// Warned rather than refused, for the reason the rest of `warn_unapplied`
+/// gives: the block is valid and will mean something when the backends land,
+/// and refusing it now would make that release an upgrade nobody could take
+/// without a rewrite.
+///
+/// One warning per device rather than one for the list, because the id is what
+/// the operator wrote and what they will look for.
+fn warn_bluetooth(builder: &mut Builder, desired: &Document) {
+	for device in &desired.bluetooth {
+		builder.warnings.push(Warning {
+			message: format!(
+				"`bluetooth {}` is understood and not acted on by this build: nothing \
+				 pairs the device, connects it, or brings a `pan` link up. The block is \
+				 kept so a configuration written now still means this when the backends \
+				 arrive",
+				device.id
+			),
+			// Not an interface's warning. A bluetooth device is not a link and
+			// naming one here would file it under something the operator can
+			// look at with `ncfg status`.
+			interface: None,
+		});
 	}
 }
 

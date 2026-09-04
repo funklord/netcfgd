@@ -84,8 +84,8 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 			document.access_points.len()
 		));
 	}
-	if !document.bluetooth.is_empty() {
-		missing.push(format!("{} bluetooth block(s)", document.bluetooth.len()));
+	for device in &document.bluetooth {
+		render_bluetooth(device, overrides, &mut text);
 	}
 
 	if missing.is_empty() {
@@ -835,6 +835,52 @@ fn proto_name(proto: netcfgd_model::security::PskProto) -> &'static str {
 	}
 }
 
+/// One `bluetooth` block, as configuration text.
+///
+/// **Refused wholesale until 2026-09-04**, which meant `ncfg profile save`
+/// could not save any machine that had one -- and a machine with a pair of
+/// headphones written down is exactly a laptop, which is what profiles are
+/// for. Four fields and a closed set of five profiles, so the refusal was
+/// costing more than the rendering does.
+///
+/// `autoconnect` defaults to true, like a `network`'s, so only `false` is
+/// written: a block that restated every default would be one nobody can read
+/// for what is unusual.
+fn render_bluetooth(
+	device: &netcfgd_model::bluetooth::BluetoothDevice,
+	overrides: &Overrides,
+	text: &mut String,
+) {
+	let head = opening("bluetooth", &device.id, overrides);
+	let _ = write!(text, "\n{head} {} {{\n", quote(&device.id));
+	let _ = writeln!(text, "\taddress = {}", quote(&device.address));
+	let _ = writeln!(
+		text,
+		"\tprofile = {}",
+		quote(bluetooth_profile(device.profile))
+	);
+	if !device.autoconnect {
+		text.push_str("\tautoconnect = false\n");
+	}
+	text.push_str("}\n");
+}
+
+/// A Bluetooth profile, spelled as the parser reads it back.
+///
+/// Hyphenated rather than `snake_case` because these are the profile names
+/// `BlueZ` uses, and a foreign vocabulary is spelled the way its owner spells
+/// it -- the same rule that keeps `wpa_supplicant`'s own words intact.
+fn bluetooth_profile(profile: netcfgd_model::bluetooth::BluetoothProfile) -> &'static str {
+	use netcfgd_model::bluetooth::BluetoothProfile;
+	match profile {
+		BluetoothProfile::A2dpSink => "a2dp-sink",
+		BluetoothProfile::A2dpSource => "a2dp-source",
+		BluetoothProfile::Hfp => "hfp",
+		BluetoothProfile::Pan => "pan",
+		BluetoothProfile::Nap => "nap",
+	}
+}
+
 fn drift_name(policy: DriftPolicy) -> &'static str {
 	match policy {
 		DriftPolicy::Report => "report",
@@ -1541,6 +1587,25 @@ mod tests {
 	fn an_empty_dns_block_survives_where_it_means_something() {
 		round_trips("interface eth0 {\n\tconfig = \"dhcp\"\n\tdns { }\n}\n");
 		round_trips("network \"H\" {\n\twifi { open = true }\n\tdns { }\n}\n");
+	}
+
+	/// Every Bluetooth profile, and both sides of `autoconnect`.
+	///
+	/// The block was refused wholesale until 2026-09-04, so `ncfg profile
+	/// save` could not save a machine with headphones written down. Five
+	/// profiles is a closed set worth walking rather than sampling: the
+	/// spellings are `BlueZ`'s and hyphenated, which is the kind of detail a
+	/// renderer gets subtly wrong.
+	#[test]
+	fn every_bluetooth_profile_round_trips() {
+		for profile in ["a2dp-sink", "a2dp-source", "hfp", "pan", "nap"] {
+			round_trips(&format!(
+				"bluetooth \"d\" {{\n\taddress = \"AA:BB:CC:DD:EE:FF\"\n\tprofile = \"{profile}\"\n}}\n"
+			));
+		}
+		round_trips(
+			"bluetooth \"d\" {\n\taddress = \"AA:BB:CC:DD:EE:FF\"\n\tprofile = \"pan\"\n\tautoconnect = false\n}\n",
+		);
 	}
 
 	/// The refusal, which is the other half of the contract. A wireguard

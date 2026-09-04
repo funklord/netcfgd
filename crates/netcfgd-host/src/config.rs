@@ -1826,6 +1826,11 @@ fn difference(expected: &netcfgd_model::Document, after: &netcfgd_model::Documen
 			return format!(" `network \"{}\"` is what differs.", want.id);
 		}
 	}
+	for want in &expected.bluetooth {
+		if after.bluetooth.iter().find(|got| got.id == want.id) != Some(want) {
+			return format!(" `bluetooth \"{}\"` is what differs.", want.id);
+		}
+	}
 	// A block that is in one document and not the other, or a list this does
 	// not walk. Saying so beats naming a block that is in fact identical.
 	" The two differ in a block this cannot name.".to_owned()
@@ -2031,6 +2036,13 @@ fn write_profile_snapshot(
 		}
 		for device in &base.devices {
 			overrides.insert(format!("device {}", device.name));
+		}
+		// Added when the renderer learned bluetooth. A block the base defines
+		// and the snapshot restates needs `override` exactly as an interface
+		// does; without it the save was refused for a redefinition, which is
+		// the renderer's new capability defeated by a list that had not moved.
+		for device in &base.bluetooth {
+			overrides.insert(format!("bluetooth {}", device.id));
 		}
 	}
 
