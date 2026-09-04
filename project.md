@@ -8683,3 +8683,61 @@ a machine with no last-good, so the last-good was nothing, and reverting to
 nothing correctly tore everything down. netcfgd said so at the time. Reading
 the log rather than the symptom is what kept that out of this record as a
 finding.
+
+### 10.41.1 Implementing the inverse-based revert, and what it measured
+
+The copyright holder settled 10.41 on 2026-09-05: **revert should apply the
+declared inverses.** It was implemented, measured, and the measurements say
+the change cannot do what it was chosen to do without a second decision. The
+code is not committed; this records what was learned so the decision can be
+retaken from evidence rather than re-derived.
+
+**Built.** The inverses of the actions a windowed apply actually ran -- only
+those with `Outcome::Done`, only those declaring an inverse -- recorded to
+`/run/netcfgd/confirm-inverses.json` when the window is armed, applied in
+reverse order at revert time, cleared by both confirm and revert. The
+re-plan was kept behind it, deliberately: `confirm.rs`'s own comment says
+re-planning "gets there from wherever the machine actually is -- including
+from a half-applied plan that stopped at a failure, which replaying inverses
+would not handle", and that reasoning is not wrong. It compiled, and both
+revert cases still worked.
+
+**The window covers nothing in normal operation, which is the blocker.** The
+daemon reconciles a changed configuration on its own, and it wins:
+
+    config written                    addr 10.0.0.1
+    two seconds later, no apply run   addr 10.0.0.9
+
+So by the time an operator runs `ncfg apply --confirm-within 60`, the change
+is already in effect and the windowed apply has one action left to do --
+`commit.arm`. Measured three times out of three, the recorded inverse list was
+exactly `[commit.revert]`: the inverse of arming the window, and nothing else.
+An inverse-based revert would undo the arming and none of the change.
+
+This is not a fault in the implementation. It is that **a window can only
+cover what is applied inside it**, and the watcher applies the change outside
+it. Making the inverses load-bearing therefore needs a decision about *when a
+change is applied*, not only about how a revert works -- for instance a
+watcher that holds off while a window is being requested, which is a change to
+the daemon's central behaviour and not a sweep's to make.
+
+**And reading the inverses back costs 209 KB**, which is 7.6% of the binary
+and puts it over the ceiling `make check` enforces:
+
+    with the deserialise      2 972 184
+    with it stubbed out       2 763 288   (inside the 2 766 027 ceiling)
+
+Attributed rather than guessed: the only change between those two builds is
+whether `serde_json::from_str::<Vec<Op>>` is instantiated. `Op` has sixty-odd
+variants and the daemon previously only ever *serialised* plans. Moving the
+store between crates does not help; the cost is the deserialisation itself.
+On a project that gates on size and targets embedded and Android, that is a
+real price for machinery the paragraph above says would undo nothing.
+
+**What the holder is being asked, restated with the new facts.** Making the
+reversibility mark truthful needs one of: the watcher deferring to a requested
+window, so that a windowed apply is what applies the change; or the mark being
+redefined around what an action disturbs, which costs nothing and describes
+what a revert actually cannot restore. The third option -- landing the
+inverses as built -- buys 209 KB of binary for a list that is
+`[commit.revert]` on every measurement taken.
