@@ -729,6 +729,45 @@ mod layering {
 		);
 	}
 
+	/// A profile name is written into the language, so it is checked like one.
+	///
+	/// It was checked only as a directory name -- not empty, no `/`, no
+	/// leading dot -- and then interpolated unescaped into
+	/// `global { profile = "..." }`. A name carrying a quote and a newline
+	/// closes the string and appends whatever follows, which compiles, which is
+	/// how it got past `install_drop_in`'s own check. Reproduced against the
+	/// shipped binary: the next reload took an injected `hostname`, and a
+	/// `hooks` block in the same position is shell that runs as root.
+	#[test]
+	fn a_profile_name_cannot_carry_configuration() {
+		let escape = "evil\"\n}\nglobal {\n\thostname = \"PWNED\"\n}\nglobal {\n\tprofile = \"evil";
+		assert!(
+			super::usable_profile_name(escape).is_err(),
+			"a name that closes its own string was accepted"
+		);
+		for bad in [
+			"",
+			"has/slash",
+			".hidden",
+			"..",
+			"up/../out",
+			"quote\"inside",
+			"back\\slash",
+			"newline\nafter",
+		] {
+			assert!(
+				super::usable_profile_name(bad).is_err(),
+				"`{bad}` was accepted as a profile name"
+			);
+		}
+		for good in ["office", "home-2", "site.a", "a_b"] {
+			assert!(
+				super::usable_profile_name(good).is_ok(),
+				"`{good}` was refused, and it is an ordinary name"
+			);
+		}
+	}
+
 	/// refused with the file put back.
 	#[test]
 	fn removing_is_idempotent_and_a_removal_that_breaks_the_config_is_undone() {
@@ -2092,6 +2131,21 @@ pub fn save_profile(
 	let taken = take_folded(config_dir)
 		.map_err(|error| format!("could not take the folded profile out: {error}"))?;
 
+	// **The selection is part of what a failure has to put back.**
+	// `write_profile_snapshot` installs the `90-profile` drop-in before the
+	// proof that the save reproduces the machine, and the cleanup below
+	// removed the snapshot, the directory and the fold -- and left the drop-in
+	// where it was written. So a save that reported "nothing was kept" had
+	// changed which profile the machine selects, and, before the name was
+	// validated, could leave arbitrary configuration behind under that name.
+	//
+	// Remembered rather than recomputed: what was there before is the only
+	// thing that can be put back, and it is either a file or an absence.
+	let selection = config_dir
+		.join("conf.d")
+		.join(format!("{PROFILE_DROP_IN}.conf"));
+	let selected_before = fs::read(&selection).ok();
+
 	let outcome = write_profile_snapshot(
 		running,
 		name,
@@ -2103,6 +2157,14 @@ pub fn save_profile(
 	if outcome.is_err() {
 		let _ = fs::remove_file(&snapshot);
 		let _ = fs::remove_dir(&directory);
+		match &selected_before {
+			Some(bytes) => {
+				let _ = write_atomically(&selection, bytes, 0o644);
+			}
+			None => {
+				let _ = fs::remove_file(&selection);
+			}
+		}
 		let _ = restore_folded(&taken);
 	}
 	outcome
@@ -2117,13 +2179,30 @@ pub fn save_profile(
 ///
 /// An empty name, one with a path separator, or one that would be hidden.
 pub fn usable_profile_name(name: &str) -> Result<(), String> {
-	if name.is_empty() || name.contains('/') || name.starts_with('.') {
-		return Err(format!(
-			"`{name}` cannot be a profile name: a plain name, since netcfgd \
-			 chooses the directory it is read from"
-		));
-	}
-	Ok(())
+	// **A profile name is two things, and this used to check only one.** It is
+	// a directory under `profile/`, which is why `/`, `..` and a leading dot
+	// are refused -- and it is also written into a quoted string in the
+	// `90-profile` drop-in, which nothing here escaped. So a name carrying a
+	// quote and a newline closed the string and appended whatever followed:
+	//
+	//     ncfg profile save 'evil"
+	//     }
+	//     global {
+	//     	hostname = "PWNED"
+	//     }
+	//     global {
+	//     	profile = "evil'
+	//
+	// compiled, which is what let it past `install_drop_in`'s own check, and
+	// the next reload took the injected `hostname`. Measured. A `hooks` block
+	// in the same position is shell that runs as root.
+	//
+	// `usable_id` is the same question asked for a wifi network's id -- a name
+	// that is both a filename and a value in the language -- so it is asked
+	// here rather than restated, which is one place to be right rather than
+	// two to keep in step.
+	crate::wifi_profile::usable_id(name)
+		.map_err(|why| format!("`{name}` cannot be a profile name: {why}"))
 }
 
 /// The half of [`save_profile`] that can fail with something to undo.
