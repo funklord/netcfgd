@@ -8741,3 +8741,49 @@ redefined around what an action disturbs, which costs nothing and describes
 what a revert actually cannot restore. The third option -- landing the
 inverses as built -- buys 209 KB of binary for a list that is
 `[commit.revert]` on every measurement taken.
+
+### 10.41.2 Why the watcher wins, exactly
+
+Established 2026-09-05, before changing anything, because "make the watcher
+defer" needs to name what it is deferring to.
+
+**The command loop reconciles before it serves requests.** One pass of the
+loop drains a burst of commands, reloads the configuration, and then, at
+`lib.rs:288`, calls `reconcile_drift` -- and only afterwards, at `lib.rs:296`,
+calls `serve_requests`. So an operator's `Request::Apply` landing in the *same
+burst* as the `ConfigChanged` it accompanies is answered after the reconcile
+has already applied the change. There is no debounce anywhere on the inotify
+path: `spawn_config_watcher` sends `Command::ConfigChanged` the moment
+`inotify` yields an event, and the only delay in the file is the 5-second
+sampling interval of the `--poll-config` fallback, which is a poll and not a
+quiet period.
+
+**`reconcile_drift` never consults the confirm window.** It is the one apply
+path that does not: it builds its own plan, narrows it to
+`reconciling_interfaces()`, and calls `netcfgd_apply::apply` directly rather
+than going through `State::apply`. `PlanOptions` there carries only `cycle` --
+no `confirm_window`, no `revert_to` -- and nothing on that path reads
+`confirm::read_window`. Of the six code paths that touch the machine, only
+`apply_request` and `confirm::revert` know a window exists.
+
+**There is no way for a client to say "hold off".** The only hold is a plain
+`bool` local to `run`, set by `--no-apply-on-start` and released one-way by
+any `Request::Apply`; it gates `reconcile_drift` alone, and `release_contended`
+runs even under it. There is no lock, no marker in `/run`, and no `Command`
+variant expressing a hold -- by design, since the daemon is single-threaded
+over its state and coordinates only through its `mpsc` channel.
+
+**One measured behaviour is still unexplained and is written down rather than
+guessed at.** Whether the watcher auto-applies a later change depends on
+whether the *first* apply carried a window:
+
+    first apply `ncfg apply`                    later change NOT applied
+    first apply `ncfg apply --confirm-within 60`
+      followed by `ncfg confirm`                later change applied
+
+Isolated to that one variable, three runs each way. The plain case also logs
+"no previous configuration recorded, so a revert would undo everything netcfgd
+does from here" and the windowed case does not. Both paths write a last-good
+by the code as read, so the difference is not yet accounted for, and it is
+recorded here as an open thread rather than folded into a design as though it
+were understood.
