@@ -18,7 +18,7 @@ pub mod network;
 pub mod protocol;
 
 pub use client::{is_reply_socket, nothing_is_listening, Client, DEFAULT_CTRL_DIR, IMPATIENT};
-pub use network::{mac_addr_value, settings, wired_settings, Setting, Unsupported};
+pub use network::{fingerprint, mac_addr_value, settings, wired_settings, Setting, Unsupported};
 pub use protocol::{Event, NetworkEntry, Reply, ScanResult};
 
 use netcfgd_model::WifiNetwork;

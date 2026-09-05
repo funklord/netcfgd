@@ -228,6 +228,42 @@ contains "joining reached the supplicant" \
 	"$(cat "$work/connect.log" 2>&1)" "joining"
 
 # ---------------------------------------------------------------------------
+# 4b. A running supplicant is reconciled against the document.
+#
+# 0015 says netcfgd's next reconcile removes a network the document no longer
+# contains. Until this it did not: `populate_supplicant` had one caller, the
+# `backend.start` arm, and `plan_backend` returned early whenever the backend
+# was already running. Measured before the fix -- rotating the secret, pinning
+# a bssid, adding a network and deleting one each planned `nothing to do`, and
+# the supplicant kept the original credentials for as long as it lived.
+#
+# The supplicant cannot be asked whether it still matches: `LIST_NETWORKS`
+# gives ids and SSIDs, and a passphrase is write-only. So netcfgd records a
+# digest of what it handed over, and the observation compares it against a
+# digest of what the document says now.
+record="$work/run/supplicant/radio0.networks.sha256"
+check "netcfgd recorded what it gave the supplicant" \
+	"$([ -s "$record" ] && echo yes || echo no)" "yes"
+before=$(cat "$record" 2>/dev/null || echo none)
+
+printf 'rotatedrotated\n' > "$work/etc/secrets/HomeFiber"
+waited=0
+while [ "$("$ncfg" plan 2>&1 | grep -c 'wifi.set_profiles' || true)" = "0" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 100 ] && break
+	sleep 0.1
+done
+contains "a rotated passphrase is planned rather than ignored" \
+	"$("$ncfg" plan 2>&1)" "wifi.set_profiles"
+
+"$ncfg" apply > "$work/reconcile.log" 2>&1 || true
+check "and the supplicant is given the networks again" \
+	"$([ "$(cat "$record" 2>/dev/null || echo none)" != "$before" ] && echo changed || echo same)" \
+	"changed"
+check "and the machine then converges" \
+	"$("$ncfg" plan 2>&1 | grep -c 'wifi.set_profiles' || true)" "0"
+
+# ---------------------------------------------------------------------------
 # 5. The same journey in one command, from nothing.
 #
 # **The case the section above cannot cover**, and the one the operator hit:

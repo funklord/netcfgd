@@ -947,6 +947,7 @@ mod tests {
 				channel: Some(6),
 			}),
 			secret_matches: Some(false),
+			networks_match: None,
 			config_matches: None,
 			config_present: None,
 			advertised: Vec::new(),

@@ -640,7 +640,40 @@ impl KernelExecutor {
 			netcfgd_supplicant::add_network(&client, network, policy, &resolver)
 				.map_err(|error| format!("could not give `{}` to {iface}: {error}", network.id))?;
 		}
+		// What was handed over, so the next observation can tell whether the
+		// document has moved since. Written after the last `add_network`, so a
+		// population that failed part-way leaves the previous record -- or
+		// none -- rather than claiming a set the supplicant does not hold.
+		self.record_supplicant_networks(iface, policy, &resolver);
 		Ok(())
+	}
+
+	/// Remember the digest of the networks a supplicant was just given.
+	///
+	/// Best effort, and deliberately so: failing to write it means the next
+	/// observation cannot say whether the supplicant matches, which the
+	/// planner reads as "no reason to act" -- the same answer it gives for a
+	/// network whose SSID comes from a scan. A supplicant that was populated
+	/// correctly is not made wrong by a record that could not be kept.
+	fn record_supplicant_networks(
+		&self,
+		iface: &str,
+		policy: netcfgd_model::MacPolicy,
+		resolver: &netcfgd_secret::Resolver,
+	) {
+		let path = networks_record_path(&self.run_dir, iface);
+		match netcfgd_supplicant::fingerprint(&self.networks, policy, resolver) {
+			Some(digest) => {
+				if let Some(dir) = path.parent() {
+					let _ = std::fs::create_dir_all(dir);
+				}
+				let _ = std::fs::write(&path, digest);
+			}
+			// Nothing to compare against later, so leave no claim behind.
+			None => {
+				let _ = std::fs::remove_file(&path);
+			}
+		}
 	}
 
 	/// Send a bridge's own settings, whether it was just made or already was.
@@ -1583,9 +1616,37 @@ impl Executor for KernelExecutor {
 			// correct behaviour is to do nothing -- not to fail the very plan
 			// it is bracketing, which is what an unhandled op would do.
 			Op::CommitArm { .. } | Op::CommitConfirm | Op::CommitRevert { .. } => Ok(()),
+			// Replace the set rather than editing it, which is 0015's rule:
+			// the supplicant holds no state of its own, so the whole set is
+			// what netcfgd is authoritative about. `populate_supplicant`
+			// already clears and re-adds, and records what it handed over --
+			// which is what makes the next observation able to say whether
+			// this is needed again.
+			Op::WifiSetProfiles { device, .. } => self.populate_supplicant(device),
 			other => Err(format!("{} is not implemented in this build", other.name())),
 		}
 	}
+}
+
+/// Where netcfgd records which networks it gave a radio's supplicant.
+///
+/// Under `/run`, like every other record netcfgd keeps of its own past, and a
+/// digest rather than a value for the reason `key_record_path` gives: the
+/// settings contain a passphrase.
+///
+/// This exists because the supplicant cannot be asked. `LIST_NETWORKS` returns
+/// ids and SSIDs; a passphrase is write-only. So the only way to know whether
+/// a running supplicant still matches the document is to remember what it was
+/// given -- which is what decision 0015 promises happens and, until this, did
+/// not: `populate_supplicant` had one caller, the `backend.start` arm, and
+/// `plan_backend` returns early when the backend is already running. Changing
+/// a passphrase, pinning a bssid, adding a network or deleting one all planned
+/// nothing, measured, and the supplicant kept the original credentials
+/// indefinitely.
+#[must_use]
+pub fn networks_record_path(run: &std::path::Path, iface: &str) -> std::path::PathBuf {
+	run.join("supplicant")
+		.join(format!("{iface}.networks.sha256"))
 }
 
 /// Where netcfgd records which key it loaded into a `WireGuard` device.
