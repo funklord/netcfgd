@@ -1988,6 +1988,35 @@ fn lower_network_wifi(block: &Block, network: &mut WifiNetwork, diags: &mut Diag
 		);
 		return;
 	}
+	// **And exactly one means at least one.** The guard above counts only the
+	// upper bound, so a `wifi` block that names no security at all fell through
+	// `build_security` to `Security::Open` -- and the guard that refuses a
+	// network with no `wifi` block is keyed on the block being *present*, so
+	// three spellings walked past both:
+	//
+	//     network "Cafe" { wifi { } }
+	//     network "Cafe" { wifi { open = false } }
+	//     network "Cafe" { wifi { owe = false } }
+	//
+	// Measured: all three compile to `security: open`. The middle one is the
+	// reason this is a refusal rather than a warning -- an operator who writes
+	// the word `false` against `open` has said the opposite of what they got,
+	// and the machine then associates in the clear with anything broadcasting
+	// that name. Same message as the missing-block guard, because it is the
+	// same mistake arriving by a different route.
+	if chosen == 0 {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				"this `wifi` block names no security, so it would be an open network",
+			)
+			.with_help(
+				"add `psk = \"@secret:NAME\"`, or `open = true` if that is meant; \
+				 `open = false` says which kind it is not, not which it is",
+			),
+		);
+		return;
+	}
 
 	if let Some(security) = build_security(keys, block, diags) {
 		network.security = security;
