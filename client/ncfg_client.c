@@ -170,10 +170,31 @@ const char *ncfg_client_socket_path(const ncfg_client_t *client)
 }
 
 /* Everything, or a failure. `write` on a socket may write part of a buffer. */
+/*
+ * `send` with MSG_NOSIGNAL, not `write`.
+ *
+ * **A plain write to a socket whose peer has gone raises SIGPIPE, whose default
+ * disposition is to kill the process.** So `systemctl restart netcfgd` did not
+ * give a client an error to report -- it killed it outright, measured at exit
+ * status 141, which is 128 + SIGPIPE. The tray and the GUI hold one connection
+ * for the life of the window, and neither Qt nor this library installs a
+ * handler, so the window simply vanished with no dialog and nothing in a log.
+ *
+ * The error path this library already wanted is a few lines down --
+ * `set_error(..., "cannot send to netcfgd: %s", strerror(errno))` -- and it was
+ * unreachable for EPIPE, because the process was dead before `write` returned.
+ * MSG_NOSIGNAL makes the send fail with EPIPE instead of signalling, which is
+ * what lets that message be printed.
+ *
+ * Per-call rather than `signal(SIGPIPE, SIG_IGN)` in an initialiser: this is a
+ * library, and changing a process-wide disposition on behalf of a program that
+ * did not ask is not ours to do. A host application that wants SIGPIPE for its
+ * own pipes keeps it.
+ */
 static int write_all(int fd, const char *data, size_t length)
 {
 	while (length) {
-		ssize_t wrote = write(fd, data, length);
+		ssize_t wrote = send(fd, data, length, MSG_NOSIGNAL);
 		if (wrote < 0) {
 			if (errno == EINTR) {
 				continue;
