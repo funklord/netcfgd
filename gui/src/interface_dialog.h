@@ -68,6 +68,15 @@ private:
 	QString          interface;
 	QString          summary;
 
+	void load_existing();
+
+	/* What the daemon says is configured, and whether it could be asked. */
+
+	ncfg_interface_config existing;
+
+	bool        unknown = false;
+
+
 	QComboBox   *addressing;
 	QLineEdit   *static_address;
 	QLineEdit   *gateway;

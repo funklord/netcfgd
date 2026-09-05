@@ -1566,6 +1566,208 @@ void ncfg_globals_free(ncfg_globals_t *globals)
 	memset(globals, 0, sizeof(*globals));
 }
 
+void ncfg_interface_config_free(ncfg_interface_config_t *config)
+{
+	if (!config) {
+		return;
+	}
+	free(config->addressing);
+	free(config->address);
+	free(config->gateway);
+	free(config->probe_command);
+	free(config->probe_args);
+	free(config->unmodelled);
+	memset(config, 0, sizeof(*config));
+}
+
+/* Append a key name to the running list of what a form cannot express. */
+static void note_unmodelled(char **list, const char *key)
+{
+	if (!*list) {
+		*list = dup_string(key);
+		return;
+	}
+	size_t length = strlen(*list) + strlen(key) + 3;
+	char *joined = malloc(length);
+	if (!joined) {
+		return;
+	}
+	snprintf(joined, length, "%s, %s", *list, key);
+	free(*list);
+	*list = joined;
+}
+
+/*
+ * The addressing, as one of the shapes a form can offer, or empty.
+ *
+ * A list of sources is what the document carries, and the dialog offers a
+ * handful of common arrangements. Anything else -- a static address with a
+ * peer, a delegated prefix, three sources at once -- has no entry to select,
+ * so it is reported as unrepresentable rather than approximated to the nearest
+ * one. Approximating is what would silently rewrite it on the next save.
+ */
+static char *addressing_shape(const ncfg_json_doc_t *doc, uint32_t list, char **address)
+{
+	uint32_t count = ncfg_json_count(doc, list);
+	if (count == 0) {
+		return dup_string("null");
+	}
+	if (count > 2) {
+		return NULL;
+	}
+
+	char *first = member_text(doc, ncfg_json_at(doc, list, 0), "source");
+	if (count == 1) {
+		char *shape = NULL;
+		if (strcmp(first, "static") == 0) {
+			uint32_t entry = ncfg_json_at(doc, list, 0);
+			/* A peer or a lifetime has nowhere to go on the form. */
+			char *peer = member_text(doc, entry, "peer");
+			int plain = peer[0] == '\0';
+			free(peer);
+			if (plain) {
+				*address = member_text(doc, entry, "address");
+				shape = dup_string("static");
+			}
+		} else if (strcmp(first, "dhcp4") == 0) {
+			shape = dup_string("dhcp");
+		} else if (strcmp(first, "dhcp6") == 0 || strcmp(first, "slaac") == 0 ||
+		    strcmp(first, "reported") == 0) {
+			shape = dup_string(first);
+		}
+		free(first);
+		return shape;
+	}
+
+	char *second = member_text(doc, ncfg_json_at(doc, list, 1), "source");
+	char *shape = NULL;
+	if (strcmp(first, "dhcp4") == 0 && strcmp(second, "slaac") == 0) {
+		shape = dup_string("dhcp+slaac");
+	}
+	free(first);
+	free(second);
+	return shape;
+}
+
+int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
+    ncfg_interface_config_t *out, char *err, size_t err_size)
+{
+	if (!out || !interface) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	out->preference = -1;
+	out->enabled = 1;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t interfaces = ncfg_json_member(doc, ncfg_json_root(doc), "interfaces");
+	uint32_t count = ncfg_json_count(doc, interfaces);
+	uint32_t found = 0;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, interfaces, i);
+		if (ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "name"), interface)) {
+			found = entry;
+			break;
+		}
+	}
+	if (!found) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->present = 1;
+
+	out->enabled = ncfg_json_bool(doc, ncfg_json_member(doc, found, "enabled"), 1);
+	out->forwarding = ncfg_json_bool(doc, ncfg_json_member(doc, found, "forwarding"), 0);
+	out->nat = ncfg_json_bool(doc, ncfg_json_member(doc, found, "nat"), 0);
+	uint32_t preference = ncfg_json_member(doc, found, "preference");
+	if (preference) {
+		out->preference = (int)ncfg_json_int(doc, preference, -1);
+	}
+
+	uint32_t addressing = ncfg_json_member(doc, found, "addressing");
+	out->addressing = addressing_shape(doc, addressing, &out->address);
+	if (!out->addressing) {
+		note_unmodelled(&out->unmodelled, "addressing");
+		out->addressing = dup_string("");
+	}
+	if (!out->address) {
+		out->address = dup_string("");
+	}
+
+	/* One default route is the gateway box; anything else has no field. */
+	uint32_t routes = ncfg_json_member(doc, found, "routes");
+	uint32_t route_count = ncfg_json_count(doc, routes);
+	out->gateway = dup_string("");
+	for (uint32_t i = 0; i < route_count; i++) {
+		uint32_t route = ncfg_json_at(doc, routes, i);
+		if (ncfg_json_string_equals(doc, ncfg_json_member(doc, route, "destination"),
+		        "default") &&
+		    route_count == 1) {
+			free(out->gateway);
+			out->gateway = member_text(doc, route, "via");
+		} else {
+			note_unmodelled(&out->unmodelled, "routes");
+			break;
+		}
+	}
+
+	uint32_t probe = ncfg_json_member(doc, found, "probe");
+	if (probe) {
+		out->probe_command = member_text(doc, probe, "command");
+		out->probe_interval = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "interval"), 0);
+		out->probe_timeout = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "timeout"), 0);
+		uint32_t args = ncfg_json_member(doc, probe, "args");
+		uint32_t args_count = ncfg_json_count(doc, args);
+		char *joined = dup_string("");
+		for (uint32_t i = 0; i < args_count; i++) {
+			size_t one_length = 0;
+			const char *raw = ncfg_json_string(doc, ncfg_json_at(doc, args, i),
+			    &one_length);
+			char *one = dup_text(raw ? raw : "", raw ? one_length : 0);
+			size_t length = strlen(joined) + strlen(one) + 2;
+			char *next = malloc(length);
+			if (next) {
+				snprintf(next, length, "%s%s%s", joined, joined[0] ? " " : "", one);
+				free(joined);
+				joined = next;
+			}
+			free(one);
+		}
+		out->probe_args = joined;
+	}
+	if (!out->probe_command) {
+		out->probe_command = dup_string("");
+	}
+	if (!out->probe_args) {
+		out->probe_args = dup_string("");
+	}
+
+	/* Everything a form of these fields cannot carry. Named, so a caller can
+	 * refuse rather than overwrite. */
+	static const char *const beyond[] = { "advertise", "dns", "dot1x", "guard", "hooks",
+		"ipv6_token", "on_drift" };
+	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
+		if (ncfg_json_member(doc, found, beyond[i])) {
+			note_unmodelled(&out->unmodelled, beyond[i]);
+		}
+	}
+	if (!out->unmodelled) {
+		out->unmodelled = dup_string("");
+	}
+
+	ncfg_json_free(doc);
+	return 1;
+}
+
 int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, size_t err_size)
 {
 	if (!out) {

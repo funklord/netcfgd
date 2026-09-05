@@ -782,6 +782,55 @@ typedef struct {
 void ncfg_globals_free(ncfg_globals_t *globals);
 
 /*
+ * One interface's configuration, as far as a form can show it.
+ *
+ * **`unmodelled` is the field that matters.** An `interface` block can carry
+ * `advertise`, `dns`, `dot1x`, `guard`, `hooks`, `ipv6_token`, `on_drift` and
+ * routes beyond a default gateway, and a dialog built from the fields below
+ * cannot express any of them. A client that composed a whole block from those
+ * fields and wrote it back would delete whatever it could not show -- which is
+ * exactly what the interface dialog did, measured: a static address, a default
+ * route, a preference, forwarding, NAT and a link probe all gone after opening
+ * the dialog and pressing Save.
+ *
+ * So the keys this struct cannot represent are named rather than dropped, and
+ * a client that finds any is expected to refuse to overwrite rather than to
+ * guess. Empty means the block is wholly representable.
+ */
+typedef struct {
+	/* Whether the document configures this interface at all. */
+	int   present;
+	/* `static`, `dhcp`, `dhcp6`, `slaac`, `dhcp+slaac`, `null`, `reported`,
+	 * or empty where the addressing is a shape a form cannot offer. */
+	char *addressing;
+	char *address;
+	char *gateway;
+	/* -1 when the document states none, since 0 is a legal preference. */
+	int   preference;
+	int   enabled;
+	int   forwarding;
+	int   nat;
+	char *probe_command;
+	char *probe_args;
+	int   probe_interval;
+	int   probe_timeout;
+	/* The keys above cannot express, joined for a message: `dns, hooks`. */
+	char *unmodelled;
+} ncfg_interface_config_t;
+
+void ncfg_interface_config_free(ncfg_interface_config_t *config);
+
+/*
+ * Read one interface's configuration out of the document.
+ *
+ * Returns 1 on success, including for an interface the document does not
+ * configure -- `present` says which. Returns 0 and fills `err` when the daemon
+ * cannot be asked.
+ */
+int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
+    ncfg_interface_config_t *out, char *err, size_t err_size);
+
+/*
  * One credential, by name. There is no field here that could carry a value,
  * which is a stronger guarantee than a rule saying not to fill one in.
  */

@@ -155,6 +155,29 @@ struct ncfg_globals {
 	bool    remote_admin = false;
 };
 
+/*
+ * One interface's configuration, as far as the dialog can show it.
+ *
+ * `unmodelled` names the keys a form of these fields cannot carry. It is the
+ * field the dialog checks before writing: a block composed from the rest and
+ * saved over one containing any of them would delete what it could not show.
+ */
+struct ncfg_interface_config {
+	bool    present = false;
+	QString addressing;
+	QString address;
+	QString gateway;
+	int     preference = -1;
+	bool    enabled = true;
+	bool    forwarding = false;
+	bool    nat = false;
+	QString probe_command;
+	QString probe_args;
+	int     probe_interval = 0;
+	int     probe_timeout = 0;
+	QString unmodelled;
+};
+
 /* One credential, by name and never by value. */
 struct ncfg_secret_row {
 	QString name;
@@ -557,6 +580,7 @@ public:
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);
 	/* The host-wide policy the configuration declares. */
 	bool globals(ncfg_globals *out, QString *error);
+	bool interface_config(const QString &interface, ncfg_interface_config *out, QString *error);
 	/* The credentials this machine holds, by name. Never by value: there is
 	 * no field that could carry one. */
 	bool secrets(QList<ncfg_secret_row> *out, QString *error);
