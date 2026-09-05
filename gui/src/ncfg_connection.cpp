@@ -659,6 +659,47 @@ bool ncfg_connection::profile_save(const QString &name, bool replace, QString *e
 	return true;
 }
 
+bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_config *out,
+    QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	*out = ncfg_interface_config();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_interface_config_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_interface_config(client, interface.toUtf8().constData(), &found, message,
+	        sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	out->present = found.present != 0;
+	out->addressing = from_c(found.addressing);
+	out->address = from_c(found.address);
+	out->gateway = from_c(found.gateway);
+	out->preference = found.preference;
+	out->enabled = found.enabled != 0;
+	out->forwarding = found.forwarding != 0;
+	out->nat = found.nat != 0;
+	out->probe_command = from_c(found.probe_command);
+	out->probe_args = from_c(found.probe_args);
+	out->probe_interval = found.probe_interval;
+	out->probe_timeout = found.probe_timeout;
+	out->unmodelled = from_c(found.unmodelled);
+	ncfg_interface_config_free(&found);
+	return true;
+}
+
 bool ncfg_connection::globals(ncfg_globals *out, QString *error)
 {
 	if (!out) {

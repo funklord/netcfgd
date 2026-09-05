@@ -123,6 +123,9 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	 * a user.
 	 */
 	note = new QLabel(this);
+	/* Named for the same reason the fields are: a probe that took
+	 * `findChildren<QLabel *>().first()` would get whichever label was
+	 * constructed first, which is a form caption. */
 	note->setObjectName(QStringLiteral("iface_note"));
 	note->setWordWrap(true);
 
@@ -208,8 +211,76 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	connect(detection, &QComboBox::currentIndexChanged, this,
 	    &ncfg_interface_dialog::detection_changed);
 
+	load_existing();
 	addressing_changed();
 	detection_changed();
+}
+
+/*
+ * Put the interface's current configuration into the form.
+ *
+ * **Without this the dialog was an empty form that overwrites.** It read
+ * nothing about the interface it was opened on, so every field sat at its
+ * constructed default -- DHCP, no address, no gateway, preference and MTU
+ * unset, forwarding and NAT off, detection on carrier -- and `submit()` writes
+ * the composed block with `replace = true`. Opening a configured interface and
+ * pressing Save replaced its drop-in with that. Measured: a static
+ * 192.0.2.10/24, a default route, `preference = 50`, forwarding, NAT and a
+ * link probe, all gone, with the note reporting that netcfgd had re-read its
+ * configuration.
+ *
+ * The values come from the daemon's document rather than from the drop-in
+ * text, because a form is a set of fields and the file is a language: parsing
+ * it here would be a second implementation of the compiler, in C++, in a
+ * window.
+ *
+ * `unmodelled` is why this cannot be only a load. An `interface` block carries
+ * things this form has no field for, and a dialog that loaded the six it knows
+ * and saved the whole block would still delete the rest. Save is refused
+ * instead, naming them.
+ */
+void ncfg_interface_dialog::load_existing()
+{
+	QString error;
+	if (!connection->interface_config(interface, &existing, &error)) {
+		/* No daemon, or it would not answer. The form stays at its defaults,
+		 * and `submit()` refuses for the same reason: what is on the machine
+		 * is unknown, so overwriting it is not something to do quietly. */
+		unknown = true;
+		return;
+	}
+	if (!existing.present) {
+		return;
+	}
+
+	const int shape = addressing->findData(existing.addressing);
+	if (shape >= 0) {
+		addressing->setCurrentIndex(shape);
+	}
+	static_address->setText(existing.address);
+	gateway->setText(existing.gateway);
+	if (existing.preference >= 0) {
+		preference->setValue(existing.preference);
+	}
+	enabled->setChecked(existing.enabled);
+	forwarding->setChecked(existing.forwarding);
+	nat->setChecked(existing.nat);
+
+	if (!existing.probe_command.isEmpty()) {
+		const int known = detection->findData(existing.probe_command);
+		if (known >= 0) {
+			detection->setCurrentIndex(known);
+		} else {
+			const int custom = detection->findData(QStringLiteral("command"));
+			if (custom >= 0) {
+				detection->setCurrentIndex(custom);
+			}
+			probe_command->setText(existing.probe_command);
+			probe_args->setText(existing.probe_args);
+		}
+		probe_interval->setValue(existing.probe_interval);
+		probe_timeout->setValue(existing.probe_timeout);
+	}
 }
 
 /*
@@ -463,6 +534,26 @@ void ncfg_interface_dialog::submit()
 		/* The model says the command is absolute, and a relative one would be
 		 * resolved against whatever directory netcfgd happens to be in. */
 		note->setText(QStringLiteral("a probe command must be an absolute path"));
+		return;
+	}
+
+	/* **Refused rather than approximated.** `submit` writes the whole block
+	 * with `replace = true`, so anything the form has no field for is deleted
+	 * by saving. The keys are named because "this dialog cannot edit that" is
+	 * a sentence an operator can act on, where a silently shortened block is
+	 * one they find days later. */
+	if (unknown) {
+		note->setText(QStringLiteral(
+		    "netcfgd could not say what this interface is configured with, so saving "
+		    "would overwrite something unknown. Check the daemon is running."));
+		return;
+	}
+	if (!existing.unmodelled.isEmpty()) {
+		note->setText(QStringLiteral(
+		    "this interface's configuration carries %1, which this dialog has no field "
+		    "for -- saving would delete it. Edit the file instead: "
+		    "`ncfg config edit interface-%2`.")
+		        .arg(existing.unmodelled, interface));
 		return;
 	}
 

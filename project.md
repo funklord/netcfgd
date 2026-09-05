@@ -9496,9 +9496,24 @@ clones the existing policy and leaves what was not named -- while the helper
 protocol the GUI drives builds a whole `Control` from three principals. That
 asymmetry is not a defect: the protocol sends all three, so the receiver cannot
 tell "unchanged" from "set to root", and merging there would be guessing. The
-editor loading what it edits is where this is fixable. The interface dialog opens blank and saves with
+editor loading what it edits is where this is fixable. The interface dialog opened blank and saved with
 `replace=true`, losing address, routes, preference, MTU, probe, forwarding and
-NAT. And a PSK network edited with no changes at all loses `metric`, `metered`,
+NAT. **Fixed**, and the fix has two halves, because loading harder would not
+have been enough: the form has no field for `advertise`, `dns`, `dot1x`,
+`guard`, `hooks`, `ipv6_token`, `on_drift` or a second route, so a dialog that
+loaded the six it knows and saved the whole block would still delete the rest.
+It refuses instead, and names them. The values come from the daemon's document
+rather than the drop-in text -- parsing the file in the window would be a
+second implementation of the compiler, in C++.
+
+**And writing the test found a crash in shipped code.** `reload_detections`
+writes the daemon's error into `note` on the path its own comment calls "not
+fatal", and it is called from the constructor a hundred lines before `note` is
+constructed. So the dialog segfaults whenever the daemon will not list the
+probe scripts -- which is every ordinary user on a machine whose `observe` tier
+is the default `root`. The probe hit it by being an ordinary user, which is the
+one thing a developer running the GUI as themselves on their own machine never
+is. And a PSK network edited with no changes at all loses `metric`, `metered`,
 `bssid`, addressing, routes and DNS, because the dialog composes the whole
 block from fields it was never given.
 
