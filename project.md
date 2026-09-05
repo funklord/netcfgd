@@ -8787,3 +8787,53 @@ does from here" and the windowed case does not. Both paths write a last-good
 by the code as read, so the difference is not yet accounted for, and it is
 recorded here as an open thread rather than folded into a design as though it
 were understood.
+
+### 10.41.3 The watcher defers to a window -- the half that needs no clock
+
+Acting on the instruction to make the watcher defer to a requested window. Two
+cases hide under that phrasing, and only one of them can be settled without
+guessing at a timeout.
+
+**A window already open is a fact on disk, and deferring to it needs no
+timing at all.** `confirm::read_window` answers from `/run`, so before
+`reconcile_drift` runs the loop asks whether an unconfirmed change is
+outstanding and stands down if one is. That is unconditionally right: the
+whole promise of a window is that the machine can be put back the way it was,
+and a watcher that applies a further change over an unconfirmed one has moved
+the ground the revert was measured against.
+
+Measured, with a control, because a guard that never lets anything through
+looks exactly like one that works:
+
+    second change while a window is open      addr stays 10.0.0.9   held
+    the same change with no window open       addr becomes 10.0.0.77 applied
+
+**A window that is being *requested* is a race, and the honest answer is that
+this half is not closed.** The request arrives about eight milliseconds after
+the pass that reconciles, in a pass of its own, so the loop cannot see it when
+it decides. Collapsing the burst catches it when it happens to arrive first,
+which costs nothing and is what the code does. Making it reliable means the
+loop waiting after a config change, and the settle was measured rather than
+picked:
+
+    300ms   the windowed apply did 0 actions   the watcher had already applied
+    500ms   0 actions                          (three runs)
+    1000ms  0 actions                          (three runs)
+    3000ms  the windowed apply did the work
+
+Three seconds of added latency on every automatic reconcile is a real cost
+paid by every change to buy the arming of a window on some of them, and the
+gap between 1s and 3s is not accounted for by the CLI, which takes 5-7ms to
+start and act (five runs, debug and release alike). **A settle whose length
+is a guess and whose mechanism is not understood is not a thing to ship**, so
+what landed is the half that costs nothing, and this is the other half written
+down. Closing it properly wants a signal rather than a clock -- the config
+saying `confirm = N`, so the reconcile arms the window itself and there is no
+request to race.
+
+`a_window_is_requested` is split out from `defers_to_a_window` so it can be
+tested at all: the tuples reaching the loop carry a `SyncSender`, and a
+predicate that cannot be exercised without building one is a predicate nothing
+exercises. Its test was sabotaged two ways -- the predicate made
+unconditionally true, and `--confirm-within 0` allowed to count as a window --
+and goes red for both.

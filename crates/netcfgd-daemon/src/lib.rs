@@ -284,7 +284,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			// `reconcile_drift` returns early, so a claim that appears after
 			// netcfgd took the radio was never looked at again.
 			release_contended(&mut state);
-			if !holding {
+			if !holding && !defers_to_a_window(&state, &requests) {
 				reconcile_drift(&mut state, &mut subscribers);
 			}
 		}
@@ -442,6 +442,74 @@ fn start_up(state: &mut State, apply_on_start: bool, reverted: bool) -> bool {
 		converge(state, &mut Vec::new());
 	}
 	!apply_on_start
+}
+
+/// Whether the watcher should stand back and let a window cover this change.
+///
+/// **The reconcile runs before the requests are served**, so an operator's
+/// `ncfg apply --confirm-within 60` landing in the same burst as the
+/// `ConfigChanged` it accompanies was answered after `reconcile_drift` had
+/// already applied the change. The window then covered nothing: measured three
+/// times out of three, the only inverse a windowed apply recorded was the one
+/// for arming the window itself. A commit-confirm window that covers nothing
+/// is worse than none, because the operator believes they have a way back.
+///
+/// Two cases, and they are different questions.
+///
+/// A pending `Apply` carrying a window is the operator saying they want this
+/// change to be revertible. Deferring costs one pass of the loop: the apply is
+/// served a few lines below and does the work itself, with the window that
+/// goes with it. **This half only fires when the request is already in the
+/// burst**, which measurement says is the uncommon case: the request arrives
+/// about eight milliseconds after the pass that reconciles, in a pass of its
+/// own. Making it reliable needs the loop to wait after a config change, and
+/// a settle short enough not to cost automatic convergence -- 300ms, 500ms,
+/// 1s were each tried -- did not close it, while 3s did. A three-second delay
+/// on every automatic reconcile is not a trade to make in passing, so what is
+/// here is the half that costs nothing and the gap is written down.
+///
+/// An **open** window means a change is already awaiting confirmation.
+/// Reconciling over it would apply something the operator has not accepted
+/// yet, on top of something they may be about to reject, and the revert would
+/// then undo a state nobody ever chose. `confirm::may_arm` already refuses to
+/// arm a second window over the first; this is the same rule from the other
+/// side.
+///
+/// What this deliberately does not do is hold indefinitely. An operator who
+/// edits the file and applies a minute later has a reconcile in between, and
+/// their window still covers nothing -- closing that needs the watcher to wait
+/// for an operator on every change, which would stop an unattended machine
+/// converging. That trade is not this function's to make.
+fn defers_to_a_window(
+	state: &State,
+	requests: &[(
+		Request,
+		netcfgd_sys::peer::Peer,
+		authorize::Origin,
+		SyncSender<Response>,
+	)],
+) -> bool {
+	if netcfgd_host::confirm::read_window(&state.paths.run).is_some() {
+		return true;
+	}
+	a_window_is_requested(requests.iter().map(|(request, ..)| request))
+}
+
+/// Does any pending request ask for a window?
+///
+/// Split out from `defers_to_a_window` so it can be tested: the tuples that
+/// arrive at the loop carry a `SyncSender`, and a predicate that cannot be
+/// exercised without building one is a predicate nothing exercises.
+fn a_window_is_requested<'a>(requests: impl Iterator<Item = &'a Request>) -> bool {
+	requests.into_iter().any(|request| {
+		matches!(
+			request,
+			Request::Apply {
+				confirm: Some(seconds),
+				..
+			} if *seconds > 0
+		)
+	})
 }
 
 /// Whether this batch of requests is the operator taking their turn.
@@ -1779,4 +1847,43 @@ fn spawn_config_watcher(
 			}
 		});
 	mechanism
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn apply(confirm: Option<u32>) -> Request {
+		Request::Apply {
+			confirm,
+			allow_disruption: Vec::new(),
+			strand_credentials: Vec::new(),
+			restart_wedged: Vec::new(),
+		}
+	}
+
+	/// A pending apply that asks for a window defers the watcher, and one that
+	/// does not ask for anything does not.
+	///
+	/// The second half is the control. Without it this passes for a predicate
+	/// that returns true unconditionally, which is what the first version of
+	/// the live check did before a no-window run was put beside it.
+	#[test]
+	fn only_a_requested_window_defers_the_watcher() {
+		assert!(a_window_is_requested([apply(Some(60))].iter()));
+		assert!(!a_window_is_requested([apply(None)].iter()));
+
+		// `--confirm-within 0` is "apply and do not arm anything", so it is
+		// not a window and must not hold the watcher off.
+		assert!(!a_window_is_requested([apply(Some(0))].iter()));
+
+		// One among several is enough: the watcher must not reconcile just
+		// because something unrelated is also queued.
+		assert!(a_window_is_requested(
+			[Request::Status, apply(Some(30)), apply(None)].iter()
+		));
+		assert!(!a_window_is_requested(
+			[Request::Status, apply(None)].iter()
+		));
+	}
 }
