@@ -113,6 +113,19 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 
 	detection = new QComboBox(this);
 	detection->setObjectName(QStringLiteral("iface_detection"));
+	/*
+	 * **Before `reload_detections`, which writes to it on its failure path.**
+	 * It was constructed a hundred lines further down, so the branch its own
+	 * comment calls "not fatal" dereferenced an uninitialised member pointer
+	 * and segfaulted -- reached whenever the daemon will not list the probe
+	 * scripts, which is every ordinary user on a machine whose `observe` tier
+	 * is the default `root`. Found by a probe that opened this dialog as such
+	 * a user.
+	 */
+	note = new QLabel(this);
+	note->setObjectName(QStringLiteral("iface_note"));
+	note->setWordWrap(true);
+
 	reload_detections(QString());
 
 	/* The list, and the two things an operator does with it. `view / edit`
@@ -179,8 +192,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 
 	layout->addLayout(form);
 
-	note = new QLabel(this);
-	note->setWordWrap(true);
+	/* Constructed near the top rather than here; see the comment there. */
 	note->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	layout->addWidget(note);
 
