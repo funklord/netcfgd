@@ -668,7 +668,30 @@ fn rfkill(sys: &Path, iface: &str) -> Option<netcfgd_model::ObservedRfkill> {
 		.collect();
 	entries.sort();
 	for path in entries {
-		let name = fs::read_to_string(path.join("name")).ok()?;
+		// **`continue`, not `?`.** `?` here returns from the *function*, so one
+		// unreadable `name` on an unrelated entry abandoned the whole search --
+		// and `read_dir` is sorted, so an entry that sorts before the phy's own
+		// decides for every entry after it. A laptop's `rfkill0` is typically
+		// the platform button or a Bluetooth switch, and a USB dongle being
+		// unplugged tears its directory down between the `read_dir` and this
+		// read; that teardown is also what generates the event this observation
+		// runs on, so the window and the trigger coincide.
+		//
+		// Measured against a fabricated `/sys`: with `rfkill0/name` unreadable,
+		// `link.rfkill` came back null and the "switched off" warning vanished
+		// -- the operator's radio is soft-blocked, the scan comes back empty,
+		// and nothing says why. Made readable again, the warning returns; and
+		// an unreadable entry sorted *after* the match was always harmless,
+		// which is what pins this to the early return rather than to unreadable
+		// files in general.
+		//
+		// Skipping is right rather than fail-closed here: an entry whose name
+		// cannot be read is one we cannot show is ours, and a later entry still
+		// can be. The fail-closed reasoning below applies to the flags of the
+		// entry that *is* ours, which is a different question.
+		let Ok(name) = fs::read_to_string(path.join("name")) else {
+			continue;
+		};
 		let name = name.trim().to_owned();
 		if name != phy {
 			continue;
