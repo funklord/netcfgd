@@ -8194,6 +8194,45 @@ was reported that way, which is the figure above measured badly rather than a
 rate that moved. **A flake rate is a number nobody re-derives**, and four runs
 cannot tell a quarter from a half.
 
+**The cost is not the failed check. It is that `make live` stops there, and
+eighteen scripts after it never run.** Make abandons the target at the first
+failing recipe line, and `openvpn.sh` sits two thirds of the way down:
+
+    a complete run          1114 checks
+    a run that flakes here   743 checks, then nothing
+    scripts after openvpn.sh in the Makefile   18 of them
+
+counted with `grep -oE 'tests/live/[a-z_0-9]+\.(sh|py)' Makefile` and the
+duplicates dropped. The digit in the character class is not decoration: the
+first count of this used `[a-z_]`, silently lost `dot1x.sh`, and reported
+seventeen -- a wrong number in a document, produced by a pattern that could
+not match one of the things it was counting.
+
+So about half of all `make live` runs cover two thirds of the suite, and **the
+two outcomes look alike unless somebody compares the counts** -- both end in a
+wall of `ok` lines, and the aborted one's last screen is as green as the
+complete one's. That is this workspace's vacuous-pass shape wearing a flake's
+clothes: the failure is loud, and what it hides is silent.
+
+**That stopping is make's default rather than a decision anybody recorded.**
+Section 4's "execution stops at the first failed action" is about a *plan*, not
+about this target, and nothing in the Makefile or here says the live suite
+should abandon the rest on one failure. It is not obviously wrong either: the
+cascade this section opens with is a leftover tunnel being adopted by the next
+script, so carrying on after a failure is exactly how one broken script
+poisoned four more. Flipping it to run everything and report at the end would
+buy back the missing third and risk turning one real failure into five
+confusing ones. Worth deciding deliberately rather than leaving as a property
+of the tool.
+
+Until the residue is fixed, a run that stops here has not tested `tunnel`,
+`ppp`, `strand`, `wireguard`, `tui.py`, `wifi_add.py`, `wifi`, `dot1x`,
+`stations`, `acl`, `ap`, `nm`, `modem_at`, `umbim`, `bluetooth`, `hwsim`,
+`association` or `delegation` -- the eighteen above, by name. Either re-run until it passes, or run those
+scripts individually and say which -- reporting a suite as green off a run that
+stopped at 743 would be reporting a third of it as passed without having run
+it.
+
 **The cascade is gone and the single check is not.** Every remaining failure
 is the same refusal check, and it is left open rather than explained away.
 
@@ -9073,3 +9112,116 @@ That last point survives not using situ, which is why it is worth carrying past 
 **It does land on [0116](doc/decision/0116-a-client-that-needs-the-model-is-rust.md), which is accepted**, and read rather than taken from its title: 0116 settles that a client needing the model is Rust while one that only speaks the socket may be either, on the reasoning that `ncfg` "is the core with a command-line front, not a client of it", linking the compiler, the planner and the observer because constraint 7 requires `ncfg plan` to survive to the smallest build. So a move to C is **larger than 0116's scope rather than a reversal of it**: 0116 decides the clients' language, and the Rust that would move is the core underneath them. Whether the move supersedes 0116, and whether any of this becomes a numbered record, is this project's own call -- a decision number is not something to consume from outside the tree.
 
 **Not measured, deliberately.** What "mature on a single host" means for fuzznet is fuzznet's to state rather than this note's, and no timing is implied by the ordering above.
+## 10.43 A seven-lens sweep of wifi, the GUI and the core, and what survived checking
+
+Asked to check wifi, the core networking paths and the GUI exhaustively. Seven
+parallel sweeps, each given the same five lenses -- the ones this workspace's
+recent history says pay out -- and each told to report only defects a fix would
+change behaviour for.
+
+**They returned about forty candidates. This section records the ones I checked
+myself**, because a sweep's output is a list of hypotheses: the last review in
+this tree produced real defects alongside claims that did not survive a second
+look, and two of the claims below were wrong in exactly that way.
+
+### Fixed, each verified before and after by running it
+
+**A stored certificate was written to a filename naming its role, not its
+credential.** `path_for(ca_cert, "ca.pem")` -- a literal -- so every network
+with a stored CA wrote one `/run/netcfgd/certs/ca.pem` and every network's
+`ca_cert=` pointed at it. One supplicant is handed every network in a single
+loop, so the last one rendered won for all of them: a machine with a work
+network and a university network validated **both** servers against whichever
+CA was written last. That is the corporate network trusting an authority it was
+never configured to trust, which is the whole of what pinning a CA is for. The
+same held for `client.pem` and `client.key`, so an EAP-TLS client key intended
+for one authenticator was presented to another. Two of the seven sweeps found
+this independently, which is what moved it to the top. Named after the secret
+now; the test asserts two different CAs land in two files *and* that each file
+holds its own bytes, and goes red against the old behaviour.
+
+**`ncfg secret set NAME < cert.pem` stored the first line.** `read_line` stops
+at a newline, and the command's own help prints exactly that redirect as the
+way to store a certificate. Measured: an 80-byte PEM stored as 27 bytes,
+`-----BEGIN CERTIFICATE-----` and nothing else, which `path_for` then
+materialised for wpa_supplicant. The reader half was already right --
+`read_file` takes the whole file -- so a hand-placed PEM always worked and only
+the writer could not produce one. A redirect now reads to end of file; a typed
+passphrase still ends at Enter, checked both ways.
+
+**`wifi { open = false }` compiled to an open network.** The guard counts *at
+most* one security key and never *at least* one, and the guard that refuses a
+network with no `wifi` block is keyed on the block being present. Measured:
+`wifi { }`, `wifi { open = false }` and `wifi { owe = false }` all compiled to
+`security: open`. The middle one is why this is a refusal rather than a
+warning -- an operator who writes `false` against `open` has said the opposite
+of what they got, and the machine then associates in the clear with anything
+broadcasting that name. Access points share the lowering, so it was an open AP
+there, which is worse. `open = true` and a real `psk` still compile.
+
+**A geneve tunnel's `ttl` was written into `IFLA_GENEVE_TOS`.** The header on
+this machine numbers the enum UNSPEC, ID, REMOTE, TTL, TOS -- so TTL is 3 and
+netcfgd said 4. **The reader carried the same wrong number**, so the read-back
+agreed, the plan converged, and nothing was ever reported. Measured against a
+real kernel, which is the only witness that could tell: with the old constant
+`ip -d link show` says `tos 0x40` and no ttl; with the fix, `ttl 64`. Two wrong
+halves round-tripping is a state no comparison in this codebase can see, which
+is why the constant is now checked against the header rather than against
+ourselves.
+
+### Confirmed and not fixed, because the fix is a design decision
+
+**A device with no `interface` block is created, enslaved, and never brought
+up.** Measured against real devices: with `device br0 { bridge { members =
+["p0","p1"] } }` and an `interface br0` block, the plan is `link.create br0`,
+`link.set_master p0`, `link.set_master p1`, `link.up br0` -- and afterwards
+`p0 master=br0 state=DOWN`, `p1 master=br0 state=DOWN`. A bridge port that is
+down forwards nothing, so `br0` never gets carrier. **That is the arrangement
+`doc/netcfgd.conf.example` ships**, and the same shape takes the uplink away
+under `qdisc { ingress_bandwidth = ... }`, where the synthesised `ifb-` device
+is likewise left down and `tc mirred` drops every inbound packet to a down
+target.
+
+`Op::LinkUp` is emitted only from the interface walk, and 0155 pass 1b moved
+both synthesised objects from `Interface` to `Device`. Why no test caught it:
+`tests/live/links.sh` writes `interface X { config = "null" }` for every device
+including bridge ports, so the suite cannot express the failing arrangement, and
+`ingress.sh` asserts the ifb exists and the filter points at it but never reads
+its link state and never passes a packet.
+
+**Not fixed here because "which devices get brought up" is a decision.** A
+bridge member and a synthesised ifb must be; an arbitrary `device eth9 { mtu =
+9000 }` with no interface block is an operator saying nothing about connecting
+over it, and `enabled` lives on the interface. Bringing up every device with no
+interface block would be a behaviour change nobody asked for; bringing up
+exactly the two synthesised cases is the narrow answer and belongs to whoever
+owns 0155.
+
+### Two claims that did not survive checking
+
+**"`make live` covers the suite."** It does not when `openvpn.sh` flakes, which
+is about half of runs -- see 10.32.1, where the count and its method are now
+recorded. I reported seventeen scripts lost and the number is eighteen: the
+pattern `[a-z_]` silently dropped `dot1x.sh` for its digit.
+
+**A rate of one in four for that flake.** Re-measured six runs each way: 3 of 6
+with the 0157 changes and 3 of 6 without. The earlier figure was a four-run
+sample, and four runs cannot tell a quarter from a half.
+
+### What is recorded but not yet checked
+
+The seven sweeps returned far more than the above, and **the rest is
+unverified**: a GUI access tab that resets two control tiers to root whenever
+one is changed, an interface dialog that opens blank and saves with
+`replace=true`, a profile name interpolated raw into generated configuration, a
+remote socket whose permissions come from the local control policy, backend
+adoption that trusts a marker any local user can put in their own argv, a wifi
+network's `metric` making the planner delete the default route it just
+installed, non-canonical IPv6 addresses oscillating between add and delete, and
+`/etc/netcfgd/conf.d` not being watched on a stock install. Each is written
+with a file, a line and a scenario in the sweep output.
+
+**They are listed here as leads, not as findings.** Every one of the four fixed
+above was checked by running it, and one of the sweeps' claims was wrong about
+which build a measurement came from. A lead that has not been reproduced is
+worth exactly the next person's time to reproduce it, and no more.

@@ -99,7 +99,18 @@ const GRE_KEY_FLAG: u16 = 0x2000;
 /// `IFLA_GENEVE_ID` and `REMOTE`, which are numbered on their own.
 const IFLA_GENEVE_ID: u16 = 1;
 const IFLA_GENEVE_REMOTE: u16 = 2;
-const IFLA_GENEVE_TTL: u16 = 4;
+// **3, not 4. 4 is `IFLA_GENEVE_TOS`.** Checked against this machine's
+// `/usr/include/linux/if_link.h`: the enum runs UNSPEC, ID, REMOTE, TTL, TOS,
+// PORT, COLLECT_METADATA, REMOTE6 -- and `REMOTE6 = 7` below pins the
+// numbering, so there is no off-by-one anywhere else in the group.
+//
+// The reader carried the same wrong number, so a geneve tunnel's `ttl` was
+// written into the outer DSCP, the read-back agreed with it, and the plan
+// converged silently: no drift, no error, and `ip -d link show` reporting
+// `tos 0x40` with no ttl at all. Two wrong halves round-tripping is a state no
+// comparison in this codebase can see, which is why the constant is checked
+// against the header rather than against ourselves.
+const IFLA_GENEVE_TTL: u16 = 3;
 const IFLA_GENEVE_REMOTE6: u16 = 7;
 
 /// `VETH_INFO_PEER`, whose payload is a whole nested `ifinfomsg` plus

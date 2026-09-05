@@ -579,7 +579,11 @@ mod ifla_iptun {
 mod ifla_geneve {
 	pub(super) const ID: u16 = 1;
 	pub(super) const REMOTE: u16 = 2;
-	pub(super) const TTL: u16 = 4;
+	// 3. See the note on `IFLA_GENEVE_TTL` in `ops.rs`: this said 4, which is
+	// `IFLA_GENEVE_TOS`, and the writer said the same -- so the two agreed with
+	// each other and with nothing else, and the plan converged on a tunnel
+	// whose TTL had never been set.
+	pub(super) const TTL: u16 = 3;
 	pub(super) const REMOTE6: u16 = 7;
 }
 
