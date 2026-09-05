@@ -1284,6 +1284,28 @@ fn reconcile_drift(
 		server::broadcast(subscribers, &event);
 	}
 
+	// **A failed reconcile said nothing at all.** `converge` prints the action
+	// that failed and the reconcile path did not, so the only trace of a
+	// broken pass was a count in an event nobody is subscribed to and a file
+	// under /run that has to be gone looking for.
+	//
+	// Measured, and it is not a hypothetical quiet: a read-only `ncfg status`
+	// rewrites the hook scripts under /run, the executor correctly refuses a
+	// hook whose hash has changed since the plan was made, `pre_up` fails, and
+	// `link.up` and `addr.add` are skipped behind it -- leaving the interface
+	// down with no address, while the daemon log held two startup lines and
+	// nothing else. `plan.last.json` named the cause exactly. The daemon knew
+	// and did not say.
+	if let Some(failure) = journal.failure() {
+		eprintln!(
+			"netcfgd: reconcile stopped at {}: {}; {} done, {} not attempted",
+			failure.op,
+			failure.error.as_deref().unwrap_or("no detail"),
+			journal.done(),
+			journal.skipped()
+		);
+	}
+
 	server::broadcast(
 		subscribers,
 		&Event::Observed {
