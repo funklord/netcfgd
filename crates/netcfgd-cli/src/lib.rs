@@ -635,6 +635,22 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 				} else {
 					println!("applied with no confirm window, as `--confirm-within 0` asked");
 				}
+				// **The same exit code the local path gives for the same
+				// journal.** `ncfg apply` returns 1 when an action failed;
+				// this arm returned 0 while printing `Failed route.add` and
+				// then "confirm window open ... run `ncfg confirm` to keep
+				// this" over a change that had not been made. Measured: a
+				// route via an unreachable gateway gives exit 1 without the
+				// flag and exit 0 with it.
+				//
+				// A deploy script writing `ncfg apply --confirm-within 60 ||
+				// rollback` therefore never rolled back, on the one form of
+				// the command chosen because the change was expected to be
+				// risky. The exit code is the half of the answer a script
+				// reads, and it disagreed with the half a person reads.
+				if journal.failure().is_some() {
+					return Ok(ExitCode::from(1));
+				}
 				Ok(ExitCode::SUCCESS)
 			}
 			client::Answer::Error { message } => Err(message),
