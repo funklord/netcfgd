@@ -15,13 +15,72 @@
 use std::io;
 use std::path::Path;
 
+/// The real and effective uids of a process, from `/proc/<pid>/status`.
+///
+/// **The real uid is the one that answers "who started this", and it is not
+/// the one the obvious instrument reports.** `stat` on `/proc/<pid>` gives the
+/// *effective* uid, and for a setuid binary the kernel reports that directory
+/// as root's -- so a process an unprivileged user launched to be mistaken for
+/// netcfgd's stats as root. Measured on this machine, with a marker netcfgd
+/// composes in its own argv:
+///
+/// ```text
+/// $ sudo -k -S -p '' /run/netcfgd/openvpn/vpn0.sock < pipe &
+/// stat -c %u /proc/<pid>          ->  0
+/// grep ^Uid: /proc/<pid>/status   ->  Uid:  1000  0  0  0
+/// ```
+///
+/// sudo will refuse the command, but the attacker chooses how long it sits at
+/// the password prompt, and adoption needs to happen once. So this reads the
+/// `Uid:` line and takes the first field.
+fn uids_of(pid: &str) -> Option<(u32, u32)> {
+	let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+	let line = status.lines().find(|line| line.starts_with("Uid:"))?;
+	let mut fields = line.split_whitespace().skip(1);
+	let real = fields.next()?.parse().ok()?;
+	let effective = fields.next()?.parse().ok()?;
+	Some((real, effective))
+}
+
+/// Whoever is asking.
+fn my_uid() -> u32 {
+	uids_of("self").map_or(u32::MAX, |(_, effective)| effective)
+}
+
+/// Whether a process could be one netcfgd started.
+///
+/// **A marker in `argv` says nothing about who put it there.** Every marker
+/// netcfgd uses is a path it composed from its own run directory and one
+/// interface -- and it is a *predictable* path, not a secret one, so any local
+/// user can type it into their own command line and have it matched. Measured:
+/// `sh -c 'sleep 300' /run/netcfgd/openvpn/vpn0.sock`, run as an ordinary
+/// user, was adopted as netcfgd's `OpenVPN` backend; netcfgd recorded the start
+/// as done, started no openvpn, and reported the tunnel up.
+///
+/// What the impostor cannot forge is *privilege*. netcfgd runs as root and
+/// starts its backends as root, so a candidate an unprivileged user could have
+/// created is not netcfgd's, whatever its argv says.
+///
+/// **Root, or whoever is asking** -- and the second half is not slack. netcfgd
+/// applying is root, so it collapses to "root" in the case that matters. It is
+/// there because `ncfg diff` and `ncfg status` observe locally and may be run
+/// by anybody: a rule of "root only" would be read by an unprivileged observer
+/// as every backend having stopped, and it would then plan to start them all.
+/// A rule of "mine only" would refuse a root backend for the same reader. The
+/// pair is the rule that is safe from both ends, and it is also what lets the
+/// tests below run as an ordinary user against their own children.
+fn ours(pid: i32, mine: u32) -> bool {
+	uids_of(&pid.to_string()).is_some_and(|(real, _)| real == 0 || real == mine)
+}
+
 /// The pid in a file, if the process it names is alive and is the one expected.
 ///
 /// **A pid file outlives the process it names, and pids are recycled.** So the
 /// pid is only half an answer: the other half is `/proc/<pid>/cmdline`, read
 /// NUL-separated so that `marker` has to be a *whole argument* rather than a
-/// substring of one. `None` covers every way of not knowing -- no file, no
-/// number in it, no such process, or a process that is somebody else's.
+/// substring of one, and `/proc/<pid>/status` for who started it. `None`
+/// covers every way of not knowing -- no file, no number in it, no such
+/// process, or a process that is somebody else's.
 ///
 /// The marker should be as specific as the caller can make it. A path netcfgd
 /// chose -- an options file, a management socket, a generated configuration --
@@ -36,6 +95,12 @@ use std::path::Path;
 /// a process somebody else started.
 #[must_use]
 pub fn pid_of(path: &Path, marker: &str) -> Option<i32> {
+	pid_of_as(path, marker, my_uid())
+}
+
+/// [`pid_of`], told who is asking, so that a test can supply a uid its own
+/// children do not have and watch the answer be refused.
+fn pid_of_as(path: &Path, marker: &str, mine: u32) -> Option<i32> {
 	let text = std::fs::read_to_string(path).ok()?;
 	let pid: i32 = text.trim().lines().next()?.trim().parse().ok()?;
 	if pid <= 0 {
@@ -46,6 +111,7 @@ pub fn pid_of(path: &Path, marker: &str) -> Option<i32> {
 		.split(|byte| *byte == 0)
 		.any(|argument| argument == marker.as_bytes())
 		.then_some(pid)
+		.filter(|pid| ours(*pid, mine))
 }
 
 /// The pid of a process carrying `marker` as a whole argument, if any.
@@ -66,15 +132,26 @@ pub fn pid_of(path: &Path, marker: &str) -> Option<i32> {
 /// a process *by name*, because an operator's own `wpa_supplicant` would be
 /// reached along with netcfgd's. This matches an absolute path netcfgd
 /// composed from its own run directory and one interface, as a **whole**
-/// `argv` element, by exactly the test [`pid_of`] applies. No other manager's
-/// command line can carry it. Loosen this to a substring or to a program name
-/// and the rule really is broken -- which is what the negative tests below are
-/// for.
+/// `argv` element, by exactly the test [`pid_of`] applies. Loosen this to a
+/// substring or to a program name and the rule really is broken -- which is
+/// what the negative tests below are for.
+///
+/// **This used to say that no other manager's command line can carry the
+/// marker, and that was the wrong question.** No other *manager* would, and
+/// nothing stops anybody else: the path is composed from public parts, so a
+/// local user can type it into their own `argv` and be adopted. The marker
+/// says which backend a process claims to be; [`ours`] is what says whether
+/// the claim is worth anything.
 ///
 /// The lowest matching pid, so that the answer is stable across calls when a
 /// caller has somehow produced two.
 #[must_use]
 pub fn pid_by_marker(marker: &str) -> Option<i32> {
+	pid_by_marker_as(marker, my_uid())
+}
+
+/// [`pid_by_marker`], told who is asking. See [`pid_of_as`].
+fn pid_by_marker_as(marker: &str, mine: u32) -> Option<i32> {
 	let mut found: Option<i32> = None;
 	let entries = std::fs::read_dir("/proc").ok()?;
 	for entry in entries.flatten() {
@@ -93,6 +170,7 @@ pub fn pid_by_marker(marker: &str) -> Option<i32> {
 		if cmdline
 			.split(|byte| *byte == 0)
 			.any(|argument| argument == marker.as_bytes())
+			&& ours(pid, mine)
 		{
 			found = Some(found.map_or(pid, |seen: i32| seen.min(pid)));
 		}
@@ -376,6 +454,114 @@ mod tests {
 		assert!(ready, "the child never appeared, so this proved nothing");
 		assert_eq!(prefix, None, "a proper prefix must not match");
 		assert_eq!(longer, None, "a longer string must not match");
+	}
+
+	/// **A marker carried by somebody else's process is refused.**
+	///
+	/// The whole defect: the marker is a predictable path, so a local user can
+	/// put it in their own `argv`. The child below is exactly the reproduction
+	/// -- an ordinary `sh` carrying an `OpenVPN` management socket path -- and
+	/// the uid it is asked about is one no process here has, which is what a
+	/// root netcfgd looking at a user's process is. Found for the real uid,
+	/// refused for the other, so the difference is the guard and not the scan.
+	#[test]
+	fn a_marker_carried_by_another_user_is_refused() {
+		let marker = format!(
+			"/run/netcfgd-test-{}-foreign/openvpn/vpn0.sock",
+			std::process::id()
+		);
+		let mut child = std::process::Command::new("sh")
+			.arg("-c")
+			.arg("sleep 30")
+			.arg(&marker)
+			.spawn()
+			.expect("spawn");
+		let mine = my_uid();
+		let mut ready = false;
+		for _ in 0..100 {
+			if pid_by_marker_as(&marker, mine).is_some() {
+				ready = true;
+				break;
+			}
+			std::thread::sleep(std::time::Duration::from_millis(20));
+		}
+		// A uid nothing on the machine runs as, so `ours` can answer only
+		// "not root and not you". `mine + 1` would be a real account.
+		let refused = pid_by_marker_as(&marker, u32::MAX - 1);
+		let _ = child.kill();
+		let _ = child.wait();
+		assert!(ready, "the child never appeared, so this proved nothing");
+		assert_eq!(
+			refused, None,
+			"a process another user started must not be adopted"
+		);
+	}
+
+	/// The same guard on the pid-file path, which is what signals a process.
+	#[test]
+	fn a_pid_file_naming_another_user_is_refused() {
+		let dir = std::env::temp_dir().join(format!("netcfgd-owner-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).expect("mkdir");
+		let marker = dir.join("supplicant.pid").to_string_lossy().into_owned();
+		let mut child = std::process::Command::new("sh")
+			.arg("-c")
+			.arg("sleep 30")
+			.arg(&marker)
+			.spawn()
+			.expect("spawn");
+		let file = dir.join("pid");
+		std::fs::write(&file, format!("{}\n", child.id())).expect("write");
+		let mine = my_uid();
+		// `sh` may not have exec'd yet, and /proc is authoritative only once it
+		// has -- so retry rather than read once and hope. Without this the
+		// positive half fails intermittently and says nothing about the guard.
+		let mut found = None;
+		for _ in 0..100 {
+			found = pid_of_as(&file, &marker, mine);
+			if found.is_some() {
+				break;
+			}
+			std::thread::sleep(std::time::Duration::from_millis(20));
+		}
+		let refused = pid_of_as(&file, &marker, u32::MAX - 1);
+		let _ = child.kill();
+		let _ = child.wait();
+		let _ = std::fs::remove_file(&file);
+		let _ = std::fs::remove_dir(&dir);
+		assert_eq!(
+			found,
+			i32::try_from(child.id()).ok(),
+			"its own child must be found"
+		);
+		assert_eq!(
+			refused, None,
+			"a process another user started must not be signalled"
+		);
+	}
+
+	/// **`Uid:`'s first field, not `stat` on the directory.**
+	///
+	/// `/proc/<pid>` is owned by the *effective* uid, and the kernel reports it
+	/// as root's for a setuid binary -- so the obvious instrument answers
+	/// "root" for a process an unprivileged user started. This asserts the two
+	/// fields are read in the right order against a process whose real and
+	/// effective uid are the same, which is the only case a test can build
+	/// without privilege; the setuid measurement is in `uids_of`'s comment.
+	#[test]
+	fn the_real_uid_is_read_before_the_effective_one() {
+		let (real, effective) = uids_of("self").expect("this process has a status file");
+		assert_eq!(real, effective, "an unprivileged test is not setuid");
+		assert!(
+			ours(i32::try_from(std::process::id()).expect("a pid fits"), real),
+			"its own uid is its own"
+		);
+		assert!(
+			!ours(
+				i32::try_from(std::process::id()).expect("a pid fits"),
+				u32::MAX - 1
+			),
+			"and no other is"
+		);
 	}
 
 	/// A marker nothing carries returns nothing, rather than a stray pid.

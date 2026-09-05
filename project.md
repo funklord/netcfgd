@@ -8189,7 +8189,18 @@ loop is exactly the sort of thing that could have made it worse:
     with the 0157 changes     3 of 6 runs failed
     with them stashed         3 of 6 runs failed
 
-Unchanged, so 0157 is not implicated. Worth keeping for a second reason: a
+Re-measured again the same day while landing 0158, the same way:
+
+    with the 0158 guard       3 of 6 runs failed
+    with it stashed           2 of 6 runs failed
+
+Also unchanged. Two changes to processes and pid handling have now each been
+put to this test and cleared by it, which is the point of running the control
+rather than reaching for the known flake: **non-reproduction is not evidence
+against an intermittent fault**, so the comfortable explanation only counts
+once the experiment that would have refuted it has been run.
+
+Worth keeping for a second reason: a
 smaller sample taken earlier in that session put the rate at one in four and
 was reported that way, which is the figure above measured badly rather than a
 rate that moved. **A flake rate is a number nobody re-derives**, and four runs
@@ -9475,9 +9486,41 @@ the drop-in. So a save that reported "nothing was kept" had still changed which
 profile the machine selects. Measured with a configuration the renderer cannot
 reproduce, which is how a save fails after that point: the selection stayed on
 the new name. It is remembered before the write and put back after a failure,
-as a file or as an absence. Backend adoption matches a marker in a process's own argv, so a
-local user can have an impostor adopted and the real backend never started,
-while netcfgd reports it running. `remote.sock`'s mode is computed from the
+as a file or as an absence.
+
+**Backend adoption trusted a marker any local user can type. Fixed**, and the
+record is [0158](doc/decision/0158-a-marker-is-a-claim-not-a-credential.md).
+0140 recognises a backend netcfgd lost the record of by an absolute path
+netcfgd composed in the process's own `argv` -- and `pid_by_marker`'s comment
+called that safe because "no other manager's command line can carry it", which
+is true of managers and false of everybody else. The path is composed from
+public parts. Measured as an ordinary user against a root netcfgd,
+`sh -c 'sleep 300' /run/netcfgd/openvpn/vpn0.sock` was adopted as the OpenVPN
+backend: the start was recorded done, no openvpn ran, and the tunnel was
+reported up. A marker says which backend a process *claims* to be; both
+lookups now also ask who started it, and accept only root or the caller.
+
+**The instrument is the interesting half.** `/proc/<pid>` is owned by the
+effective uid and the kernel reports it as root's for a setuid binary, so
+`stat` answers "root" for exactly the process being refused -- measured with
+`sudo -k -S` holding at its password prompt, which stats as `0` while
+`/proc/<pid>/status` reads `Uid: 1000 0 0 0`. A guard built on the obvious
+instrument would have been a new vacuous check. The `Uid:` line's first field
+is what is read.
+
+The rule is "root, **or** whoever is asking", and the second half is load
+bearing rather than slack: `ncfg diff` and `ncfg status` observe locally and
+may be run by anybody, so "root only" would be read by an unprivileged
+observer as every backend having stopped -- and it would then plan to start
+them all. netcfgd applying is root, so the pair collapses to "root" where it
+matters. Each half is sabotaged separately in
+`crates/netcfgd-sys/src/process.rs`, one test per lookup, and the tests supply
+the caller's uid rather than reading it so an ordinary user can drive the
+refusal against their own child. What is left open, deliberately, is a root
+process carrying a marker for an unrelated reason: closing it wants the
+executable name per kind, and those live at five spawn sites in four crates.
+
+`remote.sock`'s mode is computed from the
 *local* control policy, and authorization on that socket never consults peer
 credentials. And `wifi_status` joins an unvalidated interface into a path,
 distinguishing existence from socket-ness in its error text.

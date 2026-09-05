@@ -2203,7 +2203,7 @@ fn adopt_running_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Resul
 					format!("cannot record the {kind:?} backend on {iface}: {error}")
 				})?;
 				eprintln!(
-					"netcfgd: adopted the {kind:?} backend already running on {iface} (pid {pid}); it is netcfgd's, by the `{marker}` it was started with"
+					"netcfgd: adopted the {kind:?} backend already running on {iface} (pid {pid}); it is netcfgd's, by the `{marker}` it was started with and the privilege it runs with"
 				);
 				return Ok(true);
 			}
@@ -2259,7 +2259,7 @@ fn start_backend(
 						format!("cannot record the dhcp client on {iface}: {error}")
 					})?;
 					eprintln!(
-						"netcfgd: adopted the dhcp client already running on {iface} (pid {pid}); it is netcfgd's, by the `-p {}` it was started with",
+						"netcfgd: adopted the dhcp client already running on {iface} (pid {pid}); it is netcfgd's, by the `-p {}` it was started with and the privilege it runs with",
 						pidfile.display()
 					);
 					return Ok(());
@@ -3712,7 +3712,7 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 			std::fs::write(&pidfile, format!("{pid}\n"))
 				.map_err(|error| format!("cannot record the supplicant on {iface}: {error}"))?;
 			eprintln!(
-				"netcfgd: adopted the supplicant already running on {iface} (pid {pid}); it is netcfgd's, by the `-P {}` it was started with"
+				"netcfgd: adopted the supplicant already running on {iface} (pid {pid}); it is netcfgd's, by the `-P {}` it was started with and the privilege it runs with"
 			, pidfile.display());
 			return Ok(());
 		}
