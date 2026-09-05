@@ -9457,10 +9457,25 @@ because `render::flatten` does a separate `contains` pass, which is the
 behaviour the comment describes. `search` is worse than `servers`, being never
 sorted.
 
-**Security, all four reproduced.** A profile name is interpolated unescaped
-into generated configuration, and survives the failure path that reports
+**Security, all four reproduced.** A profile name was interpolated unescaped
+into generated configuration, and survived the failure path that reports
 "nothing was kept" -- measured, the next compile loaded an attacker-chosen
-`hostname`. Backend adoption matches a marker in a process's own argv, so a
+`hostname`. **Fixed, and it was two defects rather than one.**
+
+The name was checked only as a *directory* name -- not empty, no `/`, no
+leading dot -- and it is also a value inside a quoted string in the language.
+`usable_id` already asks that question for a wifi network's id, which is a name
+of exactly the same two kinds, so it is asked here rather than restated: one
+place to be right instead of two to keep in step.
+
+The second is the one the name check alone would have left standing. The
+selection is installed *before* the proof that the save reproduces the machine,
+and the cleanup put back the snapshot, the directory and the fold -- and not
+the drop-in. So a save that reported "nothing was kept" had still changed which
+profile the machine selects. Measured with a configuration the renderer cannot
+reproduce, which is how a save fails after that point: the selection stayed on
+the new name. It is remembered before the write and put back after a failure,
+as a file or as an absence. Backend adoption matches a marker in a process's own argv, so a
 local user can have an impostor adopted and the real backend never started,
 while netcfgd reports it running. `remote.sock`'s mode is computed from the
 *local* control policy, and authorization on that socket never consults peer
