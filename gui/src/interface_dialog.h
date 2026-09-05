@@ -85,7 +85,7 @@ private:
 	QLineEdit   *probe_args;
 	QSpinBox    *probe_interval;
 	QSpinBox    *probe_timeout;
-	QLabel      *note;
+	QLabel      *note = nullptr;
 	QPushButton *save_button;
 };
 
