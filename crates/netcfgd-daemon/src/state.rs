@@ -48,6 +48,23 @@ pub(crate) struct State {
 	/// would be gone on the next tick.
 	pub(crate) probes: crate::probe::Probes,
 	pub(crate) sims: crate::sim::Sims,
+	/// The inverses of the actions applied under the open confirm window, in
+	/// the order they ran.
+	///
+	/// **In memory rather than in the window file on disk, and that is a
+	/// deliberate limit rather than an oversight.** Writing them out would
+	/// mean reading them back, and `Op` has 48 variants: asking serde to
+	/// deserialize it costs 200KB of binary, measured, against a footprint
+	/// ceiling with 11KB of room. The alternative -- a hand-written match over
+	/// the op names -- is a second list that nothing compels to track the
+	/// first, which is the failure this codebase keeps finding in its own
+	/// walks.
+	///
+	/// So a daemon that restarts inside a window has no inverses, and
+	/// `revert` falls back to re-planning against the last-good document,
+	/// which is what it did for every revert before this. That is the weaker
+	/// path and it is still a correct one.
+	pub(crate) undo: Vec<netcfgd_plan::Op>,
 }
 
 /// What a `reload` request answers, given the event that reload produced.
@@ -106,6 +123,7 @@ impl State {
 			diagnostics: None,
 			observed: Observed::default(),
 			rejected: None,
+			undo: Vec::new(),
 		};
 		state.reload();
 		state.reobserve();
@@ -529,6 +547,7 @@ mod tests {
 			diagnostics: None,
 			observed: Observed::default(),
 			rejected: None,
+			undo: Vec::new(),
 		}
 	}
 

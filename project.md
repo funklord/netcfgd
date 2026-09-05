@@ -8728,19 +8728,17 @@ and puts it over the ceiling `make check` enforces:
     with it stubbed out       2 763 288   (inside the 2 766 027 ceiling)
 
 Attributed rather than guessed: the only change between those two builds is
-whether `serde_json::from_str::<Vec<Op>>` is instantiated. `Op` has sixty-odd
+whether `serde_json::from_str::<Vec<Op>>` is instantiated. `Op` has 48
 variants and the daemon previously only ever *serialised* plans. Moving the
 store between crates does not help; the cost is the deserialisation itself.
-On a project that gates on size and targets embedded and Android, that is a
-real price for machinery the paragraph above says would undo nothing.
 
-**What the holder is being asked, restated with the new facts.** Making the
-reversibility mark truthful needs one of: the watcher deferring to a requested
-window, so that a windowed apply is what applies the change; or the mark being
-redefined around what an action disturbs, which costs nothing and describes
-what a revert actually cannot restore. The third option -- landing the
-inverses as built -- buys 209 KB of binary for a list that is
-`[commit.revert]` on every measurement taken.
+**The price was for persisting them, not for having them, and that
+distinction is what closed this.** Both blockers above are about a design
+that writes the inverse list to `/run` -- and nothing required that. Held in
+memory on `State`, the list costs **nothing measurable**: 2 755 096 bytes
+before and after, the same number twice. Landed that way in 10.41.4; the
+paragraphs above stand as what was measured about the on-disk design and no
+longer as the reason not to do this.
 
 ### 10.41.2 Why the watcher wins, exactly
 
@@ -8837,3 +8835,69 @@ predicate that cannot be exercised without building one is a predicate nothing
 exercises. Its test was sabotaged two ways -- the predicate made
 unconditionally true, and `--confirm-within 0` allowed to count as a window --
 and goes red for both.
+
+### 10.41.4 Revert applies the declared inverses
+
+Acting on 10.41's settlement. What blocked it in 10.41.1 was the cost of
+*persisting* the inverse list, and nothing ever required persisting it: held
+on `State`, it costs nothing and is gone on restart, which is the one case
+that already had a correct answer.
+
+**What lands.** When a windowed apply arms its window, the inverses of the
+actions that actually reached the kernel -- `Outcome::Done`, and only those
+declaring one -- are recorded in memory. An unconfirmed window replays them
+newest first, then restores the last-good document and re-plans as it always
+did. Confirming clears the list; so does an apply with no window.
+
+**The re-plan is kept behind it, and is not a duplicate.** It converges from
+wherever the machine is, including from a half-applied plan that stopped at a
+failure and from a restart that lost the list -- so a daemon that dies inside
+a window reverts exactly as it did before this, by the weaker path, which is
+still a correct one.
+
+**Measured, with the document restore alone as the control.** A window
+changing an address, a route and the MTU, closing unconfirmed:
+
+    document restore only   addr restored   route restored   mtu 1400
+    declared inverses       addr restored   route restored   mtu 1500
+
+The MTU is the case, and it is a shape rather than one field: **the re-plan
+can only take back what the last-good document disagrees with.** That
+document states no MTU for the device, so 1400 agrees with it exactly as well
+as 1500 does and nothing is planned -- while `link.set_mtu` declared an
+inverse carrying the value it replaced. Before this, a revert that reported
+success left the machine one setting away from what the operator believed
+they had gone back to. `tests/live/confirm.sh` case 7 pins it and goes red
+against the previous code.
+
+**And the mark 10.41 opened with is now true.** `Plan::irreversible` drives a
+CLI warning and the GUI's `NO -- confirm cannot undo this` column, and until
+this landed the distinction was decorative: no action's inverse was consulted
+by anything, so an action declaring one was undone by exactly the same
+mechanism as an action declaring none. An action with an inverse is now
+replayed by the revert and an action without one is not, which is what both
+clients have been telling operators all along.
+
+**One fault this introduced and fixed.** The re-plan was computed against the
+observation taken *before* the inverses ran, so it re-issued work already
+done and the kernel refused it: a revert that undid all five of its actions
+correctly went on to print `revert incomplete: route.del failed: No such
+process`. A clean revert announcing itself as a broken one is worse than the
+bug it replaced. `state.reobserve()` between the two halves fixes it, and
+with the inverses complete the re-plan now finds nothing to do.
+
+**Two instrument faults, recorded because each produced a confident wrong
+reading.** `/sys/class/net/*/mtu` inside `unshare -rn` answers for the host's
+network namespace, not the new one, so the first rig read an empty MTU and
+then the wrong one; `ip link show` reads the namespace it is in. And the
+first rig started the daemon with `--no-apply-on-start` and applied with a
+plain `ncfg apply` -- which does **not** go through the daemon at all
+(`command_apply` applies locally unless `--confirm-within` is given, by
+design, so that the safety net has one implementation). The daemon therefore
+never recorded a last-good, `establish_first_last_good`'s empty document
+stayed, and the baseline appeared to revert to nothing. That would have been
+reported as a serious pre-existing defect. It was the rig.
+
+The second rig starts the daemon normally and sets `on_drift = "report"`, so
+the watcher cannot apply the change before the windowed apply does -- without
+which the window covers nothing and the case passes for the wrong reason.

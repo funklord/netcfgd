@@ -1145,7 +1145,7 @@ fn apply_request(
 		Ok(executor) => executor,
 		Err(message) => return Response::error(message),
 	};
-	let (_, journal) = state.apply(&options, &mut executor);
+	let (plan, journal) = state.apply(&options, &mut executor);
 	// **Cleared here as well as in the reconcile loop, and it was not.** The
 	// note that a modem is waiting for its link to be cycled is taken before
 	// the plan and forgotten after the plan ran; `reconcile_drift` did both
@@ -1162,14 +1162,21 @@ fn apply_request(
 
 	match (&window, last_good) {
 		(Some(seconds), Some(document)) => {
+			// What to undo if nobody confirms, taken from the plan that just
+			// ran and the journal saying which of it reached the kernel. Set
+			// before the window is armed, so there is no instant in which a
+			// window is open with nothing recorded against it.
+			state.undo = confirm::undo_from(&plan, &journal);
 			let event = confirm::arm(state, *seconds, &document);
 			if let Some(timer) = timers {
 				spawn_expiry_timer(timer, *seconds);
 			}
 			server::broadcast(subscribers, &event);
 		}
-		// No window: this configuration is the one to fall back to.
+		// No window: this configuration is the one to fall back to, and
+		// there is nothing outstanding to undo.
 		_ => {
+			state.undo.clear();
 			if let Some(desired) = &state.desired {
 				let _ = netcfgd_host::confirm::write_last_good(&state.paths.run, desired);
 			}

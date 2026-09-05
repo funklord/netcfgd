@@ -243,6 +243,58 @@ sleep 6
 check "and does not put it back on the next reconcile" "$(present)" "no"
 stop_daemon
 
+# 7. A setting the last-good document does not mention.
+#
+#    The revert restores the last-good document and re-plans, which can only
+#    take back what that document *disagrees* with. An MTU it does not state
+#    agrees with whatever the machine currently has -- so before the declared
+#    inverses were replayed, a window that changed the MTU and closed
+#    unconfirmed left the new MTU in place for ever, with the address and the
+#    route correctly restored around it. The operator sees a revert that
+#    worked and a machine that is not what they went back to.
+#
+#    `on_drift = "report"` so the watcher cannot apply the change before the
+#    windowed apply does. Without it the reconcile loop wins the race, the
+#    window covers nothing, and this passes for the wrong reason -- which is
+#    the state the first version of this case was written in.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+global {
+	on_drift = "report"
+}
+device probe0 {
+	kind   = "dummy"
+}
+interface probe0 {
+	config = "10.9.9.1/24"
+}
+CONF
+start_daemon ""
+await yes || true
+mtu_of() { ip link show probe0 2>/dev/null | sed -n 's/.*mtu \([0-9]*\).*/\1/p'; }
+check "the device starts at the kernel default" "$(mtu_of)" "1500"
+
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+global {
+	on_drift = "report"
+}
+device probe0 {
+	kind   = "dummy"
+	mtu    = 1400
+}
+interface probe0 {
+	config = "10.9.9.1/24"
+}
+CONF
+sleep 1
+"$ncfg" apply --confirm-within 2 >/dev/null 2>&1
+check "the windowed apply set the MTU" "$(mtu_of)" "1400"
+
+# Longer than the window, and longer than a tick, so the revert has run.
+sleep 7
+check "an unconfirmed MTU is put back by the declared inverse" "$(mtu_of)" "1500"
+check "and the address the document does state is still there" "$(present)" "yes"
+stop_daemon
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "confirm.sh: all checks passed"
