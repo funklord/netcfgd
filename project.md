@@ -9468,9 +9468,35 @@ credentials. And `wifi_status` joins an unvalidated interface into a path,
 distinguishing existence from socket-ness in its error text.
 
 **The GUI's three worst, each settled with the daemon in the loop.** The access
-tab never loads the current tiers and sends all three, so changing one resets
-the other two to root -- measured end to end, with the daemon then refusing the
-GUI's own `show`. The interface dialog opens blank and saves with
+tab never loaded the current tiers and sent all three, so changing one reset the
+other two to root -- measured end to end, with the daemon then refusing the
+GUI's own `show`. **Fixed**: the tab reads the policy before showing it, which
+is what an editor owes the value it edits.
+
+Two things about that fix are worth keeping. Its comment claimed the policy
+"lives in a file this client cannot read -- it is root's", and that was true of
+the file and false of the socket: the daemon reports all three, and
+`global_view` had been drawing them from `globals()` all along. A correct
+sentence about the wrong object is how this survived. And **a value the four
+fixed choices cannot express now gets an entry of its own** rather than falling
+back to the first item -- `group:wheel` and another user's `user:` are both
+legal, and selecting `root only` for them would be the same silent overwrite one
+layer down.
+
+Testing it needed the combos to be addressable. They had no object names, so a
+probe would have had to take `findChildren<QComboBox *>().first()` -- which is
+the "first widget of a kind" trap this workspace has already paid for once.
+They are named now, and `gui/tests/access_policy.cpp` drives a real daemon with
+a policy that is not the default in any of the three tiers, so a view that
+failed to load would show `root` three times and be caught. Four checks go red
+with the load removed.
+
+The daemon half is left alone deliberately. `ncfg control set` merges -- it
+clones the existing policy and leaves what was not named -- while the helper
+protocol the GUI drives builds a whole `Control` from three principals. That
+asymmetry is not a defect: the protocol sends all three, so the receiver cannot
+tell "unchanged" from "set to root", and merging there would be guessing. The
+editor loading what it edits is where this is fixable. The interface dialog opens blank and saves with
 `replace=true`, losing address, routes, preference, MTU, probe, forwarding and
 NAT. And a PSK network edited with no changes at all loses `metric`, `metered`,
 `bssid`, addressing, routes and DNS, because the dialog composes the whole

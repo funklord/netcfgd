@@ -88,6 +88,8 @@ private:
 	 * mode the client may put itself into. */
 	void set_administrator_mode(bool live);
 
+	void load_policy();
+
 	ncfg_connection *connection;
 	QFrame          *frame;
 	QComboBox       *observe;

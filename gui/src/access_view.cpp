@@ -134,6 +134,13 @@ ncfg_access_view::ncfg_access_view(ncfg_connection *connection, QWidget *parent)
 	observe = new QComboBox(frame);
 	wifi = new QComboBox(frame);
 	admin = new QComboBox(frame);
+	/* Named so a test can ask for one by name. The alternative is
+	 * `findChildren<QComboBox *>().first()`, which returns whichever was
+	 * constructed first and is how a probe elsewhere in this project ended up
+	 * reading a different table than the one it meant. */
+	observe->setObjectName(QStringLiteral("access_observe"));
+	wifi->setObjectName(QStringLiteral("access_wifi"));
+	admin->setObjectName(QStringLiteral("access_admin"));
 	fill(observe);
 	fill(wifi);
 	fill(admin);
@@ -229,8 +236,80 @@ void ncfg_access_view::stop_helper()
 	set_administrator_mode(false);
 }
 
+/*
+ * Put the machine's current policy into the three editors.
+ *
+ * **Without this the editors were an empty form that overwrites.** They are
+ * filled once in the constructor and left at index 0, which is `root only`, and
+ * `apply()` sends all three tiers -- so an operator who opened this tab to
+ * change `admin` alone sent `set root root <their choice>` and reset the other
+ * two. Measured end to end: on a machine with `observe = any`, changing only
+ * `admin` left every non-root client locked out, this window included, with the
+ * note reporting success. Recovery needed `sudo ncfg control set` in a
+ * terminal.
+ *
+ * The daemon reports the policy -- `global_view` has drawn all three from
+ * `globals()` all along -- so the comment in `refresh()` claiming this client
+ * cannot read it was describing the file rather than the socket.
+ *
+ * **A value the list cannot express gets an entry of its own**, rather than
+ * falling back to the first item. `group:wheel` and another user's `user:` are
+ * both legal and neither is in the fixed four; selecting `root only` for them
+ * would be the same silent overwrite one layer down. An entry that carries the
+ * raw value round-trips it unchanged through an Apply that was aimed at a
+ * different tier.
+ */
+void ncfg_access_view::load_policy()
+{
+	/* Only while the editors are shut. Once `unlock()` has opened them the
+	 * operator may have chosen something, and a refresh -- which a tab switch
+	 * triggers -- would throw it away. */
+	if (observe->isEnabled()) {
+		return;
+	}
+
+	ncfg_globals globals;
+	QString error;
+	if (!connection->globals(&globals, &error)) {
+		return;
+	}
+
+	const QString me = QString::fromLocal8Bit(qgetenv("USER"));
+	const auto select = [&me](QComboBox *box, const QString &value) {
+		if (value.isEmpty()) {
+			return;
+		}
+		/* `this user` is stored as empty data and means whoever is running
+		 * this, so it matches only the policy naming that same account. */
+		if (!me.isEmpty() && value == QStringLiteral("user:%1").arg(me)) {
+			box->setCurrentIndex(box->findData(QString()));
+			return;
+		}
+		const int known = box->findData(value);
+		if (known >= 0) {
+			box->setCurrentIndex(known);
+			return;
+		}
+		box->insertItem(0, value, value);
+		box->setCurrentIndex(0);
+	};
+
+	/* Rebuilt rather than adjusted, so a value inserted for one policy does
+	 * not accumulate across refreshes. */
+	for (QComboBox *box : { observe, wifi, admin }) {
+		const bool was_enabled = box->isEnabled();
+		box->clear();
+		fill(box);
+		box->setEnabled(was_enabled);
+	}
+	select(observe, globals.control_observe);
+	select(wifi, globals.control_wifi);
+	select(admin, globals.control_admin);
+}
+
 void ncfg_access_view::refresh()
 {
+	load_policy();
 	ncfg_tiers_t held = connection->tiers();
 	const QString summary =
 	    QStringLiteral("this connection holds:%1%2%3")
