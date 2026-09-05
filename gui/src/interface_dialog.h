@@ -68,6 +68,15 @@ private:
 	QString          interface;
 	QString          summary;
 
+	void load_existing();
+
+	/* What the daemon says is configured, and whether it could be asked. */
+
+	ncfg_interface_config existing;
+
+	bool        unknown = false;
+
+
 	QComboBox   *addressing;
 	QLineEdit   *static_address;
 	QLineEdit   *gateway;
@@ -85,7 +94,7 @@ private:
 	QLineEdit   *probe_args;
 	QSpinBox    *probe_interval;
 	QSpinBox    *probe_timeout;
-	QLabel      *note;
+	QLabel      *note = nullptr;
 	QPushButton *save_button;
 };
 
