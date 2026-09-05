@@ -170,8 +170,16 @@ pub fn report_script(iface: &str, report: &Path) -> String {
 		 set -u\n\
 		 \n\
 		 target='{report}'\n\
-		 tmp=\"$target.tmp\"\n\
+		 # **A dotted name, not `.tmp`.** netcfgd skips a staging file by the\n\
+		 # contract's rule -- a leading dot -- which `<iface>.tmp` does not\n\
+		 # satisfy, so a half-written report was read as an interface of its\n\
+		 # own: `ncfg status` listed `vpn0.tmp` carrying the address and\n\
+		 # nameservers being written. That is decision 0113's defect again, and\n\
+		 # the window here is the widest of the three writers -- the block below\n\
+		 # forks once per pushed route, which is exactly the netlink burst that\n\
+		 # wakes a reconcile.\n\
 		 dir=$(dirname \"$target\")\n\
+		 tmp=\"$dir/.$(basename \"$target\")\"\n\
 		 mkdir -p \"$dir\" || exit 1\n\
 		 \n\
 		 # The tunnel is gone, so the routes are. Emptied rather than removed:\n\
@@ -723,6 +731,31 @@ fn complaints(path: &Path, count: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// The script stages under a dotted name, so netcfgd skips it.
+	///
+	/// `is_staging` is "the name begins with a dot", which is the contract's
+	/// own wording -- and this script staged at `<report>.tmp`, which does not
+	/// begin with one. So a half-written report was read as an interface in
+	/// its own right: `ncfg status` listed `vpn0.tmp` carrying the address and
+	/// nameservers of the file being written. That is decision 0113's measured
+	/// defect, returning through a writer in a different crate from the test
+	/// that was meant to cover every writer.
+	///
+	/// Here rather than beside that test because this crate owns this script,
+	/// and a list kept in another crate is a list that cannot see it.
+	#[test]
+	fn the_script_stages_under_a_dot() {
+		let script = report_script("vpn0", Path::new("/run/netcfgd/reported/vpn0"));
+		assert!(
+			!script.contains("$target.tmp"),
+			"stages at a name netcfgd will read as an interface: {script}"
+		);
+		assert!(
+			script.contains(".$(basename \"$target\")"),
+			"does not stage under a dotted name: {script}"
+		);
+	}
 
 	/// The generated script has to be a shell script.
 	///

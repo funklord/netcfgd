@@ -123,8 +123,15 @@ mbim() {
 # half-written file is a file it will believe.
 write_report() {
 	mkdir -p "$run_dir/reported"
-	cat > "$report.tmp"
-	mv "$report.tmp" "$report"
+	# **A dotted name, not `.tmp`.** netcfgd skips a staging file by the
+	# contract's own rule -- a leading dot -- and `<iface>.tmp` does not have
+	# one, so a half-written report was read as an interface in its own right:
+	# `ncfg status` listed `wwan0.tmp` with the address and nameservers of the
+	# file being written. That is decision 0113's measured defect, arriving
+	# again through a writer outside the tree that 0113 fixed.
+	staged="$(dirname "$report")/.$(basename "$report")"
+	cat > "$staged"
+	mv "$staged" "$report"
 }
 
 # What `mbimcli --query-ip-configuration` prints, turned into what netcfgd

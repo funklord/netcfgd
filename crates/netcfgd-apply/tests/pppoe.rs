@@ -200,7 +200,18 @@ fn service_and_concentrator_are_optional() {
 /// the rename has to be within one filesystem, which means within this
 /// directory.
 #[test]
-fn every_generated_writer_stages_under_a_dot() {
+fn every_writer_generated_by_this_crate_stages_under_a_dot() {
+	// **Renamed, because the old name claimed more than the body checks.** It
+	// was `every_generated_writer_...` over a hand-written list of five, and
+	// the writers outside this crate -- openvpn's route-up script, and the two
+	// shipped modem helpers -- were outside the quantifier by construction.
+	// All three staged at `<report>.tmp`, which is not a dotted name, and
+	// `ncfg status` duly reported an interface called `vpn0.tmp` carrying the
+	// address being written: decision 0113's defect, returning through the
+	// door this test's name said was shut.
+	//
+	// The list is still hand-written and still cannot see a sixth writer added
+	// to this crate. What the name no longer does is promise otherwise.
 	use netcfgd_apply::kernel::{dhcpcd_script, pd_hook_script, udhcpc_script};
 	use std::path::Path;
 

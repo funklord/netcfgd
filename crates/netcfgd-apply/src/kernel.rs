@@ -2939,9 +2939,23 @@ pub fn ppp_script(iface: &str, report: &std::path::Path, going_up: bool) -> Stri
 	let when = if going_up { "ip-up" } else { "ip-down" };
 	// Emptied on the way down rather than removed, which the contract makes
 	// mean "nothing, deliberately" -- pppd running this is somebody watching.
+	// **`if` rather than `[ ... ] && ...`, and that is not a style choice.** A
+	// test that fails is the last command of the group, so the group's status
+	// is 1, `|| exit 1` fires, and the `mv` never runs -- so the report was
+	// written only when the peer offered *both* nameservers. Measured by
+	// running the generated script:
+	//
+	//     DNS1 and DNS2 set   exit 0   report written
+	//     DNS1 only           exit 1   no report at all
+	//     neither             exit 1   no report at all
+	//
+	// A peer offering one nameserver in IPCP is ordinary, and the report is the
+	// only DNS path a PPP link has -- so "one server" was indistinguishable
+	// from "no servers", both producing silence. Both tests set DNS1 and DNS2,
+	// which is why nothing caught it.
 	let body = if going_up {
-		"\t[ -n \"${DNS1:-}\" ] && printf 'dns=%s\\n' \"$DNS1\"\n\
-		 \t[ -n \"${DNS2:-}\" ] && printf 'dns=%s\\n' \"$DNS2\"\n"
+		"\tif [ -n \"${DNS1:-}\" ]; then printf 'dns=%s\\n' \"$DNS1\"; fi\n\
+		 \tif [ -n \"${DNS2:-}\" ]; then printf 'dns=%s\\n' \"$DNS2\"; fi\n"
 	} else {
 		"\t# Nothing. The session is gone, and pppd leaves DNS1 and DNS2 set\n\
 		 \t# in the environment of this very call -- which is why this is a\n\
