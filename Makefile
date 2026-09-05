@@ -1493,10 +1493,10 @@ live:
 	@# process that reads a pipe and writes a file, which is the whole of what
 	@# the privileged half of administrator mode does.
 	@NCFG_LIVE=1 sh tests/live/control_helper.sh
-	@# Who may open each control socket, from a real daemon's own bind. No
+	@# What the control sockets expose to a local caller, from a real daemon. No
 	@# namespace: it binds unix sockets and reads their modes, and it needs a
 	@# real uid with a real secondary group, which `unshare -r` does not have.
-	@NCFG_LIVE=1 sh tests/live/remote_socket.sh
+	@NCFG_LIVE=1 sh tests/live/control_exposure.sh
 	@# The interface reporting contract, checked from the side a writer writes.
 	@# Under NCFG_LIVE: it needs no modem and no module, only a file.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/report.sh"

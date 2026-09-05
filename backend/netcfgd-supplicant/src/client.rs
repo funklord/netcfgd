@@ -129,6 +129,19 @@ impl Client {
 	/// The same as [`Client::connect`].
 	pub fn connect_within(dir: &Path, interface: &str, timeout: Duration) -> io::Result<Self> {
 		let timeout = timeout.min(REPLY_TIMEOUT);
+		// **Before anything touches the filesystem.** `interface` arrives from
+		// a request at the `observe` tier, `dir.join` with an absolute path
+		// replaces the base rather than extending it, and the two errors below
+		// say different things about what is there -- so without this the
+		// pair is an existence oracle over the whole filesystem, answered as
+		// root. Refusing here rather than at the four call sites because this
+		// is where the name becomes a path. Decision 0160.
+		netcfgd_model::interface::usable_name(interface).map_err(|why| {
+			io::Error::new(
+				io::ErrorKind::InvalidInput,
+				format!("`{interface}` is not an interface name: {why}"),
+			)
+		})?;
 		let remote = dir.join(interface);
 		if !remote.exists() {
 			return Err(io::Error::new(
@@ -360,6 +373,57 @@ mod tests {
 	use super::{is_reply_socket, nothing_is_listening, Client};
 	use std::io;
 	use std::os::unix::net::UnixDatagram;
+
+	/// **A name that is a path is refused before the filesystem is touched.**
+	///
+	/// The defect: `dir.join(interface)` with an absolute path replaces the
+	/// base, and the two failure messages below the join distinguish "not
+	/// there" from "there and not connectable" -- so the pair answered, at the
+	/// `observe` tier, whether an arbitrary path exists. Measured against the
+	/// daemon: `/etc/shadow` gave "Permission denied", `/etc/nonexistent` gave
+	/// "no control socket at ...".
+	///
+	/// The assertion is on the *kind* rather than only on the failure. Every
+	/// one of these would have failed anyway with the guard removed -- there
+	/// is no supplicant at any of them -- so a test that only asked "does this
+	/// error" would pass against the oracle it was written to close. What
+	/// changes is that the answer no longer depends on what is on disk, and
+	/// `InvalidInput` is how the code says so.
+	#[test]
+	fn a_name_that_is_a_path_is_refused_without_looking() {
+		let dir = netcfgd_testdir::TestDir::new("supplicant-name");
+		for name in [
+			"/etc/shadow",
+			"/etc/definitely-not-here",
+			"../../etc/passwd",
+			"..",
+			"",
+			"a name with spaces",
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		] {
+			let error = Client::connect(dir.path(), name).expect_err("refused");
+			assert_eq!(
+				error.kind(),
+				io::ErrorKind::InvalidInput,
+				"`{name}` must be refused as a name, not reported on as a path: {error}"
+			);
+		}
+	}
+
+	/// And an ordinary name still reaches the filesystem to say what is wrong.
+	///
+	/// The other half: a guard that refused everything would pass the test
+	/// above and take the diagnostic with it.
+	#[test]
+	fn an_ordinary_name_still_gets_the_ordinary_answer() {
+		let dir = netcfgd_testdir::TestDir::new("supplicant-ordinary");
+		let error = Client::connect(dir.path(), "wlan0").expect_err("nothing is listening");
+		assert_eq!(
+			error.kind(),
+			io::ErrorKind::NotFound,
+			"a real name gets the real diagnosis: {error}"
+		);
+	}
 
 	/// A shortened deadline governs the commands, not just the opening `PING`.
 	///

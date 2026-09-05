@@ -9555,9 +9555,42 @@ principals stayed green with the defect restored, because
 test that matters drives `bind_sockets`. And a live check asserting the
 socket's group passed either way, because a socket is created owned by its
 creator's primary group and the check named that group; it takes the first
-secondary group now, which a chown has to have moved it to. And `wifi_status`
-joins an unvalidated interface into a path, distinguishing existence from
-socket-ness in its error text.
+secondary group now, which a chown has to have moved it to. **And `wifi_status` joined an unvalidated interface
+into a path. Fixed**, and the record is
+[0160](doc/decision/0160-an-interface-name-is-not-a-path.md). `Path::join`
+with an absolute path *replaces* the base rather than extending it, so no `..`
+was needed, and the two errors around the join say different things -- "no
+control socket at X" for a path that is not there, "cannot reach X: <errno>"
+for one that is. Measured as an ordinary user against `observe = "any"`:
+`/etc/shadow` answered Permission denied, `/etc/nonexistent` answered no
+control socket, `/tmp` answered Connection refused. Absent, present-and-
+unreadable and present-and-a-directory are three distinct answers, served to
+the tier that exists so a status display need not be root. `usable_name` is
+`dev_valid_name` from the kernel's `net/core/dev.c`, transcribed, and it runs
+where the name becomes a path rather than at the four call sites.
+
+**The population was enumerated rather than grepped for**, which is what kept
+it from being a fix to one symptom: of the thirteen requests carrying a name,
+four reach that join, and the other two interface-carrying ones look their name
+up in the document or the observation first.
+
+**Left open, measured, and the same defect one tier up: the compiler does not
+validate interface names at all.** `device "../../etc/evil"` and a
+forty-character name both compile and plan. The kernel refuses both, so no link
+appears -- but the name reaches a pid file, a generated config, a hook script
+and a control socket before and around that, as root, and documents are written
+by an `admin`-tier caller whom this file already records as deliberately not
+root. `usable_name` is the function it would use and `netcfgd-compile`'s
+private `IFNAMSIZ_MAX` is half of the same rule; refusing a document is a
+compile-behaviour change that wants deciding on its own terms.
+
+**A size ceiling caught something worth knowing.** The guard pushed the release
+binary 4096 bytes over -- one page exactly -- and the suspect was
+`char::escape_debug` pulling in Unicode printability tables. Measured, swapping
+that out changed nothing at all; what cost the page was returning `String`
+where `&'static str` would do, and the switch put the binary back to the byte.
+The budget was never raised. **A plausible cause with a mechanism behind it is
+still a guess**, and the whole cost of checking was two builds.
 
 **The GUI's three worst, each settled with the daemon in the loop.** The access
 tab never loaded the current tiers and sent all three, so changing one reset the

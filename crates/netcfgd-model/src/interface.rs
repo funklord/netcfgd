@@ -10,6 +10,84 @@ use crate::DriftPolicy;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
+/// The longest interface name the kernel will take.
+///
+/// `IFNAMSIZ` is 16 in `linux/if.h`, including the terminator.
+pub const IFNAMSIZ_MAX: usize = 15;
+
+/// [`usable_name`] returns `&'static str`, so its length message spells the
+/// limit out rather than interpolating it. That is a second copy of this
+/// number, so it is checked at compile time rather than trusted.
+const _: () = assert!(IFNAMSIZ_MAX == 15, "usable_name's message names 15");
+
+/// Whether a string is a name the kernel would accept for a link.
+///
+/// **This is `dev_valid_name` from `net/core/dev.c`, transcribed rather than
+/// approximated**, because the point of it here is to agree with the kernel
+/// about what an interface name is:
+///
+/// ```text
+/// if (*name == '\0')                     return false;
+/// if (strnlen(name, IFNAMSIZ) == IFNAMSIZ) return false;
+/// if (!strcmp(name, ".") || !strcmp(name, "..")) return false;
+/// while (*name) {
+///     if (*name == '/' || *name == ':' || isspace(*name)) return false;
+///     name++;
+/// }
+/// ```
+///
+/// **It is a security property and not only a courtesy.** An interface name
+/// reaches the filesystem all over this tree -- a pid file, a generated
+/// config, a hook script, a control socket -- through `Path::join`, and
+/// `join` with an absolute path *replaces* the base rather than extending it.
+/// So a name is a path unless something says it is not. Measured against the
+/// daemon before this existed: `wifi_status` on `/etc/shadow` answered
+/// "Permission denied" and on `/etc/nonexistent` answered "no control socket
+/// at ...", which is an existence oracle over the whole filesystem, served to
+/// the `observe` tier -- the one deliberately open to `any`. Decision 0160.
+///
+/// The `/` and the `..` cases are the ones that matter for that; the rest are
+/// here because agreeing with the kernel is cheaper to keep true than a subset
+/// somebody has to reason about.
+///
+/// # Errors
+///
+/// Returns a sentence naming what is wrong, for a caller that can quote it.
+/// `&'static str` rather than `String`, matching `wifi_profile::usable_id`:
+/// none of these interpolates, the caller is the one holding the name, and
+/// measured, a `String` here cost the binary a page it did not have.
+/// `&'static str` rather than `String`, matching `wifi_profile::usable_id`:
+/// none of these needs to interpolate, and the caller is the one with the name
+/// to quote.
+pub fn usable_name(name: &str) -> Result<(), &'static str> {
+	if name.is_empty() {
+		return Err("an interface name cannot be empty");
+	}
+	if name.len() > IFNAMSIZ_MAX {
+		return Err("an interface name is at most 15 characters");
+	}
+	if name == "." || name == ".." {
+		return Err("a directory is not an interface name");
+	}
+	if let Some(bad) = name
+		.chars()
+		.find(|c| *c == '/' || *c == ':' || c.is_whitespace())
+	{
+		// Named rather than escaped. `char::escape_debug` decides printability
+		// from Unicode tables, which was the suspect when this first pushed
+		// the binary 4096 bytes past its ceiling -- and measured, swapping it
+		// changed nothing at all. What cost the page was returning `String`;
+		// `&'static str` put the size back to the byte. Spelling the three
+		// out is the better message regardless.
+		return Err(match bad {
+			'/' => "an interface name cannot contain `/`",
+			':' => "an interface name cannot contain `:`",
+			_ => "an interface name cannot contain whitespace",
+		});
+	}
+	Ok(())
+}
+
 /// VLAN encapsulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1040,5 +1118,64 @@ impl LinkSettings {
 	#[must_use]
 	pub fn is_empty(&self) -> bool {
 		*self == Self::default()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{usable_name, IFNAMSIZ_MAX};
+
+	/// Every clause of `dev_valid_name`, and the names that must still pass.
+	///
+	/// The accepted list is not decoration: a rule that refused `wlan0` would
+	/// satisfy every rejection below and break the machine, which is the
+	/// direction a name check is most likely to be wrong in.
+	#[test]
+	fn the_rule_is_the_kernels() {
+		for good in [
+			"eth0",
+			"wlan0",
+			"br-lan",
+			"enp0s31f6",
+			"a",
+			"x.y",
+			"ifb-eth0",
+		] {
+			assert!(
+				usable_name(good).is_ok(),
+				"`{good}` is a name the kernel takes"
+			);
+		}
+		for bad in [
+			"",                 // *name == '\0'
+			".",                // strcmp(name, ".")
+			"..",               // strcmp(name, "..")
+			"a/b",              // '/'
+			"/etc/shadow",      // '/', and the case that made this a security rule
+			"../../etc/passwd", // '/' again, by the other route
+			"a:b",              // ':'
+			"a b",              // isspace
+			"a\tb",             // isspace, the one a reader forgets
+		] {
+			assert!(
+				usable_name(bad).is_err(),
+				"`{bad}` is not a name the kernel takes"
+			);
+		}
+	}
+
+	/// The length boundary, from both sides.
+	///
+	/// `IFNAMSIZ` counts the terminator, so the off-by-one here is the whole
+	/// content of the constant and is worth pinning rather than trusting.
+	#[test]
+	fn the_length_limit_is_ifnamsiz_less_the_terminator() {
+		let longest = "a".repeat(IFNAMSIZ_MAX);
+		let over = "a".repeat(IFNAMSIZ_MAX + 1);
+		assert!(
+			usable_name(&longest).is_ok(),
+			"{IFNAMSIZ_MAX} characters fit"
+		);
+		assert!(usable_name(&over).is_err(), "one more does not");
 	}
 }

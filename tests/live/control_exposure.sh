@@ -1,9 +1,13 @@
 #!/bin/sh
-# Who may open the remote socket, against a real daemon.
+# What netcfgd's control sockets expose to a local caller, against a real daemon.
 #
-#     sh tests/live/remote_socket.sh
+#     sh tests/live/control_exposure.sh
 #
-# Decision 0159. The remote socket's mode was computed from the *local* control
+# Two findings, one scaffold, because both are the same question asked of the
+# same two files: what can somebody on this machine reach, and what does the
+# answer tell them.
+#
+# **Who may open the remote socket (0159).** The remote socket's mode was computed from the *local* control
 # policy, and `check` short-circuits to the remote booleans for an
 # `Origin::Remote` connection -- consulting no principal and no peer. So a
 # `control` block opening `observe` to a group or to `any`, which is the shape
@@ -19,6 +23,10 @@
 # permission bits, which is the thing that differs between a fixed daemon and a
 # broken one whoever runs it.
 #
+# **What the observe tier discloses (0160)**, in the last case: an interface
+# name reaching `Path::join` made the two errors around it into an existence
+# oracle over the whole filesystem.
+#
 # No namespace: this binds unix sockets and reads their modes. It touches no
 # interface.
 
@@ -28,10 +36,10 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
-		echo "remote_socket.sh: NCFG_LIVE is set but this cannot run: $1" >&2
+		echo "control_exposure.sh: NCFG_LIVE is set but this cannot run: $1" >&2
 		exit 1
 	fi
-	echo "remote_socket.sh: skipping: $1"
+	echo "control_exposure.sh: skipping: $1"
 	exit 0
 }
 
@@ -53,10 +61,16 @@ cleanup() {
 	done
 }
 trap cleanup EXIT INT TERM
-mkdir -p "$work/etc" "$work/run"
+mkdir -p "$work/etc" "$work/run" "$work/ctrl"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
+# This run's own supplicant directory, exported before any daemon starts so the
+# daemon inherits it. Set after `start_daemon` it would be read by the CLI and
+# not by the process that does the joining, and the last case below would then
+# be answered from whatever `/run/wpa_supplicant` this machine happens to hold
+# -- which is a real directory here, with a real socket in it.
+export NCFG_WPA_CTRL_DIR="$work/ctrl"
 
 failures=0
 check() {
@@ -82,7 +96,7 @@ start_daemon() {
 		sleep 0.1
 	done
 	if [ ! -e "$work/run/netcfgd.sock" ]; then
-		echo "remote_socket.sh: the daemon never bound its socket" >&2
+		echo "control_exposure.sh: the daemon never bound its socket" >&2
 		cat "$work/daemon.log" >&2
 		exit 1
 	fi
@@ -188,9 +202,60 @@ check "a machine that never configured remote has no remote socket" \
 	"$(mode "$work/run/remote.sock")" "absent"
 stop_daemon
 
-if [ "$failures" -eq 0 ]; then
-	echo "remote_socket.sh: all checks passed"
+# **The observe tier answers no questions about the filesystem.** 0160: the
+# interface name in a `wifi_status` reaches `dir.join(interface)`, and `join`
+# with an absolute path replaces the base -- so the two errors around it, "no
+# control socket at X" and "cannot reach X: <errno>", told an unprivileged
+# caller whether X existed. Measured before the fix, against this daemon:
+# `/etc/shadow` answered "Permission denied" and `/etc/no-such-file` answered
+# "no control socket at ...".
+#
+# **The check is that the two answers do not DIFFER**, not that they fail.
+# Every probe here fails either way -- there is no supplicant at any of them --
+# so asserting "this errors" would pass against the oracle it exists to close.
+# **The two probes are the same length and the same shape**, differing only in
+# whether the file is there. The first version of this used `/etc/shadow`
+# against a long made-up path and failed honestly: one was refused for the `/`
+# and the other for being 29 characters, so the answers differed about the
+# *name*. That is not a leak -- the caller wrote the name -- but it is not the
+# question either, and a pair that varies two things at once cannot answer it.
+# The path is removed from the text before comparing, for the same reason: a
+# message quoting what the caller sent tells them nothing they did not send.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+global {
+	control {
+		observe = "any"
+	}
+}
+CONF
+start_daemon
+
+# `ncfg wifi status` sends `WifiStatus` to the daemon and prints what comes
+# back, which is the path the report came in on.
+probe() {
+	"$repo/target/debug/ncfg" wifi status "$1" 2>&1 | head -1 |
+		sed "s|$1||g" | tr -s ' '
+}
+
+present=$(probe /etc/passwd)
+absent=$(probe /etc/passwe)
+if [ "$present" = "$absent" ]; then
+	same=same
 else
-	echo "remote_socket.sh: $failures check(s) failed"
+	same="different: [$present] vs [$absent]"
+fi
+check "a path that exists and one that does not get the same answer" "$same" "same"
+check "and the answer is about the name rather than about the filesystem" \
+	"$("$repo/target/debug/ncfg" wifi status /etc/passwd 2>&1 |
+		grep -c 'is not an interface name' || true)" "1"
+check "while an ordinary name still gets the real diagnosis" \
+	"$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 |
+		grep -c 'no control socket' || true)" "1"
+stop_daemon
+
+if [ "$failures" -eq 0 ]; then
+	echo "control_exposure.sh: all checks passed"
+else
+	echo "control_exposure.sh: $failures check(s) failed"
 	exit 1
 fi
