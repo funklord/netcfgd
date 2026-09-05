@@ -621,10 +621,20 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 						println!("     {error}");
 					}
 				}
-				println!(
-					"confirm window open for {seconds}s -- run `ncfg confirm` to keep this, \
-					 or `ncfg revert` to undo it now"
-				);
+				// Zero is the operator declining a window on a machine whose
+				// config sets one, so saying a window is open would be a
+				// false statement about the safety net -- the worst thing to
+				// be wrong about here. It is still worth a line: the point of
+				// the flag is to override a default, and silence would look
+				// the same as the default having been applied.
+				if seconds > 0 {
+					println!(
+						"confirm window open for {seconds}s -- run `ncfg confirm` to keep this, \
+						 or `ncfg revert` to undo it now"
+					);
+				} else {
+					println!("applied with no confirm window, as `--confirm-within 0` asked");
+				}
 				Ok(ExitCode::SUCCESS)
 			}
 			client::Answer::Error { message } => Err(message),

@@ -42,11 +42,27 @@ use serde::{Deserialize, Serialize};
 /// only way to say it. It cannot mean a window of no seconds: that would arm
 /// and expire, which is two spellings of "no" where one of them reverts the
 /// change.
-fn confirm_window(desired: &Document, options: &PlanOptions) -> Option<u32> {
+///
+/// **And a document saying `confirm = 0` means the same thing.** That guard
+/// covered only the caller's option, so `global { confirm = 0 }` fell through
+/// the `None` arm and armed `commit.arm { window_seconds: 0 }` -- the exact
+/// state the paragraph above says cannot be expressed, reachable by writing it
+/// in the file rather than passing it on the command line. Nothing rejects a
+/// zero at compile time, since `as_u32` accepts any number that fits.
+///
+/// Public because the daemon has to reach the same answer, and a second copy
+/// of this rule is how the two would stop agreeing. The daemon arms the window
+/// the plan only marks, so it asks here rather than reading
+/// `globals.confirm_default` and re-deriving the zero cases beside it.
+#[must_use]
+pub fn confirm_window(desired: &Document, options: &PlanOptions) -> Option<u32> {
 	match options.confirm_window {
 		Some(0) => None,
 		Some(seconds) => Some(seconds),
-		None => desired.globals.confirm_default,
+		None => desired
+			.globals
+			.confirm_default
+			.filter(|seconds| *seconds > 0),
 	}
 }
 

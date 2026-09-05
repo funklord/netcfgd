@@ -220,6 +220,11 @@ configuration.
   reverts on its own unless you `ncfg confirm`. This is what makes it safe to
   reconfigure a machine over the link you are connected on. `ncfg revert`
   undoes it immediately.
+- **`global { confirm = 60 }`** says the same thing once, in the file, and
+  covers the changes netcfgd applies by itself when it notices the
+  configuration changed -- so editing the config over ssh gets the safety net
+  without remembering the flag. Not at startup and not for a drift correction,
+  for the reasons in [0157](doc/decision/0157-a-window-the-machine-arms-for-itself.md).
 - **Drift policy** per interface or host-wide: `report` says the machine
   stopped matching the config and changes nothing, `reconcile` puts it back,
   `ignore` stops watching.

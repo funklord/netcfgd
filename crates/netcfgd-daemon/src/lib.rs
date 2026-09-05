@@ -17,7 +17,7 @@ mod state;
 mod wifi;
 
 use netcfgd_host::state as run_state;
-use netcfgd_model::HookPhase;
+use netcfgd_model::{Document, HookPhase};
 use netcfgd_plan::PlanOptions;
 use netcfgd_proto::{Event, Request, Response, DEFAULT_SOCKET};
 use netcfgd_sys::socket::groups;
@@ -228,11 +228,22 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			}
 		}
 
+		// **A timer resolves the window it was spawned for, and no other.**
+		// `ConfirmExpired` carries no identity, so a timer outliving its own
+		// window -- confirmed early, or reverted by hand -- used to revert
+		// whatever window happened to be open when it fired. Measured: a
+		// window confirmed at three seconds left its six-second timer running,
+		// a second change armed a new window at five, and at six the first
+		// timer reverted the second window two seconds into its life. The log
+		// said "the window closed unconfirmed" about a window nobody had had
+		// time to confirm.
+		//
+		// Asking the window whether it has actually expired costs one clock
+		// read and cannot be fooled by an extra timer: a window with time left
+		// is not one that closed. A stale timer now finds nothing to do, which
+		// is what `spawn_expiry_timer`'s comment always claimed happened.
 		if confirm_expired {
-			let (_, events) = confirm::revert(&mut state, "the window closed unconfirmed");
-			for event in events {
-				server::broadcast(&mut subscribers, &event);
-			}
+			resolve_expired_window(&mut state, &mut subscribers);
 		}
 
 		// Before the reobserve below, so a `roam` script sees the machine as
@@ -243,10 +254,24 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			run_roam_hooks(&state, interface, bssid);
 		}
 
-		if config_changed {
-			let event = state.reload();
-			server::broadcast(&mut subscribers, &event);
-		}
+		// **"The file was written" is not "the configuration changed"**, and the
+		// confirm window turns on the difference. `Command::ConfigChanged` is
+		// sent for any inotify event, so an editor writing the same bytes, or
+		// a configuration-management tool rewriting the file on a timer, sets
+		// it -- and a reload that fails to compile sets it while leaving the
+		// desired document exactly as it was.
+		//
+		// Either of those on a pass that is also correcting drift used to arm
+		// a window over the drift correction, which 0157 says never happens.
+		// Measured with a sysctl, whose drift the kernel does not announce and
+		// which is therefore still outstanding when the rewrite wakes the
+		// loop: a byte-identical write armed a window over netcfgd putting
+		// `forwarding` back. On expiry that reverts netcfgd's own repair, the
+		// drift is found again on the next pass, and the machine oscillates.
+		//
+		// Comparing the document either side of the reload is what makes the
+		// exclusion true rather than intended.
+		let config_is_new = config_changed && reload_configuration(&mut state, &mut subscribers);
 
 		// Whatever is due, and only a *changed* verdict counts as movement.
 		// A probe that has agreed with itself for an hour should cost the
@@ -285,7 +310,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 			// netcfgd took the radio was never looked at again.
 			release_contended(&mut state);
 			if !holding && !defers_to_a_window(&state, &requests) {
-				reconcile_drift(&mut state, &mut subscribers);
+				reconcile_drift(&mut state, &mut subscribers, config_is_new, &commands);
 			}
 		}
 
@@ -510,6 +535,58 @@ fn a_window_is_requested<'a>(requests: impl Iterator<Item = &'a Request>) -> boo
 			} if *seconds > 0
 		)
 	})
+}
+
+/// Resolve a window whose timer has fired.
+///
+/// **A timer resolves the window it was spawned for, and no other.**
+/// `ConfirmExpired` carries no identity, so a timer outliving its own window --
+/// confirmed early, or reverted by hand -- used to revert whatever window
+/// happened to be open when it fired. Measured: a window confirmed at three
+/// seconds left its six-second timer running, a second change armed a new
+/// window at five, and at six the first timer reverted the second window two
+/// seconds into its life. The log said "the window closed unconfirmed" about a
+/// window nobody had had time to confirm.
+///
+/// Asking the window whether it has actually expired costs one clock read and
+/// cannot be fooled by an extra timer: a window with time left is not one that
+/// closed. A stale timer now finds nothing to do, which is what
+/// `spawn_expiry_timer`'s comment always claimed happened.
+fn resolve_expired_window(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
+	let still_open = netcfgd_host::confirm::read_window(&state.paths.run);
+	if still_open.is_some_and(|window| window.expired()) {
+		let (_, events) = confirm::revert(state, "the window closed unconfirmed");
+		for event in events {
+			server::broadcast(subscribers, &event);
+		}
+	}
+}
+
+/// Recompile, and say whether the desired document actually moved.
+///
+/// **"The file was written" is not "the configuration changed"**, and the
+/// confirm window turns on the difference. `Command::ConfigChanged` is sent for
+/// any inotify event, so an editor writing the same bytes, or a
+/// configuration-management tool rewriting the file on a timer, sets it -- and
+/// a reload that fails to compile sets it while leaving the desired document
+/// exactly as it was.
+///
+/// Either of those on a pass that is also correcting drift used to arm a window
+/// over the drift correction, which 0157 says never happens. Measured with a
+/// sysctl, whose drift the kernel does not announce and which is therefore
+/// still outstanding when the rewrite wakes the loop: a byte-identical write
+/// armed a window over netcfgd putting `forwarding` back. On expiry that
+/// reverts netcfgd's own repair, the drift is found again on the next pass, and
+/// the machine oscillates.
+///
+/// Comparing the document either side of the reload is what makes the exclusion
+/// true rather than intended.
+fn reload_configuration(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) -> bool {
+	let before = state.desired.as_ref().map(netcfgd_host::document_hash);
+	let event = state.reload();
+	let moved = state.desired.as_ref().map(netcfgd_host::document_hash) != before;
+	server::broadcast(subscribers, &event);
+	moved
 }
 
 /// Whether this batch of requests is the operator taking their turn.
@@ -1056,7 +1133,99 @@ fn advance_failed_sims(state: &mut State, probe_changed: bool) {
 	}
 }
 
-fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
+/// The window a config change should arm, and what it would fall back to.
+///
+/// `global { confirm = N }` says every change to this machine's configuration
+/// gets a safety net. Until now the only thing that read it was the planner,
+/// which emitted a `commit.arm` action -- and `commit.arm` is a marker the
+/// executor deliberately no-ops, because the window belongs to the daemon.
+/// So the action was recorded `Done`, counted in "applied N actions", and no
+/// window was ever written. An operator who wrote the key and watched an
+/// apply succeed had exactly the safety net they would have had without it.
+///
+/// **Only a configuration change, and that is the whole design.** The two
+/// exclusions are not omissions:
+///
+/// A **drift** reconcile is netcfgd putting back what something else changed.
+/// Arming there would revert netcfgd's own correction when nobody confirmed,
+/// the drift would be detected again on the next pass, and the machine would
+/// oscillate -- spending half its time in the state the reconcile exists to
+/// leave. Nobody is waiting to confirm a correction they did not ask for.
+///
+/// **Startup** is worse. `establish_first_last_good` writes an empty document
+/// as the last-good before the first apply, so on a machine that has never
+/// applied, a window armed at boot and left unconfirmed reverts to *nothing*
+/// -- taking down every address, route and backend netcfgd had just brought
+/// up, N seconds after start, with no operator present. `converge` runs from
+/// `start_up` rather than from the loop, so it is exempt by construction, and
+/// this comment is here to stop somebody wiring it in later.
+///
+/// Called after `reconcile_drift`'s early returns rather than before the apply.
+/// Before was the first arrangement, on the reasoning that the decision should
+/// be taken while nothing had moved -- and neither half of that held: `may_arm`'s
+/// already-armed branch is unreachable from here, because `defers_to_a_window`
+/// has already sent the loop away when a window is open, and nothing between the
+/// plan and the arm touches `last-good.json`. What it did do was announce a
+/// refusal to arm on a pass that then applied nothing at all.
+fn window_for_a_config_change(state: &State, config_changed: bool) -> Option<(u32, Document)> {
+	if !config_changed {
+		return None;
+	}
+	// **Asked of the planner rather than re-derived here.** The rule has three
+	// cases -- the caller's number, the caller's zero meaning "no window
+	// despite the default", and the document's own -- and a second copy of it
+	// beside this one is how the two would stop agreeing about, say, whether a
+	// zero in the file counts. The plan cannot answer for us, because the
+	// `commit.arm` it produces is a marker `state::restrict` drops on this path
+	// before the executor ever sees it; the decision behind it is what is
+	// wanted, so that is what is asked for.
+	let desired = state.desired.as_ref()?;
+	let seconds = netcfgd_plan::confirm_window(desired, &PlanOptions::default())?;
+	let last_good = match confirm::may_arm(state) {
+		Ok(document) => document,
+		// Said out loud rather than swallowed. The request path returns the
+		// refusal to whoever asked; nobody asked for this one, so an operator
+		// who set the key and watched the change apply would otherwise believe
+		// they had a window and have none.
+		Err(error) => {
+			eprintln!(
+				"netcfgd: not arming a window for this change: {}",
+				error.message()
+			);
+			return None;
+		}
+	};
+	// **A window whose fall-back is the placeholder is not a safety net, it is
+	// a scheduled outage.** `establish_first_last_good` writes an empty
+	// document before the first apply so that `--confirm-within` works from
+	// the very beginning, where "revert to nothing" really is the exact undo
+	// of a first apply -- an operator asked, is watching, and can confirm.
+	//
+	// Nobody asked for this one, and the empty last-good outlives the moment
+	// it was written for: `converge` only replaces it when the startup apply
+	// had no failure at all, so one failed action at boot leaves it in place
+	// indefinitely. An operator then changing one field would arm a window
+	// whose revert removes *every* address, route and backend netcfgd has
+	// installed -- a blast radius with no relation to the change, on a machine
+	// with nobody present. That is the disaster the startup exclusion above
+	// exists to prevent, arriving one pass later by another road.
+	if last_good == Document::default() {
+		eprintln!(
+			"netcfgd: not arming a window for this change: the last-good \
+			 configuration is empty, so reverting would undo everything \
+			 netcfgd has done rather than this change"
+		);
+		return None;
+	}
+	Some((seconds, last_good))
+}
+
+fn reconcile_drift(
+	state: &mut State,
+	subscribers: &mut Vec<SyncSender<Event>>,
+	config_changed: bool,
+	commands: &Sender<Command>,
+) {
 	let wanted = state.reconciling_interfaces();
 	if wanted.is_empty() {
 		return;
@@ -1078,6 +1247,15 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 		eprintln!("netcfgd: not reconciled in isolation: {note}");
 	}
 
+	// **After the early returns, not before them.** Computing it earlier read
+	// as defensive -- take the decision before anything moves -- and neither
+	// reason held: `may_arm`'s already-armed branch is unreachable here because
+	// `defers_to_a_window` has already sent the loop away when a window is
+	// open, and nothing between here and the arm touches `last-good.json`. What
+	// it did do is announce a refusal to arm on a pass that then applied
+	// nothing at all, which is a message about a change that never happened.
+	let arming = window_for_a_config_change(state, config_changed);
+
 	let Ok(mut executor) = state.executor() else {
 		eprintln!("netcfgd: cannot open a netlink socket to reconcile drift");
 		return;
@@ -1087,6 +1265,24 @@ fn reconcile_drift(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) 
 	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	let _ = run_state::write_journal(&state.paths.run, &journal);
 	state.reobserve();
+
+	// Armed after the apply, like the request path, and armed even when the
+	// apply failed part-way: a half-applied change is exactly what a window is
+	// for, and refusing to arm one there would withhold the safety net from
+	// the case that needs it most.
+	if let Some((seconds, last_good)) = arming {
+		if let Some(desired) = state.desired.clone() {
+			state.armed = Some(confirm::undo_from(&restricted, &journal, &desired));
+		}
+		let event = confirm::arm(state, seconds, &last_good);
+		// Without this the window never closes. `spawn_expiry_timer` is the
+		// only producer of `ConfirmExpired`, and the tick does not sweep for
+		// an expired window -- so an unarmed timer would leave the change
+		// standing until the next daemon start noticed the window and
+		// reverted it, which is the opposite of a safety net.
+		spawn_expiry_timer(commands, seconds);
+		server::broadcast(subscribers, &event);
+	}
 
 	server::broadcast(
 		subscribers,
@@ -1112,9 +1308,23 @@ fn apply_request(
 	if let Some(diagnostics) = &state.diagnostics {
 		return Response::error(diagnostics.clone());
 	}
+	// **`--confirm-within 0` is how an operator says *no* window on a machine
+	// whose config sets one, and it is the only way to say it (0094).** The
+	// planner is still told the zero a few lines below -- that is what
+	// suppresses the document's default -- but nothing here may arm from it.
+	// A zero-second window arms and expires, which is the apply undoing itself
+	// a moment after it succeeded.
+	//
+	// Measured before this guard existed: `ncfg apply --confirm-within 0` on a
+	// machine setting `confirm = 60` printed "confirm window open for 0s", and
+	// four seconds later the interface had no address at all -- the flag
+	// documented as the way to decline a window was the most destructive thing
+	// in the command. `may_arm` is asked about `arming` too, so declining a
+	// window is not refused for a window somebody else has open.
+	let arming = window.filter(|seconds| *seconds > 0);
 	// Checked before anything is applied, so a refusal leaves the
 	// machine untouched rather than changed-but-unprotected.
-	let last_good = match &window {
+	let last_good = match &arming {
 		Some(_) => match confirm::may_arm(state) {
 			Ok(document) => Some(document),
 			Err(error) => return Response::error(error.message()),
@@ -1160,13 +1370,15 @@ fn apply_request(
 	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	state.reobserve();
 
-	match (&window, last_good) {
+	match (&arming, last_good) {
 		(Some(seconds), Some(document)) => {
 			// What to undo if nobody confirms, taken from the plan that just
 			// ran and the journal saying which of it reached the kernel. Set
 			// before the window is armed, so there is no instant in which a
 			// window is open with nothing recorded against it.
-			state.undo = confirm::undo_from(&plan, &journal);
+			if let Some(desired) = state.desired.clone() {
+				state.armed = Some(confirm::undo_from(&plan, &journal, &desired));
+			}
 			let event = confirm::arm(state, *seconds, &document);
 			if let Some(timer) = timers {
 				spawn_expiry_timer(timer, *seconds);
@@ -1175,10 +1387,31 @@ fn apply_request(
 		}
 		// No window: this configuration is the one to fall back to, and
 		// there is nothing outstanding to undo.
+		//
+		// **Unless a window is open, in which case both of those are somebody
+		// else's.** A plain `ncfg apply` while a window is outstanding used to
+		// clear the inverses recorded against it and overwrite the last-good
+		// with the very configuration the window exists to undo -- so the
+		// expiry found nothing to take back, re-planned to what was already in
+		// effect, and reported a revert that had reverted nothing. The safety
+		// net disappeared silently, and `state.rejected` was then set to the
+		// configuration on disk, refusing every later reload of it.
+		//
+		// Rare before, because a window only existed if somebody had asked for
+		// one; routine now that a config change arms its own. Leaving the
+		// record alone is enough: the window resolves on its own terms, and
+		// this apply is inside it rather than instead of it.
 		_ => {
-			state.undo.clear();
-			if let Some(desired) = &state.desired {
-				let _ = netcfgd_host::confirm::write_last_good(&state.paths.run, desired);
+			if netcfgd_host::confirm::read_window(&state.paths.run).is_some() {
+				eprintln!(
+					"netcfgd: applied inside an open confirm window; the window \
+					 still reverts to what it was armed against"
+				);
+			} else {
+				state.armed = None;
+				if let Some(desired) = &state.desired {
+					let _ = netcfgd_host::confirm::write_last_good(&state.paths.run, desired);
+				}
 			}
 		}
 	}

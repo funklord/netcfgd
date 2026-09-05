@@ -8,11 +8,11 @@
 //! Free of threads and sockets, like the rest of the daemon's state. `main`
 //! decides when these run.
 
-use crate::state::State;
+use crate::state::{Armed, State};
 use netcfgd_apply::{Executor, Journal, Outcome};
 use netcfgd_host::{confirm, state as run_state};
 use netcfgd_model::Document;
-use netcfgd_plan::{Op, Plan, PlanOptions};
+use netcfgd_plan::{Plan, PlanOptions};
 use netcfgd_proto::{Event, Response};
 
 /// Why an arm request was refused.
@@ -52,15 +52,33 @@ pub(crate) fn may_arm(state: &State) -> Result<Document, ArmError> {
 }
 
 /// Open the window. Called after the apply has run.
+///
+/// **A window that could not be written is not a window, and saying so is the
+/// whole of what this can do about it.** The write was discarded, so a full or
+/// read-only `/run` produced a `ConfirmArmed` event, a recorded undo list and
+/// no window on disk -- and the expiry then found nothing to resolve, so the
+/// change stood while every client had been told it was covered. That is the
+/// worst direction to be wrong in: an operator relies on a safety net exactly
+/// when they cannot see the machine.
+///
+/// Returning the failure would be better than logging it, and is not this
+/// function's to do: both callers have already applied by the time they get
+/// here, so there is no longer a decision to make -- only something to say.
 pub(crate) fn arm(state: &State, window_seconds: u32, last_good: &Document) -> Event {
 	let window = confirm::arm(window_seconds, confirm::document_hash(last_good));
-	let _ = confirm::write_window(&state.paths.run, &window);
+	if let Err(error) = confirm::write_window(&state.paths.run, &window) {
+		eprintln!(
+			"netcfgd: could not write the confirm window: {error}; \
+			 this change is NOT covered and will not revert on its own"
+		);
+	}
 	Event::ConfirmArmed {
 		seconds: window_seconds,
 	}
 }
 
-/// The inverses of the actions that actually ran, in the order they ran.
+/// What an open window covers: the inverses of the actions that actually ran,
+/// in the order they ran, and the hash of the document they came from.
 ///
 /// Driven by the journal rather than by the plan alone, because an action
 /// that failed or never ran has nothing to undo -- replaying its inverse
@@ -77,8 +95,9 @@ pub(crate) fn arm(state: &State, window_seconds: u32, last_good: &Document) -> E
 /// the window is this module's bookkeeping, not the kernel's -- so replaying
 /// it changes nothing and keeps the count the revert logs equal to the count
 /// the apply reported.
-pub(crate) fn undo_from(plan: &Plan, journal: &Journal) -> Vec<Op> {
-	plan.actions
+pub(crate) fn undo_from(plan: &Plan, journal: &Journal, document: &Document) -> Armed {
+	let undo = plan
+		.actions
 		.iter()
 		.filter(|action| {
 			journal
@@ -87,7 +106,11 @@ pub(crate) fn undo_from(plan: &Plan, journal: &Journal) -> Vec<Op> {
 				.any(|record| record.id == action.id && record.outcome == Outcome::Done)
 		})
 		.filter_map(|action| action.inverse.clone())
-		.collect()
+		.collect();
+	Armed {
+		undo,
+		document: confirm::document_hash(document),
+	}
 }
 
 /// Keep the change.
@@ -97,7 +120,7 @@ pub(crate) fn confirm_window(state: &mut State) -> (Response, Option<Event>) {
 	}
 	let _ = confirm::clear_window(&state.paths.run);
 	// The change stood, so there is nothing to take back.
-	state.undo.clear();
+	state.armed = None;
 	// And it becomes what a future revert falls back to.
 	if let Some(desired) = &state.desired {
 		let _ = confirm::write_last_good(&state.paths.run, desired);
@@ -166,7 +189,17 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 	// then watches it fail.
 	// Remember what was rejected by identity, so a reload of the *same*
 	// configuration is refused and a genuinely edited one is not.
-	state.rejected = state.desired.as_ref().map(confirm::document_hash);
+	// **What the window covered, not what is on disk now.** See `Armed::document`:
+	// an operator editing twice inside one window leaves `desired` holding an
+	// edit that was deferred and never applied, and blacklisting that one
+	// refuses the operator's newest configuration for something it never did.
+	// The fallback is the old behaviour and is what a restarted daemon gets,
+	// having lost the record.
+	let armed = state.armed.take();
+	state.rejected = armed
+		.as_ref()
+		.map(|armed| armed.document.clone())
+		.or_else(|| state.desired.as_ref().map(confirm::document_hash));
 	state.desired = Some(last_good);
 	// /run/desired.json is what `cat` answers with, so it has to say what is
 	// actually in effect rather than what is on disk.
@@ -190,7 +223,7 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 	// applied, the way any stack of changes comes off. An address added after
 	// a link was brought up has to go before the link goes down, or the
 	// removal is aimed at something that is no longer there.
-	let undo = std::mem::take(&mut state.undo);
+	let undo = armed.map(|armed| armed.undo).unwrap_or_default();
 	let mut undone = 0_usize;
 	for op in undo.iter().rev() {
 		match executor.execute(op) {
@@ -257,7 +290,7 @@ pub(crate) fn resolve_on_startup(state: &mut State) -> Vec<Event> {
 mod tests {
 	use super::*;
 	use netcfgd_apply::journal::Record;
-	use netcfgd_plan::{Action, Reason};
+	use netcfgd_plan::{Action, Op, Reason};
 
 	fn reason() -> Reason {
 		Reason {
@@ -326,7 +359,10 @@ mod tests {
 		};
 
 		// Action 0 alone: 1 failed, 2 never ran, 3 declares no inverse.
-		assert_eq!(undo_from(&plan, &journal), vec![mtu_inverse(1500)]);
+		assert_eq!(
+			undo_from(&plan, &journal, &Document::default()).undo,
+			vec![mtu_inverse(1500)]
+		);
 	}
 
 	/// Plan order is preserved, because `revert` is what reverses it.
@@ -352,7 +388,8 @@ mod tests {
 				record(2, Outcome::Done),
 			],
 		};
-		let undone: Vec<u32> = undo_from(&plan, &journal)
+		let undone: Vec<u32> = undo_from(&plan, &journal, &Document::default())
+			.undo
 			.into_iter()
 			.map(|op| match op {
 				Op::LinkSetMtu { mtu, .. } => mtu,

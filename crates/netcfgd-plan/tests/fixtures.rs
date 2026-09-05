@@ -7964,6 +7964,33 @@ interface eth0 { config = "10.0.0.2/24" }
 	assert!(names(&plan).contains(&"addr.add"), "{:?}", names(&plan));
 }
 
+/// And a document saying zero says the same thing as a caller saying it.
+///
+/// The `Some(0)` guard covered only the caller's option, so `confirm = 0` in
+/// the file fell through to the document arm and produced
+/// `commit.arm { window_seconds: 0 }` -- a window that arms and expires, which
+/// the option's own documentation says is not a thing anyone should be able to
+/// express. Nothing rejects it at compile time either: `as_u32` accepts any
+/// number that fits.
+#[test]
+fn a_document_asking_for_zero_seconds_gets_no_window() {
+	let desired = document(
+		r#"
+global { confirm = 0 }
+interface eth0 { config = "10.0.0.2/24" }
+"#,
+	);
+	let observed = observed_with(&["eth0"]);
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"commit.arm"),
+		"a zero in the document armed a window: {:?}",
+		names(&plan)
+	);
+	// The apply is untouched, as with the caller's zero above.
+	assert!(names(&plan).contains(&"addr.add"), "{:?}", names(&plan));
+}
+
 /// A machine that said nothing still gets nothing.
 ///
 /// The opt-in half. Arming a window on every apply everywhere would make a

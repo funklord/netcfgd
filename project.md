@@ -97,11 +97,16 @@ Document {
 
 Globals {
   dns              : DnsPolicy
-  on_drift_default : DriftPolicy      // = Report
-  confirm_default  : u32?             // seconds; commit-confirm default window,
-                                      // armed on every apply that does not say
-                                      // otherwise. `--confirm-within 0` says
-                                      // otherwise (0094)
+  on_drift_default : DriftPolicy      // = Reconcile; Report was the default
+                                      // once and this line still said so
+  confirm_default  : u32?             // seconds; commit-confirm default window.
+                                      // Armed by a request that asks, and by a
+                                      // change the daemon applies because the
+                                      // configuration changed. Never at startup
+                                      // and never for drift, for the reasons in
+                                      // 0157. `--confirm-within 0` and a
+                                      // `confirm = 0` in the file both say no
+                                      // window (0094, 0157)
   hostname_policy  : enum { None, FromDhcp, Static(string) }
   control          : Control          // who may do what; see 0013
 }
@@ -6041,7 +6046,7 @@ gathered here so a new session does not have to find them.
 - **`ip link set dev down` flushes IPv6 and leaves IPv4 behind, so "the kernel cleans up" is true in one family and not the other.** netcfgd's whole plan for disabling an interface was `link.down`, which looks complete on a v6 machine and leaves a stale `10.x` address on a v4 one — an address netcfgd had installed and still recorded as its own, with nothing left to remove it. The asymmetry is real kernel behaviour and it was found by running the command and looking, while going to build something else entirely. **Where the kernel tidies up after you, check that it does so in every family**, or the daemon's idea of what it owns depends on which one the operator wrote.
 - **An ordering assertion that reads positions in a list is not testing the dependency that produces them.** Actions execute in list order, so a fixture checking that `down` comes after `addr.del` passes on emission order alone — deleting the `depends_on` edge changes no position and no assertion can see it. The break that removed the edge came back **green** on a test written specifically for the ordering. §9 already says an unasserted edge is decoration; the lesson the break added is that a *positional* assertion looks exactly like an assertion on the edge and is not one. Assert the edge by name: this action's `depends_on` contains that action's id, and the phase before it does not.
 - **Every interface that is up has a link-local, so "has an address" is true from the moment the link exists.** The portal check fires on an interface *becoming* addressed, and the first version asked whether it had any address at all -- which `fe80::` makes true immediately and permanently. The feature therefore fired once, at startup, and never again on any real machine, and it survived its first live run because the first probe is the one that works. **A transition test needs a condition that can actually go back**, and connectivity is not "has an address": it is having one that could reach something.
-- **A config key can be compiled, carried, pinned in the witness, documented, and read by nothing.** `globals.confirm_default` was all five. `global { confirm = 90 }` produced a document field that no code path consulted, so an operator who wrote it believing every apply had a safety net had none -- silently, and with the key listed in project.md's own config surface as though it worked. 0061 closed four of these by reading the DSL against the code; this one was found by going to fix something else and asking where the number lived. **Being in the schema is not being read**, and the witness cannot tell the difference: it pins the shape of a field, not that anything consults it.
+- **A config key can be compiled, carried, pinned in the witness, documented, and read by nothing.** `globals.confirm_default` was all five. `global { confirm = 90 }` produced a document field that no code path consulted, so an operator who wrote it believing every apply had a safety net had none -- silently, and with the key listed in project.md's own config surface as though it worked. 0061 closed four of these by reading the DSL against the code; this one was found by going to fix something else and asking where the number lived. **Being in the schema is not being read**, and the witness cannot tell the difference: it pins the shape of a field, not that anything consults it. **And the fix for it left the key inert for another month, which is the sharper half.** 0094 made the *planner* read the number, so `ncfg plan` printed `commit.arm globals.confirm_default: 90s` and the field was demonstrably consulted -- while the thing that reads it emits a marker op the executor deliberately no-ops, because the window belongs to the daemon. The action was recorded `Done` and counted in "applied N actions", and no window was ever written. **Being read is not being acted on**, and a field whose reader produces a marker for somebody else to honour has two places to fail; the visible one had been fixed, which is exactly what stopped anybody looking at the other. 0157 has the second half.
 - **"Read what you know and ignore the rest" describes a record, not a stream, and the difference is a shift bug on a newer kernel.** `/dev/rfkill`'s header says the record may grow, which reads as an invitation to buffer bytes and cut them every eight. It is not: the kernel dequeues **one event per read** and copies as much of it as you asked for, so a generous buffer gets exactly one record and the surplus of a longer one belongs to that read. The stream reading would have kept the ninth byte and shifted every following event — visible only on kernels newer than the one it was written against. Opening the device and printing what came back settled it in a minute; the header could not have.
 - **A probe that reads the first widget of a kind reads whichever was constructed first, which is rarely the one meant.** A headless check asked whether the devices table had caught up and read `findChildren<QTableWidget*>().first()` -- which is the *plan* pane's notes table, built earlier and empty on a converged machine. It reported "the window did not change" for a window that had changed correctly, and the obvious next move would have been to debug working code. Select a widget by something only it has: a header, an object name, a title.
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
@@ -8176,6 +8181,19 @@ fourteen runs each:
     baseline    8 of 14 runs failed, 28 failed checks, five cascades of five
     settle      6 of 14 runs failed,  6 failed checks, no cascade at all
 
+Re-measured 2026-09-05 while landing 0157, six runs each way, because two
+consecutive full-suite runs failed here and a change to the daemon's command
+loop is exactly the sort of thing that could have made it worse:
+
+    with the 0157 changes     3 of 6 runs failed
+    with them stashed         3 of 6 runs failed
+
+Unchanged, so 0157 is not implicated. Worth keeping for a second reason: a
+smaller sample taken earlier in that session put the rate at one in four and
+was reported that way, which is the figure above measured badly rather than a
+rate that moved. **A flake rate is a number nobody re-derives**, and four runs
+cannot tell a quarter from a half.
+
 **The cascade is gone and the single check is not.** Every remaining failure
 is the same refusal check, and it is left open rather than explained away.
 
@@ -8756,13 +8774,18 @@ path: `spawn_config_watcher` sends `Command::ConfigChanged` the moment
 sampling interval of the `--poll-config` fallback, which is a poll and not a
 quiet period.
 
-**`reconcile_drift` never consults the confirm window.** It is the one apply
-path that does not: it builds its own plan, narrows it to
-`reconciling_interfaces()`, and calls `netcfgd_apply::apply` directly rather
-than going through `State::apply`. `PlanOptions` there carries only `cycle` --
-no `confirm_window`, no `revert_to` -- and nothing on that path reads
-`confirm::read_window`. Of the six code paths that touch the machine, only
-`apply_request` and `confirm::revert` know a window exists.
+**`reconcile_drift` never consulted the confirm window, and now does for one
+of the two reasons it runs.** It is the one apply path that does not go through
+`State::apply`: it builds its own plan, narrows it to
+`reconciling_interfaces()`, and calls `netcfgd_apply::apply` directly, with
+`PlanOptions` carrying only `cycle`. When this was written nothing on that path
+read `confirm::read_window`, and of the six code paths that touch the machine
+only `apply_request` and `confirm::revert` knew a window existed.
+
+Since 0157 it arms one when the pass it is running was caused by the
+configuration changing and the document set `confirm = N` -- and deliberately
+not when the pass is correcting drift, which would oscillate. 10.41.5 has the
+measurements.
 
 **There is no way for a client to say "hold off".** The only hold is a plain
 `bool` local to `run`, set by `--no-apply-on-start` and released one-way by
@@ -8828,6 +8851,12 @@ what landed is the half that costs nothing, and this is the other half written
 down. Closing it properly wants a signal rather than a clock -- the config
 saying `confirm = N`, so the reconcile arms the window itself and there is no
 request to race.
+
+**That is done, in 10.41.5 and 0157**, and it closes this for the machines that
+set the key rather than in general: where the document asks for a window, the
+change the watcher applies carries one, so there is nothing left to race. A
+machine that sets no key still has the race described above, and the settle is
+still not a thing to ship.
 
 `a_window_is_requested` is split out from `defers_to_a_window` so it can be
 tested at all: the tuples reaching the loop carry a `SyncSender`, and a
@@ -8901,3 +8930,128 @@ reported as a serious pre-existing defect. It was the rig.
 The second rig starts the daemon normally and sets `on_drift = "report"`, so
 the watcher cannot apply the change before the windowed apply does -- without
 which the window covers nothing and the case passes for the wrong reason.
+
+### 10.41.5 `global { confirm = N }` arms a window the machine asks for
+
+Acting on the instruction to add the `confirm = N` config key. **The key was
+already there** -- it parses, reaches `Globals::confirm_default`, is pinned in
+the witness and is honoured by the planner, which 0094 fixed. What was missing
+is anything arming a window from it. Measured before changing anything, with a
+machine setting `confirm = 30` against a control setting no key:
+
+    startup apply     plan holds commit.arm       no window written
+    watcher applies   commit.arm dropped entirely no window written
+    control, no key   identical in both rows
+
+`commit.arm` is a marker the executor deliberately no-ops, so on the startup
+path it was recorded `Done`, counted in "applied N actions", and wrote nothing.
+On the drift path it never even reached the executor: `state::restrict` keeps
+only actions naming an interface and `Op::CommitArm` names none. `confirm::arm`
+has one caller in the workspace and it arms from the *request's* field.
+
+**What landed.** A reconcile pass caused by the configuration changing arms the
+document's window: it writes `confirm.json`, records the inverses of what ran,
+and spawns the expiry timer -- without which the window would never close,
+since that timer is the only producer of `ConfirmExpired` and the tick does not
+sweep for an expired one.
+
+Measured after, same rig and the same control, with the window shortened from
+30 seconds to 3 so the expiry could be watched:
+
+    confirm = 3   startup no window   watcher armed, 10.0.0.9   reverted to 10.0.0.1
+    no key        startup no window   watcher no window, 10.0.0.9   stayed
+
+**Startup is excluded, and a pass whose document did not change is excluded,
+and both were measured rather than argued.** The looser statement -- that a
+drift correction never arms -- is what 0157 said first and it is false: one plan
+covers the config delta and any drift in the same pass, so an edit arms over
+whatever else that pass corrected. It does not oscillate, because the following
+pass re-corrects the drift with no document change and therefore no window, but
+a revert can undo a repair nobody asked about.
+A drift correction puts the address back and arms nothing, and the machine sits
+there rather than oscillating; a confirmed config change keeps its address and
+closes its window. 0157 has the reasoning: an unconfirmed window at boot reverts
+to the empty first last-good and takes the network down with nobody present, and
+a window on a drift correction reverts netcfgd's own repair so the drift returns
+on the next pass.
+
+**And a `confirm = 0` in a document armed a zero-second window.** The `Some(0)`
+guard 0094 describes covers only the caller's option, so a zero in the file fell
+through to the document arm and produced `commit.arm { window_seconds: 0 }` --
+the arm-and-expire state 0094 says cannot be expressed. Nothing rejects it at
+compile time; `as_u32` accepts any number that fits. The planner filters it now,
+and the test goes red against the old fallback.
+
+**And the daemon asks the planner for that answer rather than carrying its own
+copy**, which it did at first: a `confirm_default` read straight off the
+document with an `if seconds == 0` beside it. That is two copies of a
+three-case rule -- the caller's number, the caller's zero, the document's own --
+with nothing compelling them to agree, which is the failure named three
+paragraphs above and would have been shipped in the same change that named it.
+The plan itself cannot answer, because its `commit.arm` is dropped by
+`state::restrict` before the executor sees it on this path; the decision behind
+it is what was wanted, so `netcfgd_plan::confirm_window` is public and the
+daemon calls it.
+
+Live cases 8, 9 and 10 in `confirm.sh` pin the three behaviours. Run against the
+previous daemon, exactly the two positive checks fail -- "a change the daemon
+applies for itself arms the document's window" and "an unconfirmed one reverts
+without anybody asking" -- while the three exclusion checks pass either way,
+which is what they should do: they assert an absence, and the old code armed
+nothing anywhere.
+
+**Six defects had to be fixed before this was safe to ship, and an adversarial
+review found them rather than the tests.** Four were in the machinery around
+commit-confirm rather than in the change: each had assumed a window is something
+an operator asked for and is watching, which was true while only
+`--confirm-within` armed one, and a config edit arming its own turned them from
+rare into routine. The other two -- the identical rewrite and the empty
+placeholder -- belonged to the new arming path itself and went from impossible
+to reachable, which is a different thing and worth not blurring. Measured, fixed, and each given a live case that
+goes red without its guard -- cases 11 to 16. Sabotaging four of them at once --
+the timer, the apply-inside-a-window, the identical rewrite and the placeholder,
+leaving the revert-blacklist alone -- fails exactly six checks and nothing else,
+three of the six belonging to the placeholder case:
+
+    a timer reverted whichever window was open, not its own
+      confirmed at 3s, second window armed at 5s, killed at 6s
+
+    an apply served inside a window overwrote the last-good
+      the window then reverted to the config it existed to undo
+
+    an identical rewrite over drift armed a window
+      `config_changed` means the file was written, not that it changed
+
+    a window armed against the empty placeholder
+      one edited field, and the interface lost its address entirely
+
+    a revert blacklisted what was on disk, not what it reverted
+      the operator's newest edit refused for something it never did
+
+**The shape they share is worth more than the six.** Each was a correct guard
+sitting one layer away from where the value was used: the planner knew zero
+meant no window and the arming site did not ask it; `Window` knew whether it
+had expired and the expiry handler did not ask it; `may_arm` knew whether a
+window was open and the no-window arm asked nothing at all; the window knew what
+it covered and the revert asked the desired document instead. **Rarity was
+standing in for a check** in the four that predate this, and the feature removed
+the rarity rather than creating them. Where a change makes an uncommon path common, the thing to audit is not
+the change but everything that had been getting away with assuming the path was
+uncommon.
+
+**`make size` moved for the first time in this thread: 2 755 096 to 2 759 192**,
+leaving 6 835 inside the ceiling. That is exactly one page, and no more should be
+read into it than that: this change added several functions, a CLI branch and a
+planner filter as well as the record of what a window covers, and nothing here
+attributes the page to any one of them. Worth naming because every other change
+in this thread was free, so a reader comparing 10.41.4's "the same number twice"
+against the gate should find the difference explained rather than surprising.
+(`make footprint` is the unrelated gate that checks an unused optional feature
+leaves no directory behind, and prints no byte count.)
+
+**And two claims in this record's own decision were too strong when written.**
+0157 said startup was excluded "by construction" -- which protects the boot-time
+apply and not the empty last-good it leaves behind for the next config change --
+and said the loop already separated a config change from drift, when what it
+separates is a file being written. Both were caught by review before shipping,
+both are corrected in 0157, and neither was found by a test.

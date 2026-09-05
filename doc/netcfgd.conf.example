@@ -180,7 +180,7 @@
 # the address it already has stays and the machine keeps talking. This is the
 # opposite. Over a network, arm a way back first:
 #
-#   ncfg apply --confirm 60
+#   ncfg apply --confirm-within 60
 #
 # The shipped `offline` profile is exactly this key. `ncfg profile set offline`.
 
@@ -201,9 +201,20 @@
 #}
 
 # Commit-confirm, for when you are configuring a machine you are logged into
-# over the network it is about to reconfigure. An apply arms a timer; if you
-# do not run `ncfg confirm` within it, the machine reverts by itself. The
-# number is seconds.
+# over the network it is about to reconfigure. An apply arms a timer, in
+# seconds; unless `ncfg confirm` follows within it, the machine reverts by
+# itself. It covers what netcfgd applies BY ITSELF on noticing this file
+# changed, not only `ncfg apply --confirm-within`, so editing the config over
+# ssh has the safety net without your having to remember the flag.
+#
+# Two applies never arm a window. STARTUP, because the fall-back on a machine
+# that has never applied is empty, and an unconfirmed window at boot would
+# take the network down with nobody present; and a DRIFT correction, because
+# putting back what something else changed is not a change anybody waits to
+# confirm, and reverting it would leave the machine oscillating.
+#
+# `ncfg apply --confirm-within 0` is "no window this time" on a machine whose
+# config sets the key.
 
 #global {
 #	confirm = 120

@@ -48,23 +48,15 @@ pub(crate) struct State {
 	/// would be gone on the next tick.
 	pub(crate) probes: crate::probe::Probes,
 	pub(crate) sims: crate::sim::Sims,
-	/// The inverses of the actions applied under the open confirm window, in
-	/// the order they ran.
+	/// What the open confirm window covers, if one is open.
 	///
-	/// **In memory rather than in the window file on disk, and that is a
-	/// deliberate limit rather than an oversight.** Writing them out would
-	/// mean reading them back, and `Op` has 48 variants: asking serde to
-	/// deserialize it costs 200KB of binary, measured, against a footprint
-	/// ceiling with 11KB of room. The alternative -- a hand-written match over
-	/// the op names -- is a second list that nothing compels to track the
-	/// first, which is the failure this codebase keeps finding in its own
-	/// walks.
-	///
-	/// So a daemon that restarts inside a window has no inverses, and
-	/// `revert` falls back to re-planning against the last-good document,
-	/// which is what it did for every revert before this. That is the weaker
-	/// path and it is still a correct one.
-	pub(crate) undo: Vec<netcfgd_plan::Op>,
+	/// **One field rather than two, because the two must move together.** The
+	/// inverses and the hash of the document they came from are set at the same
+	/// instant, cleared at the same instant, and consumed at the same instant;
+	/// as separate `Option`s they would be a second list nothing compels to
+	/// track the first, which is the failure this codebase keeps finding in its
+	/// own walks. Held here they cannot disagree.
+	pub(crate) armed: Option<Armed>,
 }
 
 /// What a `reload` request answers, given the event that reload produced.
@@ -106,6 +98,39 @@ fn link_shape(observed: &netcfgd_model::Observed) -> Vec<(String, bool)> {
 	shape
 }
 
+/// What an open confirm window covers.
+///
+/// **In memory rather than in the window file on disk, and that is a deliberate
+/// limit rather than an oversight.** Writing the inverses out would mean reading
+/// them back, and `Op` has 48 variants: asking serde to deserialize it costs
+/// 200KB of binary -- measured when this was decided, against a ceiling the
+/// daemon was then 11KB inside, and `make check` prints both numbers on every
+/// run for anyone who wants them today.
+/// The alternative -- a hand-written match over the op names -- is a second list
+/// that nothing compels to track the first.
+///
+/// So a daemon that restarts inside a window has none of this, and `revert`
+/// falls back to re-planning against the last-good document, which is what it
+/// did for every revert before any of this existed. That is the weaker path and
+/// it is still a correct one.
+pub(crate) struct Armed {
+	/// The inverses of the actions applied under the window, in the order they
+	/// ran. `revert` replays them newest first.
+	pub(crate) undo: Vec<netcfgd_plan::Op>,
+	/// The hash of the document those actions were applied from.
+	///
+	/// **Not `state.desired`, which moves under the window.** A revert records
+	/// what it rejected so that reloading the same configuration is refused and
+	/// a genuinely edited one is not -- and it used to take that hash from the
+	/// desired document at revert time. An operator editing twice inside one
+	/// window leaves `desired` holding the *second* edit, which was deferred and
+	/// never applied and never at fault: measured, the window reverted the first
+	/// edit and blacklisted the second, so `ncfg reload` answered "this
+	/// configuration was reverted away from and has not changed since" about a
+	/// configuration that had never been tried.
+	pub(crate) document: String,
+}
+
 impl State {
 	/// Read the config and the kernel once.
 	///
@@ -123,7 +148,7 @@ impl State {
 			diagnostics: None,
 			observed: Observed::default(),
 			rejected: None,
-			undo: Vec::new(),
+			armed: None,
 		};
 		state.reload();
 		state.reobserve();
@@ -547,7 +572,7 @@ mod tests {
 			diagnostics: None,
 			observed: Observed::default(),
 			rejected: None,
-			undo: Vec::new(),
+			armed: None,
 		}
 	}
 
