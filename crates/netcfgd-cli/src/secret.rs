@@ -59,11 +59,29 @@ pub(crate) fn read_without_echo(prompt: &str) -> Result<String, String> {
 		let _ = std::io::stderr().flush();
 	}
 
+	// **A terminal gives one line; a redirect gives a file.** `read_line` stops
+	// at the first newline, which is right for somebody typing a passphrase and
+	// silently wrong for the workflow this command's own help prints:
+	//
+	//     ncfg secret set corp-ca < /etc/ssl/certs/corp.pem
+	//
+	// stored the twenty-seven bytes `-----BEGIN CERTIFICATE-----` and nothing
+	// else. `Resolver::path_for` then materialised that stub for
+	// wpa_supplicant, which rejected it, and the only symptom was an
+	// association failing with nothing from netcfgd -- measured, not reasoned.
+	// The reader half was already right: `Resolver::read_file` takes the whole
+	// file and strips one trailing newline, so a hand-placed PEM always worked
+	// and only the writer could not produce one.
 	let mut line = String::new();
-	let read = std::io::stdin()
-		.lock()
-		.read_line(&mut line)
-		.map_err(|error| format!("could not read it: {error}"))?;
+	let read = if interactive {
+		std::io::stdin()
+			.lock()
+			.read_line(&mut line)
+			.map_err(|error| format!("could not read it: {error}"))?
+	} else {
+		std::io::Read::read_to_string(&mut std::io::stdin().lock(), &mut line)
+			.map_err(|error| format!("could not read it: {error}"))?
+	};
 	if interactive {
 		// The newline the operator typed was not echoed either.
 		eprintln!();
