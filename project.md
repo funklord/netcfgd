@@ -9253,3 +9253,222 @@ with a file, a line and a scenario in the sweep output.
 above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
+
+## 10.44 The leads from 10.43, reproduced -- and one that only exists when two of them meet
+
+10.43 recorded about forty candidates from seven sweeps and said plainly that
+most were **leads, not findings**: written with a file, a line and a scenario,
+and not reproduced. This is the round that reproduced them. Six workers, each
+told to run the thing rather than read it, and to report NOT REPRODUCED with
+what happened instead.
+
+**Everything below was measured against the built binaries.** Where a worker
+could not reach something it says so, and those are listed at the end rather
+than folded in.
+
+### The one that is worse than either half
+
+**A read-only `ncfg status` leaves an interface down and unaddressed, and the
+daemon says nothing.** Two separate defects compose:
+
+    ncfg status run once      hook sha dddce07b   hook refused   comp0 DOWN
+    control, not run          hook sha 3e95aa62   hook ran       comp0 10.10.0.1/24
+
+`compile()` materialises the hook scripts under `/run/netcfgd/hooks/`, and
+`ncfg status`, `show`, `plan` and the wifi commands all call it -- so a
+read-only command rewrites files the daemon is about to hash. It rewrites them
+with *different* content, because of the second defect: `conf.d` is not being
+watched, so the CLI compiles the drop-in the daemon has never seen. The
+executor then refuses a hook whose hash has moved since the plan was made --
+correctly, that guard is doing its job -- `pre_up` fails, and `link.up` and
+`addr.add` are skipped behind it.
+
+`plan.last.json` named the cause exactly. **The daemon log held two startup
+lines and nothing else**, because `reconcile_drift` wrote the journal and
+broadcast a count without ever printing the failing action, where `converge`
+prints it. That last part is fixed here; the other two are recorded below.
+
+### Confirmed, and fixed in this pass
+
+Seven more were found by the sweep of the corners the first pass skipped, and
+all seven are fixed here: an access point that names no `channel` restarted on
+every reconcile, because the renderer writes `channel=0` for ACS and the
+planner compared that against the document's `None` -- a permanent
+deauthentication loop, with the guard it needed sitting three lines below in
+the `band` arm and a comment giving the reason. Any C client was killed
+outright by a daemon restart, exit 141, because `write_all` used `write` rather
+than a send with `MSG_NOSIGNAL` -- so the tray and the GUI vanished with no
+dialog. The pppd `ip-up` script wrote nothing unless the peer offered both
+nameservers. And three writers staged at `<report>.tmp`, which is not the
+dotted name the contract asks for, so `ncfg status` listed an interface called
+`vpn0.tmp`.
+
+That last one is worth its own sentence, because the test that should have
+caught it was named `every_generated_writer_stages_under_a_dot` and walked a
+hand-written list of five -- with the openvpn script and the two shipped
+helpers outside the quantifier by construction. **A name that quantifies is a
+claim about a population, and this one was checked against a list.** It is
+renamed to what it covers, and the openvpn writer is tested in the crate that
+owns it.
+
+
+**Four spellings that never converge, and they are one defect.** The desired
+text is compared against the kernel's own rendering as a string, so whichever
+spelling the operator used has to be the kernel's:
+
+    config = "2001:0db8::1/64"      addr.add + addr.del, every apply
+    config = "2001:DB8::2/64"       the same
+    from   = "2001:0DB8::/32"       rule.del + rule.add, every apply
+    routes = "2001:0DB8:2::/64"     route.add fails EEXIST, and stops the plan
+
+The canonical spelling of each converges on the first apply, which is what
+makes it a spelling fault rather than anything about IPv6. Addresses and rule
+selectors are canonicalised at compile time now.
+
+**A route destination with host bits is refused at compile time**, naming the
+network it means. It was accepted, then failed at apply with a bare `EINVAL`
+or `EEXIST` -- and because execution stops at the first failed action, one such
+line abandoned every later action in the plan, on every apply, for ever. That
+blast radius is why this is a refusal rather than a silent mask.
+
+**`ncfg apply --confirm-within` exited 0 on a failed apply.** The local path
+returns 1 for the same journal. Measured with an unreachable gateway: exit 1
+without the flag, exit 0 with it, and "confirm window open ... run `ncfg
+confirm` to keep this" printed over a change that had not been made. A deploy
+script writing `ncfg apply --confirm-within 60 || rollback` never rolled back,
+on the one form of the command chosen because the change was expected to be
+risky.
+
+**`rfkill()` abandoned its whole search on one unreadable entry.** `?` inside
+the loop returns from the function, and `read_dir` is sorted, so an unrelated
+entry sorting first decides for every entry after it. Measured against a
+fabricated `/sys`, with the discriminating third cell that pins it to the early
+return rather than to unreadable files in general:
+
+    rfkill0/name unreadable, sorts before   warning gone, link.rfkill null
+    the same file readable again            warning back
+    unreadable entry sorted after the match harmless
+
+A laptop's `rfkill0` is typically the platform button, and a USB dongle being
+unplugged tears its directory down between the `read_dir` and the read -- and
+that teardown is also what generates the event the observation runs on, so the
+window and the trigger coincide.
+
+### Confirmed, not fixed, because the repair is a decision
+
+**A running supplicant is never reconciled against the document.** Changing a
+passphrase, pinning a `bssid`, adding a network, changing `metric` or
+`autoconnect`, and **deleting the `network` block entirely** each plan
+`nothing to do`; the supplicant keeps the original credentials indefinitely.
+`populate_supplicant` has one caller, the `BackendStart` arm, and `plan_backend`
+returns early when the backend is already running.
+
+This is a document/code contradiction rather than a bug to pick a side on:
+`doc/decision/0015-the-supplicant-holds-no-state.md` says in two places that
+netcfgd's next reconcile removes a network the document no longer contains, and
+there is no such reconcile. Flagged, per *working-practice.md*, not resolved.
+
+**An access point's security shape is never compared.** `ObservedAccessPoint`
+records `ssid`, `band` and `channel`, and `secret_matches` is computed only
+when the document says Psk *and* the running file has a `wpa_passphrase=` line.
+Measured with a stubbed hostapd:
+
+    proto = "wpa2"          passphrase changed   restart planned
+    proto = "wpa3"          passphrase changed   nothing to do
+    proto = "wpa2+wpa3"     passphrase changed   restart planned
+    open = true -> psk      security changed     nothing to do
+    wpa2 -> wpa3            same passphrase      nothing to do
+
+The `open -> psk` row is the sharpest: an operator adds a passphrase, netcfgd
+says the machine matches, and the radio keeps broadcasting the open
+configuration. `wpa2+wpa3` works and was claimed broken -- that correction is
+the worker's, from running it.
+
+**One bad network aborts the whole supplicant population.** The loop over
+networks uses `?`, so the first unsupported credential fails `backend.start`
+and stops. With the bad network first, **zero** networks reach the supplicant
+and it is left running and empty; recovery needs `--restart-wedged`, because
+the next plan says `nothing to do`.
+
+**`conf.d` is not watched when it does not exist at startup**, and the tick
+cannot rescue it -- `Command::Tick` re-reads the machine, never the config.
+Measured over 25 seconds and five ticks:
+
+    conf.d absent at start    reports "via inotify"        never noticed
+    conf.d present at start   reports "via inotify"        under a second
+    conf.d absent, --poll-config                            two seconds
+
+The daemon and the CLI then disagree about the configuration indefinitely, and
+`ncfg status` reports nothing about which mechanism is in use -- it appears
+only on the startup line on stderr.
+
+**Read-only commands materialise the hook scripts.** Inode constant, mtime
+moving, on every `status`, `show` and `plan`. The standalone truncate race did
+not fire in 400 attempts; the composed fault above is the reason this matters.
+
+**A departed DNS scope is never withdrawn under the per-scope modes.** There is
+no `resolvconf -d` and no `resolvectl revert` in the tree. netcfgd plans the
+repair, reports `ok`, and issues no call naming the departed scope -- so a dead
+resolver stays registered for the rest of the boot. The planner's comment
+states the false premise outright: "the file is written whole on any delivery",
+which is true of `write_resolv_conf`, `dnsmasq` and `unbound` and false of the
+three that are per-scope and additive.
+
+**Under `resolved`, search and routing domains cannot be cleared.** The `dns`
+verb is always run, so an emptied server list is delivered; the `domain` verb
+is guarded by `if !domains.is_empty()`, so an emptied domain list is not. The
+control -- emptying the servers instead, and watching them clear -- is what
+makes this a finding.
+
+**The scope merge only removes adjacent duplicates.** `Vec::dedup` after an
+`extend`, where the comment claims first-occurrence-wins. It reaches the
+delivered artifact under all three per-scope modes; `write_resolv_conf` escapes
+because `render::flatten` does a separate `contains` pass, which is the
+behaviour the comment describes. `search` is worse than `servers`, being never
+sorted.
+
+**Security, all four reproduced.** A profile name is interpolated unescaped
+into generated configuration, and survives the failure path that reports
+"nothing was kept" -- measured, the next compile loaded an attacker-chosen
+`hostname`. Backend adoption matches a marker in a process's own argv, so a
+local user can have an impostor adopted and the real backend never started,
+while netcfgd reports it running. `remote.sock`'s mode is computed from the
+*local* control policy, and authorization on that socket never consults peer
+credentials. And `wifi_status` joins an unvalidated interface into a path,
+distinguishing existence from socket-ness in its error text.
+
+**The GUI's three worst, each settled with the daemon in the loop.** The access
+tab never loads the current tiers and sends all three, so changing one resets
+the other two to root -- measured end to end, with the daemon then refusing the
+GUI's own `show`. The interface dialog opens blank and saves with
+`replace=true`, losing address, routes, preference, MTU, probe, forwarding and
+NAT. And a PSK network edited with no changes at all loses `metric`, `metered`,
+`bssid`, addressing, routes and DNS, because the dialog composes the whole
+block from fields it was never given.
+
+### What could not be reached, said plainly
+
+No real `resolvconf`, `resolvectl` or `systemd-resolved` on this machine, so
+the DNS results are what netcfgd *sends*, captured with logging stubs on PATH;
+what those tools do on receipt is read, not run. The GUI could not be driven --
+`gui_wifi.sh` needs `CAP_NET_ADMIN` and a build -- so its claims were settled by
+sending the daemon exactly what the dialogs compose, which is accurate to the
+code and not captured from a running window. The `wifi scan` staleness needed a
+supplicant that answers `SCAN` before its results are ready, which the repo's
+fake does not model; a worker wrote one, and every scan is one round behind.
+
+### A process failure worth more than any of the findings
+
+One worker, clearing its own daemons, matched on the binary path rather than on
+its own directories and **killed 76 `netcfgd` processes, two of which were
+its.** The others belonged to concurrent workers. `ppid 1` was read as evidence
+of abandonment, and it is not: anything started with `&` from a tool call is
+reparented immediately.
+
+That is `running-code.md`'s rule exactly -- *clean up what this process
+created, never what matches its prefix* -- and it cost the results of whatever
+was running at the time. The findings above survive because each worker had
+already reported, or reproduced its own evidence before the sweep. The lesson
+is not about care: a cleanup keyed on a pattern is a cleanup that cannot tell
+its own work from somebody else's, and in a tree several sessions share, that
+is the same defect this document keeps finding in netcfgd's own code.
