@@ -827,7 +827,17 @@ fn a_bridge_waits_for_its_members_even_though_it_sorts_first() {
 	assert!(desired.interfaces[0].name == "br0");
 
 	let enslave = &plan.actions[position(&plan, "link.set_master")];
-	let up = &plan.actions[position(&plan, "link.up")];
+	// **The master's `link.up`, by name.** There are two now -- the port is
+	// brought up too, since a device that is only ever a port has no interface
+	// block to do it -- and `position` returns the first, which is the port's.
+	// It happens to satisfy the assertion below, because a port's own bring-up
+	// also waits for its enslavement; so a positional lookup here would pass
+	// while testing something other than the rule this test is named for.
+	let up = plan
+		.actions
+		.iter()
+		.find(|action| action.op.name() == "link.up" && action.op.interface() == Some("br0"))
+		.expect("br0 is brought up");
 	let addr = &plan.actions[position(&plan, "addr.add")];
 	assert!(
 		addr.depends_on.contains(&enslave.id),
@@ -838,6 +848,89 @@ fn a_bridge_waits_for_its_members_even_though_it_sorts_first() {
 		up.depends_on.contains(&enslave.id),
 		"bringing the master up must wait for enslavement: {:?}",
 		up.depends_on
+	);
+}
+
+/// A port with no interface block of its own is still brought up.
+///
+/// `link.up` is emitted from the interface walk, and 0155 pass 1b moved being
+/// a port onto the device -- so a bridge member that is only ever a port had
+/// nothing to bring it up. Measured against real links before this: both
+/// members came out `master=br0 state=DOWN`, and a bridge port that is down
+/// forwards nothing, so the bridge never gets carrier. That is the arrangement
+/// `doc/netcfgd.conf.example` ships.
+///
+/// The control is the third assertion: a device that says something about the
+/// hardware and nothing about carrying traffic is left alone, because
+/// `enabled` lives on the interface and bringing every blockless device up
+/// would be netcfgd answering a question nobody asked.
+#[test]
+fn a_port_with_no_interface_block_is_brought_up() {
+	let desired = document(
+		r#"
+		device br0 {
+			bridge { members = "eth0" }
+		}
+		interface br0 {
+			config = "10.0.0.1/24"
+		}
+		device eth0 {
+			master = "br0"
+		}
+		device eth9 {
+			mtu = 9000
+		}
+		"#,
+	);
+	let observed = observed_with(&["eth0", "eth9"]);
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+
+	let up_for = |iface: &str| {
+		plan.actions
+			.iter()
+			.any(|action| action.op.name() == "link.up" && action.op.interface() == Some(iface))
+	};
+
+	assert!(up_for("eth0"), "the port was left down: {:?}", names(&plan));
+	assert!(
+		up_for("br0"),
+		"the bridge was left down: {:?}",
+		names(&plan)
+	);
+	assert!(
+		!up_for("eth9"),
+		"a device that carries nothing for netcfgd was brought up: {:?}",
+		names(&plan)
+	);
+}
+
+/// The device synthesised for ingress shaping is brought up.
+///
+/// It can never have an interface block -- it carries no address and never
+/// will -- and `tc mirred` refuses a down target, so before this, turning on
+/// inbound shaping dropped every packet that arrived. Measured: `ifb-wan0
+/// DOWN` after an apply.
+#[test]
+fn the_ingress_device_is_brought_up() {
+	let desired = document(
+		r#"
+		device wan0 {
+			qdisc { kind = "cake"; bandwidth = "100mbit"; ingress_bandwidth = "50mbit" }
+		}
+		interface wan0 {
+			config = "10.0.0.2/24"
+		}
+		"#,
+	);
+	let observed = observed_with(&["wan0"]);
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+
+	assert!(
+		plan.actions.iter().any(
+			|action| action.op.name() == "link.up" && action.op.interface() == Some("ifb-wan0")
+		),
+		"the ingress device was left down: {:?}",
+		names(&plan)
 	);
 }
 

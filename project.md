@@ -6051,6 +6051,7 @@ gathered here so a new session does not have to find them.
 - **A probe that reads the first widget of a kind reads whichever was constructed first, which is rarely the one meant.** A headless check asked whether the devices table had caught up and read `findChildren<QTableWidget*>().first()` -- which is the *plan* pane's notes table, built earlier and empty on a converged machine. It reported "the window did not change" for a window that had changed correctly, and the obvious next move would have been to debug working code. Select a widget by something only it has: a header, an object name, a title.
 - **"Not allowed" is the wrong guess when the answer is "could not tell".** A client asking an older daemon which control tiers it holds gets no answer, and the instinct is to grant nothing — which greys out every button against a daemon that would have permitted everything. The refusal path produces a sentence naming the tier that was needed and what to change; a disabled button produces silence. Where a permission check cannot be made, the failure that *explains itself* is the safer one, and that is not always the restrictive one.
 - **A fake that refuses what the real thing accepts hides a defect in the fake, and the test that should catch it can pass by looking early.** `fake_supplicant.py` fails anything it does not model — deliberately, so an unmodelled command cannot look like success — and it did not model `ATTACH`. netcfgd attached, was refused, dropped the connection and reconnected on every pass, forever. The check counted one `ATTACH` and **passed**, because it looked before a second had happened. It asserts exactly one at the start *and* at the end now, which is the difference between "it attached" and "it attached and stayed". A count against a loop needs a second look later, or it is a check on timing.
+- **A fixed sleep shorter than the thing it waits for is a test that reports on the load average, and it will pass every time you run it alone.** `confirm.sh` case 16 slept three seconds for a reconcile that, after `ncfg reload`, happens on the loop's five-second tick -- so it passed on every standalone run while it was being written and sabotaged, and failed the first time it ran inside the full suite on a busier machine. **The tell is the pair of results, not either one**: a case that is green alone and red in the suite is measuring the machine, and re-running it alone to "check" confirms the wrong thing more confidently each time. The remedy divides by what is being asserted -- waiting for an outcome that should happen wants a bounded poll on the outcome itself, and asserting that something should *not* happen genuinely wants a fixed sleep, because there is nothing to wait for and returning early only means not having looked long enough. Five more cases in the same file had the first shape and were converted; the negative ones were left alone deliberately.
 - **A test that was already failing turns a break sweep into noise that reads like evidence.** One of three breaks looked like it caught two tests; the second had been red before any patch was applied, because a fixture helper's first argument is the SSID and the assertion wanted the id. Every break in the sweep then "caught" it. The real signal survived, but only by luck of the other failure being the right one — a sweep has to start from green, and each break should fail *one* test and be checked for which.
 - **`make live` skips six of its thirty-eight scripts here, and four of them
   need not be skipped.** Three want a program that is not installed and three
@@ -9169,7 +9170,7 @@ halves round-tripping is a state no comparison in this codebase can see, which
 is why the constant is now checked against the header rather than against
 ourselves.
 
-### Confirmed and not fixed, because the fix is a design decision
+### Confirmed and fixed on instruction, after being recorded as a design decision
 
 **A device with no `interface` block is created, enslaved, and never brought
 up.** Measured against real devices: with `device br0 { bridge { members =
@@ -9189,13 +9190,40 @@ including bridge ports, so the suite cannot express the failing arrangement, and
 `ingress.sh` asserts the ifb exists and the filter points at it but never reads
 its link state and never passes a packet.
 
-**Not fixed here because "which devices get brought up" is a decision.** A
-bridge member and a synthesised ifb must be; an arbitrary `device eth9 { mtu =
-9000 }` with no interface block is an operator saying nothing about connecting
-over it, and `enabled` lives on the interface. Bringing up every device with no
-interface block would be a behaviour change nobody asked for; bringing up
-exactly the two synthesised cases is the narrow answer and belongs to whoever
-owns 0155.
+**Fixed, on the holder's instruction, and deliberately narrow.** A device is
+brought up when it is a port (`master` is set) or an `ifb` -- the two cases
+where netcfgd's own configuration cannot work unless the link is up and where
+no `interface` block could ever say so, because neither carries an address. An
+arbitrary `device eth9 { mtu = 9000 }` is an operator saying something about
+the hardware and nothing about connecting over it, and `enabled` lives on the
+interface, so it is left alone; that is the control in the fixture. A device
+that *does* have an interface block is left to the interface walk, which knows
+about `enabled`, about `pre_up` hooks and about the SIM cycle -- checked, one
+`link.up` and not two.
+
+The new action waits for the creation gate and for this device's own
+enslavement. The first attempt used `push_root`, which declares no edges at
+all: an `ifb` has to exist before it can be brought up, and a port brought up
+before it is enslaved is briefly a live link outside the bridge. `plan_master`
+returns the enslavement id now so the port's bring-up can name it.
+
+**Two things this taught, both about the tests rather than the code.**
+
+An existing fixture, `a_bridge_waits_for_its_members_even_though_it_sorts_first`,
+went from failing to passing while testing something other than its name. It
+finds its subject with `position(&plan, "link.up")` -- the *first* one -- which
+used to be the bridge's and is now the port's, and a port's bring-up also waits
+for its enslavement, so the assertion held for the wrong action. It names `br0`
+explicitly now. This is 9's positional-assertion lesson arriving from a new
+direction: the assertion did not rot, the plan grew a second action of the same
+kind underneath it.
+
+And the first sabotage of the new fixtures **passed**, which would have shipped
+two vacuous tests as proven. `make fmt-fix` had joined the guard onto one line
+between writing the test and breaking it, so a two-line search-and-replace
+matched nothing and the "sabotaged" build was the unmodified one. The
+replacement is asserted now. `evidence.md` says to confirm the sabotage landed;
+what made it bite here is that the formatter, not the author, moved the target.
 
 ### Two claims that did not survive checking
 

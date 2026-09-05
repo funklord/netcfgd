@@ -314,6 +314,35 @@ stop_daemon
 address_of() { ip -4 -br addr show probe0 2>/dev/null | tr -s ' ' | cut -d' ' -f3; }
 window_open() { [ -e "$work/run/confirm.json" ] && echo yes || echo no; }
 
+# **Wait for the outcome, do not sleep for it.** Case 16 asserted an address
+# after `sleep 3`, where the reconcile it waits for happens on the loop's
+# 5-second tick; it passed every time that case was run alone and failed inside
+# the full suite, where the machine is busier. A fixed sleep shorter than the
+# thing it waits for is a test that reports on the load average.
+#
+# These are for asserting that something *did* happen. Asserting that something
+# did **not** still wants a fixed sleep: there is no outcome to wait for, and
+# returning early would only mean not having looked long enough.
+await_window() {
+	waited=0
+	while [ "$(window_open)" != "$1" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 200 ] && return 1
+		sleep 0.1
+	done
+	return 0
+}
+
+await_address() {
+	waited=0
+	while [ "$(address_of)" != "$1" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 200 ] && return 1
+		sleep 0.1
+	done
+	return 0
+}
+
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global {
 	confirm = 3
@@ -341,7 +370,7 @@ interface probe0 {
 	config = "10.9.9.2/24"
 }
 CONF
-sleep 2
+await_window yes || true
 check "a change the daemon applies for itself arms the document's window" \
 	"$(window_open)" "yes"
 check "and the change is live inside it" "$(address_of)" "10.9.9.2/24"
@@ -470,11 +499,11 @@ CONF
 start_daemon ""
 await yes || true
 sed -i 's/10\.9\.9\.1/10.9.9.2/' "$work/etc/netcfgd.conf"
-sleep 2
+await_window yes || true
 check "the first window is open" "$(window_open)" "yes"
 "$ncfg" confirm >/dev/null 2>&1
 sed -i 's/10\.9\.9\.2/10.9.9.3/' "$work/etc/netcfgd.conf"
-sleep 2
+await_window yes || true
 check "and a second change arms a second" "$(window_open)" "yes"
 # The first window's timer fires about here. It must find nothing to do.
 sleep 3
@@ -503,7 +532,7 @@ CONF
 start_daemon ""
 await yes || true
 sed -i 's/10\.9\.9\.1/10.9.9.2/' "$work/etc/netcfgd.conf"
-sleep 2
+await_window yes || true
 check "the window is open over the change" "$(window_open)" "yes"
 "$ncfg" apply --confirm-within 0 >/dev/null 2>&1
 sleep 9
@@ -629,7 +658,7 @@ CONF
 start_daemon ""
 await yes || true
 sed -i 's/10\.9\.9\.1/10.9.9.2/' "$work/etc/netcfgd.conf"
-sleep 2
+await_address 10.9.9.2/24 || true
 check "the first edit is live in a window" "$(address_of)" "10.9.9.2/24"
 # A second edit while the window is open: deferred, never applied.
 sed -i 's/10\.9\.9\.2/10.9.9.3/' "$work/etc/netcfgd.conf"
@@ -639,7 +668,18 @@ sleep 9
 check "the window reverts the edit it covered" "$(address_of)" "10.9.9.1/24"
 check "and the edit it never applied is still loadable" \
 	"$("$ncfg" reload 2>&1 | head -1)" "reloaded; the configuration compiles"
-sleep 3
+# **Waited for, not slept on.** `ncfg reload` recompiles; the reconcile that
+# applies the result happens on the loop's next pass, which without a config
+# event of its own is the 5-second tick. A `sleep 3` passed when this case was
+# written and run alone and failed inside the full suite, where the machine is
+# busier -- a fixed sleep shorter than the thing it waits for is a test that
+# reports on the load average.
+waited=0
+while [ "$(address_of)" != "10.9.9.3/24" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 200 ] && break
+	sleep 0.1
+done
 check "so the operator's newest work is not lost" "$(address_of)" "10.9.9.3/24"
 stop_daemon
 

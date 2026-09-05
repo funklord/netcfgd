@@ -140,6 +140,18 @@ if [ -n "$tc" ]; then
 		"$("$tc" qdisc show dev ifb-wan0 | grep -c ' ingress ' || true)" "1"
 fi
 
+# **And the ifb is up.** Everything above asserts the objects exist and point
+# at each other, and all of it was true while the device was administratively
+# down -- `tc mirred` refuses a down target, so every packet arriving on wan0
+# was dropped rather than shaped. The ifb can never have an `interface` block
+# to bring it up, because it carries no address; before this, nothing did.
+#
+# `ip link` rather than /sys: this runs in a network namespace and /sys shows
+# the host's, which is how an earlier reading of this got a confident wrong
+# answer.
+check "and the ifb is up, or mirred would drop what it redirects" \
+	"$(ip link show ifb-wan0 2>/dev/null | grep -c '[<,]UP[,>]' || true)" "1"
+
 # Idempotence: three objects that each have to be recognised as already
 # present. Missing any one reinstalls the whole path on every apply.
 plan=$("$ncfg" plan 2>&1)

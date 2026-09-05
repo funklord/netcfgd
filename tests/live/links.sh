@@ -138,6 +138,17 @@ device lan1 {
 interface lan1 {
 	config = "null"
 }
+
+# A bridge whose port has no `interface` block, which is the arrangement every
+# other fixture in this file cannot express: they all write
+# `interface X { config = "null" }` for each device, and that block is what
+# used to bring the port up. `doc/netcfgd.conf.example` ships this shape.
+device brbare { bridge { } }
+interface brbare { config = "10.9.8.1/24" }
+device barep {
+	kind   = "dummy"
+	master = "brbare"
+}
 CONF
 
 export NCFG_CONFIG_DIR="$work/etc"
@@ -554,6 +565,19 @@ contains "and its address came back"    "$(ip -br addr show work-net)" "10.6.0.1
 contains "and the next plan has nothing to do" 	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
 
 # One apply, not two. This is the property the veth peer nearly broke.
+# **A port with no interface block is still brought up.** `link.up` comes from
+# the interface walk, and 0155 pass 1b moved being a port onto the device, so a
+# member that is only ever a port had nothing to bring it up. Measured before
+# the fix: `barep master=brbare state=DOWN`. A bridge port that is down is in
+# the disabled STP state and forwards nothing, so the bridge never gets carrier
+# and an address on it is unreachable -- while every existing assertion in this
+# file passed, because they all give each device an interface block.
+#
+# `ip link` rather than /sys: this runs in a network namespace and /sys shows
+# the host's.
+contains "a port with no interface block is enslaved" "$(detail barep)" "master brbare"
+contains "and is brought up rather than left down" "$(ip link show barep)" ",UP,"
+
 second=$("$ncfg" apply 2>&1)
 contains "one apply converges" "$second" "nothing to do"
 

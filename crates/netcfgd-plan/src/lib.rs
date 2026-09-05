@@ -1078,7 +1078,11 @@ pub fn plan(desired: &Document, observed: &Observed, options: &PlanOptions) -> P
 		// pass 1b -- and a bridge port need not have an interface at all, so
 		// planning it from the interface walk misses exactly the members that
 		// were only ever ports.
-		builder.plan_master(&device.name, observed.link(&device.name));
+		let enslaved = builder.plan_master(&device.name, observed.link(&device.name));
+		// After the enslavement, and in this loop rather than the interface
+		// walk below, because the devices this is for have no interface block
+		// to be walked.
+		builder.plan_device_up(desired, device, observed.link(&device.name), enslaved);
 		builder.plan_wireguard(device, observed);
 		builder.plan_bridge(device, observed);
 		builder.plan_bond(device, observed);
@@ -2791,7 +2795,96 @@ impl Builder {
 	/// and it is a clean seam: being a port of something is the one attribute
 	/// that moved to the device with 0155 pass 1b, so it is also the one whose
 	/// wanted value is looked up rather than read off the interface.
-	fn plan_master(&mut self, name: &str, link: Option<&netcfgd_model::ObservedLink>) {
+	/// Bring up a device that has no interface block and must carry traffic.
+	///
+	/// **`link.up` is emitted from the interface walk, and 0155 pass 1b moved
+	/// two kinds of object off that walk.** A bridge or bond member and the
+	/// `ifb` synthesised for ingress shaping are both `Device`s now, and both
+	/// exist precisely so that something can be carried over them -- neither
+	/// will ever have an `interface` block, because neither carries an address.
+	/// So they were created, enslaved, and left administratively down.
+	///
+	/// Measured before this, against real links:
+	///
+	/// ```text
+	/// device br0 { bridge { members = ["p0","p1"] } }  ->  p0 master=br0 state=DOWN
+	///                                                      p1 master=br0 state=DOWN
+	/// device wan0 { qdisc { ingress_bandwidth = ... } } ->  ifb-wan0 DOWN
+	/// ```
+	///
+	/// A bridge port that is down is in the disabled STP state and forwards
+	/// nothing, so `br0` never gets carrier and a `config = "dhcp"` over it
+	/// never gets a lease -- and that is the arrangement
+	/// `doc/netcfgd.conf.example` ships. The `ifb` is worse: `tc mirred`
+	/// refuses a down target, so turning on inbound shaping drops every packet
+	/// that arrives. Bonds escaped both because `bond_enslave` opens the slave
+	/// itself.
+	///
+	/// **Deliberately narrow: being a port, or being an `ifb`.** A plain
+	/// `device eth9 { mtu = 9000 }` with no interface block is an operator
+	/// saying something about the hardware and nothing about connecting over
+	/// it, and `enabled` lives on the interface -- so bringing up every device
+	/// without a block would be netcfgd deciding a question nobody asked it.
+	/// These two are the cases where netcfgd's own configuration cannot work
+	/// unless the link is up, and where no interface block could ever say so.
+	///
+	/// A device that *does* have an interface block is left to the walk below,
+	/// which knows about `enabled`, about `pre_up` hooks and about the SIM
+	/// cycle. Planning it here as well would be two `link.up` actions for one
+	/// link.
+	fn plan_device_up(
+		&mut self,
+		desired: &Document,
+		device: &netcfgd_model::Device,
+		link: Option<&netcfgd_model::ObservedLink>,
+		enslaved: Option<u32>,
+	) {
+		let carries_for_us = device.master.is_some() || matches!(device.kind, InterfaceKind::Ifb);
+		if !carries_for_us {
+			return;
+		}
+		if desired
+			.interfaces
+			.iter()
+			.any(|interface| interface.name == device.name)
+		{
+			return;
+		}
+		// The same condition the interface walk uses, minus the parts that
+		// belong to an interface: no `enabled` to consult and no SIM cycle to
+		// take a link down for.
+		if link.is_some_and(|link| link.up) {
+			return;
+		}
+		// The creation gate, plus this device's own enslavement where one was
+		// just planned. `push_root` was wrong on both counts: an `ifb` has to
+		// exist before it can be brought up, and a port brought up before it is
+		// enslaved is briefly a live link outside the bridge.
+		let mut waits_for = self.gate(&device.name);
+		waits_for.extend(enslaved);
+		self.push(
+			Op::LinkUp {
+				name: device.name.clone(),
+			},
+			// Not `enabled`, which is what the interface walk says and what a
+			// device does not have: saying it here would name a key the
+			// operator never wrote, on a device that has no block to write it
+			// in. What is true is that the link has to be up and is not.
+			Reason::differs(&device.name, "link", "up", "down"),
+			waits_for,
+			Some(Op::LinkDown {
+				name: device.name.clone(),
+			}),
+		);
+	}
+
+	/// Returns the id of the enslavement it planned, where it planned one, so
+	/// that a port's own `link.up` can wait for it.
+	fn plan_master(
+		&mut self,
+		name: &str,
+		link: Option<&netcfgd_model::ObservedLink>,
+	) -> Option<u32> {
 		// The master is the device's since 0155 pass 1b: being a port of a
 		// bridge is a fact about the hardware, not about a connection.
 		let wanted_master = self
@@ -2822,6 +2915,7 @@ impl Builder {
 				);
 				// Rule 2: the master waits for this.
 				self.enslavements.push((desired.clone(), id));
+				return Some(id);
 			}
 			(None, Some(current)) => {
 				self.push(
@@ -2838,6 +2932,7 @@ impl Builder {
 			}
 			_ => {}
 		}
+		None
 	}
 
 	/// Hooks, link state, addressing and routes.
