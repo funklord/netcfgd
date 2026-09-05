@@ -227,7 +227,24 @@ impl Resolver {
 			});
 		};
 
-		Self::write_private(directory, name, secret.expose().as_bytes()).map_err(|reason| {
+		// **The file is named after the credential, not after its role.** The
+		// caller passes a role -- `ca.pem`, `client.pem`, `client.key` -- and
+		// that is a literal, so every network with a stored CA wrote the same
+		// `/run/netcfgd/certs/ca.pem` and every network's `ca_cert=` pointed at
+		// it. One supplicant is given every network in one loop, so the last
+		// one rendered won for all of them: a machine with a work network and a
+		// university network validated *both* servers against whichever CA was
+		// written last. That is not a tidiness bug -- it is the corporate
+		// network trusting a certificate authority it was never configured to
+		// trust, which is the whole of what a CA pin is for.
+		//
+		// The secret's own name is the right key: two networks sharing one
+		// stored credential should share one file, and two that do not must
+		// not. It is already constrained to something that can be a filename --
+		// `read_file` refuses a name with `/`, `..` or a leading dot before it
+		// ever gets here.
+		let file = format!("{}.{name}", reference.name);
+		Self::write_private(directory, &file, secret.expose().as_bytes()).map_err(|reason| {
 			Error::Failed {
 				name: reference.name.clone(),
 				reason,

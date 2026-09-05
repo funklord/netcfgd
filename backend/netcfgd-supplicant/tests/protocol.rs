@@ -876,10 +876,12 @@ fn stored_certificates_are_materialised_and_sent_as_paths() {
 	let lines = rendered(&network("corp", tls), &resolver);
 
 	// Every one is a path under /run, and none carries the material.
+	// Named after the credential, not after the role. Two networks with
+	// different stored CAs must not share one file -- see the test below.
 	for (field, file) in [
-		("ca_cert", "ca.pem"),
-		("client_cert", "client.pem"),
-		("private_key", "client.key"),
+		("ca_cert", "corp-ca.ca.pem"),
+		("client_cert", "corp-crt.client.pem"),
+		("private_key", "corp-key.client.key"),
 	] {
 		let wanted = run.join("certs").join(file);
 		assert!(
@@ -1069,5 +1071,73 @@ fn a_lower_metric_becomes_a_higher_join_priority() {
 		priority_of(None),
 		None,
 		"an unranked network states no priority"
+	);
+}
+
+/// Two networks with different stored CAs get two files.
+///
+/// **The defect this pins is not a collision of names, it is a collision of
+/// trust.** Every stored certificate was written to one `ca.pem` and every
+/// network's `ca_cert=` pointed at it, while one supplicant is handed every
+/// network in a single loop -- so the last one rendered won for all of them,
+/// and a machine with a work network and a university network validated both
+/// servers against whichever CA happened to be written last. A corporate
+/// network then trusts an authority it was never configured to trust, which is
+/// the whole of what pinning a CA is for.
+///
+/// Asserting the two paths differ is the assertion; asserting each file holds
+/// its own bytes is what makes it about trust rather than about filenames.
+#[test]
+fn two_networks_with_different_cas_do_not_share_one_file() {
+	let dir = scratch("tls-two-cas");
+	write_secret(&dir, "work-ca", "-----BEGIN CERTIFICATE-----\nWORK==\n");
+	write_secret(&dir, "uni-ca", "-----BEGIN CERTIFICATE-----\nUNI==\n");
+	write_secret(&dir, "pw", "hunter2");
+
+	let run = scratch("tls-two-run");
+	let resolver = Resolver::with_secrets_dir(&*dir).materialising_into(run.join("certs"));
+
+	let peap = |ca: &str| {
+		Security::Eap(EapConfig {
+			method: EapMethod::Peap,
+			identity: "user@example".to_owned(),
+			anonymous_identity: None,
+			password: Some(stored("pw")),
+			ca_cert: Some(CertSource::Stored(stored(ca))),
+			client_cert: None,
+			private_key: None,
+			phase2: None,
+		})
+	};
+
+	let path_of = |lines: &[String]| -> String {
+		lines
+			.iter()
+			.find_map(|line| {
+				line.strip_prefix("SET_NETWORK 0 ca_cert \"")
+					.map(str::to_owned)
+			})
+			.expect("a ca_cert line")
+			.trim_end_matches('"')
+			.to_owned()
+	};
+
+	let work = path_of(&rendered(&network("work", peap("work-ca")), &resolver));
+	let uni = path_of(&rendered(&network("uni", peap("uni-ca")), &resolver));
+
+	assert_ne!(work, uni, "both networks were sent the same ca_cert path");
+
+	// And each file still holds its own certificate after both were rendered,
+	// which is the half a distinct name alone would not prove.
+	let read = |path: &str| std::fs::read_to_string(path).expect("materialised");
+	assert!(
+		read(&work).contains("WORK=="),
+		"work's CA holds {:?}",
+		read(&work)
+	);
+	assert!(
+		read(&uni).contains("UNI=="),
+		"uni's CA holds {:?}",
+		read(&uni)
 	);
 }
