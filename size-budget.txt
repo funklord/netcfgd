@@ -533,4 +533,19 @@ netcfgd
 # while the design is still moving measures growth that was expected rather
 # than a defect. The bands want re-deriving deliberately once the feature set
 # settles.
-total 2685464
+# Reconciling a running supplicant, +2,800 bytes to 2,688,264.
+#
+# 0015 says netcfgd's next reconcile removes a network the document no longer
+# contains, and until now nothing did: `populate_supplicant` had one caller,
+# the `backend.start` arm, so a supplicant that was already up was never given
+# anything again. What the space buys is the machinery to notice -- a digest of
+# the settings handed over, recorded under /run; a field on `ObservedBackend`
+# carrying the comparison's answer; and the planner arm that emits
+# `wifi.set_profiles`, which the taxonomy has carried unconstructed since the
+# beginning.
+#
+# Raised rather than trimmed, and the trimming was tried: making the digest
+# function return `Option` rather than a boxed error changed the number by
+# nothing at all. The cost is the new document field's serde code and a second
+# comparison path, neither of which has a cheaper shape.
+total 2688264

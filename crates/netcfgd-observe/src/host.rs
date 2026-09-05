@@ -54,7 +54,7 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	read_netfilter(observed);
 	read_offloads(observed);
 	read_access_control(observed, run_dir);
-	ask_supplicants(observed, desired);
+	ask_supplicants(observed, run_dir, desired);
 	read_advertised(observed, run_dir);
 	read_secret_currency(observed, run_dir, desired);
 	read_tunnel_currency(observed, run_dir, desired);
@@ -283,7 +283,62 @@ fn carried(state: &netcfgd_sys::wg::DeviceState) -> netcfgd_model::ObservedWireG
 /// window says the machine is associated with. A backend that is not
 /// `wpa_supplicant` leaves the field `None`, and `None` means the interface's
 /// own preference stands.
-fn ask_supplicants(observed: &mut Observed, desired: Option<&netcfgd_model::Document>) {
+/// Whether the supplicant on `interface` still holds the document's networks.
+///
+/// Compares a digest of what netcfgd recorded handing over against a digest of
+/// what the document would produce now. `None` is "cannot say" and is the
+/// answer whenever either half is missing -- no record, or a network whose SSID
+/// comes from a scan. See `ObservedBackend::networks_match`.
+fn supplicant_networks_match(
+	interface: &str,
+	run_dir: &Path,
+	document: &netcfgd_model::Document,
+) -> Option<bool> {
+	let policy = document
+		.devices
+		.iter()
+		.find(|device| device.name == interface)
+		.and_then(|device| device.wifi.as_ref())
+		.map_or(netcfgd_model::MacPolicy::Permanent, |wifi| wifi.mac_policy);
+
+	let wanted = netcfgd_supplicant::fingerprint(
+		&document.networks,
+		policy,
+		// `secrets_dir()`, not the crate default: this module already has one
+		// spelling for where the secrets are, and using the constant instead
+		// resolved against /etc/netcfgd/secrets on a machine whose store is
+		// somewhere else. Every resolution then failed, `fingerprint` returned
+		// an error, and the comparison reported "cannot say" -- so the fix
+		// looked like it did nothing.
+		&netcfgd_secret::Resolver::with_secrets_dir(secrets_dir()),
+	)?;
+
+	// **No record means netcfgd does not know what this supplicant holds, and
+	// that is a reason to act rather than a reason to shrug.** It is the state
+	// an adopted supplicant is in -- one netcfgd found already running and did
+	// not populate -- and 0015's whole premise is that the supplicant holds no
+	// state of its own, so a set netcfgd cannot account for is a set that
+	// should be replaced with the document's.
+	//
+	// This cannot loop: handing the networks over writes the record, and the
+	// next observation compares equal. And it is reached only when `wanted`
+	// was computable, which is what keeps a network whose SSID comes from a
+	// scan out of it -- that case returns above, and would otherwise re-send
+	// the whole set on every pass for ever.
+	let Ok(recorded) = fs::read_to_string(netcfgd_apply::kernel::networks_record_path(
+		run_dir, interface,
+	)) else {
+		return Some(false);
+	};
+
+	Some(wanted == recorded.trim())
+}
+
+fn ask_supplicants(
+	observed: &mut Observed,
+	run_dir: &Path,
+	desired: Option<&netcfgd_model::Document>,
+) {
 	let dir = netcfgd_supplicant::ctrl_dir();
 	let running: Vec<String> = observed
 		.backends
@@ -298,11 +353,14 @@ fn ask_supplicants(observed: &mut Observed, desired: Option<&netcfgd_model::Docu
 			&interface,
 			netcfgd_supplicant::IMPATIENT,
 		);
-		if let Some(backend) = observed
-			.backends
-			.iter_mut()
-			.find(|backend| backend.interface == interface)
-		{
+		// **By kind as well as by interface.** One interface carries several
+		// backends -- a supplicant and a DHCP client at least -- and matching
+		// on the name alone takes whichever comes first. This is the
+		// supplicant's answer, and it was being written onto whatever backend
+		// happened to sort earliest for that interface.
+		if let Some(backend) = observed.backends.iter_mut().find(|backend| {
+			backend.interface == interface && backend.kind == netcfgd_model::BackendKind::Supplicant
+		}) {
 			backend.answering = Some(client.is_ok());
 		}
 		let Ok(client) = client else {
@@ -313,6 +371,21 @@ fn ask_supplicants(observed: &mut Observed, desired: Option<&netcfgd_model::Docu
 		let Some(document) = desired else {
 			continue;
 		};
+
+		// **Does the running supplicant still hold what the document asks
+		// for?** Asked here because this is the one pass that has both the
+		// document and a connection, and answered from a record rather than
+		// from the supplicant because the supplicant cannot say: `LIST_NETWORKS`
+		// returns ids and SSIDs, and a passphrase is write-only.
+		//
+		// The answer travels, not the values -- the same trade `secret_matches`
+		// makes, and for the same reason: this is serialised into `/run`.
+		let matches = supplicant_networks_match(&interface, run_dir, document);
+		if let Some(backend) = observed.backends.iter_mut().find(|backend| {
+			backend.interface == interface && backend.kind == netcfgd_model::BackendKind::Supplicant
+		}) {
+			backend.networks_match = matches;
+		}
 		let Some((ssid, bssid)) = netcfgd_supplicant::associated(&client) else {
 			continue;
 		};

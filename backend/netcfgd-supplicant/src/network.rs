@@ -161,6 +161,57 @@ pub fn mac_addr_value(policy: MacPolicy) -> &'static str {
 	}
 }
 
+/// A digest of everything a radio's networks would be given.
+///
+/// **The supplicant cannot be asked what it holds.** `LIST_NETWORKS` returns
+/// ids and SSIDs and nothing else -- a passphrase is write-only, by design --
+/// so "does the running supplicant still match the document" cannot be
+/// answered by reading the supplicant. It is answered the way netcfgd already
+/// answers the same question for a `WireGuard` key and an openvpn config:
+/// record
+/// a digest of what was handed over, and compare it against a digest of what
+/// the document says now.
+///
+/// Covers the passphrase, because the rendered settings contain it -- as a
+/// digest and never as a value, which is the same trade `key_record_path`
+/// makes. So rotating a secret changes this, which is the case that mattered
+/// most: it is invisible to every other observation.
+///
+/// **`None` when any network's SSID is not stated in the document.** A network
+/// naming access points instead resolves its SSID from a scan at the moment it
+/// is sent, so what will be sent is not knowable from the document alone, and
+/// a digest that guessed would differ from the recorded one on every pass and
+/// re-send the whole set for ever. Absent means "cannot say", and the planner
+/// treats it as no reason to act.
+///
+/// `None` covers a network that cannot be rendered at all -- an unusable
+/// credential, or a secret that will not resolve -- for the same reason it
+/// covers an unresolved SSID: neither can be compared, and both are the
+/// planner's "no reason to act". An `Err` here would be a second way of saying
+/// the one thing the caller can do about it.
+#[must_use]
+pub fn fingerprint(
+	networks: &[WifiNetwork],
+	policy: MacPolicy,
+	resolver: &Resolver,
+) -> Option<String> {
+	let mut text = String::new();
+	for network in networks {
+		network.ssid.as_ref()?;
+		// The id as well as the settings: two networks that render identically
+		// are still two networks, and one being renamed is a change.
+		text.push_str(&network.id);
+		text.push('\n');
+		for setting in settings(network, policy, resolver).ok()? {
+			text.push_str(&setting.variable);
+			text.push(' ');
+			text.push_str(&setting.value);
+			text.push('\n');
+		}
+	}
+	Some(netcfgd_model::hash::sha256_hex(text.as_bytes()))
+}
+
 /// The settings for one network, in the order they should be sent.
 ///
 /// # Errors

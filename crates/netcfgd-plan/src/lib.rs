@@ -943,6 +943,11 @@ fn prepare(desired: &Document, observed: &Observed, options: &PlanOptions) -> Bu
 		.filter_map(|network| network.metric.map(|metric| (network.id.clone(), metric)))
 		.collect();
 	builder.has_networks = !desired.networks.is_empty();
+	builder.network_ids = desired
+		.networks
+		.iter()
+		.map(|network| network.id.clone())
+		.collect();
 	builder.access_point_devices = desired
 		.access_points
 		.iter()
@@ -1205,6 +1210,12 @@ struct Builder {
 	/// out. What this is still for is the access-point warning, where "is
 	/// there anything to join" is genuinely the question being asked.
 	has_networks: bool,
+	/// The document's network ids, in document order.
+	///
+	/// Carried because `wifi.set_profiles` names the set it is handing over,
+	/// and the builder is where the plan is composed. `has_networks` was here
+	/// already and is the same fact one bit wide.
+	network_ids: Vec<String>,
 	/// Devices that run an access point, in document order.
 	///
 	/// The device names rather than the access points themselves: the planner
@@ -3517,6 +3528,63 @@ impl Builder {
 		vec![id]
 	}
 
+	/// Re-hand a running supplicant its networks when the document has moved.
+	///
+	/// Driven by `networks_match`, which is computed where both halves are
+	/// already in hand: a digest of what netcfgd recorded giving the
+	/// supplicant against a digest of what the document would produce now. The
+	/// value never travels -- the settings contain a passphrase -- so the
+	/// observation carries the answer, the way `secret_matches` does for
+	/// hostapd.
+	///
+	/// **Only `Some(false)` acts.** `None` is "cannot say", which is what a
+	/// missing record and a network whose SSID comes from a scan both produce,
+	/// and re-sending every network on a guess would disassociate a working
+	/// radio for no reason.
+	///
+	/// `wifi.set_profiles` is the taxonomy's own name for this and has been in
+	/// section 4 unconstructed since the beginning. It replaces the set rather
+	/// than editing it, which is 0015's rule: the supplicant holds no state of
+	/// its own, so the whole set is what netcfgd is authoritative about.
+	fn plan_supplicant_networks(
+		&mut self,
+		name: &str,
+		kind: BackendKind,
+		observed: &Observed,
+		base: &[u32],
+	) -> Vec<u32> {
+		if kind != BackendKind::Supplicant {
+			return Vec::new();
+		}
+		let matches = observed
+			.backends
+			.iter()
+			.find(|backend| backend.kind == kind && backend.interface == name)
+			.and_then(|backend| backend.networks_match);
+		if matches != Some(false) {
+			return Vec::new();
+		}
+		let id = self.push(
+			Op::WifiSetProfiles {
+				device: name.to_owned(),
+				profiles: self.network_ids.clone(),
+			},
+			Reason::differs(
+				name,
+				"networks",
+				"the document's",
+				"what the supplicant was given",
+			),
+			base.to_vec(),
+			// No inverse: what it replaced is not recorded anywhere a revert
+			// could read, and 0015's whole point is that the supplicant holds
+			// nothing netcfgd is not the author of. A revert re-plans against
+			// the last-good document and hands them over again.
+			None,
+		);
+		vec![id]
+	}
+
 	fn plan_backend(
 		&mut self,
 		name: &str,
@@ -3526,7 +3594,17 @@ impl Builder {
 		base: &[u32],
 	) -> Vec<u32> {
 		if observed.backend_running(kind, name) {
-			return Vec::new();
+			// **Running is not the same as holding what the document says.**
+			// This returned here unconditionally, and `populate_supplicant` has
+			// one caller -- the `backend.start` arm -- so a supplicant that was
+			// already up was never given anything again. Measured: changing a
+			// passphrase, pinning a `bssid`, adding a network and deleting one
+			// each planned `nothing to do`, and the supplicant kept the
+			// original credentials indefinitely.
+			//
+			// 0015 says netcfgd's next reconcile removes a network the document
+			// does not contain. There was no such reconcile; this is it.
+			return self.plan_supplicant_networks(name, kind, observed, base);
 		}
 		// A daemon that dies as fast as netcfgd starts it. Since 0078 the
 		// observation notices it is gone, and on an interface set to

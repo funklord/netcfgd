@@ -920,6 +920,24 @@ pub struct ObservedBackend {
 	/// check" is not a reason to.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub secret_matches: Option<bool>,
+	/// Whether a running supplicant still holds what the document asks for.
+	///
+	/// **The answer rather than the values, for the reason `secret_matches`
+	/// carries the same shape**: what would have to be compared is a
+	/// passphrase, and the observation is written to `/run` where anything can
+	/// read it. What is compared is a digest of the settings netcfgd handed
+	/// over against a digest of the settings the document would produce now.
+	///
+	/// `None` means "cannot say", and there are three ways to get it: the
+	/// backend is not a supplicant, netcfgd has no record of what it gave one
+	/// (it did not populate it, or the record could not be written), or a
+	/// network names access points instead of an SSID -- which is resolved
+	/// from a scan at the moment it is sent, so what will be sent is not
+	/// knowable from the document alone. The planner treats absent as no
+	/// reason to act, which is the safe direction: re-sending every network on
+	/// a guess would disassociate a working radio.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub networks_match: Option<bool>,
 	/// Whether a running tunnel's configuration file is still the one it was
 	/// started from.
 	///

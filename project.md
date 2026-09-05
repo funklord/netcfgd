@@ -9363,10 +9363,40 @@ passphrase, pinning a `bssid`, adding a network, changing `metric` or
 `populate_supplicant` has one caller, the `BackendStart` arm, and `plan_backend`
 returns early when the backend is already running.
 
-This is a document/code contradiction rather than a bug to pick a side on:
+This was a document/code contradiction rather than a bug to pick a side on:
 `doc/decision/0015-the-supplicant-holds-no-state.md` says in two places that
 netcfgd's next reconcile removes a network the document no longer contains, and
-there is no such reconcile. Flagged, per *working-practice.md*, not resolved.
+there was no such reconcile. Flagged rather than resolved, per
+*working-practice.md* -- **and then settled by the holder in favour of the
+document**, which is what that rule exists to produce.
+
+**The supplicant cannot be asked, which is what shapes the fix.**
+`LIST_NETWORKS` returns ids and SSIDs; a passphrase is write-only by design. So
+netcfgd records a digest of the settings it handed over, and the observation
+compares it against a digest of what the document says now -- the idiom already
+used for a `WireGuard` key and an openvpn config, and the shape `secret_matches`
+uses for hostapd: the answer travels, never the value, because the observation
+is written into `/run`. `wifi.set_profiles` had been in the taxonomy
+unconstructed since the beginning, described as "hand a radio its network
+profiles", so the planner arm had a name waiting for it.
+
+Three judgements are worth stating because none of them is forced. **`None`
+never acts**: a network whose SSID comes from a scan cannot be predicted from
+the document, and re-sending on a guess would disassociate a working radio.
+**No record does act**: that is an adopted supplicant, whose contents netcfgd
+cannot account for, and 0015's premise is that it holds no state of its own. And
+it cannot loop, because handing the networks over writes the record.
+
+**Two faults of my own on the way, and both looked like the fix not working.**
+The observer resolved secrets against `netcfgd-secret`'s default store rather
+than the one in use, so every resolution failed and the comparison reported
+"cannot say". Then `find(|backend| backend.interface == interface)` matched on
+the name alone -- one interface carries several backends -- so the answer was
+written onto the DHCP client's entry and the planner read `None` from the
+supplicant's. The `answering` field two lines above had the same defect and is
+fixed with it. Both are the lens this sweep keeps finding: **a value read from
+the wrong copy**, in code written by somebody who had just described that lens
+to six other workers.
 
 **An access point's security shape is never compared.** `ObservedAccessPoint`
 records `ssid`, `band` and `channel`, and `secret_matches` is computed only

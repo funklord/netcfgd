@@ -531,6 +531,7 @@ impl OwnedState {
 					access_control: None,
 					started_with: None,
 					secret_matches: None,
+					networks_match: None,
 					config_matches: None,
 					config_present: None,
 					advertised: Vec::new(),
