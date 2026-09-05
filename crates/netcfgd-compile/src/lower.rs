@@ -1134,8 +1134,18 @@ fn lower_rule(block: &Block, diags: &mut Diagnostics) -> Option<RoutingRule> {
 				}
 			}
 			"priority" => priority = as_u32(&assignment.value, diags),
-			"from" => rule.from = as_string(&assignment.value, diags),
-			"to" => rule.to = as_string(&assignment.value, diags),
+			// Canonicalised for the same reason as an address: `same_rule`
+			// compares these against the kernel's own rendering, so
+			// `2001:0DB8::/32` was a rule torn down and reinstalled on every
+			// apply, with a window in between where it did not exist.
+			"from" => {
+				rule.from = as_string(&assignment.value, diags)
+					.map(|text| canonical_address(&text).unwrap_or(text));
+			}
+			"to" => {
+				rule.to = as_string(&assignment.value, diags)
+					.map(|text| canonical_address(&text).unwrap_or(text));
+			}
 			"iif" => rule.iif = as_string(&assignment.value, diags),
 			"oif" => rule.oif = as_string(&assignment.value, diags),
 			"fwmark" => rule.fwmark = as_u32(&assignment.value, diags),
@@ -4212,6 +4222,11 @@ fn address_source(entry: &Spanned<AddressEntry>, diags: &mut Diagnostics) -> Opt
 	// A bare address with no prefix and no netmask is still an error, and the
 	// message says which of the two spellings to reach for.
 	check_cidr(&address, entry.span, diags)?;
+	// The kernel's spelling, not the operator's. See `canonical_address`: the
+	// comparison against what the kernel reports is a string comparison, so a
+	// leading zero or an uppercase digit made the address add and delete
+	// itself on every apply.
+	let address = canonical_address(&address).unwrap_or(address);
 	Some(AddressSource::Static(Static {
 		address,
 		peer,
@@ -4245,6 +4260,95 @@ fn set_lifetime(slot: &mut Option<u32>, text: &str, span: Span, diags: &mut Diag
 
 /// Reject an address that is not `IP/prefixlen` here rather than at apply
 /// time, when the interface is half configured.
+/// The kernel's own spelling of an address or prefix, or `None` if it is not one.
+///
+/// **The desired side is compared against the kernel's rendering as a string,
+/// so whichever spelling the operator used has to become the kernel's.** Every
+/// one of these was measured on a dummy device, second plan after an apply:
+///
+/// ```text
+/// config  = "2001:0db8::1/64"    addr.add + addr.del, every apply, for ever
+/// config  = "2001:DB8::2/64"     the same
+/// from    = "2001:0DB8::/32"     rule.del + rule.add, every apply
+/// routes  = "2001:0DB8:2::/64"   route.add fails EEXIST and stops the plan
+/// ```
+///
+/// The canonical spelling of each converges on the first apply, which is what
+/// makes this a spelling fault rather than anything about IPv6. `Ipv6Addr`'s
+/// `Display` is the compressed lowercase form the kernel also prints, so
+/// parsing and re-rendering is the whole of the normalisation.
+///
+/// Takes a bare address as well as a prefix, because a routing rule's `from`
+/// may be either and the kernel prints a bare one back unchanged.
+fn canonical_address(text: &str) -> Option<String> {
+	if let Some((addr, prefix)) = text.split_once('/') {
+		let parsed: IpAddr = addr.parse().ok()?;
+		let length: u8 = prefix.parse().ok()?;
+		let max = if parsed.is_ipv4() { 32 } else { 128 };
+		if u32::from(length) > max {
+			return None;
+		}
+		return Some(format!("{parsed}/{length}"));
+	}
+	text.parse::<IpAddr>().ok().map(|parsed| parsed.to_string())
+}
+
+/// The network a prefix names, or `None` if any host bit is set.
+///
+/// **A route destination is masked by the kernel and an address is not**, which
+/// is why this is separate from `canonical_address`. `ip route add
+/// 10.1.2.3/8` is refused outright with `EINVAL`, and
+/// `2001:db8:1::5/64` is accepted and stored as `2001:db8:1::/64` -- so the
+/// desired text never matches what comes back, `route.add` is planned again,
+/// and the second apply fails `EEXIST`.
+///
+/// Measured, and the blast radius is what makes it worth a compile-time
+/// refusal rather than a silent mask: execution stops at the first failed
+/// action, so one destination with host bits abandons every later action in
+/// the plan, on every apply, for ever. `ncfg: stopped at action 0
+/// (route.add); 0 done, 1 not attempted`.
+///
+/// Refused rather than masked because masking would change what the operator
+/// wrote into something else and say nothing; the diagnostic names the form
+/// they meant.
+fn network_of(text: &str) -> Option<Result<String, String>> {
+	let (addr, prefix) = text.split_once('/')?;
+	let parsed: IpAddr = addr.parse().ok()?;
+	let length: u8 = prefix.parse().ok()?;
+	let masked = match parsed {
+		IpAddr::V4(v4) => {
+			if length > 32 {
+				return None;
+			}
+			let bits = u32::from(v4);
+			let mask = if length == 0 {
+				0
+			} else {
+				u32::MAX << (32 - length)
+			};
+			IpAddr::V4(std::net::Ipv4Addr::from(bits & mask))
+		}
+		IpAddr::V6(v6) => {
+			if length > 128 {
+				return None;
+			}
+			let bits = u128::from(v6);
+			let mask = if length == 0 {
+				0
+			} else {
+				u128::MAX << (128 - length)
+			};
+			IpAddr::V6(std::net::Ipv6Addr::from(bits & mask))
+		}
+	};
+	let canonical = format!("{masked}/{length}");
+	if masked == parsed {
+		Some(Ok(canonical))
+	} else {
+		Some(Err(canonical))
+	}
+}
+
 fn check_cidr(text: &str, span: Span, diags: &mut Diagnostics) -> Option<()> {
 	let Some((addr, prefix)) = text.split_once('/') else {
 		diags.push(
@@ -4277,6 +4381,22 @@ fn check_cidr(text: &str, span: Span, diags: &mut Diagnostics) -> Option<()> {
 fn parse_route(entry: &Spanned<String>, diags: &mut Diagnostics) -> Option<Route> {
 	let mut words = entry.node.split_whitespace();
 	let destination = words.next()?.to_owned();
+	// `default` and the other non-prefix spellings pass through untouched;
+	// anything that is a prefix is checked and canonicalised.
+	let destination = match network_of(&destination) {
+		Some(Ok(canonical)) => canonical,
+		Some(Err(network)) => {
+			diags.push(
+				Diagnostic::new(
+					entry.span,
+					format!("`{destination}` has host bits set, so it is not a network"),
+				)
+				.with_help(format!("write `{network}`, which is the network it names")),
+			);
+			return None;
+		}
+		None => destination,
+	};
 	let mut route = Route {
 		destination,
 		via: None,
