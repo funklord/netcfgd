@@ -5269,7 +5269,25 @@ impl Builder {
 				access_point.ssid.to_hex(),
 				started.ssid.to_hex(),
 			)
-		} else if started.channel != access_point.channel {
+		} else if started.channel != access_point.channel && access_point.channel.is_some() {
+			// **The same guard the `band` arm below carries, for the same
+			// reason, and it was missing here.** An absent `channel` means
+			// "let hostapd choose" -- ACS -- and the renderer writes
+			// `channel=0` to say so, which reads back as `Some(0)`. Comparing
+			// that against the document's `None` is true on every pass, so an
+			// access point that names no channel was stopped and started on
+			// every reconcile, and a reconcile runs on every netlink event.
+			//
+			// Measured: `backend.stop` + `backend.start` with the reason
+			// `access_point.channel: <absent> (was 0)`, and the plan's own
+			// warning saying what that costs -- "every station associated with
+			// it is deauthenticated and reconnects". There is no dedup and no
+			// backoff, so it is a permanent deauthentication loop for a
+			// document nobody has touched.
+			//
+			// Nothing caught it because the plan fixture hands the document's
+			// `Option` straight back instead of deriving it from the file the
+			// renderer writes, and every live test pins a channel.
 			(
 				"access_point.channel",
 				render_option(access_point.channel),
