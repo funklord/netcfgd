@@ -575,6 +575,7 @@ mod tests {
 			observe: true,
 			wifi: true,
 			admin: false,
+			..RemotePolicy::default()
 		};
 		// Local is root-only, so anything that got through did so on the
 		// remote policy rather than by falling back to the local one.
@@ -644,6 +645,7 @@ mod tests {
 			observe: true,
 			wifi: true,
 			admin: false,
+			..RemotePolicy::default()
 		};
 		let control = Control {
 			admin: Principal::Any,

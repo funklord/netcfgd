@@ -7,7 +7,7 @@
 //! per client on a socket that will normally have one or two.
 
 use crate::authorize::Origin;
-use netcfgd_model::Control;
+use netcfgd_model::control::named_groups;
 use netcfgd_proto::{read_request, write_message, Event, Request, Response};
 use netcfgd_sys::peer::{group_id, Peer};
 use std::io::{BufReader, BufWriter};
@@ -57,12 +57,20 @@ pub(crate) enum Command {
 
 /// Bind the control socket and serve it until the process exits.
 ///
+/// **`reach` is who may open the file, which is not who may do anything.**
+/// The local socket passes its three principals because those are the people
+/// the local policy speaks about; the remote socket passes one, naming who may
+/// act as the agent. Passing the *local* policy for both is what 0159 fixes:
+/// the mode is a statement about local processes either way, and the remote
+/// socket's authorisation never consults the local principals, so a `control`
+/// block opening `observe` was opening a socket that grants the remote tiers.
+///
 /// # Errors
 ///
 /// Returns the underlying `io::Error` if the socket cannot be bound.
 pub(crate) fn serve(
 	path: &Path,
-	control: &Control,
+	reach: &[&netcfgd_model::Principal],
 	origin: Origin,
 	commands: Sender<Command>,
 ) -> std::io::Result<()> {
@@ -75,7 +83,7 @@ pub(crate) fn serve(
 	let _ = std::fs::remove_file(path);
 
 	let listener = UnixListener::bind(path)?;
-	apply_policy_permissions(path, control);
+	apply_policy_permissions(path, reach);
 
 	let connections = Connections::new();
 	thread::Builder::new()
@@ -203,16 +211,13 @@ impl Drop for Slot {
 /// this says so loudly rather than leaving a root-only socket under a config
 /// that claims otherwise. That combination produces a bug report about wifi
 /// not working which takes an afternoon to trace.
-fn apply_policy_permissions(path: &Path, control: &Control) {
+fn apply_policy_permissions(path: &Path, reach: &[&netcfgd_model::Principal]) {
 	use std::os::unix::fs::PermissionsExt;
 
-	let groups = control.named_groups();
-	let mode = if control.observe == netcfgd_model::Principal::Any
-		|| control.wifi == netcfgd_model::Principal::Any
-		|| control.admin == netcfgd_model::Principal::Any
-	{
+	let groups = named_groups(reach);
+	let mode = if reach.contains(&&netcfgd_model::Principal::Any) {
 		0o666
-	} else if control.opens_beyond_root() {
+	} else if reach.iter().any(|principal| principal.beyond_root()) {
 		0o660
 	} else {
 		0o600
@@ -380,6 +385,87 @@ pub(crate) fn drain(commands: &Receiver<Command>) -> Vec<Command> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use netcfgd_model::Control;
+
+	/// **The remote socket's mode does not follow the local policy.**
+	///
+	/// The defect this pins: `bind_sockets` passed the local `Control` for
+	/// both sockets, so a `control` block opening `observe` to `any` made
+	/// `remote.sock` world-writable -- and `check` short-circuits to the
+	/// remote booleans for an `Origin::Remote` connection, consulting no
+	/// principal and no peer. Measured before the fix, as an ordinary user
+	/// against `observe = "any"` with `admin = "root"`: `reload` was refused
+	/// on the local socket and accepted on the remote one.
+	///
+	/// The two sockets are checked in one test rather than two, because the
+	/// property is that they *differ*: a test asserting the remote mode alone
+	/// would still pass if the local one had been narrowed to match it, which
+	/// is the other way to make them agree and is a worse answer.
+	#[test]
+	fn a_wide_local_policy_leaves_the_remote_socket_shut() {
+		use netcfgd_model::Principal;
+		use std::os::unix::fs::PermissionsExt;
+
+		let dir = netcfgd_testdir::TestDir::new("remote-mode");
+		let wide = Control {
+			observe: Principal::Any,
+			wifi: Principal::Root,
+			admin: Principal::Root,
+		};
+		let closed = netcfgd_model::RemotePolicy::default();
+
+		let local = dir.join("netcfgd.sock");
+		let (commands, _incoming) = std::sync::mpsc::channel();
+		serve(
+			&local,
+			&[&wide.observe, &wide.wifi, &wide.admin],
+			Origin::Local,
+			commands.clone(),
+		)
+		.expect("the local socket binds");
+
+		let remote = dir.join("remote.sock");
+		serve(&remote, &[&closed.agent], Origin::Remote, commands)
+			.expect("the remote socket binds");
+
+		let mode = |path: &std::path::Path| {
+			std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
+		};
+		assert_eq!(
+			mode(&local),
+			0o666,
+			"the local policy said any, and means it"
+		);
+		assert_eq!(
+			mode(&remote),
+			0o600,
+			"an unnamed agent leaves the remote socket to root, whatever local says"
+		);
+	}
+
+	/// And a named agent opens it, which is what `agent` is for.
+	///
+	/// Without this the test above is satisfied by a socket that is 0600
+	/// unconditionally, which would be safe and would have removed 0128's
+	/// stated mechanism rather than pointing it at the right policy.
+	#[test]
+	fn a_named_agent_opens_the_remote_socket() {
+		use netcfgd_model::Principal;
+		use std::os::unix::fs::PermissionsExt;
+
+		let dir = netcfgd_testdir::TestDir::new("remote-agent");
+		let (commands, _incoming) = std::sync::mpsc::channel();
+		let path = dir.join("remote.sock");
+		serve(
+			&path,
+			&[&Principal::Group("netcfgd".to_owned())],
+			Origin::Remote,
+			commands,
+		)
+		.expect("the remote socket binds");
+		let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+		assert_eq!(mode, 0o660, "a group-named agent reaches the socket");
+	}
 
 	/// A served socket, with the state loop played by the test.
 	///
@@ -403,7 +489,14 @@ mod tests {
 			let dir = netcfgd_testdir::TestDir::new(tag);
 			let path = dir.join("netcfgd.sock");
 			let (commands, incoming) = std::sync::mpsc::channel();
-			serve(&path, &Control::default(), Origin::Local, commands).expect("the socket binds");
+			let control = Control::default();
+			serve(
+				&path,
+				&[&control.observe, &control.wifi, &control.admin],
+				Origin::Local,
+				commands,
+			)
+			.expect("the socket binds");
 
 			thread::spawn(move || {
 				for command in incoming {

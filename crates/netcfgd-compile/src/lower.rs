@@ -597,6 +597,24 @@ fn lower_remote_key(
 	assignment: &Assignment,
 	diags: &mut Diagnostics,
 ) {
+	// **Who may connect, which is a different question from which tiers are
+	// open.** The tiers describe a caller the daemon cannot see; this
+	// describes the local process holding the other end of the socket, which
+	// `SO_PEERCRED` answers exactly as it does for `control`. It decides the
+	// socket's mode and group, and it is `root` when unwritten. Decision 0159.
+	if assignment.key == "agent" {
+		let Some(text) = as_string(&assignment.value, diags) else {
+			return;
+		};
+		match netcfgd_model::Principal::parse(&text) {
+			Ok(principal) => remote.agent = principal,
+			Err(why) => diags.push(Diagnostic::new(assignment.value.span, why).with_help(
+				"`agent` says who on this machine may act as the agent: root, \
+					 any, user:NAME or group:NAME",
+			)),
+		}
+		return;
+	}
 	let tier = match assignment.key.as_str() {
 		"observe" => &mut remote.observe,
 		"wifi" => &mut remote.wifi,
@@ -604,7 +622,9 @@ fn lower_remote_key(
 		other => {
 			diags.push(
 				Diagnostic::new(assignment.span, format!("unknown remote key `{other}`"))
-					.with_help("the tiers are observe, wifi and admin"),
+					.with_help(
+						"the tiers are observe, wifi and admin; `agent` says who may connect",
+					),
 			);
 			return;
 		}

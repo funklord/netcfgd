@@ -129,6 +129,25 @@ pub struct RemotePolicy {
 	pub wifi: bool,
 	/// Change anything else, from off the machine.
 	pub admin: bool,
+	/// Who may connect to the remote socket and act as the agent.
+	///
+	/// **A principal where the tiers are booleans, and it is not the
+	/// asymmetry 0128 rejected.** The tiers describe a caller the daemon
+	/// cannot see, which is why they cannot name one. This describes the
+	/// process on *this* machine holding the other end of the unix socket --
+	/// exactly what `SO_PEERCRED` answers, and exactly what the local
+	/// principals already mean.
+	///
+	/// It exists because the socket's mode was taken from the *local* policy,
+	/// so a `control` block opening `observe` to a group or to `any` opened
+	/// `remote.sock` to the same people -- and a remote connection never
+	/// consults the local principals. Measured: with `observe = "any"` and
+	/// `admin = "root"`, `ncfg`'s own `reload` was refused on the local socket
+	/// and accepted on the remote one, by an ordinary user. Decision 0159.
+	///
+	/// `Root` by default, so a machine that opens remote access without
+	/// saying who runs the agent has a socket only root can reach.
+	pub agent: Principal,
 }
 
 impl RemotePolicy {
@@ -189,25 +208,36 @@ impl Control {
 	/// Every group named by any tier, for the socket's ownership.
 	#[must_use]
 	pub fn named_groups(&self) -> Vec<&str> {
-		let mut found: Vec<&str> = Vec::new();
-		for principal in [&self.observe, &self.wifi, &self.admin] {
-			if let Principal::Group(name) = principal {
-				// Deduplicated, because the caller counts what this returns
-				// and warns when there is more than one. The policy
-				// `debian/postinst` prints names the same group for `observe`
-				// and `wifi`, which is the ordinary desktop case -- and it
-				// produced "the control policy names 2 groups (netcfgd,
-				// netcfgd) ... Members of the others will not be able to
-				// connect", warning about others that do not exist. A
-				// diagnostic that fires on the recommended configuration is
-				// one people learn to scroll past.
-				if !found.contains(&name.as_str()) {
-					found.push(name.as_str());
-				}
+		named_groups(&[&self.observe, &self.wifi, &self.admin])
+	}
+}
+
+/// Every group named by a set of principals, in order and without repeats.
+///
+/// Free rather than a method, because the remote socket's reachability is one
+/// principal and the local socket's is three, and both sockets are given to a
+/// group the same way. Two copies of this rule is how they come to disagree
+/// about what "the same group twice" means.
+#[must_use]
+pub fn named_groups<'a>(principals: &[&'a Principal]) -> Vec<&'a str> {
+	let mut found: Vec<&'a str> = Vec::new();
+	for principal in principals {
+		if let Principal::Group(name) = principal {
+			// Deduplicated, because the caller counts what this returns and
+			// warns when there is more than one. The policy
+			// `debian/postinst` prints names the same group for `observe`
+			// and `wifi`, which is the ordinary desktop case -- and it
+			// produced "the control policy names 2 groups (netcfgd,
+			// netcfgd) ... Members of the others will not be able to
+			// connect", warning about others that do not exist. A
+			// diagnostic that fires on the recommended configuration is one
+			// people learn to scroll past.
+			if !found.contains(&name.as_str()) {
+				found.push(name.as_str());
 			}
 		}
-		found
 	}
+	found
 }
 
 #[cfg(test)]

@@ -719,6 +719,11 @@ fn witness() -> Document {
 				observe: true,
 				wifi: true,
 				admin: false,
+				// A group rather than the default `root`, for the reason
+				// above: this field decides the remote socket's mode and
+				// group, and a witness pinning the default cannot tell a
+				// policy from a placeholder.
+				agent: Principal::Group("netcfgd-agent".to_owned()),
 			},
 		},
 		devices: every_device(),

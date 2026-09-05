@@ -844,10 +844,16 @@ fn authorized(
 /// rather than tidiness, since a socket that does not exist is one nothing can
 /// reach through.
 ///
-/// Both carry the same `Control`, and that is not an oversight: the local
-/// policy is what `Origin::Local` connections are judged against, and a remote
-/// connection never consults it. Passing it keeps `serve` one function rather
-/// than two that must agree about how a socket is set up.
+/// **Each socket's permissions come from the policy that speaks about it.**
+/// This used to pass the local `Control` for both, with a comment saying that
+/// was deliberate because a remote connection never consults it. It never
+/// does -- which is exactly why the local policy must not decide who can open
+/// the remote file: `check` short-circuits to the remote booleans for an
+/// `Origin::Remote` connection and never looks at a principal or at
+/// `SO_PEERCRED`, so whoever can open `remote.sock` has whatever remote
+/// allows. Measured before the fix, as an ordinary user against a policy of
+/// `observe = "any"` and `admin = "root"`: `reload` refused on the local
+/// socket, accepted on the remote one. Decision 0159.
 fn bind_sockets(
 	socket_path: &std::path::Path,
 	control: &netcfgd_model::Control,
@@ -856,7 +862,7 @@ fn bind_sockets(
 ) -> Result<(), String> {
 	server::serve(
 		socket_path,
-		control,
+		&[&control.observe, &control.wifi, &control.admin],
 		authorize::Origin::Local,
 		commands.clone(),
 	)
@@ -874,7 +880,7 @@ fn bind_sockets(
 	let remote_path = socket_path.with_file_name("remote.sock");
 	server::serve(
 		&remote_path,
-		control,
+		&[&remote.agent],
 		authorize::Origin::Remote,
 		commands.clone(),
 	)
@@ -883,8 +889,9 @@ fn bind_sockets(
 	// the one thing about this daemon an operator should never discover by
 	// finding the file.
 	eprintln!(
-		"netcfgd: remote access is open on {} -- observe {}, wifi {}, admin {}",
+		"netcfgd: remote access is open on {} to `{}` -- observe {}, wifi {}, admin {}",
 		remote_path.display(),
+		remote.agent.render(),
 		remote.observe,
 		remote.wifi,
 		remote.admin
@@ -2114,6 +2121,83 @@ fn spawn_config_watcher(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// **Each socket's mode comes from the policy that speaks about it.**
+	///
+	/// This drives `bind_sockets` rather than `serve`, and the difference is
+	/// the whole value of the test. `apply_policy_permissions` was never
+	/// wrong: it turned the principals it was handed into a mode correctly
+	/// before the fix and after it. What was wrong was the *argument* -- the
+	/// local `Control` passed for both sockets -- so a test that calls `serve`
+	/// with the right principals asserts a function that already worked and
+	/// says nothing about the wiring. Restoring the defect leaves such a test
+	/// green; it turns this one red.
+	///
+	/// Both modes are asserted together because the property is that they
+	/// differ: narrowing the local socket to match the remote one is the other
+	/// way to make them agree, and it is the wrong one.
+	#[test]
+	fn the_remote_socket_does_not_inherit_the_local_policy() {
+		use std::os::unix::fs::PermissionsExt;
+
+		let dir = netcfgd_testdir::TestDir::new("bind-sockets");
+		let config = dir.join("etc");
+		let run = dir.join("run");
+		std::fs::create_dir_all(&config).expect("etc");
+		std::fs::create_dir_all(&run).expect("run");
+		// `observe = any` is the shape that made this reachable: a status
+		// display that need not be root, which is the reason the tier exists.
+		std::fs::write(
+			config.join("netcfgd.conf"),
+			"global {\n\tcontrol {\n\t\tobserve = \"any\"\n\t}\n\
+			 \tremote {\n\t\tobserve = true\n\t\tadmin = true\n\t}\n}\n",
+		)
+		.expect("config");
+
+		let mut state = State::new(state::Paths {
+			factory: config.clone(),
+			config: config.clone(),
+			run: run.clone(),
+		});
+		state.reload();
+		let globals = &state
+			.desired
+			.as_ref()
+			.expect("the config compiles")
+			.globals
+			.clone();
+		assert_eq!(
+			globals.control.observe,
+			netcfgd_model::Principal::Any,
+			"the local policy under test is the wide one"
+		);
+		assert!(
+			globals.remote.is_open(),
+			"remote is open, or there is no socket"
+		);
+
+		let (commands, _incoming) = std::sync::mpsc::channel();
+		bind_sockets(
+			&run.join("netcfgd.sock"),
+			&globals.control,
+			&state,
+			&commands,
+		)
+		.expect("both sockets bind");
+
+		let mode = |name: &str| {
+			std::fs::metadata(run.join(name))
+				.expect("stat")
+				.permissions()
+				.mode() & 0o777
+		};
+		assert_eq!(mode("netcfgd.sock"), 0o666, "the local policy said any");
+		assert_eq!(
+			mode("remote.sock"),
+			0o600,
+			"an unnamed agent leaves the remote socket to root, whatever local says"
+		);
+	}
 
 	fn apply(confirm: Option<u32>) -> Request {
 		Request::Apply {

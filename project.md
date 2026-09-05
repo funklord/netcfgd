@@ -5882,11 +5882,16 @@ gathered here so a new session does not have to find them.
   Origin is which socket a connection arrived on -- observed, not claimed, so
   there is no field to forge and nothing to evaluate. The remote socket exists
   only when a `remote` policy opens something, which is constraint 2 applied
-  where the difference is a security property. Remote policy is booleans over
-  0013's three tiers rather than principals, because every remote caller
-  arrives as the agent and `user:alice` would be a sentence the daemon cannot
-  evaluate. The division it creates: **the agent authenticates, the daemon
-  bounds**, and the bound holds when the agent is wrong.
+  where the difference is a security property. The *tiers* are booleans over
+  0013's three rather than principals, because every remote caller arrives as
+  the agent and `user:alice` would be a sentence the daemon cannot evaluate.
+  The division it creates: **the agent authenticates, the daemon bounds**, and
+  the bound holds when the agent is wrong.
+  [0159](doc/decision/0159-who-may-open-a-socket-is-not-who-may-use-it.md)
+  adds the one principal that block does carry -- `agent`, who on *this*
+  machine may open the socket, which `SO_PEERCRED` answers like any local
+  principal -- because the socket's mode had been taken from the local
+  `control` block, and a remote connection never consults it.
 
   It reverses §5's "the daemon itself is unchanged", which was right while
   remote meant reading state and wrong once 0127 let a remote caller send
@@ -9520,10 +9525,39 @@ refusal against their own child. What is left open, deliberately, is a root
 process carrying a marker for an unrelated reason: closing it wants the
 executable name per kind, and those live at five spawn sites in four crates.
 
-`remote.sock`'s mode is computed from the
-*local* control policy, and authorization on that socket never consults peer
-credentials. And `wifi_status` joins an unvalidated interface into a path,
-distinguishing existence from socket-ness in its error text.
+**`remote.sock`'s mode came from the *local* control
+policy. Fixed**, and the record is
+[0159](doc/decision/0159-who-may-open-a-socket-is-not-who-may-use-it.md).
+`check` short-circuits to the remote booleans for an `Origin::Remote`
+connection and consults no principal and no peer -- by design, since every
+remote caller arrives as the agent -- so whoever can open `remote.sock` has
+whatever remote allows. `bind_sockets` passed the local `Control` for both
+sockets and its comment said that was deliberate *because* a remote connection
+never consults it, which is the reason it is wrong rather than a reason it is
+right: the mode is a statement about local processes either way. Measured as an
+ordinary user against `observe = "any"` with `admin = "root"`, `reload` was
+refused on the local socket and accepted on the remote one; with
+`observe = "group:netcfgd"`, which is what `debian/postinst` ships, the same
+holds for every member of that group.
+
+The remote block gains `agent`, a principal saying who on this machine may open
+the socket, defaulting to `root`. That is 0128's own stated mechanism -- "a
+dedicated unprivileged user in a named group reaches the socket, and nothing
+else does" -- pointed at the policy that describes the agent instead of the one
+describing local users. It is not the principal 0128 rejected: that refusal was
+about the *tiers*, which describe a caller the daemon cannot see, where this
+describes the process holding the other end of a unix socket.
+
+**Two of the tests were worth less than they looked, and both were caught by
+sabotage rather than by reading.** A unit test driving `serve` with the right
+principals stayed green with the defect restored, because
+`apply_policy_permissions` was never the broken part -- the argument was. The
+test that matters drives `bind_sockets`. And a live check asserting the
+socket's group passed either way, because a socket is created owned by its
+creator's primary group and the check named that group; it takes the first
+secondary group now, which a chown has to have moved it to. And `wifi_status`
+joins an unvalidated interface into a path, distinguishing existence from
+socket-ness in its error text.
 
 **The GUI's three worst, each settled with the daemon in the loop.** The access
 tab never loaded the current tiers and sent all three, so changing one reset the

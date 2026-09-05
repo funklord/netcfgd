@@ -48,7 +48,10 @@
     "remote": {
       "observe": true,
       "wifi": true,
-      "admin": false
+      "admin": false,
+      "agent": {
+        "group": "netcfgd-agent"
+      }
     }
   },
   "devices": [
