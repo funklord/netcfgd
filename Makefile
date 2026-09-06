@@ -432,6 +432,10 @@ install:
 	@# compiler has stopped speaking.
 	install -m 0644 doc/netcfgd.conf.example \
 		$(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf.example
+	@# The switcher, installed by `install` rather than by `install-systemd`
+	@# because it drives OpenRC and sysvinit too.
+	install -m 0755 packaging/netcfgd_select.sh \
+		$(DESTDIR)$(SBINDIR)/netcfgd_select.sh
 	@echo "install: netcfgd and ncfg installed; no init glue"
 	@echo "install:   $(SYSCONFDIR)/netcfgd/netcfgd.conf.example documents every feature"
 	@echo "install:   make install-systemd | install-openrc | install-procd"
@@ -533,8 +537,8 @@ install-systemd:
 	install -m 0644 packaging/systemd/netcfgd.service \
 		$(DESTDIR)/usr/lib/systemd/system/netcfgd.service
 	@echo "install-systemd: netcfgd.service installed, not enabled"
-	@echo "install-systemd:   to make netcfgd the only network daemon, see"
-	@echo "install-systemd:   packaging/systemd/netcfgd-exclusive.conf"
+	@echo "install-systemd:   to make netcfgd the only network daemon:"
+	@echo "install-systemd:     netcfgd_select.sh"
 
 # The NetworkManager shim, built from its own workspace.
 #
@@ -866,6 +870,12 @@ packaging:
 	@# an interface on behalf of something one second from gone. A race, so it
 	@# failed intermittently. 0145.
 	@python3 tool/conflict_order_gate.py
+	@# The switcher keeps four facts about each daemon and three live in case
+	@# arms, so a manager added to the list and two of the three is silently
+	@# never stood down -- a fall-through reads exactly like a daemon with
+	@# nothing to clean up. It also refuses to name a program netcfgd runs
+	@# itself, which would be netcfgd disabling its own tools. 0168.
+	@python3 tool/select_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
@@ -1721,6 +1731,7 @@ distclean: veryclean
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/ncfg
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
+	rm -f $(DESTDIR)$(SBINDIR)/netcfgd_select.sh
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-gui
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim

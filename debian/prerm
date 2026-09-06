@@ -7,6 +7,23 @@ set -e
 
 case "$1" in
 remove | deconfigure)
+	# **Give the machine its network daemons back, before the files go.**
+	# `postinst` masked them, and a mask outlives the package that applied
+	# it -- so without this, removing netcfgd leaves a host on which
+	# NetworkManager, networkd, connman, iwd, wpa_supplicant and the rest all
+	# refuse to start, and no way online to find out why. 0145 records what
+	# *one* daemon declining an interface cost; this would be all of them.
+	#
+	# It has to be here rather than in `postrm`, because for `remove` dpkg
+	# deletes the package's files first and runs `postrm` after -- the
+	# switcher would already be gone.
+	#
+	# `none` rather than naming one: unmask everything and start nothing.
+	# Which daemon runs next is the operator's choice, and a package being
+	# removed is the worst moment to make it for them.
+	if [ -x /usr/sbin/netcfgd_select.sh ]; then
+		/usr/sbin/netcfgd_select.sh none || true
+	fi
 	if [ -d /run/systemd/system ]; then
 		# `deb-systemd-invoke` rather than `systemctl`, because it honours
 		# policy-rc.d and systemctl does not. Without it, removing this package

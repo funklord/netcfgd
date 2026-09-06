@@ -1,10 +1,28 @@
 #!/bin/sh
-# Installing netcfgd must not change how this machine's network works.
+# Installing netcfgd makes netcfgd this machine's network daemon.
 #
-# The unit is installed and deliberately not enabled, and nothing is started.
-# A network daemon that took over on `apt install` could take the machine off
-# the network before its operator had written a line of configuration -- and
-# netcfgd's whole shape is that it says what it will do before it does it.
+# **This reverses what this file used to say**, on the copyright holder's
+# instruction (0168). It read "installing netcfgd must not change how this
+# machine's network works", shipped the unit disabled, and shipped the
+# exclusive drop-in as documentation -- so a machine that installed netcfgd
+# got a program that did nothing until three further commands were run, and
+# one that lost every argument with whatever was already holding the
+# interfaces.
+#
+# The work is `netcfgd_select.sh`, not a block of systemctl calls here. It is
+# one tool that goes both ways: `postrm` calls it with `none` on the way out,
+# and an operator who wants NetworkManager back for an afternoon runs
+# `netcfgd_select.sh networkmanager` rather than reconstructing a dozen
+# invocations from memory. A takeover with no way back is the thing that
+# leaves a machine unusable, and 0145 already records what "no daemon on this
+# machine at all" costs.
+#
+# What it stands down are *services*. No package is removed and no binary
+# renamed: netcfgd runs wpa_supplicant, dhcpcd, hostapd, pppd, openvpn,
+# udhcpc, odhcp6c and resolvconf itself, and the NetworkManager package stays
+# because desktop wireless applets depend on it -- they work against netcfgd
+# through `netcfgd-nm`, which serves NM's own bus name. What cannot run is
+# the NM *daemon*: two processes cannot own one bus name.
 set -e
 
 case "$1" in
@@ -26,11 +44,27 @@ configure)
 		addgroup --system netcfgd >/dev/null 2>&1 || true
 	fi
 
-	echo "netcfgd: installed. Nothing is configured and nothing is running."
+	# **Only on a first install.** `$2` is the version being upgraded from,
+	# so this is empty exactly once. An upgrade must not re-take a machine
+	# whose operator has since chosen NetworkManager: they ran
+	# `netcfgd_select.sh networkmanager` and meant it, and an upgrade that
+	# silently undid that would make the switcher a lie.
+	if [ -z "$2" ] && [ -x /usr/sbin/netcfgd_select.sh ]; then
+		/usr/sbin/netcfgd_select.sh netcfgd || true
+	fi
+
+	echo "netcfgd: installed, and it is now this machine's network daemon."
+	echo "netcfgd:   the other network services are stopped, disabled and"
+	echo "netcfgd:   masked -- the SERVICES only. No package was removed and"
+	echo "netcfgd:   no binary renamed."
+	echo "netcfgd:"
+	echo "netcfgd:   to go back, or to choose something else:"
+	echo "netcfgd:     netcfgd_select.sh networkmanager"
+	echo "netcfgd:     netcfgd_select.sh --dry-run   # what it would do"
+	echo "netcfgd:"
 	echo "netcfgd:   write /etc/netcfgd/netcfgd.conf, then:"
 	echo "netcfgd:     ncfg plan      # what it would do, and why"
 	echo "netcfgd:     ncfg apply     # do it"
-	echo "netcfgd:   to run it as a daemon: systemctl enable --now netcfgd"
 	echo "netcfgd:"
 	echo "netcfgd:   every feature, with the syntax to use it, is in"
 	echo "netcfgd:     /etc/netcfgd/netcfgd.conf.example"

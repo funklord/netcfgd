@@ -9284,6 +9284,60 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.52 Installing netcfgd now selects netcfgd
+
+Instructed by the copyright holder: *"when netcfgd is installed I want it to
+work 100%, and any other processes that interfere with it are to be killed,
+disabled and if they still persist, renamed"* -- and then the constraint that
+shaped the whole design: *"we keep NM around only because many desktops have a
+built in wireless/network configurator applet for NM which works with
+netcfgd-nm too, but depends on NM."*
+
+**`packaging/netcfgd_select.sh` is the answer, and it goes both ways**
+([0168](doc/decision/0168-installing-netcfgd-selects-netcfgd.md)). `postinst`
+runs it on a first install; `prerm` runs it with `none` on the way out; an
+operator runs `netcfgd_select.sh networkmanager` to hand the machine back. A
+takeover with no way back is what leaves a machine unusable, and this project
+already has the record for that.
+
+**It stands down eleven services and touches no package and no binary.** The
+holder's NM constraint is what forces that, and following it honestly emptied
+the rename rung: netcfgd *runs* `wpa_supplicant`, `dhcpcd`, `hostapd`, `pppd`,
+`openvpn`, `udhcpc`, `odhcp6c` and `resolvconf`, and `dnsmasq` and `unbound`
+are DNS backends 0007 offers as modes. Cross those against the daemons that
+actually contest the network and what is left safely divertible is `connmand`
+and `dhclient`. **The daemons that fight netcfgd are the ones it delegates to
+or impersonates**, so masking is the rung that does the work -- it survives
+reboots and upgrades and is reversible, where a rename needs `dpkg-divert` and
+leaves a package database to repair.
+
+**Three defects in my own work, each caught by running the thing rather than
+reading it:**
+
+- **`--dry-run` on this machine proposed deleting `/run/network/ifstate` for
+  `eth0`, `ib0` and `lo`.** I had listed it as a stale claim beside NM's and
+  networkd's. It is not: it is ifupdown's *live* record of what it brought up,
+  and netcfgd never reads it -- so removing it buys netcfgd nothing and costs
+  ifupdown the ability to bring those interfaces down. The two that stay are
+  there because netcfgd *does* read them, which is 0145.
+- **The unmasking was in `postrm` and would never have run.** For `remove`,
+  dpkg deletes the package's files first and runs `postrm` after, so the
+  switcher would already be gone, the `-x` guard would skip silently, and the
+  machine would keep every network daemon masked with nothing able to undo it.
+  It is in `prerm` now.
+- **The new gate's third check could not fail.** A non-greedy regex from
+  `unmask_all() {` with no end anchor ran past the closing brace and matched
+  an identical loop further down the file, so the function could be sabotaged
+  to walk a hard-coded pair and the gate still passed. Found by sabotaging it
+  *and confirming the edit had landed* -- the first sabotage silently did not
+  apply, and a check that reports success against an unapplied sabotage looks
+  exactly like a check that works.
+
+**What is not tested is everything systemd.** This machine has no systemd, so
+every `systemctl` path is exercised only through `--dry-run`. The argument
+handling, the refusal without root, all three directions and the gate are run.
+That is the same bar §*What would prove it* sets for the daemon.
+
 ## 10.51 A file that says "edits will be overwritten" and did not overwrite them
 
 Instructed by the copyright holder, straight after 0164 made the write

@@ -7,6 +7,14 @@
 # goes only if it is empty.
 set -e
 
+# **The unmasking is in `prerm`, not here, and that is an ordering fact
+# rather than a preference.** For `remove`, dpkg deletes the package's files
+# and *then* runs `postrm` -- so /usr/sbin/netcfgd_select.sh is already gone
+# by the time this script could call it, the `-x` guard would skip silently,
+# and the machine would keep every network daemon masked with nothing left
+# able to unmask them. Written here once because the first draft of this
+# change put it in this file and it would have failed exactly that way.
+
 case "$1" in
 purge)
 	if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
