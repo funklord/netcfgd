@@ -9348,6 +9348,63 @@ of which are now done:
 - **Still open: nothing checks the unit against a running systemd.** The gate
   is static by construction and says so.
 
+**So what is the actual state? Root everywhere, confined on one init out of
+four.** Asked directly by the holder, and measured rather than assumed by
+reading all four scripts:
+
+| init | how it starts netcfgd | confinement |
+|---|---|---|
+| systemd | `ExecStart=/usr/sbin/netcfgd`, no `User=` | `CapabilityBoundingSet` of six, ambient three, `ProtectSystem=full` + four `ReadWritePaths`, `ProtectHome`, `NoNewPrivileges`, `MemoryDenyWriteExecute`, `RestrictNamespaces`, `LockPersonality` |
+| OpenRC | `command="/usr/sbin/netcfgd"` | none |
+| procd | `procd_set_param command /usr/sbin/netcfgd` | none |
+| sysvinit | `start-stop-daemon --start --exec` | none |
+
+Nothing grants capabilities on the binary either: no `setcap` in
+`debian/postinst`, `debian/rules` or the APKBUILD.
+
+**netcfgd runs as root under all four**, systemd included -- the unit sets no
+`User=`. What differs is the ceiling. A bounding set caps what a process may
+ever hold *including* root's, so under systemd netcfgd is a root process
+limited to six capabilities, and under the other three it is a root process
+with all of them. That difference is real, costs nothing, and is the one part
+of the unit that is not ambient theatre.
+
+**It is also the part that has bitten twice**, which is the whole argument in
+miniature: `d0ad78b` because the set omitted `CAP_CHOWN` and the control socket
+could not be given to its policy group, and `a3f2c2a` because it sat below what
+dhcpcd's own privsep needs to chroot and drop privileges. A ceiling that is
+free until it is wrong, and wrong is a lease that never arrives.
+
+**The three unconfined inits are not missing a facility, they are declining
+one.** OpenRC has `command_user` and `capabilities`, procd has
+`procd_set_param user`, `capabilities`, `no_new_privs` and `seccomp`,
+`start-stop-daemon` has `--chuid`. Measured: netcfgd uses none of them, zero
+times. So the asymmetry is a choice that was never written down until now, and
+the recommendation is to keep it and say so rather than to close it. Porting
+the allow-list to three more inits is three more copies of two lists that must
+agree, which is the shape that produced every defect in the table above, for a
+mitigation that does not protect anything netcfgd owns.
+
+**What is worth having instead is the same on every init, because it is inside
+the program**: the three tiers (0013), `admin` deliberately not being root with
+`check_content` refusing privileged productions, a client that cannot write
+configuration and must ask the daemon (0127), and syscalls confined to one
+audited crate (constraint 4). None of that depends on the init, and all of it
+survives a container, a read-only root and a hardened kernel.
+
+**And one boundary where netcfgd does not do what works.**
+`netcfgd-host/src/portal.rs` opens a TCP connection to a captive portal and
+parses the reply in the process holding `CAP_NET_ADMIN`. It is careful -- a
+1024-byte ceiling, the status line and nothing else, `from_utf8_lossy`, nothing
+the far side can make it allocate -- and it is not a defect. It is the one
+place the daemon itself speaks to a hostile peer, and it is exactly the shape
+dhcpcd separates and netcfgd does not: dhcpcd parses the wire in a process that
+cannot touch an interface and hands the result to one that can, which is why
+the bounding set had to be widened for it. If real separation is ever wanted
+here, that boundary and the config compiler -- which parses text from an
+`admin` caller who is deliberately not root -- are where it would go, and
+neither needs an init system's help. Recorded as a finding; not a task.
+
 **And the objection reaches the new test hardest, which is worth conceding.**
 `sandbox_writes.sh` reproduces the sandbox with `unshare -rm` and bind mounts,
 so it skips on exactly the hardened kernels where the question matters most.
