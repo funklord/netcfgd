@@ -422,11 +422,15 @@ pub fn writable_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
 /// after the write is a mode that was wrong once, and the window is exactly
 /// when the passphrase is on disk under another name.
 ///
-/// The same reasoning, and nearly the same code, as `netcfgd-nm`'s
-/// `write_atomically`. Not shared with it: that adapter depends on
-/// `netcfgd-proto` and `netcfgd-model` and nothing else on purpose (decision
-/// 0030), and pulling this crate in to save twenty lines would undo the
-/// containment the packaging gate enforces.
+/// **This said it was one of two copies, and named the wrong sibling.** The
+/// other was `netcfgd-nm`'s, and `0d99c70` -- "ask netcfgd to write, rather
+/// than writing /etc/netcfgd" -- removed it when 0127 made netcfgd the only
+/// writer of its own configuration. The adapter writes no files at all now.
+///
+/// There is still a second copy and it is `netcfgd-dns`'s `replace`. Not
+/// shared, for a structural reason rather than a containment one: this crate
+/// depends on `netcfgd-apply`, which depends on `netcfgd-dns`, so sharing
+/// would invert the graph. See `write_in_place` below and decision 0161.
 ///
 /// The temporary's name carries the process **and** a counter. The process id
 /// alone is what this had, and it is only half of the question: two threads in
@@ -461,13 +465,40 @@ pub fn write_atomically(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> 
 		SEQUENCE.fetch_add(1, Ordering::Relaxed)
 	));
 
+	let staged = fs::OpenOptions::new()
+		.write(true)
+		.create(true)
+		.truncate(true)
+		.mode(mode)
+		.open(&temporary);
+
+	// **A sandbox can grant a file without granting the directory it sits in**,
+	// and staging beside the target is creating a directory entry. `netcfgd-dns`
+	// met this first on `/etc/resolv.conf`, which
+	// `packaging/systemd/netcfgd.service` names in `ReadWritePaths` as a file
+	// while `ProtectSystem=full` holds `/etc` read-only; decision 0161 has the
+	// measurement. Every path this helper writes today sits inside a directory
+	// the unit grants whole, so this branch is unreached on the packaged unit --
+	// it is here because the shape is the same and the next path added need not
+	// rediscover it.
+	//
+	// The two kinds and no others: a full disk also fails to stage, and falling
+	// back there would truncate a config file and then fail to refill it.
+	let file = match staged {
+		Ok(file) => file,
+		Err(error)
+			if matches!(
+				error.kind(),
+				io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
+			) =>
+		{
+			return write_in_place(path, bytes, mode);
+		}
+		Err(error) => return Err(error),
+	};
+
 	let outcome = (|| -> io::Result<()> {
-		let mut file = fs::OpenOptions::new()
-			.write(true)
-			.create(true)
-			.truncate(true)
-			.mode(mode)
-			.open(&temporary)?;
+		let mut file = file;
 		file.write_all(bytes)?;
 		// Durable before it is visible. A rename that beats the data to disk is
 		// a truncated config file after a power cut, which on a router is the
@@ -481,6 +512,50 @@ pub fn write_atomically(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> 
 		let _ = fs::remove_file(&temporary);
 	}
 	outcome
+}
+
+/// Write a file that already exists, without staging beside it.
+///
+/// **The same fallback as `netcfgd-dns`'s, and deliberately a second copy.**
+/// That crate cannot reach this one -- `netcfgd-host` depends on
+/// `netcfgd-apply` which depends on `netcfgd-dns`, so sharing would invert the
+/// graph. Two copies of one rule is how they come to disagree, and the merge
+/// wants a home neither crate can offer today; it is recorded in 0161 rather
+/// than done in passing.
+///
+/// It gives up atomicity, which is the trade: a reader can catch this
+/// mid-write where a rename could not be caught at all, and the alternative is
+/// not writing.
+///
+/// **It will not follow a symlink**, for the reason 0161 gives: writing
+/// through one edits whatever owns the target, which nothing here has been
+/// asked to do.
+///
+/// **Existing files only**, and the mode is set explicitly because
+/// `OpenOptions::mode` applies to creation alone -- a secret written back at
+/// 0600 must not inherit whatever the file already carried.
+fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
+	use std::io::Write as _;
+	use std::os::unix::fs::PermissionsExt as _;
+
+	if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+		return Err(io::Error::new(
+			io::ErrorKind::PermissionDenied,
+			format!(
+				"{} is a symlink and netcfgd cannot stage a replacement beside it; 				 writing through the link would edit whatever owns the target",
+				path.display()
+			),
+		));
+	}
+
+	let mut file = fs::OpenOptions::new()
+		.write(true)
+		.truncate(true)
+		.open(path)?;
+	file.write_all(bytes)?;
+	file.sync_all()?;
+	drop(file);
+	fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
 /// The factory directory to use: the argument, the environment, or the

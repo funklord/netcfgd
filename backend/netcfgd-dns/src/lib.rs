@@ -339,12 +339,37 @@ fn replace(path: &std::path::Path, text: &str) -> Result<(), String> {
 			SEQUENCE.fetch_add(1, Ordering::Relaxed)
 		));
 
-	let outcome = std::fs::write(&temporary, text)
-		.map_err(|error| format!("could not write {}: {error}", temporary.display()))
-		.and_then(|()| {
-			std::fs::rename(&temporary, path)
-				.map_err(|error| format!("could not replace {}: {error}", path.display()))
-		});
+	let staged = match std::fs::write(&temporary, text) {
+		Ok(()) => Ok(()),
+		// **The sandbox grants the file and the atomic replace needs the
+		// directory.** `ProtectSystem=full` mounts `/etc` read-only and the
+		// unit opens one path back up with
+		// `ReadWritePaths=-/etc/resolv.conf` -- which grants the *file*.
+		// Creating a new entry in `/etc` is still refused, and staging a
+		// temporary beside the target is creating a new entry. So on every
+		// systemd machine this failed with a permission error naming a
+		// dotfile the operator has never seen, for a file they had explicitly
+		// made writable.
+		//
+		// Only these two kinds. A full disk also fails to stage, and falling
+		// back there would truncate the resolver's configuration and then
+		// fail to refill it -- an empty `resolv.conf` being worse than an
+		// unchanged one.
+		Err(error)
+			if matches!(
+				error.kind(),
+				std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+			) =>
+		{
+			return in_place(path, text, &error);
+		}
+		Err(error) => Err(format!("could not write {}: {error}", temporary.display())),
+	};
+
+	let outcome = staged.and_then(|()| {
+		std::fs::rename(&temporary, path)
+			.map_err(|error| format!("could not replace {}: {error}", path.display()))
+	});
 	if outcome.is_err() {
 		// A failed rename would otherwise leave the staging file next to the
 		// resolver's own configuration for ever, which is how a full disk
@@ -352,6 +377,48 @@ fn replace(path: &std::path::Path, text: &str) -> Result<(), String> {
 		let _ = std::fs::remove_file(&temporary);
 	}
 	outcome
+}
+
+/// Write a file that already exists, without staging beside it.
+///
+/// **The fallback for a directory netcfgd may not add to**, and it gives up
+/// atomicity: a reader can catch this mid-write where the rename could not be
+/// caught at all. That is the trade, and it is the right way round -- the
+/// alternative is not writing, which is what happened before.
+///
+/// **It will not follow a symlink.** `/etc/resolv.conf` is a symlink into
+/// another resolver's runtime state on a great many machines -- systemd-resolved
+/// and openresolv both do it -- and `fs::write` follows one. The rename path
+/// *replaces* such a link, which is what `write_resolv_conf` mode asks for:
+/// the operator has said netcfgd owns the file. Writing through it instead
+/// would scribble in a daemon's own state, which nothing here has ever been
+/// asked to do, so it refuses and says which situation it is in.
+///
+/// **Existing files only.** `OpenOptions` without `create` opens what is
+/// there; a file that is absent needs a writable directory anyway, so
+/// pretending otherwise would swap one confusing error for another.
+fn in_place(path: &std::path::Path, text: &str, staging: &std::io::Error) -> Result<(), String> {
+	use std::io::Write;
+
+	if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+		return Err(format!(
+			"{} is a symlink, and netcfgd cannot stage a replacement beside it ({staging}). 			 Writing through the link would edit whatever owns the target -- 			 systemd-resolved or openresolv, usually. Point `dns_mode` at that resolver 			 instead, or replace the symlink with a file netcfgd may own",
+			path.display()
+		));
+	}
+
+	let mut file = std::fs::OpenOptions::new()
+		.write(true)
+		.truncate(true)
+		.open(path)
+		.map_err(|error| {
+			format!(
+				"could not stage beside {} ({staging}) and could not write it either: {error}",
+				path.display()
+			)
+		})?;
+	file.write_all(text.as_bytes())
+		.map_err(|error| format!("could not write {}: {error}", path.display()))
 }
 
 /// Hand the whole scoped structure to a script, as JSON on stdin.
@@ -444,6 +511,93 @@ pub fn single<'a>(name: &'a str, policy: &'a DnsPolicy) -> Vec<Scope<'a>> {
 #[cfg(test)]
 mod tests {
 	use super::replace;
+
+	/// **The sandbox grants the file, and the atomic replace needs the
+	/// directory.**
+	///
+	/// `ProtectSystem=full` mounts `/etc` read-only and the unit names
+	/// `ReadWritePaths=-/etc/resolv.conf` to open one path back up. That opens
+	/// the *file*: creating a new entry in `/etc` is still refused, and
+	/// staging a temporary beside the target is creating a new entry. So on
+	/// every systemd machine `write_resolv_conf` failed with a permission
+	/// error naming a dotfile the operator has never seen.
+	///
+	/// **This reproduces the shape and not the mechanism**, which is worth
+	/// saying because the difference bit once already. A `chmod` on the
+	/// directory gives an unprivileged test `EACCES`; the real machine gives
+	/// `EROFS` from a read-only mount, and root walks through a mode but not
+	/// through a mount. A first attempt at an end-to-end check ran under
+	/// `unshare -rn` against a `chmod`'d directory, passed, and passed just as
+	/// happily with the fix removed. `tests/live/dns_sandbox.sh` makes the
+	/// mounts and is the one that answers for the packaged unit; this covers
+	/// the other error kind, which an unprivileged caller really does hit.
+	#[test]
+	fn a_writable_file_in_a_read_only_directory_is_still_written() {
+		use std::os::unix::fs::PermissionsExt;
+
+		let dir = netcfgd_testdir::TestDir::new("dns-sandboxed");
+		let path = dir.join("resolv.conf");
+		std::fs::write(&path, "nameserver 192.0.2.1\n").expect("the file starts out there");
+
+		let opened = std::fs::metadata(dir.path()).expect("stat").permissions();
+		let mut shut = opened.clone();
+		shut.set_mode(0o555);
+		std::fs::set_permissions(dir.path(), shut).expect("close the directory");
+
+		let outcome = replace(&path, "nameserver 192.0.2.9\n");
+
+		// Restored before the assertion, or a failure leaves a directory the
+		// harness cannot remove and every later run trips over it.
+		std::fs::set_permissions(dir.path(), opened).expect("reopen the directory");
+
+		outcome.expect("a writable file in a read-only directory is writable");
+		assert_eq!(
+			std::fs::read_to_string(&path).expect("readable"),
+			"nameserver 192.0.2.9\n"
+		);
+	}
+
+	/// **And it refuses to write through a symlink.**
+	///
+	/// The fallback above changes what happens to a symlinked
+	/// `/etc/resolv.conf`, which is what systemd-resolved and openresolv both
+	/// leave behind. A rename *replaces* the link, which is what
+	/// `write_resolv_conf` mode asks for. `fs::write` would follow it and edit
+	/// the other daemon's runtime state instead -- silently, and on the one
+	/// path where the sandbox makes the fallback engage.
+	///
+	/// So the difference is asserted rather than left to the reader: the
+	/// target keeps its content and the answer names the situation.
+	#[test]
+	fn the_fallback_will_not_write_through_a_symlink() {
+		use std::os::unix::fs::PermissionsExt;
+
+		let dir = netcfgd_testdir::TestDir::new("dns-symlink");
+		let real = dir.join("stub-resolv.conf");
+		let link = dir.join("resolv.conf");
+		std::fs::write(&real, "nameserver 192.0.2.53\n").expect("the resolver's own file");
+		std::os::unix::fs::symlink(&real, &link).expect("the link a resolver leaves");
+
+		let opened = std::fs::metadata(dir.path()).expect("stat").permissions();
+		let mut shut = opened.clone();
+		shut.set_mode(0o555);
+		std::fs::set_permissions(dir.path(), shut).expect("close the directory");
+
+		let outcome = replace(&link, "nameserver 192.0.2.9\n");
+
+		std::fs::set_permissions(dir.path(), opened).expect("reopen the directory");
+
+		let message = outcome.expect_err("writing through the link must be refused");
+		assert!(
+			message.contains("is a symlink"),
+			"the refusal has to say which situation it is in: {message}"
+		);
+		assert_eq!(
+			std::fs::read_to_string(&real).expect("readable"),
+			"nameserver 192.0.2.53\n",
+			"the resolver's own file must be untouched"
+		);
+	}
 
 	/// Two writers of one resolver file must not tread on each other.
 	///

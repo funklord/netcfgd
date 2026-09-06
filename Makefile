@@ -1497,6 +1497,11 @@ live:
 	@# namespace: it binds unix sockets and reads their modes, and it needs a
 	@# real uid with a real secondary group, which `unshare -r` does not have.
 	@NCFG_LIVE=1 sh tests/live/control_exposure.sh
+	@# Writing files under the sandbox a systemd unit imposes. No
+	@# outer namespace: it makes its own mount namespace, and it must, because
+	@# a chmod reproduces the symptom for an unprivileged process and not for
+	@# root -- CAP_DAC_OVERRIDE walks through a mode and not through a mount.
+	@NCFG_LIVE=1 sh tests/live/sandbox_writes.sh
 	@# The interface reporting contract, checked from the side a writer writes.
 	@# Under NCFG_LIVE: it needs no modem and no module, only a file.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/report.sh"

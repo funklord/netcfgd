@@ -115,6 +115,14 @@ ProtectSystem=full
 # three optional ones: dnsmasq and unbound are packages a machine need not
 # have, and a unit that refuses to start for want of a directory belonging to
 # software nobody installed would be worse than the fault it prevents.
+# **A path named here grants the file, not the directory it sits in.** The
+# three below that name directories are writable through and through; the
+# `resolv.conf` line grants one file, and creating a new entry in /etc -- which
+# is what staging a temporary beside a target is -- stays refused. netcfgd
+# writes that one file in place for exactly that reason, giving up an atomic
+# replace it cannot perform here. Adding /etc to this list would buy the
+# atomicity back and give away what `ProtectSystem=full` is for; the trade is
+# deliberate and is recorded in decision 0161.
 ReadWritePaths=/etc/netcfgd
 ReadWritePaths=-/etc/resolv.conf
 ReadWritePaths=-/etc/dnsmasq.d

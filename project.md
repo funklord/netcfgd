@@ -9270,6 +9270,56 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.45 A sandbox grants a file, and an atomic replace needs the directory
+
+Reported from a machine where `write_resolv_conf` could not write, and then
+reported again as applying to files the GUI writes. Both halves are settled and
+the record is
+[0161](doc/decision/0161-the-sandbox-grants-a-file-not-a-directory.md).
+
+`ProtectSystem=full` mounts `/etc` read-only; the unit opens one path back up
+with `ReadWritePaths=-/etc/resolv.conf`. **That grants the file.** Staging a
+dotfile beside it is creating a new entry in `/etc`, which stays refused -- so
+the standard atomic swap failed on every systemd machine, naming a temporary
+the operator has never seen, for a file they had explicitly made writable. The
+fix stages and renames where the directory allows it and writes in place where
+it does not, on `PermissionDenied` and `ReadOnlyFilesystem` only: a full disk
+also fails to stage, and falling back there would truncate the resolver's
+configuration and then fail to refill it.
+
+**The reproduction had to be a mount, and the first one was not.** A `chmod`
+on the directory gives an unprivileged process `EACCES`, which looks like the
+same fault; root has `CAP_DAC_OVERRIDE` and walks straight through a mode. It
+does not walk through a read-only mount. The first end-to-end check ran under
+`unshare -rn` against a `chmod`'d directory, passed, **and passed just as
+happily with the fix reverted** -- a vacuous pass caught only because the
+control was run. `tests/live/sandbox_writes.sh` makes the mounts the unit
+actually produces.
+
+**The fallback follows no symlink**, and that is a behaviour change worth
+knowing. `/etc/resolv.conf` is a link into another resolver's runtime state on
+a great many machines. A rename *replaces* such a link, which is what
+`write_resolv_conf` mode asks for; `fs::write` would follow it and edit
+systemd-resolved's own file, silently, on exactly the path where the sandbox
+makes the fallback engage. Measured with the guard removed: the write succeeds
+and the resolver's file changes.
+
+**The second report was right about the shape and, measured, not yet about the
+fact.** `netcfgd-host`'s `write_atomically` is the same pattern and carries
+every `config put`, `secret set`, `profile save` and `control set` -- the GUI's
+write verbs. Each was driven under the real mounts and each works, because the
+unit grants `/etc/netcfgd` as a whole directory. It is fixed there too: the
+exposure is one `ReadWritePaths` line away, and under the tightest grant a
+hardened unit could write, `ncfg control set` fails with `EROFS` without the
+fallback and writes with it.
+
+**Two copies of one rule that cannot be merged where they are.**
+`netcfgd-host` depends on `netcfgd-apply` depends on `netcfgd-dns`, so sharing
+would invert the graph; each names the other and the merge is left as its own
+work. A third copy turned out to have gone: the comment claiming
+`netcfgd-nm` had one described a function `0d99c70` removed when 0127 made
+netcfgd the only writer of its own configuration.
+
 ## 10.44 The leads from 10.43, reproduced -- and one that only exists when two of them meet
 
 10.43 recorded about forty candidates from seven sweeps and said plainly that
