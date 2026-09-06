@@ -99,16 +99,125 @@ fn split(url: &str) -> Option<(String, String)> {
 	Some((target, path.to_owned()))
 }
 
-/// Fetch the URL and say what answered.
+/// The name this binary answers to when it is its own probe.
+///
+/// Never installed and never a symlink: `netcfgd` execs itself with this in
+/// `argv[0]`, so the only way to reach it is to be netcfgd. A copy of the
+/// binary renamed to it by hand resolves a URL and prints a status line with
+/// no privileges, which is a thing anybody could already do with `curl`.
+pub const HELPER_NAME: &str = "netcfgd-probe";
+
+/// How long the child may live, whatever it is doing.
+///
+/// One second past the socket deadline, so that a stuck read is reported as a
+/// read that did not finish rather than as a child that was killed.
+const CHILD_LIFETIME: u32 = 6;
+
+/// Fetch the URL and say what answered -- from a child that holds nothing.
+///
+/// **The parent must not do this itself, and the reason is `getaddrinfo`.**
+/// Resolving the URL means glibc's resolver, its NSS modules, and a DNS
+/// response chosen by the network being probed, all in C. Running that in the
+/// process holding `CAP_NET_ADMIN` is the arrangement CVE-2015-7547 turned
+/// into a root compromise on a great many machines. Decision 0162.
+///
+/// **`exec`, not just `fork`.** netcfgd is multithreaded -- the rfkill
+/// watcher, one thread per control connection -- and after `fork` a child of a
+/// multithreaded process may call only async-signal-safe functions until it
+/// execs, because another thread may have been holding malloc's lock at the
+/// moment of the fork. `getaddrinfo` allocates. So the child is a fresh
+/// single-threaded image of this same binary, invoked under [`HELPER_NAME`],
+/// which is what the multi-call layout is for.
+///
+/// **The child bounds itself.** It sets an alarm before doing anything, so
+/// reading its output to end of file cannot hang: end of file is the child
+/// exiting, and the child cannot outlive its alarm.
 ///
 /// `expect` is the status that means nothing is in the way -- 204 by
 /// convention, which is what a `generate_204` endpoint is for.
 #[must_use]
 pub fn probe(url: &str, expect: u16) -> Verdict {
+	use std::os::unix::process::CommandExt as _;
+
+	let child = std::process::Command::new("/proc/self/exe")
+		.arg0(HELPER_NAME)
+		.arg(url)
+		.stdin(std::process::Stdio::null())
+		.stdout(std::process::Stdio::piped())
+		.stderr(std::process::Stdio::null())
+		.output();
+
+	let output = match child {
+		Ok(output) => output,
+		// `/proc/self/exe` is how a process finds its own image, and a machine
+		// without `/proc` is one where this cannot be done safely at all --
+		// so it is not done unsafely instead.
+		Err(error) => {
+			return Verdict::Unreachable {
+				detail: format!("could not start the probe helper: {error}"),
+			}
+		}
+	};
+
+	let said = String::from_utf8_lossy(&output.stdout)
+		.trim_end()
+		.to_owned();
+	match output.status.code() {
+		Some(0) => verdict(&said, expect),
+		Some(1) => Verdict::Unreachable { detail: said },
+		// The child refused to do the work because it could not give up what
+		// it holds. Reported as its own sentence: a probe that ran anyway
+		// would be the thing this exists to prevent, quietly.
+		Some(2) => Verdict::Unreachable {
+			detail: format!(
+				"the probe helper would not drop its privileges, so it did not run: {said}"
+			),
+		},
+		// Killed, which on this path means its own alarm.
+		None => Verdict::Unreachable {
+			detail: format!("the probe of {url} did not finish"),
+		},
+		Some(other) => Verdict::Unreachable {
+			detail: format!("the probe helper exited with {other}"),
+		},
+	}
+}
+
+/// The child: give everything up, then do the hostile part.
+///
+/// Exits 0 with the status line on stdout, 1 with a reason, or 2 when it could
+/// not shed privilege -- in which case it has done nothing else.
+#[must_use]
+pub fn helper_main() -> std::process::ExitCode {
+	let Some(url) = std::env::args().nth(1) else {
+		println!("usage: {HELPER_NAME} <url>");
+		return std::process::ExitCode::from(1);
+	};
+
+	// Before the alarm and before anything is resolved or opened. A failure
+	// here is the whole reason to stop.
+	if let Err(error) = netcfgd_sys::privilege::shed() {
+		println!("{error}");
+		return std::process::ExitCode::from(2);
+	}
+	netcfgd_sys::privilege::die_after(CHILD_LIFETIME);
+
+	match fetch(&url) {
+		Ok(status) => {
+			println!("{status}");
+			std::process::ExitCode::SUCCESS
+		}
+		Err(detail) => {
+			println!("{detail}");
+			std::process::ExitCode::from(1)
+		}
+	}
+}
+
+/// Resolve, connect, and read back the status line. Runs only in the child.
+fn fetch(url: &str) -> Result<String, String> {
 	let Some((target, path)) = split(url) else {
-		return Verdict::Unreachable {
-			detail: format!("`{url}` is not a URL this can fetch"),
-		};
+		return Err(format!("`{url}` is not a URL this can fetch"));
 	};
 
 	// Resolution is the first thing a portal interferes with and the first
@@ -116,35 +225,20 @@ pub fn probe(url: &str, expect: u16) -> Verdict {
 	// its own sentence rather than folded into "could not connect".
 	let mut addresses = match target.to_socket_addrs() {
 		Ok(addresses) => addresses,
-		Err(error) => {
-			return Verdict::Unreachable {
-				detail: format!("cannot resolve {target}: {error}"),
-			}
-		}
+		Err(error) => return Err(format!("cannot resolve {target}: {error}")),
 	};
 	let Some(address) = addresses.next() else {
-		return Verdict::Unreachable {
-			detail: format!("{target} resolved to nothing"),
-		};
+		return Err(format!("{target} resolved to nothing"));
 	};
 
 	let stream = match TcpStream::connect_timeout(&address, DEADLINE) {
 		Ok(stream) => stream,
-		Err(error) => {
-			return Verdict::Unreachable {
-				detail: format!("cannot reach {target}: {error}"),
-			}
-		}
+		Err(error) => return Err(format!("cannot reach {target}: {error}")),
 	};
 	let _ = stream.set_read_timeout(Some(DEADLINE));
 	let _ = stream.set_write_timeout(Some(DEADLINE));
 
-	match exchange(stream, &target, &path) {
-		Ok(status) => verdict(&status, expect),
-		Err(error) => Verdict::Unreachable {
-			detail: format!("{target} did not answer: {error}"),
-		},
-	}
+	exchange(stream, &target, &path).map_err(|error| format!("{target} did not answer: {error}"))
 }
 
 /// Send the request and read back the status line's code.

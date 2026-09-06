@@ -28,6 +28,7 @@ pub mod lock;
 pub mod nft;
 pub mod ops;
 pub mod peer;
+pub mod privilege;
 pub mod process;
 pub mod qdisc;
 pub mod radio;

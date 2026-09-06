@@ -899,6 +899,17 @@ fn bind_sockets(
 	Ok(())
 }
 
+/// The captive-portal probe, run as its own unprivileged program.
+///
+/// Re-exported so that `netcfgd-bin` can dispatch to it on `argv[0]` without
+/// gaining an edge to `netcfgd-host`: the binary crate depends on the client
+/// and the daemon and nothing else, and this keeps that true. See
+/// `netcfgd_host::portal::probe` for why the work happens in a child at all.
+#[must_use]
+pub fn probe_helper_main() -> std::process::ExitCode {
+	netcfgd_host::portal::helper_main()
+}
+
 /// Watch `/dev/rfkill` so a flipped switch is noticed as it happens.
 ///
 /// 0062 made netcfgd report a blocked radio; this is what makes the report

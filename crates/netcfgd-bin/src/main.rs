@@ -33,12 +33,19 @@ fn main() -> ExitCode {
 	match called_as.as_str() {
 		"ncfg" => netcfgd_cli::main(),
 		"netcfgd" => netcfgd_daemon::main(),
+		// A third program, and it is not installed under this name: netcfgd
+		// execs itself with it in `argv[0]` to run a captive-portal probe in
+		// a process that has given up every capability first. Nothing on disk
+		// is called this, so the only way to arrive here is to be netcfgd --
+		// and a hand-renamed copy would resolve a URL and print a status line
+		// with no privileges, which is what `curl` does. Decision 0162.
+		"netcfgd-probe" => netcfgd_daemon::probe_helper_main(),
 		// Neither name. This is a build tree or a rename, not an install, so
 		// it says what the two names are rather than guessing at one -- a
 		// wrong guess would start a daemon for somebody who wanted a client.
 		other => {
 			eprintln!(
-				"this binary is both `netcfgd` and `ncfg`, and picks by the name it is \
+				"this binary is `netcfgd` and `ncfg`, and picks by the name it is \
 				 called as; it was called as `{other}`"
 			);
 			eprintln!("install it as `netcfgd` and symlink `ncfg` to it");

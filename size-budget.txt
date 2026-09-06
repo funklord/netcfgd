@@ -571,4 +571,12 @@ netcfgd
 # into one helper changed the size by nothing; the page is the check. Returning
 # `&'static str` from `usable_name` rather than `String` did matter, and is
 # why 0160 itself cost zero -- that one is recorded in the model.
-total 2771480
+# Running the captive-portal probe with no privileges, +4,096 bytes.
+#
+# One page again, and the true cost is under it. What it buys is that
+# `getaddrinfo` -- glibc's resolver, its NSS modules, and a DNS response chosen
+# by the network being probed -- no longer runs in the process holding
+# CAP_NET_ADMIN. Decision 0162. The code is a capability-shedding module in
+# netcfgd-sys, a helper arm in the multi-call dispatch, and the parent/child
+# split in portal.rs; the fetch itself moved rather than being duplicated.
+total 2775576

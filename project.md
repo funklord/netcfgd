@@ -9428,18 +9428,50 @@ caught by bypassing the call site rather than deleting the function: green
 either way. The test that counts drives `verdict`, whose output is what becomes
 `NCFG_REASON`, and it fails with the attack text quoted back in the message.
 
-**What is left is (1), and it is a design decision rather than a defect.**
-dhcpcd is the working example and it is in netcfgd's own dependency list: it
-parses the wire in a process that has chrooted and dropped privileges, and
-hands the result to one that can touch an interface -- which is why `a3f2c2a`
-had to widen the bounding set for it. The netcfgd shape would be a child that
-drops to an empty capability set, resolves, connects, reads, and reports a
-verdict over a pipe. It costs a `capset`/`prctl` pair in `netcfgd-sys` (the one
-crate permitted syscalls, constraint 4), a fork and a small pipe protocol, and
-tests. It needs no init system's help, which is the property that makes it
-worth more than the unit ever was. The config compiler -- which parses text
-from an `admin` caller who is deliberately not root -- is the second candidate.
-Neither is done. The decision is the holder's.
+**~~What is left is (1)~~ -- done, and it is the first privilege separation
+inside netcfgd.**
+[0162](doc/decision/0162-the-probe-gives-up-what-it-does-not-need.md). The
+probe runs in a child that has shed every capability: `PR_SET_NO_NEW_PRIVS`,
+the ambient set cleared, the bounding set dropped, effective/permitted/
+inheritable zeroed -- and then the *outcome* verified, so a caller that gets an
+error does not go on to do the thing it was dropping privilege for. `exec` and
+not merely `fork`, because netcfgd is multithreaded and a forked child may call
+only async-signal-safe functions until it execs, while `getaddrinfo` allocates;
+the child is a fresh image of the same binary under `netcfgd-probe`, which is
+what the multi-call layout already provides and which nothing on disk is called.
+
+Asked whether it was expressible in C: yes, and more naturally than in Rust,
+since `fork`, `pipe`, `prctl` and `capset` are C APIs that Rust reaches only
+through `unsafe` and libc. The design survives the transition unchanged.
+
+**It would have shipped broken, and the way it was caught is the point.**
+`PR_CAPBSET_DROP` needs `CAP_SETPCAP`; netcfgd's unit grants six capabilities
+and that is not one. A first version treated the resulting `EPERM` as fatal, so
+the helper refused to run -- on the packaged install it was written for, and on
+any machine where netcfgd is not root. **That is a fifth entry for the table
+above, and it would have been added by the change written to argue against
+it.** One command as an ordinary user found it. `EPERM` is tolerated now
+because `NO_NEW_PRIVS` is already set and the end state is checked rather than
+each step trusted.
+
+The first test was wrong twice over: it shed inside a libtest worker and read
+`/proc/self/status`, which reports the thread group leader, so it saw a full
+set after a successful shed -- capabilities are per-thread and the two halves
+were about different threads. It also spawned a child that re-ran its own
+spawner, took ninety seconds, and stopped only because a child that has shed
+skips. It sheds in a thread now, runs in eight milliseconds, and has a
+companion asserting the other thread kept what it had -- without which a pass
+would be equally consistent with the whole process having been disarmed.
+
+**What is still open is the second candidate**, and it is a design decision
+rather than a defect.
+The config compiler parses text from an `admin` caller who is deliberately not
+root, and could have the same treatment. It is not done, and the decision is
+the holder's. The child also stays uid 0: dropping the uid as well is stronger
+and needs a uid to drop *to*, which is a packaging question. What the
+capability drop buys without it is that a compromise in the resolver cannot
+configure an interface, open a raw socket, load a module or override a file
+permission -- `CAP_DAC_OVERRIDE` is a capability, so even uid 0 loses it.
 
 **And the objection reaches the new test hardest, which is worth conceding.**
 `sandbox_writes.sh` reproduces the sandbox with `unshare -rm` and bind mounts,
