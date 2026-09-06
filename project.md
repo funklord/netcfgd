@@ -9329,6 +9329,18 @@ rewrite `resolv.conf` on every tick for ever. Zero rewrites in 25 seconds over
 a two-scope configuration, which is the case where the flattening order could
 have disagreed.
 
+**The size ratchet was turned three commits late, and the guess would have
+been wrong.** The growth had been sitting inside the 3% tolerance across four
+changes -- which is what that tolerance is documented not to be for -- and the
+obvious attribution was the hook refactor, being the only other code commit
+since the baseline. Measured with one release build per commit: the control
+reproduced the recorded total exactly, `bfdf75f` cost **zero**, the confirm
+window cost one page, the `/etc` grant cost zero, and this work cost two.
+`size-budget.txt` carries a line each, including the two zeroes, so nobody
+re-measures them. **The ordering was a plausible story and the measurement was
+four builds**, which is the whole argument for `evidence.md`'s rule about
+re-deriving a number before it becomes a premise.
+
 **And an editing mistake worth more than it cost, because it happened twice
 in one change.** Inserting a documented function ahead of an existing one put
 the new block *between* `#[must_use]` and the item it belonged to, and

@@ -588,4 +588,32 @@ netcfgd
 # `/proc/sys/kernel/overflowuid` rather than a `getpwnam` for `nobody`, since
 # a name lookup means NSS, which is the C library this whole change exists to
 # keep out of the privileged process.
-total 2783768
+# Keeping the commit-confirm promise out of the runtime directory, +4,096
+# bytes.
+#
+# One page, and it is `confirm::dir` plus the doc comment that explains why the
+# window lives beside `/run/netcfgd` rather than in it: a real stop deletes the
+# runtime directory, so a promise kept there survived `systemctl restart` and
+# was destroyed by `systemctl stop` and `start`. Decision 0163.
+# Granting the directory so a symlinked resolv.conf can be replaced, +0 bytes.
+#
+# Worth a line precisely because it is zero. The fix is `ReadWritePaths=/etc`
+# in the unit and a string literal that gained line continuations; neither is
+# code. Decision 0164. Recorded so the next reader does not re-measure it.
+# Defending the resolv.conf netcfgd owns, +8,192 bytes to 2,796,056.
+#
+# Two pages, and the largest single item since the sandbox work. Three things
+# bought it: `read_resolv_currency`, which re-renders what netcfgd would write
+# and compares it with the file, so a foreign overwrite is visible to the
+# planner at all; `Op::is_host_wide_config` and the `restrict` arm that lets a
+# whole-host action survive a drift pass; and `resolv_guard`, which scans
+# `/proc` and signals what keeps taking the file back. Decisions 0165 and 0166.
+#
+# **The whole 12,288 was attributed by measurement, not by ordering** -- one
+# release build per commit, after the growth had been sitting inside the 3%
+# tolerance across four changes. The control reproduced this file's previous
+# total exactly, which is what makes the rest of the column mean anything, and
+# `bfdf75f` -- the change the growth was first guessed at -- cost nothing.
+# **A ratchet only ratchets if somebody turns it**, and this one was turned
+# three commits late.
+total 2796056
