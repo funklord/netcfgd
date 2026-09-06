@@ -228,3 +228,126 @@ Named in advance, so that stopping is a measurement rather than a mood.
 
 If any of those happens, the arrangement in section 4 means the ending is a
 `git rm -r` and a note here saying which one it was.
+
+## 9. Should the move to fuzznet happen at the same time?
+
+Asked by the copyright holder 2026-09-06, with the principle behind it: no more
+owned protocols, except where a protocol exists for compatibility with
+established software.
+
+**The principle is right and netcfgd nearly satisfies it already.** Measured
+from the crates that implement them, everything netcfgd speaks to anything else
+is somebody else's: rtnetlink, wpa_supplicant's and hostapd's control
+interfaces, dhcpcd's control socket, udhcpc and odhcp6c, OpenVPN's management
+interface, pppd, radvd's configuration, MBIM/QMI/AT for modems, and the
+NetworkManager shim. What netcfgd owns is **one protocol** -- the local control
+socket -- and **two formats**: the runtime state under `/run` and the four
+schema witnesses. The config DSL is a language rather than a protocol and was
+decided on its own terms in
+[0001](decision/0001-native-config-syntax.md).
+
+### The arithmetic says the socket is not where the weight is
+
+Section 2's 508,084 bytes, split by what drives it:
+
+    serde and serde_json machinery, shared        232,562
+    the model's derived codecs                    168,328
+    the socket protocol's derived codecs           61,872
+    observe, host and apply                         2,826
+    itoa, memchr, zmij                              7,529
+
+**Moving the socket to fuzznet removes at most 61,872 bytes -- 12% of the serde
+cost and 2.2% of the binary -- and leaves serde linked**, because the model
+still serialises to `/run` and to the witnesses. That is the worst trade on the
+table: the full cost of changing a protocol, for almost none of the weight.
+
+The weight is in the model's codecs and the shared machinery, and what puts it
+there is **principle 2 and constraint 7** -- runtime state as greppable JSON
+files, because not being a black box is the product. So "no more owned
+protocols" does not reach the cost. What would reach it is a decision about
+owned *formats*, and that is a product decision rather than a technical one.
+
+### netcfgd has already argued this, and left it falsifiable
+
+`doc/shared-protocol-brief.md` section 4 exists to tell fuzznet's author why
+netcfgd's local hop stays newline-delimited JSON while its remote hop is
+binary, and `doc/socket-protocol.md` section 3.2 records the split as
+deliberate: text where a shell script is a legitimate client, binary where
+bytes cross a trust boundary. The remote frame is already `situ`-described with
+Monocypher as the codec, so the binary half of the principle is netcfgd's own
+plan and not a new idea.
+
+That section names three things that would change the answer, and **one of them
+is now live**: *"if an embedded tier returned with a budget JSON alone breaks."*
+That is exactly what this document is about. The argument was written to be
+falsifiable and its trigger has fired -- but the arithmetic above says it fires
+on the wrong object. The budget is broken by the state format, not by the
+socket.
+
+### Doing both at once removes the only oracle
+
+Section 5's comparison rests on both implementations producing byte-identical
+`doc/schema/*.json` and `--json` output. **Change the protocol at the same time
+and that is gone before the port has a single verified stage.** A run that
+varies two things cannot answer which one moved -- which is not a general
+caution here but a mistake made in this repository the same week, in a probe
+pair built to close a disclosure and unable to answer its own question until
+the two probes were made to differ in one thing only.
+
+### The waste worry is real, and the answer is shape rather than sequence
+
+The objection to sequencing is that hand-writing 150 codecs in C for JSON, when
+fuzznet is coming, writes them twice. That is true only if the C port copies
+serde's *output* instead of serde's *shape*. serde is a walk over the type and
+an encoder behind a trait; reproduce that split and swapping JSON for a framed
+binary encoding is a new encoder, not 150 rewritten codecs.
+
+**Deciding that split now is what makes sequencing cheap**, and it costs
+nothing to decide it now because section 3's Rust-side experiment has to pick a
+shape anyway.
+
+### `situ` is the obvious tool and it has a recorded cost
+
+A schema compiler generating a JSON codec and a fuzznet codec from one
+description answers the "written twice" objection outright, and netcfgd already
+names situ for the remote frame. `build-and-commit.md` carries a standing
+instruction to evaluate it against any project hand-writing wire-format
+encoders, and a C netcfgd is that project.
+
+**The counter-argument is netcfgd's own and it is not a small one.** Section 4
+records that `client/` -- a C implementation written against the witness rather
+than against the Rust types -- found **three defects in the protocol itself**
+([0081](decision/0081-a-request-nobody-can-send-is-not-a-feature.md),
+[0082](decision/0082-one-operation-has-one-name.md),
+[0083](decision/0083-the-tag-is-the-name.md)), and says in as many words
+that generated bindings would not have produced them, because the second
+implementation would have come from the same source as the first.
+
+That is independence of witnesses, and it has already paid out three times. It
+cuts against generating the C daemon's codecs from the same schema as the Rust
+one, for the same reason it cuts against generating both ends of a protocol.
+Whether the saving is worth the independence is a real question with a real
+answer, and it is not settled here.
+
+### What this recommends
+
+Three separable changes, ordered by which one has an oracle:
+
+1. **The codec replacement in Rust** (section 3), written as a walk plus an
+   encoder. It measures whether either transition is needed and produces the
+   shape both would use.
+2. **The C port with the wire unchanged**, so the differential in section 5
+   works at every stage.
+3. **fuzznet for the control socket**, as its own change with its own
+   differential, once a stage of the port is verified -- or earlier, if step 1
+   shows the socket is where the weight is. Today it is not: 61,872 bytes of
+   508,084.
+
+And one question that should be answered before any of them, because it decides
+1 and 3 together and is the only one that reaches the number:
+
+**Do `/run` state and the schema witnesses stay greppable JSON?** If they do,
+serde or its C equivalent stays linked whatever the socket speaks, and the
+socket's encoding is worth about 62 KB either way. If they do not, that is a
+change to constraint 7 and the largest single item on this list. It is the
+copyright holder's, not a worker's.
