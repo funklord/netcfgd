@@ -193,7 +193,7 @@ pub(crate) fn set_radio(
 /// is written either way, so `ncfg status` explains what this only names.
 fn apply_interface(state: &mut crate::State, interface: &str) -> Result<(), String> {
 	let full = state.plan(&netcfgd_plan::PlanOptions::default());
-	let (restricted, _dropped) = crate::state::restrict(&full, &[interface.to_owned()]);
+	let (restricted, _dropped) = crate::state::restrict(&full, &[interface.to_owned()], false);
 	let mut plan = netcfgd_plan::Plan {
 		warnings: restricted.warnings.clone(),
 		refusals: restricted.refusals.clone(),

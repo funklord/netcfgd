@@ -697,6 +697,24 @@ impl Op {
 		}
 	}
 
+	/// Whether this op configures the **whole host** rather than one interface.
+	///
+	/// `interface()` returns `None` for these, which is correct and is not the
+	/// same question. The daemon's drift loop restricts a plan to the
+	/// interfaces that opted into reconciling, and anything answering `None`
+	/// was therefore dropped -- so a `resolv.conf` another resolver had
+	/// overwritten could never be put back, under a file whose first line says
+	/// "Edits will be overwritten". These are governed by the *global* drift
+	/// policy instead. Decision 0165.
+	///
+	/// Deliberately an allow-list rather than `interface().is_none()`:
+	/// `commit.arm`, `commit.confirm` and `commit.revert` also answer `None`
+	/// and must never be swept into a drift pass.
+	#[must_use]
+	pub fn is_host_wide_config(&self) -> bool {
+		matches!(self, Self::DnsApply { .. } | Self::HostnameSet { .. })
+	}
+
 	/// Which interface this acts on, where it acts on one.
 	#[must_use]
 	pub fn interface(&self) -> Option<&str> {

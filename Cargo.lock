@@ -138,6 +138,7 @@ name = "netcfgd-observe"
 version = "0.1.0"
 dependencies = [
  "netcfgd-apply",
+ "netcfgd-dns",
  "netcfgd-hostapd",
  "netcfgd-model",
  "netcfgd-openvpn",

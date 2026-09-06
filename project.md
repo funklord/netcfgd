@@ -9284,6 +9284,94 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.51 A file that says "edits will be overwritten" and did not overwrite them
+
+Instructed by the copyright holder, straight after 0164 made the write
+possible at all: *"you need to overwrite resolv.conf no matter what, if
+another process tries to stop you kill it."*
+
+**It was not being overwritten, and two independent filters were each enough
+to lose it.** Measured with a running daemon on `on_drift = "reconcile"` and a
+shell standing in for another resolver: netcfgd wrote the file, the shell
+overwrote it, and twelve seconds of the drift loop left the foreign contents
+in place.
+
+- **The observation asked netcfgd's record rather than the file.**
+  `observed.dns` is filled from `prior.dns` -- what netcfgd wrote down as
+  having delivered -- so a foreign overwrite was invisible by construction and
+  the planner correctly found no difference. `evidence.md`'s *ask the object
+  you mean* in the tree's own code.
+- **The drift loop drops anything that is not an interface's.** `dns.apply`
+  answers `None` to `interface()`, rightly, because a host's resolver is not
+  an interface's property -- and `restrict` keeps only actions naming a
+  reconciling interface, so it could never survive. Above it sat a second
+  gate: `reconcile_drift` returns early when no interface is reconciling, and
+  a machine whose only reconcilable state is `global { dns { .. } }` has none.
+
+**Both are fixed and each was proven load-bearing by reverting it alone** and
+watching the live test lose the file twice, which is the part worth copying:
+two fixes that are each necessary look exactly like one fix and one piece of
+superstition until you take them out separately.
+
+**The killing was asked for and the mechanism is not a kill.**
+`systemd-resolved.service` carries `Restart=`, so signalling it gets it
+restarted seconds later -- netcfgd would fight a supervisor rather than a
+program, for ever. What holds is `Conflicts=systemd-resolved.service` in
+`netcfgd-exclusive.conf`, which is how the five daemons already there are
+stood down. **resolved's absence from that list was the fifth omission of
+exactly that kind**, and it is the one that owns this file. It stays opt-in,
+because a machine on `dns_mode = "resolved"` wants resolved running and
+netcfgd handing scopes to it.
+
+**A rewrite loop would have been worse than the fault**, so it was measured
+rather than assumed: a re-render that disagreed with what was written would
+rewrite `resolv.conf` on every tick for ever. Zero rewrites in 25 seconds over
+a two-scope configuration, which is the case where the flattening order could
+have disagreed.
+
+**And an editing mistake worth more than it cost, because it happened twice
+in one change.** Inserting a documented function ahead of an existing one put
+the new block *between* `#[must_use]` and the item it belonged to, and
+inserting two tests ahead of an existing one put them between `#[test]` and
+its function -- **silently disabling a test that had been passing**. Nothing
+about the diff looks wrong; an attribute and the item it applies to are
+separated by exactly the kind of well-commented block a careful edit adds.
+`clippy -D warnings` caught both, one as "unused attribute" and one as
+"function is never used", which is the argument for running it before
+believing a green suite: a test that stops being a test still reports nothing.
+
+**And then the killing was built too**
+([0166](doc/decision/0166-what-cannot-be-attributed-is-killed-by-name.md)),
+behind three gates that must all open: netcfgd owns the file, it has been
+taken back three times in a row, and the process is neither netcfgd's own nor
+supervised. The count resets on any pass that did not have to reclaim, so
+three unrelated writes a week apart never reach it.
+
+**The blunt half is the finding, and the test is what produced it.** netcfgd
+cannot tell who wrote the file -- nothing can ask the kernel that, and
+`fanotify` would want `CAP_SYS_ADMIN` to defend a text file. So the sweep
+signals *every* known resolver-writing program netcfgd did not start, and the
+first run of the test killed an idle `dhclient` that had written nothing,
+alongside the one that would not stop. That is now asserted rather than
+discovered: the check says the bystander goes, so a later narrowing is a
+deliberate change with a failing test rather than a silent one.
+
+**The test had to make its own pid namespace, and that is not a detail.** The
+suite runs under `unshare -rn` -- a *network* namespace -- where `/proc` still
+lists every process on the machine. A sweep test there would have terminated
+the developer's real NetworkManager. `unshare -rnp --fork --mount-proc` is
+what makes it runnable at all, and the Makefile invokes that one bare with the
+reason written beside it.
+
+**A sabotage run that proved nothing, caught by luck.** Checking that the
+own-pid exclusion was load-bearing, the sabotaged build failed to compile and
+the test ran against the previous binary -- and passed. The output was being
+filtered to `FAIL`, so a green result and a build that never happened looked
+identical. It was caught by reading the build log on a hunch rather than by
+anything in the method. **Check the build's exit status before believing a
+test that follows it**, which is this document's own stale-binary rule meeting
+the habit of grepping test output for failures.
+
 ## 10.50 The fix that was reproduced against the uncommon machine
 
 Reported by the copyright holder the same day 0161 landed: *"the writing of

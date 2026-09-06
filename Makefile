@@ -1399,6 +1399,13 @@ live:
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/resolv_owned.sh"
+	@# Bare, and it must stay bare: it makes its own *pid* namespace so the
+	@# sweep it exercises can only see its own children. Under the suite's
+	@# usual `unshare -rn` -- a network namespace only -- /proc still shows
+	@# every process on the machine, and the test would terminate the
+	@# developer's real NetworkManager or dhclient.
+	@NCFG_LIVE=1 sh tests/live/resolv_defended.sh
 	@# The other daemon-driven hook: a roam is wpa_supplicant's decision and
 	@# reaches netcfgd on its event socket, so no apply can exercise it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/roam.sh"

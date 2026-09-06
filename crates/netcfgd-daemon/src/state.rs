@@ -25,6 +25,13 @@ pub(crate) struct Paths {
 
 /// What the daemon knows.
 pub(crate) struct State {
+	/// How many drift passes in a row have had to put `resolv.conf` back.
+	///
+	/// Counted rather than merely noticed, because one foreign write is
+	/// ordinary -- a lease, a hook, an operator with an editor -- and a run of
+	/// them is not. `resolv_guard::PATIENCE` is where the line is drawn, and
+	/// crossing it is the only thing that makes netcfgd signal anybody.
+	pub(crate) resolv_reclaims: u32,
 	/// Where it reads and writes.
 	pub(crate) paths: Paths,
 	/// The compiled desired state. `None` when the config does not compile.
@@ -141,6 +148,7 @@ impl State {
 	#[must_use]
 	pub(crate) fn new(paths: Paths) -> Self {
 		let mut state = Self {
+			resolv_reclaims: 0,
 			probes: crate::probe::Probes::default(),
 			sims: crate::sim::Sims::default(),
 			paths,
@@ -454,6 +462,19 @@ impl State {
 
 	/// The interfaces whose drift policy says to put things back.
 	#[must_use]
+	/// Whether netcfgd may put the *host's* configuration back when something
+	/// else changes it.
+	///
+	/// Separate from [`Self::reconciling_interfaces`] because `resolv.conf`
+	/// and the hostname belong to no interface, so no per-interface policy can
+	/// speak for them. The global default is what an operator writing
+	/// `global { on_drift = "reconcile" }` is setting.
+	pub(crate) fn reconciles_host_wide(&self) -> bool {
+		self.desired
+			.as_ref()
+			.is_some_and(|desired| desired.globals.on_drift_default == DriftPolicy::Reconcile)
+	}
+
 	pub(crate) fn reconciling_interfaces(&self) -> Vec<String> {
 		self.desired.as_ref().map_or_else(Vec::new, |desired| {
 			desired
@@ -518,7 +539,7 @@ impl State {
 /// address, route -- so the orphan case is the master/member edge and little
 /// else.
 #[must_use]
-pub(crate) fn restrict(plan: &Plan, interfaces: &[String]) -> (Plan, Vec<String>) {
+pub(crate) fn restrict(plan: &Plan, interfaces: &[String], host_wide: bool) -> (Plan, Vec<String>) {
 	let mut kept = Plan {
 		warnings: plan.warnings.clone(),
 		refusals: plan.refusals.clone(),
@@ -533,10 +554,19 @@ pub(crate) fn restrict(plan: &Plan, interfaces: &[String]) -> (Plan, Vec<String>
 	let mut kept_ids: Vec<u32> = Vec::new();
 
 	for action in &plan.actions {
-		let wanted = action
-			.op
-			.interface()
-			.is_some_and(|interface| interfaces.iter().any(|name| name == interface));
+		// A host-wide action belongs to no interface, so the interface filter
+		// below can only ever drop it. `host_wide` is the global drift policy
+		// saying whether netcfgd may put the whole host's configuration back --
+		// which is the question for `resolv.conf` and the hostname, neither of
+		// which is anybody's interface (0165).
+		let wanted = if action.op.is_host_wide_config() {
+			host_wide
+		} else {
+			action
+				.op
+				.interface()
+				.is_some_and(|interface| interfaces.iter().any(|name| name == interface))
+		};
 		if !wanted {
 			continue;
 		}
@@ -569,6 +599,7 @@ mod tests {
 	fn state_over(config: &Path, run: &Path, text: &str) -> State {
 		std::fs::write(config.join("netcfgd.conf"), text).expect("config written");
 		State {
+			resolv_reclaims: 0,
 			probes: crate::probe::Probes::default(),
 			sims: crate::sim::Sims::default(),
 			paths: Paths {
@@ -684,7 +715,7 @@ mod tests {
 			..Plan::default()
 		};
 
-		let (kept, dropped) = restrict(&plan, &["eth0".to_owned()]);
+		let (kept, dropped) = restrict(&plan, &["eth0".to_owned()], false);
 		assert_eq!(kept.actions.len(), 2);
 		assert!(kept
 			.actions
@@ -707,7 +738,7 @@ mod tests {
 			..Plan::default()
 		};
 
-		let (kept, dropped) = restrict(&plan, &["br0".to_owned()]);
+		let (kept, dropped) = restrict(&plan, &["br0".to_owned()], false);
 		assert!(kept.actions.is_empty());
 		assert_eq!(dropped.len(), 1);
 		assert!(
@@ -734,8 +765,76 @@ mod tests {
 			..Plan::default()
 		};
 
-		let (kept, _) = restrict(&plan, &["eth0".to_owned()]);
+		let (kept, _) = restrict(&plan, &["eth0".to_owned()], false);
 		assert_eq!(kept.refusals.len(), 1);
+	}
+
+	/// A host-wide action survives a restriction that names no interface.
+	///
+	/// The defect this pins: `dns.apply` answers `None` to `interface()`, so
+	/// the interface filter could only ever drop it -- and a `resolv.conf`
+	/// another resolver had overwritten was therefore never put back, under a
+	/// file whose first line promises it would be. 0165.
+	#[test]
+	fn a_host_wide_action_is_kept_when_the_host_reconciles() {
+		let plan = Plan {
+			actions: vec![Action {
+				id: 0,
+				op: Op::DnsApply {
+					scope: "globals".to_owned(),
+					policy: Box::new(netcfgd_model::DnsPolicy::default()),
+				},
+				reason: Reason {
+					interface: None,
+					field: "dns".to_owned(),
+					desired: "write_resolv_conf".to_owned(),
+					observed: "<absent>".to_owned(),
+				},
+				depends_on: Vec::new(),
+				inverse: None,
+			}],
+			..Plan::default()
+		};
+
+		// No interface is named, which is the ordinary case for a machine
+		// whose only reconcilable state is the resolver.
+		let (kept, _) = restrict(&plan, &[], true);
+		assert_eq!(kept.actions.len(), 1, "the host reconciles, so it is kept");
+
+		let (dropped, _) = restrict(&plan, &[], false);
+		assert!(
+			dropped.actions.is_empty(),
+			"and the global policy is what decides, not the interface list"
+		);
+	}
+
+	/// A commit op answers `None` too and must never ride along.
+	///
+	/// This is why `is_host_wide_config` is an allow-list rather than
+	/// `interface().is_none()`: arming or reverting a confirm window inside a
+	/// drift pass would apply something nobody asked for.
+	#[test]
+	fn a_commit_action_is_not_swept_in_by_the_host_wide_rule() {
+		let plan = Plan {
+			actions: vec![Action {
+				id: 0,
+				op: Op::CommitArm { window_seconds: 60 },
+				reason: Reason {
+					interface: None,
+					field: "confirm".to_owned(),
+					desired: "60".to_owned(),
+					observed: "<absent>".to_owned(),
+				},
+				depends_on: Vec::new(),
+				inverse: None,
+			}],
+			..Plan::default()
+		};
+		let (kept, _) = restrict(&plan, &[], true);
+		assert!(
+			kept.actions.is_empty(),
+			"commit.arm answers None to interface() and is not host configuration"
+		);
 	}
 
 	/// Nothing to reconcile is the normal case and must not produce an empty
@@ -746,7 +845,7 @@ mod tests {
 			actions: vec![action(0, "eth0", vec![])],
 			..Plan::default()
 		};
-		let (kept, dropped) = restrict(&plan, &[]);
+		let (kept, dropped) = restrict(&plan, &[], false);
 		assert!(kept.actions.is_empty());
 		assert!(dropped.is_empty());
 	}

@@ -11,6 +11,7 @@
 mod authorize;
 mod confirm;
 mod probe;
+mod resolv_guard;
 mod server;
 mod sim;
 mod state;
@@ -1245,7 +1246,14 @@ fn reconcile_drift(
 	commands: &Sender<Command>,
 ) {
 	let wanted = state.reconciling_interfaces();
-	if wanted.is_empty() {
+	// **Not `wanted.is_empty()` alone.** A host whose only reconcilable state
+	// is `resolv.conf` has no interface in that list -- a `global { dns { .. } }`
+	// block with no `interface` block at all is an ordinary configuration --
+	// and returning here meant the whole-host half could never run. That was
+	// the second of the two reasons a foreign overwrite of `resolv.conf` was
+	// never put back; `restrict` dropping it was the first (0165).
+	let host_wide = state.reconciles_host_wide();
+	if wanted.is_empty() && !host_wide {
 		return;
 	}
 	// The cycles waiting to happen, taken before the plan and cleared only
@@ -1257,7 +1265,7 @@ fn reconcile_drift(
 		cycle: cycling.clone(),
 		..PlanOptions::default()
 	});
-	let (restricted, dropped) = state::restrict(&full, &wanted);
+	let (restricted, dropped) = state::restrict(&full, &wanted, host_wide);
 	if restricted.actions.is_empty() {
 		return;
 	}
@@ -1279,6 +1287,31 @@ fn reconcile_drift(
 		return;
 	};
 	let journal = netcfgd_apply::apply(&restricted, &mut executor);
+	// **Counted here rather than where the file is written**, because this is
+	// the only place that knows the write was a *reclaim* -- a pass that had
+	// to put back something netcfgd had already delivered. The executor
+	// writing `resolv.conf` on a first apply is not interference.
+	//
+	// Reset on any drift pass that did not have to, so the count means "in a
+	// row" rather than "ever". A machine where something rewrites the file
+	// once an hour never reaches the threshold, which is the intent: that is
+	// somebody's cron, not a fight.
+	if restricted
+		.actions
+		.iter()
+		.any(|action| matches!(action.op, netcfgd_plan::Op::DnsApply { .. }))
+	{
+		state.resolv_reclaims = state.resolv_reclaims.saturating_add(1);
+		if state.resolv_reclaims >= resolv_guard::PATIENCE {
+			resolv_guard::sweep(&state.paths.run);
+			// Start the count again rather than sweeping on every pass after
+			// the third: whatever was signalled needs a moment to go, and a
+			// sweep per tick would be its own storm.
+			state.resolv_reclaims = 0;
+		}
+	} else {
+		state.resolv_reclaims = 0;
+	}
 	state.sims.cycled(&cycling, &journal);
 	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 	let _ = run_state::write_journal(&state.paths.run, &journal);

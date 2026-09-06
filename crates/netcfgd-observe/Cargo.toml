@@ -19,6 +19,10 @@ netcfgd-sys = { path = "../netcfgd-sys" }
 netcfgd-secret  = { path = "../netcfgd-secret" }
 netcfgd-apply   = { path = "../netcfgd-apply" }
 netcfgd-openvpn = { path = "../../backend/netcfgd-openvpn" }
+# Read `resolv.conf` back and re-render what netcfgd would have written, so a
+# foreign overwrite is visible to the planner. Depends only on the model, so
+# there is no cycle.
+netcfgd-dns     = { path = "../../backend/netcfgd-dns" }
 netcfgd-ra      = { path = "../../backend/netcfgd-ra" }
 netcfgd-hostapd = { path = "../../backend/netcfgd-hostapd" }
 # And the second question of that shape: does a running supplicant still answer?

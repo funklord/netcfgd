@@ -60,6 +60,59 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	read_tunnel_currency(observed, run_dir, desired);
 	read_wireguard_keys(observed);
 	read_wireguard_currency(observed, run_dir, desired);
+	read_resolv_currency(observed);
+}
+
+/// Whether the `resolv.conf` netcfgd wrote is still the one on disk.
+///
+/// **The fourth currency check, and the one whose absence was reported.**
+/// `build` fills `observed.dns` from `prior.dns` -- netcfgd's own record of
+/// what it delivered -- so the observation asked the record and never the
+/// file. Another resolver overwriting `/etc/resolv.conf` was therefore
+/// invisible: the planner compared desired against a record that still said
+/// "delivered", found no difference, and emitted nothing. Measured before the
+/// fix: a foreign write survived the drift loop untouched, under a file whose
+/// first line says "Edits will be overwritten".
+///
+/// This is `evidence.md`'s *ask the object you mean* -- the record is a
+/// property of what netcfgd did, and the question is what the file says now.
+///
+/// **Only for `write_resolv_conf`.** Every other mode hands the file to a
+/// resolver that owns it, and netcfgd comparing bytes it does not write would
+/// report drift for another daemon doing its job. In this mode the operator
+/// has said netcfgd owns the file, so anything else in it is drift by
+/// definition.
+///
+/// Clearing the whole list rather than one entry is deliberate: the delivery
+/// is one file rendered from every scope at once, so it is in effect or it is
+/// not. The planner then sees nothing delivered and re-applies, which rewrites
+/// the file.
+fn read_resolv_currency(observed: &mut Observed) {
+	if !observed
+		.dns
+		.iter()
+		.any(|applied| applied.policy.mode == netcfgd_model::DnsMode::WriteResolvConf)
+	{
+		return;
+	}
+	let scopes: Vec<netcfgd_dns::Scope<'_>> = observed
+		.dns
+		.iter()
+		.map(|applied| netcfgd_dns::Scope {
+			name: &applied.scope,
+			policy: &applied.policy,
+		})
+		.collect();
+	let expected =
+		netcfgd_dns::render::resolv_conf(&netcfgd_dns::render::flatten(&scopes), "netcfgd");
+	// An unreadable file is not "no drift": it is the file netcfgd owns being
+	// gone, or replaced by a symlink into somebody else's runtime state, and
+	// both want rewriting. `read_to_string` follows a link, which is what
+	// makes the second case read as different rather than as an error.
+	let actual = fs::read_to_string(netcfgd_apply::kernel::resolv_conf_path()).unwrap_or_default();
+	if actual != expected {
+		observed.dns.clear();
+	}
 }
 
 /// Whether each `WireGuard` device still holds the key the store has.

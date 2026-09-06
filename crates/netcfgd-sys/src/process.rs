@@ -178,6 +178,75 @@ fn pid_by_marker_as(marker: &str, mine: u32) -> Option<i32> {
 	found
 }
 
+/// The program a pid is running, from `/proc/<pid>/comm`.
+///
+/// `comm` rather than `cmdline[0]`: a daemon re-executed under a path, a
+/// symlink or a wrapper has whatever argv it was given, while `comm` is the
+/// kernel's own name for the executable. It is **truncated to 15 characters**,
+/// which is why the caller's list carries `systemd-resolve` rather than
+/// `systemd-resolved` -- a fact worth stating where the list is written, since
+/// a name that is one character too long simply never matches and the sweep
+/// reports nothing.
+#[must_use]
+pub fn program_of(pid: i32) -> Option<String> {
+	let text = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+	let name = text.trim_end_matches('\n');
+	(!name.is_empty()).then(|| name.to_owned())
+}
+
+/// Whether a service manager is holding this process up.
+///
+/// **A killed service comes straight back**, so this is the difference between
+/// removing an interference and starting a fight that cannot be won:
+/// `systemd-resolved.service` carries `Restart=`, and signalling it buys
+/// seconds. The answer for those is `Conflicts=` in a unit, not a signal.
+///
+/// Read from `/proc/<pid>/cgroup`, where a systemd service names a
+/// `*.service` slice. A process outside one -- started from a shell, a hook,
+/// an init script that does not supervise -- has no such name, and a kill
+/// holds for it.
+///
+/// **It answers false where it cannot tell**, which is the direction that
+/// matches the caller: an unreadable cgroup on a kernel without the
+/// controller is not evidence of supervision, and treating it as such would
+/// make the sweep do nothing on exactly the machines it is wanted on.
+#[must_use]
+pub fn is_service_supervised(pid: i32) -> bool {
+	std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+		.is_ok_and(|text| text.lines().any(|line| line.contains(".service")))
+}
+
+/// Every pid whose program name is one of `names`.
+///
+/// The scan `pid_by_marker` does, asked a different question: that one looks
+/// for an argument netcfgd put there, and this one for programs netcfgd did
+/// not start at all.
+#[must_use]
+pub fn pids_of_programs(names: &[&str]) -> Vec<(i32, String)> {
+	let mut found = Vec::new();
+	let Ok(entries) = std::fs::read_dir("/proc") else {
+		return found;
+	};
+	for entry in entries.flatten() {
+		let Ok(name) = entry.file_name().into_string() else {
+			continue;
+		};
+		let Ok(pid) = name.parse::<i32>() else {
+			continue;
+		};
+		if pid <= 0 {
+			continue;
+		}
+		if let Some(program) = program_of(pid) {
+			if names.iter().any(|wanted| *wanted == program) {
+				found.push((pid, program));
+			}
+		}
+	}
+	found.sort_unstable();
+	found
+}
+
 /// Ask a process to terminate.
 ///
 /// `SIGTERM` rather than `SIGKILL`, always: `pppd` on a `SIGTERM` hangs up the

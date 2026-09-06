@@ -1982,7 +1982,12 @@ fn set_accept_ra(iface: &str, value: u8) -> Result<(), String> {
 }
 
 /// Where `resolv.conf` is: the environment, or the usual place.
-fn resolv_conf_path() -> std::path::PathBuf {
+///
+/// Public because the observation needs the same answer: `netcfgd-observe`
+/// reads the file back to see whether netcfgd's delivery is still in effect,
+/// and a second copy of this would be a second thing to be wrong.
+#[must_use]
+pub fn resolv_conf_path() -> std::path::PathBuf {
 	std::env::var("NCFG_RESOLV_CONF").map_or_else(
 		|_| std::path::PathBuf::from(netcfgd_dns::RESOLV_CONF),
 		std::path::PathBuf::from,
