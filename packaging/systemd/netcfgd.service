@@ -148,6 +148,27 @@ RuntimeDirectoryMode=0755
 # behind for ever would make the reboot case look like a restart.
 RuntimeDirectoryPreserve=restart
 
+# **What is NOT in that directory, and must never be put there (0163).**
+#
+# The commit-confirm window and the document it reverts to live in
+# /run/netcfgd-confirm, which systemd does not manage. The line above is why:
+# it deletes /run/netcfgd on a real stop, so a window kept there survived
+# `systemctl restart` and was destroyed by `systemctl stop` followed by
+# `systemctl start` -- two spellings of one intent, and the careful-looking
+# one silently kept a change nobody had confirmed. It also made the answer
+# differ by init, since OpenRC, procd and sysvinit never remove that
+# directory at all.
+#
+# Everything else netcfgd records is a claim about an object that still
+# exists, so it can be rebuilt by asking the object -- a kernel protocol tag,
+# a link mark, a marker in a backend's own argv. A window cannot be: it
+# asserts that somebody did NOT come back, and nothing in the world holds a
+# copy of that.
+#
+# So do not add `RuntimeDirectory=netcfgd-confirm` here. It is the natural
+# thing to add on noticing a second directory, and it reintroduces the fault
+# exactly. `tests/live/killmode.sh` fails if this file ever names it.
+
 # **Declared rather than defaulted, and the value is deliberate (0142).**
 #
 # systemd's default is `control-group`, which kills every process in the unit's

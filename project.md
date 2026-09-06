@@ -952,11 +952,12 @@ them because no test had ever carried those keys.
    a stop holds, the record survives, and a deb upgrade restarts a running
    daemon. What is missing is that an upgrade and a final stop look identical
    to the daemon, and nothing writes the intent down for the next copy.
-   **It now has a concrete consumer rather than only a rationale**: an
-   unresolved commit-confirm window is destroyed by a real stop and survives a
-   restart, so the intent is exactly what decides whether the promise should
-   outlive the process. Measured in 10.49, which also names the two cheaper
-   fixes and what each of them costs.
+   **It had a concrete consumer, and that one is now closed by placement
+   rather than by intent**: an unresolved commit-confirm window was destroyed
+   by a real stop and survived a restart, and 0163 moved it out of the
+   directory systemd deletes (10.49). What that does *not* answer is still the
+   requirement -- netcfgd is told nothing, and the fix works by needing to know
+   nothing. The next consumer will not necessarily have that option.
 
 **And one question rather than a task: could this run on a microcontroller?**
 Put by the holder 2026-09-02. The core turns out to be portable already and the
@@ -9289,6 +9290,11 @@ Found 2026-09-06 while looking for what would consume the *why am I being
 stopped* intent that §10's item 4 is about. It is a gap in the thing that
 question exists to protect, and it needed no new mechanism to find.
 
+**Fixed the same day on the holder's instruction, by moving the window out of
+the directory systemd manages** ([0163](doc/decision/0163-a-promise-lives-outside-the-runtime-directory.md)).
+The finding is kept as it was written, because the reasoning that found it is
+worth more than the patch; what changed is recorded at the end.
+
 **An unresolved commit-confirm window does not survive a real stop.** Measured,
 with the restart case as the positive control, in a `unshare -rn` namespace
 against the freshly built daemon:
@@ -9358,12 +9364,55 @@ between at least three, each touching something already decided:
   outlive the process, and this is the first concrete consumer found for it.
   That is an argument for the feature and not yet a design.
 
-**No test was added, deliberately.** One asserting today's behaviour would pin
-a defect and one asserting tomorrow's would fail `make live`, so the
-reproduction is written above instead and the check belongs with whichever fix
-is chosen. `tests/live/confirm.sh` case 6 already covers the restart half; what
-it has never done is remove the directory, which is the one line between the
-two cases.
+**No test was added at first, deliberately.** One asserting today's behaviour
+would pin a defect and one asserting tomorrow's would fail `make live`, so the
+reproduction was written down and the check waited for the fix. `confirm.sh`
+case 6 already covered the restart half; what it had never done is remove the
+directory, which is the one line between the two cases.
+
+### What the fix turned out to be, and the three things it cost
+
+The holder chose the first option. `netcfgd_host::confirm::dir` composes a
+sibling of the run directory -- final component plus `-confirm`, so
+`/run/netcfgd` gives `/run/netcfgd-confirm` -- and the window and the last-good
+document are written there. It is derived from the run directory rather than
+hard-coded, so `NCFG_RUN_DIR` keeps working and every test gets the sibling
+without being told. `write_atomically` already creates parent directories and
+`ProtectSystem=full` leaves `/run` writable, so no init script and no
+`ReadWritePaths=` had to change. `make live`'s `confirm.sh` is 53 checks and
+all pass.
+
+**A round trip cannot see this fix, which is why it needed its own
+assertion.** `a_window_round_trips_through_the_file` passes just as well with
+both files back inside the runtime directory -- confirmed by sabotaging `dir`
+to return the run directory and watching that test stay green while the two
+new ones went red. The new assertions are that the directory is not inside the
+run directory, that both files really are over there, and that removing the run
+directory outright leaves the window readable.
+
+**Three test paths named the old location and one of them was mine.** The live
+suite's `window_open` and a `last-good.json` grep pointed at `$work/run`, and
+the first draft of the new case checked that `run/confirm.json` was absent
+after the wipe -- which passes for the wrong reason once the fix is in, because
+it was never there. It asserts instead that the runtime directory had something
+to lose, that the wipe emptied it, and that the promise is elsewhere.
+
+**And the fault has a natural one-line reintroduction**: adding
+`RuntimeDirectory=netcfgd-confirm` to the unit, which is what somebody does on
+noticing a second directory the daemon writes to. `killmode.sh` refuses that,
+and refuses a rename in Rust that would leave the guard pointing at a path
+nobody writes -- a guard over the wrong name is green and guards nothing. Both
+were made to fail independently before being written down.
+
+**One process failure worth keeping.** The control run -- the suite without the
+change, to establish that three later failures were mine -- was done by
+stashing, rebuilding and running. Restoring the stash afterwards left the
+*control* binary in place, and the next run reported the fix not working. That
+is this document's own rule about never concluding from a binary the build step
+did not rebuild, met from the direction nobody writes it down for: not a stale
+binary from an old edit, but a correctly built one from a deliberate control.
+**A control run leaves the wrong artifact behind, and the artifact does not
+know it was a control.**
 
 ## 10.48 situ against netcfgd's format, and the one thing that decides it
 

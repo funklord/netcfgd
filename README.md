@@ -243,7 +243,11 @@ its reason and its inverse.
 
 Runtime state is greppable files under `/run/netcfgd/`, including a
 per-interface report that DHCP clients, pppd scripts and VPN helpers write
-into.
+into. One thing sits beside it rather than in it: an open commit-confirm
+window, and the configuration it would revert to, are kept in
+`/run/netcfgd-confirm/`, because the runtime directory is the one an init
+deletes when the service stops and a promise nobody has answered has to
+outlive that.
 
 ## Clients
 

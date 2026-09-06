@@ -80,6 +80,29 @@ else
 	failures=$((failures + 1))
 fi
 
+# The commit-confirm promise must stay OUT of what systemd deletes.
+#
+# 0163 moved `confirm.json` and `last-good.json` to `/run/netcfgd-confirm`
+# because `RuntimeDirectoryPreserve=restart` deletes `/run/netcfgd` on a real
+# stop -- so `systemctl stop && systemctl start` kept a change nobody had
+# confirmed, where `systemctl restart` took it back.
+#
+# Naming that sibling in a `RuntimeDirectory=` would put the fault straight
+# back, and it is the natural thing for somebody to add: a second directory
+# the daemon writes to looks like an omission. This is the check that says
+# no. It belongs here rather than beside the code because the mistake is made
+# in the unit, not in Rust.
+check "the unit does not hand the confirm directory to systemd to delete" \
+	"$(grep -c '^RuntimeDirectory=netcfgd-confirm$' "$unit")" "0"
+
+# And the guard above is only worth having if the directory it protects is
+# still the one the code writes to. A rename in Rust with this line left
+# behind would be a check guarding a path nobody uses -- green, and guarding
+# nothing.
+source_dir="$repo/crates/netcfgd-host/src/confirm.rs"
+check "and the name it guards is the one the code composes" \
+	"$(grep -c 'sibling.push("-confirm");' "$source_dir")" "1"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "killmode.sh: all checks passed"

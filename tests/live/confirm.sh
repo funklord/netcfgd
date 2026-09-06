@@ -90,7 +90,11 @@ await() {
 }
 
 start_daemon() {
-	rm -rf "$work/run"
+	# Both directories, because the promise is deliberately not in the runtime
+	# one (0163). Clearing only `run` would leave the previous case's window
+	# and last-good document in place, and the next case would revert at
+	# startup for a reason belonging to the case before it.
+	rm -rf "$work/run" "$work/run-confirm"
 	mkdir -p "$work/run"
 	# shellcheck disable=SC2086
 	"$repo/target/debug/netcfgd" $1 > "$work/daemon.log" 2>&1 &
@@ -243,6 +247,46 @@ sleep 6
 check "and does not put it back on the next reconcile" "$(present)" "no"
 stop_daemon
 
+# 6a. The same recovery, after a *real stop* rather than a restart.
+#
+#     Case 6 kills the daemon and leaves `/run/netcfgd` alone, which is what
+#     `systemctl restart` does: `RuntimeDirectoryPreserve=restart` keeps the
+#     directory across a restart and deletes it on a stop. So case 6 could
+#     never see what a stop costs, and for a long time a stop cost the whole
+#     window -- `systemctl stop && systemctl start` kept an unconfirmed change
+#     that `systemctl restart` would have taken back, and the answer differed
+#     by init because OpenRC, procd and sysvinit never remove that directory.
+#
+#     0163 moved the window and the last-good document to a sibling directory
+#     for this. The one line between the two cases is the `rm -rf` below, and
+#     it is the whole test: remove what a real stop removes, and the promise
+#     must still be there.
+start_daemon --no-apply-on-start
+"$ncfg" apply --confirm-within 600 >/dev/null 2>&1
+await yes || true
+check "a window is open before the stop" "$(present)" "yes"
+
+crash_daemon
+#     The wipe has to be shown to have done something. Asserting that
+#     `run/confirm.json` is absent afterwards would pass for the wrong reason
+#     once the fix is in, because it was never there -- a check whose passing
+#     condition includes the failure.
+check "the runtime directory has something in it to lose" \
+	"$([ -n "$(ls -A "$work/run")" ] && echo yes || echo no)" "yes"
+# Exactly what systemd does to a RuntimeDirectory on a real stop, and nothing
+# else. The sibling is deliberately not named here.
+rm -rf "$work/run"
+mkdir -p "$work/run"
+check "and the stop emptied it" "$(ls -A "$work/run" | wc -l | tr -d ' ')" "0"
+check "while the promise is kept elsewhere" \
+	"$([ -e "$work/run-confirm/confirm.json" ] && echo present || echo gone)" "present"
+
+restart_daemon --no-apply-on-start
+check "a real stop does not cost the window" "$(present)" "no"
+check "and the daemon says it found one" \
+	"$(grep -ci 'confirm window was open' "$work/restart.log")" "1"
+stop_daemon
+
 # 7. A setting the last-good document does not mention.
 #
 #    The revert restores the last-good document and re-plans, which can only
@@ -312,7 +356,9 @@ stop_daemon
 #    would revert to *nothing* -- every address, route and backend netcfgd had
 #    just brought up, taken down N seconds after start with nobody present.
 address_of() { ip -4 -br addr show probe0 2>/dev/null | tr -s ' ' | cut -d' ' -f3; }
-window_open() { [ -e "$work/run/confirm.json" ] && echo yes || echo no; }
+# The sibling, not the runtime directory: 0163 keeps the promise where a real
+# stop cannot take it.
+window_open() { [ -e "$work/run-confirm/confirm.json" ] && echo yes || echo no; }
 
 # **Wait for the outcome, do not sleep for it.** Case 16 asserted an address
 # after `sleep 3`, where the reconcile it waits for happens on the loop's
@@ -613,7 +659,7 @@ start_daemon ""
 await yes || true
 sleep 1
 check "a failed startup apply leaves the placeholder in place" \
-	"$(grep -c '"interfaces": \[\]' "$work/run/last-good.json" 2>/dev/null)" "1"
+	"$(grep -c '"interfaces": \[\]' "$work/run-confirm/last-good.json" 2>/dev/null)" "1"
 sed -i 's/10\.9\.9\.1/10.9.9.4/' "$work/etc/netcfgd.conf"
 sleep 3
 check "and no window is armed against it" "$(window_open)" "no"
