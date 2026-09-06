@@ -1865,7 +1865,7 @@ fn lower_network(
 				format!("`{}` is not valid inside `network`", inner.head),
 			)),
 			Item::Hook(hook) => match hook_phase(&hook.phase) {
-				Some(phase) => match hooks.materialise(phase, &label, &hook.body) {
+				Some(phase) => match hooks.record(phase, &label, &hook.body) {
 					Ok(reference) => network.hooks.push(reference),
 					Err(message) => diags.push(Diagnostic::new(hook.span, message)),
 				},
@@ -2672,7 +2672,7 @@ fn lower_interface(
 				)),
 			},
 			Item::Hook(hook) => match hook_phase(&hook.phase) {
-				Some(phase) => match hooks.materialise(phase, &name, &hook.body) {
+				Some(phase) => match hooks.record(phase, &name, &hook.body) {
 					Ok(reference) => interface.hooks.push(reference),
 					Err(message) => diags.push(Diagnostic::new(hook.span, message)),
 				},

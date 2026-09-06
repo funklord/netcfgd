@@ -15,12 +15,7 @@ struct FakeHooks {
 }
 
 impl HookSink for FakeHooks {
-	fn materialise(
-		&mut self,
-		phase: HookPhase,
-		owner: &str,
-		body: &str,
-	) -> Result<HookRef, String> {
+	fn record(&mut self, phase: HookPhase, owner: &str, body: &str) -> Result<HookRef, String> {
 		let index = self.seen.len();
 		self.seen.push((phase, owner.to_owned(), body.to_owned()));
 		Ok(HookRef {
@@ -267,14 +262,15 @@ fn on_names_the_remaining_phases() {
 
 /// A caller with nowhere to put hooks refuses them rather than dropping them,
 /// which would produce a document describing a system nobody asked for.
+///
+/// `NoHooks` no longer refuses because it cannot *write* -- nothing writes
+/// during compilation now -- but because it will not carry them. A caller that
+/// wants a document with hooks in it supplies a sink that keeps them.
 #[test]
-fn a_sink_that_cannot_materialise_refuses_loudly() {
+fn a_sink_that_will_not_carry_hooks_refuses_loudly() {
 	let text = "interface eth0 {\n\tpost_up {\necho hi\n}\n}\n";
 	let rendered = errors(text);
-	assert!(
-		rendered.contains("cannot materialise hooks"),
-		"got: {rendered}"
-	);
+	assert!(rendered.contains("cannot accept hooks"), "got: {rendered}");
 }
 
 /// Decision 0007, through the language: routing domains under a flat mode are

@@ -1,43 +1,82 @@
-//! Materialising hook bodies into `/run/netcfgd/hooks/`.
+//! Naming hook bodies now, and writing them when somebody asks.
 //!
-//! Section 2.2: the DSL lets an author write inline shell, and the compiler
-//! turns those blocks into files so the document carries only
-//! `{phase, path, sha256}`. This is the half that touches a filesystem, which
-//! is why it lives in the CLI and reaches the compiler through a trait.
+//! Section 2.2: the DSL lets an author write inline shell, and the document
+//! carries only `{phase, path, sha256}`. Turning a body into that triple needs
+//! no filesystem -- the path is a naming rule and the hash is of the body --
+//! so this records, and writing is a second, explicit step.
+//!
+//! **It used to write during compilation**, which made five of six read-only
+//! CLI paths write files and left a failed compile with some of its hooks
+//! already on disk. See `netcfgd_compile::HookSink`.
 
 use netcfgd_compile::HookSink;
 use netcfgd_model::{HookPhase, HookRef};
 use std::fs;
 use std::path::PathBuf;
 
-/// Writes hook bodies under a directory and hashes them.
-pub struct RunHooks {
+/// Hook bodies named and held, ready to be written.
+///
+/// Writing is [`PendingHooks::write`], and nothing calls it implicitly.
+pub struct PendingHooks {
 	dir: PathBuf,
-	written: usize,
+	/// The script as it will be written, in the order the compiler reached
+	/// them, keyed by the path the document now refers to.
+	pending: Vec<(PathBuf, String)>,
 }
 
-impl RunHooks {
-	/// Materialise into `run_dir/hooks/`.
+impl PendingHooks {
+	/// Name into `run_dir/hooks/`, without creating it.
 	#[must_use]
 	pub fn new(run_dir: &std::path::Path) -> Self {
 		Self {
 			dir: run_dir.join("hooks"),
-			written: 0,
+			pending: Vec::new(),
 		}
+	}
+
+	/// How many are waiting. Zero is the ordinary case: most configs have no
+	/// hooks, and a caller that writes unconditionally should still not have
+	/// to create a directory for nothing.
+	#[must_use]
+	pub fn len(&self) -> usize {
+		self.pending.len()
+	}
+
+	/// Whether there is nothing to write.
+	#[must_use]
+	pub fn is_empty(&self) -> bool {
+		self.pending.is_empty()
+	}
+
+	/// Write every recorded body to the path the document refers to.
+	///
+	/// **Called only where the hooks are about to be needed.** A read-only
+	/// verb has a document that names them and no reason to put them on disk;
+	/// the one that runs them does.
+	///
+	/// The directory is created only when there is something to put in it, so
+	/// a machine with no hooks grows no empty directory and a read-only run
+	/// dir is not touched at all.
+	///
+	/// # Errors
+	///
+	/// Returns a message naming the file that could not be written.
+	pub fn write(&self) -> Result<(), String> {
+		if self.pending.is_empty() {
+			return Ok(());
+		}
+		fs::create_dir_all(&self.dir)
+			.map_err(|error| format!("could not create {}: {error}", self.dir.display()))?;
+		for (path, script) in &self.pending {
+			write_private(path, script.as_bytes())?;
+		}
+		Ok(())
 	}
 }
 
-impl HookSink for RunHooks {
-	fn materialise(
-		&mut self,
-		phase: HookPhase,
-		owner: &str,
-		body: &str,
-	) -> Result<HookRef, String> {
-		fs::create_dir_all(&self.dir)
-			.map_err(|error| format!("could not create {}: {error}", self.dir.display()))?;
-
-		let name = format!("{owner}.{}.{}", phase.name(), self.written);
+impl HookSink for PendingHooks {
+	fn record(&mut self, phase: HookPhase, owner: &str, body: &str) -> Result<HookRef, String> {
+		let name = format!("{owner}.{}.{}", phase.name(), self.pending.len());
 		let path = self.dir.join(&name);
 
 		// A hook body is shell, and the runner executes it directly rather
@@ -49,16 +88,15 @@ impl HookSink for RunHooks {
 			format!("#!/bin/sh\n{body}")
 		};
 
-		write_private(&path, script.as_bytes())?;
-
-		self.written += 1;
-		Ok(HookRef {
+		let reference = HookRef {
 			phase,
 			path: path.display().to_string(),
 			sha256: sha256_hex(script.as_bytes()),
 			run_as: None,
 			timeout: None,
-		})
+		};
+		self.pending.push((path, script));
+		Ok(reference)
 	}
 }
 
@@ -106,7 +144,73 @@ pub use netcfgd_model::hash::sha256_hex;
 
 #[cfg(test)]
 mod tests {
-	use super::sha256_hex;
+	use super::{sha256_hex, PendingHooks};
+	use netcfgd_compile::HookSink as _;
+	use netcfgd_model::HookPhase;
+
+	/// **Recording writes nothing, and the reference is complete anyway.**
+	///
+	/// The whole point of the split: the document gets its `{phase, path,
+	/// sha256}` without a filesystem being touched, so a caller that only
+	/// wants to know what *would* happen leaves no trace. The directory is
+	/// asserted absent rather than empty -- an empty `hooks/` on a machine
+	/// that ran `ncfg plan` would still be a read-only verb having written.
+	#[test]
+	fn recording_touches_nothing() {
+		let dir = netcfgd_testdir::TestDir::new("hooks-record");
+		let mut pending = PendingHooks::new(dir.path());
+
+		let reference = pending
+			.record(HookPhase::PostUp, "eth0", "echo hi\n")
+			.expect("recorded");
+
+		assert!(reference.path.ends_with("eth0.post_up.0"));
+		assert_eq!(reference.sha256, sha256_hex(b"#!/bin/sh\necho hi\n"));
+		assert_eq!(pending.len(), 1);
+		assert!(
+			!dir.join("hooks").exists(),
+			"recording must not create the directory, let alone the file"
+		);
+	}
+
+	/// And asking puts exactly what the reference promised on disk.
+	///
+	/// The pair is the test: the first half would pass against a sink that
+	/// silently dropped the body, and this is what catches that.
+	#[test]
+	fn writing_puts_the_recorded_body_where_the_reference_says() {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let dir = netcfgd_testdir::TestDir::new("hooks-write");
+		let mut pending = PendingHooks::new(dir.path());
+		let reference = pending
+			.record(HookPhase::PreUp, "wlan0", "#!/bin/dash\nexit 0\n")
+			.expect("recorded");
+		pending.write().expect("written");
+
+		let written = std::fs::read_to_string(&reference.path).expect("it is there");
+		// A body with its own shebang keeps it.
+		assert_eq!(written, "#!/bin/dash\nexit 0\n");
+		assert_eq!(sha256_hex(written.as_bytes()), reference.sha256);
+
+		let mode = std::fs::metadata(&reference.path)
+			.expect("stat")
+			.permissions()
+			.mode() & 0o777;
+		assert_eq!(mode, 0o700, "a hook is root's shell and nobody else's");
+	}
+
+	/// Nothing recorded, nothing created -- not even the directory.
+	///
+	/// `apply` calls `write` unconditionally, and most machines have no hooks
+	/// at all; creating an empty directory for them would put a side effect
+	/// back on a path that no longer has one.
+	#[test]
+	fn writing_nothing_creates_nothing() {
+		let dir = netcfgd_testdir::TestDir::new("hooks-empty");
+		PendingHooks::new(dir.path()).write().expect("no-op");
+		assert!(!dir.join("hooks").exists());
+	}
 
 	/// The published vectors, because a hash implementation that is nearly
 	/// right is worth nothing and looks fine.

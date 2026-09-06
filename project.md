@@ -9278,6 +9278,52 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.47 Hook materialisation leaves compilation
+
+Instructed by the copyright holder 2026-09-06, choosing between the two shapes
+10.46 recorded. The compiler is pure now: `grep` for `std::fs`, `File::`,
+`Command::` and `std::env` across `netcfgd-compile/src` returns nothing, and
+its dependencies are the model and serde.
+
+**`HookSink::materialise` became `HookSink::record`, and the rename is the
+contract.** Both halves of what the document needs -- the path and the sha256
+-- are computable from the body and a naming rule, so writing was folded in
+only because the sink happened to be there. It cost three things:
+
+- **Five of the six CLI paths that compile are read-only** -- `plan`, `show`,
+  `explain`, and the helpers behind `wireless_interface` and
+  `observe_with_document` -- and every one wrote hook scripts under `/run` as
+  a side effect of being asked what *would* happen. Measured before and after,
+  with a config carrying one `post_up`:
+
+      before   ncfg plan   ->  /run/netcfgd/hooks/hk0.post_up.0
+      after    ncfg plan   ->  no hooks directory at all
+               ncfg show   ->  no hooks directory at all
+               ncfg apply  ->  hk0.post_up.0
+
+  This is the lead recorded earlier about read-only commands materialising
+  hook scripts, and it is closed by the refactor rather than by a guard.
+
+- **A compile that failed had already written some of them**, because the
+  writes happened as each hook was reached rather than after the document was
+  known good. The daemon's reload now writes after the compile succeeds, so a
+  bad configuration leaves `/run/netcfgd/hooks` as it was.
+
+- **A pure compiler can run somewhere with no privileges**, which is what this
+  was for. 10.46 records why that is wanted: the release profile is
+  `panic = "abort"` with `overflow-checks = true`, so a panic anywhere in the
+  compiler takes the daemon down and `catch_unwind` cannot help.
+
+**The directory is created only when there is something to put in it.** `apply`
+calls `write` unconditionally and most machines have no hooks; creating an
+empty `hooks/` for them would put a side effect back on a path that had just
+lost one.
+
+**The compiler found the call sites, which is why the count is trustworthy.**
+Changing `compile`'s return type turned every caller into a type error --
+thirteen of them, five in `control.rs` alone that a first reading had missed --
+so each had to state whether it wanted the files. One does.
+
 ## 10.46 What the systemd sandbox has actually bought, measured
 
 Asked by the copyright holder 2026-09-06, after the fifth defect it produced:

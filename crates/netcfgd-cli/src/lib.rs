@@ -421,7 +421,22 @@ fn parse_options(arguments: &[String]) -> Result<(Options, Vec<String>), String>
 /// The diagnostic is not lost, only demoted: `plan` says the directory is
 /// empty rather than refusing to answer, which keeps the case where somebody
 /// pointed `--config-dir` at the wrong place from reading as "nothing to do".
-fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::PathBuf), String> {
+/// Compile, and hand back the hooks the document names without writing them.
+///
+/// **The caller decides.** Of the six paths through here, one -- `apply` --
+/// needs the scripts on disk; `plan`, `show`, `explain` and two helpers do
+/// not, and all five used to write them anyway because the compiler did it on
+/// their behalf. `ncfg plan`'s own help says it changes nothing.
+fn compile(
+	options: &Options,
+) -> Result<
+	(
+		netcfgd_model::Document,
+		std::path::PathBuf,
+		hooks::PendingHooks,
+	),
+	String,
+> {
 	let config_dir = config::resolve_dir(options.config_dir.as_deref());
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
 
@@ -431,14 +446,14 @@ fn compile(options: &Options) -> Result<(netcfgd_model::Document, std::path::Pat
 	)
 	.map_err(|error| load_failure(&config_dir, &error))?;
 
-	let mut sink = hooks::RunHooks::new(&run_dir);
+	let mut sink = hooks::PendingHooks::new(&run_dir);
 	let (document, provenance) = netcfgd_compile::compile_with_provenance(&sources, &mut sink)
 		.map_err(|diagnostics| diagnostics.render(&sources))?;
 	// Written on every compile, not only when `explain` asks, so that what is
 	// in /run describes the current configuration whichever binary last ran.
 	let _ = state::write_provenance(&run_dir, &provenance);
 
-	Ok((document, run_dir))
+	Ok((document, run_dir, sink))
 }
 
 /// How a failed load reads back.
@@ -466,7 +481,8 @@ fn compile_with_provenance(
 		&config_dir,
 	)
 	.map_err(|error| load_failure(&config_dir, &error))?;
-	let mut sink = hooks::RunHooks::new(&run_dir);
+	// Recorded and not written: every caller of this is read-only.
+	let mut sink = hooks::PendingHooks::new(&run_dir);
 	let (document, provenance) = netcfgd_compile::compile_with_provenance(&sources, &mut sink)
 		.map_err(|diagnostics| diagnostics.render(&sources))?;
 	let _ = state::write_provenance(&run_dir, &provenance);
@@ -494,8 +510,17 @@ fn observe_against(
 
 fn build_plan(
 	options: &Options,
-) -> Result<(Plan, netcfgd_model::Document, Observed, std::path::PathBuf), String> {
-	let (document, run_dir) = compile(options)?;
+) -> Result<
+	(
+		Plan,
+		netcfgd_model::Document,
+		Observed,
+		std::path::PathBuf,
+		hooks::PendingHooks,
+	),
+	String,
+> {
+	let (document, run_dir, pending) = compile(options)?;
 	// With the document, because one thing the observation answers needs it:
 	// whether a running access point still holds the passphrase the store has
 	// (decision 0052). Every other caller of `observe` has no document and asks
@@ -512,11 +537,11 @@ fn build_plan(
 		cycle: Vec::new(),
 	};
 	let plan = plan(&document, &observed, &plan_options);
-	Ok((plan, document, observed, run_dir))
+	Ok((plan, document, observed, run_dir, pending))
 }
 
 fn command_plan(options: &Options) -> Result<ExitCode, String> {
-	let (plan, document, observed, run_dir) = build_plan(options)?;
+	let (plan, document, observed, run_dir, _) = build_plan(options)?;
 
 	// Even a plan writes what it decided and what it saw. Answering "why is it
 	// like this?" from a file is the product, and it should not require an
@@ -658,7 +683,14 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		};
 	}
 
-	let (plan, document, observed, run_dir) = build_plan(options)?;
+	let (plan, document, observed, run_dir, pending) = build_plan(options)?;
+
+	// **The one verb that needs the hooks on disk.** Every other path through
+	// `compile` is read-only and now leaves `/run/netcfgd/hooks` alone; this
+	// one is about to run them, so it asks. Before the plan executes and after
+	// the document is known good, which is the ordering a failed compile used
+	// to break.
+	pending.write()?;
 
 	let _ = state::write_desired(&run_dir, &document);
 	let _ = state::write_observed(&run_dir, &observed);
@@ -827,7 +859,7 @@ fn wireless_interface(given: Option<&String>, options: &Options) -> Result<Strin
 	if let Some(name) = given {
 		return Ok(name.clone());
 	}
-	let (document, _) = compile(options)?;
+	let (document, _, _) = compile(options)?;
 	let radios: Vec<&str> = document
 		.devices
 		.iter()
@@ -1531,7 +1563,7 @@ fn command_reset(options: &Options) -> Result<ExitCode, String> {
 /// `None` says -- rather than failing the command.
 fn observe_with_document(options: &Options, run_dir: &std::path::Path) -> Result<Observed, String> {
 	let compiled = compile(options).ok();
-	observe_against(run_dir, compiled.as_ref().map(|(document, _)| document))
+	observe_against(run_dir, compiled.as_ref().map(|(document, _, _)| document))
 }
 
 /// The per-link lines that are neither an address nor a VLAN.
@@ -1668,7 +1700,7 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 }
 
 fn command_show(options: &Options) -> Result<ExitCode, String> {
-	let (document, run_dir) = compile(options)?;
+	let (document, run_dir, _) = compile(options)?;
 	let _ = state::write_desired(&run_dir, &document);
 	println!(
 		"{}",

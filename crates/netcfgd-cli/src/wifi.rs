@@ -672,7 +672,7 @@ fn current(options: &Options) -> Result<Option<netcfgd_model::Document>, String>
 	// `compile` to compile it -- because `compile` is where hook materialising
 	// and provenance live and a second implementation of it here would be a
 	// second answer to what the configuration says.
-	let (document, _) = super::compile(options)?;
+	let (document, _, _) = super::compile(options)?;
 	Ok(Some(document))
 }
 
@@ -1586,7 +1586,7 @@ mod tests {
 		assert!(text.contains("network \"Airport\" {"), "{text}");
 		// The whole point of the verify step: what it wrote is what the daemon
 		// reads, through the same loader.
-		let (document, _) = crate::compile(&options).expect("it compiles");
+		let (document, _, _) = crate::compile(&options).expect("it compiles");
 		assert_eq!(document.networks.len(), 1);
 		assert_eq!(document.networks[0].id, "Airport");
 		assert!(matches!(

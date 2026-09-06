@@ -85,7 +85,7 @@ fn active(options: &Options) -> Result<Option<String>, String> {
 	if let Some((_, chosen)) = from_daemon(options) {
 		return Ok(chosen);
 	}
-	let (document, _) = crate::compile(options)?;
+	let (document, _, _) = crate::compile(options)?;
 	Ok(document.globals.profile)
 }
 
@@ -145,7 +145,7 @@ fn save(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 	let factory = netcfgd_host::config::resolve_factory_dir(options.factory_dir.as_deref());
 
 	// What is running, before anything moves.
-	let (running, _) = crate::compile(options)?;
+	let (running, _, _) = crate::compile(options)?;
 
 	// The whole of it is in `netcfgd-host` so that the daemon can do it too:
 	// this was the only way to save a profile, which meant a machine with a
@@ -381,7 +381,7 @@ mod tests {
 
 		assert_eq!(active(&options).expect("compiles"), None, "on none now");
 		assert!(root.join("etc/conf.d/05-profile-office.conf").exists());
-		let (document, _) = crate::compile(&options).expect("compiles");
+		let (document, _, _) = crate::compile(&options).expect("compiles");
 		assert_eq!(document.devices[0].mtu, Some(1400), "the edit won");
 	}
 
@@ -432,12 +432,12 @@ mod tests {
 		)
 		.expect("the edit compiles");
 
-		let (running, _) = crate::compile(&options).expect("compiles");
+		let (running, _, _) = crate::compile(&options).expect("compiles");
 		assert_eq!(running.devices[0].mtu, Some(1400));
 
 		save(&["office-v2".to_owned()], &options).expect("save");
 
-		let (after, _) = crate::compile(&options).expect("compiles");
+		let (after, _, _) = crate::compile(&options).expect("compiles");
 		assert_eq!(after.devices[0].mtu, Some(1400), "nothing moved");
 		assert_eq!(
 			after.globals.profile.as_deref(),

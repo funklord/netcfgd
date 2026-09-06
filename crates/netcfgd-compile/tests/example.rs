@@ -38,12 +38,7 @@ use netcfgd_model::{HookPhase, HookRef};
 struct FakeHooks;
 
 impl HookSink for FakeHooks {
-	fn materialise(
-		&mut self,
-		phase: HookPhase,
-		owner: &str,
-		_body: &str,
-	) -> Result<HookRef, String> {
+	fn record(&mut self, phase: HookPhase, owner: &str, _body: &str) -> Result<HookRef, String> {
 		Ok(HookRef {
 			phase,
 			path: format!("/run/netcfgd/hooks/{owner}"),

@@ -6,7 +6,7 @@
 //! which is the same seam that makes the planner testable without hardware.
 
 use netcfgd_apply::{apply, Executor, Journal};
-use netcfgd_host::{config, confirm, hooks::RunHooks, state as run_state};
+use netcfgd_host::{config, confirm, hooks::PendingHooks, state as run_state};
 use netcfgd_model::{Document, DriftPolicy, HookPhase, Observed};
 use netcfgd_plan::{plan, Plan, PlanOptions};
 use netcfgd_proto::{Event, Response};
@@ -159,7 +159,7 @@ impl State {
 	///
 	/// Returns the event describing what happened, for subscribers.
 	pub(crate) fn reload(&mut self) -> Event {
-		let mut sink = RunHooks::new(&self.paths.run);
+		let mut sink = PendingHooks::new(&self.paths.run);
 		let sources = match config::load_with_profile(&self.paths.factory, &self.paths.config) {
 			Ok(sources) => sources,
 			Err(error) => {
@@ -176,6 +176,14 @@ impl State {
 
 		match netcfgd_compile::compile_with_provenance(&sources, &mut sink) {
 			Ok((document, provenance)) => {
+				// **After the compile succeeded, not during it.** The daemon
+				// is about to hold this document and apply from it, so the
+				// hooks it names have to exist -- but a compile that failed
+				// now leaves nothing behind, where before it had already
+				// written whichever hooks it reached before the diagnostic.
+				if let Err(error) = sink.write() {
+					eprintln!("netcfgd: {error}");
+				}
 				let _ = run_state::write_provenance(&self.paths.run, &provenance);
 				if self.rejected.as_deref() == Some(confirm::document_hash(&document).as_str()) {
 					// The same configuration a revert already rejected. Adopting

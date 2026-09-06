@@ -381,7 +381,7 @@ fn handle(line: &str, options: &Options) -> Result<PathBuf, String> {
 }
 
 fn show(options: &Options) -> Result<ExitCode, String> {
-	let (document, _) = super::compile(options)?;
+	let (document, _, _) = super::compile(options)?;
 	let control = &document.globals.control;
 
 	println!("observe  {}", control.observe.render());
@@ -401,7 +401,7 @@ fn show(options: &Options) -> Result<ExitCode, String> {
 
 /// Parse `--observe`, `--wifi` and `--admin`, leaving what was not named alone.
 fn set(options: &Options) -> Result<ExitCode, String> {
-	let (document, _) = super::compile(options)?;
+	let (document, _, _) = super::compile(options)?;
 	let mut control = document.globals.control.clone();
 	let mut named = false;
 
@@ -516,7 +516,7 @@ fn report(control: &Control) {
 /// happens on the file that decides who may configure the network -- so a
 /// result that fails the invariant is put back rather than reported.
 fn splice_into(path: &Path, wanted: &Control, options: &Options) -> Result<PathBuf, String> {
-	let (before, _) = super::compile(options)?;
+	let (before, _, _) = super::compile(options)?;
 	let text = std::fs::read_to_string(path)
 		.map_err(|error| format!("could not read {}: {error}", path.display()))?;
 	let spliced = splice_control(&text, wanted)?;
@@ -529,7 +529,7 @@ fn splice_into(path: &Path, wanted: &Control, options: &Options) -> Result<PathB
 		why
 	};
 
-	let (after, _) = match super::compile(options) {
+	let (after, _, _) = match super::compile(options) {
 		Ok(compiled) => compiled,
 		Err(error) => {
 			return Err(put_back(format!(
@@ -566,7 +566,7 @@ fn splice_into(path: &Path, wanted: &Control, options: &Options) -> Result<PathB
 }
 
 fn verify(options: &Options, wanted: &Control) -> Result<(), String> {
-	let (document, _) = super::compile(options)
+	let (document, _, _) = super::compile(options)
 		.map_err(|error| format!("that policy does not compile, so it was put back:\n{error}"))?;
 	if &document.globals.control != wanted {
 		return Err(

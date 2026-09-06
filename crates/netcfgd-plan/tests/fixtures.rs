@@ -1290,7 +1290,7 @@ fn every_action_explains_itself() {
 struct TestHooks;
 
 impl netcfgd_compile::HookSink for TestHooks {
-	fn materialise(
+	fn record(
 		&mut self,
 		phase: netcfgd_model::HookPhase,
 		owner: &str,

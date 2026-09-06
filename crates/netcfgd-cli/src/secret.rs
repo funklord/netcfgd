@@ -243,7 +243,7 @@ fn report(secret: &Path, name: &str, replacing: bool, options: &Options) {
 	// configuration that does not compile is not an error *here*: the secret is
 	// written either way, and an operator storing a credential before writing
 	// the block that names it is the ordinary order to do things in.
-	let Ok((document, _)) = crate::compile(options) else {
+	let Ok((document, _, _)) = crate::compile(options) else {
 		return;
 	};
 	let users = referring_to(&document, name);
