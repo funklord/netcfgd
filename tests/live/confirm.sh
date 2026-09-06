@@ -90,7 +90,11 @@ await() {
 }
 
 start_daemon() {
-	rm -rf "$work/run"
+	# Both directories, because the promise is deliberately not in the runtime
+	# one (0163). Clearing only `run` would leave the previous case's window
+	# and last-good document in place, and the next case would revert at
+	# startup for a reason belonging to the case before it.
+	rm -rf "$work/run" "$work/run-confirm"
 	mkdir -p "$work/run"
 	# shellcheck disable=SC2086
 	"$repo/target/debug/netcfgd" $1 > "$work/daemon.log" 2>&1 &
@@ -241,6 +245,39 @@ check "and says why" \
 # operator watches it work and then watches it fail.
 sleep 6
 check "and does not put it back on the next reconcile" "$(present)" "no"
+stop_daemon
+
+# 6a. The same recovery, after a *real stop* rather than a restart.
+#
+#     Case 6 kills the daemon and leaves `/run/netcfgd` alone, which is what
+#     `systemctl restart` does: `RuntimeDirectoryPreserve=restart` keeps the
+#     directory across a restart and deletes it on a stop. So case 6 could
+#     never see what a stop costs, and for a long time a stop cost the whole
+#     window -- `systemctl stop && systemctl start` kept an unconfirmed change
+#     that `systemctl restart` would have taken back, and the answer differed
+#     by init because OpenRC, procd and sysvinit never remove that directory.
+#
+#     0163 moved the window and the last-good document to a sibling directory
+#     for this. The one line between the two cases is the `rm -rf` below, and
+#     it is the whole test: remove what a real stop removes, and the promise
+#     must still be there.
+start_daemon --no-apply-on-start
+"$ncfg" apply --confirm-within 600 >/dev/null 2>&1
+await yes || true
+check "a window is open before the stop" "$(present)" "yes"
+
+crash_daemon
+# Exactly what systemd does to a RuntimeDirectory on a real stop, and nothing
+# else. The sibling is deliberately not named here.
+rm -rf "$work/run"
+mkdir -p "$work/run"
+check "the runtime directory is gone" \
+	"$([ -e "$work/run/confirm.json" ] && echo present || echo gone)" "gone"
+
+restart_daemon --no-apply-on-start
+check "a real stop does not cost the window" "$(present)" "no"
+check "and the daemon says it found one" \
+	"$(grep -ci 'confirm window was open' "$work/restart.log")" "1"
 stop_daemon
 
 # 7. A setting the last-good document does not mention.
