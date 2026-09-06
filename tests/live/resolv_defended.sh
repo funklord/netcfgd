@@ -132,6 +132,35 @@ protected=$!
 started="$started $protected"
 echo "$protected" > "$work/run/dhcp/probe0.pid"
 
+# 2a. A process in ANOTHER network namespace is not netcfgd's business.
+#
+#     This is the guard that makes the whole sweep safe to have. A daemon in a
+#     different network namespace cannot be configuring netcfgd's interfaces,
+#     so it is not interfering whatever it is called -- and without the check,
+#     every live script that runs under `unshare -rn` would let netcfgd
+#     terminate the developer's real dhclient, because a network namespace
+#     leaves /proc showing the whole machine.
+#     **The outsider has to still look like a target**, or the check passes
+#     for the wrong reason. The first version ran `exec unshare -n sleep`,
+#     which made its comm `sleep` -- so the sweep would never have matched it
+#     whatever namespace it was in, and removing the guard changed nothing.
+#     Caught by sabotaging the guard and watching the test stay green. The
+#     namespace goes on the outside and the renamed program on the inside, so
+#     comm stays `dhclient`.
+#     `unshare -n prog` EXECS prog rather than forking, so the pid from `$!`
+#     is the renamed shell itself and keeps comm `dhclient`. Taking its child
+#     instead finds the `sleep` it spawns, whose comm is `sleep` -- which is
+#     how the first version of this managed to assert nothing at all.
+unshare -n "$work/bin/dhclient" -c 'while true; do sleep 1; done' &
+outsider=$!
+started="$started $outsider"
+sleep 1
+check "the outsider really is in another network namespace" \
+	"$([ "$(readlink /proc/$outsider/ns/net 2>/dev/null)" != "$(readlink /proc/self/ns/net)" ] \
+		&& echo elsewhere || echo same)" "elsewhere"
+check "and the sweep would otherwise match it, or this proves nothing" \
+	"$(cat /proc/$outsider/comm 2>/dev/null)" "dhclient"
+
 # 3. The interference: takes the file back over and over.
 "$work/bin/dhclient" -c 'while true; do printf "nameserver 203.0.113.99\n" > "$0"; sleep 1; done' \
 	"$work/resolv.conf" &
@@ -159,6 +188,8 @@ check "and an idle process of the same program goes with it" \
 	"$([ -d "/proc/$bystander" ] && echo alive || echo gone)" "gone"
 check "the process netcfgd started is left alone" \
 	"$([ -d "/proc/$protected" ] && echo alive || echo gone)" "alive"
+check "and so is one in another network namespace" \
+	"$([ -d "/proc/$outsider" ] && echo alive || echo gone)" "alive"
 
 await_ours || true
 check "and the file is netcfgd's again afterwards" \

@@ -9341,6 +9341,41 @@ re-measures them. **The ordering was a plausible story and the measurement was
 four builds**, which is the whole argument for `evidence.md`'s rule about
 re-deriving a number before it becomes a premise.
 
+**The sweep could reach the whole machine, and only its own test was safe**
+([0167](doc/decision/0167-a-daemon-in-another-namespace-is-not-interfering.md)).
+`resolv_defended.sh` was isolated in a pid namespace on purpose -- and the
+*nine* other live scripts that configure `write_resolv_conf` run under
+`unshare -rn`, a network namespace, where `/proc` still lists every process on
+the host. None reaches three reclaims today, so nothing was harmed; one added
+check in any of them would have had `make live` kill the developer's
+`dhclient`. **Isolating the test that was thought about is not the same as
+making the mechanism safe.**
+
+The guard is a statement about the world rather than about tests: a daemon in
+another network namespace cannot be configuring netcfgd's interfaces, so it is
+not interfering whatever it is called -- equally true inside a container.
+Proven on this machine under `unshare -rn`, with the sweep genuinely firing:
+it saw the host's own `dhclient`, which is on its list of writers, and skipped
+it. **The negative control was deliberately not run**, because confirming it
+that way means killing the machine's DHCP client; the guard was made to fail
+inside the pid-namespaced test instead.
+
+**Writing that check taught more than the check is worth.** Its first version
+asserted nothing, twice: the outsider `exec`ed into `unshare`, so its `comm`
+became `sleep` and the sweep would never have matched it -- removing the guard
+left the test green -- and then the pid was wrong, because `unshare -n prog`
+execs rather than forking, so taking its child found the `sleep` it spawned.
+Both were caught by sabotage and by measuring `comm` for each shell form
+rather than reasoning about it. **A test for a safety guard that cannot fail
+is worse than none**, since the guard is exactly what nobody re-checks.
+
+**And the stale binary caught me a third time in one session.** After
+restoring the sabotaged guard I re-ran without rebuilding, read the sabotaged
+binary's behaviour as the fix failing, and started looking for a defect that
+was not there. Restoring source is not restoring a build. Every sabotage in
+this pass now rebuilds at *both* ends and checks the build's status before the
+run.
+
 **And an editing mistake worth more than it cost, because it happened twice
 in one change.** Inserting a documented function ahead of an existing one put
 the new block *between* `#[must_use]` and the item it belonged to, and

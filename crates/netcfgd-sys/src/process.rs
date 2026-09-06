@@ -216,6 +216,31 @@ pub fn is_service_supervised(pid: i32) -> bool {
 		.is_ok_and(|text| text.lines().any(|line| line.contains(".service")))
 }
 
+/// Whether a process is in the same network namespace as this one.
+///
+/// **A daemon in another network namespace is not configuring netcfgd's
+/// interfaces**, so it cannot be interfering with netcfgd whatever its name
+/// is. That is not a nicety: netcfgd's own live suite runs each script under
+/// `unshare -rn`, where `/proc` still lists every process on the machine, so
+/// without this a test that reached the sweep would terminate the developer's
+/// real `dhclient` or `NetworkManager`. It is equally the right answer for a
+/// container, where the host's daemons are visible and are somebody else's.
+///
+/// **It fails closed, and that is the opposite of
+/// [`is_service_supervised`].** Where the link cannot be read -- a process
+/// that exited between the scan and the check, or one whose `/proc` entry is
+/// not readable -- the answer is "not ours to signal". The two defaults point
+/// opposite ways because the costs do: mistaking a supervised process for an
+/// unsupervised one wastes a signal, while mistaking another namespace's
+/// process for ours kills something outside the world netcfgd manages.
+#[must_use]
+pub fn shares_network_namespace(pid: i32) -> bool {
+	let Ok(mine) = std::fs::read_link("/proc/self/ns/net") else {
+		return false;
+	};
+	std::fs::read_link(format!("/proc/{pid}/ns/net")).is_ok_and(|theirs| theirs == mine)
+}
+
 /// Every pid whose program name is one of `names`.
 ///
 /// The scan `pid_by_marker` does, asked a different question: that one looks

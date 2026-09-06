@@ -616,4 +616,13 @@ netcfgd
 # `bfdf75f` -- the change the growth was first guessed at -- cost nothing.
 # **A ratchet only ratchets if somebody turns it**, and this one was turned
 # three commits late.
-total 2796056
+# Signalling only inside netcfgd's own network namespace, +4,096 bytes to
+# 2,800,152.
+#
+# One page for two `readlink`s and the comment explaining why they fail
+# closed. What it buys is that the sweep 0166 added cannot reach a daemon
+# outside the world netcfgd manages -- the host's own dhclient seen from a
+# test namespace, or the host's daemons seen from inside a container.
+# Decision 0167. Attributable without a second build: it is the only change
+# since the total above.
+total 2800152

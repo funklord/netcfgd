@@ -114,6 +114,12 @@ pub(crate) fn sweep(run_dir: &Path) -> usize {
 			// dhcpcd is on the list by construction and is not interference.
 			continue;
 		}
+		if !netcfgd_sys::process::shares_network_namespace(pid) {
+			// Not a diagnostic: on a machine running containers this is most
+			// of what the scan finds, and saying so every three reclaims
+			// would bury the lines that matter.
+			continue;
+		}
 		if netcfgd_sys::process::is_service_supervised(pid) {
 			eprintln!(
 				"netcfgd: {program} (pid {pid}) keeps rewriting resolv.conf and is run by a service manager, so netcfgd is not signalling it"
