@@ -9270,6 +9270,83 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.46 What the systemd sandbox has actually bought, measured
+
+Asked by the copyright holder 2026-09-06, after the fifth defect it produced:
+does netcfgd gain anything from being sandboxed, given it runs as root
+regardless -- and is a mechanism built on bind mounts safe to depend on at all.
+The decision is the holder's. The measurement is not, so it is here.
+
+**The record, from this repository's own history.** Four shipped defects, every
+one created by the sandbox rather than caught by it:
+
+| commit | what the sandbox forbade | what the operator saw |
+|---|---|---|
+| `d0ad78b` | `CapabilityBoundingSet` had no `CAP_CHOWN` | the control socket stayed `root:root`, so a policy naming `group:netcfgd` was a lie and both clients were refused |
+| `aef7d4a` | `ReadOnlyPaths=/etc/netcfgd`, surviving 0127 | every client write the socket exists to carry, refused -- and `ProtectSystem=full` made `/etc` read-only under a comment claiming it avoided that |
+| `a3f2c2a` | `CapabilityBoundingSet` below dhcpcd's privsep | `chroot: Operation not permitted`, no lease, an interface waiting for carrier for ever |
+| `0064b8b` | `ReadWritePaths` granting a file, not its directory | `write_resolv_conf` failing with `EROFS` on every systemd machine |
+
+**Against zero recorded instances of it preventing anything.** That asymmetry
+is not an argument by itself -- a guard that has never fired may still be
+holding -- but the direction of the ledger is a fact and it had not been
+written down.
+
+**Every one was invisible to the tests, and structurally so.** Not one of the
+57 live scripts starts netcfgd through a systemd unit -- they run the binary
+directly, 40 of them inside an `unshare` and the rest making their own
+namespaces or none. That is the right way to test the software and it is
+exactly why none of them could see any of these: the sandbox was the one part
+of the deployment nothing exercised, until `tests/live/sandbox_writes.sh` and
+`tool/sandbox_gate.py`.
+
+**What it genuinely buys, stated fairly.** netcfgd holds `CAP_NET_ADMIN` and
+runs hooks as root, so an attacker who controls it already has every route,
+every address, the resolver, and the secrets under `/etc/netcfgd/secrets` --
+the machine's traffic, in other words. What the sandbox still denies is
+*persistence and lateral movement*: no writing `/usr` or `/boot`, no editing
+another daemon's unit, no reading `/home`. `NoNewPrivileges`,
+`MemoryDenyWriteExecute` and `RestrictNamespaces` are ordinary exploit
+mitigation and cost nothing. So the gain is real and it is second-order: it
+does not protect what netcfgd owns, it limits what a compromise reaches next.
+
+**The portability objection is the stronger half, and it is measured.**
+`packaging/` ships glue for systemd, OpenRC, procd and sysvinit; `make
+apk-container` builds for a container; M5 supports a read-only root. **Only one
+of those five has any of this.** A container without `CAP_SYS_ADMIN` cannot
+make the mount namespace the mechanism needs, and a hardened kernel with
+`kernel.unprivileged_userns_clone=0` refuses the namespace outright. So on most
+of netcfgd's own targets the sandbox is already absent, which settles one
+question completely: **the code must be correct without it.**
+
+It is. That is what the live suite has been proving all along, and it is why
+all four defects were systemd-only. Which means the sandbox can only ever fail
+in one direction -- forbidding something the code legitimately does -- and every
+one of the four is that shape: two lists that must agree, kept in step by
+memory. That is `tool/sandbox_gate.py`'s reason for existing.
+
+**So the recommendation is not to remove it but to forbid it from being
+load-bearing, and to enforce that rather than intend it.** Three things, two
+of which are now done:
+
+- **A writer that the sandbox can forbid notices and adapts rather than
+  aborting** (0161). The same code runs under OpenRC where nothing forbids
+  anything, so aborting is only ever correct on one platform out of five.
+- **The gate checks how, not only whether.** It reported "allowed" throughout
+  the `resolv.conf` defect, because it asked whether the path was permitted
+  when the requirement was whether its *directory* was. It now names the paths
+  granted as files and says their writes are not atomic -- one today,
+  `/etc/resolv.conf`.
+- **Still open: nothing checks the unit against a running systemd.** The gate
+  is static by construction and says so.
+
+**And the objection reaches the new test hardest, which is worth conceding.**
+`sandbox_writes.sh` reproduces the sandbox with `unshare -rm` and bind mounts,
+so it skips on exactly the hardened kernels where the question matters most.
+The unit test beside it covers the `EACCES` half with a `chmod` and runs
+anywhere. That split is the honest state: the portable half of the coverage
+tests the portable half of the failure.
+
 ## 10.45 A sandbox grants a file, and an atomic replace needs the directory
 
 Reported from a machine where `write_resolv_conf` could not write, and then

@@ -21,10 +21,21 @@ comment chose `ProtectSystem=full` to *avoid* /etc being read-only, which is
 what `full` does. So the DNS backends -- the reason the comment gave -- could
 not write /etc/resolv.conf either.
 
+**A granted file is not a granted directory, and this gate could not see the
+difference until it had cost something.** netcfgd replaces a config file by
+staging a dotfile beside it and renaming -- which needs write permission on the
+*parent*, not on the target. `ReadWritePaths=-/etc/resolv.conf` grants the
+file, so this gate said "allowed" and the write failed with EROFS anyway. It
+asked whether the path was permitted when the code's requirement was whether
+its directory was. Decision 0161; the writers fall back to an in-place write
+now, so a file-granted path works and is no longer atomic. That is a real
+property and it is reported rather than buried.
+
 **What this does not check.** Whether a path is writable in fact: that needs
 the unit running as root under systemd, which is not a thing a static gate can
-do. What it checks is that the two lists name the same paths, which is the
-half that goes stale.
+do. `tests/live/sandbox_writes.sh` gets closer by making the same mounts in a
+namespace. What this checks is that the two lists name the same paths, and now
+also how each one will be written.
 
 Static: it reads the sources and one unit file, so it runs anywhere.
 """
@@ -156,10 +167,32 @@ def main():
 		return 1
 
 	failures = 0
+	in_place = []
 	for path in sorted(found):
 		if any(covers(known, path) for known in READ_ONLY):
 			continue
 		if any(covers(known, path) for known in allowed):
+			# **Granted, and now: granted how?** A stage-and-rename needs the
+			# parent writable. Where only the file itself is granted the write
+			# still lands -- 0161 -- but in place, so a reader can catch it
+			# half-done. Not a failure, and not something to leave unsaid
+			# either: it is a durability property of a config file, decided by
+			# a line in a unit rather than by any code.
+			parent = str(pathlib.PurePosixPath(path).parent)
+			if any(covers(known, parent) for known in allowed):
+				continue
+			# A path with a descendant in this set is a directory netcfgd
+			# writes *into*, so its children stage inside it and the parent
+			# grant is irrelevant -- `/etc/netcfgd` against
+			# `/etc/netcfgd/secrets`. One with no descendant is written as a
+			# file. The discriminator is derived from the set rather than
+			# guessed from the name, and where it is wrong it over-reports: a
+			# granted directory that nothing else in the sources names would
+			# be listed. This prints rather than fails, so that is the right
+			# way to be wrong.
+			if any(other != path and covers(path, other) for other in found):
+				continue
+			in_place.append(path)
 			continue
 		where = ", ".join(sorted(found[path])[:3])
 		print(f"sandbox: {path} appears in the sources and the unit neither "
@@ -178,8 +211,12 @@ def main():
 	if failures:
 		print(f"sandbox: {failures} disagreement(s) between the unit and the code")
 		return 1
+	for path in in_place:
+		print(f"sandbox: {path} is granted as a file and not through its "
+		      f"directory, so netcfgd writes it in place rather than "
+		      f"atomically (0161)")
 	print(f"sandbox: {len(found)} /etc path(s) in the code, all allowed or "
-	      f"classified read-only")
+	      f"classified read-only; {len(in_place)} written in place")
 	return 0
 
 
