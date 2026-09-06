@@ -79,19 +79,38 @@ struct CapData {
 /// after a successful shed. Neither half was lying; they were about different
 /// threads.
 ///
-/// **The process stays root.** Dropping the uid as well is stronger and is a
-/// separate decision, because it needs a uid to drop *to* and that is a
-/// packaging question. What this buys without it: a compromise in the resolver
-/// cannot configure an interface, load a module, open a raw socket, chroot, or
-/// override a file permission -- `CAP_DAC_OVERRIDE` is a capability, so even
-/// uid 0 loses it here. What it does not buy: files uid 0 owns are still uid
-/// 0's to read.
+/// **It stops being root too, and the id comes from the kernel rather than
+/// from a convention.** Capabilities alone leave uid 0, which can still read
+/// what uid 0 *owns* -- `/etc/netcfgd/secrets` is 0600 and root's, so a
+/// compromise in the resolver could read every wifi passphrase and 802.1X
+/// credential on the machine. `CAP_DAC_OVERRIDE` being gone does not help: an
+/// owner needs no override.
+///
+/// The id is `/proc/sys/kernel/overflowuid`, defaulting to 65534. That is the
+/// id the kernel itself substitutes for one it cannot map, so it is a non-root
+/// id on every Linux by construction -- and asking for it costs one file read
+/// rather than a `getpwnam`, which would mean NSS, which is the C library this
+/// whole exercise exists to keep away from the privileged process. It is the
+/// same 65534 that `nobody` is on a Debian or Alpine machine; this arrives at
+/// it without a user database.
+///
+/// **Not a dedicated `netcfgd` user**, and that is deliberate rather than
+/// lazy: the packaging creates a *group* for the control socket and no user,
+/// so requiring one would be a change to four init systems and two package
+/// formats for a child that owns nothing, opens nothing and lives for
+/// milliseconds. What it needs is not to be uid 0, which this gives it.
+///
+/// Supplementary groups go first, then the gid, then the uid -- once the uid
+/// has left root neither of the other two can be set. A `setuid` away from
+/// root also clears the permitted and effective sets by itself, so the capset
+/// below is belt to that braces; both are done because the verification at the
+/// end has to be able to pass on a machine where this was never root at all.
 ///
 /// # Errors
 ///
 /// Returns the first refusal, and a caller that gets one must not go on to do
 /// the thing it was dropping privilege for.
-pub fn shed() -> io::Result<()> {
+pub fn shed() -> io::Result<Shed> {
 	// SAFETY: `prctl` with `PR_SET_NO_NEW_PRIVS` takes four ignored arguments
 	// and touches no memory this crate owns. It cannot fail on a kernel that
 	// has the option, and a kernel that does not is one where the rest of this
@@ -130,6 +149,40 @@ pub fn shed() -> io::Result<()> {
 	// would otherwise be a route around, and the *outcome* is verified below
 	// rather than each step being trusted. `EINVAL` is the ceiling being
 	// generous about capability numbers this kernel does not have.
+	// **Before the capabilities, because it needs two of them.** Clearing the
+	// supplementary groups and setting the gid want `CAP_SETGID`, and the uid
+	// wants `CAP_SETUID` -- both of which the bounding-set loop below is about
+	// to make unavailable. netcfgd's unit grants both, for dhcpcd's privsep,
+	// so they are there to be spent.
+	let mut reached = Shed::Fully;
+	if is_root() {
+		let id = unprivileged_id();
+		// SAFETY: `setgroups` with a count of zero reads no memory from the
+		// pointer, which is why null is the conventional argument. It empties
+		// the supplementary set, which a uid change does not touch.
+		let groups = unsafe { libc::setgroups(0, std::ptr::null()) };
+		// SAFETY: both take an id and touch no memory. The order is fixed:
+		// after the uid leaves root the gid can no longer be set.
+		let group = unsafe { libc::setgid(id) };
+		// SAFETY: as above.
+		let user = unsafe { libc::setuid(id) };
+		if groups != 0 || group != 0 || user != 0 {
+			// **There is no id to become, and that is a real place to be.**
+			// A user namespace with one mapping -- `unshare -r`, and every
+			// rootless container -- maps uid 0 and nothing else, so 65534
+			// does not exist to move to and the kernel refuses. Being uid 0
+			// there is not being the machine's root: it is a mapped id with
+			// no authority outside the namespace, so capabilities-only is
+			// the whole of what privilege there was.
+			//
+			// Reported rather than swallowed. A caller that needs the
+			// stronger answer can insist on it; the portal probe does not,
+			// because the weaker one is already everything that namespace
+			// had to give.
+			reached = Shed::CapabilitiesOnly;
+		}
+	}
+
 	for capability in 0..=CAPABILITY_CEILING {
 		// SAFETY: as above.
 		let dropped = unsafe { libc::prctl(libc::PR_CAPBSET_DROP, capability, 0, 0, 0) };
@@ -178,7 +231,71 @@ pub fn shed() -> io::Result<()> {
 			),
 		));
 	}
-	Ok(())
+	if reached == Shed::Fully && is_root() {
+		return Err(io::Error::new(
+			io::ErrorKind::PermissionDenied,
+			"still uid 0 after a drop that reported success",
+		));
+	}
+	Ok(reached)
+}
+
+/// How far [`shed`] got.
+///
+/// Two answers rather than a boolean success, because the weaker one is
+/// legitimate and the difference matters to whoever reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shed {
+	/// No capabilities, and no longer uid 0.
+	Fully,
+	/// No capabilities, still uid 0 -- there was no unprivileged id to become.
+	/// A user namespace with a single mapping is the case that produces this.
+	CapabilitiesOnly,
+}
+
+impl Shed {
+	/// A sentence for a diagnostic.
+	#[must_use]
+	pub fn describe(self) -> &'static str {
+		match self {
+			Self::Fully => "no capabilities and not root",
+			Self::CapabilitiesOnly => "no capabilities, still uid 0: no unprivileged id to become",
+		}
+	}
+}
+
+/// Whether this process is root, by any of the three uids.
+///
+/// All three, because a saved-set uid of 0 is a way back: a process that has
+/// only `seteuid`ed away can `seteuid` back. The check that matters after
+/// [`shed`] is that none of them is 0.
+#[must_use]
+fn is_root() -> bool {
+	let (mut real, mut effective, mut saved) = (u32::MAX, u32::MAX, u32::MAX);
+	// SAFETY: `getresuid` writes three `uid_t` through the pointers given,
+	// which are stack locals of that type and live for the call, and it reads
+	// nothing.
+	if unsafe { libc::getresuid(&raw mut real, &raw mut effective, &raw mut saved) } != 0 {
+		// Unknowable is treated as root, because the caller uses this to
+		// decide whether to drop and the safe answer to "am I privileged" is
+		// yes.
+		return true;
+	}
+	real == 0 || effective == 0 || saved == 0
+}
+
+/// The id to become: the kernel's own substitute for one it cannot map.
+///
+/// `/proc/sys/kernel/overflowuid`, and 65534 when it cannot be read -- which
+/// is the kernel's compiled-in default and what `nobody` is on a Debian or an
+/// Alpine machine. Read rather than assumed, because it is tunable.
+#[must_use]
+fn unprivileged_id() -> u32 {
+	std::fs::read_to_string("/proc/sys/kernel/overflowuid")
+		.ok()
+		.and_then(|text| text.trim().parse().ok())
+		.filter(|id| *id != 0)
+		.unwrap_or(65534)
 }
 
 /// The effective, permitted and inheritable sets of the calling thread.
@@ -265,17 +382,48 @@ mod tests {
 			return;
 		}
 
-		let after = std::thread::spawn(|| {
-			shed().expect("shedding must succeed where there is something to shed");
-			effective_capabilities().expect("/proc is mounted")
+		let (reached, after) = std::thread::spawn(|| {
+			let reached = shed().expect("shedding must succeed where there is something to shed");
+			(reached, effective_capabilities().expect("/proc is mounted"))
 		})
 		.join()
 		.expect("the shedding thread did not panic");
+
+		// **Which of the two it reached is a fact about the environment rather
+		// than about the code, so it is reported and not asserted.** Under
+		// `unshare -r` only uid 0 is mapped, so there is no id to become and
+		// `CapabilitiesOnly` is the right answer; on a real root machine
+		// `Fully` is. Asserting either would fail in one environment for no
+		// defect at all.
+		eprintln!("privilege: reached {}", reached.describe());
 
 		assert_eq!(
 			after, 0,
 			"started with {before:x} and the thread kept {after:x}"
 		);
+	}
+
+	/// **The id to become is the kernel's, and it is never root.**
+	///
+	/// The question actually asked was which user. Not `nobody` by name --
+	/// that means `getpwnam`, which means NSS, which is the C library this
+	/// whole exercise keeps away from the privileged process -- but
+	/// `/proc/sys/kernel/overflowuid`, the kernel's own substitute for an id
+	/// it cannot map. 65534 here, and what `nobody` is on Debian and Alpine.
+	#[test]
+	fn the_unprivileged_id_is_the_kernels_and_is_not_root() {
+		let id = super::unprivileged_id();
+		assert_ne!(id, 0, "becoming root is not dropping privilege");
+		let published = std::fs::read_to_string("/proc/sys/kernel/overflowuid")
+			.ok()
+			.and_then(|text| text.trim().parse::<u32>().ok());
+		match published {
+			Some(kernels) if kernels != 0 => {
+				assert_eq!(id, kernels, "the kernel's answer is the one used");
+			}
+			// A machine publishing 0, or nothing: the compiled-in default.
+			_ => assert_eq!(id, 65534),
+		}
 	}
 
 	/// And the thread that shed took nothing from the one that did not.

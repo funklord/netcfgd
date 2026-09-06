@@ -579,4 +579,13 @@ netcfgd
 # CAP_NET_ADMIN. Decision 0162. The code is a capability-shedding module in
 # netcfgd-sys, a helper arm in the multi-call dispatch, and the parent/child
 # split in portal.rs; the fetch itself moved rather than being duplicated.
-total 2775576
+# Dropping the uid as well as the capabilities, +8,192 bytes to 2,783,768.
+#
+# Two pages, and what they buy is the half the capability drop could not: uid 0
+# reads what uid 0 *owns*, and `/etc/netcfgd/secrets` is 0600 root's -- every
+# wifi passphrase and 802.1X credential on the machine. `CAP_DAC_OVERRIDE`
+# being gone does not help an owner. The id is the kernel's own
+# `/proc/sys/kernel/overflowuid` rather than a `getpwnam` for `nobody`, since
+# a name lookup means NSS, which is the C library this whole change exists to
+# keep out of the privileged process.
+total 2783768

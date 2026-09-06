@@ -9463,8 +9463,42 @@ skips. It sheds in a thread now, runs in eight milliseconds, and has a
 companion asserting the other thread kept what it had -- without which a pass
 would be equally consistent with the whole process having been disarmed.
 
-**What is still open is the second candidate**, and it is a design decision
-rather than a defect.
+**The child stops being root too, and the id is the kernel's.** Asked which
+user: the packaging creates a `netcfgd` *group* for the control socket and no
+user, so there is nothing netcfgd-specific to become, and `nobody` by name
+means `getpwnam`, which means NSS -- the C library the change exists to keep
+away. So it is `/proc/sys/kernel/overflowuid`, 65534, the id the kernel
+substitutes for one it cannot map and the same number `nobody` carries on
+Debian and Alpine. It matters on top of the capabilities because uid 0 reads
+what uid 0 *owns*, and `/etc/netcfgd/secrets` is 0600 root's -- every
+passphrase and 802.1X credential on the machine. A user namespace with one
+mapping has no id to become; `shed` reports which of the two it reached rather
+than failing, because uid 0 inside such a namespace is not the machine's root.
+
+**What is still open is the second candidate**, and the reason to do it is
+better than the one first given here -- which was memory safety, and is wrong.
+`netcfgd-compile` is `#![forbid(unsafe_code)]`, so the class privilege
+separation classically defends against does not exist in it. What does exist is
+this: the release profile sets `panic = "abort"` and `overflow-checks = true`,
+so **a panic anywhere in the compiler takes the whole daemon with it** -- an
+index, a slice on a character boundary, an arithmetic overflow on a span -- and
+`catch_unwind` cannot help under abort. A malformed file at reload, or crafted
+text from an `admin`-tier caller through `ConfigPut`, is then a way to stop
+netcfgd. Separation contains that: the child aborts, the parent reports a
+diagnostic and stays up.
+
+**And there is a complication the portal did not have.** The daemon's reload
+does not call a pure compiler: it passes `RunHooks`, which *materialises hook
+scripts under `/run/netcfgd/hooks` as root during compilation*. A child with no
+privileges cannot write them. So the split is not "text in, document out" -- it
+is either the child returning hook bodies for the parent to write, which is a
+larger protocol, or the hook materialisation moving out of compilation
+entirely, which is the tidier answer and a bigger change. Compiles reached with
+`NoHooks` are pure and would separate trivially, but they are validation paths;
+leaving reload in-process would leave the case that matters.
+
+That choice -- which of the two shapes -- is the holder's, and it is why this
+is recorded rather than done alongside the probe.
 The config compiler parses text from an `admin` caller who is deliberately not
 root, and could have the same treatment. It is not done, and the decision is
 the holder's. The child also stays uid 0: dropping the uid as well is stronger

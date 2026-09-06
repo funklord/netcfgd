@@ -65,14 +65,42 @@ the helper that is the whole process; called from a worker in a threaded
 process it would leave every other thread holding what it held, which looks
 like shedding and is not.
 
-## What this does not do
+## Which user, and it is the kernel's answer rather than a convention
 
-**The child stays uid 0.** Dropping the uid as well is stronger and needs a uid
-to drop *to*, which is a packaging question rather than a code one. What the
-capability drop buys without it: a compromise in the resolver cannot configure
-an interface, open a raw socket, load a module, chroot, or override a file
-permission -- `CAP_DAC_OVERRIDE` is a capability, so even uid 0 loses it. What
-it does not buy: files uid 0 owns are still uid 0's to read.
+Asked directly, and the honest starting point is that the conventional answers
+did not fit. **The packaging creates a `netcfgd` *group* for the control socket
+and no user**, so there is nothing netcfgd-specific to become; adding one is a
+change to four init systems and two package formats for a child that owns
+nothing, opens nothing and lives for milliseconds. And `nobody` by name means
+`getpwnam`, which means NSS -- the C library this whole change exists to keep
+out of the privileged process.
+
+So the id is **`/proc/sys/kernel/overflowuid`**, 65534 by default: the id the
+kernel itself substitutes for one it cannot map, non-root on every Linux by
+construction, and the same number `nobody` carries on a Debian or Alpine
+machine. One file read, no user database.
+
+**Why it is worth having on top of the capability drop.** Capabilities alone
+leave uid 0, and uid 0 reads what uid 0 *owns* -- `/etc/netcfgd/secrets` is
+0600 and root's, which is every wifi passphrase and 802.1X credential on the
+machine. `CAP_DAC_OVERRIDE` being gone does not help: an owner needs no
+override.
+
+Order: supplementary groups, then gid, then uid. Once the uid leaves root
+neither of the others can be set. It happens *before* the bounding-set loop,
+because it spends `CAP_SETGID` and `CAP_SETUID` -- both of which netcfgd's unit
+grants for dhcpcd's privsep and which the loop is about to take away.
+
+**And sometimes there is no id to become, which is reported rather than
+swallowed.** A user namespace with a single mapping -- `unshare -r`, and every
+rootless container -- maps uid 0 and nothing else, so 65534 does not exist to
+move to and the kernel refuses. Measured: the first version treated that as
+fatal and the helper stopped working under `unshare -rn` entirely. Being uid 0
+*there* is not being the machine's root, though: it is a mapped id with no
+authority outside the namespace, so capabilities-only is the whole of what
+privilege that namespace had to give. `shed` returns which of the two it
+reached, the helper says so on stderr on every run, and a caller that needs the
+stronger answer can insist on it. The portal probe does not.
 
 ## Two things measured, both of which would have shipped
 

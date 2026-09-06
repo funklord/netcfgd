@@ -196,9 +196,15 @@ pub fn helper_main() -> std::process::ExitCode {
 
 	// Before the alarm and before anything is resolved or opened. A failure
 	// here is the whole reason to stop.
-	if let Err(error) = netcfgd_sys::privilege::shed() {
-		println!("{error}");
-		return std::process::ExitCode::from(2);
+	match netcfgd_sys::privilege::shed() {
+		// Always said, and always to stderr, which the parent discards. It
+		// costs nothing in production and it is how a test watching this
+		// child can tell which of the two it got.
+		Ok(reached) => eprintln!("{HELPER_NAME}: {}", reached.describe()),
+		Err(error) => {
+			println!("{error}");
+			return std::process::ExitCode::from(2);
+		}
 	}
 	netcfgd_sys::privilege::die_after(CHILD_LIFETIME);
 
