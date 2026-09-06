@@ -9284,6 +9284,44 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.53 A check that had never counted anything
+
+`orphan.sh`'s *"there is exactly one supplicant carrying that mark"* failed
+with **`expected: 1, actual:`** and nothing after it. It failed identically at
+`962bbe1`, so it was not caused by the work around it -- a control build
+settled that before anything else was looked at.
+
+**It had never counted anything, and could not have.** The expression opened
+with `grep -lc . /proc/[0-9]*/cmdline` whose output was discarded -- vestigial,
+doing nothing at all except **exiting 2**, because some `/proc` entries are
+unreadable and others vanish between the glob and the read. Under `set -e` a
+failing command inside `$( )` kills the substitution, so the `echo $c` at the
+end never ran and the empty string reached the comparison.
+
+**The shape of the lie is the part worth keeping.** An empty `actual` against
+`expected: 1` reads as *no supplicant is running* -- a defect in netcfgd, in
+the exact area the test covers. It does not read as *this check did not
+execute*. So a broken test impersonated a plausible bug in the thing it was
+testing, which is worse than a test that simply fails.
+
+Three changes. The dead `grep` is gone. The count is a named function using an
+`if` rather than `cmd && c=$((c+1))`, so no future reading of `set -e` can make
+the loop's own exit status decide whether the total is printed. And `check`
+now says so when it sees an empty actual against a non-empty expected:
+
+    note: the actual value is empty, which usually means
+    note:   its $( ) failed rather than that the machine
+    note:   is in the state above
+
+Proven both ways: the count reports a real number (asserting 2 gives
+`actual: 1`, where it gave nothing before), and reintroducing the vestigial
+`grep` brings the empty back with the note underneath it.
+
+**The same counting shape is in `dot1x.sh` and is left alone.** It has no
+failing opener, so it works today; changing correct code in a passing test to
+match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
+edited, because the hazard is real and one added line away.
+
 ## 10.52 Installing netcfgd now selects netcfgd
 
 Instructed by the copyright holder: *"when netcfgd is installed I want it to

@@ -108,6 +108,18 @@ check() {
 		echo "FAIL $1"
 		echo "       expected: $3"
 		echo "       actual:   $2"
+		# **An empty actual against a non-empty expected is almost never the
+		# machine.** It is a command substitution that died before it printed:
+		# under `set -e` any failing command inside `$( )` kills the subshell,
+		# and what reaches here is the empty string. That is exactly how the
+		# supplicant count in this file failed for as long as it existed, and
+		# it read as "no supplicant is running" rather than "the check did not
+		# run" -- a whole different bug, in netcfgd rather than in the test.
+		if [ -z "$2" ] && [ -n "$3" ]; then
+			echo "       note: the actual value is empty, which usually means"
+			echo "       note:   its \$( ) failed rather than that the machine"
+			echo "       note:   is in the state above"
+		fi
 		failures=$((failures + 1))
 	fi
 }
@@ -120,6 +132,36 @@ differs() {
 		failures=$((failures + 1))
 	fi
 }
+# How many processes carry this marker in their own argv.
+#
+# **This was written inline and could not produce a number.** It opened with
+# `grep -lc . /proc/[0-9]*/cmdline` whose output was discarded -- a vestigial
+# command that did nothing except exit **2**, because some /proc entries are
+# unreadable and others vanish between the glob and the read. Under `set -e` a
+# failing first command kills the whole substitution, so `echo $c` never ran
+# and the check compared the empty string against "1". It had never once
+# counted anything, and it read as a real failure: "expected 1, actual" with
+# nothing after it looks like a machine with no supplicant rather than like a
+# test that did not run.
+#
+# Two changes, and the second matters as much as the first. The dead `grep` is
+# gone. And the count is an `if` rather than `cmd && c=$((c+1))`, so no future
+# `set -e` reading can make the loop's own exit status decide whether the
+# total is printed.
+carrying() {
+	marker=$1
+	found=0
+	for entry in /proc/[0-9]*; do
+		# A process that exits mid-loop is ordinary, not an error: /proc is a
+		# view of a moving system, which is the whole reason the original
+		# opener failed.
+		if tr '\0' '\n' < "$entry/cmdline" 2>/dev/null | grep -q "^$marker$"; then
+			found=$((found + 1))
+		fi
+	done
+	echo "$found"
+}
+
 contains() {
 	case "$2" in
 	*"$3"*) echo "ok   $1" ;;
@@ -243,7 +285,7 @@ check "and it names the process that was already running" "$adopted" "$first"
 check "nothing was restarted -- the association was never dropped" \
 	"$([ -e "/proc/$first" ] && echo alive || echo gone)" "alive"
 check "and there is exactly one supplicant carrying that mark" \
-	"$(grep -lc . /proc/[0-9]*/cmdline 2>/dev/null >/dev/null; c=0; for d in /proc/[0-9]*; do tr '\0' '\n' < "$d/cmdline" 2>/dev/null | grep -q "^$work/run/supplicant/radio0.pid$" && c=$((c+1)); done; echo $c)" "1"
+	"$(carrying "$work/run/supplicant/radio0.pid")" "1"
 check "and it did not blame another manager for its own process" \
 	"$(grep -ci 'did not start' "$work/d2.log" 2>/dev/null | head -1)" "0"
 contains "and the radio is netcfgd's" "$("$ncfg" wifi radios 2>&1)" "netcfgd's"
