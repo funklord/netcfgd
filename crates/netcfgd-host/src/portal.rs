@@ -181,7 +181,45 @@ fn exchange(mut stream: TcpStream, host: &str, path: &str) -> std::io::Result<St
 		.to_owned())
 }
 
-/// A status line into a verdict.
+/// As much of a hostile answer as is safe to repeat.
+///
+/// **This string reaches a root shell.** A `Portal` verdict's `detail` becomes
+/// `NCFG_REASON` for the `portal`-phase hooks, which netcfgd runs as root, and
+/// on this branch the content is whatever answered on port 80 -- a machine on
+/// a network this has already decided not to trust. It was passed through
+/// `{:?}`, which escapes quotes, newlines and non-printables and leaves
+/// `` ` ``, `$`, `;`, `|`, `&` and `*` exactly as they arrived.
+///
+/// An environment variable is not re-parsed by a shell, and an unquoted
+/// expansion word-splits and globs rather than running anything, so this is not
+/// command injection by itself. It is attacker-chosen text in a root script's
+/// environment, which is a thing to hand somebody only if they asked for it --
+/// and a hook that `eval`s its reason is a mistake netcfgd should not be making
+/// possible.
+///
+/// So: printable ASCII from a small set, everything else a dot, and 64
+/// characters. `HTTP/1.0 302 Found` survives intact, which is the case an
+/// operator is actually reading this for.
+fn legible(text: &str) -> String {
+	const KEEP: &str = " .,:/-_=";
+	let mut out: String = text
+		.chars()
+		.take(64)
+		.map(|c| {
+			if c.is_ascii_alphanumeric() || KEEP.contains(c) {
+				c
+			} else {
+				'.'
+			}
+		})
+		.collect();
+	if text.chars().nth(64).is_some() {
+		out.push_str("...");
+	}
+	out
+}
+
+/// A status line into a verdict./// A status line into a verdict.
 fn verdict(status_line: &str, expect: u16) -> Verdict {
 	// `HTTP/1.1 204 No Content` -- the code is the second word.
 	let code = status_line
@@ -198,13 +236,71 @@ fn verdict(status_line: &str, expect: u16) -> Verdict {
 		// "unreachable" -- something is there -- and calling it clear would be
 		// worse than calling it a portal.
 		None => Verdict::Portal {
-			detail: format!("the answer was not an HTTP status line: {status_line:?}"),
+			detail: format!(
+				"the answer was not an HTTP status line: {}",
+				legible(status_line)
+			),
 		},
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	/// **The verdict is what reaches the hook, so the verdict is what is
+	/// asserted.**
+	///
+	/// The test below covers `legible` and would stay green with the call site
+	/// bypassed -- measured, by bypassing it. This drives `verdict`, which is
+	/// the function whose output becomes `NCFG_REASON`, and it is the one that
+	/// fails when the sanitising is skipped rather than merely removed.
+	#[test]
+	fn the_detail_a_hook_receives_is_sanitised() {
+		let nasty = "\x16\x03\x01 $(id) `id` ; rm -rf / | tee & glob*";
+		let Verdict::Portal { detail } = super::verdict(nasty, 204) else {
+			panic!("something answered and it was not HTTP, so this is a portal");
+		};
+		for bad in ['$', '`', ';', '|', '&', '*'] {
+			assert!(
+				!detail.contains(bad),
+				"`{bad}` reached the hook environment in `{detail}`"
+			);
+		}
+		// Still says what happened, or it is not a diagnostic.
+		assert!(detail.contains("not an HTTP status line"), "{detail}");
+
+		// And the ordinary case is untouched: a real portal's code is a number
+		// and says which one.
+		let Verdict::Portal { detail } = super::verdict("HTTP/1.1 302 Found", 204) else {
+			panic!("302 is not 204");
+		};
+		assert_eq!(detail, "expected 204, got 302");
+	}
+
+	/// **What a hostile answer may put in a root script's environment.**
+	///
+	/// A `Portal` verdict's detail becomes `NCFG_REASON` for the `portal`
+	/// hooks, which run as root. This branch carries whatever answered on
+	/// port 80, so the characters a careless hook could be hurt by are the
+	/// ones to remove -- and the ones an operator reads it for are the ones
+	/// to keep.
+	#[test]
+	fn a_hostile_answer_reaches_the_hook_declawed() {
+		// The case this exists for: it stays readable.
+		assert_eq!(legible("HTTP/1.0 302 Found"), "HTTP/1.0 302 Found");
+
+		// And the case it exists against.
+		let nasty = "$(id);`id`;rm -rf /|tee&x*?<>'\"\\";
+		let out = legible(nasty);
+		for bad in ['$', '`', ';', '|', '&', '*', '?', '<', '>', '\'', '"', '\\'] {
+			assert!(!out.contains(bad), "`{bad}` survived into `{out}`");
+		}
+
+		// Bounded, because 1024 bytes of somebody else's choosing is not a
+		// diagnostic.
+		let long = legible(&"A".repeat(500));
+		assert_eq!(long.len(), 67, "64 kept plus an ellipsis: {long}");
+	}
+
 	use super::*;
 
 	/// A link-local address is not a network to check.

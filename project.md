@@ -9392,18 +9392,54 @@ configuration and must ask the daemon (0127), and syscalls confined to one
 audited crate (constraint 4). None of that depends on the init, and all of it
 survives a container, a read-only root and a hardened kernel.
 
-**And one boundary where netcfgd does not do what works.**
-`netcfgd-host/src/portal.rs` opens a TCP connection to a captive portal and
-parses the reply in the process holding `CAP_NET_ADMIN`. It is careful -- a
-1024-byte ceiling, the status line and nothing else, `from_utf8_lossy`, nothing
-the far side can make it allocate -- and it is not a defect. It is the one
-place the daemon itself speaks to a hostile peer, and it is exactly the shape
-dhcpcd separates and netcfgd does not: dhcpcd parses the wire in a process that
-cannot touch an interface and hands the result to one that can, which is why
-the bounding set had to be widened for it. If real separation is ever wanted
-here, that boundary and the config compiler -- which parses text from an
-`admin` caller who is deliberately not root -- are where it would go, and
-neither needs an init system's help. Recorded as a finding; not a task.
+**And one boundary where netcfgd does not do what works. Named vaguely at
+first, and the vague version pointed at the wrong thing** -- it said the HTTP
+parse, which is the least interesting part of it. There are three boundaries in
+`netcfgd-host/src/portal.rs`, and they are not equally interesting:
+
+1. **Name resolution, and this is the real one.** `probe` calls
+   `to_socket_addrs`, which is glibc's `getaddrinfo` -- confirmed by symbol
+   table rather than assumed: `nm -D target/release/netcfgd` shows
+   `U getaddrinfo@GLIBC_2.2.5`. So NSS modules and a DNS response parser, in C,
+   run **in the process holding `CAP_NET_ADMIN`**, against the resolver the
+   network being probed has just handed over. CVE-2015-7547 is that exact
+   shape. netcfgd is not special in calling `getaddrinfo`; it is unusual in
+   calling it seconds after joining an untrusted network, with those
+   capabilities, at that network's suggestion. Opt-in: no URL, no probe (0061,
+   0095).
+2. **The HTTP exchange.** A 1024-byte ceiling, the status line and nothing
+   else, `from_utf8_lossy`, nothing the far side can make it allocate, in Rust.
+   Negligible, and it is what the first version of this entry emphasised.
+3. **The verdict reaching a root shell. Fixed.** A `Portal` detail becomes
+   `NCFG_REASON` for the `portal`-phase hooks, which netcfgd runs as root, and
+   on the not-HTTP branch it carried `{status_line:?}` -- whatever answered on
+   port 80. `{:?}` escapes quotes, newlines and non-printables and leaves
+   `` ` ``, `$`, `;`, `|`, `&` and `*` exactly as they arrived. Not command
+   injection by itself: an environment variable is not re-parsed, and an
+   unquoted expansion word-splits and globs rather than running anything. It is
+   still attacker-chosen text in a root script's environment, and a hook that
+   `eval`s its reason is a mistake netcfgd should not make possible. It is now
+   printable ASCII from a small set, dots for the rest, 64 characters and an
+   ellipsis -- `HTTP/1.0 302 Found` survives intact, which is what an operator
+   reads it for.
+
+**The first test of that fix proved the helper and not the wiring**, and was
+caught by bypassing the call site rather than deleting the function: green
+either way. The test that counts drives `verdict`, whose output is what becomes
+`NCFG_REASON`, and it fails with the attack text quoted back in the message.
+
+**What is left is (1), and it is a design decision rather than a defect.**
+dhcpcd is the working example and it is in netcfgd's own dependency list: it
+parses the wire in a process that has chrooted and dropped privileges, and
+hands the result to one that can touch an interface -- which is why `a3f2c2a`
+had to widen the bounding set for it. The netcfgd shape would be a child that
+drops to an empty capability set, resolves, connects, reads, and reports a
+verdict over a pipe. It costs a `capset`/`prctl` pair in `netcfgd-sys` (the one
+crate permitted syscalls, constraint 4), a fork and a small pipe protocol, and
+tests. It needs no init system's help, which is the property that makes it
+worth more than the unit ever was. The config compiler -- which parses text
+from an `admin` caller who is deliberately not root -- is the second candidate.
+Neither is done. The decision is the holder's.
 
 **And the objection reaches the new test hardest, which is worth conceding.**
 `sandbox_writes.sh` reproduces the sandbox with `unshare -rm` and bind mounts,
