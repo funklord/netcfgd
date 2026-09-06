@@ -9286,6 +9286,39 @@ situ's author in the shape `doc/shared-protocol-brief.md` already uses for
 fuzznet -- a sibling's requirements live in the tree that has them, and are
 signalled rather than filed in somebody else's repository.
 
+**Delivered 2026-09-06 as a pointer, which needed the holder to settle the
+tension in the sentence above.** situ keeps a `suggestion/` directory that its
+own `project.md` 26.131 calls "correspondence rather than an archive", and
+netcfgd already had a file in it -- the 2026-08-04 wire-format evaluation,
+which situ answered inside. So the sentence above and situ's own convention
+disagree about where a requirement lives. The holder chose the pointer: the
+brief stays here as the one copy to correct, and `suggestion/netcfgd.md` gained
+183 lines carrying the deciding requirement, the recursion split, the corrected
+attribute census and the size question, with the detail left behind a path.
+Nothing was committed in situ's tree, which had ten files of another session's
+work in flight at the time.
+
+**Writing it corrected the brief, which is the part worth keeping.** Preparing
+numbers for another tree meant re-deriving them, and three of six were wrong:
+`skip_serializing_if` is **225** rather than the 226 and 227 the brief gave in
+two places, `default` is **294** rather than 295, and `rename_all` is **44**
+rather than 43. The last is not a digit but an argument -- the brief said "all
+43 are `snake_case`, so that row was measuring the tool rather than the
+format", and the forty-fourth is `BluetoothProfile`'s `kebab-case`, which
+belongs in the row the brief kept as its surviving requirement. So the small
+ask grew from "seven values in one enum" to eight members across two.
+
+**Two instruments disagreed and both were wrong, in opposite directions.** A
+line-grep for the attribute counted 227 and a paren scanner counted 226; the
+grep was picking up two doc comments that quote the attribute with its
+predicate, and the scanner was picking up a third that spells out
+`#[serde(skip_serializing_if)]` in full and so contains the literal it searches
+for. Neither error was visible in its own output. What settled it was the
+predicate breakdown summing to the total exactly -- 205 + 11 + 8 + 1 -- which
+is the independent reading the two counts could not give each other. The method
+is now recorded beside the table in both places, because a bare integer invites
+no re-derivation and this one went unchecked through four commits.
+
 **The answer is one requirement, not a feature list. netcfgd's document has to
 be greppable JSON and situ describes binary layouts.** Measured in situ's own
 `project.md`: every one of its ten "json" occurrences is about its tooling
@@ -9319,8 +9352,12 @@ declared depth bound, the shape `max` already has for arrays.
 **What else situ would need is one question with six symptoms, and the list is
 derived rather than noticed.** The first pass stopped at the JSON blocker; the
 authoritative list is what the model already asks of serde, counted across
-`netcfgd-model` and `netcfgd-proto`: `default` 295, `skip_serializing_if` 226,
+`netcfgd-model` and `netcfgd-proto`: `default` 294, `skip_serializing_if` 225,
 `deny_unknown_fields` 89, `rename_all` and `rename` 51 between them, `tag` 7.
+The counts are taken by extracting every `#[serde(..)]` body with a paren
+scanner and rejecting any match inside a comment; three doc comments mention
+these attributes in prose, which a line-grep and a naive scanner miscount in
+opposite directions.
 Situ has none of the first, second, fifth or sixth -- its own `default` is
 enum unknown-value handling (8.7), a different thing under the same word, and
 "external name" and "wire name" appear zero times in its specification. Its
@@ -9333,11 +9370,13 @@ identifies fields by name and has no order.
 
 **And then the table was put to the test that mattered -- can JSON be described
 without any of it -- and mostly it can, so the ask is much smaller than the
-counts suggest.** All 43 `rename_all` are `snake_case` converting Rust's
+counts suggest.** 43 of the 44 `rename_all` are `snake_case` converting Rust's
 `PascalCase` variants: a schema writes the name it wants and needs no rename
-concept, so that row was measuring the tool rather than the format. All 227
-`skip_serializing_if` are "omit when empty" (`Option::is_none` 207,
-`Vec::is_empty` 11, `Not::not` 8, `is_zero` 1) and pair with the 295 `default`
+concept, so that row was measuring the tool rather than the format. The
+forty-fourth is `BluetoothProfile`'s `kebab-case`, which belongs with the
+`rename`s instead. All 225
+`skip_serializing_if` are "omit when empty" (`Option::is_none` 205,
+`Vec::is_empty` 11, `Not::not` 8, `is_zero` 1) and pair with the 294 `default`
 that restore them -- **two halves of one size optimisation, and emitting every
 field always makes both vanish.** The 7 `tag` uses are a representation choice;
 an externally tagged variant is a one-member object whose name is the
@@ -9345,9 +9384,10 @@ discriminant, needing no ordering rule at all.
 
 **What survives is one requirement and one small one.** Members are identified
 by name and have no order, which is irreducible and is what a text codec means.
-And an enum member may need a spelling that is not a legal identifier -- the
-seven `rename`s are all the kernel's bonding modes, `balance-rr` and `802.3ad`
-among them, which are Linux's spellings and not netcfgd's.
+And an enum member may need a spelling that is not a legal identifier -- eight
+members across two enums, six of the seven bonding modes (`balance-rr`,
+`802.3ad`; `broadcast` is only a case change) and the two `a2dp-*` Bluetooth
+profiles, which are Linux's and Bluetooth's spellings and not netcfgd's.
 
 **The cost of dropping the optimisation is not size, it is the witnesses.**
 Both are byte-exact and frozen (0020), and every present-but-empty field would

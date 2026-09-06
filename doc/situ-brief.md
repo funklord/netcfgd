@@ -216,12 +216,24 @@ feature any replacement has to express. Counted across `netcfgd-model` and
 | what the model asks for | uses | situ today |
 |---|---|---|
 | a structured-text codec at all | -- | none; section 13's families are line codes |
-| `default` -- absent on decode means this value | 295 | none; `default` in situ is enum unknown-value handling (8.7), a different thing wearing the same word |
-| `skip_serializing_if` -- omit on encode when a predicate holds | 226 | none |
+| `default` -- absent on decode means this value | 294 | none; `default` in situ is enum unknown-value handling (8.7), a different thing wearing the same word |
+| `skip_serializing_if` -- omit on encode when a predicate holds | 225 | none |
 | `deny_unknown_fields` -- an unknown member is an error | 89 | **already agreed**, and strongly: section 2 and 14.5 make never preserving unknown fields a security position |
 | `rename_all` and `rename` -- the external name differs from the identifier | 51 | none; "external name" and "wire name" appear zero times in the specification |
 | `tag` -- the discriminant is a member of the same object | 7 | 9.6 requires the discriminant parsed **strictly before** the variant in layout order |
 | recursive types | 0 for this schema | being lifted; needed for arbitrary JSON, not for this document |
+
+**How these were counted, because a bare integer invites no re-derivation.**
+Every `#[serde(..)]` body across `netcfgd-model/src` and `netcfgd-proto/src`
+is extracted with a paren scanner that respects strings, and split on
+top-level commas; a match inside a `//` or `///` comment is rejected. That
+last clause is load-bearing rather than tidy. Two line-greps and the first
+parser disagreed by one and two, and all three discrepancies were prose:
+`skip_serializing_if` appears in three doc comments, one of them spelling
+out `#[serde(skip_serializing_if)]` in full, which a grep for the attribute
+and a scanner for the attribute get wrong in opposite directions. The
+reconciled figure is 225, and its own predicate breakdown sums to it
+exactly -- 205 + 11 + 8 + 1 -- which is the check that settled it.
 
 ### 6a.1 Most of that table is netcfgd's choice, not JSON's requirement
 
@@ -230,21 +242,27 @@ with other serialisers, might it be right about the rest -- can JSON be
 described without these? **Largely yes, and the table above overstates the ask.
 Each row was re-read for what it is rather than for how many times it appears.**
 
-- **`rename_all`, 43 uses: not a requirement at all.** Every one is
+- **`rename_all`, 43 of 44 uses: not a requirement at all.** Forty-three are
   `snake_case`, converting Rust's `PascalCase` enum variants. A schema language
   writes `write_resolv_conf` as the name and needs no rename concept. This row
   was an artifact of generating from Rust types, and counting it as a gap was
-  the mistake of measuring the tool rather than the format.
+  the mistake of measuring the tool rather than the format. **The forty-fourth
+  is not**, and the first draft of this section missed it by saying "every
+  one": `BluetoothProfile` is `kebab-case`, so `a2dp-sink` and `a2dp-source`
+  are wire spellings no language will accept as identifiers. It belongs in the
+  row below rather than this one.
 
 - **`rename`, 7 uses: a real requirement, and a tiny one.** All seven are the
   kernel's bonding modes -- `balance-rr`, `active-backup`, `802.3ad`. Those are
   Linux's spellings, not netcfgd's, and `802.3ad` is not an identifier in any
   language. So what is needed is narrow: **an enum member whose wire spelling
-  is not a legal identifier.** Seven values in one enum, not a pervasive
-  feature.
+  is not a legal identifier.** Counted honestly that is **eight members across
+  two enums**, not seven in one: six of the seven bonding modes carry a hyphen
+  or lead with a digit, `broadcast` is only a case change and does not belong
+  here, and the two `a2dp-*` profiles above do.
 
-- **`skip_serializing_if` (227) and `default` (295): two halves of one
-  optimisation, not two features.** The predicates are `Option::is_none` 207
+- **`skip_serializing_if` (225) and `default` (294): two halves of one
+  optimisation, not two features.** The predicates are `Option::is_none` 205
   times, `Vec::is_empty` 11, `Not::not` 8, `is_zero` once -- in every case
   "omit when the value is the type's empty one", paired with "restore it when
   absent". **Emit every field always and both disappear**, at the price of a
@@ -256,8 +274,9 @@ Each row was re-read for what it is rather than for how many times it appears.**
 
 **What survives is one requirement and one small one.** Members are identified
 by name and have no order -- irreducible, and it is what a text codec means.
-And an enum member may need a spelling that is not an identifier. Everything
-else in the table is netcfgd's convenience, serde's default, or an artifact of
+And an enum member may need a spelling that is not an identifier -- eight of
+them, in two enums, for Linux's bonding modes and Bluetooth's profiles.
+Everything else in the table is netcfgd's convenience, serde's default, or an artifact of
 the language the model happens to be written in.
 
 **The cost of giving up the optimisation is not size, it is the witnesses.**
