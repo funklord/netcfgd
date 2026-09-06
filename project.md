@@ -9293,11 +9293,29 @@ netcfgd already had a file in it -- the 2026-08-04 wire-format evaluation,
 which situ answered inside. So the sentence above and situ's own convention
 disagree about where a requirement lives. The holder chose the pointer: the
 brief stays here as the one copy to correct, and `suggestion/netcfgd.md` gained
-183 lines carrying the deciding requirement, the recursion split, the corrected
+243 lines carrying the deciding requirement, the recursion split, the corrected
 attribute census and the size question, with the detail left behind a path.
 Nothing was committed in situ's tree, which had ten files of another session's
 work in flight at the time.
 
+**The first draft of that addendum sent only the gaps**, and the omission is
+the one worth recording. The brief's section 3 is *What fits, in situ's own
+terms* -- five bullets saying the backends netcfgd needs are done, that its 58
+`Vec` fields and ~43 payload variants and 177 optionals all have spellings, and
+that situ validates text more strictly than netcfgd validates its own 41
+`String` fields. **None of it crossed.** A reader given a requirement, a
+correction and four asks would have taken a worse impression than the
+evaluation supports, and the brief says in as many words that the fitting half
+is "worth saying before the parts that do not".
+
+**It was found by asking whether everything had been explained, and answered by
+diffing rather than by re-reading.** Every distinctive figure in the brief --
+counts, byte sizes, decision numbers, situ's own section numbers -- was grepped
+for in both files, which found one further omission a second read had missed:
+`14.5`, the citation for situ's refusal to preserve unknown fields, in the one
+row where the two projects already agree. **A summary drops the agreement
+first**, because the gaps are what feel like the content; the check that catches
+it is mechanical, and re-reading one's own prose is not.
 **Writing it corrected the brief, which is the part worth keeping.** Preparing
 numbers for another tree meant re-deriving them, and three of six were wrong:
 `skip_serializing_if` is **225** rather than the 226 and 227 the brief gave in
