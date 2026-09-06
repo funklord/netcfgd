@@ -8211,6 +8211,14 @@ was reported that way, which is the figure above measured badly rather than a
 rate that moved. **A flake rate is a number nobody re-derives**, and four runs
 cannot tell a quarter from a half.
 
+**`make -k` does not help, and it is the obvious thing to reach for.** Measured
+2026-09-06 on a full-suite run: `-k` continues with other *targets*, and every
+script is a line in one recipe, so the first failing line still abandons `live`.
+The run stopped at openvpn.sh with 41 passed and the remaining eighteen
+unreached; running those eighteen by hand took the tally to 53 passed, 1 failed,
+6 skipped for absent packages or real root. Anyone wanting the whole suite past
+a flake has to invoke the rest directly.
+
 **The cost is not the failed check. It is that `make live` stops there, and
 eighteen scripts after it never run.** Make abandons the target at the first
 failing recipe line, and `openvpn.sh` sits two thirds of the way down:
