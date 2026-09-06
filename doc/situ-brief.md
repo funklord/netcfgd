@@ -204,6 +204,47 @@ size of each is visible rather than asserted:
 
 ---
 
+## 6a. The outstanding list, and it is one question with six symptoms
+
+Section 6 was written by stopping at the first blocker. With recursion being
+lifted and a text codec therefore conceivable, the rest deserves the survey it
+did not get -- and the authoritative list is not what netcfgd noticed, it is
+what netcfgd's model **already asks of serde**. Every attribute in use is a
+feature any replacement has to express. Counted across `netcfgd-model` and
+`netcfgd-proto`:
+
+| what the model asks for | uses | situ today |
+|---|---|---|
+| a structured-text codec at all | -- | none; section 13's families are line codes |
+| `default` -- absent on decode means this value | 295 | none; `default` in situ is enum unknown-value handling (8.7), a different thing wearing the same word |
+| `skip_serializing_if` -- omit on encode when a predicate holds | 226 | none |
+| `deny_unknown_fields` -- an unknown member is an error | 89 | **already agreed**, and strongly: section 2 and 14.5 make never preserving unknown fields a security position |
+| `rename_all` and `rename` -- the external name differs from the identifier | 51 | none; "external name" and "wire name" appear zero times in the specification |
+| `tag` -- the discriminant is a member of the same object | 7 | 9.6 requires the discriminant parsed **strictly before** the variant in layout order |
+| recursive types | 0 for this schema | being lifted; needed for arbitrary JSON, not for this document |
+
+**Five of those six are the same fact.** situ describes positional binary
+layouts, where a field's identity is its offset and its order is structural.
+A text format has the opposite properties: **fields are identified by name and
+have no order.** So the missing pieces are not six features, they are one
+design question -- *what is a member's external identity, and what may be
+absent* -- asked six ways.
+
+That is worth saying because a feature list invites six separate additions,
+and the shape of the answer is probably one addition. It also predicts which
+of situ's existing rules would need re-examining rather than extending: 9.6's
+"strictly before in layout order" is not a restriction that can be relaxed for
+text, it is a statement about a world where order exists.
+
+**The one that is already right is worth as much as the gaps.** netcfgd's 89
+`deny_unknown_fields` and situ's refusal to preserve unknown fields are the
+same position reached separately, and it is the position most serialisers get
+wrong in the other direction.
+
+**This section is to be redone once recursion lands**, at the copyright
+holder's instruction, and the numbers above are the baseline to redo it
+against.
+
 ## 7. What netcfgd is not asking for, and one thing against itself
 
 **Not the capability lattice.** In-place mutability, addressability and

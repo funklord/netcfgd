@@ -9316,6 +9316,28 @@ stack" promise (20.1), since a decoder for a schema of known depth can hold an
 explicit stack of 7 and one for arbitrary JSON cannot. The brief suggests a
 declared depth bound, the shape `max` already has for arrays.
 
+**What else situ would need is one question with six symptoms, and the list is
+derived rather than noticed.** The first pass stopped at the JSON blocker; the
+authoritative list is what the model already asks of serde, counted across
+`netcfgd-model` and `netcfgd-proto`: `default` 295, `skip_serializing_if` 226,
+`deny_unknown_fields` 89, `rename_all` and `rename` 51 between them, `tag` 7.
+Situ has none of the first, second, fifth or sixth -- its own `default` is
+enum unknown-value handling (8.7), a different thing under the same word, and
+"external name" and "wire name" appear zero times in its specification. Its
+`variant` (9.6) requires the discriminant parsed *strictly before* the variant
+in layout order.
+
+**Five of those are the same fact**: situ describes positional layouts where a
+field's identity is its offset and its order is structural, and a text format
+identifies fields by name and has no order. So the gap is one design question
+-- what is a member's external identity, and what may be absent -- asked six
+ways, and 9.6's ordering rule is a statement about a world where order exists
+rather than a restriction to relax.
+
+**The one already right is worth as much**: netcfgd's 89 `deny_unknown_fields`
+and situ's refusal to preserve unknown fields (2, 14.5) are the same position
+reached separately, and it is the one most serialisers get wrong the other way.
+
 **The depth was got wrong first**, and the error is the reason it is quoted
 with its method: a count over every capitalised token in each type body
 reported 14 cycles and depth 14, having matched enum variant names as field
