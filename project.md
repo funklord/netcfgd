@@ -9278,6 +9278,49 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.48 situ against netcfgd's format, and the one thing that decides it
+
+Asked 2026-09-06 whether situ could describe the format a separated compiler
+would use. The brief is [doc/situ-brief.md](doc/situ-brief.md), written for
+situ's author in the shape `doc/shared-protocol-brief.md` already uses for
+fuzznet -- a sibling's requirements live in the tree that has them, and are
+signalled rather than filed in somebody else's repository.
+
+**The answer is one requirement, not a feature list. netcfgd's document has to
+be greppable JSON and situ describes binary layouts.** Measured in situ's own
+`project.md`: every one of its ten "json" occurrences is about its tooling
+(`--diagnostics=json`, `situc lsp`), and its codec families are line codes --
+CRC, Manchester, COBS, base64. JSON here is constraint 7 rather than a
+preference: `/run` is readable with `cat` on a machine being debugged over the
+network it is reconfiguring, and both schema witnesses are JSON.
+
+So a situ-described pipe would mean two encodings of one model, which is two
+things that must agree -- the class 0081, 0082 and 0083 are about.
+
+**More of it fits than a first reading suggests, and that is worth recording
+so the question is not reopened from scratch.** All four backends are done
+(situ 20.1), including the two netcfgd needs; `T x[expr]` and `T x[remaining]`
+cover the 58 `Vec` fields (8.5); `variant` covers the ~43 payload-carrying
+variants (9.6); `tlv` could carry the 177 optionals (9.5); and 8.6 validates
+`[encoding = utf8]` strictly, which is more than netcfgd does to its own 41
+`String` fields today. The model is **not recursive** -- no `Box<..>` anywhere
+-- so situ's v0 rule against recursion is met rather than merely survived.
+
+**The question worth more than the one asked**, and the brief puts it: the
+compiler pipe is a small format, while the *model* is 18.3% of the binary in
+serde. `netcfgd-model` is 168,328 bytes of derived codec against 53,037 of
+everything else -- three quarters of that crate is serialization, and
+hand-writing those codecs is most of the size argument for the C transition. A
+schema compiler generating them for Rust now and C later is exactly the answer,
+and it runs into the JSON requirement immediately, because those codecs encode
+the model.
+
+**And netcfgd's own evidence cuts against generating both ends**, which the
+brief relays rather than hides: `client/` was written against the witness
+instead of the Rust types and found three defects in the protocol itself, which
+a generated second implementation could not have. If netcfgd ever generates
+both sides it should keep one hand-written implementation as the control.
+
 ## 10.47 Hook materialisation leaves compilation
 
 Instructed by the copyright holder 2026-09-06, choosing between the two shapes
