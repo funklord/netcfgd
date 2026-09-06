@@ -4,13 +4,22 @@
 //! at the wrong moment would leave a machine configured with something nobody
 //! ever confirmed. So the armed state and the document to go back to are both
 //! files, written before the change is applied rather than after.
+//!
+//! **They do not live in the runtime directory, and that is the whole point of
+//! [`dir`].** Everything else netcfgd records is a claim about an object that
+//! still exists, so it can be rebuilt by asking the object: 0135 reads an
+//! address back from its kernel protocol tag, 0136 marks a link, 0140 finds a
+//! backend by the marker in its own `argv`. A window is not that. It asserts
+//! that somebody applied a change and *did not come back*, which nothing in
+//! the world holds a copy of -- so losing the file is losing the thing itself.
+//! Decision 0163.
 
 use crate::state::write_atomic;
 use netcfgd_model::Document;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 /// An open commit-confirm window.
@@ -78,10 +87,45 @@ pub fn arm(window_seconds: u32, last_good_hash: String) -> Window {
 	}
 }
 
+/// Where the promise is kept: a sibling of the runtime directory, never
+/// inside it.
+///
+/// **`systemd.exec(5)`'s `RuntimeDirectory=` is deleted on a real stop**, and
+/// the unit sets `RuntimeDirectoryPreserve=restart`, which keeps
+/// `/run/netcfgd` across `systemctl restart` and removes it for
+/// `systemctl stop`. So a window written inside it survived a restart and was
+/// destroyed by a stop and a start -- two spellings of one operator intent
+/// with opposite outcomes, and the safe-looking spelling was the losing one.
+/// It also made the answer differ by init, because `OpenRC`, procd and sysvinit
+/// never remove that directory at all.
+///
+/// A sibling is outside what `RuntimeDirectory=netcfgd` manages, so systemd
+/// leaves it alone and the four inits agree again. It is still under `/run`:
+/// this is not persistence, and nothing here may be written to flash, which
+/// `doc/read-only-root.md` would otherwise pay for.
+///
+/// **Do not name this directory in a `RuntimeDirectory=`**, which would put
+/// the fault straight back. `tests/live/killmode.sh` fails if the unit ever
+/// does.
+#[must_use]
+pub fn dir(run_dir: &Path) -> PathBuf {
+	match (run_dir.parent(), run_dir.file_name()) {
+		(Some(parent), Some(name)) => {
+			let mut sibling = name.to_os_string();
+			sibling.push("-confirm");
+			parent.join(sibling)
+		}
+		// A run directory with no parent and no final component is `/` or
+		// empty. Neither is a real configuration, and a subdirectory is the
+		// answer that cannot escape upwards.
+		_ => run_dir.join("confirm"),
+	}
+}
+
 /// The open window, if there is one.
 #[must_use]
 pub fn read_window(run_dir: &Path) -> Option<Window> {
-	fs::read_to_string(run_dir.join("confirm.json"))
+	fs::read_to_string(dir(run_dir).join("confirm.json"))
 		.ok()
 		.and_then(|text| serde_json::from_str(&text).ok())
 }
@@ -94,7 +138,7 @@ pub fn read_window(run_dir: &Path) -> Option<Window> {
 pub fn write_window(run_dir: &Path, window: &Window) -> io::Result<()> {
 	let text = serde_json::to_string_pretty(window)
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-	write_atomic(&run_dir.join("confirm.json"), &text)
+	write_atomic(&dir(run_dir).join("confirm.json"), &text)
 }
 
 /// Close the window.
@@ -103,7 +147,7 @@ pub fn write_window(run_dir: &Path, window: &Window) -> io::Result<()> {
 ///
 /// Returns an `io::Error` for anything but the file already being absent.
 pub fn clear_window(run_dir: &Path) -> io::Result<()> {
-	match fs::remove_file(run_dir.join("confirm.json")) {
+	match fs::remove_file(dir(run_dir).join("confirm.json")) {
 		Ok(()) => Ok(()),
 		Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
 		Err(error) => Err(error),
@@ -113,7 +157,7 @@ pub fn clear_window(run_dir: &Path) -> io::Result<()> {
 /// The last configuration that was applied and stood.
 #[must_use]
 pub fn read_last_good(run_dir: &Path) -> Option<Document> {
-	let text = fs::read_to_string(run_dir.join("last-good.json")).ok()?;
+	let text = fs::read_to_string(dir(run_dir).join("last-good.json")).ok()?;
 	Document::from_json(&text).ok()
 }
 
@@ -126,7 +170,7 @@ pub fn write_last_good(run_dir: &Path, document: &Document) -> io::Result<()> {
 	let text = document
 		.to_json_canonical()
 		.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
-	write_atomic(&run_dir.join("last-good.json"), &text)
+	write_atomic(&dir(run_dir).join("last-good.json"), &text)
 }
 
 /// A document's identity, for naming which one a revert targets.
@@ -173,11 +217,70 @@ mod tests {
 
 	#[test]
 	fn a_window_round_trips_through_the_file() {
-		let dir = scratch("roundtrip");
+		let area = scratch("roundtrip");
+		// A run directory *inside* the scratch area, so that the sibling
+		// `dir()` writes to is inside it too and goes when the area does.
+		// Passing the area itself would put the sibling next to it, where
+		// nothing removes it -- one leaked directory per run of this test.
+		let run = area.path().join("run");
 		let window = arm(120, "abc123".to_owned());
-		write_window(&dir, &window).expect("writes");
-		assert_eq!(read_window(&dir), Some(window));
-		let _ = fs::remove_dir_all(&dir);
+		write_window(&run, &window).expect("writes");
+		assert_eq!(read_window(&run), Some(window));
+	}
+
+	/// The promise is not in the directory an init may delete.
+	///
+	/// This is the assertion the fix exists for, so it is pinned rather than
+	/// left to the round trip above -- which passes just as well with both
+	/// files back inside the runtime directory.
+	#[test]
+	fn the_window_is_written_outside_the_runtime_directory() {
+		let area = scratch("outside");
+		let run = area.path().join("run");
+		write_window(&run, &arm(60, "x".to_owned())).expect("writes");
+		write_last_good(&run, &Document::default()).expect("writes");
+
+		assert!(
+			!dir(&run).starts_with(&run),
+			"the confirm directory must not be inside the runtime directory: {} is inside {}",
+			dir(&run).display(),
+			run.display()
+		);
+		// And the files really are over there rather than merely addressed
+		// through a function that says so.
+		assert!(dir(&run).join("confirm.json").exists());
+		assert!(dir(&run).join("last-good.json").exists());
+		assert!(!run.join("confirm.json").exists());
+		assert!(!run.join("last-good.json").exists());
+
+		// What a real stop does: the runtime directory goes and nothing else.
+		let _ = fs::remove_dir_all(&run);
+		assert!(
+			read_window(&run).is_some(),
+			"a window must survive the runtime directory being removed"
+		);
+		assert!(
+			read_last_good(&run).is_some(),
+			"and so must the document it reverts to"
+		);
+	}
+
+	/// A degenerate run directory still resolves somewhere inside itself
+	/// rather than escaping upwards.
+	#[test]
+	fn a_root_run_directory_does_not_escape() {
+		assert_eq!(dir(Path::new("/")), Path::new("/confirm"));
+		assert_eq!(dir(Path::new("")), Path::new("confirm"));
+		assert_eq!(
+			dir(Path::new("/run/netcfgd")),
+			Path::new("/run/netcfgd-confirm")
+		);
+		// A trailing slash is the same directory and must not answer
+		// differently.
+		assert_eq!(
+			dir(Path::new("/run/netcfgd/")),
+			Path::new("/run/netcfgd-confirm")
+		);
 	}
 
 	/// The deadline is absolute, so a daemon restarting inside the window
@@ -258,11 +361,11 @@ mod tests {
 	/// can both reach it and neither should fail because the other won.
 	#[test]
 	fn clearing_an_absent_window_is_not_an_error() {
-		let dir = scratch("clear");
-		assert!(clear_window(&dir).is_ok());
-		assert!(clear_window(&dir).is_ok());
-		assert_eq!(read_window(&dir), None);
-		let _ = fs::remove_dir_all(&dir);
+		let area = scratch("clear");
+		let run = area.path().join("run");
+		assert!(clear_window(&run).is_ok());
+		assert!(clear_window(&run).is_ok());
+		assert_eq!(read_window(&run), None);
 	}
 
 	/// A hash identifies a configuration rather than a compilation, which is
@@ -300,10 +403,10 @@ mod tests {
 
 	#[test]
 	fn a_last_good_document_round_trips() {
-		let dir = scratch("lastgood");
+		let area = scratch("lastgood");
+		let run = area.path().join("run");
 		let document = document_with_confirm(90);
-		write_last_good(&dir, &document).expect("writes");
-		assert_eq!(read_last_good(&dir), Some(document));
-		let _ = fs::remove_dir_all(&dir);
+		write_last_good(&run, &document).expect("writes");
+		assert_eq!(read_last_good(&run), Some(document));
 	}
 }
