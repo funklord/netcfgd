@@ -223,6 +223,52 @@ feature any replacement has to express. Counted across `netcfgd-model` and
 | `tag` -- the discriminant is a member of the same object | 7 | 9.6 requires the discriminant parsed **strictly before** the variant in layout order |
 | recursive types | 0 for this schema | being lifted; needed for arbitrary JSON, not for this document |
 
+### 6a.1 Most of that table is netcfgd's choice, not JSON's requirement
+
+Put to netcfgd after the table was written: if situ is right where it disagrees
+with other serialisers, might it be right about the rest -- can JSON be
+described without these? **Largely yes, and the table above overstates the ask.
+Each row was re-read for what it is rather than for how many times it appears.**
+
+- **`rename_all`, 43 uses: not a requirement at all.** Every one is
+  `snake_case`, converting Rust's `PascalCase` enum variants. A schema language
+  writes `write_resolv_conf` as the name and needs no rename concept. This row
+  was an artifact of generating from Rust types, and counting it as a gap was
+  the mistake of measuring the tool rather than the format.
+
+- **`rename`, 7 uses: a real requirement, and a tiny one.** All seven are the
+  kernel's bonding modes -- `balance-rr`, `active-backup`, `802.3ad`. Those are
+  Linux's spellings, not netcfgd's, and `802.3ad` is not an identifier in any
+  language. So what is needed is narrow: **an enum member whose wire spelling
+  is not a legal identifier.** Seven values in one enum, not a pervasive
+  feature.
+
+- **`skip_serializing_if` (227) and `default` (295): two halves of one
+  optimisation, not two features.** The predicates are `Option::is_none` 207
+  times, `Vec::is_empty` 11, `Not::not` 8, `is_zero` once -- in every case
+  "omit when the value is the type's empty one", paired with "restore it when
+  absent". **Emit every field always and both disappear**, at the price of a
+  larger document. Neither is needed to describe JSON.
+
+- **`tag`, 7 uses: a representation choice.** An externally tagged variant is a
+  one-member object whose *name* is the discriminant, which needs no separate
+  discriminant field and so no relaxation of 9.6's ordering rule.
+
+**What survives is one requirement and one small one.** Members are identified
+by name and have no order -- irreducible, and it is what a text codec means.
+And an enum member may need a spelling that is not an identifier. Everything
+else in the table is netcfgd's convenience, serde's default, or an artifact of
+the language the model happens to be written in.
+
+**The cost of giving up the optimisation is not size, it is the witnesses.**
+`doc/schema/document.json` and `socket.json` are byte-exact and frozen (0020),
+and every present-but-empty field would change them; the socket's shape would
+change for every client, including `client/` and the GUI. So the honest
+position is that a **new** format -- the compiler pipe -- can be described
+without any of this today, and the **existing** one cannot be re-spelled
+without a deliberate schema change. How much larger the document gets is
+unmeasured; serialising one both ways would settle it.
+
 **Five of those six are the same fact.** situ describes positional binary
 layouts, where a field's identity is its offset and its order is structural.
 A text format has the opposite properties: **fields are identified by name and

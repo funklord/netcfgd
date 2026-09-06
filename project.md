@@ -9329,10 +9329,31 @@ in layout order.
 
 **Five of those are the same fact**: situ describes positional layouts where a
 field's identity is its offset and its order is structural, and a text format
-identifies fields by name and has no order. So the gap is one design question
--- what is a member's external identity, and what may be absent -- asked six
-ways, and 9.6's ordering rule is a statement about a world where order exists
-rather than a restriction to relax.
+identifies fields by name and has no order.
+
+**And then the table was put to the test that mattered -- can JSON be described
+without any of it -- and mostly it can, so the ask is much smaller than the
+counts suggest.** All 43 `rename_all` are `snake_case` converting Rust's
+`PascalCase` variants: a schema writes the name it wants and needs no rename
+concept, so that row was measuring the tool rather than the format. All 227
+`skip_serializing_if` are "omit when empty" (`Option::is_none` 207,
+`Vec::is_empty` 11, `Not::not` 8, `is_zero` 1) and pair with the 295 `default`
+that restore them -- **two halves of one size optimisation, and emitting every
+field always makes both vanish.** The 7 `tag` uses are a representation choice;
+an externally tagged variant is a one-member object whose name is the
+discriminant, needing no ordering rule at all.
+
+**What survives is one requirement and one small one.** Members are identified
+by name and have no order, which is irreducible and is what a text codec means.
+And an enum member may need a spelling that is not a legal identifier -- the
+seven `rename`s are all the kernel's bonding modes, `balance-rr` and `802.3ad`
+among them, which are Linux's spellings and not netcfgd's.
+
+**The cost of dropping the optimisation is not size, it is the witnesses.**
+Both are byte-exact and frozen (0020), and every present-but-empty field would
+change them, along with the socket's shape for every client. So a *new* format
+needs none of this and the *existing* one cannot be re-spelled without a
+deliberate schema change.
 
 **The one already right is worth as much**: netcfgd's 89 `deny_unknown_fields`
 and situ's refusal to preserve unknown fields (2, 14.5) are the same position
