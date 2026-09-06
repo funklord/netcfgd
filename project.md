@@ -952,6 +952,11 @@ them because no test had ever carried those keys.
    a stop holds, the record survives, and a deb upgrade restarts a running
    daemon. What is missing is that an upgrade and a final stop look identical
    to the daemon, and nothing writes the intent down for the next copy.
+   **It now has a concrete consumer rather than only a rationale**: an
+   unresolved commit-confirm window is destroyed by a real stop and survives a
+   restart, so the intent is exactly what decides whether the promise should
+   outlive the process. Measured in 10.49, which also names the two cheaper
+   fixes and what each of them costs.
 
 **And one question rather than a task: could this run on a microcontroller?**
 Put by the holder 2026-09-02. The core turns out to be portable already and the
@@ -9277,6 +9282,88 @@ with a file, a line and a scenario in the sweep output.
 above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
+
+## 10.49 A promise has nothing in the world to rebuild it from
+
+Found 2026-09-06 while looking for what would consume the *why am I being
+stopped* intent that §10's item 4 is about. It is a gap in the thing that
+question exists to protect, and it needed no new mechanism to find.
+
+**An unresolved commit-confirm window does not survive a real stop.** Measured,
+with the restart case as the positive control, in a `unshare -rn` namespace
+against the freshly built daemon:
+
+    case A  restart, /run kept       window found  -> reverted, address gone
+    case B  real stop, /run removed  no window     -> the change stands
+
+Both cases arm a 300-second window over a first apply, kill the daemon with
+`kill -9`, and start an ordinary daemon -- no `--no-apply-on-start`, because
+that is what an init starts. The only difference between them is whether
+`/run/netcfgd` is removed in between. **A came back and reverted; B came back
+and kept the change nobody confirmed.**
+
+**The systemd half is this document's own established fact and was not
+re-measured**: `RuntimeDirectoryPreserve=restart` keeps `/run/netcfgd` across a
+`systemctl restart` and removes it on a real stop, which §10.26 already relies
+on and 0135 quotes `systemd.exec(5)` for. There is no systemd on this machine,
+so the probe models the directory removal directly rather than driving a unit.
+What is new here is not that fact but a consumer nobody had checked against it.
+
+**So `systemctl restart netcfgd` and `systemctl stop netcfgd && systemctl start
+netcfgd` differ in whether an operator's unconfirmed change is taken back.** Two
+spellings of one intent, opposite safety outcomes, and the dangerous one is the
+one somebody types when they are being careful.
+
+**And the answer differs by init system, which is the worse half.** systemd is
+the only one of the four that removes the directory: OpenRC's `start_pre` runs
+`checkpath --directory` and never removes it, procd's `start_service` runs
+`mkdir -p` and never removes it, and sysvinit removes only the pid file -- read
+in full rather than grepped. So the same operator action reverts on OpenWrt and
+does not on Debian.
+
+**Why this consumer and not the others, which is the part worth keeping.**
+Everything else in `/run/netcfgd` that matters has been given a way to be
+rebuilt from the world: 0135 reads addresses and routes back from the kernel's
+protocol tag, 0136 gives a link its own mark, 0140 finds a backend by scanning
+`/proc` for the marker it was started with. Those all work because the state is
+**a claim about an object that still exists**, so the object can be asked.
+
+0139 already named the window as a different kind -- *a promise that was never
+kept* -- and settled that it must not be boot-scoped. What follows from its own
+taxonomy and was not drawn: **a promise has no object in the world to rebuild it
+from.** There is nothing to tag and nothing to scan for, because what it asserts
+is that somebody did *not* come back. So it is the one kind of state in the
+directory for which losing the file is losing the thing itself, and it is the
+one kind that has no fallback.
+
+**The reasoning is inconsistent rather than merely thin, which is what makes it
+a finding rather than a wish.** 0139 declines to boot-scope the window on the
+grounds that a reboot does not make the promise false and boot-scoping "would
+remove the protection exactly where the outage was worst". A stop and a start
+are strictly *less* disruptive than a reboot, and the protection is removed
+there today.
+
+**What is not settled, and is not a worker's to settle.** The fix is a choice
+between at least three, each touching something already decided:
+
+- **Move the window and the last-good document out of the directory systemd
+  manages.** Cleanest for this fault, and it makes part of `/run/netcfgd`
+  outlive a stop, which is constraint 1's "derived and disposable" needing an
+  explicit exception rather than an implicit one.
+- **`RuntimeDirectoryPreserve=yes`.** One line, and it changes the lifetime of
+  everything else in there -- including the backend records whose removal
+  §10.13 and §10.26 are written about, in both directions.
+- **The item-4 intent.** A stopper that says whether this is an upgrade or a
+  final stop is exactly the information that decides whether a promise should
+  outlive the process, and this is the first concrete consumer found for it.
+  That is an argument for the feature and not yet a design.
+
+**No test was added, deliberately.** One asserting today's behaviour would pin
+a defect and one asserting tomorrow's would fail `make live`, so the
+reproduction is written above instead and the check belongs with whichever fix
+is chosen. `tests/live/confirm.sh` case 6 already covers the restart half; what
+it has never done is remove the directory, which is the one line between the
+two cases.
 
 ## 10.48 situ against netcfgd's format, and the one thing that decides it
 
