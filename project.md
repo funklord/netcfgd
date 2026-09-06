@@ -9303,8 +9303,24 @@ so the question is not reopened from scratch.** All four backends are done
 cover the 58 `Vec` fields (8.5); `variant` covers the ~43 payload-carrying
 variants (9.6); `tlv` could carry the 177 optionals (9.5); and 8.6 validates
 `[encoding = utf8]` strictly, which is more than netcfgd does to its own 41
-`String` fields today. The model is **not recursive** -- no `Box<..>` anywhere
--- so situ's v0 rule against recursion is met rather than merely survived.
+`String` fields today.
+
+**The model is acyclic and 7 deep**, over a graph of 117 types with nothing
+naming itself. Situ's author reports the v0 ban on recursive types is being
+lifted so that every format is describable, and that JSON needs it -- right
+about JSON's grammar, and worth separating from netcfgd's case: describing
+*arbitrary* JSON needs a recursive schema, while describing *this document
+spelled as JSON* needs a recursive codec over a schema that is not. The
+difference decides whether situ's C backend keeps its "no recursion, bounded
+stack" promise (20.1), since a decoder for a schema of known depth can hold an
+explicit stack of 7 and one for arbitrary JSON cannot. The brief suggests a
+declared depth bound, the shape `max` already has for arrays.
+
+**The depth was got wrong first**, and the error is the reason it is quoted
+with its method: a count over every capitalised token in each type body
+reported 14 cycles and depth 14, having matched enum variant names as field
+types. A model with a real cycle and no `Box<..>` would not compile, which is
+what made the number worth disbelieving.
 
 **The question worth more than the one asked**, and the brief puts it: the
 compiler pipe is a small format, while the *model* is 18.3% of the binary in

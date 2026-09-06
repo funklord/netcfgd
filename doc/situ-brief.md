@@ -45,10 +45,15 @@ across `crates/netcfgd-model/src`:
 | fields that are a fixed-width scalar | 65 |
 | fields that are another model type | 64 |
 
-**Not recursive**, checked rather than assumed: no `Box<..>` appears anywhere
-in the model, which is how a recursive type is spelled in Rust. situ rejects
-recursive types at parse time in v0 (section 2), and netcfgd would not meet
-that rule by accident -- it meets it.
+**Not recursive, and measured properly rather than by absence of `Box<..>`.**
+The model's field types form a graph of 117 nodes: **no type names itself, there
+are no cycles at all, and the nesting depth from `Document` is 7.**
+
+That number was got wrong first. A count over every capitalised token in each
+type's body reported 14 cycles and a depth of 14 -- it was matching enum variant
+names and doc-comment words as if they were field types. A model with a genuine
+cycle and no `Box<..>` would not compile, which is what made the answer worth
+disbelieving. The corrected walk reads field types only.
 
 **276 of 405 fields are optional, repeated, or unbounded text.** A document for
 twenty interfaces is 10,484 bytes of JSON; the frozen maximal witness is
@@ -145,6 +150,32 @@ size of each is visible rather than asserted:
    non-goal "not a serialization library for language-native objects", so it
    may be correctly out of scope. **If it is out of scope, say so and this
    brief is finished** -- everything below only matters if this is not.
+
+   **Situ's author reports that the v0 ban on recursive types is being lifted,
+   so that every format is describable, and that JSON needs it.** That is
+   right about JSON's grammar -- a value contains values -- and it is worth
+   separating from what netcfgd needs, because the two are different sizes.
+
+   - **Describing arbitrary JSON needs recursion in the schema.** Depth is
+     whatever the input has.
+   - **Describing netcfgd's document, spelled as JSON, does not.** The schema
+     is acyclic and 7 deep, measured above. The recursion lives in the
+     *codec*, not in the type being described.
+
+   The distinction has a consequence for situ's own invariants rather than for
+   netcfgd. Section 20.1 promises the C backend "no recursion, bounded stack";
+   section 2 gives non-terminating size and capability computation as the
+   reason recursion was banned. **A decoder for a schema of known depth keeps
+   both** -- an explicit stack of 7 is a compile-time constant, exactly as an
+   array's `max` is. A decoder for arbitrary JSON keeps neither, because
+   nothing bounds the depth.
+
+   So if the lift is to serve both, the shape that seems to fit situ's existing
+   grain is **a declared depth bound on a recursive type, the same mechanism
+   `max` already is for arrays**: bounded recursion stays inside invariant 4
+   and stays decidable, unbounded recursion is the case that needs the
+   allocator question of decision 0031. That is a suggestion from outside and
+   situ's author is better placed to say whether it holds.
 
 2. **A first-class optional.** 177 of 405 fields. TLV carries it, but the
    schema author then makes 177 TLV decisions to say something the source
