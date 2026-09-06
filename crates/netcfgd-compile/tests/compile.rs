@@ -2597,3 +2597,97 @@ fn an_unknown_modem_key_is_refused() {
 		"got: {rendered}"
 	);
 }
+
+/// **Every place a document names a link refuses a name that is a path.**
+///
+/// One config rather than nine tests, because the property is the
+/// *quantifier*: what makes this a fix rather than a patch to `device` is that
+/// no position is left over. The count is asserted as well as the text, so a
+/// site that stopped checking would show up as eight rather than as a message
+/// somebody has to notice missing.
+///
+/// The positions were enumerated from the model -- every field of the desired
+/// document that holds a kernel link name -- rather than grepped for, since
+/// "which fields are interface names" is exactly what a pattern answers about
+/// the shape it was handed. `Observed` is not here: those names come back from
+/// the kernel, which would not have given out one it refuses.
+#[test]
+fn every_place_a_link_is_named_refuses_a_path() {
+	let rendered = errors(
+		r#"
+		device "../../etc/evil" { kind = "dummy" }
+		interface "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" { config = "null" }
+		device brx { bridge { members = "good ../bad" } }
+		device bond0 { bond { members = "also/bad" ; mode = "balance-rr" } }
+		device portx { kind = "dummy" ; master = "/etc/shadow" }
+		device vl { vlan { parent = "a b" ; id = 7 } }
+		device vv { veth { peer = ".." } }
+		device mv { macvlan { parent = "x:y" } }
+		access_point "guest" { device = "/tmp" ; wifi { open = true } }
+		rule r { from = "10.0.0.0/8" ; iif = "/dev/null" ; lookup = 100 }
+		rule s { from = "10.0.0.0/8" ; oif = "" ; lookup = 101 }
+		"#,
+	);
+	let refused = rendered.matches("is not an interface name").count();
+	assert_eq!(
+		refused, 11,
+		"one per position, and the positions are the point:\n{rendered}"
+	);
+	// The clause each one tripped, so a rule that collapsed to "contains a
+	// slash" would be caught rather than counted.
+	for expected in [
+		"cannot contain `/`",
+		"is at most 15 characters",
+		"cannot contain whitespace",
+		"keeps `.` and `..` for directories",
+		"cannot contain `:`",
+		"cannot be empty",
+	] {
+		assert!(
+			rendered.contains(expected),
+			"missing `{expected}`:\n{rendered}"
+		);
+	}
+}
+
+/// And the names people actually write still compile.
+///
+/// The other half, and the one a name check is most likely to fail: a rule
+/// that refused `br-lan` or `enp0s31f6` would satisfy every assertion above
+/// and break every machine.
+#[test]
+fn the_names_people_write_still_compile() {
+	let document = build_ok(
+		r#"
+		device br-lan { bridge { members = "enp0s31f6 wlp0s20f3" } }
+		interface br-lan { config = "10.0.0.1/24" }
+		device enp0s31f6 { kind = "physical" ; master = "br-lan" }
+		device vlan.7 { vlan { parent = "br-lan" ; id = 7 } }
+		device vethA { veth { peer = "vethB" } }
+		"#,
+	);
+	// Five, not four, and the fifth is the reason `members` is checked at all:
+	// a member with no `device` block of its own gets one synthesised, so
+	// `wlp0s20f3` is a device here having been named only in a list. A bad
+	// word in that list would have become a device name the same way.
+	//
+	// The first guess at the fifth was the veth's far end, which the compiler
+	// does not synthesise. Measured rather than reasoned, because a count that
+	// is adjusted until it passes has stopped asserting anything.
+	assert_eq!(document.devices.len(), 5);
+	assert!(
+		document
+			.devices
+			.iter()
+			.any(|device| device.name == "wlp0s20f3"),
+		"a bridge member becomes a device"
+	);
+	assert_eq!(
+		document
+			.devices
+			.iter()
+			.find(|device| device.name == "enp0s31f6")
+			.and_then(|device| device.master.as_deref()),
+		Some("br-lan")
+	);
+}

@@ -67,7 +67,11 @@ pub fn usable_name(name: &str) -> Result<(), &'static str> {
 		return Err("an interface name is at most 15 characters");
 	}
 	if name == "." || name == ".." {
-		return Err("a directory is not an interface name");
+		// Not "a directory is not an interface name": every caller prefixes
+		// "`{name}` is not an interface name: ", so that phrasing said it
+		// twice in one line -- and it inflated a coverage count that greps for
+		// the phrase, which is how it was noticed.
+		return Err("the kernel keeps `.` and `..` for directories");
 	}
 	if let Some(bad) = name
 		.chars()

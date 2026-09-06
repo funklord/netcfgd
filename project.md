@@ -9574,15 +9574,35 @@ it from being a fix to one symptom: of the thirteen requests carrying a name,
 four reach that join, and the other two interface-carrying ones look their name
 up in the document or the observation first.
 
-**Left open, measured, and the same defect one tier up: the compiler does not
-validate interface names at all.** `device "../../etc/evil"` and a
-forty-character name both compile and plan. The kernel refuses both, so no link
-appears -- but the name reaches a pid file, a generated config, a hook script
-and a control socket before and around that, as root, and documents are written
-by an `admin`-tier caller whom this file already records as deliberately not
-root. `usable_name` is the function it would use and `netcfgd-compile`'s
-private `IFNAMSIZ_MAX` is half of the same rule; refusing a document is a
-compile-behaviour change that wants deciding on its own terms.
+**~~Left open: the compiler does not validate interface names at all.~~
+Fixed the same day**, on the holder's instruction, and 0160 carries both
+halves. `device "../../etc/evil"` and a forty-character name both compiled and
+planned; the kernel refuses both, so no link appears, but the name reaches a
+pid file, a generated config, a hook script and a control socket before and
+around that, as root -- and a document is written by an `admin`-tier caller
+this file already records as deliberately not root.
+
+**Ten positions, and the count is the point.** Two block labels (`device`,
+`interface`), `master`, `iif`, `oif`, an access point's `device`, four
+`parent`/`dev` spellings, a veth `peer`, and every word of a `members` list.
+They were enumerated from the model's own fields rather than grepped for, and
+the test asserts the *number* of refusals rather than only their text, so a
+site that stopped checking shows up as a count instead of as a message nobody
+notices missing. Each of the three guards was removed in turn: 11 refusals
+becomes 4, 9 and 9.
+
+**References are not checked against declarations, and that is a separate
+gap.** `master = "brx"` naming no declared device still plans
+`link.set_master`; what this closes is that the name is a *name*. The
+resolution question is its own.
+
+Two things the tests found rather than the code. The control -- names people
+actually write -- caught that a bridge member with no `device` block of its own
+gets one synthesised, so a word in a list becomes a device name and `members`
+had to be checked word by word. And the first guess at why that document held
+five devices rather than four was the veth's far end, which the compiler does
+not synthesise at all: measured, not reasoned, because a count adjusted until
+it passes has stopped asserting anything.
 
 **A size ceiling caught something worth knowing.** The guard pushed the release
 binary 4096 bytes over -- one page exactly -- and the suspect was

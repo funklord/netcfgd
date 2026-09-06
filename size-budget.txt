@@ -548,4 +548,27 @@ netcfgd
 # function return `Option` rather than a boxed error changed the number by
 # nothing at all. The cost is the new document field's serde code and a second
 # comparison path, neither of which has a cheaper shape.
-total 2688264
+# Validating interface names in the compiler, +4,096 bytes -- and a re-baseline
+# of 79,120 bytes that had nothing to do with it.
+#
+# 0160 refused a name that is a path where a *request* reaches a filesystem
+# join. This is the other door: `device "../../etc/evil"` compiled and planned,
+# and a document is written by an `admin`-tier caller this project deliberately
+# does not treat as root. Ten positions in the DSL name a link -- two labels,
+# `master`, `iif`, `oif`, an access point's `device`, four `parent`/`dev`
+# spellings, a veth `peer`, and the words of a `members` list -- and all of
+# them go through one rule now.
+#
+# **The two numbers are separate and the larger one is not this change.** The
+# fix itself is 4,096 bytes: one page, and the true cost is somewhere under it,
+# since the file size moves a page at a time. The remaining 79,120 is growth
+# since the last entry that had been riding the 3% tolerance rather than being
+# recorded -- which this file says not to do, in as many words, because
+# spending the tolerance on real features means the next one fails the gate for
+# the wrong reason. Re-baselined here so the ratchet is a ratchet again.
+#
+# Trimming was tried and measured. Folding three near-identical diagnostics
+# into one helper changed the size by nothing; the page is the check. Returning
+# `&'static str` from `usable_name` rather than `String` did matter, and is
+# why 0160 itself cost zero -- that one is recorded in the model.
+total 2771480

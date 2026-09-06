@@ -70,7 +70,7 @@ The refusal is `InvalidInput` and quotes the name back. Quoting what the caller
 sent tells them nothing they did not already know; what they no longer learn is
 anything about the machine.
 
-## What this does not fix, and it is the same defect one tier up
+## The document is the other door, and it is now the same rule
 
 **The compiler does not validate interface names at all.** Measured:
 
@@ -86,11 +86,29 @@ Documents are written by root or by an `admin`-tier caller over `ConfigPut`,
 and this project records that **`admin` is not root and that is load-bearing**,
 so that is a boundary and not a formality.
 
-It is left here rather than fixed because it is a different entry point at a
-different tier, and refusing a document is a compile-behaviour change that
-wants deciding on its own terms. `usable_name` is the function it would use;
-`netcfgd-compile`'s private `IFNAMSIZ_MAX` is half of the same rule and would
-fold into it.
+This was recorded as open when the request half was fixed, and closed the same
+day on the holder's instruction. `netcfgd-compile` refuses such a name with a
+span, through the same `usable_name`, at every position a document names a
+link: the `device` and `interface` labels, `master`, `iif`, `oif`, an access
+point's `device`, the four `parent`/`dev` spellings, a veth `peer`, and each
+word of a `members` list. Ten positions, enumerated from the model's fields
+rather than found by pattern.
+
+Nothing is refused that the kernel would have accepted, so no working
+configuration changes; what changes is that a name the kernel would reject is
+reported with a span instead of failing later with the name already joined into
+half a dozen paths.
+
+**A `members` word needed its own check.** A member with no `device` block of
+its own gets a device synthesised for it, so a word in a list becomes a device
+name -- which the control test found rather than the review. Every bad word is
+reported rather than only the first; the span is the list's, because `as_words`
+gives each word the value's span, so the diagnostic quotes the word instead.
+
+**What is still not checked is whether a reference resolves.** `master = "brx"`
+naming no declared device plans `link.set_master brx` as before. That is a
+different question -- a name being well-formed against a name existing -- and
+it wants its own record.
 
 ## Consequences
 

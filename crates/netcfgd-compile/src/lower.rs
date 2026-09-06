@@ -878,7 +878,7 @@ fn is_structural_key(key: &str) -> bool {
 /// it is a port of, and how its egress is shaped (0155 pass 1b).
 fn lower_structural_key(device: &mut Device, assignment: &Assignment, diags: &mut Diagnostics) {
 	match assignment.key.as_str() {
-		"master" => device.master = as_string(&assignment.value, diags),
+		"master" => device.master = as_interface_name(&assignment.value, diags),
 		"vlans" => {
 			for line in as_lines(&assignment.value, diags) {
 				if let Some(vlans) = parse_bridge_vlan(&line, diags) {
@@ -918,7 +918,7 @@ fn lower_device(
 	sources: &SourceMap,
 	provenance: &mut Provenance,
 ) -> Option<Device> {
-	let name = require_label(block, diags)?;
+	let name = require_interface_label(block, diags)?;
 	let mut device = Device {
 		name,
 		r#match: None,
@@ -1166,8 +1166,8 @@ fn lower_rule(block: &Block, diags: &mut Diagnostics) -> Option<RoutingRule> {
 				rule.to = as_string(&assignment.value, diags)
 					.map(|text| canonical_address(&text).unwrap_or(text));
 			}
-			"iif" => rule.iif = as_string(&assignment.value, diags),
-			"oif" => rule.oif = as_string(&assignment.value, diags),
+			"iif" => rule.iif = as_interface_name(&assignment.value, diags),
+			"oif" => rule.oif = as_interface_name(&assignment.value, diags),
 			"fwmark" => rule.fwmark = as_u32(&assignment.value, diags),
 			"fwmask" => rule.fwmask = as_u32(&assignment.value, diags),
 			"lookup" | "table" => rule.table = as_u32(&assignment.value, diags),
@@ -1297,7 +1297,8 @@ fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPo
 		match item {
 			Item::Assignment(assignment) => match assignment.key.as_str() {
 				"device" => {
-					access_point.device = as_string(&assignment.value, diags).unwrap_or_default();
+					access_point.device =
+						as_interface_name(&assignment.value, diags).unwrap_or_default();
 				}
 				"channel" => {
 					access_point.channel =
@@ -2454,7 +2455,7 @@ fn lower_interface(
 	sources: &SourceMap,
 	provenance: &mut Provenance,
 ) -> Option<Interface> {
-	let name = require_label(block, diags)?;
+	let name = require_interface_label(block, diags)?;
 	let mut interface = Interface {
 		name: name.clone(),
 		enabled: true,
@@ -2970,7 +2971,7 @@ fn lower_vxlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> 
 					}
 				}
 			}
-			"parent" | "dev" => config.parent = as_string(&assignment.value, diags),
+			"parent" | "dev" => config.parent = as_interface_name(&assignment.value, diags),
 			"local" => config.local = address(diags),
 			"remote" | "group" => config.remote = address(diags),
 			"port" => {
@@ -3204,7 +3205,7 @@ fn lower_pppoe(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> 
 			continue;
 		};
 		match assignment.key.as_str() {
-			"parent" | "dev" => parent = as_string(&assignment.value, diags),
+			"parent" | "dev" => parent = as_interface_name(&assignment.value, diags),
 			"username" | "user" => username = as_string(&assignment.value, diags),
 			"password" => password = as_secret(&assignment.value, diags),
 			"service" => service = as_string(&assignment.value, diags),
@@ -3277,7 +3278,7 @@ fn lower_macvlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind
 			continue;
 		};
 		match assignment.key.as_str() {
-			"parent" | "dev" => parent = as_string(&assignment.value, diags),
+			"parent" | "dev" => parent = as_interface_name(&assignment.value, diags),
 			"mode" => {
 				if let Some(name) = as_string(&assignment.value, diags) {
 					match name.as_str() {
@@ -3364,7 +3365,7 @@ fn lower_tunnel(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind>
 			}
 			"local" => config.local = address(diags),
 			"remote" => config.remote = address(diags),
-			"parent" | "dev" => config.parent = as_string(&assignment.value, diags),
+			"parent" | "dev" => config.parent = as_interface_name(&assignment.value, diags),
 			"ttl" => {
 				config.ttl = as_u32(&assignment.value, diags).and_then(|n| u8::try_from(n).ok());
 			}
@@ -3453,7 +3454,7 @@ fn lower_veth(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 			continue;
 		};
 		match assignment.key.as_str() {
-			"peer" => peer = as_string(&assignment.value, diags),
+			"peer" => peer = as_interface_name(&assignment.value, diags),
 			other => diags.push(Diagnostic::new(
 				assignment.span,
 				format!("unknown veth key `{other}`"),
@@ -3481,7 +3482,7 @@ fn lower_vlan(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 			continue;
 		};
 		match assignment.key.as_str() {
-			"parent" => parent = as_string(&assignment.value, diags),
+			"parent" => parent = as_interface_name(&assignment.value, diags),
 			"id" => {
 				id = as_u32(&assignment.value, diags).and_then(|n| u16::try_from(n).ok());
 				if id.is_none() {
@@ -3698,9 +3699,15 @@ fn lower_bridge(block: &Block, diags: &mut Diagnostics) -> InterfaceKind {
 		};
 		match assignment.key.as_str() {
 			"members" => {
+				// Each word is a link name. Every bad one is reported and
+				// dropped rather than stopping at the first, so an operator
+				// fixing typos is told about all of them at once. The span is
+				// the list's, not the word's -- `as_words` gives each word the
+				// value's span -- so the diagnostic quotes the word itself.
 				config.members = as_words(&assignment.value, diags)
 					.into_iter()
-					.map(|w| w.node)
+					.filter(|word| usable_member(word, diags))
+					.map(|word| word.node)
 					.collect();
 			}
 			"stp" => {
@@ -3740,9 +3747,15 @@ fn lower_bond(block: &Block, diags: &mut Diagnostics) -> Option<InterfaceKind> {
 		};
 		match assignment.key.as_str() {
 			"members" => {
+				// Each word is a link name. Every bad one is reported and
+				// dropped rather than stopping at the first, so an operator
+				// fixing typos is told about all of them at once. The span is
+				// the list's, not the word's -- `as_words` gives each word the
+				// value's span -- so the diagnostic quotes the word itself.
 				members = as_words(&assignment.value, diags)
 					.into_iter()
-					.map(|w| w.node)
+					.filter(|word| usable_member(word, diags))
+					.map(|word| word.node)
 					.collect();
 			}
 			"mode" => {
@@ -4476,6 +4489,55 @@ fn parse_route(entry: &Spanned<String>, diags: &mut Diagnostics) -> Option<Route
 	Some(route)
 }
 
+/// One word of a `members` list, checked in place.
+///
+/// Split from [`as_interface_name`] because a member arrives as one word of a
+/// list rather than as an assignment's whole value, and because a bad word
+/// must not take the good ones with it.
+fn usable_member(word: &Spanned<String>, diags: &mut Diagnostics) -> bool {
+	name_ok(&word.node, word.span, LINK_NAME_HELP, diags)
+}
+
+/// The one place the "not an interface name" diagnostic is built.
+///
+/// Three callers, three spans, one message. It was written out three times
+/// first, and the suspicion was that three `format!` sites had cost the
+/// release binary the page it went over by -- measured, folding them into one
+/// changed the size by nothing. The page is the check itself. This shape is
+/// kept because three copies of one sentence is worse code either way, not
+/// because it bought anything.
+fn name_ok(text: &str, span: Span, help: &str, diags: &mut Diagnostics) -> bool {
+	match netcfgd_model::interface::usable_name(text) {
+		Ok(()) => true,
+		Err(why) => {
+			diags.push(
+				Diagnostic::new(span, format!("`{text}` is not an interface name: {why}"))
+					.with_help(help),
+			);
+			false
+		}
+	}
+}
+
+/// Why the name matters, where a link is referred to.
+const LINK_NAME_HELP: &str = "netcfgd uses this name for the link and for the files it keeps \
+	 about it, so it has to be a name the kernel would take";
+
+/// The same, where a block is named for the link it declares.
+const LINK_LABEL_HELP: &str = "a `device` or `interface` block is named for the link itself, \
+	 so the label has to be a name the kernel would take";
+
+/// The same as [`require_label`], for a block whose label names a link.
+///
+/// `device` and `interface` only: the other five labelled blocks name a rule,
+/// a network, an access point, a bluetooth device or a wireguard peer, and
+/// those are netcfgd's own handles rather than the kernel's. See
+/// [`as_interface_name`] for why this matters.
+fn require_interface_label(block: &Block, diags: &mut Diagnostics) -> Option<String> {
+	let label = require_label(block, diags)?;
+	name_ok(&label, block.span, LINK_LABEL_HELP, diags).then_some(label)
+}
+
 fn require_label(block: &Block, diags: &mut Diagnostics) -> Option<String> {
 	if let Some(label) = &block.label {
 		Some(label.clone())
@@ -4486,6 +4548,30 @@ fn require_label(block: &Block, diags: &mut Diagnostics) -> Option<String> {
 		));
 		None
 	}
+}
+
+/// A string that has to be a name the kernel would take for a link.
+///
+/// **An interface name reaches the filesystem all over this tree** -- a pid
+/// file, a generated config, a hook script, a control socket -- through
+/// `Path::join`, and `join` with an absolute path *replaces* the base rather
+/// than extending it. [0160](../../doc/decision/0160-an-interface-name-is-not-a-path.md)
+/// closed that at the one place a *request* reaches such a join. This is the
+/// other door: a document is written by root or by an `admin`-tier caller over
+/// `ConfigPut`, and this project holds that `admin` is deliberately not root.
+///
+/// Measured before this existed: `device "../../etc/evil" { kind = "dummy" }`
+/// compiled and planned `link.create ../../etc/evil`, and a forty-character
+/// name did too. The kernel refuses both at netlink time, so no link appears
+/// -- and the name has already been joined into half a dozen paths by then.
+///
+/// The rule is `netcfgd_model::interface::usable_name`, which is the kernel's
+/// own `dev_valid_name`, so nothing is refused here that the kernel would have
+/// accepted. What changes is that it is refused with a span instead of failing
+/// somewhere with the name in a path.
+fn as_interface_name(value: &Spanned<Value>, diags: &mut Diagnostics) -> Option<String> {
+	let text = as_string(value, diags)?;
+	name_ok(&text, value.span, LINK_NAME_HELP, diags).then_some(text)
 }
 
 fn as_string(value: &Spanned<Value>, diags: &mut Diagnostics) -> Option<String> {
