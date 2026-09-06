@@ -402,7 +402,11 @@ fn in_place(path: &std::path::Path, text: &str, staging: &std::io::Error) -> Res
 
 	if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
 		return Err(format!(
-			"{} is a symlink, and netcfgd cannot stage a replacement beside it ({staging}). 			 Writing through the link would edit whatever owns the target -- 			 systemd-resolved or openresolv, usually. Point `dns_mode` at that resolver 			 instead, or replace the symlink with a file netcfgd may own",
+			"{} is a symlink, and netcfgd cannot stage a replacement beside it \
+			 ({staging}). Writing through the link would edit whatever owns the \
+			 target -- systemd-resolved or openresolv, usually. Point `dns_mode` \
+			 at that resolver instead, or replace the symlink with a file netcfgd \
+			 may own",
 			path.display()
 		));
 	}

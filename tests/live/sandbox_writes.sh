@@ -125,6 +125,89 @@ check "a config file granted alone is written" \
 check "and nothing complains about a read-only filesystem" \
 	"$(grep -ci 'read-only file system' "$work/control.log" || true)" "0"
 
+# **The case the first version of this script could not see (0164).**
+#
+# Everything above uses a REGULAR FILE at resolv.conf, which is what 0161 was
+# reproduced against. On any machine running systemd-resolved, /etc/resolv.conf
+# is a SYMLINK into /run/systemd/resolve -- and there the two paths 0161 left
+# behind do not intersect: staging is refused by the sandbox, and the in-place
+# fallback refuses on purpose rather than writing through the link into
+# another resolver's state. So the mode could not work at all, which is what
+# was reported from a systemd machine.
+#
+# The fix is the grant: the unit names /etc rather than the one file, so
+# netcfgd can unlink the link and put its own file there. Both halves are
+# checked -- that the wide grant replaces a symlink, and that the narrow one
+# still refuses cleanly rather than scribbling in somebody else's file.
+mkdir -p "$work/etc3" "$work/run3" "$work/stub3"
+cat > "$work/etc3/netcfgd.conf" <<'CONF'
+global {
+	dns {
+		mode    = "write_resolv_conf"
+		servers = "192.0.2.53 192.0.2.54"
+	}
+}
+CONF
+mkdir -p "$work/sys3"
+printf 'nameserver 127.0.0.53\n' > "$work/stub3/stub-resolv.conf"
+ln -s "$work/stub3/stub-resolv.conf" "$work/sys3/resolv.conf"
+
+# a. The packaged grant: /etc writable as a directory.
+unshare -rm sh -c '
+	set -eu
+	work=$1; repo=$2
+	mount --bind "$work/sys3" "$work/sys3"
+	NCFG_CONFIG_DIR="$work/etc3" NCFG_RUN_DIR="$work/run3" \
+	NCFG_RESOLV_CONF="$work/sys3/resolv.conf" \
+		"$repo/target/debug/ncfg" apply --oneshot > "$work/sym_wide.log" 2>&1 || true
+	cat "$work/sys3/resolv.conf" > "$work/sym_wide.seen" 2>/dev/null || true
+	if [ -L "$work/sys3/resolv.conf" ]; then echo link; else echo file; fi > "$work/sym_wide.kind"
+' sh "$work" "$repo"
+
+check "a symlinked resolv.conf is replaced when /etc is granted" \
+	"$(grep -c '^nameserver 192.0.2.53' "$work/sym_wide.seen" 2>/dev/null || true)" "1"
+check "and what is there afterwards is netcfgd's own file, not a link" \
+	"$(cat "$work/sym_wide.kind" 2>/dev/null || true)" "file"
+check "and the resolver whose link it was keeps its own file untouched" \
+	"$(grep -c '^nameserver 127.0.0.53' "$work/stub3/stub-resolv.conf" || true)" "1"
+
+# b. The narrow grant, which is what a hardened drop-in or a read-only root
+#    still produces. It must refuse, and must not write through the link.
+mkdir -p "$work/sys4" "$work/stub4" "$work/run4"
+printf 'nameserver 127.0.0.53\n' > "$work/stub4/stub-resolv.conf"
+ln -s "$work/stub4/stub-resolv.conf" "$work/sys4/resolv.conf"
+printf 'nameserver 127.0.0.53\n' > "$work/writable4"
+
+unshare -rm sh -c '
+	set -eu
+	work=$1; repo=$2
+	mount --bind "$work/sys4" "$work/sys4"
+	mount -o remount,bind,ro "$work/sys4"
+	# ReadWritePaths= on a symlink grants the resolved target, not the link.
+	mount --bind "$work/writable4" "$work/stub4/stub-resolv.conf"
+	NCFG_CONFIG_DIR="$work/etc3" NCFG_RUN_DIR="$work/run4" \
+	NCFG_RESOLV_CONF="$work/sys4/resolv.conf" \
+		"$repo/target/debug/ncfg" apply --oneshot > "$work/sym_narrow.log" 2>&1 || true
+	cat "$work/stub4/stub-resolv.conf" > "$work/sym_narrow.target"
+' sh "$work" "$repo"
+
+check "a narrow grant refuses a symlink rather than following it" \
+	"$(grep -c 'is a symlink' "$work/sym_narrow.log" || true)" "1"
+check "and says so in one line an operator can read" \
+	"$(awk '/is a symlink/ {print gsub(/\t/, "")}' "$work/sym_narrow.log" | head -1)" "0"
+check "and the other resolver's file is not written through the link" \
+	"$(grep -c '^nameserver 192.0.2.53' "$work/sym_narrow.target" || true)" "0"
+
+# **The grant itself, because every check above depends on it.** A unit that
+# narrowed this back to the one file would put the reported fault straight
+# back, and the tests above would go on passing case (b) while (a) failed with
+# no hint that the unit was the reason.
+unit="$repo/packaging/systemd/netcfgd.service"
+check "the unit grants the directory rather than the file" \
+	"$(grep -c '^ReadWritePaths=/etc$' "$unit")" "1"
+check "and no longer grants resolv.conf alone" \
+	"$(grep -c '^ReadWritePaths=-*/etc/resolv.conf$' "$unit")" "0"
+
 if [ "$failures" -eq 0 ]; then
 	echo "sandbox_writes.sh: all checks passed"
 else

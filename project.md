@@ -9284,6 +9284,68 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.50 The fix that was reproduced against the uncommon machine
+
+Reported by the copyright holder the same day 0161 landed: *"the writing of
+resolv.conf does not work on another systemd computer. If that is configured
+you should take steps to ensure it is written."*
+
+**0161 was insufficient rather than absent, and the reason is worth more than
+the patch.** It gave `replace` two paths -- stage-and-rename, and an in-place
+write for a directory netcfgd may not add to -- and the second refuses when the
+target is a symlink, on purpose, so netcfgd cannot scribble in
+systemd-resolved's own state. Both are correct alone. **On a machine running
+systemd-resolved they do not intersect**, because `/etc/resolv.conf` is a
+symlink there by default: staging is refused by the sandbox and the in-place
+path refuses by design, so `write_resolv_conf` could not work at all.
+
+Reproduced with the mounts the unit actually produces and the link
+systemd-resolved actually leaves:
+
+    FAIL dns.apply  dns: write_resolv_conf (was <absent>)
+         ... is a symlink, and netcfgd cannot stage a replacement beside it
+         (Read-only file system (os error 30)) ...
+    ncfg: stopped at action 0 (dns.apply); 0 done, 0 not attempted
+
+**0161's own prose contains both halves and does not put them together.** It
+argues the symlink refusal from "the rename path *replaces* such a link, which
+is what `write_resolv_conf` mode asks for" -- true, and the rename path is
+exactly the one that never runs under the sandbox the same record had just
+finished describing. Two correct sentences, three paragraphs apart, whose
+conjunction is the defect.
+
+**The fix is the grant, and it needed the holder rather than a worker.**
+Replacing a symlink means unlinking it and creating a file, and both need the
+*directory*. No narrower systemd grant allows creating one named entry:
+`rename(2)` wants write on the destination directory, and staging under `/run`
+cannot be renamed into `/etc` because `rename` does not cross filesystems --
+the `EXDEV` 0161 had already rejected. So it was the directory or a mode that
+stays broken on the machines most people run. Put with both costed; the
+directory was chosen, and `ReadWritePaths=/etc` replaces the four paths it
+subsumes ([0164](doc/decision/0164-the-grant-has-to-be-the-directory.md)).
+
+**What the test could not see, which is the general lesson.**
+`sandbox_writes.sh` was written with 0161 and is careful in the way that
+matters -- it makes real mounts rather than using `chmod`, because root walks
+through a mode and not through a read-only mount, and its first version passed
+just as happily with the fix reverted. It then modelled the sandbox faithfully
+and only ever with a **regular file**. So it was structurally blind to the
+reported machine, and no amount of running it would have said so. **A fixture
+can be rigorous about the mechanism it models and wrong about which case the
+world presents**, and the second question is not asked by making the first one
+better.
+
+It now drives the symlink under both grants -- replaced and landed under the
+wide one, refused and not written through under the narrow one -- and asserts
+the unit still grants the directory, because every other check in the file
+makes its own mounts and would go on passing if the unit narrowed back.
+
+**And the operator-facing message was mangled the whole time.** It was a
+multi-line string literal with no `\` continuations, so the tabs indenting the
+source were inside the string: the remedy reached the operator with three tabs
+in the middle of the sentence telling them what to do. Fixed, with a check that
+the line carries no tab, proven to fail on its own against the old spelling.
+
 ## 10.49 A promise has nothing in the world to rebuild it from
 
 Found 2026-09-06 while looking for what would consume the *why am I being
@@ -9696,7 +9758,7 @@ reading all four scripts:
 
 | init | how it starts netcfgd | confinement |
 |---|---|---|
-| systemd | `ExecStart=/usr/sbin/netcfgd`, no `User=` | `CapabilityBoundingSet` of six, ambient three, `ProtectSystem=full` + four `ReadWritePaths`, `ProtectHome`, `NoNewPrivileges`, `MemoryDenyWriteExecute`, `RestrictNamespaces`, `LockPersonality` |
+| systemd | `ExecStart=/usr/sbin/netcfgd`, no `User=` | `CapabilityBoundingSet` of six, ambient three, `ProtectSystem=full` + `ReadWritePaths=/etc` (four narrower paths until 0164), `ProtectHome`, `NoNewPrivileges`, `MemoryDenyWriteExecute`, `RestrictNamespaces`, `LockPersonality` |
 | OpenRC | `command="/usr/sbin/netcfgd"` | none |
 | procd | `procd_set_param command /usr/sbin/netcfgd` | none |
 | sysvinit | `start-stop-daemon --start --exec` | none |
@@ -9863,7 +9925,16 @@ reported again as applying to files the GUI writes. Both halves are settled and
 the record is
 [0161](doc/decision/0161-the-sandbox-grants-a-file-not-a-directory.md).
 
-`ProtectSystem=full` mounts `/etc` read-only; the unit opens one path back up
+**Overtaken on the grant, the same day, and kept for the reasoning.** The unit
+names `ReadWritePaths=/etc` now: 0161's fix was reproduced against a
+`resolv.conf` that is a regular file, and on a systemd-resolved machine it is a
+symlink, where the in-place fallback below refuses and the mode could not work
+at all. See 10.50 and
+[0164](doc/decision/0164-the-grant-has-to-be-the-directory.md). Everything
+below describes what was true until then, and the in-place fallback it
+produced is still in the code for a narrower grant.
+
+`ProtectSystem=full` mounts `/etc` read-only; the unit opened one path back up
 with `ReadWritePaths=-/etc/resolv.conf`. **That grants the file.** Staging a
 dotfile beside it is creating a new entry in `/etc`, which stays refused -- so
 the standard atomic swap failed on every systemd machine, naming a temporary

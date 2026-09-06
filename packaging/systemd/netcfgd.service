@@ -115,18 +115,36 @@ ProtectSystem=full
 # three optional ones: dnsmasq and unbound are packages a machine need not
 # have, and a unit that refuses to start for want of a directory belonging to
 # software nobody installed would be worse than the fault it prevents.
-# **A path named here grants the file, not the directory it sits in.** The
-# three below that name directories are writable through and through; the
-# `resolv.conf` line grants one file, and creating a new entry in /etc -- which
-# is what staging a temporary beside a target is -- stays refused. netcfgd
-# writes that one file in place for exactly that reason, giving up an atomic
-# replace it cannot perform here. Adding /etc to this list would buy the
-# atomicity back and give away what `ProtectSystem=full` is for; the trade is
-# deliberate and is recorded in decision 0161.
-ReadWritePaths=/etc/netcfgd
-ReadWritePaths=-/etc/resolv.conf
-ReadWritePaths=-/etc/dnsmasq.d
-ReadWritePaths=-/etc/unbound/unbound.conf.d
+# **A path named here grants the file, not the directory it sits in**, and
+# that is why this is now one line rather than four (0164).
+#
+# 0161 granted `-/etc/resolv.conf` and had netcfgd write that one file in
+# place, giving up the atomic replace rather than widening the grant. It fixed
+# the machine it was reproduced on and not the common one. `/etc/resolv.conf`
+# is a **symlink** into another resolver's runtime state on any machine running
+# systemd-resolved -- and netcfgd must not write through such a link, because
+# that edits systemd-resolved's own file. So the in-place path refuses, the
+# staging path is refused by the sandbox, and `write_resolv_conf` could not
+# work at all there. Reported from a systemd machine and reproduced with these
+# exact mounts: the apply stopped at action 0 and resolv.conf was untouched.
+#
+# Replacing a symlink means unlinking it and creating a file, which needs the
+# **directory**. There is no narrower systemd grant that allows creating one
+# named entry: `rename(2)` needs write on the destination directory, and
+# staging under /run cannot be renamed across a filesystem boundary (EXDEV).
+# So the choice was to grant /etc or to leave the mode broken on the machines
+# most people run, and the copyright holder chose the grant.
+#
+# What it costs, stated plainly: netcfgd may write any file under /etc, not
+# just the four this used to name. `ProtectSystem=full` still holds /usr,
+# /boot and /efi read-only. `/etc/netcfgd`, `/etc/resolv.conf`,
+# `/etc/dnsmasq.d` and `/etc/unbound/unbound.conf.d` are all subsumed by this
+# line, so they are gone rather than kept as documentation -- four redundant
+# entries would read as a narrower grant than the one in force.
+#
+# `tests/live/sandbox_writes.sh` drives both the symlink and the regular-file
+# case under real mounts, and fails if this line ever narrows again.
+ReadWritePaths=/etc
 
 RuntimeDirectory=netcfgd
 RuntimeDirectoryMode=0755
