@@ -2962,24 +2962,24 @@ int ncfg_client_wifi_forget(ncfg_client_t *client, const char *id, char *err, si
 	return done;
 }
 
-int ncfg_client_secret_delete(ncfg_client_t *client, const char *name, char *err,
-                  size_t err_size)
+/*
+ * The two `..._delete` calls differ in one word of their request and in
+ * nothing else, so they share the building of it. Two copies would be two
+ * chances to get the quoting wrong, and only one of them would have a test.
+ */
+static int delete_by_name(ncfg_client_t *client, const char *verb, const char *name, char *err,
+              size_t err_size)
 {
-	if (!name || !*name) {
-		set_error(err, err_size, "no credential to remove");
-		return 0;
-	}
-
 	char request[512];
-	int head = snprintf(request, sizeof(request), "{\"request\":\"secret_delete\",\"name\":");
+	int head = snprintf(request, sizeof(request), "{\"request\":\"%s\",\"name\":", verb);
 	if (head < 0 || (size_t)head >= sizeof(request)) {
-		set_error(err, err_size, "credential name is too long to ask about");
+		set_error(err, err_size, "name is too long to ask about");
 		return 0;
 	}
 	size_t at = (size_t)head;
 	size_t span = ncfg_client_quote(name, request + at, sizeof(request) - at);
 	if (!span || at + span + 2 > sizeof(request)) {
-		set_error(err, err_size, "credential name is too long to ask about");
+		set_error(err, err_size, "name is too long to ask about");
 		return 0;
 	}
 	at += span;
@@ -2993,6 +2993,26 @@ int ncfg_client_secret_delete(ncfg_client_t *client, const char *name, char *err
 	int done = !took_refusal(doc, err, err_size);
 	ncfg_json_free(doc);
 	return done;
+}
+
+int ncfg_client_config_delete(ncfg_client_t *client, const char *name, char *err,
+                  size_t err_size)
+{
+	if (!name || !*name) {
+		set_error(err, err_size, "no drop-in to remove");
+		return 0;
+	}
+	return delete_by_name(client, "config_delete", name, err, err_size);
+}
+
+int ncfg_client_secret_delete(ncfg_client_t *client, const char *name, char *err,
+                  size_t err_size)
+{
+	if (!name || !*name) {
+		set_error(err, err_size, "no credential to remove");
+		return 0;
+	}
+	return delete_by_name(client, "secret_delete", name, err, err_size);
 }
 
 int ncfg_client_wifi_disconnect(ncfg_client_t *client, const char *interface, char *err,

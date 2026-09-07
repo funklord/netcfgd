@@ -1142,6 +1142,27 @@ bool ncfg_connection::secret_delete(const QString &name, QString *error)
 	return true;
 }
 
+bool ncfg_connection::config_delete(const QString &name, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray which = name.toUtf8();
+
+	if (!ncfg_client_config_delete(client, which.constData(), message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::explain(const QString &interface, QList<ncfg_explain_row> *out,
                   QString *error)
 {

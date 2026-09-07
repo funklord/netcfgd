@@ -570,6 +570,14 @@ public:
 	 * remote code execution with a nicer font.
 	 */
 	bool config_put(const QString &name, const QString &text, bool replace, QString *error);
+	/* Take a drop-in away, by the name it was stored under. Needs `admin`.
+	 *
+	 * **No view offers this yet**, and that is deliberate: the window writes
+	 * drop-ins from dialogs and lists them nowhere, so a button would have
+	 * nothing to point at. What it has is a caller -- a probe that writes a
+	 * drop-in and has to leave the machine as it found it, which is the whole
+	 * reason the call exists before the view does. */
+	bool config_delete(const QString &name, QString *error);
 	/*
 	 * Write a link-detection script, through the daemon.
 	 *

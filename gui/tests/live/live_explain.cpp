@@ -135,6 +135,28 @@ int main(int argc, char **argv)
 	check("and the address it was given is in there",
 	    about.contains(QStringLiteral("192.0.2.77/24")), about);
 
+	/* **Put back what this probe changed, and assert that it went.**
+	 *
+	 * The drop-in above is not inert: it declares a `device`, so netcfgd
+	 * *creates* `explain0` in the namespace and keeps it. Every probe the
+	 * runner starts after this one -- `live_wifi` among them -- then runs
+	 * against a machine with an extra interface and a document this probe
+	 * wrote, which is a fixture nobody asked for and one nothing would name
+	 * if it caused a failure. Measured before this was added: the interface
+	 * is there and the drop-in is on disk when the probe exits.
+	 *
+	 * Asserted rather than merely attempted, for the reason `evidence.md`
+	 * gives about cleanups: a removal nobody checks is indistinguishable from
+	 * one that silently did nothing, and the symptom arrives in somebody
+	 * else's test. */
+	check("the probe takes its own drop-in away again",
+	    connection.config_delete(QStringLiteral("live-explain"), &why), why);
+
+	ncfg_explain_dialog after(&connection, QStringLiteral("explain0"));
+	const QString left = drawn(&after);
+	check("and netcfgd stops calling it configured",
+	    !left.contains(QStringLiteral("live-explain")), left);
+
 	printf("\n");
 	if (failures) {
 		printf("live_explain: %d failed\n", failures);

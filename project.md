@@ -9518,12 +9518,31 @@ program failed to fetch.
     the source dropped in parse  "and a fact that has a place shows the place"
     the wrong subject tag        every check in the probe
 
-### What is left
+### The probe was the fixture nobody asked for
 
-`config_delete` is the last of the four, and it has no natural surface: the
-gui writes drop-ins through `config_put` from the dialogs, and there is no
-view that lists them to remove one from. Adding the verb without the list
-would be a button with nothing to point at. Recorded rather than done.
+Written and passing, it left `explain0` **on the machine**. The drop-in it
+sends declares a `device`, so netcfgd creates that interface and keeps it, and
+the drop-in stays in `conf.d` -- so every probe the runner starts afterwards,
+`live_wifi` among them, ran against a document this one wrote and an interface
+that was not there when the suite began.
+
+Found while chasing 10.62's intermittent rather than by reading: five clean
+runs of `gui_wifi.sh` did not reproduce that flake, and looking for what else
+had changed found this. **The flake is still unexplained; what this closes is
+a fixture that could have caused one and would have named nothing if it had.**
+`ip link` inside the namespace and `ls conf.d` afterwards are the whole
+measurement.
+
+It removes the drop-in now and **asserts that it went**, which is the half
+that matters: a cleanup nobody checks is indistinguishable from one that
+silently did nothing, and the symptom arrives in somebody else's test.
+Reverting the removal fails exactly "and netcfgd stops calling it configured".
+
+That gave `config_delete` its first caller, which is why it exists now and
+`explain`'s neighbours in the enumeration do not. **The verb still has no
+view**: the window writes drop-ins from dialogs and lists them nowhere, so a
+button would have nothing to point at. A drop-ins list is the thing to build
+before the button, and it needs a `config_list` the protocol does not have.
 ## 10.62 The credentials tab could name a fault and not fix it
 
 The same shape as 10.59's saved-networks table, found by the same

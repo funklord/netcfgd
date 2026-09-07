@@ -906,6 +906,21 @@ int ncfg_client_explain(ncfg_client_t *client, const char *interface, ncfg_expla
             char *err, size_t err_size);
 
 /*
+ * Take a configuration drop-in away, by the name it was stored under. Needs
+ * `admin`.
+ *
+ * The mirror of ncfg_client_config_put(), and a name rather than a path for
+ * the same reason: netcfgd chose where it went (0127), and a client that knew
+ * the path would be a client keeping one.
+ *
+ * **An absent name is success**, as it is for the daemon: the state asked for
+ * is the state that resulted. A caller that wants to know whether anything
+ * was there asks before, and nothing here does.
+ */
+int ncfg_client_config_delete(ncfg_client_t *client, const char *name, char *err,
+                  size_t err_size);
+
+/*
  * Write what this machine is running into a profile, and select it. Needs
  * `admin`.
  *
