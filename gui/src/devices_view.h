@@ -39,11 +39,19 @@ private slots:
 	 * `preference` -- which uplink wins -- and a wired port's addressing are
 	 * set, neither of which the program could reach before. */
 	void configure_selected();
+	/* Ask netcfgd why the selected interface is the way it is.
+	 *
+	 * **The tab answers "what" and could not answer "why".** `ncfg explain`
+	 * has been the daemon's since the beginning and no window could ask it,
+	 * so the one thing this program can say that `ip addr` cannot was
+	 * reachable only from a terminal. */
+	void explain_selected();
 
 private:
 	ncfg_connection *connection;
 	ncfg_table_view *table;
 	QPushButton     *configure_button;
+	QPushButton     *explain_button;
 };
 
 #endif /* NCFG_DEVICES_VIEW_H */

@@ -1142,6 +1142,41 @@ bool ncfg_connection::secret_delete(const QString &name, QString *error)
 	return true;
 }
 
+bool ncfg_connection::explain(const QString &interface, QList<ncfg_explain_row> *out,
+                  QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray name = interface.toUtf8();
+	ncfg_explanation_t answer;
+
+	if (!ncfg_client_explain(client, name.constData(), &answer, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < answer.count; i++) {
+		ncfg_explain_row row;
+		row.topic = QString::fromUtf8(answer.items[i].topic ? answer.items[i].topic : "");
+		row.detail = QString::fromUtf8(answer.items[i].detail ? answer.items[i].detail : "");
+		row.source = QString::fromUtf8(answer.items[i].source ? answer.items[i].source : "");
+		out->append(row);
+	}
+	ncfg_explanation_free(&answer);
+	return true;
+}
+
 bool ncfg_connection::confirm(QString *error)
 {
 	if (!client) {

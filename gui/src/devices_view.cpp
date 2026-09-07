@@ -3,6 +3,7 @@
  */
 #include "devices_view.h"
 
+#include "explain_dialog.h"
 #include "interface_dialog.h"
 #include "ncfg_connection.h"
 #include "table_view.h"
@@ -34,6 +35,12 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	configure_button->setObjectName(QStringLiteral("configure_interface"));
 	configure_button->setEnabled(false);
 	table->add_control(configure_button);
+	/* `observe`, so it needs no tier check: a connection that cannot observe
+	 * has no rows to select. */
+	explain_button = new QPushButton(QStringLiteral("why"), this);
+	explain_button->setObjectName(QStringLiteral("explain_interface"));
+	explain_button->setEnabled(false);
+	table->add_control(explain_button);
 
 	auto *layout = new QVBoxLayout(this);
 	layout->setContentsMargins(0, 0, 0, 0);
@@ -42,8 +49,12 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	connect(configure_button, &QPushButton::clicked, this,
 	    &ncfg_devices_view::configure_selected);
 	connect(table, &ncfg_table_view::activated, this, &ncfg_devices_view::configure_selected);
-	connect(table, &ncfg_table_view::selection_changed, this,
-	    [this]() { configure_button->setEnabled(table->selected_row() >= 0); });
+	connect(explain_button, &QPushButton::clicked, this, &ncfg_devices_view::explain_selected);
+	connect(table, &ncfg_table_view::selection_changed, this, [this]() {
+		const bool chosen = table->selected_row() >= 0;
+		configure_button->setEnabled(chosen);
+		explain_button->setEnabled(chosen);
+	});
 }
 
 void ncfg_devices_view::refresh()
@@ -76,6 +87,17 @@ void ncfg_devices_view::refresh()
 
 	emit reported(rows.isEmpty() ? QStringLiteral("no interfaces reported")
 	                 : QStringLiteral("%1 interfaces").arg(rows.size()));
+}
+
+void ncfg_devices_view::explain_selected()
+{
+	const QString name = table->selected_cell(0);
+	if (name.isEmpty()) {
+		return;
+	}
+
+	ncfg_explain_dialog dialog(connection, name, this);
+	dialog.exec();
 }
 
 void ncfg_devices_view::configure_selected()

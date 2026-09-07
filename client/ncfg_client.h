@@ -864,6 +864,47 @@ void ncfg_secrets_free(ncfg_secrets_t *secrets);
  */
 int ncfg_client_secrets(ncfg_client_t *client, ncfg_secrets_t *out, char *err, size_t err_size);
 
+/* One statement in an explanation. */
+typedef struct {
+	/* What this fact is about: `desired`, `observed`, `ownership`, `guard`. */
+	char *topic;
+	/* The statement itself. */
+	char *detail;
+	/* Where it came from, where that is a place -- a config file and line, a
+	 * kernel attribute, a file under /run. Empty where the fact has no place:
+	 * "the kernel says so" is a source with nothing to open. */
+	char *source;
+} ncfg_fact_t;
+
+typedef struct {
+	/* What was asked about, as the daemon rendered it back. Not the string
+	 * that was sent: the daemon normalises, and a view that echoed its own
+	 * argument would be captioning the answer with the question. */
+	char        *subject;
+	ncfg_fact_t *items;
+	size_t       count;
+} ncfg_explanation_t;
+
+void ncfg_explanation_free(ncfg_explanation_t *explanation);
+
+/*
+ * Why is this interface the way it is. Needs `observe`.
+ *
+ * **netcfgd's own question, and the one thing no other client of this daemon
+ * can answer.** `status` says what is; this says which line of which file
+ * asked for it, what the kernel reports, who owns it and what a guard
+ * refused. A window that could show the first and not the second would be a
+ * prettier `ip addr`.
+ *
+ * Interfaces only, of the three subjects the protocol has. An address and a
+ * route are reachable by the same request and are not offered here yet: what
+ * a view has to hand is the row an operator selected, and every list in the
+ * gui is a list of interfaces. Adding the other two is a signature change
+ * when something has a route to select.
+ */
+int ncfg_client_explain(ncfg_client_t *client, const char *interface, ncfg_explanation_t *out,
+            char *err, size_t err_size);
+
 /*
  * Write what this machine is running into a profile, and select it. Needs
  * `admin`.

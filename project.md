@@ -9457,6 +9457,73 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.63 The window could say what, and not why
+
+The last of the four verbs the enumeration in 10.59 found unreachable from the
+gui, and the one worth the most: `explain` has been the daemon's since the
+beginning and no window could ask it.
+
+**It is the question that makes this program worth opening.** Every other view
+says what the machine is doing, and so does `ip addr`. `explain` says which
+line of which file asked for it, what the kernel reports back, what the drift
+policy is and what an apply would do next -- which only the daemon holding the
+compiled document can answer. A window with the first and not the second is a
+prettier `ip addr`.
+
+The devices tab has a `why` button now, beside `configure`, opening a
+read-only table of the daemon's own facts. Read-only is the whole design: an
+explanation is netcfgd's account of a decision it has already made, and a
+control there would be editing the answer to a question. The place to change
+what it says is one button along.
+
+### The fault was in the join, which is why the probe is live
+
+Written from the Rust type rather than from the wire, the subject went out as
+`{"kind":"interface","name":"..."}` and the daemon answered **missing field
+`subject`** -- `Subject` is serde-tagged on the field name `subject`, so the
+member holding it and the tag inside it are spelled the same:
+
+    {"request":"explain","subject":{"subject":"interface","name":"eth0"}}
+
+`doc/schema/socket.json` has that line and has had it all along. **Reading the
+type told me what the data is; only the witness told me what the bytes are**,
+and a C string literal against a serde attribute is a join no unit test on
+either side can see. That is the argument for `live_explain` being a live
+probe rather than a parse test, and reverting the tag turns the whole probe
+red -- a malformed request drops the connection, so everything after it fails
+too.
+
+### Two things the probe had to be careful about
+
+**It writes the interface it wants explained.** The gui harness starts with an
+empty `netcfgd.conf` on purpose -- "the state the report came from" -- so a
+probe asserting that a fact carries a file and a line would have had nothing
+to find. It sends a drop-in through `config_put` rather than dropping a file,
+so what gets explained is a document netcfgd compiled. The runner walks
+`*.pro` in directory order, and depending on another probe having run first
+would be depending on that order.
+
+**An explanation with no facts is an answer, not a failure**, and it is the
+one a client is most likely to misread. The daemon answers about an interface
+it does not manage as readily as one it does -- "not mentioned in the
+configuration; netcfgd does not manage it" is a fact -- so the dialog says
+that in the note rather than showing an empty table, which reads as a request
+that went wrong.
+
+The source column draws `--` where a fact has no place. "The kernel says so"
+is a source with nothing to open, and a blank cell there reads as a value the
+program failed to fetch.
+
+    reverted                     which check goes red
+    the source dropped in parse  "and a fact that has a place shows the place"
+    the wrong subject tag        every check in the probe
+
+### What is left
+
+`config_delete` is the last of the four, and it has no natural surface: the
+gui writes drop-ins through `config_put` from the dialogs, and there is no
+view that lists them to remove one from. Adding the verb without the list
+would be a button with nothing to point at. Recorded rather than done.
 ## 10.62 The credentials tab could name a fault and not fix it
 
 The same shape as 10.59's saved-networks table, found by the same

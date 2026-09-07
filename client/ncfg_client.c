@@ -2476,6 +2476,108 @@ int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *
 	return put_named_text(client, "config_put", name, text, replace, err, err_size);
 }
 
+void ncfg_explanation_free(ncfg_explanation_t *explanation)
+{
+	if (!explanation) {
+		return;
+	}
+	for (size_t i = 0; i < explanation->count; i++) {
+		free(explanation->items[i].topic);
+		free(explanation->items[i].detail);
+		free(explanation->items[i].source);
+	}
+	free(explanation->items);
+	free(explanation->subject);
+	explanation->items = NULL;
+	explanation->subject = NULL;
+	explanation->count = 0;
+}
+
+int ncfg_client_explain(ncfg_client_t *client, const char *interface, ncfg_explanation_t *out,
+            char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->subject = NULL;
+	out->count = 0;
+	if (!interface || !*interface) {
+		set_error(err, err_size, "no interface to explain");
+		return 0;
+	}
+
+	/* `{"subject":{"subject":"interface","name":...}}`, and the repeated key
+	 * is the wire's own: `Subject` is serde-tagged on the field name
+	 * `subject`, so the member holding it and the tag inside it are spelled
+	 * the same. Written from `doc/schema/socket.json` rather than from the
+	 * Rust type -- guessing `kind` here cost one round trip that came back
+	 * "missing field `subject`", which is the daemon reading a tagged enum
+	 * and finding no tag.
+	 *
+	 * A tagged object rather than a flat string because the protocol has
+	 * three subjects and only one of them is a bare name: an address and a
+	 * route each need the interface as well, so a string would be a second
+	 * grammar nobody wrote down. */
+	char request[512];
+	int head = snprintf(request, sizeof(request),
+	            "{\"request\":\"explain\",\"subject\":{\"subject\":\"interface\",\"name\":");
+	if (head < 0 || (size_t)head >= sizeof(request)) {
+		set_error(err, err_size, "interface name is too long to ask about");
+		return 0;
+	}
+	size_t at = (size_t)head;
+	size_t span = ncfg_client_quote(interface, request + at, sizeof(request) - at);
+	if (!span || at + span + 3 > sizeof(request)) {
+		set_error(err, err_size, "interface name is too long to ask about");
+		return 0;
+	}
+	at += span;
+	request[at++] = '}';
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	out->subject = member_text(doc, ncfg_json_root(doc), "subject");
+	uint32_t facts = ncfg_json_member(doc, ncfg_json_root(doc), "facts");
+	uint32_t count = ncfg_json_count(doc, facts);
+	if (!count) {
+		/* An explanation with no facts is a real answer: netcfgd knows the
+		 * name and has nothing to say about it. The caller distinguishes it
+		 * from a refusal by this returning 1. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, facts, i);
+		out->items[i].topic = member_text(doc, entry, "topic");
+		out->items[i].detail = member_text(doc, entry, "detail");
+		/* Absent rather than empty when a fact has no place -- the field is
+		 * `skip_serializing_if` on the wire -- so this is null and the view
+		 * decides what an empty cell looks like. */
+		out->items[i].source = member_text(doc, entry, "source");
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_secrets_free(ncfg_secrets_t *secrets)
 {
 	if (!secrets) {

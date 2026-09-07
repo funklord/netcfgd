@@ -179,6 +179,18 @@ struct ncfg_interface_config {
 };
 
 /* One credential, by name and never by value. */
+/* One statement in an explanation, as a view draws it. */
+struct ncfg_explain_row {
+	/* `desired`, `observed`, `ownership`, `guard`, `drift`, `next`. Not an
+	 * enum: the daemon owns this vocabulary and a client that mapped it to a
+	 * fixed set would drop a topic added later rather than showing it. */
+	QString topic;
+	QString detail;
+	/* Empty where the fact has no place -- "the kernel says so" is a source
+	 * with nothing to open. */
+	QString source;
+};
+
 struct ncfg_secret_row {
 	QString name;
 	bool    stored = false;
@@ -539,6 +551,14 @@ public:
 	 * (0042) -- so a view offering this owns the confirmation. Ask `tiers()`
 	 * before offering it at all. */
 	bool secret_delete(const QString &name, QString *error);
+
+	/* Why is this interface the way it is. Needs `observe`.
+	 *
+	 * **The question no other client of this daemon can answer.** `links()`
+	 * says what is; this says which line of which file asked for it, what the
+	 * kernel reports, and what netcfgd would do next. A window with the first
+	 * and not the second is a prettier `ip addr`. */
+	bool explain(const QString &interface, QList<ncfg_explain_row> *out, QString *error);
 	bool saved_networks(QList<ncfg_saved_network_row> *out, QString *error);
 	bool dns(ncfg_dns_row *out, QString *error);
 	/*
