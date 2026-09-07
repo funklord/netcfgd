@@ -309,6 +309,83 @@ check "stopping one that is already stopped is not an error" \
 
 settle
 
+# ------------------------------------------------- adopting what cannot answer
+
+# **A daemon on its way out is netcfgd's by every marker and no use to it.** A
+# tunnel told to stop unlinks its management socket and its pid file, and then
+# takes its time over the rest. For that time the process is alive, carries the
+# socket path in its own argv, and cannot be reached through it.
+#
+# Adoption used to take it. netcfgd wrote that pid down, reported the tunnel
+# started and started nothing -- so the daemon finished exiting, the next apply
+# found a dead pid, and `nothing to do` is what it said about a tunnel that was
+# never there. That is the second signature the note above `settle` describes,
+# and it is what made the refusal check fail about one run in three: a stop
+# waits for the socket to go, and the process outlives it.
+#
+# Waiting for a race is not a test of it, so the fake is asked for the window
+# rather than raced for it. `FAKE_OPENVPN_EXIT_DELAY` is the same kind of knob
+# as `FAKE_OPENVPN_BIND_DELAY` at the other end of the life: it holds the
+# daemon in the state netcfgd gets confused by, every run.
+cat > "$work/etc/netcfgd.conf" <<CONF
+device vpn0 {
+	openvpn { config = "$work/etc/work.ovpn" }
+}
+CONF
+FAKE_OPENVPN_EXIT_DELAY=3 "$ncfg" apply > /dev/null 2>&1 || true
+waited=0
+while [ ! -S "$work/run/openvpn/vpn0.sock" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+doomed=$(cat "$work/run/openvpn/vpn0.pid" 2>/dev/null || echo 0)
+
+# Stop it. The daemon lets go of the socket and stays alive.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+device vpn0 { kind = "dummy" }
+interface vpn0 { config = "null" }
+CONF
+"$ncfg" apply > /dev/null 2>&1 || true
+waited=0
+while [ -S "$work/run/openvpn/vpn0.sock" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+check "the stopped tunnel has let go of its socket" \
+	"$([ -S "$work/run/openvpn/vpn0.sock" ] && echo yes || echo no)" "no"
+# The control. Without a live process carrying the marker there is nothing to
+# adopt, and every check below would pass on a machine where this window never
+# opened -- which is the shape of a test that has quietly stopped asking.
+check "and is still running, which is the window this is about" \
+	"$(still_running "$doomed" && echo yes || echo no)" "yes"
+
+cat > "$work/etc/netcfgd.conf" <<CONF
+device vpn0 {
+	openvpn { config = "$work/etc/work.ovpn" }
+}
+CONF
+"$ncfg" apply > "$work/unreachable.txt" 2>&1 || true
+check "a daemon that cannot be reached is not adopted" \
+	"$(grep -c 'adopted the OpenVpn backend' "$work/unreachable.txt" || true)" "0"
+# Declining costs nothing here *because* the marker is the socket: unreachable
+# means the path is free, so the replacement binds where the one that is leaving
+# cannot.
+waited=0
+while [ ! -S "$work/run/openvpn/vpn0.sock" ]; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+check "a tunnel that can be reached is started in its place" \
+	"$([ -S "$work/run/openvpn/vpn0.sock" ] && echo yes || echo no)" "yes"
+check "and it is a different process, not the one that was leaving" \
+	"$([ "$(cat "$work/run/openvpn/vpn0.pid" 2>/dev/null || echo 0)" = "$doomed" ] \
+		&& echo same || echo different)" "different"
+
+settle
+
 # --------------------------------------------------------------- credentials
 
 # A server that wants a username and password. OpenVPN has no indirection for

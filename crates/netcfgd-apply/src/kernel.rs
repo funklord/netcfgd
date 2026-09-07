@@ -2600,17 +2600,43 @@ fn client_pid_path(program: &str, iface: &str) -> Result<std::path::PathBuf, Str
 /// every marker and worthless to it, and adopting one takes the radio away from
 /// a manager that could have driven it.
 ///
-/// Only the supplicant is checked, because it is the only kind where netcfgd
-/// has a cheap, non-destructive question to ask and where the failure is known
-/// to happen. For everything else this answers `true`: the alternative is
-/// inventing a liveness probe per backend on no evidence, and a probe that has
-/// never seen its failure is one nobody should trust.
+/// **A daemon on its way out is netcfgd's by every marker too**, which is how
+/// openvpn joined the supplicant here. A tunnel that has been told to stop
+/// unlinks its management socket and then exits, and in the window between
+/// those two the process is alive, carries the socket path in its own argv, and
+/// cannot be reached through it. `tests/live/openvpn.sh` hit that window in
+/// about one run in three: netcfgd adopted the corpse, wrote its pid down,
+/// reported the tunnel started -- and started nothing, so the next apply found
+/// a dead pid and said there was nothing to do. A stop that was meant to be
+/// refused was never asked for.
+///
+/// For openvpn the two questions are one question, which is what makes the
+/// probe cheap and safe: the marker *is* the management socket. Unreachable
+/// therefore means the path is free, so declining to adopt hands the caller a
+/// `start` that cannot collide with what is still exiting.
+///
+/// Everything else answers `true`. The alternative is inventing a liveness
+/// probe per backend on no evidence, and a probe that has never seen its
+/// failure is one nobody should trust -- which is why this grew by one kind,
+/// when that kind's failure was reproduced, rather than by six at once.
+///
+/// Decision 0170. Not the reachability probe 0158 turned down: that one was
+/// offered against an *impostor*, and a probe cannot answer whose a process is.
 #[must_use]
 fn backend_is_reachable(kind: netcfgd_model::BackendKind, iface: &str) -> bool {
-	if kind != netcfgd_model::BackendKind::Supplicant {
-		return true;
+	use netcfgd_model::BackendKind;
+	match kind {
+		BackendKind::Supplicant => {
+			netcfgd_supplicant::answers(&netcfgd_supplicant::ctrl_dir(), iface)
+		}
+		// Connect and drop it. No command is sent: the connect is the whole
+		// question, and `Management::command` would cost a round trip in an
+		// apply for an answer this does not read.
+		BackendKind::OpenVpn => {
+			openvpn::Management::connect(&openvpn::socket_path(&run_dir_path(), iface)).is_ok()
+		}
+		_ => true,
 	}
-	netcfgd_supplicant::answers(&netcfgd_supplicant::ctrl_dir(), iface)
 }
 
 /// Where a daemon netcfgd started records its pid, and what marks it as that

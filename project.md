@@ -9457,6 +9457,66 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.57 The intermittent that a workaround had already diagnosed
+
+`make live` failed one check in `openvpn.sh`, and it had been failing about
+one run in three for long enough that the script's own comments describe the
+mechanism:
+
+    FAIL a daemon that refuses to stop is reported, not recorded as stopped
+           expected: 1
+           actual:   0
+
+The apply that should have printed a refusal said `nothing to do`.
+Instrumented, the apply *before* it had said:
+
+    netcfgd: adopted the OpenVpn backend already running on vpn0 (pid 21748)
+
+pid 21748 was the tunnel the previous section had stopped: it had unlinked
+its management socket and its pid file and had not yet exited. netcfgd
+adopted it, wrote its pid down, reported the tunnel started, and started
+nothing. The daemon then finished exiting, so the next apply found a dead pid
+and had nothing to stop. Decision 0170; the fix is one arm in
+`backend_is_reachable`, connecting to the socket the marker names.
+
+**The diagnosis was already written down, as a property of the test.** The
+note above `settle()` in that script says a leftover "that had already
+removed its socket made netcfgd adopt it and bind no socket at all, so a
+teardown found nothing running and planned nothing -- which is the `nothing
+to do` the refusal check reported for months." Every word of that is about
+netcfgd. It reads as a note about test hygiene because it sits beside the
+function that works around it, and `settle` between sections is what kept it
+off the other checks -- so the workaround both fixed the symptom everywhere
+it was applied and removed the pressure to look at the one place it was not.
+
+**A workaround that names its cause is a finding filed in the wrong place.**
+The cheap discriminator, and it costs one sentence: read the note and ask
+whose behaviour it describes. If the answer is the code under test, the note
+belongs to the code and the workaround is a deadline, not a fix.
+
+**And waiting for a race is not testing it.** The regression check asks the
+fake for the window rather than racing it -- `FAKE_OPENVPN_EXIT_DELAY` holds
+the daemon between letting go and being gone, the same kind of knob
+`FAKE_OPENVPN_BIND_DELAY` already is at the other end of its life. Two
+controls sit above the assertions, because without a live process carrying
+the marker every one of them would pass on a machine where the window never
+opened: the section asserts the stopped tunnel has let go of its socket *and
+is still running* before it asks anything about adoption.
+
+Reverted, the check names the fault -- `a daemon that cannot be reached is
+not adopted`, expected 0, actual 1 -- and two consequences fail beneath it.
+With it, eight consecutive runs of `openvpn.sh` and no failures.
+
+**The first fix was in the wrong layer and the deterministic case is what
+said so.** The scenario was first built by deleting the pid file underneath a
+live daemon, which looks like the same state and is not: with no pid file
+`read_backend_liveness` answers "cannot tell", leaves the record saying
+running, and the planner emits no start at all -- so adoption never runs and
+the fix could not have been exercised either way. It passed with the fix and
+failed without it for a reason that had nothing to do with the fix. Making
+the fake produce the *real* window is what put the check on the code it was
+written for.
+
 ## 10.56 The switcher masked the supplicant NetworkManager needs
 
 Reported from the holder's machine, hours after 10.52 shipped: *"now I cannot

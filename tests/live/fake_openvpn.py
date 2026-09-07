@@ -65,6 +65,17 @@ def serve(path, log, pid_file=None):
 							os.unlink(path)
 						if pid_file and os.path.exists(pid_file):
 							os.unlink(pid_file)
+						# **The window between letting go and being gone.**
+						# A real daemon takes time over the rest of its
+						# shutdown, and for that time it is alive, carries
+						# netcfgd's socket path in its own argv, and cannot be
+						# reached through it. Whoever looks for it by marker
+						# finds a process that is no use to them. Timing
+						# again, not protocol: `FAKE_OPENVPN_BIND_DELAY` asks
+						# for the window at the other end for the same reason.
+						leaving = os.environ.get("FAKE_OPENVPN_EXIT_DELAY")
+						if leaving:
+							time.sleep(float(leaving))
 						os._exit(0)
 				elif command == "state":
 					conn.sendall(b"1,CONNECTED,SUCCESS,10.8.0.2,,\r\nEND\r\n")
