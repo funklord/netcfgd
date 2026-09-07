@@ -55,12 +55,20 @@ PRE_TARGETDEPS += $$CLIENT_LIB
 # and `gui` skipping in `make check` when their tool is missing -- a gate that
 # demands a tool nobody has is a gate people delete.
 #
-# QTTY_ROOT may be passed in; otherwise a sibling checkout is looked for. The
-# library is *not* vendored, which is a departure from harmonization.md's soft
-# default and is recorded in gui/project.md rather than left to be noticed:
-# pinning a pre-alpha API in a submodule buys a bump every time it moves, and
-# netcfgd's GUI is not in the root build yet either.
-isEmpty(QTTY_ROOT): QTTY_ROOT = $$PWD/../../qtty
+# **Vendored as a submodule at the repository root**, which is
+# harmonization.md's soft default and what every sibling here does --
+# monocypher and flog in fuzzypickles, vterm in beerssh, ossacli in raidcfgd.
+# netcfgd's first submodule. What it buys against a live sibling checkout is
+# that a build is reproducible: the pin says which qtty this was built
+# against, and qtty is pre-alpha, so "whatever is next door" is a moving
+# target rather than a stable one. What it costs is a bump each time qtty
+# moves, which is the ordinary price and is paid deliberately.
+#
+# A sibling checkout can still be used
+# by passing QTTY_ROOT=, which is what a qtty developer testing a change
+# against netcfgd wants -- but the default is the pinned one, so an ordinary
+# build is reproducible rather than dependent on whatever is next door.
+isEmpty(QTTY_ROOT): QTTY_ROOT = $$PWD/../qtty
 exists($$QTTY_ROOT/qtty.pri) {
 	isEmpty(QTTY_LIB_DIR): QTTY_LIB_DIR = $$QTTY_ROOT/build/lib
 	exists($$QTTY_LIB_DIR/libqtty.a) {

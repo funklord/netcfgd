@@ -40,7 +40,28 @@ all: $(TARGET)
 $(CLIENT_LIB):
 	$(MAKE) -C $(CLIENT_DIR) DEBUG=$(DEBUG) SANITIZE=$(SANITIZE)
 
-$(TARGET): $(CLIENT_LIB) gui.pro $(wildcard src/*.cpp src/*.h)
+# qtty, vendored as a submodule at the repository root, which is where every
+# sibling here puts one -- monocypher and flog in fuzzypickles, vterm in
+# beerssh, ossacli in raidcfgd.
+#
+# **Built if the submodule is checked out, skipped if it is not.** A clone
+# without `--recurse-submodules` leaves an empty directory, and `gui/` has to
+# keep building there: the TUI is what goes missing, not the GUI. Asked on
+# every build for the same reason the client library is -- a stale libqtty.a
+# against moved headers is the same debugging session, and qtty is pre-alpha.
+QTTY_DIR = ../qtty
+QTTY_LIB = $(QTTY_DIR)/build/lib/libqtty.a
+
+.PHONY: qtty
+qtty:
+	@if [ -f $(QTTY_DIR)/qtty.pro ]; then \
+		$(MAKE) -C $(QTTY_DIR); \
+	else \
+		echo "gui: $(QTTY_DIR) is empty -- run 'git submodule update --init'"; \
+		echo "gui:   for the terminal frontend. Building the GUI only."; \
+	fi
+
+$(TARGET): $(CLIENT_LIB) qtty gui.pro $(wildcard src/*.cpp src/*.h)
 	@mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(QMAKE) ../gui.pro
 	$(MAKE) -C $(BUILD_DIR)

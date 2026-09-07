@@ -356,13 +356,29 @@ without it 614,264 bytes, no `NETCFGD_QTTY`, no flag, and the same GUI as
 before. That is the same shape as `deny` and `gui` skipping in `make check`
 when their tool is absent.
 
-**Not vendored, which departs from `harmonization.md`'s soft default**, and is
-recorded here rather than left to be noticed. Pinning a pre-alpha API in a
-submodule buys a bump every time it moves, and `gui/` is not in the root build
-yet either. `QTTY_ROOT` may be passed in; otherwise a sibling checkout is
-looked for. **Whether to vendor is the copyright holder's**, and the cost of
-not doing it is the ordinary one: a build against whatever the sibling
-checkout happens to be.
+**Vendored as a submodule at the repository root**, on the holder's
+instruction and following `harmonization.md`'s soft default -- which is also
+what every sibling does: `monocypher` and `flog` in fuzzypickles, `vterm` in
+beerssh, `ossacli` in raidcfgd, all at the root and named for the project.
+**This is netcfgd's first submodule**, so it sets the pattern rather than
+following a local one.
+
+What it buys is that a build says which qtty it was built against. qtty is
+pre-alpha, so a live sibling checkout is a moving target and "it worked
+yesterday" would be a statement about somebody else's working tree. What it
+costs is a bump whenever qtty moves, which is the ordinary price of pinning
+and is paid deliberately.
+
+`QTTY_ROOT=` still overrides it, which is what a qtty developer testing a
+change against netcfgd wants; the default is the pin.
+
+`gui/Makefile` builds the submodule the way it builds `client/`: asked on
+every build rather than assumed, because a stale `libqtty.a` against moved
+headers is the same debugging session the client library's comment describes.
+**A clone without `--recurse-submodules` leaves the directory empty and is
+handled rather than failing** -- the Makefile says which command to run and
+builds the GUI without the terminal frontend, which is the same
+tool-is-absent shape as the detection above.
 
 **One thing to know before trusting a build.** qtty's tree carries several
 build directories and two of them -- `build-g` and `build-w` -- are policy
