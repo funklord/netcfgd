@@ -424,9 +424,13 @@ came out **byte-for-byte identical**. Only the identical size gave it away.
 **A variant that exists in the compiler's arguments and nowhere else reports
 whatever the plain build reports.**
 
-This is signalled to `claude-guidelines` as a standard for the Qt trees --
-netcfgd, fuzzypickles, hydra and beerssh are all Qt Widgets applications and
-the question arrives identically in each.
+Signalled as **`claude-guidelines`' *Open signals*, "A Qt Widgets application
+gets its TUI for free, and splitting the binary buys nothing"** -- naming the
+entry rather than asserting the act, which is what `harmonization.md` asks
+for and is checkable. It is a signal because netcfgd, fuzzypickles, hydra and
+beerssh are all Qt Widgets applications and the question arrives identically
+in each; whether it becomes a convention is a deliberate cross-project pass's
+to decide, not this tree's.
 
 ## 8. Order of work
 
