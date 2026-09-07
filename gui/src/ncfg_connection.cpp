@@ -1121,6 +1121,27 @@ bool ncfg_connection::wifi_forget(const QString &id, QString *error)
 	return true;
 }
 
+bool ncfg_connection::secret_delete(const QString &name, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray which = name.toUtf8();
+
+	if (!ncfg_client_secret_delete(client, which.constData(), message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::confirm(QString *error)
 {
 	if (!client) {

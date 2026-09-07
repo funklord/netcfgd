@@ -1898,6 +1898,56 @@ static void an_unreachable_daemon_says_what_to_do(void)
 	   err);
 }
 
+/*
+ * Removing a credential names it and carries nothing else.
+ *
+ * **The message is the whole of the bound.** `secret_delete` is `admin` and
+ * the protocol says that is all that guards it: no `replace` to withhold, no
+ * second question, because replacing is recoverable by whoever knows the value
+ * and removing is not (0042). So what this pins is that the request cannot
+ * grow a field -- a value, a path, a flag -- without somebody noticing here.
+ *
+ * And that a name is quoted rather than interpolated: `ncfg_client_quote`
+ * exists because a name is not guaranteed to be a bare word, and a client that
+ * built this with `snprintf("%s")` would send a broken line for a name with a
+ * quote in it.
+ */
+static void removing_a_secret_names_it_and_nothing_else(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	static char sent[65536];
+
+	if (!staged_open(&staged, "a secret can be removed",
+	         "{\"response\":\"ok\"}\n{\"response\":\"ok\"}\n")) {
+		return;
+	}
+
+	if (ncfg_client_secret_delete(staged.client, "corp-ca", err, sizeof(err))) {
+		equals("removing a credential carries its name and nothing else",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"secret_delete\",\"name\":\"corp-ca\"}\n");
+	} else {
+		ok("removing a credential carries its name and nothing else", 0, err);
+	}
+
+	if (ncfg_client_secret_delete(staged.client, "say \"hello\"", err, sizeof(err))) {
+		equals("and a name that is not a bare word is quoted",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"secret_delete\",\"name\":\"say \\\"hello\\\"\"}\n");
+	} else {
+		ok("and a name that is not a bare word is quoted", 0, err);
+	}
+
+	/* No round trip for an empty name: there is nothing to ask about, and a
+	 * request carrying "" would be a client asking the daemon to decide
+	 * something the client already knows. */
+	ok("an empty name is refused here rather than sent",
+	   !ncfg_client_secret_delete(staged.client, "", err, sizeof(err)), err);
+
+	staged_close(&staged);
+}
+
 int main(int argc, char **argv)
 {
 	/* `--facts OUT WITNESS`: the conformance dump, not the test run. */
@@ -1934,6 +1984,7 @@ int main(int argc, char **argv)
 	a_refused_stream_says_which_tier_it_wanted();
 	freeing_what_was_never_filled_in_is_nothing();
 	a_kind_the_kernel_gave_wins_over_the_name();
+	removing_a_secret_names_it_and_nothing_else();
 	an_unreachable_daemon_says_what_to_do();
 
 	printf("\n");

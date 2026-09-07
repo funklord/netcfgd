@@ -530,6 +530,15 @@ public:
 	 * one with short of naming `wifi-<id>` -- netcfgd's own filing, which is
 	 * exactly what 0127 keeps out of a client. */
 	bool wifi_forget(const QString &id, QString *error);
+
+	/* Remove a stored credential, by name.
+	 *
+	 * **`admin`, and the protocol says that is the whole of what guards it.**
+	 * There is no `replace` to withhold and no second question, because
+	 * replacing is recoverable by whoever knows the value and removing is not
+	 * (0042) -- so a view offering this owns the confirmation. Ask `tiers()`
+	 * before offering it at all. */
+	bool secret_delete(const QString &name, QString *error);
 	bool saved_networks(QList<ncfg_saved_network_row> *out, QString *error);
 	bool dns(ncfg_dns_row *out, QString *error);
 	/*

@@ -1187,6 +1187,21 @@ int ncfg_client_wifi_disconnect(ncfg_client_t *client, const char *interface, ch
 int ncfg_client_wifi_forget(ncfg_client_t *client, const char *id, char *err, size_t err_size);
 
 /*
+ * Remove a stored credential, by name.
+ *
+ * **`admin`, and that is the whole of what guards it.** The protocol says so
+ * where the request is defined: unlike a store, this refuses nothing and asks
+ * nothing twice, because replacing is recoverable by whoever knows the value
+ * and removing is not (0042). A caller offering a button for it owns the
+ * confirmation.
+ *
+ * An absent name is success, as it is for the daemon: the state asked for is
+ * the state that resulted.
+ */
+int ncfg_client_secret_delete(ncfg_client_t *client, const char *name, char *err,
+                  size_t err_size);
+
+/*
  * What an operator has agreed to, beyond the plan itself.
  *
  * Two lists and never a flag, which is netcfgd's own shape: `ncfg` spells these

@@ -2860,6 +2860,39 @@ int ncfg_client_wifi_forget(ncfg_client_t *client, const char *id, char *err, si
 	return done;
 }
 
+int ncfg_client_secret_delete(ncfg_client_t *client, const char *name, char *err,
+                  size_t err_size)
+{
+	if (!name || !*name) {
+		set_error(err, err_size, "no credential to remove");
+		return 0;
+	}
+
+	char request[512];
+	int head = snprintf(request, sizeof(request), "{\"request\":\"secret_delete\",\"name\":");
+	if (head < 0 || (size_t)head >= sizeof(request)) {
+		set_error(err, err_size, "credential name is too long to ask about");
+		return 0;
+	}
+	size_t at = (size_t)head;
+	size_t span = ncfg_client_quote(name, request + at, sizeof(request) - at);
+	if (!span || at + span + 2 > sizeof(request)) {
+		set_error(err, err_size, "credential name is too long to ask about");
+		return 0;
+	}
+	at += span;
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
 int ncfg_client_wifi_disconnect(ncfg_client_t *client, const char *interface, char *err,
                 size_t err_size)
 {

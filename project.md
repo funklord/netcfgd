@@ -9457,6 +9457,81 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.62 The credentials tab could name a fault and not fix it
+
+The same shape as 10.59's saved-networks table, found by the same
+enumeration and worth recording separately because the *reason* it was
+read-only was a good one that had stopped applying.
+
+`secrets_view.h` says storing a credential here would be "a value in a process
+that did not need to hold one", and that is right: no value crosses the socket
+in this direction, and `ncfg_secret_row` has no field that could carry one. So
+the view is read-only, deliberately.
+
+**But removing carries no value, only a name.** The view's own subject is the
+credential nothing refers to -- "stored, unused", which its header calls "a
+credential still on the machine after whatever wanted it was deleted" -- and
+its note answered that with *"removing the file is how a machine forgets it"*:
+a client told to go behind the socket, which is the one thing 0127 exists to
+stop. `Request::SecretDelete` has been served all along.
+
+**A rule with a reason attached is easy to over-apply**, and this is the
+cheap check for it: ask what the reason forbids rather than what the rule
+says. "No value in this process" forbids a text field. It says nothing about a
+button that sends a name.
+
+### What the protocol said to do about it
+
+The request's own documentation carried the instruction:
+
+> What guards it is the `admin` tier and nothing else, which is worth knowing
+> before a client offers a button for it.
+
+So the button is off without `admin` and says which tier in its tooltip, and
+the confirmation is the strong one 0042 asks for -- a private key nobody has a
+copy of cannot be got back, and unlike a store there is no `replace` to
+withhold and no second question from the protocol.
+
+**Two questions in one, chosen by the row.** A credential nothing refers to is
+the tidy case. One something still refers to is a network that will stop
+joining -- so the question names what refers to it rather than warning in the
+abstract, and it is still offered, because rotating a credential means
+removing the old one while the reference stays.
+
+**MISSING rows are not offered at all.** A name the configuration refers to
+and the store does not hold has no file to remove, and a live button there
+would be offering to fix the wrong half of the fault.
+
+### The probe, and what it deliberately cannot assert
+
+`gui/tests/live/live_secrets.cpp` is the fifth live GUI probe and needed no
+edit to `gui_wifi.sh`: that runner finds every `.pro` in the directory, which
+its own comment promised and this is the first time anything tested.
+
+It never reads a value, because nothing in this direction can. What it asserts
+instead is the **store's** answer through the daemon -- listed, then not --
+rather than the table's, so that "the row went" and "the credential went" stay
+two claims. A view that stopped drawing a row it still held would pass the
+first and fail the second.
+
+Cancel is pressed before Yes, for the reason the wifi probe learned the hard
+way: a probe that only ever answers Yes passes with the dialog deleted.
+
+    reverted                        which check goes red
+    the confirmation bypassed       "answering no keeps the credential"
+    the call to the daemon removed  "answering yes removes it from the store"
+                                    and "and the view says so"
+
+### An intermittent seen in passing, not chased
+
+During one sabotage run `live_wifi` failed "activating scans straight away, so
+the table is already filled" and "and pressing scan again refills it", and
+passed them on every other run of the day. Nothing in `secrets_view` can reach
+the wifi scan, so this is that probe's own timing rather than anything the
+sabotage did. Recorded rather than investigated: an intermittent named in a
+document is one the next person can recognise instead of rediscovering, and
+non-reproduction is not evidence against it.
+
 ## 10.61 The build fetches what it needs, and the package puts its unit in force
 
 *"Submodules should be handled automatically by makefiles, same with
