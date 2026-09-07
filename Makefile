@@ -892,6 +892,11 @@ packaging:
 	@# nothing to clean up. It also refuses to name a program netcfgd runs
 	@# itself, which would be netcfgd disabling its own tools. 0168.
 	@python3 tool/select_gate.py
+	@# `kill %1` needs job control, which a non-interactive shell does not
+	@# have, so it does nothing and reads as cleanup. Four netcfgd daemons
+	@# outlived their probes that way before this existed, and the leak
+	@# surfaces an hour later as somebody else's confusing failure.
+	@python3 tool/probe_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \

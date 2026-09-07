@@ -860,6 +860,20 @@ and every script under `tests/live/` already does, which is why none of them
 leaked; the four that did were throwaway heredocs, and being throwaway is what
 kept them from being read as carefully.
 
+**`tool/probe_gate.py` refuses it now**, in `make check`: no `kill %N` or
+`wait %N` in a live script, and no script that backgrounds a daemon without
+reading `$!`. It reports what it inspected -- 60 scripts, 33 of which
+background one -- and refuses to pass over an empty population, since a gate
+that found no scripts would announce success in the same words. All three
+checks were made to fail before it was wired in.
+
+The second check is the property and the first is one symptom of it; the
+second is also a heuristic and says so, because what it cannot see is whether
+the pid captured is the *right* one. It names the daemons rather than
+flagging every `&`, or a script backgrounding a `sleep` it never means to
+reap would need an exception -- and a gate carrying exceptions has been
+switched off by instalments.
+
 **They were found by the orphan check rather than by anything going wrong**,
 which is the argument for running `ps --ppid 1`, `df` and `lsof +L1` after
 every suite rather than when something looks broken. And they were identified
