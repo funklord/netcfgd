@@ -1437,6 +1437,10 @@ live:
 	@# every process on the machine, and the test would terminate the
 	@# developer's real NetworkManager or dhclient.
 	@NCFG_LIVE=1 sh tests/live/resolv_defended.sh
+	@# The switcher's systemd paths, driven with a recording systemctl on a
+	@# machine that has none. Bare, because it makes its own mount namespace
+	@# to put a tmpfs over /run.
+	@NCFG_LIVE=1 sh tests/live/select.sh
 	@# The other daemon-driven hook: a roam is wpa_supplicant's decision and
 	@# reaches netcfgd on its event socket, so no apply can exercise it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/roam.sh"

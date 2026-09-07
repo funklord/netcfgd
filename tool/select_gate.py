@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """Every manager `netcfgd_select.sh` names is one it can actually act on.
 
+**And nothing that is merely a tool is treated as a manager.** That
+distinction is the one this gate exists for now: `wpa_supplicant.service`
+sat in the `managers` list once, so every selection masked it -- including
+the one that selects NetworkManager, which cannot scan without it. netcfgd
+never wants the service (it spawns the binary with its own marker), so
+nothing in this tree would have noticed at runtime, and a real machine ended
+with no daemon able to use its radio.
+
 The switcher keeps four facts about each network daemon -- its name in the
 `managers` list, the units that start it, the runtime claim it leaves and the
 children it abandons -- and three of those live in `case` arms. A manager
@@ -87,6 +95,34 @@ def main() -> int:
 	failures = 0
 
 	units = arms(text, "unit_of")
+
+	# **The regression that broke a machine, refused statically.**
+	# `wpa_supplicant.service` in `managers` means every selection masks it,
+	# including the one that selects NetworkManager -- which cannot scan
+	# without it. netcfgd never wants the service, so nothing here would have
+	# noticed at runtime. A radio or a tool is not a manager.
+	for entry in ("supplicant", "iwd", "dhcpcd", "modemmanager", "resolved"):
+		if entry in managers:
+			print(f"select-gate: {entry} is in `managers`, so every selection masks it")
+			print("select-gate:   it is a radio or a tool a manager drives, not a rival")
+			failures += 1
+
+	# Everything a manager declares needing has to be a radio or a tool this
+	# script knows how to start.
+	known = set(
+		(re.search(r"^radios='([^']*)'", text, re.MULTILINE) or [None, ""]).__getitem__(1).split()
+	) | set(
+		(re.search(r"^tools='([^']*)'", text, re.MULTILINE) or [None, ""]).__getitem__(1).split()
+	)
+	for line in body(text, "needs_of").splitlines():
+		wanted = re.match(r"\s*[a-z|]+\) echo '([^']*)'", line)
+		if not wanted:
+			continue
+		for service in wanted.group(1).split():
+			if service not in known:
+				print(f"select-gate: needs_of names {service}, which is not a radio or a tool")
+				failures += 1
+
 	for manager in managers:
 		if manager not in units:
 			print(f"select-gate: {manager} is in `managers` and has no unit_of arm,")
@@ -100,13 +136,18 @@ def main() -> int:
 			print("select-gate:   missing from it is a shell error rather than a decision")
 			failures += 1
 
-	# Everything `unit_of` can name has to be reachable by `unmask_all`, which
-	# walks the same list -- so the check is that `none` uses that list rather
-	# than a second copy of it.
-	if "for manager in $managers" not in body(text, "unmask_all"):
-		print("select-gate: unmask_all does not walk `managers`, so `none` can")
-		print("select-gate:   leave masked whatever the second list forgot")
-		failures += 1
+	# **`none` has to reach every list, not only the managers.** A machine
+	# masked by the version that conflated managers with the tools they drive
+	# still has `wpa_supplicant.service` masked, and `none` is the recovery --
+	# so it walks the radios and tools too, whether or not the current code
+	# would ever mask them. Checked against the lists rather than a literal
+	# loop, so rewriting the loop does not silently drop one.
+	unmasking = body(text, "unmask_all")
+	for name in ("managers", "radios", "tools"):
+		if f"${name}" not in unmasking:
+			print(f"select-gate: unmask_all does not walk `{name}`, so `none` cannot")
+			print("select-gate:   recover a machine where one of them was masked")
+			failures += 1
 
 	for tool in DELEGATED:
 		if re.search(rf"^\t[a-z]+\) echo .*\b{tool}\.service", text, re.MULTILINE):

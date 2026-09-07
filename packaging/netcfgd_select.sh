@@ -114,8 +114,53 @@ say() { echo "$me: $*"; }
 # belong together, and a list that has to be edited in three places is how the
 # fourth entry ends up with two of them.
 # ---------------------------------------------------------------------------
-managers='netcfgd networkmanager networkd connman modemmanager resolved
-supplicant iwd dhcpcd ifupdown wicd'
+# **Managers compete for interfaces. Tools are what a manager drives.**
+# Conflating the two is the defect this file shipped with, and it broke a
+# machine: `wpa_supplicant.service` was in one list with the managers, so
+# selecting *anything* masked it -- and NetworkManager does not talk to radios
+# itself, it drives wpa_supplicant over D-Bus. NM came up, showed the device
+# and found no networks. Selecting `networkmanager` broke NetworkManager.
+#
+# netcfgd was unaffected, which is exactly why the mistake was invisible from
+# here: it spawns the wpa_supplicant *binary* directly with its own
+# `-P /run/netcfgd/supplicant/<iface>.pid` and never wants the service. So the
+# machine ended with no daemon able to use the radio, which is 0145's outcome
+# reached by a new route.
+#
+# Only these compete for interfaces, and only these are ever masked.
+managers='netcfgd networkmanager networkd connman ifupdown wicd'
+
+# A radio is held exclusively by whoever has it, so at most one of these may
+# run -- but which one is a property of the *selected manager*, not something
+# to be stood down uniformly.
+radios='supplicant iwd'
+
+# Services a manager may need. Stopped when the selected manager does not want
+# them, **never masked**: masking is what makes a machine unrecoverable
+# without root and knowledge, and none of these is a rival.
+tools='dhcpcd modemmanager resolved'
+
+# What each manager needs running. netcfgd needs nothing here, and that is not
+# an oversight -- it starts wpa_supplicant, dhcpcd and the rest as *binaries*
+# with its own markers (0140), so a system service instance is a rival to it
+# rather than a dependency.
+#
+# systemd-resolved is in nobody's list. It is a DNS resolver and orthogonal to
+# which daemon configures interfaces; netcfgd only contends with it under
+# `dns_mode = "write_resolv_conf"`, which is what `netcfgd-exclusive.conf`
+# and 0165's sweep are for. Standing it down here would break a netcfgd
+# configured with `dns_mode = "resolved"` -- the arrangement 0007 recommends.
+needs_of() {
+	case "$1" in
+	networkmanager) echo 'supplicant modemmanager' ;;
+	networkd) echo 'supplicant' ;;
+	connman) echo 'supplicant' ;;
+	ifupdown) echo 'supplicant dhcpcd' ;;
+	wicd) echo 'supplicant' ;;
+	netcfgd) echo '' ;;
+	*) echo '' ;;
+	esac
+}
 
 # **netplan is deliberately not in that list, and is warned about instead.**
 # It is not a daemon and cannot be selected or stood down: it is a generator
@@ -366,13 +411,44 @@ bring_up() {
 	fi
 }
 
+# Everything this script knows about, not only the managers. A machine masked
+# by the version of this file that conflated the two lists still has
+# `wpa_supplicant.service` masked, and `none` is what has to get it back --
+# so this walks the radios and tools too, whether or not the current code
+# would ever have masked them.
 unmask_all() {
 	[ -d /run/systemd/system ] || return 0
-	for manager in $managers; do
-		for unit in $(unit_of "$manager"); do
+	for entry in $managers $radios $tools; do
+		for unit in $(unit_of "$entry"); do
 			run systemctl unmask "$unit"
 		done
 	done
+}
+
+# A service the selected manager does not want. **Stopped and disabled, never
+# masked.** It is not a rival, and a mask is what turns "not running" into
+# "cannot be started by anything that needs it".
+stand_aside() {
+	[ -d /run/systemd/system ] || return 0
+	for unit in $(unit_of "$1"); do
+		run systemctl stop "$unit"
+		run systemctl disable "$unit"
+		# Deliberately no `mask`. If this ever grows one, read the comment on
+		# `managers` first: that is the change that broke a machine.
+	done
+}
+
+# A service the selected manager needs. Unmasked first, because an earlier run
+# of this script -- or of the version that masked everything -- may have left
+# it that way.
+ensure_service() {
+	[ -d /run/systemd/system ] || return 0
+	for unit in $(unit_of "$1"); do
+		run systemctl unmask "$unit"
+	done
+	primary=$(unit_of "$1" | cut -d' ' -f1)
+	run systemctl enable "$primary"
+	run systemctl start "$primary"
 }
 
 # netplan has no daemon to stand down and its configuration outlives this.
@@ -405,16 +481,28 @@ none)
 	;;
 *)
 	say "selecting $target"
+
+	# 1. The rival managers. Only these are masked, because only these
+	#    compete for the interfaces.
 	for manager in $managers; do
 		[ "$manager" = "$target" ] && continue
-		# wpa_supplicant is a special case in one direction only: the SERVICE
-		# is a system-wide instance another manager drives, and netcfgd starts
-		# its own binary directly. Standing the service down never costs
-		# netcfgd a supplicant.
 		stand_down "$manager"
 	done
-	# Unmask the one being selected before starting it -- it may have been
-	# masked by an earlier run of this script choosing something else.
+
+	# 2. The radios and tools, decided by what the selected manager needs
+	#    rather than by which of them is the target. This is the half that
+	#    was wrong: standing every non-target entry down masked
+	#    wpa_supplicant.service for *every* selection, including the one that
+	#    selects NetworkManager -- which cannot scan without it.
+	wanted=$(needs_of "$target")
+	for service in $radios $tools; do
+		if echo " $wanted " | grep -q " $service "; then
+			say "$target needs $service"
+			ensure_service "$service"
+		else
+			stand_aside "$service"
+		fi
+	done
 	# **The persistence pass, and it runs after everything else.** Standing a
 	# service down and signalling what it left is enough on any ordinary
 	# machine; a program still running here has survived a stop, a disable, a

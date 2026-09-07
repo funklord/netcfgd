@@ -9457,6 +9457,56 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.56 The switcher masked the supplicant NetworkManager needs
+
+Reported from the holder's machine, hours after 10.52 shipped: *"now I cannot
+get wifi on netcfgd, nor NM, as NM doesn't even scan."*
+
+**`netcfgd_select.sh` kept managers and the tools they drive in one list**, and
+stood down everything that was not the selected target. `wpa_supplicant` was in
+it, so **every selection masked `wpa_supplicant.service`** -- including
+`netcfgd_select.sh networkmanager`, whose whole job is handing the machine
+back. NM does not talk to radios itself; it drives wpa_supplicant over D-Bus.
+Masked, NM starts, lists the device and finds no networks.
+
+**netcfgd was unaffected, which is exactly why nothing here saw it.** netcfgd
+spawns the `wpa_supplicant` *binary* with its own `-P` marker and never wants
+the service, so on a machine running netcfgd for wifi the mask costs nothing.
+On any other it leaves the radio with no daemon that can use it -- 0145's
+outcome by a new route, in code written after that record
+([0169](doc/decision/0169-a-manager-is-not-the-tools-it-drives.md)).
+
+**Two more of the same conflation, neither reported and both real.** Masking
+`systemd-resolved` breaks `dns_mode = "resolved"`, the arrangement 0007
+recommends; masking `ModemManager` takes NM's mobile broadband away. One
+error, three consequences, because the list was one list.
+
+**The correction is a distinction, not a special case.** A manager competes
+for interfaces and is masked; a radio or a tool is what a manager drives, is
+stopped when the selected manager does not want it, and is never masked.
+`needs_of` says which manager needs what, and netcfgd needs none of them.
+Masking is what makes a machine unrecoverable without root and knowledge, so
+it is reserved for what genuinely cannot coexist.
+
+**`none` now unmasks the radios and tools too**, whether or not the current
+code would ever mask them, because a machine broken by the shipped version
+still has the supplicant masked and `none` is its recovery.
+
+**What should have been written first is a harness, not a warning.** This was
+shipped with "every systemctl path is exercised only through `--dry-run`"
+stated plainly in three places -- the record, the commit message and the
+report to the holder -- and saying so did not stop it breaking a machine.
+`tests/live/select.sh` drives those paths on a machine with **no systemd**: a
+mount namespace, a tmpfs over `/run` so `/run/systemd/system` can exist, and a
+`systemctl` on `PATH` that records its arguments. It needed nothing this
+machine lacks. Putting the supplicant back among the managers turns three of
+its eight checks red.
+
+**Naming a gap is not the same as leaving it open deliberately.** The gap was
+named accurately and repeatedly, and the naming read as diligence while the
+untested code went to a real machine. A test that needs nothing you do not
+have is not a gap to declare; it is one to close.
+
 ## 10.52 Installing netcfgd now selects netcfgd
 
 Instructed by the copyright holder: *"when netcfgd is installed I want it to
