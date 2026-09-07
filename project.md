@@ -847,6 +847,27 @@ The packages are `cargo rust ncurses-dev make git iproute2 python3 util-linux pr
 
 **If a regression would make a test hang rather than fail, wrap it in `timeout`.** A stuck suite reports nothing, which is worse than a red one.
 
+**`kill %1` does nothing in a script, and looks exactly like cleaning up.** Job
+specs need job control, which is off in a non-interactive shell -- so a probe
+ending `kill %1` leaves its daemon running and is reparented to init. Four
+netcfgd daemons were found that way on 2026-09-07, aged 25 to 70 minutes, one
+per pty render probe written while adopting qtty. Every one of those probes
+also ran under `timeout`, which bounds the *foreground* command and not the
+daemon it backgrounded -- the same shape as the note above about a timeout
+around a container runner bounding the wrapper rather than the container.
+Capture the pid: `daemon=$!`, `trap 'kill "$daemon"' EXIT`. Every saved probe
+and every script under `tests/live/` already does, which is why none of them
+leaked; the four that did were throwaway heredocs, and being throwaway is what
+kept them from being read as carefully.
+
+**They were found by the orphan check rather than by anything going wrong**,
+which is the argument for running `ps --ppid 1`, `df` and `lsof +L1` after
+every suite rather than when something looks broken. And they were identified
+by artifact rather than by name -- each daemon's own `NCFG_RUN_DIR` named a
+scratch directory this session had created -- because killing netcfgd by
+binary path is what cost this workspace 76 processes once, most of them
+somebody else's.
+
 ### Known incompatibilities to carry forward
 
 - **A netifrc `preup` that checks link state deadlocks under netcfgd's ordering.** Rule 6 runs `pre_up` before `link.up`, and the kernel returns `EINVAL` for `carrier` on a down interface, so `mii-tool`/`ethtool` checks cannot work there — and net.example's canonical `preup` aborts on "no link", which then prevents the bring-up that would have produced the carrier. The ordering stays. The warning was to have lived in `ncfg convert`, which [0019](doc/decision/0019-no-importers-for-config-stores-that-rewrite-themselves.md) dropped, so the incompatibility is documented and nothing converts. [0011](doc/decision/0011-preup-runs-before-the-link-is-up.md).
