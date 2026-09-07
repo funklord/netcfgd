@@ -9284,6 +9284,59 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.55 The rename rung, and how little it can point at
+
+Built on the holder's instruction, after 0168 recorded it as declined. It is
+the third rung: stand the service down, kill what it left, and **if it is
+still there, rename the binary** so it cannot come back.
+
+**`dpkg-divert`, not `mv`.** A plain rename is undone by the next upgrade of
+the package that owns the file and shows up in `dpkg --verify` as damage: it
+would look like it worked and quietly stop, which is the failure class this
+tree keeps paying for. A diversion is a rename dpkg knows about, survives
+upgrades, and is removed by one command -- which is what lets `none` put the
+machine back. This machine already carries several, from `synaptic` and
+`util-linux-extra` to `sysvinit-core`, so it is an ordinary mechanism rather
+than a clever one.
+
+**Two binaries qualify, and that is the finding rather than a limitation.**
+netcfgd *runs* `wpa_supplicant`, `dhcpcd`, `hostapd`, `pppd`, `openvpn`,
+`udhcpc`, `odhcp6c` and `resolvconf`; `dnsmasq` and `unbound` are DNS
+backends 0007 offers as modes; and NetworkManager's package has to stay
+because desktop applets depend on it and reach netcfgd through the shim.
+Crossing those against the daemons that actually contest the network leaves
+`connmand` (connman's) and `dhclient` (isc-dhcp-client's, which NM and
+ifupdown start and netcfgd never does). **The daemons that fight netcfgd are
+overwhelmingly the ones it delegates to or impersonates**, so masking is the
+rung with teeth and this one is a genuine last resort.
+
+**It fires only on persistence**, which on any ordinary machine is never: a
+program still running after a stop, a disable, a mask and a `SIGTERM`. The
+check runs once after every manager has been stood down rather than inside
+each -- one manager's child is another's, and finding `dhclient` again under
+ifupdown having killed it under NetworkManager is two owners, not
+persistence.
+
+**Exercised rather than reasoned about.** A copy of `/bin/sh` named
+`connmand` was left running and the dry run produced the exact command and
+the corrected summary:
+
+    renaming /usr/sbin/connmand -- it stayed up through a stop, a mask
+      and a signal
+    would: dpkg-divert --add --rename --divert
+      /usr/sbin/connmand.netcfgd-disabled /usr/sbin/connmand
+
+**The summary used to lie in the case that matters.** It printed "no package
+was removed and no binary renamed" unconditionally -- true on every ordinary
+run and false exactly when the rung fires. A summary that cannot report the
+unusual outcome is worse than none, because it is read instead of
+`dpkg-divert --list`.
+
+`tool/select_gate.py` now refuses a divertible program with no path, one that
+netcfgd runs, and a list nothing undiverts -- each proven to fail. Its success
+line names the counts it inspected, since a gate over an empty divertible
+list would otherwise report success in the same words.
+
 ## 10.54 The suite had never run past its own preconditions here
 
 Running `make live` end to end after fixing 10.53 took four attempts, and each

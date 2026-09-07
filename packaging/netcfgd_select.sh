@@ -67,6 +67,9 @@ USAGE
 
 dry=
 target=
+# What the persistence pass renamed, so the summary can say so rather than
+# claiming nothing was. Empty on every ordinary run.
+renamed=
 for argument in "$@"; do
 	case "$argument" in
 	--dry-run) dry=yes ;;
@@ -199,6 +202,79 @@ children_of() {
 # netcfgd its own, which is what `is_netcfgds` below is for.
 
 # ---------------------------------------------------------------------------
+# The last resort: renaming a binary that will not stay down.
+#
+# **Only reached when standing the service down and killing the process was
+# not enough** -- masked, signalled, and still there. On a machine where that
+# never happens, nothing here ever runs, which is the intent.
+#
+# **`dpkg-divert`, not `mv`.** A plain rename is undone by the next upgrade of
+# the package that owns the file, and `dpkg --verify` reports it as damage; it
+# would look like it worked and quietly stop. A diversion is a rename dpkg
+# knows about, survives upgrades, and is removed by one command -- which is
+# what makes `none` able to put the machine back.
+#
+# **The list is short because almost nothing may be renamed**, and that is a
+# consequence of what netcfgd is rather than caution. netcfgd *runs*
+# wpa_supplicant, dhcpcd, hostapd, pppd, openvpn, udhcpc, odhcp6c and
+# resolvconf; dnsmasq and unbound are DNS backends 0007 offers as modes; and
+# NetworkManager's package has to stay because desktop applets depend on it
+# and reach netcfgd through netcfgd-nm. Diverting any of those breaks netcfgd
+# or the desktop rather than a competitor.
+#
+# What is left is a daemon netcfgd never invokes and nothing here depends on:
+#
+#     connmand   connman's daemon
+#     dhclient   isc-dhcp-client's, started by NetworkManager and ifupdown.
+#                netcfgd uses dhcpcd or udhcpc and never this.
+divertible_path() {
+	case "$1" in
+	connmand) echo /usr/sbin/connmand ;;
+	dhclient) echo /usr/sbin/dhclient ;;
+	*) echo '' ;;
+	esac
+}
+divertible='connmand dhclient'
+
+# Where a diverted binary goes. Named for netcfgd so that `dpkg-divert --list`
+# says who did it and why, which is the only trace an operator has to follow.
+diverted_name() { echo "$1.netcfgd-disabled"; }
+
+divert() {
+	program=$1
+	path=$(divertible_path "$program")
+	[ -n "$path" ] || return 0
+	[ -e "$path" ] || return 0
+	if ! command -v dpkg-divert >/dev/null 2>&1; then
+		say "$program will not stay down and there is no dpkg-divert here"
+		say "  a plain rename would be undone by the next package upgrade,"
+		say "  so nothing was renamed. Remove or mask $program by hand."
+		return 0
+	fi
+	if dpkg-divert --list "$path" 2>/dev/null | grep -q .; then
+		say "$path is already diverted"
+		return 0
+	fi
+	say "renaming $path -- it stayed up through a stop, a mask and a signal"
+	run dpkg-divert --add --rename --divert "$(diverted_name "$path")" "$path"
+	renamed="$renamed $path"
+}
+
+undivert() {
+	command -v dpkg-divert >/dev/null 2>&1 || return 0
+	for program in $divertible; do
+		path=$(divertible_path "$program")
+		[ -n "$path" ] || continue
+		# Only netcfgd's own diversions. Another package's -- and this machine
+		# has several, from synaptic to util-linux -- is not ours to undo.
+		if dpkg-divert --list "$path" 2>/dev/null | grep -q "netcfgd-disabled"; then
+			say "restoring $path"
+			run dpkg-divert --remove --rename "$path"
+		fi
+	done
+}
+
+# ---------------------------------------------------------------------------
 # Is this process ours, or somebody else's world?
 # ---------------------------------------------------------------------------
 
@@ -320,6 +396,10 @@ none)
 	# daemon removed must not be left unable to run any of them.
 	say "unmasking every network daemon and starting none"
 	unmask_all
+	# Diversions outlive the package that made them, so this is the one
+	# chance to undo them. A machine left with connmand renamed and netcfgd
+	# gone has a daemon that cannot start and nothing saying why.
+	undivert
 	say "nothing is running the network now. Start one, for example:"
 	say "  systemctl enable --now NetworkManager"
 	;;
@@ -335,10 +415,42 @@ none)
 	done
 	# Unmask the one being selected before starting it -- it may have been
 	# masked by an earlier run of this script choosing something else.
+	# **The persistence pass, and it runs after everything else.** Standing a
+	# service down and signalling what it left is enough on any ordinary
+	# machine; a program still running here has survived a stop, a disable, a
+	# mask and a SIGTERM, which is the "if they still persist" case.
+	#
+	# Checked once, after all the managers, rather than inside stand_down:
+	# one manager's child is another's, and killing dhclient while standing
+	# NetworkManager down then finding it again under ifupdown is not
+	# persistence, it is two owners.
+	for program in $divertible; do
+		for pid in $(pgrep -x "$program" 2>/dev/null || true); do
+			is_netcfgds "$pid" && continue
+			in_our_netns "$pid" || continue
+			divert "$program"
+			# Signal it again now the binary cannot come back. Without this
+			# the running copy stays up until something restarts it, which is
+			# exactly what will not happen any more.
+			run kill "$pid"
+			break
+		done
+	done
+
 	bring_up "$target"
 	warn_about_netplan
 	say "$target is now this machine's network daemon"
-	say "  no package was removed and no binary renamed"
+	# **Said only when it is true.** The first version printed "no binary
+	# renamed" unconditionally, which is the common case and becomes a lie
+	# the moment the persistence pass above fires -- a summary that cannot
+	# report the unusual outcome is worse than none, because it is read
+	# instead of `dpkg-divert --list`.
+	if [ -n "$renamed" ]; then
+		say "  no package was removed; renamed:$renamed"
+		say "  'dpkg-divert --list' shows them, and '$me none' puts them back"
+	else
+		say "  no package was removed and no binary renamed"
+	fi
 	say "  run '$me none' to unmask everything again"
 	;;
 esac

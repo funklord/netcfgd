@@ -114,12 +114,40 @@ def main() -> int:
 			print("select-gate:   and netcfgd runs that program itself")
 			failures += 1
 
+	# The rename rung. Diverting a binary is the one thing here that outlives
+	# the package, so what may be diverted is checked harder than what may be
+	# masked.
+	listed = re.search(r"^divertible='([^']*)'", text, re.MULTILINE)
+	divertible = listed.group(1).split() if listed else []
+	paths = arms(text, "divertible_path")
+	for program in divertible:
+		if program not in paths:
+			print(f"select-gate: {program} is divertible and has no path,")
+			print("select-gate:   so the rename would silently do nothing")
+			failures += 1
+		# **The check with teeth.** netcfgd runs these; renaming one would
+		# disable netcfgd rather than a competitor, and it would survive the
+		# package being reinstalled.
+		if program in DELEGATED or program in ("wpa_supplicant", "dhcpcd", "NetworkManager"):
+			print(f"select-gate: {program} may not be diverted -- netcfgd runs it,")
+			print("select-gate:   or a desktop applet depends on its package")
+			failures += 1
+
+	# A diversion that nothing removes is a machine nobody can put back.
+	if divertible and "undivert" not in body(text, "unmask_all") + text.split("none)")[-1]:
+		print("select-gate: nothing undiverts on `none`, so a renamed binary")
+		print("select-gate:   would outlive the package that renamed it")
+		failures += 1
+
 	if failures:
 		print(f"select-gate: {failures} problem(s)", file=sys.stderr)
 		return 1
+	# Say what was inspected, not merely that it passed: a gate over an empty
+	# divertible list would report success in exactly these words.
 	print(
 		f"select-gate: {len(managers)} manager(s), each with a unit; "
-		"`none` unmasks from the same list"
+		f"{len(divertible)} divertible, none of them netcfgd's own; "
+		"`none` unmasks and undiverts"
 	)
 	return 0
 
