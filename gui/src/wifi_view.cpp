@@ -12,6 +12,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -126,9 +127,18 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	edit_button = new QPushButton(QStringLiteral("view / change"), this);
 	edit_button->setObjectName(QStringLiteral("edit_saved"));
 	edit_button->setEnabled(false);
+	/* **The mirror of "add", and this table had none.** A list a client can
+	 * add to and never remove from left the operator with
+	 * `ncfg config rm wifi-<id>` -- netcfgd's own filing, which a client is
+	 * not supposed to know (0127) and nobody would guess. `wifi_forget` is
+	 * the verb, and this is the button (0172). */
+	forget_button = new QPushButton(QStringLiteral("forget"), this);
+	forget_button->setObjectName(QStringLiteral("forget_saved"));
+	forget_button->setEnabled(false);
 	manual_button = new QPushButton(QStringLiteral("add by hand"), this);
 	manual_button->setObjectName(QStringLiteral("add_manually"));
 	saved_controls->addWidget(edit_button);
+	saved_controls->addWidget(forget_button);
 	/* "By hand" rather than "add", because the button above the scan table is
 	 * also called add and does something different: that one adds what the
 	 * scan found, and this one writes a network that need not be in range. */
@@ -151,12 +161,15 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	layout->addWidget(saved_table);
 
 	connect(edit_button, &QPushButton::clicked, this, &ncfg_wifi_view::edit_selected);
+	connect(forget_button, &QPushButton::clicked, this, &ncfg_wifi_view::forget_selected);
 	connect(manual_button, &QPushButton::clicked, this, &ncfg_wifi_view::add_manually);
 	/* Double-click opens it too. A table of settings that cannot be opened by
 	 * double-clicking a row is one an operator tries to double-click. */
 	connect(saved_table, &QTableWidget::doubleClicked, this, &ncfg_wifi_view::edit_selected);
 	connect(saved_table, &QTableWidget::itemSelectionChanged, this, [this]() {
-		edit_button->setEnabled(saved_table->currentRow() >= 0);
+		const bool chosen = saved_table->currentRow() >= 0;
+		edit_button->setEnabled(chosen);
+		forget_button->setEnabled(chosen);
 	});
 
 	connect(scan_button, &QPushButton::clicked, this, &ncfg_wifi_view::scan);
@@ -275,6 +288,60 @@ void ncfg_wifi_view::edit_selected()
 		return;
 	}
 	edit_network(saved.at(row));
+}
+
+/*
+ * Forget the selected network, having asked first.
+ *
+ * **Asked, because this is the only control on the tab that destroys
+ * something.** Every other button here is undone by pressing another one; a
+ * forgotten network has to be typed in again and its passphrase with it. The
+ * question names the network rather than saying "are you sure", so a misread
+ * selection is visible in the question itself, and Cancel is the default.
+ *
+ * **What happens to the credential is said, not promised.** The daemon removes
+ * it when nothing else refers to it and keeps it when something does, so this
+ * says "unless something else still refers to one" -- a flat "and its
+ * passphrase" would be a claim this side cannot make.
+ *
+ * `refresh` rather than `update_saved`, so the scan table's in-range marks are
+ * recomputed too: a row that has just stopped being configured must stop being
+ * drawn as configured.
+ */
+void ncfg_wifi_view::forget_selected()
+{
+	const int row = saved_table->currentRow();
+	if (row < 0 || row >= saved.size()) {
+		return;
+	}
+	const QString id = saved.at(row).id;
+	const QString question =
+	    QStringLiteral("Forget the network `%1`?\n\nIts configuration goes, and its stored "
+	               "credential with it unless something else still refers to one.")
+	        .arg(id);
+	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"), question,
+	            QMessageBox::Cancel | QMessageBox::Yes, this);
+	box.setDefaultButton(QMessageBox::Cancel);
+	if (box.exec() != QMessageBox::Yes) {
+		return;
+	}
+
+	QString error;
+	if (!connection->wifi_forget(id, &error)) {
+		status->setText(error);
+		emit reported(error);
+		return;
+	}
+	/* **The refresh first, and the sentence after it.** The other order is
+	 * the obvious one and loses: `refresh` writes its own line about the
+	 * radio, so an operator who pressed forget saw the outcome for as long as
+	 * one turn of the event loop and then a status line about something else.
+	 * Found by a probe reading the status after the click and getting
+	 * `radio0: COMPLETED on ...`. */
+	refresh();
+	const QString said = QStringLiteral("forgot `%1`").arg(id);
+	status->setText(said);
+	emit reported(said);
 }
 
 void ncfg_wifi_view::add_manually()

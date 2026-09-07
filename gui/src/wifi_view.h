@@ -67,6 +67,8 @@ private slots:
 	void activate();
 	void selection_changed();
 	void edit_selected();
+	/* Take a saved network away, and its credential with it. */
+	void forget_selected();
 	void add_manually();
 
 private:
@@ -124,6 +126,7 @@ private:
 	 */
 	QTableWidget    *saved_table;
 	QPushButton     *edit_button;
+	QPushButton     *forget_button;
 	QPushButton     *manual_button;
 	QList<ncfg_saved_network_row> saved;
 	void    update_saved();

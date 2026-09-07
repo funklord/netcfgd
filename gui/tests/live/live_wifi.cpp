@@ -39,7 +39,9 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QTableWidget>
+#include <QMessageBox>
 #include <QThread>
+#include <QTimer>
 
 #include <functional>
 
@@ -104,6 +106,38 @@ static QTableWidget *table_of(QWidget *of)
  * settled on after a test that *hung* rather than failed: a hang stalls the
  * suite instead of reporting, and a GUI probe with a live daemon behind it is
  * exactly where one would happen. */
+/* Answer a modal question the next time one is up.
+ *
+ * `QMessageBox::exec` runs its own event loop, so a probe that clicked the
+ * button and then looked at the result would never reach the looking -- it
+ * would sit in the dialog until the suite timed out. The click is queued
+ * *before* the button that opens it, and it finds the dialog through
+ * `activeModalWidget` rather than by keeping a pointer, because the dialog is
+ * built inside the slot and does not exist yet when this is scheduled.
+ *
+ * Bounded by a retry count rather than by a single shot: on a loaded machine
+ * the box may not be up on the first turn of the loop, and a probe that
+ * silently did nothing would leave the test hanging in exactly the way this
+ * exists to prevent.
+ */
+static void answer_modal(QMessageBox::StandardButton which, int tries = 100)
+{
+	QTimer::singleShot(0, [which, tries]() {
+		QWidget *modal = QApplication::activeModalWidget();
+		auto *box = qobject_cast<QMessageBox *>(modal);
+		if (box) {
+			QAbstractButton *press = box->button(which);
+			if (press) {
+				press->click();
+			}
+			return;
+		}
+		if (tries > 0) {
+			answer_modal(which, tries - 1);
+		}
+	});
+}
+
 static bool settles(const std::function<bool()> &done, int milliseconds = 8000)
 {
 	QElapsedTimer clock;
@@ -298,6 +332,123 @@ int main(int argc, char **argv)
 	check("a daemon that goes away leaves scanning disabled", !scan->isEnabled());
 	check("and joining", !join->isEnabled());
 	check("and leaving", leave && !leave->isEnabled());
+
+	/* 7. Forgetting a network, which the table could not do at all.
+	 *
+	 * The saved list had `view / change` and `add by hand` above it and no way
+	 * to remove a row: the only removal was `ncfg config rm wifi-<id>`,
+	 * netcfgd's own filing, which a client is not supposed to know (0127).
+	 * `wifi_forget` is the verb and this drives the button (0172).
+	 *
+	 * The network is added through the connection rather than through the
+	 * `add` button, deliberately: that button opens a dialog and asks for a
+	 * passphrase, which is a different join and has its own probe. What is
+	 * under test here is the row, the button and the daemon.
+	 *
+	 * Re-opened first, because section 6 above leaves the connection pointed
+	 * at a socket that is not there -- a forget against a closed connection
+	 * would fail for the wrong reason and pass this section by accident. */
+	QString back;
+	check("the connection can be re-opened for the last section",
+	    connection.open(QString(), &back), back);
+
+	QString add_why;
+	check("a network can be added to forget",
+	    connection.wifi_add(QStringLiteral("466f7267657454686973"),
+	        QStringLiteral("ForgetThis"), QStringLiteral("hunter2hunter2"), QString(), false,
+	        nullptr, &add_why),
+	    add_why);
+	view.refresh();
+
+	QTableWidget *saved = view.findChild<QTableWidget *>(QStringLiteral("saved_networks"));
+	QPushButton *forget = button(&view, "forget");
+	if (!saved || !forget) {
+		printf("FAIL the saved list has a forget button\n");
+		failures++;
+	} else {
+		check("the saved list has a forget button", true);
+		check("the network is in the saved list",
+		    settles([&] {
+			    view.refresh();
+			    return saved->rowCount() > 0;
+		    }));
+		/* Nothing selected is nothing to forget, and the button says so by
+		 * being off. A destructive control that is live with no row chosen is
+		 * one press away from removing whatever happens to be first. */
+		saved->clearSelection();
+		saved->setCurrentCell(-1, -1);
+		check("with no row chosen the button is off", !forget->isEnabled());
+
+		saved->selectRow(0);
+		check("choosing a row offers it", forget->isEnabled());
+
+		/* Cancel first: the question has to be a question. A probe that only
+		 * ever answered Yes would pass with the dialog removed entirely. */
+		answer_modal(QMessageBox::Cancel);
+		forget->click();
+		QCoreApplication::processEvents();
+		/* **Named, not counted.** This asked whether the saved list was
+		 * non-empty, and `HomeFiber` is in it from the sections above -- so it
+		 * was true however the click went and could not fail. Caught by
+		 * sabotaging the confirmation into `if (false && box.exec() ...)`,
+		 * which bypasses the dialog entirely and left this green. */
+		check("answering no keeps the network", settles([&] {
+			QList<ncfg_saved_network_row> rows;
+			QString why;
+			if (!connection.saved_networks(&rows, &why)) {
+				return false;
+			}
+			for (const ncfg_saved_network_row &entry : rows) {
+				if (entry.id == QStringLiteral("ForgetThis")) {
+					return true;
+				}
+			}
+			return false;
+		}, 2000));
+
+		/* **The one that was added, not "no networks".** The sections above
+		 * leave `HomeFiber` configured, so an empty list would be the wrong
+		 * assertion -- it passed nothing and failed for a reason that had
+		 * nothing to do with forgetting. Name the id. */
+		const int before = saved->rowCount();
+		int row = 0;
+		for (int i = 0; i < saved->rowCount(); i++) {
+			if (saved->item(i, 0) && saved->item(i, 0)->text() == QStringLiteral("ForgetThis")) {
+				row = i;
+			}
+		}
+		saved->selectRow(row);
+		answer_modal(QMessageBox::Yes);
+		forget->click();
+		check("answering yes forgets it",
+		    settles([&] {
+			    QList<ncfg_saved_network_row> rows;
+			    QString why;
+			    if (!connection.saved_networks(&rows, &why)) {
+				    return false;
+			    }
+			    for (const ncfg_saved_network_row &entry : rows) {
+				    if (entry.id == QStringLiteral("ForgetThis")) {
+					    return false;
+				    }
+			    }
+			    return true;
+		    }));
+		check("and leaves the other network alone",
+		    settles([&] {
+			    QList<ncfg_saved_network_row> rows;
+			    QString why;
+			    return connection.saved_networks(&rows, &why) && !rows.isEmpty();
+		    }, 2000));
+		check("and the status line says so",
+		    reported.contains(QStringLiteral("forgot")),
+		    QStringLiteral("status was: %1").arg(reported));
+		check("and the row goes from the table",
+		    settles([&] {
+			    view.refresh();
+			    return saved->rowCount() == before - 1;
+		    }));
+	}
 
 	printf("\n");
 	if (failures) {
