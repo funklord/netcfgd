@@ -9284,6 +9284,53 @@ above was checked by running it, and one of the sweeps' claims was wrong about
 which build a measurement came from. A lead that has not been reproduced is
 worth exactly the next person's time to reproduce it, and no more.
 
+## 10.54 The suite had never run past its own preconditions here
+
+Running `make live` end to end after fixing 10.53 took four attempts, and each
+one stopped somewhere the previous had never reached. Worth recording as a set,
+because the shape is the same every time: **the suite refuses to let a missing
+tool look like a pass** (`NCFG_LIVE=1` turns a skip into a failure), so every
+gap in the machine surfaces as a hard stop rather than a green run with holes.
+
+    474 ok, 23 scripts   dhcpcd is not installed
+    474 ok, 23 scripts   cannot make a user, mount and network namespace
+    575 ok, 31 scripts   cannot create /etc/resolv.conf: Directory nonexistent
+   1042 ok, 55 scripts   rc=0
+
+**The fifth run is green**, and it is the first time the suite has run end to
+end on this machine: 1042 checks, 55 scripts, no failures, and eight honest
+skips that name what they want -- `wireguard-tools`, `hostapd`, `nmcli`, and
+four that need real root. `rc` and the failure count agree, which is the pair
+this document says to read together rather than either alone.
+
+**Two were the machine and the third was a defect.** `dhcpcd` and `uidmap`
+were simply not installed; the holder installed both. `slaac.sh` had been
+naming the second one in its skip line from the first run -- *"an unprivileged
+namespace needs newuidmap (apt install uidmap)"* -- and it was read as an
+unrelated skip rather than as a prediction of the next blocker, which cost a
+round trip.
+
+**The third is a real fault in `dhcpcd.sh`, and it needed this machine to
+show.** The script mounts a fresh tmpfs over `/run`, then resolves
+`/etc/resolv.conf` to shield it. Here that is a symlink to
+`/run/connman/resolv.conf` -- so after the tmpfs the link dangles, `readlink
+-f` fails because it requires every component but the last to exist, the `||`
+falls back to the literal `/etc/resolv.conf`, and `: >` writes *through* the
+dangling link and dies with **"Directory nonexistent"** naming `/etc`, which
+plainly exists. The message points at the wrong directory, which is most of
+why it reads as absurd.
+
+`readlink -m` canonicalises without requiring anything to exist, so the
+`mkdir -p` below it gets the path that actually needs making. One flag, and
+reverting it reproduces the failure exactly.
+
+**The comment above it named systemd-resolved alone**, and that is the part
+worth keeping: connman is the same shape, openresolv is a third, and the case
+is *a resolver that writes into `/run`* rather than any one daemon. A fixture
+written against the resolver its author had is the same error as a stand-in
+written against the half of a tool its author had met -- and this project
+already has that entry.
+
 ## 10.53 A check that had never counted anything
 
 `orphan.sh`'s *"there is exactly one supplicant carrying that mark"* failed

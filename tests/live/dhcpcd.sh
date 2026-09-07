@@ -201,10 +201,24 @@ mkdir -p "$work/etc" "$work/run"
 mount -t tmpfs tmpfs /run || die "cannot put a tmpfs over /run"
 mount -t tmpfs tmpfs /var/lib/dhcpcd || die "cannot put a tmpfs over /var/lib/dhcpcd"
 
-# The decoy resolv.conf. `readlink -f` because a machine running
-# systemd-resolved points /etc/resolv.conf into /run, which is the tmpfs above --
-# so the file has to be made before it can be mounted over.
-resolv=$(readlink -f /etc/resolv.conf 2>/dev/null || echo /etc/resolv.conf)
+# The decoy resolv.conf. A machine whose resolver writes into /run points
+# /etc/resolv.conf there, and the tmpfs above has just emptied it -- so the
+# file has to be made before it can be mounted over.
+#
+# **`readlink -m`, not `-f`, and the difference is this script's whole
+# failure on a connman machine.** `-f` requires every component but the last
+# to exist; after the tmpfs the link's directory does not, so it failed, the
+# `||` fell back to the literal /etc/resolv.conf, and `: >` then wrote
+# *through* the dangling symlink and died with "Directory nonexistent" --
+# naming /etc, which exists, for a directory under /run that does not. `-m`
+# canonicalises without requiring anything to exist, so the `mkdir -p` below
+# gets the path that actually needs making.
+#
+# The comment here used to name systemd-resolved alone. connman is the same
+# shape -- /etc/resolv.conf -> /run/connman/resolv.conf -- and openresolv is
+# a third, so the case is "a resolver that writes into /run" rather than any
+# one daemon.
+resolv=$(readlink -m /etc/resolv.conf 2>/dev/null || echo /etc/resolv.conf)
 mkdir -p "$(dirname "$resolv")"
 [ -e "$resolv" ] || : > "$resolv"
 printf 'nameserver 203.0.113.99\n# what was here before dhcpcd ran\n' > "$work/etc-resolv"
