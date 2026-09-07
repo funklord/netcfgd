@@ -49,6 +49,52 @@ configure)
 	# whose operator has since chosen NetworkManager: they ran
 	# `netcfgd_select.sh networkmanager` and meant it, and an upgrade that
 	# silently undid that would make the switcher a lie.
+	# **The unit systemd is RUNNING, not the one on disk.**
+	#
+	# `debian/rules` passes `dh_installsystemd --no-enable --no-start`, and
+	# debhelper reads `--no-start` as "emit no postinst systemd snippet at
+	# all" -- `RESTART_AFTER_UPGRADE` defaults to true only when `--no-start`
+	# is absent, so both branches that would have written one are skipped.
+	# What those snippets carry, besides the start nobody wanted here, is
+	# `systemctl --system daemon-reload`.
+	#
+	# So an upgrade wrote a new `netcfgd.service` and systemd went on running
+	# the old one, and the `try-restart` below re-executed the daemon **under
+	# the stale unit** -- new binary, previous sandbox. Reported from an
+	# install as netcfgd refusing every write with "Read-only file system"
+	# naming `/etc/netcfgd/conf.d`, on a machine whose installed unit had
+	# named `/etc` in `ReadWritePaths=` since 2026-08-21.
+	#
+	# Unconditional, and before anything that starts or restarts: on a first
+	# install it costs one reload of a unit systemd has not seen, and on an
+	# upgrade it is the difference between the fix being installed and the fix
+	# being in force.
+	if [ -d /run/systemd/system ]; then
+		systemctl --system daemon-reload >/dev/null 2>&1 || true
+	fi
+
+	# **Permissions, applied every time and not only on a first install.**
+	#
+	# dpkg sets modes for files the package ships; it knows nothing about the
+	# ones netcfgd creates as it runs, and an older version's mistake outlives
+	# the version that made it. The credential store is the one that matters:
+	# `ncfg secret set` makes it 0700 today, and a machine that has been
+	# through an earlier netcfgd may hold one that is not.
+	#
+	# `install -d` rather than `mkdir -p`: it sets the mode on a directory
+	# that already exists as well as on one it creates, which is the whole
+	# point of doing this on every configure.
+	install -d -m 0755 -o root -g root /etc/netcfgd /etc/netcfgd/conf.d
+	if [ -d /etc/netcfgd/secrets ]; then
+		chown root:root /etc/netcfgd/secrets || true
+		chmod 0700 /etc/netcfgd/secrets || true
+		# The credentials themselves. 0600 is what writes them (0042), and a
+		# file that is readable by anyone else is a private key somebody can
+		# copy -- which no later tightening of the directory takes back.
+		find /etc/netcfgd/secrets -mindepth 1 -maxdepth 1 -type f \
+			-exec chown root:root {} + -exec chmod 0600 {} + || true
+	fi
+
 	if [ -z "$2" ] && [ -x /usr/sbin/netcfgd_select.sh ]; then
 		/usr/sbin/netcfgd_select.sh netcfgd || true
 	fi

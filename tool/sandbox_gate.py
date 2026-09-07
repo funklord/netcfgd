@@ -142,6 +142,99 @@ def etc_paths_in_sources():
 	return found
 
 
+def strip_shell_comments(text):
+	"""A maintainer script with its comment lines removed.
+
+	**Not `strip_comments`, which strips Rust `//` and leaves `#` alone.**
+	Using it here made both checks below read the comment that explains them:
+	the paragraph above the reload names `daemon-reload` and `try-restart`, in
+	that order, dozens of lines before the code does -- so "is there a reload"
+	was satisfied by prose, and "is it before the restart" compared two
+	sentences. Caught by moving the real reload to the end of the script and
+	watching this gate stay green.
+
+	Whole lines only. A `#` inside a command is a shell comment too, but it is
+	also a character that appears inside quotes, and dropping from the first
+	`#` would eat `chmod 0700 "#name"`. Every comment in these scripts is on
+	its own line.
+	"""
+	return "\n".join(
+		line for line in text.splitlines() if not line.lstrip().startswith("#")
+	)
+
+
+POSTINST = pathlib.Path("debian/postinst")
+
+
+def maintainer_script_puts_the_unit_in_force():
+	"""The unit systemd is RUNNING has to be the one the package just wrote.
+
+	**A correct unit that is not loaded costs exactly what a wrong unit
+	costs**, which is why this lives beside the checks above rather than in a
+	packaging gate of its own: the symptom is the same EROFS, at run time, on
+	a packaged install, and in no test.
+
+	`debian/rules` passes `dh_installsystemd --no-enable --no-start`, and
+	debhelper reads `--no-start` as "emit no postinst systemd snippet at all"
+	-- `RESTART_AFTER_UPGRADE` defaults to true only when `--no-start` is
+	absent, so both branches that would have written one are skipped. What
+	those snippets carry, besides the start this package does not want, is
+	`systemctl --system daemon-reload`.
+
+	So an upgrade wrote a new unit, systemd went on running the old one, and
+	the postinst's own `try-restart` re-executed the daemon under the stale
+	sandbox. Reported from an install whose netcfgd refused every write with
+	"Read-only file system" naming `/etc/netcfgd/conf.d`, months after the
+	unit on disk started granting `/etc`.
+
+	Two things are asserted, and the second is the one a rewrite would lose:
+	that the reload is there at all, and that it comes **before** anything
+	that starts or restarts the service. A reload after a restart reloads for
+	next time.
+	"""
+	if not POSTINST.is_file():
+		print(f"sandbox: {POSTINST} is missing, so nothing reloads the unit")
+		return 1
+
+	text = POSTINST.read_text()
+	body = strip_shell_comments(text)
+	failures = 0
+
+	reload_at = body.find("daemon-reload")
+	if reload_at < 0:
+		print("sandbox: debian/postinst never runs `systemctl daemon-reload`, so a")
+		print("sandbox:   changed unit is written and never loaded -- and the restart")
+		print("sandbox:   below it re-executes the daemon under the old sandbox.")
+		print("sandbox:   dh_installsystemd emits no snippet under --no-start")
+		failures += 1
+
+	for verb in ("try-restart", "invoke-rc.d"):
+		at = body.find(verb)
+		if at < 0 or reload_at < 0:
+			continue
+		if at < reload_at:
+			print(f"sandbox: debian/postinst runs `{verb}` before the daemon-reload,")
+			print("sandbox:   so the restart uses the unit systemd already had")
+			failures += 1
+
+	# **Applied every time, which is the half an install-time guard loses.**
+	# dpkg sets modes for files the package ships and knows nothing about the
+	# ones netcfgd creates as it runs -- and an older version's mistake
+	# outlives the version that made it.
+	if "/etc/netcfgd/secrets" not in body:
+		print("sandbox: debian/postinst does not correct the credential store's mode,")
+		print("sandbox:   so a directory an older netcfgd left readable stays readable")
+		failures += 1
+	else:
+		guard = body.find('[ -z "$2" ]')
+		secrets = body.find("/etc/netcfgd/secrets")
+		if 0 <= guard < secrets:
+			print("sandbox: the permissions block sits after the first-install guard,")
+			print("sandbox:   so an upgrade -- the case an old mode survives -- skips it")
+			failures += 1
+	return failures
+
+
 def main():
 	if not UNIT.exists():
 		print(f"sandbox: {UNIT} is missing, so this gate is checking nothing")
@@ -208,6 +301,8 @@ def main():
 			      f"names it -- residue, or a path spelled differently?")
 			failures += 1
 
+	failures += maintainer_script_puts_the_unit_in_force()
+
 	if failures:
 		print(f"sandbox: {failures} disagreement(s) between the unit and the code")
 		return 1
@@ -216,7 +311,8 @@ def main():
 		      f"directory, so netcfgd writes it in place rather than "
 		      f"atomically (0161)")
 	print(f"sandbox: {len(found)} /etc path(s) in the code, all allowed or "
-	      f"classified read-only; {len(in_place)} written in place")
+	      f"classified read-only; {len(in_place)} written in place; the "
+	      f"postinst reloads before it restarts")
 	return 0
 
 

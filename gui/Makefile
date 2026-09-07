@@ -52,13 +52,48 @@ $(CLIENT_LIB):
 QTTY_DIR = ../qtty
 QTTY_LIB = $(QTTY_DIR)/build/lib/libqtty.a
 
+# **Fetched, not asked for.** This printed `run 'git submodule update --init'`
+# and built the window without a terminal frontend -- so a clone made the
+# ordinary way produced a package whose `netcfgd-tui` opened a window, and the
+# only sign was a line in a build log nobody re-reads. Telling somebody to type
+# a command the build could type itself is the failure, not the message.
+#
+# **Only when it has never been checked out.** The condition is the absence of
+# `qtty.pro`, not "is it up to date": `git submodule update` moves HEAD, and a
+# qtty developer with the submodule on their own branch would find the build
+# had moved it under them. An empty directory belongs to nobody.
+#
+# **And it stays non-fatal, and it must not hang.** The submodule's URL is ssh,
+# so a machine with no key or no network cannot fetch it -- and the GUI is
+# meant to build there. Measured while writing this: pointed at a remote that
+# does not exist, `git submodule update` did not fail, it **waited** -- for
+# credentials it was never going to be given -- and the build sat there until
+# an outer timeout killed it. A fetch that asks a question in the middle of
+# `make` is worse than one that fails.
+#
+# So it is told not to ask: `GIT_TERMINAL_PROMPT=0` for http, `BatchMode=yes`
+# for ssh, and `GIT_ASKPASS` pointed at something that answers nothing. The
+# `timeout` is a backstop against something no environment variable reaches,
+# not the mechanism -- and it is generous, because a first fetch of qtty over
+# ssh measured 177s here and a build that killed a working clone at two
+# minutes would be the fault this rule exists to remove. The `||` keeps a failure a fallback rather
+# than an error, so both ends land on the same message they always did -- now
+# a report of something attempted rather than an instruction.
 .PHONY: qtty
 qtty:
-	@if [ -f $(QTTY_DIR)/qtty.pro ]; then \
+	@if [ ! -f $(QTTY_DIR)/qtty.pro ] && git -C .. rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "gui: $(QTTY_DIR) is empty; fetching the submodule for the terminal frontend"; \
+		GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true \
+		GIT_SSH_COMMAND='ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new' \
+		timeout 600 git -C .. submodule update --init -- qtty || \
+			echo "gui:   could not fetch it (no network, no key, or a source tree \
+without git). Building the window only."; \
+	fi; \
+	if [ -f $(QTTY_DIR)/qtty.pro ]; then \
 		$(MAKE) -C $(QTTY_DIR); \
 	else \
-		echo "gui: $(QTTY_DIR) is empty -- run 'git submodule update --init'"; \
-		echo "gui:   for the terminal frontend. Building the GUI only."; \
+		echo "gui: no $(QTTY_DIR) -- building the window only, with no --tui."; \
+		echo "gui:   netcfgd-tui will say so rather than opening a window (0173)."; \
 	fi
 
 $(TARGET): $(CLIENT_LIB) qtty gui.pro $(wildcard src/*.cpp src/*.h)

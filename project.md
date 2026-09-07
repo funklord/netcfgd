@@ -9457,6 +9457,83 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.61 The build fetches what it needs, and the package puts its unit in force
+
+*"Submodules should be handled automatically by makefiles, same with
+permissions. That is the path of least resistance."* Then, narrowing it:
+*"permissions should be applied by the package to its files and the relevant
+system, regardless of there being an older version."*
+
+**Telling somebody to type a command the build could type itself is the
+failure, not the message.** 10.60 fixed the silence about a missing qtty
+submodule by printing an instruction; the instruction was still the wrong
+answer. `gui/Makefile` fetches it now when the directory has never been
+checked out.
+
+Two conditions, and both are the interesting part:
+
+  * **Only when it is empty.** `git submodule update` moves HEAD, so a qtty
+    developer with the submodule on their own branch would find the build had
+    moved it under them. An empty directory belongs to nobody.
+  * **It must not ask a question.** Pointed at a remote that does not exist,
+    `git submodule update` did not fail -- it *waited*, for credentials it was
+    never going to be given, until an outer timeout killed the build. So it is
+    told not to ask: `GIT_TERMINAL_PROMPT=0`, `BatchMode=yes`, and a
+    `GIT_ASKPASS` that answers nothing. **A fetch that stops to ask in the
+    middle of `make` is worse than one that fails.**
+
+The timeout is a backstop rather than the mechanism, and it is generous:
+a first fetch of qtty over ssh measured **177s** here, so a build that killed
+a working clone at two minutes would be the fault this rule exists to remove.
+
+### The package was writing a unit systemd never loaded
+
+The second half turned out to be the report from 10.60, root-caused.
+
+`debian/rules` passes `dh_installsystemd --no-enable --no-start`, deliberately:
+installing this package must not start the shim, which takes NetworkManager's
+bus name. Reading debhelper rather than assuming, `--no-start` does more than
+that. `RESTART_AFTER_UPGRADE` defaults to true only when `--no-start` is
+absent, so both branches that would emit a postinst snippet are skipped -- and
+what those snippets carry, besides the start nobody wanted, is
+`systemctl --system daemon-reload`.
+
+**So an upgrade wrote a new `netcfgd.service` and systemd went on running the
+old one**, and the postinst's own `try-restart` re-executed the daemon under
+the stale unit: new binary, previous sandbox. That is the machine that reported
+netcfgd refusing every write with "Read-only file system" naming
+`/etc/netcfgd/conf.d`, months after the unit on disk started granting `/etc`.
+
+The postinst reloads before it restarts now, and applies its permissions on
+every `configure` rather than on a first install -- dpkg sets modes for files
+the package ships and knows nothing about the ones netcfgd creates as it runs.
+The credential store is the one that matters: an older version's mode outlives
+the version that made it, and no later tightening takes back a private key
+somebody already copied.
+
+**A correct unit that is not loaded costs exactly what a wrong unit costs**,
+which is why the check lives in `sandbox_gate.py` beside the unit-versus-code
+comparison rather than in a packaging gate of its own. Same symptom, same
+place to look.
+
+### And the gate could not fail, which the sabotage found
+
+The first version reused `strip_comments`, which strips **Rust** `//` and
+leaves `#` alone. So both new checks read the comment that explains them: the
+paragraph above the reload names `daemon-reload` and then `try-restart`,
+dozens of lines before the code does. "Is there a reload" was satisfied by
+prose, and "is it before the restart" compared two sentences.
+
+Moving the real reload to the end of the script and watching the gate stay
+green is what showed it. **A gate that reads a file's comments is testing its
+own documentation** -- and the better the comment, the more reliably it
+passes.
+
+Worth keeping beyond this instance: a helper named `strip_comments` in a tool
+that has only ever read one language is a helper whose name promises more than
+it does. It reads `strip_shell_comments` beside it now, and the new one says
+in its own docstring which mistake produced it.
+
 ## 10.60 The packaged install is a machine this tree cannot see
 
 Two reports from one install, arriving while the gui work above was underway.
