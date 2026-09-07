@@ -320,6 +320,57 @@ Four rules, all of them the same rule:
   workspace does not gain them -- `Cargo.toml`'s member list stays as it is, and
   `make size` keeps measuring the Rust install alone.
 
+## 7a. The TUI is these widgets, not a second program
+
+Instructed 2026-09-07: *"you can make the qtty tui now, based on gui"* and,
+when the shape was in doubt, *"they should use the same code"*.
+
+**`qtty` renders an unmodified Qt Widgets application on a character-cell
+terminal** -- its own README's first line -- so there was no TUI to write.
+netcfgd's device table, tabs, toolbar and status line are the TUI. One binary
+does both: `netcfgd-gui --tui`, a `-tui` symlink, or autodetection when there
+is no display and stdout is a terminal.
+
+Measured rather than asserted. Driven against a live daemon on a pty:
+
+    <Refresh>-<Apply...>------------------------------------
+     netcfgd at /run/netcfgd/netcfgd.sock
+     [machine][configuration][changes]
+     |[devices][wifi][modems][bluetooth]-------------------
+     | interfa. kind   sta. netwo. addresses            mtu
+     | probe0 | dummy |up  |      |10.9.9.1/24, fe80::.|1500
+     6 interfaces
+
+**Three lines of integration, and the order is the whole of it.**
+`Qtty::prepare_environment()` sets `QT_QPA_PLATFORM` and `QApplication` reads
+that in its constructor, so the frontend is decided from a raw `argv` scan
+before an application exists -- which is why `--tui` is *also* registered with
+`QCommandLineParser` further down, or the parser rejects the flag that got us
+there. `Qtty::setup()` settles the font and style and must precede the first
+widget, since the shared UI derives its metrics from them.
+
+**Optional, and detected.** qtty is pre-alpha and says "expect API movement",
+and `gui/` has to keep building for somebody who has never heard of it.
+Verified both ways: with qtty a 1,022,120-byte binary offering `--tui`,
+without it 614,264 bytes, no `NETCFGD_QTTY`, no flag, and the same GUI as
+before. That is the same shape as `deny` and `gui` skipping in `make check`
+when their tool is absent.
+
+**Not vendored, which departs from `harmonization.md`'s soft default**, and is
+recorded here rather than left to be noticed. Pinning a pre-alpha API in a
+submodule buys a bump every time it moves, and `gui/` is not in the root build
+yet either. `QTTY_ROOT` may be passed in; otherwise a sibling checkout is
+looked for. **Whether to vendor is the copyright holder's**, and the cost of
+not doing it is the ordinary one: a build against whatever the sibling
+checkout happens to be.
+
+**One thing to know before trusting a build.** qtty's tree carries several
+build directories and two of them -- `build-g` and `build-w` -- are policy
+builds with the TUI compiled out (`QTTY_NO_TUI`). Linking against those fails
+with `undefined reference to Qtty::prepare_environment()`, which reads as a
+missing library rather than as the wrong one. The plain `build/` is the one
+with both frontends, and this project looks there.
+
 ## 8. Order of work
 
 1. ~~**`client/` against the local socket, and the GUI on top of it.**~~ **Done

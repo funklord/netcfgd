@@ -18,9 +18,56 @@
 
 #include <cstdio>
 
+#ifdef NETCFGD_QTTY
+#  include <QFileInfo>
+#  include <qtty/qtty.h>
+#  include <unistd.h>
+
+/*
+ * Which frontend, decided before QApplication exists.
+ *
+ * `Qtty::prepare_environment()` sets QT_QPA_PLATFORM and QApplication reads
+ * that in its constructor, so this cannot wait for QCommandLineParser -- the
+ * parser needs an application. The flags are registered with the parser too,
+ * further down, or it would reject the one that got us here.
+ */
+static bool want_tui(int argc, char **argv)
+{
+	for (int i = 1; i < argc; ++i) {
+		if (!qstrcmp(argv[i], "--tui"))
+			return true;
+		if (!qstrcmp(argv[i], "--gui"))
+			return false;
+	}
+	/* Invoked through a -tui symlink, which is how a terminal-only command
+	 * name is given to somebody who should not have to remember a flag. */
+	if (QFileInfo(QString::fromLocal8Bit(argv[0])).fileName().endsWith(
+	        QStringLiteral("-tui")))
+		return true;
+	/* Otherwise: a session with no display, on a terminal, wants the TUI.
+	 * Both halves matter -- a GUI session running this from a terminal
+	 * emulator has a display and should get the window. */
+	const bool display = qEnvironmentVariableIsSet("WAYLAND_DISPLAY")
+	                  || qEnvironmentVariableIsSet("DISPLAY");
+	return !display && isatty(1);
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#ifdef NETCFGD_QTTY
+	const bool tui = want_tui(argc, argv);
+	if (tui)
+		Qtty::prepare_environment();
+#endif
 	QApplication application(argc, argv);
+#ifdef NETCFGD_QTTY
+	/* Before any widget is constructed: setup() settles the font and style,
+	 * and the shared UI derives its metrics from them. After a widget exists
+	 * it is too late for that widget. */
+	if (tui)
+		Qtty::setup(application);
+#endif
 	QApplication::setApplicationName(QStringLiteral("netcfgd-gui"));
 
 	QCommandLineParser parser;
@@ -40,6 +87,19 @@ int main(int argc, char **argv)
 	    QStringLiteral("Start in the notification area with no window. Closing the window "
 	               "then hides it rather than quitting."));
 	parser.addOption(tray_option);
+#ifdef NETCFGD_QTTY
+	/* Registered so the parser accepts them; `want_tui` has already read
+	 * them, because the frontend is decided before an application exists. */
+	QCommandLineOption tui_option(
+	    QStringList() << QStringLiteral("tui"),
+	    QStringLiteral("Render on the terminal instead of the desktop. The same "
+	               "windows, drawn on a character grid."));
+	parser.addOption(tui_option);
+	QCommandLineOption gui_option(
+	    QStringList() << QStringLiteral("gui"),
+	    QStringLiteral("Force the desktop frontend even with no display."));
+	parser.addOption(gui_option);
+#endif
 	parser.process(application);
 
 	ncfg_connection connection;
@@ -88,5 +148,11 @@ int main(int argc, char **argv)
 	if (!tray || !wanted_tray) {
 		window.show();
 	}
+#ifdef NETCFGD_QTTY
+	/* Qtty::exec drives the terminal backend and needs the top-level widget;
+	 * QApplication::exec would run an event loop with nothing drawing. */
+	if (tui)
+		return Qtty::exec(application, window);
+#endif
 	return QApplication::exec();
 }
