@@ -85,6 +85,13 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		| Request::WifiConnect { .. }
 		| Request::WifiDisconnect { .. }
 		| Request::WifiAdd { .. }
+		// **Forgetting one is `wifi` because adding one is.** The message is an
+		// id and nothing else, and what it removes is the block that id names
+		// plus a credential nothing else refers to -- strictly less reach than
+		// `WifiAdd`, which writes both. A tier that may create a network and
+		// not remove it leaves a client able to fill a machine with networks
+		// it cannot take back.
+		| Request::WifiForget { .. }
 		// Taking a radio on is `wifi` for the same reason adding a network is.
 		// What it writes is a `device` block, and a client sending one as
 		// *text* would be sending configuration -- 0117's remote code

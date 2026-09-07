@@ -47,6 +47,9 @@ usage:
                                                  the flags below, including
                                                  --eap for a campus or
                                                  corporate network
+                             forget ID           take a network away, and its
+                                                 credential with it unless
+                                                 something else refers to it
                              connect ID [IFACE]  join a configured network
                              disconnect [IFACE]  leave it, keeping the config
                            IFACE may be omitted when the config describes one
@@ -941,7 +944,7 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 	let Some(subcommand) = positional.first() else {
 		return Err(
 			"`ncfg wifi` needs a subcommand: radios, activate, deactivate, scan, \
-			 status, add, connect or disconnect"
+			 status, add, forget, connect or disconnect"
 				.to_owned(),
 		);
 	};
@@ -952,6 +955,10 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 	// nothing else is running either.
 	if subcommand == "add" {
 		return wifi::add(rest, options);
+	}
+	// And `forget`, for the same reason: it is the same write, backwards.
+	if subcommand == "forget" {
+		return wifi::forget(rest, options);
 	}
 
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
@@ -987,8 +994,8 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 		},
 		other => {
 			return Err(format!(
-				"unknown wifi subcommand `{other}`; try scan, status, clients, add, connect or \
-				 disconnect"
+				"unknown wifi subcommand `{other}`; try scan, status, clients, add, forget, \
+				 connect or disconnect"
 			))
 		}
 	};

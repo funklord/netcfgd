@@ -637,4 +637,12 @@ netcfgd
 #
 # Attributable without a second build: it is the only change since the total
 # above, and the arithmetic is exact -- the previous total plus one page.
-total 2804248
+# Forgetting a network, +8,192 bytes to 2,812,440.
+#
+# Two pages for `wifi_forget`: the request and its dispatch, the removal in
+# `wifi_profile::forget`, and the per-network walk `named_by` reuses from the
+# secrets lister. Decision 0172.
+#
+# Attributable without a second build: the only change since the total above,
+# and the previous total plus two pages exactly.
+total 2812440

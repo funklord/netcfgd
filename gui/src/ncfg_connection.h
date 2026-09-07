@@ -522,6 +522,14 @@ public:
 	bool wifi_status(const QString &interface, ncfg_wifi_status_row *out, QString *error);
 	bool wifi_connect(const QString &interface, const QString &network, QString *error);
 	bool wifi_disconnect(const QString &interface, QString *error);
+	/* Forget a saved network: its block, and its credential with it when
+	 * nothing else refers to one. `wifi` tier, like adding it.
+	 *
+	 * **`add`'s mirror, which this class did not have.** What existed was
+	 * `config_put`, so a view could write a network and had nothing to remove
+	 * one with short of naming `wifi-<id>` -- netcfgd's own filing, which is
+	 * exactly what 0127 keeps out of a client. */
+	bool wifi_forget(const QString &id, QString *error);
 	bool saved_networks(QList<ncfg_saved_network_row> *out, QString *error);
 	bool dns(ncfg_dns_row *out, QString *error);
 	/*

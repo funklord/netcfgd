@@ -1168,6 +1168,25 @@ int ncfg_client_wifi_disconnect(ncfg_client_t *client, const char *interface, ch
                 size_t err_size);
 
 /*
+ * Forget a configured network: its block, and its credential with it.
+ *
+ * The mirror of ncfg_client_wifi_add(), and it was missing -- so a gui could
+ * offer "add" and had nothing to offer for "forget". What existed was
+ * config_delete naming `wifi-<id>`, which is netcfgd's own file layout, and a
+ * client that spells that is a client keeping a path (0127).
+ *
+ * `id` is the network's id in the document, the same one wifi_connect() takes
+ * -- never an SSID, and never a path. The daemon removes the credential when
+ * nothing else refers to it and keeps it when something does; neither is
+ * reported here, because what a client shows for it is the secrets list,
+ * where a credential left behind is already named as the fault it is.
+ *
+ * `wifi` tier, for 0124's reason: the message carries an id and nothing else,
+ * so its shape is what bounds it.
+ */
+int ncfg_client_wifi_forget(ncfg_client_t *client, const char *id, char *err, size_t err_size);
+
+/*
  * What an operator has agreed to, beyond the plan itself.
  *
  * Two lists and never a flag, which is netcfgd's own shape: `ncfg` spells these

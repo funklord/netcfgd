@@ -9457,6 +9457,90 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.59 The GUI could add and could not remove, and the daemon said "is it running?"
+
+Two things, from one instruction to improve the gui and two reports that
+arrived while it was underway.
+
+### Picking the work by measurement
+
+The gui's own order of work is finished through item 1 and item 2 is a
+different subsystem, so "what should the gui do next" had no answer in the
+documents. What answered it was enumerating the daemon's request verbs against
+the client's API surface. Four are unreachable from the gui -- `config_delete`,
+`secret_delete`, `explain`, and a removal for a wifi network that does not
+exist at all -- and the last is the one an operator meets: a **saved networks**
+table with `view / change` and `add by hand` above it and no way to remove a
+row.
+
+**A query would not have found it.** There is no "cannot forget" message to
+grep for; the absence is a verb nobody wrote. What found it was listing both
+populations and looking at the difference, which is *Re-derive the scope
+number*'s remedy applied to a feature set rather than to a count.
+
+Decision 0172 has the verb. What belongs here is why it was shaped as one at
+all: the removal already existed as `ncfg config rm wifi-<id>`, and a gui
+button that sent that would have been a client spelling netcfgd's own file
+layout -- the thing 0127 exists to prevent. **A feature that is reachable only
+by knowing where the daemon keeps its files is not reachable**, and the cost of
+pretending otherwise is a table nobody can delete from.
+
+### The report that arrived mid-change
+
+*"I installed netcfgd now, and netcfgd-gui says it is not running as usual"*,
+then *"I always have to mess around to start it when NM is running"*, on a
+machine that is not this one.
+
+The gui was telling the truth and being useless about it. `client/` produced:
+
+    cannot reach netcfgd at /run/netcfgd/netcfgd.sock: No such file or
+    directory. Is the daemon running?
+
+**That is the right question and the wrong sentence.** The answer is no --
+nothing else produces `ENOENT` on a path netcfgd creates at startup -- and the
+reader is left to work out what to type. Worse, the gui put it in a critical
+box and **exited**, so somebody who then started the daemon had to find the
+program again. That round trip is the "messing around".
+
+It names both remedies now (`systemctl enable --now netcfgd`, or
+`netcfgd_select.sh netcfgd` when another daemon still holds the machine) and
+the dialog offers **Retry** rather than quitting.
+
+**Both remedies, and no guess at which.** A stale `/run/NetworkManager`
+outlives the daemon that made it, so a directory is a proxy that would name
+the wrong cause with the authority of a diagnosis -- *A wrong guess is a cheap
+way to make a tree explain itself* says to check a suspicion rather than act on
+it, and there is nothing here to check it with. Naming only `systemctl` would
+send somebody to start a daemon on a machine NetworkManager owns, which is the
+case they reported.
+
+**Why an install leaves this state at all** is worth writing down, because it
+is not a bug: `debian/postinst` runs the selector only when `$2` is empty --
+a *first* install. An upgrade does `try-restart`, which does nothing when
+netcfgd was never started. So a machine that had the package before the
+selector existed keeps whatever is running, which is NetworkManager, for ever.
+Whether an upgrade should select is a packaging decision and not one to make
+while fixing a message.
+
+### The rss gate was failing on where the measurement landed
+
+`make check` went red at 4880 KB of a 4864 limit, and five runs of `make rss`
+on the same build gave 4716..4764. The change had not moved it: the mean was
+indistinguishable from the mean before it.
+
+**The band had stopped covering the noise**, which is the failure that limit's
+own headroom exists to prevent -- its comment says so, and says to re-derive
+from measurement. Under a concurrent `make check` the same binary measures
+4808 and 4880, because `VmHWM` is peak resident including text and page
+reclaim under pressure is exactly what the band was sized for. This machine
+runs more sessions than it did when 4864 was chosen.
+
+Raised to 5120 with all three figures recorded: the idle spread, the loaded
+peak, and `RssAnon` -- 532 KB against 500 when the limit was last set, which is
+the honest answer to "is it using more memory" and is 32 KB of it. **A gate
+that goes red at random is one people re-run until it is green**, which is
+worse than no gate.
+
 ## 10.58 Five verbs, one refusal, five answers -- and one that was not true
 
 Reported: *"fix all the `cannot write` bugs when changing config in netcfgd.

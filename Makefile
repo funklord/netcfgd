@@ -1334,7 +1334,34 @@ footprint:
 # Left as a ratchet rather than tightened, because tuning a footprint budget
 # while the design is still moving is optimising the wrong end. Re-derive the
 # band from measurement once the feature set settles.
-RSS_LIMIT_KB ?= 4864
+
+# **Re-derived 2026-09-07, because the band had stopped covering the noise.**
+# `make check` went red at 4880 of 4864 and five runs of `make rss` on the same
+# build gave 4716, 4732, 4724, 4764, 4764 -- so the gate was failing on where
+# the measurement landed rather than on anything the daemon did. That is the
+# failure this limit's own headroom exists to prevent, and a gate that goes red
+# at random is one people re-run until it is green, which is worse than no gate.
+#
+# Two things moved it, and both are the mechanism this comment already
+# describes rather than an allocation regression:
+#
+#   * VmHWM counts resident TEXT page by page, and the binary grew 2,800,152 ->
+#     2,812,440 bytes across `wifi_forget` and the write diagnostics -- three
+#     pages, about 12 KB, arriving directly in the number this gate pins.
+#   * The measurement is sensitive to load. Idle it sits at 4716..4764; with a
+#     `make check` running beside it, 4808 and 4880. Page reclaim under memory
+#     pressure is exactly what the original band was sized for, and this
+#     machine has more sessions on it than it did.
+#
+# `RssAnon` -- what netcfgd actually allocated -- is 532 KB, against 500 KB when
+# the limit was last raised. That is the honest number for "is it using more
+# memory", and 32 KB of it is real. The other 300 KB of the raise is text and
+# noise, which is why both figures are printed on every run.
+#
+# 5120 is the observed peak plus a band wider than the observed spread
+# (4880 + 240; the spread across seven runs is 164). Still a ratchet: raising
+# it stays a deliberate edit with the measurement in the commit.
+RSS_LIMIT_KB ?= 5120
 
 rss:
 	@$(CARGO) build --release --quiet

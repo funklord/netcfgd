@@ -322,6 +322,60 @@ fn activate(interface: &str, options: &Options) -> Result<(), String> {
 /// Returns the sentence to print. Nothing is left behind by a failure: the two
 /// files are written only after every check has passed, and are removed again if
 /// what they compile to is not what was asked for.
+/// `ncfg wifi forget ID`.
+///
+/// **The mirror of [`add`], and it did not exist.** Taking a network away was
+/// `ncfg config rm wifi-<id>` -- correct, undiscoverable, and a caller
+/// spelling netcfgd's own file naming back at it. Somebody who added a network
+/// with `ncfg wifi add` had no way to remove it in the same vocabulary.
+///
+/// Socket first and the directory second, like every other write verb (0127):
+/// `/etc/netcfgd` is root's and a client is not. The local path is for the
+/// machine being configured before netcfgd runs on it, which is the same
+/// reason `add` has one.
+///
+/// # Errors
+///
+/// No id, a daemon that refused, or a configuration this caller cannot write.
+pub(crate) fn forget(positional: &[String], options: &Options) -> Result<ExitCode, String> {
+	let [id] = positional else {
+		return Err(
+			"`ncfg wifi forget` takes one network id: `ncfg wifi forget home`. \
+			 `ncfg wifi status` and the configuration list them"
+				.to_owned(),
+		);
+	};
+
+	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
+	if socket.exists() {
+		let request = netcfgd_proto::Request::WifiForget { id: id.clone() };
+		return match crate::client::ask(&socket, &request) {
+			Ok(crate::client::Answer::Ok) => {
+				println!("netcfgd forgot `{id}`");
+				Ok(ExitCode::SUCCESS)
+			}
+			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
+			Ok(other) => Err(format!("the daemon sent {}", other.describe())),
+		};
+	}
+
+	let config_dir = netcfgd_host::config::resolve_dir(options.config_dir.as_deref());
+	let factory_dir = netcfgd_host::config::resolve_factory_dir(options.factory_dir.as_deref());
+	let (document, _, _) = crate::compile(options)?;
+	let forgotten = wifi_profile::forget(&config_dir, &factory_dir, Some(&document), id)
+		.map_err(|error| crate::drop_in::refused_locally(error, &socket))?;
+	println!("forgot `{id}`");
+	// Said, because a credential outliving what wanted it is a fault this
+	// project names elsewhere and an operator cannot see it from here.
+	for name in &forgotten.credentials_removed {
+		println!("and removed the credential `{name}`, which nothing refers to now");
+	}
+	for name in &forgotten.credentials_kept {
+		println!("the credential `{name}` stays: something else still refers to it");
+	}
+	Ok(ExitCode::SUCCESS)
+}
+
 pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, String> {
 	let [ssid_text] = positional else {
 		return Err(

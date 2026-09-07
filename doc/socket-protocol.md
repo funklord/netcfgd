@@ -140,7 +140,7 @@ reach.
 | Tier | Requests |
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations` |
-| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add` |
+| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget` |
 | `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete` |
 
 Two placements are deliberate and worth knowing, because both look wrong at
@@ -166,6 +166,20 @@ first glance:
   exists". 0117's typed request is what exists. Adding is still not applying:
   a wifi-tier caller writes a network and joins it, and cannot apply anything
   else.
+- **`wifi_forget` is `wifi` because `wifi_add` is.** It carries an id and
+  nothing else, and what it removes is the `network` block that id names plus
+  a credential nothing else refers to -- strictly less reach than the request
+  that created both. A tier that may add a network and not remove one leaves a
+  caller able to fill a machine with networks it cannot take back, and leaves
+  the only removal spelled `config_delete` of `wifi-<id>`, which is netcfgd's
+  own filing and `admin`.
+
+  The credential is the part worth stating: it goes when the configuration
+  after the removal refers to it from nowhere, and stays when anything still
+  does -- including an `access_point` block, since the question is asked of
+  the whole document. If the configuration cannot be read back afterwards,
+  every credential stays; removing one on a guess is the one thing here
+  nobody can undo.
 
 - **`config_put` is `admin`, and the tier is not the whole answer for it.**
   It carries configuration, and the same request can hold a wifi network or a

@@ -320,6 +320,37 @@ check "and left a supplicant running, from one command" \
 	"$([ -n "$revived" ] && [ -e "/proc/$revived" ] && echo yes || echo no)" "yes"
 contains "so a scan works straight away" "$("$ncfg" wifi scan radio0 2>&1 || true)" "HomeFiber"
 
+# --- and forgetting it, which is where the journey ended without an exit
+#
+# **The last step of the journey had no verb.** A network could be added with
+# one command since 0117 and taken away only by `ncfg config rm wifi-<id>` --
+# netcfgd's own file naming, which 0127 keeps out of clients and which nobody
+# would guess. The gui showed a saved-networks table with no way to remove a
+# row for the same reason.
+#
+# Driven through a **running daemon**, because that is the path a desktop
+# takes: the socket exists here, so `ncfg wifi forget` sends `wifi_forget`
+# rather than writing the file itself, and the daemon is what removes both.
+secret_file="$work/etc/secrets/HomeFiber"
+check "the credential is there before forgetting" \
+	"$([ -f "$secret_file" ] && echo yes || echo no)" "yes"
+# The control for the id, so the refusal below cannot pass by naming nothing.
+missing=$("$ncfg" wifi forget NoSuchNetwork 2>&1 || true)
+contains "forgetting one that is not configured is refused" "$missing" "no network"
+contains "and the refusal names what there is" "$missing" "HomeFiber"
+
+forgot=$("$ncfg" wifi forget HomeFiber 2>&1 || true)
+contains "forgetting reaches the daemon rather than the disk" "$forgot" "netcfgd forgot"
+check "the network block is gone" \
+	"$([ -f "$work/etc/conf.d/wifi-HomeFiber.conf" ] && echo yes || echo no)" "no"
+# The half that makes it a forget rather than a hide: a credential outliving
+# what wanted it is the fault `secrets_view` exists to surface, and forgetting
+# a network is exactly when one would be created.
+check "and the credential went with it" \
+	"$([ -f "$secret_file" ] && echo yes || echo no)" "no"
+check "and the machine no longer knows the network" \
+	"$("$ncfg" show 2>/dev/null | grep -c HomeFiber || true)" "0"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "wifi_journey.sh: all checks passed"

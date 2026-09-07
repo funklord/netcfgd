@@ -103,6 +103,24 @@ fn note_security(
 	}
 }
 
+/// Every credential one network's security refers to, by name.
+///
+/// The same walk as [`references`] pointed at one block instead of a document,
+/// and it goes through the same `match` so that a model growing a fifth place
+/// to keep a credential cannot be covered here and missed there. `forget`
+/// needs this to know what a network is about to stop referring to.
+#[must_use]
+pub fn named_by(security: &netcfgd_model::Security) -> Vec<String> {
+	let mut names = Vec::new();
+	let mut note = |_what: &str, reference: &netcfgd_model::SecretRef| {
+		names.push(reference.name.clone());
+	};
+	note_security(&mut note, "", security);
+	names.sort_unstable();
+	names.dedup();
+	names
+}
+
 /// Every `@secret:` reference in a document, by name.
 ///
 /// **The document is destructured**, so a block list added to `Document` is a

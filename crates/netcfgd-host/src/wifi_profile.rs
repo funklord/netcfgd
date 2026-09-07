@@ -127,13 +127,152 @@ pub fn usable_id(name: &str) -> Result<(), &'static str> {
 /// block edited by hand afterwards is simply the configuration.
 #[must_use]
 pub fn profile_path(config_dir: &Path, id: &str) -> PathBuf {
-	config_dir.join("conf.d").join(format!("wifi-{id}.conf"))
+	config_dir
+		.join("conf.d")
+		.join(format!("{}.conf", drop_in_name(id)))
+}
+
+/// What `config_put` and `config_delete` call that file.
+///
+/// The same string as the path above, minus the directory and the suffix,
+/// because a client asks netcfgd to take a drop-in away **by name** and this
+/// is the name. Written once so the two cannot drift: a forget that removed
+/// `wifi-<id>` while the writer wrote `wifi_<id>` would report success and
+/// leave the network configured, which is the shape of failure this file's
+/// own header warns about for the trap directory.
+#[must_use]
+pub fn drop_in_name(id: &str) -> String {
+	format!("wifi-{id}")
 }
 
 /// Where the `file` secret provider will look for the credential.
 #[must_use]
 pub fn secret_path(config_dir: &Path, id: &str) -> PathBuf {
 	config_dir.join("secrets").join(id)
+}
+
+/// What [`forget`] took away.
+///
+/// The credentials are two lists rather than one flag, because "the passphrase
+/// went with it" and "the passphrase is still here because something else uses
+/// it" are different sentences and an operator wants whichever is true. Neither
+/// is a value: these are names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Forgotten {
+	/// Credentials removed, because nothing refers to them any more.
+	pub credentials_removed: Vec<String>,
+	/// Credentials left, because something still does.
+	pub credentials_kept: Vec<String>,
+}
+
+/// Take a configured network away, and its credential with it.
+///
+/// **The mirror of [`install`], and it did not exist.** A network could be
+/// added over the socket since 0117 and taken away only by knowing that
+/// netcfgd files it as `conf.d/wifi-<id>.conf` and asking for that name --
+/// which is the file layout a client is not supposed to know (0127), so the
+/// gui had no way to offer it at all and the cli had none either. What was
+/// reachable was `ncfg config rm wifi-<id>`: correct, undiscoverable, and a
+/// client spelling netcfgd's own naming back at it.
+///
+/// **The credential goes when nothing else refers to it.** A stored secret
+/// nothing names is the fault `secrets_view` exists to surface -- "a
+/// credential still on the machine after whatever wanted it was deleted" --
+/// and forgetting a network is exactly when one is created. The question is
+/// asked of the configuration *after* the removal rather than before, because
+/// what matters is whether anything still refers to it, and it is asked of the
+/// whole document rather than of the other networks: a passphrase shared with
+/// an access point block is still in use.
+///
+/// **It fails closed.** If the configuration cannot be read back after the
+/// removal, every credential is kept. Removing one on a guess is unrecoverable
+/// in the way 0042 describes and leaving one behind is visible in a tab.
+///
+/// # Errors
+///
+/// An id that cannot be a name, no such network, a network netcfgd did not
+/// write the file for, or a removal the filesystem refused.
+pub fn forget(
+	config_dir: &Path,
+	factory_dir: &Path,
+	document: Option<&netcfgd_model::Document>,
+	id: &str,
+) -> Result<Forgotten, InstallError> {
+	usable_id(id)
+		.map_err(|why| format!("`{id}` cannot be used as a network id here: {why}"))
+		.map_err(InstallError::from)?;
+
+	let Some(document) = document else {
+		return Err(
+			"there is no compiled configuration, so there is no network to forget"
+				.to_owned()
+				.into(),
+		);
+	};
+	let Some(network) = document.networks.iter().find(|network| network.id == id) else {
+		// Naming what there is, for the reason `profile set` does: the id is
+		// usually a typo away from a real one, and a bare refusal sends
+		// somebody to look for a file.
+		let names: Vec<&str> = document
+			.networks
+			.iter()
+			.map(|network| network.id.as_str())
+			.collect();
+		return Err(if names.is_empty() {
+			format!("no network `{id}` is configured, and there are none to forget")
+		} else {
+			format!(
+				"no network `{id}` is configured. There is: {}",
+				names.join(", ")
+			)
+		}
+		.into());
+	};
+	let named = crate::secrets::named_by(&network.security);
+
+	// **The drop-in first**, so that a refusal leaves the credential where it
+	// was. The other order would take a passphrase away from a network that is
+	// still configured, which is the one outcome here nobody can undo.
+	if !crate::config::remove_drop_in(config_dir, factory_dir, &drop_in_name(id))? {
+		return Err(format!(
+			"`{id}` is configured, but not in a file netcfgd wrote -- so netcfgd \
+			 cannot take it away. Whatever defines it is somebody's own file, and \
+			 editing it is theirs"
+		)
+		.into());
+	}
+
+	let after = crate::config::load_with_profile(factory_dir, config_dir)
+		.ok()
+		.and_then(|sources| netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok());
+	let mut forgotten = Forgotten {
+		credentials_removed: Vec::new(),
+		credentials_kept: Vec::new(),
+	};
+	for name in named {
+		let still_used = after
+			.as_ref()
+			.is_none_or(|document| !crate::secrets::referring_to(document, &name).is_empty());
+		if still_used {
+			forgotten.credentials_kept.push(name);
+			continue;
+		}
+		let path = secret_path(config_dir, &name);
+		match std::fs::remove_file(&path) {
+			Ok(()) => forgotten.credentials_removed.push(name),
+			// Referenced and never stored is one of the two faults the secrets
+			// list exists to name, and it is not this function's to complain
+			// about: there was nothing to remove and the network is gone.
+			Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+			Err(error) => {
+				return Err(InstallError::from_io(
+					format!("could not remove {}: {error}", path.display()),
+					&error,
+				))
+			}
+		}
+	}
+	Ok(forgotten)
 }
 
 /// A value going into a quoted string in generated configuration.

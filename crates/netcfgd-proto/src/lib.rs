@@ -26,7 +26,13 @@ use serde::{Deserialize, Serialize};
 /// A client that speaks a different major refuses to continue, for the same
 /// reason a document consumer does: acting on half an understanding is worse
 /// than refusing.
-pub const PROTOCOL_VERSION: Version = Version { major: 1, minor: 0 };
+///
+/// **The minor is what a client reads to know whether a verb is there**, and
+/// this is the first time it has moved. 1.1 adds [`Request::WifiForget`] and
+/// removes nothing, so an older client is unaffected and a newer one can tell
+/// -- which is the whole of what the field is for. A major stays reserved for
+/// a change that makes an old client wrong rather than merely incomplete.
+pub const PROTOCOL_VERSION: Version = Version { major: 1, minor: 1 };
 
 /// Where the socket lives when nothing says otherwise.
 pub const DEFAULT_SOCKET: &str = "/run/netcfgd/netcfgd.sock";
@@ -169,6 +175,31 @@ pub enum Request {
 	WifiDisconnect {
 		/// Which interface.
 		interface: String,
+	},
+
+	/// Forget a configured network: its block, and its credential with it.
+	///
+	/// **[`Request::WifiAdd`]'s mirror, and it was missing.** A network could
+	/// be added over the socket since 0117 and taken away only by
+	/// [`Request::ConfigDelete`] naming `wifi-<id>` -- netcfgd's own file
+	/// layout, which 0127 says a client does not know. So a gui could offer
+	/// "add" and not "forget", and the cli's answer was `ncfg config rm` with
+	/// a name nobody would guess.
+	///
+	/// **The `wifi` tier, by 0124's own argument.** The message carries an id
+	/// and nothing else: it can name no hook, no path, no `run_as` and no
+	/// control policy, and what it removes is one `network` block and a
+	/// credential nothing else refers to. A caller who may add a network may
+	/// remove the one they added.
+	///
+	/// **The credential goes when nothing else refers to it**, asked of the
+	/// configuration after the block has gone. A shared passphrase stays, and
+	/// so does everything if the configuration cannot be read back -- removing
+	/// a credential on a guess is the one thing here nobody can undo (0042).
+	WifiForget {
+		/// The `network` block's id, as `wifi_add` chose it or the operator
+		/// wrote it.
+		id: String,
 	},
 
 	/// Put a configuration drop-in on disk, which netcfgd writes.
@@ -477,6 +508,9 @@ impl Request {
 				"eap",
 			],
 			Self::WifiConnect { .. } => &["interface", "network"],
+			// The id and nothing else, which is what keeps it at the `wifi`
+			// tier -- the shape of the message is the bound.
+			Self::WifiForget { .. } => &["id"],
 			Self::ConfigPut { .. } | Self::ProbePut { .. } => &["name", "text", "replace"],
 			Self::SecretPut { .. } => &["name", "value", "replace"],
 			// `ProfileSet` is here because its `name` is the same one member,

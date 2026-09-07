@@ -117,8 +117,34 @@ static int connect_socket(const char *socket_path, char *err, size_t err_size)
 			      "than a daemon that is not running",
 			      socket_path, strerror(failed));
 		} else {
+			/* **It asked the reader a question it can answer itself.**
+			 * "Is the daemon running?" is the right question and the
+			 * wrong sentence: the answer is no -- nothing else produces
+			 * ENOENT on a socket path netcfgd creates at startup -- and
+			 * the reader is left to work out what to type. Reported by
+			 * an operator who had just installed the package: "netcfgd-gui
+			 * says it is not running as usual ... I always have to mess
+			 * around to start it when NM is running."
+			 *
+			 * Both remedies, because there are two states and this
+			 * cannot tell them apart without asking an init system it
+			 * is not allowed to depend on. A machine where netcfgd is
+			 * merely unstarted wants the first; one where another daemon
+			 * still holds the interfaces wants the second, which stops
+			 * that daemon before starting this one. Naming only the
+			 * first sends somebody to `systemctl start` on a machine
+			 * NetworkManager owns, which is exactly the messing around.
+			 *
+			 * No guess at which. A stale `/run/NetworkManager` outlives
+			 * the daemon that made it, so a directory is a proxy that
+			 * would name the wrong cause with the authority of a
+			 * diagnosis. */
 			set_error(err, err_size,
-			      "cannot reach netcfgd at %s: %s. Is the daemon running?",
+			      "cannot reach netcfgd at %s: %s -- netcfgd is not running. "
+			      "Start it with `sudo systemctl enable --now netcfgd`, or "
+			      "with `sudo netcfgd_select.sh netcfgd` if another network "
+			      "daemon still has this machine (that stops and masks it "
+			      "first)",
 			      socket_path, strerror(failed));
 		}
 		close(fd);
@@ -2786,6 +2812,42 @@ int ncfg_client_wifi_connect(ncfg_client_t *client, const char *interface, const
 	if (at + 2 > sizeof(request)) {
 		return 0;
 	}
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
+}
+
+int ncfg_client_wifi_forget(ncfg_client_t *client, const char *id, char *err, size_t err_size)
+{
+	if (!id || !*id) {
+		set_error(err, err_size, "no network to forget");
+		return 0;
+	}
+
+	/* Not wifi_request(): that one writes an `interface` member, and this
+	 * carries an `id`. One member's name apart, and it is the member the
+	 * daemon dispatches on -- a shared helper taking the key as a third
+	 * string would read as though the two were the same request. */
+	char request[512];
+	int head = snprintf(request, sizeof(request), "{\"request\":\"wifi_forget\",\"id\":");
+	if (head < 0 || (size_t)head >= sizeof(request)) {
+		set_error(err, err_size, "network id is too long to ask about");
+		return 0;
+	}
+	size_t at = (size_t)head;
+	size_t span = ncfg_client_quote(id, request + at, sizeof(request) - at);
+	if (!span || at + span + 2 > sizeof(request)) {
+		set_error(err, err_size, "network id is too long to ask about");
+		return 0;
+	}
+	at += span;
 	request[at++] = '}';
 	request[at] = '\0';
 

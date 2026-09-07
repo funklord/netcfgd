@@ -1857,6 +1857,47 @@ static void a_link_knows_whether_a_default_route_leaves_through_it(void)
 	staged_close(&staged);
 }
 
+/*
+ * An unreachable daemon is answered, not asked about.
+ *
+ * The message used to end "Is the daemon running?" -- the right question and
+ * the wrong sentence, because the answer is no and the reader was left to work
+ * out what to type. Reported by an operator with the package freshly
+ * installed: "netcfgd-gui says it is not running as usual ... I always have to
+ * mess around to start it when NM is running."
+ *
+ * Both remedies are pinned, because there are two states and this layer cannot
+ * tell them apart: a machine where netcfgd is merely unstarted, and one where
+ * another daemon still holds the interfaces and has to be stood down first.
+ * Naming only `systemctl` sends somebody to start a daemon on a machine
+ * NetworkManager owns.
+ *
+ * Pinning the WORDS rather than that it failed, for `evidence.md`'s reason: a
+ * refusal that stops describing its own case fails silently, and this one is
+ * read by somebody who is already stuck.
+ */
+static void an_unreachable_daemon_says_what_to_do(void)
+{
+	char err[NCFG_ERROR_MAX];
+	err[0] = 'x';
+	ncfg_client_t *client =
+	    ncfg_client_open("/nonexistent-netcfgd-run-dir/netcfgd.sock", err, sizeof(err));
+	ok("connecting to a socket that is not there fails", client == NULL, NULL);
+	if (client) {
+		ncfg_client_close(client);
+		return;
+	}
+	ok("and the path is in the message", strstr(err, "/nonexistent-netcfgd-run-dir") != NULL,
+	   err);
+	ok("and it answers the question rather than asking it",
+	   strstr(err, "netcfgd is not running") != NULL, err);
+	ok("and names how to start it", strstr(err, "systemctl enable --now netcfgd") != NULL, err);
+	ok("and how to take the machine from another daemon",
+	   strstr(err, "netcfgd_select.sh netcfgd") != NULL, err);
+	ok("and does not ask whether the daemon is running", strstr(err, "Is the daemon") == NULL,
+	   err);
+}
+
 int main(int argc, char **argv)
 {
 	/* `--facts OUT WITNESS`: the conformance dump, not the test run. */
@@ -1893,6 +1934,7 @@ int main(int argc, char **argv)
 	a_refused_stream_says_which_tier_it_wanted();
 	freeing_what_was_never_filled_in_is_nothing();
 	a_kind_the_kernel_gave_wins_over_the_name();
+	an_unreachable_daemon_says_what_to_do();
 
 	printf("\n");
 	if (failures) {

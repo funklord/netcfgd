@@ -1577,6 +1577,7 @@ fn answer(
 		| Request::WifiConnect { .. }
 		| Request::WifiDisconnect { .. }
 		| Request::WifiAdd { .. }
+		| Request::WifiForget { .. }
 		| Request::ApStations { .. }
 		| Request::Radios
 		| Request::RadioSet { .. } => answer_wifi(state, request),
@@ -1646,6 +1647,7 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 		Request::WifiDisconnect { interface } => {
 			wifi::disconnect(state.desired.as_ref(), interface)
 		}
+		Request::WifiForget { id } => forget_network_request(state, id),
 		Request::WifiAdd {
 			ssid,
 			id,
@@ -1942,6 +1944,31 @@ fn put_config_request(state: &mut State, name: &str, text: &str, replace: bool) 
 			Response::Ok
 		}
 		Err(message) => Response::error(message),
+	}
+}
+
+/// Take a network out of the configuration, and read it back.
+///
+/// The mirror of [`add_network_request`], and the same reload for the same
+/// reason: a client that forgot a network and was told by the very next
+/// request that it is still there would be right to call that a bug.
+///
+/// Nothing is reported but success. What was removed is a `network` block and
+/// possibly a credential, and a client that wants to see the result asks --
+/// the secrets list is where a credential left behind shows up, which is the
+/// tab that exists for it.
+fn forget_network_request(state: &mut State, id: &str) -> Response {
+	match netcfgd_host::wifi_profile::forget(
+		&state.paths.config,
+		&state.paths.factory,
+		state.desired.as_ref(),
+		id,
+	) {
+		Ok(_) => {
+			state.reload();
+			Response::Ok
+		}
+		Err(error) => Response::error(error.message),
 	}
 }
 

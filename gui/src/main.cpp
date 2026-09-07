@@ -120,14 +120,28 @@ int main(int argc, char **argv)
 
 	ncfg_connection connection;
 	QString error;
-	if (!connection.open(parser.value(socket_option), &error)) {
-		/* A window with an empty table would say the machine has no
-		 * interfaces, which is a different and much worse claim than
-		 * "netcfgd could not be reached". The message is the C layer's,
-		 * which names the path and says the daemon has to be running.
-		 */
-		QMessageBox::critical(nullptr, QStringLiteral("netcfgd"), error);
-		return 1;
+	/* **Retry rather than exit**, because the thing to do about this happens
+	 * in another window. The dialog names the commands (the C layer's message
+	 * does), and every one of them ends with netcfgd running -- so quitting
+	 * here means the operator starts the daemon and then has to find this
+	 * program again. Reported as "I always have to mess around to start it
+	 * when NM is running", which is that round trip.
+	 *
+	 * A window with an empty table is still refused: it would say the machine
+	 * has no interfaces, which is a different and much worse claim than
+	 * "netcfgd could not be reached". So this loops on the dialog rather than
+	 * opening the window unconnected.
+	 *
+	 * `Retry` is the default button, since somebody who has just read the
+	 * message is about to act on it. Cancel is what closing the dialog does,
+	 * so there is no way to dismiss it into a window that would lie. */
+	while (!connection.open(parser.value(socket_option), &error)) {
+		QMessageBox box(QMessageBox::Critical, QStringLiteral("netcfgd"), error,
+		            QMessageBox::Retry | QMessageBox::Cancel);
+		box.setDefaultButton(QMessageBox::Retry);
+		if (box.exec() != QMessageBox::Retry) {
+			return 1;
+		}
 	}
 
 	ncfg_main_window window(&connection);

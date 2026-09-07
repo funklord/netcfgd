@@ -85,6 +85,7 @@ fn every_request() -> Vec<Request> {
 		Request::WifiAdd { .. } => "wifi_add",
 		Request::WifiConnect { .. } => "wifi_connect",
 		Request::WifiDisconnect { .. } => "wifi_disconnect",
+		Request::WifiForget { .. } => "wifi_forget",
 		Request::ApStations { .. } => "ap_stations",
 		Request::ConfigPut { .. } => "config_put",
 		Request::ProbePut { .. } => "probe_put",
@@ -133,6 +134,7 @@ fn every_request() -> Vec<Request> {
 			"wifi_add",
 			"wifi_connect",
 			"wifi_disconnect",
+			"wifi_forget",
 			"wifi_scan",
 			"wifi_status",
 		],
@@ -309,6 +311,9 @@ fn every_request_sample() -> Vec<Request> {
 		},
 		Request::WifiDisconnect {
 			interface: "wlan0".to_owned(),
+		},
+		Request::WifiForget {
+			id: "home".to_owned(),
 		},
 		Request::ApStations {
 			interface: "wlan0".to_owned(),

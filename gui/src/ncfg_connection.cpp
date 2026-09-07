@@ -1100,6 +1100,27 @@ bool ncfg_connection::wifi_disconnect(const QString &interface, QString *error)
 	return true;
 }
 
+bool ncfg_connection::wifi_forget(const QString &id, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray which = id.toUtf8();
+
+	if (!ncfg_client_wifi_forget(client, which.constData(), message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::confirm(QString *error)
 {
 	if (!client) {
