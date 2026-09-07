@@ -18,8 +18,9 @@
 
 #include <cstdio>
 
+#include <QFileInfo>
+
 #ifdef NETCFGD_QTTY
-#  include <QFileInfo>
 #  include <qtty/qtty.h>
 #  include <unistd.h>
 
@@ -67,10 +68,54 @@ static bool want_tui(int argc, char **argv)
 	return !display && isatty(1);
 #endif
 }
+#else
+/*
+ * Was the terminal frontend asked for, in a build that has none?
+ *
+ * **The silent case, reported from an install**: "netcfgd-tui is the same as
+ * netcfgd-gui, and there is no --tui argument". Both halves are true and
+ * neither says why. `install-gui` makes the `netcfgd-tui` symlink
+ * unconditionally, and everything that reads it is behind `NETCFGD_QTTY` --
+ * so a build whose qtty submodule was never checked out installs a terminal
+ * command that opens a window, and refuses `--tui` as an unknown option.
+ *
+ * A feature that goes missing has to say so where somebody is looking, and
+ * the place somebody is looking is the command they just typed. This is the
+ * same argv scan `want_tui` does, kept deliberately in step with it: the two
+ * must agree about what "asked for the TUI" means, or the refusal fires on a
+ * different set of invocations than the frontend would have.
+ */
+static bool asked_for_tui(int argc, char **argv)
+{
+	for (int i = 1; i < argc; ++i) {
+		if (!qstrcmp(argv[i], "--tui"))
+			return true;
+		if (!qstrcmp(argv[i], "--gui"))
+			return false;
+	}
+	return QFileInfo(QString::fromLocal8Bit(argv[0]))
+	    .fileName()
+	    .endsWith(QStringLiteral("-tui"));
+}
 #endif
 
 int main(int argc, char **argv)
 {
+#ifndef NETCFGD_QTTY
+	/* Before QApplication: this must work with no display, which is the
+	 * situation somebody typing `netcfgd-tui` is usually in. */
+	if (asked_for_tui(argc, argv)) {
+		fprintf(stderr,
+		    "netcfgd-tui: this build has no terminal frontend, so there is nothing to "
+		    "run.\n"
+		    "  It is compiled in when the `qtty` submodule is checked out and built:\n"
+		    "    git submodule update --init && make gui\n"
+		    "  A package built from a clone without `--recurse-submodules` gets the\n"
+		    "  window and not the terminal, and installs this name anyway.\n"
+		    "  The desktop window is `netcfgd-gui`.\n");
+		return 2;
+	}
+#endif
 #ifdef NETCFGD_QTTY
 	const bool tui = want_tui(argc, argv);
 	if (tui)

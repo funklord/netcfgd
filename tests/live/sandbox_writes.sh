@@ -286,6 +286,40 @@ check "a refused write with no daemon says the write was refused" \
 check "and that there was nobody to ask instead" \
 	"$(grep -c 'nothing is listening on' "$work/put6.log" || true)" "1"
 
+# **Said once at startup, rather than once per write.** 0127 makes netcfgd the
+# only writer of its own configuration, so a read-only `/etc/netcfgd` refuses
+# every write verb a client has -- one at a time, in front of whoever pressed
+# the button. The condition is true from the moment the daemon starts, so that
+# is where it is reported: in `systemctl status` and the journal, before
+# anybody tries. Reported from an install that met it the other way round.
+check "the daemon says at startup that it cannot write its configuration" \
+	"$(grep -c 'so no client can store configuration' "$work/daemon5.log" || true)" "1"
+check "and names the setting that grants it" \
+	"$(grep -c 'ReadWritePaths=' "$work/daemon5.log" || true)" "1"
+
+# The control, and it is the half that decides whether the check above means
+# anything: a warning printed unconditionally would pass that grep on every
+# machine. The same daemon, the same directory, no read-only mount.
+unshare -rmn sh -c '
+	set -eu
+	work=$1; repo=$2
+	NCFG_CONFIG_DIR="$work/etc5/netcfgd" NCFG_RUN_DIR="$work/run7" \
+		"$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon7.log" 2>&1 &
+	daemon=$!
+	waited=0
+	while [ ! -S "$work/run7/netcfgd.sock" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 50 ] && break
+		sleep 0.1
+	done
+	kill "$daemon" 2>/dev/null || true
+	wait "$daemon" 2>/dev/null || true
+' sh "$work" "$repo"
+check "and says nothing of the sort when it can write" \
+	"$(grep -c 'so no client can store configuration' "$work/daemon7.log" || true)" "0"
+check "the control daemon really started, so its silence means something" \
+	"$(grep -c 'watching' "$work/daemon7.log" || true)" "1"
+
 # **The grant itself, because every check above depends on it.** A unit that
 # narrowed this back to the one file would put the reported fault straight
 # back, and the tests above would go on passing case (b) while (a) failed with

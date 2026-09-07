@@ -9457,6 +9457,66 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.60 The packaged install is a machine this tree cannot see
+
+Two reports from one install, arriving while the gui work above was underway.
+Decision 0173 has what was decided; what belongs here is what they say about
+where the faults were.
+
+**Both are the developer's build and the packaged build differing, and neither
+difference had a voice.** Here, the qtty submodule is checked out and
+`/etc/netcfgd` is a scratch directory in `/tmp`. There, the submodule may never
+have been fetched and `/etc` is behind `ProtectSystem=`. Every test in this
+repository runs in the first world.
+
+**The tui one is three defensible pieces making an indefensible whole.**
+`gui.pro` compiles the TUI only when qtty is present -- right, since a clone
+without `--recurse-submodules` still has to build. `install-gui` makes the
+`netcfgd-tui` symlink -- right, since the binary handles the name. `main.cpp`
+reads that name only under `#ifdef NETCFGD_QTTY` -- right, since there is
+nothing to read it for otherwise. Put together: a terminal command that opens
+a window and refuses `--tui` as an unknown option, on a package that built
+cleanly. **No single reviewer of any one file would have called it wrong.**
+
+That is the argument for the runtime refusal over a build-time one. A build
+that failed for a missing submodule would be worse -- the GUI is meant to
+build without it -- so what was missing is the program saying, at the moment
+somebody asks for the thing it does not have, that it does not have it.
+
+**The write one is 0171's message doing its job and arriving too late.** The
+sentence was right: it named the directory, the errno and `ReadWritePaths=`.
+What was wrong is that the machine was in that state from the moment netcfgd
+started and said nothing until a button was pressed. **A condition that is
+true at startup is reported at startup**, and the general form is worth
+keeping: when a diagnostic is good and still feels like a failure, ask when
+the condition became true rather than how to word it better.
+
+**The probe writes rather than reads.** netcfgd is root and root walks through
+a mode; it does not walk through a read-only mount. `access(2)` and a `stat`
+both answer *yes* on exactly the machine the check exists for -- the same trap
+`sandbox_writes.sh`'s own header records for its first version, which used a
+`chmod` and passed with the fix removed.
+
+**And the control is what makes the check worth having.** A warning printed
+unconditionally would satisfy the grep on every machine, so the live test
+starts the same daemon on the same directory with no read-only mount and
+asserts silence -- plus that it started at all, or the silence would be a
+daemon that never ran.
+
+### What is still open, and it is not ours to close from here
+
+The shipped `netcfgd.service` has carried `ReadWritePaths=/etc` since
+`aef7d4a` (2026-08-21). A machine without it is running an older unit, a
+drop-in that overrides it, or a daemon not restarted since the package moved.
+**This tree cannot tell which**, and naming a cause it has not established
+would be a diagnosis with unearned authority -- so the message names the
+mechanism and the command that shows it (`systemctl cat netcfgd`) and stops.
+
+The packaging question underneath is real and is recorded rather than
+answered: `debian/postinst` runs the selector only on a first install, so an
+upgraded machine keeps whatever was running and whatever unit it had loaded.
+Whether an upgrade should re-select is the copyright holder's call.
+
 ## 10.59 The GUI could add and could not remove, and the daemon said "is it running?"
 
 Two things, from one instruction to improve the gui and two reports that

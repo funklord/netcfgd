@@ -80,6 +80,16 @@ exists($$QTTY_ROOT/qtty.pri) {
 	} else {
 		message("gui: qtty checkout has no built libqtty.a; --tui unavailable")
 	}
+} else {
+	# **The silent case, and it was silent.** A clone without
+	# `--recurse-submodules` leaves `../qtty` empty, this `exists()` is false,
+	# and until now nothing said anything -- so a package built that way
+	# shipped the `netcfgd-tui` symlink, no `--tui` option, and no clue.
+	# Reported from an install: "netcfgd-tui is the same as netcfgd-gui, and
+	# there is no --tui argument". The binary refuses that invocation now; this
+	# is the other end, where whoever built it can still do something about it.
+	message("gui: no qtty at $$QTTY_ROOT -- building the window only, with no --tui.")
+	message("gui:   git submodule update --init, then build again, for the terminal frontend")
 }
 
 SOURCES += \

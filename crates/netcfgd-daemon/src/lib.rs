@@ -174,6 +174,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		paths.config.display(),
 		socket_path.display()
 	);
+	report_writability(&paths.config);
 	report_contention(&state);
 
 	// Before anything else: a window found here was opened by a daemon that is
@@ -1944,6 +1945,67 @@ fn put_config_request(state: &mut State, name: &str, text: &str, replace: bool) 
 			Response::Ok
 		}
 		Err(message) => Response::error(message),
+	}
+}
+
+/// Say at startup when netcfgd cannot write its own configuration directory.
+///
+/// **Because the alternative is finding out one write at a time.** 0127 makes
+/// netcfgd the only writer of `/etc/netcfgd`, so every `wifi_add`,
+/// `config_put`, `secret_put`, `profile_save` and `wifi_forget` a client sends
+/// lands here -- and if the directory is read-only for this process, all of
+/// them fail, one at a time, in front of whoever pressed the button. Reported
+/// from an install:
+///
+/// ```text
+/// could not write /etc/netcfgd/conf.d/wifi-EMP-XYLEM.conf: ... (Read-only
+/// file system (os error 30))
+/// ```
+///
+/// That message is right and it arrives at the worst moment. The condition is
+/// true from the moment the daemon starts, so this is where it belongs: in
+/// `systemctl status` and the journal, before anybody tries.
+///
+/// **Asked by writing, not by reading a mode.** netcfgd is root and root walks
+/// through a mode; it does not walk through a read-only mount, which is what
+/// `ProtectSystem=` imposes. `access(2)` and a stat would both answer yes on
+/// exactly the machine this exists for.
+///
+/// The probe carries this process's pid so two daemons cannot collide, and it
+/// is a dotfile so the config loader would ignore it even if a crash left one
+/// behind (0121).
+fn report_writability(config: &std::path::Path) {
+	let probe = config.join(format!(".netcfgd-write-probe.{}", std::process::id()));
+	match std::fs::OpenOptions::new()
+		.write(true)
+		.create_new(true)
+		.open(&probe)
+	{
+		Ok(_) => {
+			let _ = std::fs::remove_file(&probe);
+		}
+		// Anything else -- a full disk, a name that already exists -- is not
+		// this check's subject, and guessing about it here would put a
+		// sentence about sandboxes in front of somebody whose disk is full.
+		Err(error)
+			if matches!(
+				error.kind(),
+				std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+			) =>
+		{
+			eprintln!(
+				"netcfgd: cannot write {} ({error}), so no client can store \
+				 configuration: `ncfg wifi add`, `ncfg config put`, `ncfg secret set`, \
+				 `ncfg profile save` and the gui's write buttons will all be refused",
+				config.display()
+			);
+			eprintln!(
+				"netcfgd:   netcfgd is the only writer of that directory (0127). Under \
+				 systemd this is `ProtectSystem=`, and the unit has to name the path \
+				 in `ReadWritePaths=` -- `systemctl cat netcfgd` shows what yours says"
+			);
+		}
+		Err(_) => {}
 	}
 }
 
