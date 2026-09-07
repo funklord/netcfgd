@@ -33,6 +33,21 @@
  */
 static bool want_tui(int argc, char **argv)
 {
+	/* Policy builds: a package that must carry only one frontend. They trim
+	 * *code paths*, never libraries -- the TUI is these QWidgets on a
+	 * character grid, so libQt6Widgets is linked either way. Honoured here
+	 * because qtty defines them and netcfgd did not read them, which made a
+	 * `DEFINES+=QTTY_NO_GUI` build byte-for-byte identical to a plain one:
+	 * the variant existed in the compiler's arguments and nowhere else. */
+#if defined(QTTY_NO_TUI)
+	(void)argc;
+	(void)argv;
+	return false;
+#elif defined(QTTY_NO_GUI)
+	(void)argc;
+	(void)argv;
+	return true;
+#else
 	for (int i = 1; i < argc; ++i) {
 		if (!qstrcmp(argv[i], "--tui"))
 			return true;
@@ -50,6 +65,7 @@ static bool want_tui(int argc, char **argv)
 	const bool display = qEnvironmentVariableIsSet("WAYLAND_DISPLAY")
 	                  || qEnvironmentVariableIsSet("DISPLAY");
 	return !display && isatty(1);
+#endif
 }
 #endif
 

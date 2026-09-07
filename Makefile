@@ -508,8 +508,24 @@ install-gui:
 	install -m 0755 $(GUI_BUILD_DIR)/netcfgd-gui $(DESTDIR)$(BINDIR)/netcfgd-gui
 	install -m 0644 gui/packaging/netcfgd-gui.desktop \
 		$(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	@# **One binary, two names**, the way `ncfg` is the daemon's second name.
+	@# The program reads argv[0] and a name ending `-tui` selects the terminal
+	@# frontend, so this costs a symlink and buys a real command rather than
+	@# `netcfgd-gui --tui`, which is an odd thing to type on a server.
+	@#
+	@# A second *binary* would buy nothing: the TUI is these QWidgets rendered
+	@# on a character grid, so it links libQt6Widgets whatever is stripped
+	@# from it. Splitting trims code paths, never libraries -- and the Qt-free
+	@# TUI already exists and is `ncfg tui` (0025).
+	@#
+	@# Relative, so it resolves inside a DESTDIR staging root and after it is
+	@# unpacked at /, which is the same reason the `ncfg` link is absolute to
+	@# SBINDIR rather than to the build tree.
+	ln -sf netcfgd-gui $(DESTDIR)$(BINDIR)/netcfgd-tui
 	@echo "install-gui: netcfgd-gui installed; it needs libqt6widgets6 at run time"
 	@echo "install-gui:   and links libQt6DBus, which the daemon does not"
+	@echo "install-gui:   netcfgd-tui is the same binary on a terminal;"
+	@echo "install-gui:   netcfgd-gui --tui does the same from either name"
 
 # The LSB init scripts, for the machines that do not run systemd.
 #
@@ -1733,6 +1749,7 @@ uninstall:
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd_select.sh
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-gui
+	rm -f $(DESTDIR)$(BINDIR)/netcfgd-tui
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-at

@@ -387,6 +387,47 @@ with `undefined reference to Qtty::prepare_environment()`, which reads as a
 missing library rather than as the wrong one. The plain `build/` is the one
 with both frontends, and this project looks there.
 
+## 7b. One binary and a symlink, measured rather than argued
+
+Asked whether the dual binary was right or whether a separate `netcfgd-tui`
+would be better. Built both and compared:
+
+    dual binary   1,022,120 bytes
+    TUI-only      1,021,952 bytes     168 bytes, same nine libraries
+
+`libQt6Core`, `libQt6Gui`, `libQt6Widgets`, `libQt6DBus`, `EGL`, `GLX`,
+`OpenGL`, `GLdispatch`, `xcb` -- identical in both. **A second binary cannot
+shed a dependency**, because the TUI is these `QWidget`s rendered on a
+character grid: stripping the GUI code path removes `QApplication::exec()`
+and the tray, not `libQt6Widgets`. Splitting trims code paths, never
+libraries.
+
+So: **one binary, and a `netcfgd-tui` symlink**. `argv[0]` selection was
+already in the frontend chooser, so the terminal command name costs one
+`ln -s` in `install-gui` -- verified by invoking it as `netcfgd-tui` with no
+flag and watching it render. `--tui` and `--gui` still work from either name.
+A second build target would cost two things to keep in step, which is the
+failure this tree keeps paying for.
+
+**The Qt-free TUI already exists and is not this one.** `ncfg tui` is ncurses
+in the Rust binary and links nothing beyond libc with the feature off (0025) --
+that is the router and serial-console answer. The qtty TUI is for somebody
+who has Qt already: a desktop, or an ssh session into one. They do not
+compete, and a project weighing the two should ask which audience it is
+missing rather than which binary layout it prefers.
+
+**`QTTY_NO_GUI` and `QTTY_NO_TUI` are honoured now**, so a policy build that
+must carry one frontend is possible. They were not, which is how the first
+attempt at the measurement above proved nothing: the define reached the
+compiler seventy times, netcfgd's `main` never read it, and the two binaries
+came out **byte-for-byte identical**. Only the identical size gave it away.
+**A variant that exists in the compiler's arguments and nowhere else reports
+whatever the plain build reports.**
+
+This is signalled to `claude-guidelines` as a standard for the Qt trees --
+netcfgd, fuzzypickles, hydra and beerssh are all Qt Widgets applications and
+the question arrives identically in each.
+
 ## 8. Order of work
 
 1. ~~**`client/` against the local socket, and the GUI on top of it.**~~ **Done
