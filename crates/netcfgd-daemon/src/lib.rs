@@ -1697,6 +1697,7 @@ fn delete_config_request(state: &mut State, name: &str) -> Response {
 		state,
 		folded.as_deref(),
 		netcfgd_host::config::remove_drop_in(&state.paths.config, &state.paths.factory, name)
+			.map_err(|error| error.message)
 			.map(|_| ()),
 	) {
 		Ok(()) => {
@@ -1911,7 +1912,7 @@ fn set_profile_request(state: &mut State, name: Option<&str>) -> Response {
 			state.reload();
 			Response::Ok
 		}
-		Err(message) => Response::error(message),
+		Err(error) => Response::error(error.message),
 	}
 }
 
@@ -1929,7 +1930,8 @@ fn put_config_request(state: &mut State, name: &str, text: &str, replace: bool) 
 			name,
 			text,
 			replace,
-		),
+		)
+		.map_err(|error| error.message),
 	) {
 		Ok(_) => {
 			state.reload();

@@ -126,7 +126,9 @@ pub(crate) fn usable_name(name: &str) -> Result<(), &'static str> {
 	Ok(())
 }
 
-pub(crate) fn make_secrets_dir(secret: &Path) -> Result<(), String> {
+pub(crate) fn make_secrets_dir(
+	secret: &Path,
+) -> Result<(), netcfgd_host::wifi_profile::InstallError> {
 	use std::os::unix::fs::DirBuilderExt as _;
 
 	let directory = secret.parent().unwrap_or_else(|| Path::new("."));
@@ -137,7 +139,12 @@ pub(crate) fn make_secrets_dir(secret: &Path) -> Result<(), String> {
 		.recursive(true)
 		.mode(0o700)
 		.create(directory)
-		.map_err(|error| format!("could not create {}: {error}", directory.display()))
+		.map_err(|error| {
+			netcfgd_host::wifi_profile::InstallError::from_io(
+				format!("could not create {}: {error}", directory.display()),
+				&error,
+			)
+		})
 }
 
 /// Where the `file` provider will look for this one.
@@ -218,9 +225,20 @@ pub(crate) fn set(positional: &[String], options: &Options) -> Result<ExitCode, 
 		};
 	}
 
-	make_secrets_dir(&secret)?;
-	config::write_atomically(&secret, value.as_bytes(), 0o600)
-		.map_err(|error| format!("could not write {}: {error}", secret.display()))?;
+	// Both failures carry the same second half: there was no daemon to ask,
+	// and `/etc/netcfgd/secrets` is root's (0127). Told only that permission
+	// was denied, a reader goes looking for a mode to change when starting
+	// netcfgd would have done it for them.
+	make_secrets_dir(&secret).map_err(|error| crate::drop_in::refused_locally(error, &socket))?;
+	config::write_atomically(&secret, value.as_bytes(), 0o600).map_err(|error| {
+		crate::drop_in::refused_locally(
+			netcfgd_host::wifi_profile::InstallError::from_io(
+				format!("could not write {}: {error}", secret.display()),
+				&error,
+			),
+			&socket,
+		)
+	})?;
 
 	report(&secret, name, replacing, options);
 	Ok(ExitCode::SUCCESS)

@@ -9457,6 +9457,104 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.58 Five verbs, one refusal, five answers -- and one that was not true
+
+Reported: *"fix all the `cannot write` bugs when changing config in netcfgd.
+Because it happens every time I try to change anything."*
+
+Every config-changing verb was run against a directory it may not write, with
+no daemon listening. The table is the whole finding:
+
+    config put      could not write .../conf.d/thing.conf:
+                    No such file or directory (os error 2)
+    config rm       could not remove ...: Permission denied
+    profile save    could not create .../profile/office: Permission denied
+    secret set      could not create .../secrets: Permission denied
+    wifi add        cannot write ... and nothing is listening on ... -- so
+                    there is nowhere to put this network. Start netcfgd, or
+                    run this as somebody who can write the configuration
+
+**The first row is a lie and the last row is the answer**, and they are the
+same situation. Decision 0171 has the four faults and what was decided; what
+belongs here is what the exercise says about how they survived.
+
+**Enumerating beat querying, again.** Four of the five faults are invisible
+to anyone reading the code for "cannot write": three verbs report an errno
+that is perfectly correct and useless, and the fourth -- `ncfg profile save`
+never sending `Request::ProfileSave` -- has no error message at all to grep
+for. What found them was running every member of the population and putting
+the answers next to each other. One row differing from four is a finding a
+table shows and a reading does not.
+
+**The good message was the oldest one.** `wifi add` has said both halves
+since 0127. Nothing carried it to the verbs added since, and nothing could
+have: it was a `format!` inside one match arm. It is `refused_locally` now,
+and `wifi add` uses it rather than its own copy -- one fewer place for the
+next verb to not find.
+
+**A classification set "from nothing else" is a comment that ages.**
+`InstallError::denied` said it was set "from `ErrorKind::PermissionDenied`
+and from nothing else". That was true, deliberate, and left the two-halves
+message switched off in exactly the case this tree keeps meeting:
+`ProtectSystem=` is a mount rather than a mode, so it answers `EROFS`. The
+sentence describing the limit is what made it look considered.
+
+### The fallback that spoke over its cause
+
+`write_atomically` falls back to writing in place when the directory refuses
+a staged temporary. The fallback opens an existing file **on purpose** (0161)
+-- so for a new file it answers `ENOENT`, and that answer replaced the
+`EROFS` that was the reason. An operator asking to create a drop-in was told
+the drop-in did not exist.
+
+`netcfgd-dns` has the same fallback and has always taken the staging error as
+an argument and named both halves. The host copy's own doc comment predicted
+this: *"Two copies of one rule is how they come to disagree."* It was right,
+and the copy carrying the warning is the one that drifted. **A note saying a
+duplication is dangerous does not make the duplication safe**, and the file
+that carries the note is not thereby the file that stays correct.
+
+### The bug the fix uncovered, and the half left open
+
+Making `profile save` reach the daemon meant `profile.sh` could finally
+exercise it -- and it failed, on the configuration that file must have:
+
+    profile/weekend/00-saved.conf:10:2: `control` is already set in `global`
+
+The renderer marks a redefined `interface`, `device`, `network` or
+`bluetooth` block `override` and never marks `global` one, deliberately
+(0147). So a snapshot restating `global { control { ... } }` collides with
+the base -- and **every machine whose desktop client can reach the daemon has
+that block**, because 0127 requires it to grant access. `ncfg profile save`
+did not work on the machines most likely to run it.
+
+Dropping what the base already says identically fixes it and changes no
+effective document. **What is still open is a profile carrying a `global`
+setting the base sets differently.** The language cannot express it: `global`
+merges, `override global` would replace the block and discard the parts the
+snapshot does not mention, and there is no per-setting override inside it.
+
+The option, its cost and whose it is: a per-setting `override` inside
+`global` would make profiles able to change a control policy or a DNS
+default, at the cost of a syntax whose merge rules are already the subject of
+0147; leaving it means a profile can never differ from the base on a global
+setting, which nobody has yet asked for. **That is the copyright holder's to
+settle**, not a call to make while fixing a message -- it is refused with the
+existing message rather than written out broken.
+
+### What the tests could not have caught
+
+`sandbox_writes.sh` made real read-only mounts and drove `ncfg` **directly**,
+so the client-asks-daemon collapse 0127 built had never met one. That is why
+a daemon whose sandbox refuses every write went unnoticed twice (0161, 0164)
+and was reported from a desktop both times. It drives a daemon now.
+
+`profile.sh` exists because the profile verbs "had never been spoken to a
+running daemon", and it went on not speaking to `save` -- the one verb that
+was not speaking either. **A test written to close a gap can leave the same
+gap open for the member nobody listed**, which is the exhaustiveness question
+asked of a name, met in a file rather than in an assertion.
+
 ## 10.57 The intermittent that a workaround had already diagnosed
 
 `make live` failed one check in `openvpn.sh`, and it had been failing about

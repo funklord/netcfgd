@@ -200,6 +200,7 @@ pub(crate) fn put_text(
 	let factory_dir = config::resolve_factory_dir(options.factory_dir.as_deref());
 	let path = with_profile_taken_off(&config_dir, &factory_dir, name, || {
 		config::install_drop_in(&config_dir, &factory_dir, name, &text, replace)
+			.map_err(|error| refused_locally(error, &socket))
 	})?;
 	println!("wrote {}", path.display());
 	println!(
@@ -240,6 +241,7 @@ pub(crate) fn remove_named(
 	// went looking for a file that had gone. `remove_drop_in` reports it now.
 	let removed = with_profile_taken_off(&config_dir, &factory_dir, name, || {
 		config::remove_drop_in(&config_dir, &factory_dir, name)
+			.map_err(|error| refused_locally(error, &socket))
 	})?;
 	if removed {
 		// The same words the daemon path uses, because it is the same event
@@ -249,6 +251,36 @@ pub(crate) fn remove_named(
 		println!("{subject} is not in {}", config_dir.display());
 	}
 	Ok(ExitCode::SUCCESS)
+}
+
+/// Say the other half when a local write was refused.
+///
+/// **Two things to do about it, and a raw errno names neither.** The
+/// filesystem refused this process, *and* there was no daemon to ask instead
+/// -- a reader told only the first goes looking for a permission to grant when
+/// starting netcfgd would have done. `ncfg wifi add` has said both since 0127
+/// and every other write verb said the first only, which is the same collapse
+/// reported by whoever met it through `ncfg config put` instead.
+///
+/// **Only on a refusal.** A drop-in rejected for not compiling has nothing to
+/// do with who may write, and appending "nothing is listening" to it would
+/// send a reader to start a daemon that would have refused the same text.
+/// [`InstallError::denied`] is the classification, set from the kind the
+/// kernel gave rather than from the words in the message -- matching words is
+/// how a fallback silently switches itself off.
+pub(crate) fn refused_locally(
+	error: netcfgd_host::wifi_profile::InstallError,
+	socket: &std::path::Path,
+) -> String {
+	if !error.denied {
+		return error.message;
+	}
+	format!(
+		"could not write the configuration ({}), and could not ask netcfgd to \
+		 do it either: nothing is listening on {}",
+		error.message,
+		socket.display()
+	)
 }
 
 #[cfg(test)]

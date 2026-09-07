@@ -251,12 +251,18 @@ pub fn render(profile: &Profile) -> String {
 /// turning the fallback off, which is the failure mode nobody notices.
 ///
 /// `Display` renders exactly what this used to return, so no message changes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallError {
 	/// The sentence to print.
 	pub message: String,
 	/// The filesystem refused this process, rather than the request being
-	/// wrong. Set from `ErrorKind::PermissionDenied` and from nothing else.
+	/// wrong. Set from `ErrorKind::PermissionDenied` and from
+	/// `ErrorKind::ReadOnlyFilesystem`, which is the same refusal arriving
+	/// from a sandbox rather than from a mode -- and is the one this tree
+	/// actually meets, since `ProtectSystem=` is a mount and not a
+	/// permission. Saying "and from nothing else" was true and left the
+	/// message that names both halves switched off in exactly the case it
+	/// was written for.
 	pub denied: bool,
 }
 
@@ -277,10 +283,14 @@ impl From<String> for InstallError {
 
 impl InstallError {
 	/// An error from the filesystem, carrying whether it was a refusal.
-	fn from_io(message: String, error: &std::io::Error) -> Self {
+	#[must_use]
+	pub fn from_io(message: String, error: &std::io::Error) -> Self {
 		Self {
 			message,
-			denied: error.kind() == std::io::ErrorKind::PermissionDenied,
+			denied: matches!(
+				error.kind(),
+				std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+			),
 		}
 	}
 }

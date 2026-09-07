@@ -141,6 +141,32 @@ fn save(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 		return Err("`ncfg profile save` needs a name to save as".to_owned());
 	};
 
+	// **The daemon first, which this alone did not do.** Every other write
+	// verb takes the socket when one is listening and the directory only when
+	// none is -- 0127's collapse, because `/etc/netcfgd` is root's and a
+	// client is not root. `save` wrote locally unconditionally, so an
+	// unprivileged operator with netcfgd running got "could not create
+	// /etc/netcfgd/profile/<name>: Permission denied" for a request the
+	// daemon already serves and already authorizes at the `admin` tier. The
+	// verb existed on both sides and nothing sent it.
+	let socket = crate::client::socket_path(&crate::state::resolve_dir(options.run_dir.as_deref()));
+	if socket.exists() {
+		let request = netcfgd_proto::Request::ProfileSave {
+			name: name.clone(),
+			replace: options.replace,
+		};
+		return match crate::client::ask(&socket, &request) {
+			Ok(crate::client::Answer::Ok) => {
+				// No path: netcfgd chose where it went, and 0127's rule is
+				// that handing one back invites a client to keep it.
+				println!("netcfgd saved `{name}` and is running it");
+				Ok(ExitCode::SUCCESS)
+			}
+			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
+			Ok(other) => Err(format!("the daemon sent {}", other.describe())),
+		};
+	}
+
 	let config = netcfgd_host::config::resolve_dir(options.config_dir.as_deref());
 	let factory = netcfgd_host::config::resolve_factory_dir(options.factory_dir.as_deref());
 
@@ -159,7 +185,8 @@ fn save(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 		// The remedy in this caller's vocabulary: `ncfg` has a flag to
 		// name, and a message naming a gui's button would be useless here.
 		"`--replace`",
-	)?;
+	)
+	.map_err(|error| crate::drop_in::refused_locally(error, &socket))?;
 	println!("wrote {}", snapshot.display());
 	println!("`{name}` is now the profile in use");
 	Ok(ExitCode::SUCCESS)

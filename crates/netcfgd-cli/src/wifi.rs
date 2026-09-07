@@ -312,6 +312,7 @@ fn activate(interface: &str, options: &Options) -> Result<(), String> {
 		true,
 	)
 	.map(|_| ())
+	.map_err(|error| crate::drop_in::refused_locally(error, &socket))
 }
 
 /// Add a network to the configuration.
@@ -460,19 +461,10 @@ pub(crate) fn add(positional: &[String], options: &Options) -> Result<ExitCode, 
 		match wifi_profile::install(&config_dir, &factory_dir, &profile, credential.as_deref()) {
 			Ok(written) => written,
 			// Both halves named, because they are two different things to do
-			// about it. The kernel refused this process, *and* there is no
-			// daemon to ask instead -- a reader told only the first goes
-			// looking for a permission to grant, when starting netcfgd would
-			// have done.
-			Err(error) if error.denied => {
-				return Err(format!(
-					"could not write the configuration ({}), and could not ask \
-					 netcfgd to do it either: nothing is listening on {}",
-					error.message,
-					socket.display()
-				))
-			}
-			Err(error) => return Err(error.message),
+			// about it -- and said in one place now, because every other write
+			// verb needed the same sentence and a second copy is how they come
+			// to disagree.
+			Err(error) => return Err(crate::drop_in::refused_locally(error, &socket)),
 		};
 
 	report(

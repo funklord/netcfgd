@@ -492,7 +492,7 @@ pub fn write_atomically(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> 
 				io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
 			) =>
 		{
-			return write_in_place(path, bytes, mode);
+			return write_in_place(path, bytes, mode, &error);
 		}
 		Err(error) => return Err(error),
 	};
@@ -534,7 +534,26 @@ pub fn write_atomically(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> 
 /// **Existing files only**, and the mode is set explicitly because
 /// `OpenOptions::mode` applies to creation alone -- a secret written back at
 /// 0600 must not inherit whatever the file already carried.
-fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
+///
+/// **`staging` is why this is being tried at all, and every failure here names
+/// it.** Without that the fallback speaks over the real cause: opening a file
+/// that is not there answers `ENOENT`, so a drop-in refused by a read-only
+/// `/etc` was reported as "could not write
+/// /etc/netcfgd/conf.d/thing.conf: No such file or directory" -- a file the
+/// operator has never seen, named as missing, for a write they had just asked
+/// for. The reason is one directory up and was thrown away.
+///
+/// `netcfgd-dns`'s copy of this fallback has always taken the staging error
+/// and said both halves. This one did not, which is the drift the note on
+/// that copy predicts: "Two copies of one rule is how they come to disagree."
+/// Where they can be merged is still 0161's question; that they must say the
+/// same thing meanwhile is not.
+///
+/// The kind is the **staging** error's rather than this one's, so a caller
+/// classifying the failure -- `wifi_profile::InstallError::from_io`, and the
+/// CLI through it -- sees the refusal that actually happened instead of an
+/// artifact of the fallback.
+fn write_in_place(path: &Path, bytes: &[u8], mode: u32, staging: &io::Error) -> io::Result<()> {
 	use std::io::Write as _;
 	use std::os::unix::fs::PermissionsExt as _;
 
@@ -542,16 +561,54 @@ fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
 		return Err(io::Error::new(
 			io::ErrorKind::PermissionDenied,
 			format!(
-				"{} is a symlink and netcfgd cannot stage a replacement beside it; 				 writing through the link would edit whatever owns the target",
+				"{} is a symlink and netcfgd cannot stage a replacement beside it \
+				 ({staging}); writing through the link would edit whatever owns \
+				 the target",
 				path.display()
 			),
 		));
 	}
 
+	let directory = path.parent().unwrap_or_else(|| Path::new("."));
 	let mut file = fs::OpenOptions::new()
 		.write(true)
 		.truncate(true)
-		.open(path)?;
+		.open(path)
+		.map_err(|error| {
+			// Two sentences, because there are two situations and they want
+			// different things done about them. A file that is not there
+			// cannot be written in place by design, so its `ENOENT` says
+			// nothing at all and the directory is the whole story.
+			// The caller says which file, so this says only why -- naming the
+			// path a third time is how a true message becomes an unreadable
+			// one.
+			let second = if fs::symlink_metadata(path).is_ok() {
+				format!("and writing it in place failed too: {error}")
+			} else {
+				"and it is not there to be written in place".to_owned()
+			};
+			// **Named only for `EROFS`, and as a mechanism rather than a
+			// verdict.** A read-only /etc is a sandbox on a systemd machine
+			// and a read-only root on an embedded one, and the sentence has
+			// to be true of both -- so it states what was measured, then says
+			// where to look. This project has met the systemd half twice
+			// (0161, 0164) and each time the message named a path and left
+			// the reader to guess at the mount.
+			let sandbox = if staging.kind() == io::ErrorKind::ReadOnlyFilesystem {
+				". The directory is mounted read-only for this process; under \
+				 systemd that is `ProtectSystem=`, and the unit has to name the \
+				 path in `ReadWritePaths=`"
+			} else {
+				""
+			};
+			io::Error::new(
+				staging.kind(),
+				format!(
+					"{} would not take a temporary file ({staging}), {second}{sandbox}",
+					directory.display()
+				),
+			)
+		})?;
 	file.write_all(bytes)?;
 	file.sync_all()?;
 	drop(file);
@@ -919,7 +976,7 @@ mod layering {
 		)
 		.expect_err("it must be refused");
 		assert!(
-			error.contains("already defined"),
+			error.message.contains("already defined"),
 			"the refusal should carry the compiler's own diagnostic: {error}"
 		);
 		assert!(
@@ -1479,7 +1536,7 @@ pub fn install_drop_in(
 	name: &str,
 	text: &str,
 	replace: bool,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, crate::wifi_profile::InstallError> {
 	// The same rule a wifi profile's id follows, and shared rather than
 	// restated: this decides whether a client-supplied string can become a
 	// filename, which is the one check standing between a name and a path.
@@ -1493,7 +1550,8 @@ pub fn install_drop_in(
 			 quietly overwriting a file somebody wrote by hand is the thing this \
 			 refuses to do",
 			path.display()
-		));
+		)
+		.into());
 	}
 
 	let previous = if path.exists() {
@@ -1508,8 +1566,12 @@ pub fn install_drop_in(
 		std::fs::create_dir_all(parent)
 			.map_err(|error| format!("could not create {}: {error}", parent.display()))?;
 	}
-	write_atomically(&path, text.as_bytes(), 0o644)
-		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
+	write_atomically(&path, text.as_bytes(), 0o644).map_err(|error| {
+		crate::wifi_profile::InstallError::from_io(
+			format!("could not write {}: {error}", path.display()),
+			&error,
+		)
+	})?;
 
 	// **With the profile, not without it.** This verified through
 	// `load_layered`, which does not read the selected profile's directory --
@@ -1527,7 +1589,7 @@ pub fn install_drop_in(
 		Ok(sources) => sources,
 		Err(error) => {
 			restore(&path, previous.as_deref());
-			return Err(format!("could not read {}: {error}", config_dir.display()));
+			return Err(format!("could not read {}: {error}", config_dir.display()).into());
 		}
 	};
 	if let Err(diagnostics) = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks) {
@@ -1535,7 +1597,8 @@ pub fn install_drop_in(
 		restore(&path, previous.as_deref());
 		return Err(format!(
 			"that would stop the configuration compiling, so it was not kept:\n{rendered}"
-		));
+		)
+		.into());
 	}
 
 	Ok(path)
@@ -1648,14 +1711,16 @@ pub fn install_secret(
 	name: &str,
 	value: &str,
 	replace: bool,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, crate::wifi_profile::InstallError> {
 	crate::wifi_profile::usable_id(name)
-		.map_err(|why| format!("`{name}` cannot be used as a secret name: {why}"))?;
+		.map_err(|why| format!("`{name}` cannot be used as a secret name: {why}"))
+		.map_err(crate::wifi_profile::InstallError::from)?;
 	if value.is_empty() {
 		return Err(format!(
 			"nothing was given for `{name}`, and an empty secret is a secret that fails at \
 			 the moment it is used rather than now"
-		));
+		)
+		.into());
 	}
 
 	let path = config_dir.join("secrets").join(name);
@@ -1665,7 +1730,8 @@ pub fn install_secret(
 			 that a private key nobody has a copy of cannot be got back \
 			 (doc/decision/0042)",
 			path.display()
-		));
+		)
+		.into());
 	}
 
 	if let Some(parent) = path.parent() {
@@ -1675,11 +1741,20 @@ pub fn install_secret(
 				.recursive(true)
 				.mode(0o700)
 				.create(parent)
-				.map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+				.map_err(|error| {
+					crate::wifi_profile::InstallError::from_io(
+						format!("could not create {}: {error}", parent.display()),
+						&error,
+					)
+				})?;
 		}
 	}
-	write_atomically(&path, value.as_bytes(), 0o600)
-		.map_err(|error| format!("could not write {}: {error}", path.display()))?;
+	write_atomically(&path, value.as_bytes(), 0o600).map_err(|error| {
+		crate::wifi_profile::InstallError::from_io(
+			format!("could not write {}: {error}", path.display()),
+			&error,
+		)
+	})?;
 	Ok(path)
 }
 
@@ -1807,9 +1882,14 @@ pub fn install_probe(
 ///
 /// A name that cannot be used, a removal that failed, or a configuration that
 /// would no longer compile -- in which case the file is put back.
-pub fn remove_drop_in(config_dir: &Path, factory_dir: &Path, name: &str) -> Result<bool, String> {
+pub fn remove_drop_in(
+	config_dir: &Path,
+	factory_dir: &Path,
+	name: &str,
+) -> Result<bool, crate::wifi_profile::InstallError> {
 	crate::wifi_profile::usable_id(name)
-		.map_err(|why| format!("`{name}` cannot be used as a name here: {why}"))?;
+		.map_err(|why| format!("`{name}` cannot be used as a name here: {why}"))
+		.map_err(crate::wifi_profile::InstallError::from)?;
 
 	let path = config_dir.join("conf.d").join(format!("{name}.conf"));
 	// **Whether anything was there is the caller's to report**, and it had no
@@ -1820,8 +1900,15 @@ pub fn remove_drop_in(config_dir: &Path, factory_dir: &Path, name: &str) -> Resu
 	let Ok(previous) = std::fs::read(&path) else {
 		return Ok(false);
 	};
-	std::fs::remove_file(&path)
-		.map_err(|error| format!("could not remove {}: {error}", path.display()))?;
+	// Removing an entry needs the DIRECTORY, exactly as creating one does, so
+	// this is the same refusal as `install_drop_in`'s and is classified the
+	// same way -- a read-only /etc refuses a delete too.
+	std::fs::remove_file(&path).map_err(|error| {
+		crate::wifi_profile::InstallError::from_io(
+			format!("could not remove {}: {error}", path.display()),
+			&error,
+		)
+	})?;
 
 	let compiles = load_layered(factory_dir, config_dir)
 		.map_err(|error| format!("could not read {}: {error}", config_dir.display()))
@@ -1835,7 +1922,8 @@ pub fn remove_drop_in(config_dir: &Path, factory_dir: &Path, name: &str) -> Resu
 		return Err(format!(
 			"removing that would stop the configuration compiling, so it was put \
 			 back:\n{rendered}"
-		));
+		)
+		.into());
 	}
 	Ok(true)
 }
@@ -2177,8 +2265,8 @@ pub fn save_profile(
 	replace: bool,
 	running: &netcfgd_model::Document,
 	how_to_replace: &str,
-) -> Result<PathBuf, String> {
-	usable_profile_name(name)?;
+) -> Result<PathBuf, crate::wifi_profile::InstallError> {
+	usable_profile_name(name).map_err(crate::wifi_profile::InstallError::from)?;
 
 	let directory = config_dir.join("profile").join(name);
 	let snapshot = directory.join("00-saved.conf");
@@ -2192,7 +2280,8 @@ pub fn save_profile(
 		return Err(format!(
 			"`{name}` already exists ({}); {how_to_replace} to overwrite it",
 			directory.display()
-		));
+		)
+		.into());
 	}
 	if directory.is_dir() && !snapshot.exists() {
 		return Err(format!(
@@ -2200,11 +2289,13 @@ pub fn save_profile(
 			 files this cannot reproduce. Save as another name, or take that \
 			 directory away first",
 			directory.display()
-		));
+		)
+		.into());
 	}
 
 	let taken = take_folded(config_dir)
-		.map_err(|error| format!("could not take the folded profile out: {error}"))?;
+		.map_err(|error| format!("could not take the folded profile out: {error}"))
+		.map_err(crate::wifi_profile::InstallError::from)?;
 
 	// **The selection is part of what a failure has to put back.**
 	// `write_profile_snapshot` installs the `90-profile` drop-in before the
@@ -2288,7 +2379,7 @@ fn write_profile_snapshot(
 	factory_dir: &Path,
 	directory: &Path,
 	snapshot: &Path,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, crate::wifi_profile::InstallError> {
 	// Which blocks the base still defines, now that the fold is out of it.
 	// `override` on a block nothing defines is a compile error, and its
 	// absence on one that is defined is a different one -- so this is not a
@@ -2316,7 +2407,64 @@ fn write_profile_snapshot(
 		}
 	}
 
-	let text = netcfgd_compile::render::render(running, &overrides).map_err(|missing| {
+	// **What the base already says is not the profile's to restate**, and for
+	// `global` that is not a redundancy but a compile error. The renderer
+	// marks a redefined `interface`, `device`, `network` or `bluetooth` block
+	// `override`; it never marks `global` one, deliberately -- 0147 makes the
+	// block a singleton whose sub-blocks merge, so an `override global` would
+	// replace the whole block and discard whatever the base said about the
+	// parts the snapshot does not mention.
+	//
+	// The consequence, unnoticed until `profile.sh` tried to save on a machine
+	// configured the way that test must configure itself: a base with
+	// `global { control { ... } }` -- which is every machine whose desktop
+	// client can reach the daemon at all (0127) -- made the snapshot restate
+	// `control`, and the save was refused with "`control` is already set in
+	// `global`". `ncfg profile save` therefore did not work on the machines
+	// most likely to run it.
+	//
+	// Clearing a part the base already carries identically leaves the
+	// *effective* document unchanged, since the profile layers on the base and
+	// the base still supplies it -- which is exactly what the proof below
+	// checks, and it is why this is a redundancy to drop rather than a
+	// decision about precedence.
+	//
+	// A part that DIFFERS from the base is left alone and will still be
+	// refused. That case is a profile carrying a `global` setting the base
+	// also sets to something else, and the language has no way to say it: see
+	// project.md 10.58, which is the holder's to settle rather than this
+	// function's.
+	// **For the rendering only.** The proof below compares against what was
+	// actually running, and comparing against the trimmed copy would be the
+	// two-documents-one-witness failure: it would agree with whatever this
+	// trimming did, including with a mistake in it.
+	let mut to_write = running.clone();
+	if let Some(base) = &base {
+		let globals = &mut to_write.globals;
+		let their = &base.globals;
+		if globals.dns == their.dns {
+			globals.dns = netcfgd_model::DnsPolicy::default();
+		}
+		if globals.control == their.control {
+			globals.control = netcfgd_model::control::Control::default();
+		}
+		if globals.remote == their.remote {
+			globals.remote = netcfgd_model::control::RemotePolicy::default();
+		}
+		if globals.hostname_policy == their.hostname_policy {
+			globals.hostname_policy = netcfgd_model::HostnamePolicy::default();
+		}
+		if globals.networking == their.networking {
+			globals.networking = netcfgd_model::Networking::default();
+		}
+		if globals.on_drift_default == their.on_drift_default {
+			globals.on_drift_default = netcfgd_model::DriftPolicy::default();
+		}
+		if globals.confirm_default == their.confirm_default {
+			globals.confirm_default = None;
+		}
+	}
+	let text = netcfgd_compile::render::render(&to_write, &overrides).map_err(|missing| {
 		format!(
 			"this configuration cannot be written out yet, so it was not saved. \
 			 What is in the way:\n  {}\nWrite the profile by hand instead",
@@ -2324,10 +2472,18 @@ fn write_profile_snapshot(
 		)
 	})?;
 
-	fs::create_dir_all(directory)
-		.map_err(|error| format!("could not create {}: {error}", directory.display()))?;
-	fs::write(snapshot, &text)
-		.map_err(|error| format!("could not write {}: {error}", snapshot.display()))?;
+	fs::create_dir_all(directory).map_err(|error| {
+		crate::wifi_profile::InstallError::from_io(
+			format!("could not create {}: {error}", directory.display()),
+			&error,
+		)
+	})?;
+	fs::write(snapshot, &text).map_err(|error| {
+		crate::wifi_profile::InstallError::from_io(
+			format!("could not write {}: {error}", snapshot.display()),
+			&error,
+		)
+	})?;
 
 	// Selecting is part of the same act: having just said what this profile
 	// means, being left on none would be a surprise.
@@ -2355,7 +2511,8 @@ fn write_profile_snapshot(
 			after
 				.as_ref()
 				.map_or(String::new(), |after| difference(&expected, after))
-		));
+		)
+		.into());
 	}
 
 	Ok(snapshot.to_path_buf())

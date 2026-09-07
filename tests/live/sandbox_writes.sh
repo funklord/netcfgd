@@ -198,6 +198,94 @@ check "and says so in one line an operator can read" \
 check "and the other resolver's file is not written through the link" \
 	"$(grep -c '^nameserver 192.0.2.53' "$work/sym_narrow.target" || true)" "0"
 
+# **What a refused write SAYS, which is the half that had rotted.**
+#
+# `write_atomically` stages beside the target and falls back to writing in
+# place when the directory refuses it. The fallback opens an existing file on
+# purpose (0161) -- so for a file that is not there yet it answers `ENOENT`,
+# and that answer replaced the refusal that was the actual cause. Every
+# `ncfg config put` of a new drop-in under a read-only /etc was reported as
+#
+#     could not write /etc/netcfgd/conf.d/thing.conf: No such file or directory
+#
+# naming a file the operator had just asked to create, as missing. The reason
+# was one directory up and was thrown away. `netcfgd-dns`'s copy of the same
+# fallback has always carried the staging error into its message; this one is
+# the drift the note on that copy predicts.
+#
+# Driven through a **daemon**, because that is who writes since 0127 and
+# because nothing else here does: `sandbox_writes.sh` ran `ncfg` directly, so
+# the entire client-asks-daemon collapse had never met a real mount.
+mkdir -p "$work/etc5/netcfgd/conf.d" "$work/run5"
+printf 'global { }\n' > "$work/etc5/netcfgd/netcfgd.conf"
+printf 'global { }\n' > "$work/drop5.conf"
+
+# **`-n` as well as `-m`, unlike every block above.** Those run `ncfg apply
+# --oneshot` against a configuration that names only a file in this work
+# directory, so they touch nothing else. This one starts the *daemon*, which
+# has a reconcile loop and would have run it against the machine's own network
+# -- `--no-apply-on-start` and an empty document make that harmless and a
+# network namespace makes it impossible, which is the order to want them in.
+unshare -rmn sh -c '
+	set -eu
+	work=$1; repo=$2
+	mount --bind "$work/etc5" "$work/etc5"
+	mount -o remount,bind,ro "$work/etc5"
+	NCFG_CONFIG_DIR="$work/etc5/netcfgd" NCFG_RUN_DIR="$work/run5" \
+		"$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon5.log" 2>&1 &
+	daemon=$!
+	waited=0
+	while [ ! -S "$work/run5/netcfgd.sock" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 50 ] && break
+		sleep 0.1
+	done
+	NCFG_CONFIG_DIR="$work/etc5/netcfgd" NCFG_RUN_DIR="$work/run5" \
+		"$repo/target/debug/ncfg" config put thing "$work/drop5.conf" \
+		> "$work/put5.log" 2>&1 || true
+	kill "$daemon" 2>/dev/null || true
+	wait "$daemon" 2>/dev/null || true
+' sh "$work" "$repo"
+
+# The control. Everything below is about the wording of a refusal, so a run
+# where nothing was refused would pass every one of them by saying nothing.
+check "the write was refused, which is what the rest of this is about" \
+	"$(grep -ci 'could not write' "$work/put5.log" || true)" "1"
+check "the refusal names the directory rather than the file that is not there" \
+	"$(grep -c 'conf.d would not take a temporary file' "$work/put5.log" || true)" "1"
+check "and gives the kernel's reason for it" \
+	"$(grep -ci 'read-only file system' "$work/put5.log" || true)" "1"
+# The fallback's own error is an artifact of the fallback: it opens what is
+# there, and nothing was.
+check "not the fallback's answer about a file nobody asked to open" \
+	"$(grep -ci 'no such file or directory' "$work/put5.log" || true)" "0"
+check "and it says where a systemd machine grants that directory" \
+	"$(grep -c 'ReadWritePaths=' "$work/put5.log" || true)" "1"
+
+# **The other half, for a client with nowhere to send it.** A refusal and "no
+# daemon is listening" are two different things to do about one failure, and
+# every write verb but `ncfg wifi add` said only the first -- so a reader went
+# looking for a mode to change when starting netcfgd would have done. The
+# classification is the kernel's error kind rather than the words in the
+# message: `ErrorKind::ReadOnlyFilesystem` is the same refusal as
+# `PermissionDenied` arriving from a mount instead of a mode, and it was not
+# counted, which switched the sentence off in exactly the case it was written
+# for.
+unshare -rmn sh -c '
+	set -eu
+	work=$1; repo=$2
+	mount --bind "$work/etc5" "$work/etc5"
+	mount -o remount,bind,ro "$work/etc5"
+	NCFG_CONFIG_DIR="$work/etc5/netcfgd" NCFG_RUN_DIR="$work/nosuchrun" \
+		"$repo/target/debug/ncfg" config put thing "$work/drop5.conf" \
+		> "$work/put6.log" 2>&1 || true
+' sh "$work" "$repo"
+
+check "a refused write with no daemon says the write was refused" \
+	"$(grep -ci 'read-only file system' "$work/put6.log" || true)" "1"
+check "and that there was nobody to ask instead" \
+	"$(grep -c 'nothing is listening on' "$work/put6.log" || true)" "1"
+
 # **The grant itself, because every check above depends on it.** A unit that
 # narrowed this back to the one file would put the reported fault straight
 # back, and the tests above would go on passing case (b) while (a) failed with

@@ -625,4 +625,16 @@ netcfgd
 # test namespace, or the host's daemons seen from inside a container.
 # Decision 0167. Attributable without a second build: it is the only change
 # since the total above.
-total 2800152
+# A refusal that says what refused it, +4,096 bytes to 2,804,248.
+#
+# One page, and it is nearly all message. `write_in_place` now takes the
+# staging error and composes the sentence that names the directory, the
+# kernel's reason, whether the file was there to write in place, and -- for
+# `EROFS` -- where a systemd unit grants the path; `refused_locally` adds the
+# second half for five verbs, replacing the copy `wifi add` carried; and
+# `install_drop_in`, `remove_drop_in`, `install_secret` and `save_profile`
+# return a classified error rather than a `String`. Decision 0171.
+#
+# Attributable without a second build: it is the only change since the total
+# above, and the arithmetic is exact -- the previous total plus one page.
+total 2804248

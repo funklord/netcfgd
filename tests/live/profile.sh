@@ -178,6 +178,38 @@ off=$("$ncfg" show 2>/dev/null |
 	echo "unreadable")
 check "the shipped profile turns networking off and downs the link" "$off" "off False"
 
+# --- saving, which is the verb that never reached the daemon
+
+# **`ncfg profile save` wrote locally whatever was listening**, alone among
+# the write verbs: every other one takes the socket first and the directory
+# only when nothing answers (0127), because `/etc/netcfgd` is root's and a
+# client is not. `Request::ProfileSave` existed, the daemon served it, the
+# authorizer placed it at the `admin` tier -- and nothing sent it. An
+# unprivileged operator with netcfgd running got "could not create
+# /etc/netcfgd/profile/<name>: Permission denied" for a request that would
+# have worked.
+#
+# This file is where that should have been caught: it exists because the
+# profile verbs "had never been spoken to a running daemon", and it went on
+# not speaking this one.
+#
+# **The wording is the discriminator, and it is the only one there is.** Both
+# paths write the same files, so the disk cannot say which ran. Only the
+# socket branch prints netcfgd as the actor; the local branch prints `wrote
+# <path>`, which is 0127's rule about not handing a path back showing through
+# as an observable difference.
+saved=$("$ncfg" profile save weekend 2>&1 || true)
+contains "saving asks the daemon rather than writing the file itself" \
+	"$saved" "netcfgd saved"
+check "and the machine is running what was saved" \
+	"$("$ncfg" profile get 2>&1)" "weekend"
+check "the snapshot is where netcfgd files them" \
+	"$([ -f "$work/etc/profile/weekend/00-saved.conf" ] && echo yes || echo no)" "yes"
+# The refusal is the daemon's too, and it must arrive as a sentence rather
+# than as a client-side guess about a directory it cannot see.
+again=$("$ncfg" profile save weekend 2>&1 || true)
+contains "saving over one that exists is refused" "$again" "already exists"
+
 # --- unsetting
 
 "$ncfg" profile unset > "$work/unset.log" 2>&1 ||
