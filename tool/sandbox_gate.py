@@ -235,16 +235,93 @@ def maintainer_script_puts_the_unit_in_force():
 	return failures
 
 
+# What each `ProtectSystem=` level remounts read-only. systemd.exec(5), and
+# every row below was confirmed by running the real thing under `systemd-run`
+# rather than read off the page -- see `readwritepaths_are_not_inert`.
+PROTECT_SYSTEM_READ_ONLY = {
+	"no": (),
+	"yes": ("/usr", "/boot", "/efi"),
+	"true": ("/usr", "/boot", "/efi"),
+	"full": ("/usr", "/boot", "/efi", "/etc"),
+	"strict": ("/",),
+}
+
+
+def protect_system_level(text):
+	"""The last `ProtectSystem=` the unit sets, or None."""
+	level = None
+	for line in text.splitlines():
+		line = line.strip()
+		if line.startswith("ProtectSystem="):
+			level = line.split("=", 1)[1].strip()
+	return level
+
+
+def readwritepaths_are_not_inert(level, allowed):
+	"""A grant naming exactly what `ProtectSystem=` protects grants nothing.
+
+	**This is the check whose absence cost the most, and it is purely static
+	-- it needed no systemd and no root, only the question nobody asked.**
+
+	`ProtectSystem=` applies its read-only remount *after* the
+	`ReadWritePaths=` bind mounts, so an entry naming the very path being
+	remounted is covered straight back over. A *subpath* survives, because the
+	remount of the parent does not reach into a mount nested below it.
+	Measured on systemd 257, one `systemd-run` per row, each with a control:
+
+	    full   + ReadWritePaths=/etc          -> /etc ro,  write EROFS
+	    full   + ReadWritePaths=/etc/netcfgd  -> /etc ro,  subpath writable
+	    yes    + ReadWritePaths=/etc          -> /etc rw
+	    strict + ReadWritePaths=/etc          -> /etc rw
+	    no     + ReadWritePaths=/etc          -> /etc rw
+
+	The rule fits all five: an entry equal to a protected path is inert, an
+	entry strictly below one is granted. Under `strict` the only protected
+	path is `/`, so every entry is strictly below it and every entry works --
+	which is why `strict` is not the odd one out it looks like.
+
+	What it cost. 0131 allow-listed four narrow paths under `full` and they
+	worked, being subpaths. 0164 consolidated them into the single
+	`ReadWritePaths=/etc` -- and consolidating a set of working subpath grants
+	into their common parent turned all four inert at once. From then on
+	netcfgd could write nothing under /etc: not `/etc/netcfgd`, so every
+	client write 0127 built was refused, and not the `/etc` directory, so
+	`write_resolv_conf` could not stage. The daemon reported it correctly on
+	every start and named `ReadWritePaths=` as the remedy; the path was
+	already named, so the report read as already-actioned and the machine went
+	on failing. **Nothing here could see it**: the unit named the path, the
+	sources named the path, so both directions of the comparison above agreed
+	-- they were checking that two lists match, and the lists did match. What
+	neither asked was whether the line does anything.
+	"""
+	protected = PROTECT_SYSTEM_READ_ONLY.get(level)
+	if protected is None:
+		print(f"sandbox: the unit sets ProtectSystem={level!r}, which this gate")
+		print("sandbox:   does not know -- add it to PROTECT_SYSTEM_READ_ONLY with")
+		print("sandbox:   a measurement rather than letting it through unchecked")
+		return 1
+
+	failures = 0
+	for path in sorted(allowed):
+		normalised = "/" + "/".join(p for p in path.split("/") if p)
+		if normalised in protected:
+			print(f"sandbox: ReadWritePaths={path} is inert -- ProtectSystem={level}")
+			print(f"sandbox:   remounts {path} read-only after the grant is applied,")
+			print("sandbox:   so it grants nothing. Name a subpath, or lower")
+			print("sandbox:   ProtectSystem= to a level that does not hold it")
+			failures += 1
+	return failures
+
+
 def main():
 	if not UNIT.exists():
 		print(f"sandbox: {UNIT} is missing, so this gate is checking nothing")
 		return 1
 
 	text = UNIT.read_text(encoding="utf-8")
-	if "ProtectSystem=full" not in text and "ProtectSystem=strict" not in text:
-		# Without one of these /etc is writable and the allow-list is moot --
-		# but so is the hardening, which is a decision rather than a default.
-		print("sandbox: the unit no longer makes /etc read-only; was that meant?")
+	level = protect_system_level(text)
+	if level is None:
+		print("sandbox: the unit sets no ProtectSystem= at all; was that meant?")
 		return 1
 
 	allowed = unit_allows(text)
@@ -301,6 +378,7 @@ def main():
 			      f"names it -- residue, or a path spelled differently?")
 			failures += 1
 
+	failures += readwritepaths_are_not_inert(level, allowed)
 	failures += maintainer_script_puts_the_unit_in_force()
 
 	if failures:
@@ -311,7 +389,8 @@ def main():
 		      f"directory, so netcfgd writes it in place rather than "
 		      f"atomically (0161)")
 	print(f"sandbox: {len(found)} /etc path(s) in the code, all allowed or "
-	      f"classified read-only; {len(in_place)} written in place; the "
+	      f"classified read-only; {len(in_place)} written in place; "
+	      f"ProtectSystem={level} with no inert grant; the "
 	      f"postinst reloads before it restarts")
 	return 0
 

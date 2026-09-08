@@ -1,6 +1,9 @@
 # 0164: the grant has to be the directory
 
-Status: accepted
+Status: accepted; the `ProtectSystem=full` half superseded by
+[0176](0176-a-grant-under-protectsystem-full-grants-nothing.md), which measured
+that `ReadWritePaths=/etc` under `full` grants nothing at all. The decision
+below -- that the grant has to be the **directory** -- stands.
 Date: 2026-09-06
 Milestone: M8; reported from a second systemd machine where
 `write_resolv_conf` still did not write

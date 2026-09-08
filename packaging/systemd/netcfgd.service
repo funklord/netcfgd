@@ -82,22 +82,50 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 
-# `full`: /usr, the boot directories **and /etc** read-only. Not `strict`,
-# which would take the whole hierarchy including /run and /var and leave
-# netcfgd unable to write its own runtime state.
+# `yes`: /usr and the boot directories read-only, /etc left alone.
 #
-# The comment that used to sit here had this backwards. It said "strict would
-# make /etc read-only, and the DNS backends legitimately write there", and
-# chose `full` to avoid that -- but `full` is precisely what mounts /etc
-# read-only (systemd.exec(5): "If set to 'full', the /etc/ directory is
-# mounted read-only, too"). So the setting delivered the exact hazard the
-# comment named it to avoid, and every write netcfgd makes under /etc had been
-# failing with EROFS on any systemd machine.
-ProtectSystem=full
+# **Not `full`, and this is the third time this one word has broken the
+# daemon.** The comment that used to sit here got it right and then acted on
+# it backwards. It correctly quoted systemd.exec(5) -- "If set to 'full', the
+# /etc/ directory is mounted read-only, too" -- and then kept `full` and tried
+# to reopen /etc with `ReadWritePaths=/etc` below. **That grant is inert.**
+# `ProtectSystem=` applies its read-only remount *after* the ReadWritePaths
+# bind mounts, so naming the very path `full` protects grants nothing at all.
+#
+# Measured on debian-nabbe, systemd 257, with `systemd-run -p ...` and a
+# control for each row:
+#
+#     ProtectSystem=full   ReadWritePaths=/etc            -> /etc ro,  EROFS
+#     ProtectSystem=full   ReadWritePaths=/etc/netcfgd    -> /etc ro,  subpath rw
+#     ProtectSystem=yes    ReadWritePaths=/etc            -> /etc rw
+#     ProtectSystem=strict ReadWritePaths=/etc            -> /etc rw
+#
+# A *subpath* grant survives, which is why 0131's four narrow paths worked and
+# 0164's single wide one does not: consolidating them silently reverted 0131.
+# Under the shipped line nothing under /etc was writable at all -- not
+# `/etc/netcfgd`, so every client write 0127 built was refused, and not the
+# `/etc` directory, so `write_resolv_conf` could not stage. The daemon said so
+# on every start; the remedy it printed was to name the path in
+# `ReadWritePaths=`, and the path was already named.
+#
+# **Not `strict`**, which was the other candidate and is wrong for a reason
+# worth keeping: it takes the whole hierarchy, so `/run` and `/var/lib` go
+# read-only too. Measured, that leaves the supplicant no `/run/wpa_supplicant`
+# for its control socket and dhcpcd no `/var/lib/dhcpcd` -- netcfgd's children
+# inherit this mount namespace, so a grant it does not make is one they do not
+# get either.
+#
+# 0164 rejected this spelling as "same practical exposure, expressed as a
+# lower hardening level rather than a named path, so a reader cannot see why
+# it was lowered". The exposure is the same; the *access* is not, which is
+# what that rejection assumed and no one had measured. The `ReadWritePaths=`
+# line below therefore stays: under `yes` it grants nothing new, and it is
+# what says which directory the lowering was for.
+ProtectSystem=yes
 
-# What netcfgd genuinely writes under /etc, named one by one. This is the half
-# `ProtectSystem=full` leaves to the unit: harden everything, then say what
-# must stay writable.
+# Which directory the hardening above was lowered for. Under `ProtectSystem=yes`
+# this grants nothing that /etc did not already have -- it is documentation
+# with teeth, and it is what a reader checks against the line above.
 #
 # **/etc/netcfgd is load-bearing since 0127**, which made netcfgd the *only*
 # writer of its own configuration -- a client cannot write there, so it sends
@@ -136,7 +164,7 @@ ProtectSystem=full
 # most people run, and the copyright holder chose the grant.
 #
 # What it costs, stated plainly: netcfgd may write any file under /etc, not
-# just the four this used to name. `ProtectSystem=full` still holds /usr,
+# just the four this used to name. `ProtectSystem=yes` still holds /usr,
 # /boot and /efi read-only. `/etc/netcfgd`, `/etc/resolv.conf`,
 # `/etc/dnsmasq.d` and `/etc/unbound/unbound.conf.d` are all subsumed by this
 # line, so they are gone rather than kept as documentation -- four redundant
