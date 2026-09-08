@@ -77,6 +77,28 @@ cleanup() {
 		kill "$pid" 2>/dev/null || true
 		wait "$pid" 2>/dev/null || true
 	done
+	# **The supplicant netcfgd started, which is nobody's child here.** It is
+	# launched with `-B`, so it daemonises away from this shell, and killing
+	# netcfgd deliberately does not take it -- that is what `KillMode=process`
+	# means on a real machine (0134, 0142) and the fixture reproduces it
+	# faithfully. Faithfully enough to leak: four of these were alive, one per
+	# run, before this existed.
+	#
+	# By the pid file netcfgd wrote, which is how netcfgd finds it too, and
+	# never by name -- `pgrep -x python3` on a shared pid namespace is a sweep
+	# across the whole machine.
+	if [ -r "$work/run/supplicant/wlan0.pid" ]; then
+		supplicant=$(cat "$work/run/supplicant/wlan0.pid" 2>/dev/null || true)
+		case "$supplicant" in
+		[0-9]*)
+			# Confirmed to be this run's before it is signalled: a pid file
+			# outlives the process it names and pids are recycled.
+			if grep -qa "$work" "/proc/$supplicant/cmdline" 2>/dev/null; then
+				kill "$supplicant" 2>/dev/null || true
+			fi
+			;;
+		esac
+	fi
 	# Retried, for the reason roam.sh records: a signalled daemon writes on its
 	# way out and a single rm races it, failing a run whose checks all passed.
 	waited=0
