@@ -139,7 +139,7 @@ reach.
 
 | Tier | Requests |
 |---|---|
-| `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations` |
+| `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list` |
 | `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget` |
 | `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete` |
 
@@ -180,6 +180,24 @@ first glance:
   the whole document. If the configuration cannot be read back afterwards,
   every credential stays; removing one on a guess is the one thing here
   nobody can undo.
+
+- **`config_list` is `observe`, while `config_put` and `config_delete` are
+  `admin`.** Reading which files netcfgd is reading adds nothing to what a
+  local user already has: the files are world-readable on disk and the
+  compiled result is in `show`. What it adds is *provenance* -- which file each
+  part came from -- which is the same thing `explain` gives per interface and
+  is `observe` for the same reason. A display that needed a writing tier to
+  show what is configured is a display that ends up being given one.
+
+  It carries each file's **text**, for the reason `probe_list` does: a client
+  needs it to show one, these are a few hundred bytes, and a second round trip
+  per file would mean a list and a body that could disagree. Nothing secret is
+  in them -- a credential is `@secret:name` in the configuration and its value
+  lives in the store, which no request returns.
+
+  `netcfgd.conf` is listed with **no name and `removable` false**. It is not a
+  drop-in, no request writes or removes it, and giving it a name would offer a
+  client a verb that does not exist for it.
 
 - **`config_put` is `admin`, and the tier is not the whole answer for it.**
   It carries configuration, and the same request can hold a wifi network or a

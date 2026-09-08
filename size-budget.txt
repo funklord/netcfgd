@@ -645,4 +645,12 @@ netcfgd
 #
 # Attributable without a second build: the only change since the total above,
 # and the previous total plus two pages exactly.
-total 2812440
+# Listing the configuration, +8,192 bytes to 2,820,632.
+#
+# Two pages for `config_list`: the request and its response, `ConfigFile`, and
+# `list_drop_ins` -- which is `writable_files` turned into what a client sees,
+# so the enumeration itself was already there. Decision 0174.
+#
+# Attributable without a second build: the only change since the total above,
+# and the previous total plus two pages exactly.
+total 2820632

@@ -51,6 +51,12 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// writing tier to show what is configured is a display that ends up
 		// being given one.
 		| Request::ProbeList
+		// Listing the configuration is the same question about netcfgd's own
+		// files: they are world-readable on disk and the compiled result is
+		// already in `Show`. What this adds is which file each part came from,
+		// which is a provenance answer rather than a disclosure -- `Explain`
+		// gives the same thing per interface and is `observe` too.
+		| Request::ConfigList
 		| Request::ProfileList
 		| Request::ModemList
 		// Names only, never values -- and the names are already in the

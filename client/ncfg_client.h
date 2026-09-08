@@ -920,6 +920,45 @@ int ncfg_client_explain(ncfg_client_t *client, const char *interface, ncfg_expla
 int ncfg_client_config_delete(ncfg_client_t *client, const char *name, char *err,
                   size_t err_size);
 
+/* One configuration file, as netcfgd reads it. */
+typedef struct {
+	/* What config_put and config_delete call it -- the drop-in's stem, with
+	 * no directory and no `.conf`. Empty for `netcfgd.conf`, which is not a
+	 * drop-in and which no request can write or remove. */
+	char *name;
+	/* The file as a person refers to it: `netcfgd.conf` or
+	 * `conf.d/thing.conf`, relative to the configuration directory. Never an
+	 * absolute path, because that is a thing a client keeps and then writes
+	 * to (0127). */
+	char *file;
+	/* The contents. */
+	char *text;
+	/* Whether config_delete would take it away. */
+	int   removable;
+} ncfg_config_file_t;
+
+typedef struct {
+	ncfg_config_file_t *items;
+	size_t              count;
+} ncfg_configs_t;
+
+void ncfg_configs_free(ncfg_configs_t *configs);
+
+/*
+ * Every configuration file netcfgd reads, in the order it reads them. Needs
+ * `observe`.
+ *
+ * **The listing netcfgd had for everything but its own configuration.** A
+ * client could write a drop-in and remove one and never find out what was
+ * there, which left the removal reachable only by somebody who already knew
+ * the name.
+ *
+ * The order is the loader's, which is what makes it worth showing: a later
+ * file overrides an earlier one, so the sequence is the answer to "which of
+ * these two won".
+ */
+int ncfg_client_configs(ncfg_client_t *client, ncfg_configs_t *out, char *err, size_t err_size);
+
 /*
  * Write what this machine is running into a profile, and select it. Needs
  * `admin`.

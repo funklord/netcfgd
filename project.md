@@ -9457,6 +9457,61 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.64 netcfgd could list everything except its own configuration
+
+Probes, profiles, credentials: each had a listing. The configuration did not,
+so a client could write a drop-in and remove one and never see what was there
+-- which left the removal reachable only by somebody who already knew the
+name, and left the window writing drop-ins from two dialogs and showing them
+nowhere. Decision 0174 has the verb and the tab.
+
+**The enumeration that started this run finished here.** Four verbs were
+unreachable from the window in 10.59; three were built and the fourth,
+`config_delete`, was deliberately left because it had no surface. Building the
+surface is what turned out to need a fifth verb -- and that is the honest
+shape of the work rather than a plan that went wrong: **the missing button was
+a symptom, and the missing listing was the thing.**
+
+### What the tier turned on
+
+`observe`, and the argument is `Explain`'s. Reading which files netcfgd reads
+adds nothing a local user does not have -- they are world-readable and the
+compiled result is already in `Show`. What it adds is provenance, and a
+display that needed a writing tier to show what is configured is a display
+that ends up being given one.
+
+**Built on `writable_files` rather than on a glob**, which is that function's
+own stated point: it enumerates what the *loader* reads. A listing with its
+own rule would show a machine a file set it is not running -- and the check
+that it does not is free, because `notes.txt` dropped into `conf.d` is absent
+from the answer.
+
+### The pair the view has to keep apart
+
+`netcfgd.conf` is listed with **no name and `removable` false**. It is not a
+drop-in, no request writes or removes it, and a name would offer a verb that
+does not exist for it. That is what the sabotage is aimed at: forcing
+`removable` true makes the button go live on the machine's own configuration,
+and exactly one check fails.
+
+### Two things the probe had to be told twice
+
+**An assertion the fixture could not satisfy.** "But its text is shown" failed
+for `netcfgd.conf`, and the code was right: the gui harness writes that file
+zero-length on purpose. The fix is not a better fixture but a better question
+-- the pane is checked by what it **stopped** showing when the selection moved,
+which is an observation only a pane following the selection can produce. "Its
+text is displayed" would have passed against a pane that had gone blank for
+any reason at all.
+
+**Four functions over the line limit, in a row.** `every_response`, `answer`
+twice, and clippy would not take any of them. Each was fixed by the remedy the
+file already documents for itself -- "out of `every_response` for that
+function's line limit", "a function rather than an arm for the reason its
+siblings are" -- so the neighbouring probe listing got the same treatment as
+the new one. **A limit that is enforced teaches the shape**; the same limit as
+a comment would have been an argument.
+
 ## 10.63 The window could say what, and not why
 
 The last of the four verbs the enumeration in 10.59 found unreachable from the
@@ -9538,11 +9593,8 @@ that matters: a cleanup nobody checks is indistinguishable from one that
 silently did nothing, and the symptom arrives in somebody else's test.
 Reverting the removal fails exactly "and netcfgd stops calling it configured".
 
-That gave `config_delete` its first caller, which is why it exists now and
-`explain`'s neighbours in the enumeration do not. **The verb still has no
-view**: the window writes drop-ins from dialogs and lists them nowhere, so a
-button would have nothing to point at. A drop-ins list is the thing to build
-before the button, and it needs a `config_list` the protocol does not have.
+That gave `config_delete` its first caller, which is why it existed before
+its view did. **The view came next and needed a verb** -- see 10.64.
 ## 10.62 The credentials tab could name a fault and not fix it
 
 The same shape as 10.59's saved-networks table, found by the same

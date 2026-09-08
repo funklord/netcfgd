@@ -1599,9 +1599,8 @@ fn answer(
 		Request::ModemList => Response::Modems {
 			modems: state.sims.status(state.desired.as_ref()),
 		},
-		Request::ProbeList => Response::Probes {
-			probes: netcfgd_host::config::list_probes(&state.paths.config, &state.paths.factory),
-		},
+		Request::ConfigList => list_configs_request(state),
+		Request::ProbeList => list_probes_request(state),
 		Request::ProbePut {
 			name,
 			text,
@@ -2006,6 +2005,27 @@ fn report_writability(config: &std::path::Path) {
 			);
 		}
 		Err(_) => {}
+	}
+}
+
+/// The link-detection scripts, shipped ones and the operator's.
+///
+/// A function rather than an arm for the same reason as its neighbour below:
+/// `answer` has a line limit and clippy enforces it, and the two listings are
+/// the same shape so they get the same treatment.
+fn list_probes_request(state: &State) -> Response {
+	Response::Probes {
+		probes: netcfgd_host::config::list_probes(&state.paths.config, &state.paths.factory),
+	}
+}
+
+/// Every configuration file netcfgd reads, in the order it reads them.
+///
+/// A function rather than an arm for the reason its siblings are: `answer` has
+/// a line limit, and clippy enforces it.
+fn list_configs_request(state: &State) -> Response {
+	Response::Configs {
+		configs: netcfgd_host::config::list_drop_ins(&state.paths.config),
 	}
 }
 

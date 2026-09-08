@@ -101,6 +101,7 @@ SOURCES += \
 	src/add_network_dialog.cpp \
 	src/apply_dialog.cpp \
 	src/devices_view.cpp \
+	src/config_view.cpp \
 	src/explain_dialog.cpp \
 	src/global_view.cpp \
 	src/modems_view.cpp \
@@ -128,6 +129,7 @@ HEADERS += \
 	src/add_network_dialog.h \
 	src/apply_dialog.h \
 	src/devices_view.h \
+	src/config_view.h \
 	src/explain_dialog.h \
 	src/global_view.h \
 	src/modems_view.h \

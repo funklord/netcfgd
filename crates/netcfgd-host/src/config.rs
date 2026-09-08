@@ -1807,6 +1807,60 @@ pub fn list_probes(config_dir: &Path, factory_dir: &Path) -> Vec<netcfgd_proto::
 	found
 }
 
+/// Every configuration file netcfgd reads, as a client sees them.
+///
+/// **The listing netcfgd did not have for its own files.** Probes, profiles
+/// and credentials each had one; the configuration did not, so a client could
+/// write a drop-in and remove one and never find out what was there.
+///
+/// Built on [`writable_files`] rather than on a glob of its own, which is that
+/// function's whole point: it enumerates what the *loader* reads, so a listing
+/// that used a different rule would show a machine a file set it is not
+/// running.
+///
+/// `netcfgd.conf` is listed with an empty `name` and `removable` false. It is
+/// not a drop-in, no request can write or remove it, and giving it a name
+/// would offer a client a verb that does not exist for it.
+///
+/// A file that cannot be read is skipped rather than reported. The loader
+/// would fail on it and say so with a diagnostic naming the line; a listing
+/// that invented an entry with empty text would be a second, worse account of
+/// the same fault.
+#[must_use]
+pub fn list_drop_ins(config_dir: &Path) -> Vec<netcfgd_proto::ConfigFile> {
+	let Ok(paths) = writable_files(config_dir) else {
+		return Vec::new();
+	};
+	let mut found = Vec::new();
+	for path in paths {
+		let Ok(text) = fs::read_to_string(&path) else {
+			continue;
+		};
+		let drop_in = path
+			.parent()
+			.is_some_and(|parent| parent.ends_with("conf.d"));
+		let file_name = path
+			.file_name()
+			.map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+		found.push(netcfgd_proto::ConfigFile {
+			name: if drop_in {
+				path.file_stem()
+					.map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
+			} else {
+				String::new()
+			},
+			file: if drop_in {
+				format!("conf.d/{file_name}")
+			} else {
+				file_name
+			},
+			removable: drop_in,
+			text,
+		});
+	}
+	found
+}
+
 /// Put a link-detection script on disk, executable.
 ///
 /// **The most dangerous thing netcfgd writes, and the shortest function.** A

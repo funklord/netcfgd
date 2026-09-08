@@ -36,8 +36,9 @@
 {"request":"wifi_add","ssid":"63616665"}
 {"request":"wifi_disconnect","interface":"wlan0"}
 {"request":"wifi_forget","id":"home"}
+{"request":"config_list"}
 {"request":"ap_stations","interface":"wlan0"}
-{"response":"hello","protocol":{"major":1,"minor":1},"schema":{"major":1,"minor":0},"tiers":["observe","admin"]}
+{"response":"hello","protocol":{"major":1,"minor":2},"schema":{"major":1,"minor":0},"tiers":["observe","admin"]}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"enterprise":false,"ssid":"686f6d65","name":"home","mobility_domain":"a1b2","configured":"home"},{"bssid":"00:11:22:33:44:66","frequency":5180,"signal":-58,"secured":false,"enterprise":false,"ssid":"","name":""},{"bssid":"00:11:22:33:44:77","frequency":2437,"signal":-71,"secured":true,"enterprise":true,"ssid":"ff00ff"}]}
 {"response":"radios","radios":[{"interface":"wlan0","activated":true,"supplicant":true},{"interface":"wlan1","activated":false,"supplicant":true}]}
@@ -54,6 +55,7 @@
 {"response":"secrets","secrets":[{"name":"cafe","stored":true,"used_by":["network Cafe"]},{"name":"campus","stored":false,"used_by":["network Campus"]},{"name":"old-vpn","stored":true}]}
 {"response":"modems","modems":[{"device":"wwan0","sim":["esim","socket"],"selected":"socket","apn":"im.cxn","cycle_pending":true},{"device":"wwan1","sim":["socket"],"selected":"socket"}]}
 {"response":"profiles","profiles":[{"name":"offline","shipped":true},{"name":"office","shipped":false}],"chosen":"office"}
+{"response":"configs","configs":[{"file":"netcfgd.conf","removable":false,"text":"global { }\n"},{"name":"wifi-home","file":"conf.d/wifi-home.conf","removable":true,"text":"network \"home\" { }\n"}]}
 {"response":"probes","probes":[{"name":"default","directory":"/usr/share/netcfgd/probe","text":"#!/bin/sh\nexit 0\n","editable":false},{"name":"office","directory":"/etc/netcfgd/probe","text":"#!/bin/sh\nexit 1\n","editable":true}]}
 {"event":"observed","summary":"eth0 gained an address"}
 {"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}

@@ -27,12 +27,12 @@ use serde::{Deserialize, Serialize};
 /// reason a document consumer does: acting on half an understanding is worse
 /// than refusing.
 ///
-/// **The minor is what a client reads to know whether a verb is there**, and
-/// this is the first time it has moved. 1.1 adds [`Request::WifiForget`] and
-/// removes nothing, so an older client is unaffected and a newer one can tell
+/// **The minor is what a client reads to know whether a verb is there.** 1.1
+/// added [`Request::WifiForget`] and 1.2 adds [`Request::ConfigList`]; both
+/// remove nothing, so an older client is unaffected and a newer one can tell
 /// -- which is the whole of what the field is for. A major stays reserved for
 /// a change that makes an old client wrong rather than merely incomplete.
-pub const PROTOCOL_VERSION: Version = Version { major: 1, minor: 1 };
+pub const PROTOCOL_VERSION: Version = Version { major: 1, minor: 2 };
 
 /// Where the socket lives when nothing says otherwise.
 pub const DEFAULT_SOCKET: &str = "/run/netcfgd/netcfgd.sock";
@@ -87,6 +87,20 @@ pub enum Request {
 		/// What to explain.
 		subject: Subject,
 	},
+	/// Every configuration file netcfgd reads, in the order it reads them.
+	///
+	/// **The one thing netcfgd stores and could not list.** Probes, profiles
+	/// and credentials each have a listing; its own configuration did not, so
+	/// a client could write a drop-in with [`Request::ConfigPut`], remove one
+	/// with [`Request::ConfigDelete`], and never find out what was there --
+	/// which left the removal reachable only by somebody who already knew the
+	/// name.
+	///
+	/// `observe`, for the reason [`Request::ProbeList`] is: the files are
+	/// world-readable on disk, the compiled result is already in
+	/// [`Request::Show`], and a display that needed a writing tier to show
+	/// what is configured is a display that ends up being given one.
+	ConfigList,
 	/// Stream events until the connection closes.
 	Monitor,
 
@@ -486,6 +500,7 @@ impl Request {
 			| Self::Reload
 			| Self::Show
 			| Self::Monitor
+			| Self::ConfigList
 			| Self::Radios => &[],
 			Self::Apply { .. } => &[
 				"confirm",
@@ -523,6 +538,36 @@ impl Request {
 			Self::RadioSet { .. } => &["interface", "activate"],
 		}
 	}
+}
+
+/// One configuration file, as netcfgd reads it.
+///
+/// **The text comes with the listing**, for [`ProbeScript`]'s reason: a client
+/// needs it to show one, these are a few hundred bytes each, and a second
+/// round trip per file would mean a list and a body that could disagree.
+/// Nothing secret is in them -- a credential is `@secret:name` in the
+/// configuration and its value lives in the store, which no request returns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigFile {
+	/// What [`Request::ConfigDelete`] and [`Request::ConfigPut`] call this
+	/// file -- the drop-in's stem, with no directory and no `.conf`.
+	///
+	/// Empty for `netcfgd.conf` itself, which is not a drop-in and which no
+	/// request can write or remove. A client showing a name for it would be
+	/// offering a verb that does not exist.
+	#[serde(default, skip_serializing_if = "String::is_empty")]
+	pub name: String,
+	/// The file as a person would refer to it: `netcfgd.conf` or
+	/// `conf.d/thing.conf`. Relative to the configuration directory, because
+	/// an absolute path is a thing a client keeps and then writes to (0127).
+	pub file: String,
+	/// Whether [`Request::ConfigDelete`] would take this away. False for
+	/// `netcfgd.conf`, which is the machine's own configuration rather than
+	/// something a client filed.
+	pub removable: bool,
+	/// The file's contents.
+	pub text: String,
 }
 
 /// One link-detection script, as netcfgd sees it.
@@ -769,6 +814,11 @@ pub enum Response {
 		/// The profile in effect, or `None`, which is the default and is not
 		/// a profile called "none".
 		chosen: Option<String>,
+	},
+	/// The configuration files, in answer to [`Request::ConfigList`].
+	Configs {
+		/// One per file the loader would read, in that order.
+		configs: Vec<ConfigFile>,
 	},
 	/// The link-detection scripts, in answer to [`Request::ProbeList`].
 	Probes {

@@ -100,6 +100,7 @@ fn every_request() -> Vec<Request> {
 		Request::ProfileSave { .. } => "profile_save",
 		Request::ProfileSet { .. } => "profile_set",
 		Request::RadioSet { .. } => "radio_set",
+		Request::ConfigList => "config_list",
 	};
 	let mut present: Vec<&str> = all.iter().map(name).collect();
 	present.sort_unstable();
@@ -110,6 +111,7 @@ fn every_request() -> Vec<Request> {
 			"ap_stations",
 			"apply",
 			"config_delete",
+			"config_list",
 			"config_put",
 			"confirm",
 			"explain",
@@ -315,6 +317,7 @@ fn every_request_sample() -> Vec<Request> {
 		Request::WifiForget {
 			id: "home".to_owned(),
 		},
+		Request::ConfigList,
 		Request::ApStations {
 			interface: "wlan0".to_owned(),
 		},
@@ -359,6 +362,57 @@ fn enterprise_samples() -> Vec<Request> {
 /// nothing that is stored -- a network that will never join -- and stored with
 /// nothing referring to it, a credential left behind. A witness carrying only
 /// the first pins none of it.
+/// The configuration listing, out of `every_response` for that function's line
+/// limit.
+///
+/// Both kinds, because the pair is the point: `netcfgd.conf` has no name and
+/// cannot be removed, a drop-in has both, and a witness carrying one of them
+/// would not pin the difference -- which is the difference a view has to draw
+/// or it offers to remove the machine's own configuration through a request
+/// that has no such verb.
+/// The probe listing, out of `every_response` for that function's line limit.
+///
+/// One of each kind, because the pair is the point: a shipped example is not
+/// editable in place, and the operator's copy of the same name is what shadows
+/// it. A witness carrying only one would not pin that.
+fn probes_sample() -> Response {
+	Response::Probes {
+		probes: vec![
+			netcfgd_proto::ProbeScript {
+				name: "default".to_owned(),
+				directory: "/usr/share/netcfgd/probe".to_owned(),
+				text: "#!/bin/sh\nexit 0\n".to_owned(),
+				editable: false,
+			},
+			netcfgd_proto::ProbeScript {
+				name: "office".to_owned(),
+				directory: "/etc/netcfgd/probe".to_owned(),
+				text: "#!/bin/sh\nexit 1\n".to_owned(),
+				editable: true,
+			},
+		],
+	}
+}
+
+fn configs_sample() -> Response {
+	Response::Configs {
+		configs: vec![
+			netcfgd_proto::ConfigFile {
+				name: String::new(),
+				file: "netcfgd.conf".to_owned(),
+				removable: false,
+				text: "global { }\n".to_owned(),
+			},
+			netcfgd_proto::ConfigFile {
+				name: "wifi-home".to_owned(),
+				file: "conf.d/wifi-home.conf".to_owned(),
+				removable: true,
+				text: "network \"home\" { }\n".to_owned(),
+			},
+		],
+	}
+}
+
 fn secrets_sample() -> Response {
 	Response::Secrets {
 		// Three, one per state worth telling apart: stored and used,
@@ -431,22 +485,8 @@ fn every_response() -> Vec<Response> {
 			],
 			chosen: Some("office".to_owned()),
 		}])
-		.chain([Response::Probes {
-			probes: vec![
-				netcfgd_proto::ProbeScript {
-					name: "default".to_owned(),
-					directory: "/usr/share/netcfgd/probe".to_owned(),
-					text: "#!/bin/sh\nexit 0\n".to_owned(),
-					editable: false,
-				},
-				netcfgd_proto::ProbeScript {
-					name: "office".to_owned(),
-					directory: "/etc/netcfgd/probe".to_owned(),
-					text: "#!/bin/sh\nexit 1\n".to_owned(),
-					editable: true,
-				},
-			],
-		}])
+		.chain([configs_sample()])
+		.chain([probes_sample()])
 		.collect();
 
 	let name = |response: &Response| match response {
@@ -461,6 +501,7 @@ fn every_response() -> Vec<Response> {
 		Response::WifiStatus(_) => "wifi_status",
 		Response::ApStations(_) => "ap_stations",
 		Response::Radios { .. } => "radios",
+		Response::Configs { .. } => "configs",
 		Response::Probes { .. } => "probes",
 		Response::Profiles { .. } => "profiles",
 		Response::Modems { .. } => "modems",
@@ -475,6 +516,7 @@ fn every_response() -> Vec<Response> {
 		present,
 		[
 			"ap_stations",
+			"configs",
 			"document",
 			"error",
 			"event",

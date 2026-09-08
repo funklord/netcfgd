@@ -9,6 +9,7 @@
 #include "devices_view.h"
 #include "global_view.h"
 #include "modems_view.h"
+#include "config_view.h"
 #include "secrets_view.h"
 #include "profiles_view.h"
 #include "rules_view.h"
@@ -85,6 +86,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	rules = new ncfg_rules_view(connection, configuration);
 	hooks = new ncfg_hooks_view(connection, configuration);
 	secrets = new ncfg_secrets_view(connection, configuration);
+	config = new ncfg_config_view(connection, configuration);
 	/* `global` first because it is the frame the rest sit in, and `access`
 	 * immediately after it because the two are one subject seen twice:
 	 * `global` shows the control tiers read-only and `access` is where they
@@ -101,6 +103,12 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	configuration->addTab(rules, QStringLiteral("rules"));
 	configuration->addTab(hooks, QStringLiteral("hooks"));
 	configuration->addTab(secrets, QStringLiteral("secrets"));
+	/* Last, and unlike `dns` that is not a place to be buried: this is the
+	 * input every other tab on this level is a rendering of, so a reader
+	 * arrives here after asking "where is that set" somewhere else. The tabs
+	 * before it answer that question one subject at a time; this one answers
+	 * it by naming the file. */
+	configuration->addTab(config, QStringLiteral("files"));
 
 	plan = new ncfg_plan_view(connection, changes);
 	events = new ncfg_events_view(connection, changes);
@@ -118,6 +126,10 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(modems, &ncfg_modems_view::reported, this, &ncfg_main_window::note);
 	connect(global, &ncfg_global_view::reported, this, &ncfg_main_window::note);
 	connect(secrets, &ncfg_secrets_view::reported, this, &ncfg_main_window::note);
+	connect(config, &ncfg_config_view::reported, this, &ncfg_main_window::note);
+	/* A removed drop-in changes the document, so whatever is showing a plan
+	 * is stale -- the same signal the devices tab raises after an edit. */
+	connect(config, &ncfg_config_view::changed, this, &ncfg_main_window::refresh);
 	connect(global, &ncfg_global_view::changed, this, &ncfg_main_window::reload);
 	connect(profiles, &ncfg_profiles_view::reported, this, &ncfg_main_window::note);
 	connect(rules, &ncfg_rules_view::reported, this, &ncfg_main_window::note);
@@ -248,6 +260,8 @@ void ncfg_main_window::refresh()
 		global->refresh();
 	} else if (current == secrets) {
 		secrets->refresh();
+	} else if (current == config) {
+		config->refresh();
 	} else if (current == profiles) {
 		profiles->refresh();
 	} else if (current == rules) {

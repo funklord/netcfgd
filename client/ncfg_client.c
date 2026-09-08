@@ -2476,6 +2476,72 @@ int ncfg_client_config_put(ncfg_client_t *client, const char *name, const char *
 	return put_named_text(client, "config_put", name, text, replace, err, err_size);
 }
 
+void ncfg_configs_free(ncfg_configs_t *configs)
+{
+	if (!configs) {
+		return;
+	}
+	for (size_t i = 0; i < configs->count; i++) {
+		free(configs->items[i].name);
+		free(configs->items[i].file);
+		free(configs->items[i].text);
+	}
+	free(configs->items);
+	configs->items = NULL;
+	configs->count = 0;
+}
+
+int ncfg_client_configs(ncfg_client_t *client, ncfg_configs_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc =
+	    ncfg_client_request(client, "{\"request\":\"config_list\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t configs = ncfg_json_member(doc, ncfg_json_root(doc), "configs");
+	uint32_t count = ncfg_json_count(doc, configs);
+	if (!count) {
+		/* A machine with no configuration at all: netcfgd.conf absent and
+		 * conf.d empty, which is what a fresh install looks like. An answer,
+		 * not a failure, so this returns 1 with nothing in it. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, configs, i);
+		/* Absent rather than empty on the wire for `netcfgd.conf`, which
+		 * `member_text` renders as an empty string -- the same thing a
+		 * caller has to treat as "no name" either way. */
+		out->items[i].name = member_text(doc, entry, "name");
+		out->items[i].file = member_text(doc, entry, "file");
+		out->items[i].text = member_text(doc, entry, "text");
+		out->items[i].removable =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "removable"), 0);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_explanation_free(ncfg_explanation_t *explanation)
 {
 	if (!explanation) {

@@ -180,6 +180,16 @@ struct ncfg_interface_config {
 
 /* One credential, by name and never by value. */
 /* One statement in an explanation, as a view draws it. */
+/* One configuration file, as a view draws it. */
+struct ncfg_config_row {
+	/* What `config_delete` calls it. Empty for `netcfgd.conf`. */
+	QString name;
+	/* `netcfgd.conf` or `conf.d/thing.conf`, relative to the config dir. */
+	QString file;
+	QString text;
+	bool    removable = false;
+};
+
 struct ncfg_explain_row {
 	/* `desired`, `observed`, `ownership`, `guard`, `drift`, `next`. Not an
 	 * enum: the daemon owns this vocabulary and a client that mapped it to a
@@ -578,6 +588,14 @@ public:
 	 * drop-in and has to leave the machine as it found it, which is the whole
 	 * reason the call exists before the view does. */
 	bool config_delete(const QString &name, QString *error);
+	/* Every configuration file netcfgd reads, in the order it reads them.
+	 * Needs `observe`.
+	 *
+	 * **The order is the point, not a detail of the listing.** A later file
+	 * overrides an earlier one, so the sequence is the answer to "which of
+	 * these two won" -- which is why a view draws them in it rather than
+	 * sorting by name. */
+	bool configs(QList<ncfg_config_row> *out, QString *error);
 	/*
 	 * Write a link-detection script, through the daemon.
 	 *

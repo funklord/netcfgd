@@ -311,6 +311,7 @@ fn describe(response: &Response) -> &'static str {
 		Response::WifiStatus(_) => "a radio status",
 		Response::ApStations(_) => "a station list",
 		Response::Radios { .. } => "a radio list",
+		Response::Configs { .. } => "a configuration listing",
 		Response::Probes { .. } => "a link-detection script list",
 		Response::Profiles { .. } => "a profile list",
 		Response::Secrets { .. } => "a credential list",
