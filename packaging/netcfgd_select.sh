@@ -136,9 +136,43 @@ managers='netcfgd networkmanager networkd connman ifupdown wicd'
 radios='supplicant iwd'
 
 # Services a manager may need. Stopped when the selected manager does not want
-# them, **never masked**: masking is what makes a machine unrecoverable
-# without root and knowledge, and none of these is a rival.
+# them. Masked only where `revived_over_dbus` says a stop cannot hold, because
+# masking is what makes a machine unrecoverable without root and knowledge.
 tools='dhcpcd modemmanager resolved'
+
+# **Stopping and disabling these does not keep them down.** Each ships a
+# `/usr/share/dbus-1/system-services/*.service` naming `SystemdService=`, so
+# any client asking for the bus name starts the unit again -- `disable` governs
+# boot, not activation, and there is no socket unit on Debian to disable
+# either.
+#
+# That matters here and nowhere else because `netcfgd-exclusive.conf` conflicts
+# with both, and **`Conflicts=` is symmetric**: systemd resolves it by stopping
+# whichever unit was already up. Verified with two throwaway units -- starting
+# the one that declares nothing stopped the one that declared the conflict. So
+# on a machine running netcfgd, a desktop applet asking for
+# `fi.w1.wpa_supplicant1` does not merely start a rival supplicant, it stops
+# netcfgd. Measured: netcfgd started at 14:09:33 and was gone at 14:09:46, when
+# NetworkManager came up and asked for the supplicant. The stop is clean, so
+# `Restart=on-failure` does not bring it back.
+#
+# **This is not 10.56's mistake returning, and the difference is which
+# selection masks.** That fault masked `wpa_supplicant.service` on *every*
+# selection, including `networkmanager` -- which drives the supplicant over
+# D-Bus and cannot scan without it. Masking happens only in `stand_aside`,
+# which is reached only for a service the selected manager does **not** need;
+# `needs_of networkmanager` names both of these, so both go through
+# `ensure_service` instead and are unmasked, enabled and started. The invariant
+# that broke that machine is asserted three ways in `tests/live/select.sh` and
+# still holds.
+#
+# **systemd-resolved is deliberately absent though it is D-Bus activatable
+# too.** It contends for no device -- it is a resolver, orthogonal to which
+# daemon configures interfaces -- so netcfgd does not conflict with it, nothing
+# revives it *at netcfgd's expense*, and masking it would break
+# `dns_mode = "resolved"`, the arrangement 0007 recommends. Asserted by
+# `tests/live/select.sh`: no selection masks it.
+revived_over_dbus='supplicant modemmanager'
 
 # What each manager needs running. netcfgd needs nothing here, and that is not
 # an oversight -- it starts wpa_supplicant, dhcpcd and the rest as *binaries*
@@ -178,7 +212,23 @@ needs_of() {
 # which pull their daemon in as a dependency at boot.
 unit_of() {
 	case "$1" in
-	netcfgd) echo netcfgd.service ;;
+	# **`netcfgd-nm.service` belongs here and was missing**, which is the
+	# whole of a bug that read as "wifi works occasionally". The shim serves
+	# NetworkManager's own bus name, so it carries `Conflicts=NM.service` and
+	# `Requires=netcfgd.service` -- and this function was the only thing that
+	# could stand it down. It never did, so `netcfgd_select.sh networkmanager`
+	# stopped and masked netcfgd and left its shim enabled: at the next boot
+	# multi-user.target pulled the shim in, its `Conflicts=` stopped the
+	# NetworkManager that had just been selected, and its `Requires=` asked
+	# for the daemon this script had masked. The machine came up with no
+	# manager at all, and which of the three won was a race.
+	#
+	# Second in the list on purpose. `bring_up` unmasks every unit and starts
+	# only the first, so selecting netcfgd unmasks the shim without enabling
+	# it -- which is what `debian/rules` already decided with
+	# `dh_installsystemd --no-enable --no-start`. Standing it down is a bug
+	# fix; starting it is a policy this script does not get to make.
+	netcfgd) echo 'netcfgd.service netcfgd-nm.service' ;;
 	networkmanager) echo 'NetworkManager.service NetworkManager-wait-online.service NetworkManager-dispatcher.service' ;;
 	networkd) echo 'systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service' ;;
 	connman) echo 'connman.service connman-wait-online.service' ;;
@@ -418,6 +468,9 @@ bring_up() {
 # would ever have masked them.
 unmask_all() {
 	[ -d /run/systemd/system ] || return 0
+	# `$revived_over_dbus` is a subset of `$radios $tools` and is not walked
+	# separately: an entry that was not already in one of those could be masked
+	# and never unmasked. `select_gate.py` asserts the subset holds.
 	for entry in $managers $radios $tools; do
 		for unit in $(unit_of "$entry"); do
 			run systemctl unmask "$unit"
@@ -425,16 +478,35 @@ unmask_all() {
 	done
 }
 
-# A service the selected manager does not want. **Stopped and disabled, never
-# masked.** It is not a rival, and a mask is what turns "not running" into
-# "cannot be started by anything that needs it".
+# A service the selected manager does not want. **Stopped and disabled; masked
+# only where a stop does not hold.** A mask turns "not running" into "cannot be
+# started by anything that needs it", so it is reserved for the case where the
+# alternative is a service that comes straight back and takes the selected
+# manager down with it -- see `revived_over_dbus`, which is the whole of the
+# exception and names why each entry is in it.
+#
+# The rule this replaces was "never masked", and it was right about the
+# incident it came from and wrong as a general statement: 10.56's fault was
+# masking the supplicant on *every* selection, not masking it at all. This
+# function is only ever reached for a service the target does not need, so
+# `netcfgd_select.sh networkmanager` cannot arrive here for the supplicant.
 stand_aside() {
 	[ -d /run/systemd/system ] || return 0
+	mask_it=
+	if echo " $revived_over_dbus " | grep -q " $1 "; then
+		mask_it=yes
+	fi
 	for unit in $(unit_of "$1"); do
 		run systemctl stop "$unit"
 		run systemctl disable "$unit"
-		# Deliberately no `mask`. If this ever grows one, read the comment on
-		# `managers` first: that is the change that broke a machine.
+		# An `if` and not `[ -n "$mask_it" ] && run ...`. Under `set -eu` that
+		# list returns 1 when the test is false, and as the last command of the
+		# loop it becomes the function's status -- so the first service that is
+		# *not* masked would abort the whole script and leave the machine
+		# half-switched. Caught by running it.
+		if [ -n "$mask_it" ]; then
+			run systemctl mask "$unit"
+		fi
 	done
 }
 

@@ -42,6 +42,11 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "packaging" / "netcfgd_select.sh"
 
+# Where this project's own units live. The switcher has to be able to stand
+# down everything netcfgd installs, and until this gate compared the two it
+# could only compare the script against itself.
+UNITS = Path(__file__).resolve().parent.parent / "packaging" / "systemd"
+
 # Programs netcfgd starts itself. A unit named for one of these would be
 # netcfgd disabling its own tools. wpa_supplicant and dhcpcd are deliberately
 # absent: their *services* are a rival instance another manager drives, while
@@ -96,6 +101,42 @@ def main() -> int:
 
 	units = arms(text, "unit_of")
 
+	# **What `stand_aside` masks has to be something `none` can unmask.**
+	# `unmask_all` walks `$managers $radios $tools` and nothing else, so an
+	# entry in `revived_over_dbus` that is not in one of those could be masked
+	# by a selection and never put back -- the machine-with-everything-masked
+	# outcome 0145 records, arrived at from the one list added to fix a
+	# different fault.
+	#
+	# Read from the script rather than hard-coded, so adding an entry is what
+	# makes this fail. A missing list is a failure and not a skip: this gate
+	# has already been caught passing over something it never read.
+	revived = re.search(r"^revived_over_dbus='([^']*)'", text, re.MULTILINE)
+	if not revived:
+		print("select-gate: could not find the revived_over_dbus list, so what")
+		print("select-gate:   stand_aside masks is unchecked")
+		failures += 1
+	else:
+		recoverable = set()
+		for name in ("radios", "tools"):
+			found_list = re.search(rf"^{name}='([^']+)'", text, re.MULTILINE)
+			if found_list:
+				recoverable.update(found_list.group(1).split())
+		for entry in revived.group(1).split():
+			if entry not in recoverable:
+				print(f"select-gate: {entry} is masked by stand_aside and is in")
+				print("select-gate:   neither `radios` nor `tools`, so `none` never")
+				print("select-gate:   unmasks it and nothing can put the machine back")
+				failures += 1
+			# A manager is masked by `stand_down` already and reached by
+			# `unmask_all` that way; naming it here too would mask it twice and
+			# read as though `stand_aside` handled managers, which it must not.
+			if entry in managers:
+				print(f"select-gate: {entry} is in `managers` and in")
+				print("select-gate:   `revived_over_dbus` -- a manager is stood down,")
+				print("select-gate:   not stood aside, and the two paths differ")
+				failures += 1
+
 	# **The regression that broke a machine, refused statically.**
 	# `wpa_supplicant.service` in `managers` means every selection masks it,
 	# including the one that selects NetworkManager -- which cannot scan
@@ -128,6 +169,63 @@ def main() -> int:
 			print(f"select-gate: {manager} is in `managers` and has no unit_of arm,")
 			print("select-gate:   so selecting anything else silently leaves it running")
 			failures += 1
+
+	# **Every unit this project ships has to be named in `unit_of`**, and this
+	# is the check that was missing rather than wrong. The rest of this gate
+	# compares the script's lists against each other, so a unit the script has
+	# simply never heard of is consistent with all of them.
+	#
+	# `netcfgd-nm.service` was that unit for as long as it existed. It serves
+	# NetworkManager's bus name, so it carries `Conflicts=NetworkManager.service`
+	# and `Requires=netcfgd.service` -- which makes it, from the switcher's
+	# point of view, a second copy of the netcfgd manager wearing another
+	# name. `unit_of netcfgd` listed only `netcfgd.service`, so selecting
+	# NetworkManager stood the daemon down and left its shim enabled: the next
+	# boot pulled the shim in from multi-user.target, its `Conflicts=` stopped
+	# the NetworkManager that had just been selected, and its `Requires=`
+	# asked for a daemon the same run had masked. Three units in
+	# `multi-user.target.wants`, each conflicting with another, and which one
+	# survived a boot was a race -- reported, accurately, as wifi that worked
+	# occasionally.
+	#
+	# Read from the directory rather than from a list here, so that adding a
+	# unit to the package is what makes this fail. A list would be a fourth
+	# thing to keep in step, which is the failure the whole gate is about.
+	if not UNITS.is_dir():
+		print(f"select-gate: {UNITS} is not a directory, so this gate would")
+		print("select-gate:   compare the script against no units at all")
+		failures += 1
+	else:
+		# The unit names `unit_of` echoes, taken from its body rather than
+		# from its case labels -- the labels are manager names, and it is the
+		# echoed units that decide what gets stood down.
+		#
+		# **Comments stripped first, and the first version of this did not.**
+		# The arm that fixed `netcfgd-nm.service` carries a paragraph naming
+		# the unit and the bug, so `netcfgd-nm.service` appeared in the body
+		# whether or not any arm echoed it -- and the check passed with the
+		# arm sabotaged back to its broken form. Caught by running that
+		# sabotage and confirming the edit had landed, which is the only way
+		# this shape of vacuous pass is ever visible. Same failure
+		# `sandbox_gate.strip_shell_comments` records: a check satisfied by
+		# the prose that explains it.
+		code = "\n".join(
+			line for line in body(text, "unit_of").splitlines()
+			if not line.lstrip().startswith("#")
+		)
+		named = set(re.findall(r"[A-Za-z0-9_.@-]+\.service", code))
+		shipped = sorted(path.name for path in UNITS.glob("*.service"))
+		if not shipped:
+			print(f"select-gate: no units found in {UNITS}, so the comparison")
+			print("select-gate:   below cannot fail -- has the layout changed?")
+			failures += 1
+		for unit in shipped:
+			if unit not in named:
+				print(f"select-gate: {unit} is installed by this project and no")
+				print("select-gate:   unit_of arm names it, so no selection can stand")
+				print("select-gate:   it down -- it survives every switch and fights")
+				print("select-gate:   whichever manager was chosen")
+				failures += 1
 
 	for function in ("claims_of", "children_of"):
 		covered = arms(text, function)
