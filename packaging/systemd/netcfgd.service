@@ -70,8 +70,33 @@ RestartSec=2
 # capping it below what dhcpcd needs is how a sandbox stops a daemon doing the
 # one thing it was started for. Ambient stays as it was: these are available to
 # be dropped into, not handed out.
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN
+#
+# **`CAP_NET_BIND_SERVICE`, and it is ambient rather than only bounded.** A DHCP
+# client binds UDP port 68, which is privileged, and dhcpcd does it from the
+# privilege-separated child that owns the socket -- so a bounding-set entry
+# nobody holds is no use here. Without it, measured on the reporting machine:
+#
+#     dhcpcd: ps_inet_listenin: Permission denied
+#     dhcpcd: BOOTP proxy 10.0.125.56 exited unexpectedly from PID ..., code=1
+#     dhcpcd: ps_root_recvmsg: Permission denied
+#
+# **The lease still arrives**, over the raw socket `CAP_NET_RAW` allows, so the
+# address and the routes appear and netcfgd reports success. What dies is the
+# proxy that carries the lease's *options* -- so the hook is invoked, writes its
+# report, and the report holds a header and not one `dns=` line. The machine
+# came up addressed, routed and unable to resolve anything, with nothing in
+# netcfgd's log saying so.
+#
+# Confirmed directly rather than inferred: binding UDP 68 under the set above
+# answers `EACCES`, and answers `OK` with this line added.
+#
+# This is the second half of a pair. The hook could not be *executed* because
+# `/run` is `noexec` (0178); once it could, it had nothing to report because
+# the client could not bind. Either alone produces the same empty resolver, and
+# fixing one leaves the symptom exactly where it was -- which is how the first
+# fix looked like no fix at all.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
 ProtectHome=yes
 ProtectKernelLogs=yes
