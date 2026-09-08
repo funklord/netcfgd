@@ -199,6 +199,34 @@ ProtectSystem=yes
 # case under real mounts, and fails if this line ever narrows again.
 ReadWritePaths=/etc
 
+# **Execution permitted inside netcfgd's own runtime directory, and nowhere
+# else.** systemd mounts `/run` `nosuid,nodev,noexec` by default since v256, and
+# netcfgd writes scripts there for the programs it drives to run: udhcpc's
+# script, odhcp6c's prefix hook, pppd's ip-up and ip-down, and -- the one that
+# cannot be solved any other way -- the hook bodies an operator writes inline in
+# the configuration, which are materialised here at 0700 and executed directly.
+#
+# Without this, every one of them answers `EACCES` on exec. The DHCP clients
+# lose the lease's nameservers, `pppd` reports nothing, and **no `pre_up`,
+# `post_up`, `pre_down` or `post_down` runs at all** -- loudly for the hooks,
+# because netcfgd spawns those itself and sees the error, and silently for the
+# clients, whose refusal goes to their own log.
+#
+# Measured: a 0700 script under `/run` is refused, is permitted with this line,
+# and a *child* process inherits the permission -- which is what matters, since
+# it is udhcpc and pppd doing the exec rather than netcfgd.
+#
+# **Scoped to `/run/netcfgd`, not `/run`.** This is netcfgd's own directory,
+# created by `RuntimeDirectory=` below and wiped with it; the rest of `/run`
+# stays `noexec`. A shipped script needs none of this and the dhcpcd hook is one
+# (0178) -- but an inline hook body is the operator's content and can never be
+# shipped, so the grant has to exist for that case whatever else is done.
+#
+# `ExecPaths=` is systemd 249 and later. An older systemd ignores an unknown
+# directive rather than refusing the unit, so this degrades to the broken
+# behaviour it fixes rather than to a daemon that will not start.
+ExecPaths=/run/netcfgd
+
 RuntimeDirectory=netcfgd
 RuntimeDirectoryMode=0755
 # Keep /run/netcfgd across a restart, so that an upgrade does not throw away

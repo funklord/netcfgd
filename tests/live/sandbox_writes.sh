@@ -384,6 +384,12 @@ else
 	for granted in $(sed -n 's/^ReadWritePaths=\(.*\)$/\1/p' "$unit"); do
 		properties="$properties -p ReadWritePaths=$granted"
 	done
+	# Kept apart from `$properties`, because the control below has to impose
+	# everything the unit declares *except* this one.
+	exec_properties=
+	for allowed in $(sed -n 's/^ExecPaths=\(.*\)$/\1/p' "$unit"); do
+		exec_properties="$exec_properties -p ExecPaths=$allowed"
+	done
 	# Bounded from outside as well as by the command: a transient unit that
 	# hung would otherwise hold this script for ever.
 	etc_state=$(timeout 60 systemd-run --quiet --wait --pipe --collect \
@@ -392,6 +398,39 @@ else
 
 	check "the unit's own ProtectSystem= and ReadWritePaths= leave /etc writable" \
 		"$etc_state" "rw"
+
+	# **And that a script in netcfgd's runtime directory can be executed.**
+	# systemd mounts /run `noexec` by default since v256, and netcfgd writes
+	# scripts there for the programs it drives: udhcpc's, odhcp6c's prefix
+	# hook, pppd's ip-up and ip-down, and the hook bodies an operator writes
+	# inline, which are materialised at 0700 and executed directly. Without
+	# `ExecPaths=` every one answers EACCES -- silently for the clients, whose
+	# refusal goes to their own log, and absolutely for the hooks: no `pre_up`
+	# or `post_up` runs at all.
+	#
+	# Driven through `sh -c` so the exec is done by a *child*, which is the
+	# case that matters: it is udhcpc and pppd that run these, not netcfgd.
+	probe_dir=/run/netcfgd
+	mkdir -p "$probe_dir" 2>/dev/null || true
+	printf '#!/bin/sh\necho EXECOK\n' > "$probe_dir/.sandbox-probe" 2>/dev/null || true
+	chmod 0700 "$probe_dir/.sandbox-probe" 2>/dev/null || true
+	exec_state=$(timeout 60 systemd-run --quiet --wait --pipe --collect \
+		$properties $exec_properties \
+		/bin/sh -c "$probe_dir/.sandbox-probe" 2>/dev/null || echo denied)
+	check "a script in netcfgd's runtime directory can be executed by a child" \
+		"$exec_state" "EXECOK"
+
+	# The control, and this one is not optional: /run is only `noexec` on a
+	# systemd new enough to make it so, and on anything older the check above
+	# passes for a reason that has nothing to do with the unit. Dropping
+	# ExecPaths= has to make it fail, or it is measuring the machine rather
+	# than the declaration.
+	denied_state=$(timeout 60 systemd-run --quiet --wait --pipe --collect \
+		$properties \
+		/bin/sh -c "$probe_dir/.sandbox-probe" 2>/dev/null || echo denied)
+	check "and cannot without the unit's ExecPaths=, so that line is load-bearing" \
+		"$denied_state" "denied"
+	rm -f "$probe_dir/.sandbox-probe"
 
 	# **The control, and this check is worth nothing without it.** `rw` above
 	# would also be the answer if the properties had failed to apply, if
