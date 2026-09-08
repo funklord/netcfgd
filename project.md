@@ -6864,13 +6864,17 @@ not recorded anywhere, and with the supplicant then logging nowhere (the `-s`
 fault, since fixed) it probably cannot be recovered. A recurrence is
 diagnosable now in a way that one was not.
 
-**Not fixed, because the fix is a decision that touches three records.** The
-shape that looks right: an orphan carrying **netcfgd's own marker** for this
-interface, found by `pid_by_marker` and not reachable, is neither adoptable nor
-ignorable — so refuse the radio and say so, or stop it. Stopping it is not the
-0141 case, because the marker proves it is netcfgd's own process rather than
-somebody else's; but it does bear on 0134's "an unannounced stop holds", and
-choosing between refusing and stopping is the holder's.
+**Decided and fixed 2026-09-08, in `adopt_running_backend`; see 10.67 for the
+implementation and its scope.** The shape was: an orphan
+carrying **netcfgd's own marker** for this interface, found by `pid_by_marker`
+and not reachable, is neither adoptable nor ignorable — so refuse the radio and
+say so, or stop it. Stopping it is not the 0141 case, because the marker proves
+it is netcfgd's own process rather than somebody else's; it does bear on 0134's
+"an unannounced stop holds", and the choice was the holder's. **They chose to
+stop it** — *"just kill every dhcpcd, wpa_supplicant and what ever else that
+isn't part of your configuration and control"* — after this reproduced on their
+machine and cost the association. See 10.67, which has the reproduction and the
+reason the guard could have told its own processes apart all along.
 
 **Recovering by hand**, meanwhile, is `kill` on any `wpa_supplicant` whose
 `argv` contains `/run/netcfgd/supplicant/`, while netcfgd is not running:
@@ -9457,6 +9461,254 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.67 The machine 10.66 was written for, with root on it
+
+10.66 was written to be read by whoever was next in front of that machine with
+root. This is that pass. Three defects were found and two fixed; the third is
+what broke the machine when the fixes were tried live, and it had been named in
+this pass's own notes before the switch was run and left for later. That
+ordering is the process failure and it is recorded at the bottom.
+
+### The daemon had been saying it for weeks, and the remedy was already applied
+
+Every netcfgd start on that machine logged:
+
+    netcfgd: cannot write /etc/netcfgd (Read-only file system (os error 30)),
+      so no client can store configuration ...
+    netcfgd:   Under systemd this is `ProtectSystem=`, and the unit has to name
+      the path in `ReadWritePaths=` -- `systemctl cat netcfgd` shows what yours
+      says
+
+and then, five seconds later and for ever:
+
+    netcfgd: reconcile stopped at dns.apply: could not stage beside
+      /etc/resolv.conf (Read-only file system (os error 30)) ...
+
+The message is correct and names the right setting. `systemctl cat netcfgd`
+showed `ReadWritePaths=/etc` already there. **`ProtectSystem=full` applies its
+read-only remount after the `ReadWritePaths=` bind mounts, so an entry naming
+the very path being remounted grants nothing.** A *subpath* survives. Measured
+five ways under `systemd-run`; the table and the reasoning are
+[0176](doc/decision/0176-a-grant-under-protectsystem-full-grants-nothing.md).
+
+Two consequences worth carrying separately from the fix:
+
+- **0164 reverted 0131 while fixing nothing.** 0131's four narrow paths worked
+  because they were subpaths; consolidating them into their common parent
+  `/etc` turned all four inert at once. So client writes were refused again as
+  before 0131, *and* `write_resolv_conf` still could not stage as before 0164.
+- **Widening a grant is not monotonic.** Under a sandbox whose protection is a
+  mount, replacing several narrow grants with the broad one containing them can
+  permit strictly less, silently, with both the unit and the sources still
+  naming the path.
+
+**A diagnostic pointing at a setting that is already set reads as
+already-actioned.** That is why this survived 10.60 writing the message, 10.66
+writing a runbook whose first step greps for that very line, and two decision
+records about the grant. The message is not wrong and does not need softening;
+what it needed was a check on the unit, which is static and now exists.
+
+### The switcher could not stand down the shim, so a boot was a three-way race
+
+`unit_of netcfgd` echoed `netcfgd.service` and nothing else. `netcfgd-nm.service`
+appeared in `netcfgd_select.sh` twice, both times in a comment.
+
+The shim serves NetworkManager's bus name, so it carries
+`Conflicts=NetworkManager.service` and `Requires=netcfgd.service` -- from the
+switcher's point of view a second copy of the netcfgd manager under another
+name. So `netcfgd_select.sh networkmanager` stopped and masked the daemon and
+left its shim enabled. Found on that machine:
+`/etc/systemd/system/multi-user.target.wants/` held **`netcfgd.service`,
+`netcfgd-nm.service` and `NetworkManager.service` at once**, each conflicting
+with another. Which survived a boot was a race, reported accurately as wifi
+that worked occasionally.
+
+`tool/select_gate.py` now reads `packaging/systemd/*.service` and fails on any
+unit the project installs that no `unit_of` arm names. **Its first version
+passed the sabotage**: the fix's own comment names `netcfgd-nm.service`, so the
+regex found it in the function body with the arm reverted. It strips comments
+now -- the same vacuous pass `sandbox_gate.strip_shell_comments` already
+records, met again by the person who had just read that docstring.
+
+### `Conflicts=` is symmetric, and the supplicant unit is D-Bus activatable
+
+This is the one that broke the machine, and it needs no netcfgd bug to fire.
+
+`wpa_supplicant.service` carries `SystemdService=` in
+`/usr/share/dbus-1/system-services/fi.w1.wpa_supplicant1.service`, so **stopping
+and disabling it does not keep it down** -- any D-Bus request for
+`fi.w1.wpa_supplicant1` starts it. `netcfgd-exclusive.conf` carries
+`Conflicts=wpa_supplicant.service`, and `Conflicts=` is symmetric: verified with
+two throwaway units, where starting the unit that declares nothing stopped the
+one that declared the conflict.
+
+So **anything that asks D-Bus for the supplicant evicts netcfgd**, and netcfgd
+does not come back: the stop is clean, and `Restart=on-failure` does not cover
+it. Measured on that machine: netcfgd started at 14:09:33 and was stopped at
+14:09:46, thirteen seconds later, when NetworkManager came up and asked for the
+supplicant.
+
+`stand_aside` stops and disables the radios and tools and deliberately never
+masks them, which is 10.56's fix and is right for `networkmanager`. It is not
+sufficient for `netcfgd`, because a mask is the only thing that blocks D-Bus
+activation. The switcher's own comment anticipated socket activation -- "A
+masked service that a socket can still activate is not stood down" -- and
+`unit_of supplicant` names `wpa_supplicant.socket` accordingly. **The door that
+was open is D-Bus, and there is no socket unit on Debian at all.**
+
+### Two supplicants on one radio, and the guard that produced them
+
+At the same moment systemd logged:
+
+    netcfgd.service: Found left-over process 1159032 (wpa_supplicant) in
+      control group while starting unit. Ignoring.
+
+netcfgd started beside a supplicant it had not started, declined to stop it --
+*"the supplicant is running and silent, and netcfgd will not kill a daemon that
+may only be busy"* -- and started its own anyway. The journal then shows the two
+deauthenticating each other in a loop, `CTRL-EVENT-SSID-TEMP-DISABLED
+auth_failures=2`, until the association was lost. That is 10.13 reproduced, and
+netcfgd's own refusal message names the consequence exactly: *"two on one radio
+drop the association, which takes the address and the default route with it."*
+
+**The copyright holder has now decided the question 10.13 left open**, on being
+shown this:
+
+> just kill every dhcpcd, wpa_supplicant and what ever else that isn't part of
+> your configuration and control.
+
+which is 10.52's original instruction reaching the case that had been carved out
+of it. 10.13 had written the shape and deferred the choice: *"an orphan carrying
+netcfgd's own marker for this interface, found by `pid_by_marker` and not
+reachable, is neither adoptable nor ignorable -- so refuse the radio and say so,
+or stop it ... choosing between refusing and stopping is the holder's."* **The
+answer is stop it.**
+
+**It is decidable, which is the part the guard got wrong.** netcfgd marks every
+backend it starts with `-P /run/netcfgd/supplicant/<iface>.pid` and the process
+carries it in its own argv for as long as it lives (0140);
+`netcfgd_select.sh`'s `is_netcfgds` is that exact test, and `in_our_netns` is
+the container exclusion 0167 asks for. So "is this process mine" and "is it in
+my world" are both answerable without guessing. The guard at `kernel.rs:1985`
+was written to be conservative about *somebody else's* daemon -- the incident
+behind it is real, adopting an unreachable supplicant once captured a radio with
+a dead process and locked NetworkManager out too -- and was then applied to
+netcfgd's own orphans, which the marker distinguishes. **A guard that cannot
+tell its own processes from a stranger's is not being careful, it is being
+uninformed**, and the cost of that caution here was the outage it existed to
+prevent.
+
+Not yet implemented. What it touches: the refusal at `kernel.rs:1985`, 0134's
+*"an unannounced stop holds"*, and 0141.
+
+### What is fixed, what is not
+
+| | state |
+|---|---|
+| `ProtectSystem=full` grants nothing | fixed, `ProtectSystem=yes`, 0176 |
+| `sandbox_gate.py` blind to an inert grant | fixed, sabotaged both ways |
+| `unit_of netcfgd` omits the shim | fixed |
+| `select_gate.py` blind to a shipped unit | fixed, sabotaged both ways |
+| D-Bus activation evicts netcfgd | fixed, `revived_over_dbus` |
+| netcfgd starts a second supplicant on an orphan | fixed, `adopt_running_backend` |
+| `tests/live/select.sh` killed the host's supplicant | fixed, `unshare -rmn` |
+| `tests/live/sandbox_writes.sh` models mounts systemd does not make | **open** |
+
+**None of this has been run against a real machine.** The fixes are gated,
+unit-tested and sabotaged; the switch itself has not been retried, deliberately,
+and doing so is the copyright holder's call.
+
+### What the two fixes are
+
+Both are one decision from the copyright holder applied in two places, recorded
+as [0177](doc/decision/0177-netcfgd-stands-down-what-it-can-prove-is-not-in-use.md).
+
+**The orphan is stopped.** `adopt_running_backend` gained the case both its
+branches declined: a marker that is an absolute path, no pid file naming a live
+process, `backend_is_reachable` false, and `pid_by_marker` finding a process --
+that is netcfgd's own supplicant with the handle lost, and it is terminated
+before a second one is started. Gated on `shares_network_namespace` for 0167.
+**Scoped to what netcfgd has lost control of**: a backend whose pid file still
+names a live process returns from the first branch and never reaches this, so
+0141's wedged-backend refusal and `ncfg apply --restart-wedged` are untouched.
+The marker is what makes the difference between the two -- "is this mine" is
+answered from `/proc`, not guessed.
+
+**The supplicant unit is masked when netcfgd is selected.** `revived_over_dbus`
+names `supplicant` and `modemmanager`; `stand_aside` masks those and nothing
+else. `systemd-resolved` is deliberately not in it -- it contends for no device,
+netcfgd does not conflict with it, and masking it would break
+`dns_mode = "resolved"`.
+
+**This is not 10.56 returning, and the distinction is which selection masks.**
+That fault masked the supplicant on *every* selection including
+`networkmanager`. Masking now happens only in `stand_aside`, reached only for a
+service the selected manager does not need, and `needs_of networkmanager` names
+both entries -- so NM's selection goes through `ensure_service` and unmasks
+them. `tests/live/select.sh` asserts that directly, and `select_gate.py` asserts
+that everything `stand_aside` can mask is in a list `unmask_all` walks, so
+`none` can always put a machine back.
+
+**The rule that replaces "never mask a tool", because the old one was broader
+than its incident:** a mask is reserved for a service that both contends for a
+device and *comes back on its own*. Stop-and-disable governs boot and nothing
+else, so against a D-Bus-activatable unit it is not a stand-down at all. The old
+statement was right about the machine it came from and forbade the fix for a
+different one.
+
+### The live test killed the supplicant of whoever ran it as root
+
+Found by reading `tests/live/select.sh` before running it, and it had been true
+since the file was written.
+
+It runs the switcher **for real**, not under `--dry-run` -- the `systemctl`
+calls are caught by a stub on `PATH`, which is the point. `kill` is not stubbed,
+and `unshare -rm` makes a user and mount namespace and **no network namespace**.
+So `stand_down networkmanager` ran `pgrep -x wpa_supplicant`, found the host's
+supplicant, `is_netcfgds` correctly said it was not netcfgd's, `in_our_netns`
+said it *was* ours because the namespace was shared -- and the test terminated
+the supplicant carrying the network of the machine it was running on.
+
+Every part of the switcher behaved correctly. The test supplied a world in which
+"is this process in my world" had the wrong answer.
+
+`unshare -rmn` fixes it, and the switcher's own 0167 exclusion then does the
+work: every host process is in a different netns and none is signalled. **That
+alone would leave the kill path with no coverage**, and an assertion that can
+only read zero is the vacuous pass this tree keeps finding -- the first version
+of the replacement check did exactly that, grepping the `systemctl` log for a
+message the switcher writes to stdout. So the namespace gets a decoy of its own:
+`sleep` copied to a file named `wpa_supplicant`, because `pgrep -x` matches
+`comm` and a `#!` script would be `sh`. Proven by removing the decoy and
+watching the check fail, and by a control on the host's supplicant pid before
+and after -- unchanged.
+
+**A `--dry-run` in a namespace is not the same test and would not have caught
+this**, which is why the file is right to run the real thing. What it needed was
+the namespace to be complete.
+
+
+### The process failure, which cost more than any of the findings
+
+**The third defect was identified before the machine was switched, and recorded
+as "a decision for the holder" rather than fixed.** Then the machine was
+switched to netcfgd to verify the first two fixes -- on a laptop whose only
+route to the network was the radio in question -- and the known, unfixed
+eviction path fired within thirteen seconds. The operator repaired the machine.
+
+Both fixes were real and both are proven. Neither was sufficient, and **the pass
+knew which third thing would decide that and ran the experiment anyway.**
+`running-code.md` says to name what makes a thing stop before starting it; the
+same question asked of a live switch is *what makes this fail*, and the answer
+was already written down in this pass's own notes.
+
+The narrower rule, because it is not about caution in general: **a known-unfixed
+failure path in the thing under test is not an open question, it is a
+prediction.** Deferring it to the holder was the right call for the *fix* and
+the wrong call for the *ordering* -- it licensed a live run whose outcome was
+already known. Verify after the predicted failure is closed, or do not verify
+live.
+
 ## 10.66 Handover: what is known about the machine where wifi works occasionally
 
 Written to be read by whoever is next in front of the failing machine, with
@@ -9480,10 +9732,16 @@ a starter-config generator is not in this tree.
 What each answer means, because the order is chosen to separate causes rather
 than to gather everything:
 
-- **`ReadWritePaths` absent, or naming `/etc/netcfgd` rather than `/etc`.**
-  The machine is running a unit older than `aef7d4a` (2026-08-21) *or* the
-  unit on disk is current and systemd never reloaded it -- which was true of
-  every upgrade until 10.61, because `dh_installsystemd --no-enable
+- **`ProtectSystem=full` on any unit, whatever `ReadWritePaths` says.**
+  Read these two together and read `ProtectSystem=` first: `full` remounts
+  `/etc` read-only *after* the grants are applied, so `ReadWritePaths=/etc`
+  grants nothing and the daemon's own "name the path in `ReadWritePaths=`"
+  message points at a line that is already there. `ProtectSystem=yes` is the
+  fixed spelling; 10.67 and 0176 have the measurements. **Then** the older
+  question: `ReadWritePaths` absent, or naming `/etc/netcfgd` rather than
+  `/etc`, means the machine is running a unit older than `aef7d4a`
+  (2026-08-21) *or* the unit on disk is current and systemd never reloaded it
+  -- which was true of every upgrade until 10.61, because `dh_installsystemd --no-enable
   --no-start` emits no postinst snippet at all and therefore no
   `daemon-reload`. **`systemctl daemon-reload && systemctl restart netcfgd`
   is the whole fix if so**, and netcfgd now says at startup when it cannot

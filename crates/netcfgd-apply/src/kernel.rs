@@ -2213,6 +2213,72 @@ fn adopt_running_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Resul
 				return Ok(true);
 			}
 		}
+		// **An unreachable orphan of netcfgd's own is stopped, not stepped
+		// around.** This is the case the two branches above both decline and
+		// nothing else catches, and until it was closed it produced one extra
+		// supplicant per stop/start cycle.
+		//
+		// The chain, where every link is a decision that is right alone:
+		// `KillMode=process` keeps the backend alive across a stop (0134,
+		// 0142); `RuntimeDirectoryPreserve=restart` takes the pid file with
+		// `/run/netcfgd`, so the first branch cannot see it; the orphan loses
+		// its control socket when another manager's supplicant rebinds
+		// `/run/wpa_supplicant/<iface>`, so `backend_is_reachable` is false and
+		// the second branch declines; and the contention check that should
+		// refuse the radio looks for *another manager* by reading that
+		// manager's state, so netcfgd's own orphan is not a contender either.
+		// Neither adopted, nor refused, nor stopped.
+		//
+		// Measured on the reporting machine: netcfgd started beside such an
+		// orphan -- systemd logged `Found left-over process 1159032
+		// (wpa_supplicant) in control group while starting unit` -- started its
+		// own, and the two deauthenticated each other in a loop
+		// (`CTRL-EVENT-SSID-TEMP-DISABLED auth_failures=2`) until the
+		// association was lost. netcfgd's own refusal message names that
+		// consequence exactly: two on one radio drop the association, which
+		// takes the address and the default route with it.
+		//
+		// **Stopping is not 0141's case, and the marker is what makes the
+		// difference.** 0141 and the `restart_wedged` refusal are about not
+		// killing a daemon that may only be busy -- a false positive there
+		// kills somebody's healthy process, so a person decides. Here the
+		// marker is an absolute path netcfgd composed and the process carries
+		// in its own argv (0140), so "is this mine" is answered rather than
+		// guessed. A guard that cannot tell its own processes from a
+		// stranger's is not being careful, it is being uninformed. The
+		// copyright holder settled this on 2026-09-08, having watched it cost
+		// the association: *"just kill every dhcpcd, wpa_supplicant and what
+		// ever else that isn't part of your configuration and control."*
+		//
+		// **Scoped to what netcfgd has lost the handle to.** A backend whose
+		// pid file still names a live process returns `true` from the first
+		// branch and never reaches here, wedged or not -- that one *is* under
+		// netcfgd's control, and it stays 0141's decision with
+		// `ncfg apply --restart-wedged` as the override. What is stopped here
+		// is only a process netcfgd started, can no longer talk to, and has no
+		// record of.
+		if marker.starts_with('/') && !backend_is_reachable(kind, iface) {
+			if let Some(pid) = netcfgd_sys::process::pid_by_marker(&marker) {
+				// The namespace check for the reason 0167 gives: a container's
+				// daemons are visible in `/proc` and are somebody else's, and
+				// this fails closed -- an unreadable link means "not ours to
+				// signal".
+				if netcfgd_sys::process::shares_network_namespace(pid) {
+					eprintln!(
+						"netcfgd: stopping the {kind:?} backend orphaned on {iface} (pid {pid}); 						 it is netcfgd's by the `{marker}` in its own argv, it does not answer 						 its control socket, and starting a second beside it would drop the 						 association"
+					);
+					if let Err(error) = netcfgd_sys::process::terminate(pid) {
+						// Reported and not fatal: the start below is still the
+						// better move than refusing the radio outright, and a
+						// terminate that failed is visible here rather than as
+						// a mystery two interfaces later.
+						eprintln!(
+							"netcfgd: could not stop the orphaned {kind:?} backend on {iface} 							 (pid {pid}): {error}"
+						);
+					}
+				}
+			}
+		}
 	}
 	Ok(false)
 }
