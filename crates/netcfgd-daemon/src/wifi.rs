@@ -993,4 +993,62 @@ mod tests {
 			"activating a radio plans no supplicant, so it would change nothing: {names:?}"
 		);
 	}
+
+	/// What activation writes takes the lease's nameservers.
+	///
+	/// **The other half of the outcome, and it was missing for as long as the
+	/// block existed.** A lease's nameservers are offered to an interface and
+	/// taken only where one asks, so a block with `config = "dhcp"` and no
+	/// `dns { }` came up addressed, routed and unable to resolve anything --
+	/// on a machine whose global `dns` block said `write_resolv_conf`, which
+	/// reads as though it had been asked for. netcfgd said so in a `ncfg plan`
+	/// warning naming this exact remedy, about a file netcfgd had written
+	/// itself. Reported after a switch: "I had to write to resolv.conf".
+	///
+	/// The test above could not see it: it asserts a supplicant is planned,
+	/// and a supplicant was. This asks the question the operator actually has
+	/// -- given a lease that offered nameservers, does the resolver get
+	/// written -- which is the outcome rather than the text.
+	#[test]
+	fn what_activation_writes_takes_the_leases_nameservers() {
+		let mut sources = netcfgd_compile::SourceMap::new();
+		sources.add(
+			"radio-wlan0.conf",
+			netcfgd_host::config::radio_blocks("wlan0"),
+		);
+		// The delivery mode, which is a separate file on a real machine and is
+		// what makes the resolver netcfgd's to write at all.
+		sources.add(
+			"50-dns.conf",
+			"global { dns { mode = \"write_resolv_conf\" } }\n".to_owned(),
+		);
+		let document = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
+			.unwrap_or_else(|diagnostics| {
+				panic!(
+					"activation writes something that does not compile:\n{}",
+					diagnostics.render(&sources)
+				)
+			});
+
+		// A lease that offered nameservers, which is what the dhcpcd hook
+		// reports and what the interface has to ask for.
+		let mut observed = netcfgd_model::Observed::default();
+		observed.reports.push(netcfgd_model::ObservedReport {
+			interface: "wlan0".to_owned(),
+			addresses: Vec::new(),
+			gateways: Vec::new(),
+			nameservers: vec!["10.0.0.1".to_owned()],
+			search: vec!["vibes.se".to_owned()],
+			routes: Vec::new(),
+		});
+
+		let plan = netcfgd_plan::plan(&document, &observed, &netcfgd_plan::PlanOptions::default());
+		let names: Vec<&str> = plan.actions.iter().map(|action| action.op.name()).collect();
+		assert!(
+			names.contains(&"dns.apply"),
+			"activation writes a block that never asks for the lease's nameservers, so \
+			 the machine resolves nothing: {names:?}; warnings: {:?}",
+			plan.warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+		);
+	}
 }
