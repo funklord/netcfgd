@@ -13,6 +13,26 @@ use netcfgd_sys::peer::{group_id, user_id, Peer};
 /// Exhaustive on purpose. A request added without a tier fails to compile,
 /// which is a better reminder than a review checklist -- the failure mode of a
 /// permission system is a verb nobody remembered to cover.
+///
+/// **The test is what the caller is asking netcfgd to do, and nothing else.**
+/// Stated by the copyright holder after this file had argued otherwise twice:
+/// an observer may *request* the data netcfgd holds, an admin may *write* all
+/// of it through netcfgd and may request secrets as well.
+///
+/// **A file's mode is not an argument for a tier.** Two comments below used to
+/// place a listing at `observe` partly because the files behind it are
+/// readable on disk -- "0755, so anybody on the machine can already read
+/// them". That is a fact about the filesystem, and these tiers are about
+/// netcfgd: it decides what it will answer, and it is answering over a socket
+/// a remote caller may one day be on the other end of (0128). The reasoning
+/// also evaporates the moment a mode changes or the data stops being a file,
+/// while the tier it was used to justify stays -- which is how a wrong reason
+/// outlives the case that made it look right.
+///
+/// So the question is only ever: is this a read of what netcfgd knows, or a
+/// write through netcfgd? Everything else is detail about the answer's
+/// contents, which is worth naming -- `ApStations` below names what it
+/// exposes -- but is not what decides the tier.
 #[must_use]
 pub(crate) fn tier_of(request: &Request) -> Tier {
 	match request {
@@ -45,17 +65,18 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// whether a supplicant answers. All three are visible to anybody who
 		// can run `ip link` on the machine.
 		| Request::Radios
-		// Listing the link-detection scripts is reading, and the files are
-		// 0755 on disk so anybody on the machine can already read them. It is
-		// `observe` for the reason `WifiStatus` is: a display that needed a
+		// Listing the link-detection scripts is reading what netcfgd holds. It
+		// is `observe` for the reason `WifiStatus` is: a display that needed a
 		// writing tier to show what is configured is a display that ends up
-		// being given one.
+		// being given one. (This said "and the files are 0755 on disk so
+		// anybody on the machine can already read them", which assumes the
+		// caller is on the machine -- see the note on `tier_of`.)
 		| Request::ProbeList
-		// Listing the configuration is the same question about netcfgd's own
-		// files: they are world-readable on disk and the compiled result is
-		// already in `Show`. What this adds is which file each part came from,
-		// which is a provenance answer rather than a disclosure -- `Explain`
-		// gives the same thing per interface and is `observe` too.
+		// Listing the configuration is the same question again, and the
+		// answer is the same: a client is asking netcfgd for what it is
+		// reading. `Show` already returns the compiled result; what this adds
+		// is which file each part came from, which is the provenance `Explain`
+		// gives per interface and is `observe` for the same reason.
 		| Request::ConfigList
 		| Request::ProfileList
 		| Request::ModemList

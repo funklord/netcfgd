@@ -182,12 +182,24 @@ first glance:
   nobody can undo.
 
 - **`config_list` is `observe`, while `config_put` and `config_delete` are
-  `admin`.** Reading which files netcfgd is reading adds nothing to what a
-  local user already has: the files are world-readable on disk and the
-  compiled result is in `show`. What it adds is *provenance* -- which file each
-  part came from -- which is the same thing `explain` gives per interface and
-  is `observe` for the same reason. A display that needed a writing tier to
-  show what is configured is a display that ends up being given one.
+  `admin`.** The tiers divide on what the caller asks netcfgd to do: an
+  observer may request the data netcfgd holds, and an admin may write all of
+  it through netcfgd. Listing is a request for data, so it is `observe`; the
+  two that write are `admin`.
+
+  **The mode of the files behind it is not part of that argument**, and this
+  bullet used to say it was. netcfgd bridges the host gap: the caller may be
+  another user, a process in another namespace, or -- once `remote` is in use
+  -- somebody with no filesystem in common with this machine at all. "Anybody
+  local could read it anyway" is a fact about somebody else, not about the
+  caller. It fails the other way too: a mode changes, or the answer stops
+  being a file, and the justification evaporates while the tier it justified
+  stays.
+
+  `show` already returns the compiled result; what this adds is *provenance* --
+  which file each part came from -- the same thing `explain` gives per
+  interface. A display that needed a writing tier to show what is configured
+  is a display that ends up being given one.
 
   It carries each file's **text**, for the reason `probe_list` does: a client
   needs it to show one, these are a few hundred bytes, and a second round trip

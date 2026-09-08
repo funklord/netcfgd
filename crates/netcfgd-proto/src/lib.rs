@@ -96,10 +96,15 @@ pub enum Request {
 	/// which left the removal reachable only by somebody who already knew the
 	/// name.
 	///
-	/// `observe`, for the reason [`Request::ProbeList`] is: the files are
-	/// world-readable on disk, the compiled result is already in
-	/// [`Request::Show`], and a display that needed a writing tier to show
-	/// what is configured is a display that ends up being given one.
+	/// `observe`, because it is a request for data netcfgd holds -- which is
+	/// the whole test. Not because the files are readable on disk: netcfgd
+	/// bridges the host gap, so what a local user could do is a fact about
+	/// somebody other than the caller.
+	///
+	/// [`Request::Show`] already returns the compiled result; what this adds
+	/// is which file each part came from, the provenance [`Request::Explain`]
+	/// gives per interface. A display that needed a writing tier to show what
+	/// is configured is a display that ends up being given one.
 	ConfigList,
 	/// Stream events until the connection closes.
 	Monitor,

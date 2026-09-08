@@ -9457,6 +9457,70 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.65 A tier is about netcfgd, and the argument kept being about the disk
+
+Two corrections from the copyright holder, in one exchange:
+
+> You are still confusing file with netcfgd permissions. An observer is
+> allowed to request the data from netcfgd, and an admin is allowed to write
+> all the data via netcfgd and request secrets as well.
+
+> netcfgd bridges the host gap, so never confuse them.
+
+Decision 0175 has the rule and what it leaves open. What belongs here is the
+shape of the mistake, because it had been made twice and neither instance
+looked like one.
+
+**Both tiers were right. Both arguments were wrong.** `authorize.rs` placed
+`ProbeList` at `observe` partly because "the files are 0755 on disk so anybody
+on the machine can already read them", and 10.64 repeated it for
+`ConfigList`. Nothing behaved incorrectly, no test could fail, and the
+sentences read as careful -- they cite a real fact and reach a defensible
+conclusion.
+
+**That is what makes it expensive.** A correct decision resting on a wrong
+reason is not a small error: the reason is the part that gets copied. It was
+copied, from a comment written months ago into a decision record written
+yesterday, and it would have been copied again by the next listing verb --
+which is exactly how the tier for something that *is not* a file would have
+been argued from a file's mode.
+
+**Why the reason is wrong is worth stating in one line: it assumes the caller
+is on the machine.** Spanning that gap is what netcfgd is for. The peer may be
+another user, a process in another namespace, or -- once `remote` is in use --
+somebody with no filesystem in common with this host, which is why 0128 gives
+remote callers a policy of their own. "Anybody local could read it anyway" is
+a fact about somebody who is not asking.
+
+It fails from the other end too, and this is the half that predicts the next
+instance: **half of what these requests return was never a file.** A status is
+netlink, a plan is memory, a radio list is a control socket. A justification
+that only works for the answers that happen to be files is one that will be
+reached for on an answer that is not.
+
+### The rule that replaces it
+
+    observe   request the data netcfgd holds
+    admin     write all of it through netcfgd, and request secrets
+
+Everything else is detail about the answer's *contents*. Worth naming --
+`ApStations` says in as many words that it hands out other people's hardware
+addresses and is a proximity sensor for anybody granted `observe` -- but not
+what decides the tier.
+
+### The gap the correction opened, and left open
+
+`admin` is defined to include **requesting secrets**, and netcfgd has no
+request that returns one: `SecretList` carries names and whether the store
+holds them, `install_secret` says "the only direction credentials travel in
+netcfgd is inward", and the credentials tab is built on that.
+
+So the tier now permits something the protocol does not offer. That is a real
+gap and it is recorded rather than closed: a verb returning credentials
+crosses a boundary 0042 and 0127 both rest on, and **inventing one from a
+sentence about tiers would be reading an instruction wider than it was
+given.** It is the holder's to ask for.
+
 ## 10.64 netcfgd could list everything except its own configuration
 
 Probes, profiles, credentials: each had a listing. The configuration did not,
@@ -9472,13 +9536,27 @@ surface is what turned out to need a fifth verb -- and that is the honest
 shape of the work rather than a plan that went wrong: **the missing button was
 a symptom, and the missing listing was the thing.**
 
-### What the tier turned on
+### What the tier turned on, and the argument that was wrong for it
 
-`observe`, and the argument is `Explain`'s. Reading which files netcfgd reads
-adds nothing a local user does not have -- they are world-readable and the
-compiled result is already in `Show`. What it adds is provenance, and a
-display that needed a writing tier to show what is configured is a display
-that ends up being given one.
+`observe`, and the argument is `Explain`'s: a client is asking netcfgd for
+what netcfgd is reading. `Show` already returns the compiled result; what this
+adds is provenance, and a display that needed a writing tier to show what is
+configured is a display that ends up being given one.
+
+**The first version of that paragraph said something else and it was wrong.**
+It argued the tier from the files' modes -- "adds nothing a local user does
+not have, they are world-readable" -- and the copyright holder named it:
+
+> You are still confusing file with netcfgd permissions. ... netcfgd bridges
+> the host gap, so never confuse them.
+
+The tier was right; the reason was not, and **a correct decision resting on a
+wrong reason is worse than a wrong decision**, because the next person applies
+the reason to a case where it holds and the decision does not. Decision 0175
+has the rule. The short form: the caller may not be on this machine at all --
+another user, another namespace, or a remote peer with no filesystem in common
+-- so "anybody local could read it anyway" is a fact about somebody who is not
+asking.
 
 **Built on `writable_files` rather than on a glob**, which is that function's
 own stated point: it enumerates what the *loader* reads. A listing with its

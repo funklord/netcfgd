@@ -1,6 +1,9 @@
 # 0174: netcfgd can list its own configuration
 
-Status: accepted
+Status: accepted; the reasoning below is corrected by
+[0175](0175-a-tier-is-about-netcfgd-not-about-the-filesystem.md) -- `observe`
+is right, the argument from the files' modes was not, and the body is left as
+it was written rather than tidied
 Date: 2026-09-08
 Milestone: M8; the listing
 [0127](0127-netcfgd-is-the-only-writer-and-the-socket-carries-the-rest.md)
