@@ -9461,6 +9461,78 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.69 The switch works, and what the two empty-resolver faults were
+
+The retry of 10.68's switch, with both halves of the DNS failure fixed. The
+machine is on netcfgd now: associated to `OpenPC.se`, leased `10.0.125.56`,
+routed, and resolving through a `resolv.conf` netcfgd wrote from the lease.
+
+**The empty resolver was two independent faults, stacked, and fixing the first
+changed nothing visible.** That is the part worth carrying: 0178 shipped the
+hook so it could be *executed*, and the machine still came up unable to resolve,
+which read as the fix having failed. It had not. The hook now ran and had
+nothing to report.
+
+### `CAP_NET_BIND_SERVICE` was missing, so the lease carried no options
+
+A DHCP client binds UDP 68, which is privileged, and dhcpcd does it from the
+privilege-separated child that owns the socket. The unit's bounding set did not
+carry `CAP_NET_BIND_SERVICE` and neither did its ambient set:
+
+    dhcpcd: ps_inet_listenin: Permission denied
+    dhcpcd: BOOTP proxy 10.0.125.56 exited unexpectedly from PID ..., code=1
+    dhcpcd: ps_root_recvmsg: Permission denied
+
+**The lease still arrives**, over the raw socket `CAP_NET_RAW` allows, so the
+address and the routes appear and netcfgd reports success. What dies is the
+proxy carrying the lease's *options* -- so the hook is invoked, writes its
+report, and the report holds a header and not one `dns=` line. Addressed,
+routed, resolving nothing, with netcfgd's own log clean.
+
+Ambient rather than only bounded: the client is a child that needs it
+effective, and a bounding-set entry nobody holds grants nothing. Confirmed by
+binding UDP 68 under each set -- `EACCES` without, `OK` with -- and then
+end-to-end: the report went from a bare header to `dns=10.0.0.1` and
+`search=vibes.se`, and `dhcpcd: [BOOTP proxy]` now sits in the cgroup where it
+used to exit at once.
+
+### `ncfg wifi activate` wrote a radio that could not resolve
+
+A lease's nameservers are *offered* to an interface and taken only where one
+asks. The block netcfgd's own activation command writes had `config = "dhcp"`
+and no `dns { }`, so the radio came up addressed and resolving nothing -- on a
+machine whose global block said `write_resolv_conf`, which reads as though it
+had been asked for.
+
+netcfgd said so, in a `ncfg plan` warning naming the exact remedy, about a file
+netcfgd had written itself. **A diagnostic that names a remedy for a file the
+program generates is a defect report against the generator**, and it went unread
+for as long as the two were separate things to look at.
+
+The existing test could not see it: it asserts that what activation writes plans
+a *supplicant*, and a supplicant was always planned. The new one asks whether,
+given a lease that offered nameservers, the resolver gets written.
+
+### Open: `dpkg --unpack` stops the daemon and nothing restarts it
+
+Reproduced three times. `dpkg -i` of the netcfgd package with the daemon running
+leaves it `inactive`, and the network survives only because `KillMode=process`
+keeps the supplicant and the DHCP client alive.
+
+Isolated as far as it goes: it is **the unpack**, not the maintainer scripts.
+`dpkg --unpack` alone stops it and `dpkg --configure` does not bring it back.
+Running the shipped `prerm upgrade` and `postrm upgrade` by hand against a
+running daemon stops nothing. The package declares no triggers, and the
+`/etc/init.d/netcfgd` conffile generates no unit -- `FragmentPath` stays the
+native one. systemd records a stop *job* (`Result=success`, SIGTERM,
+`ExecMainCode=2`), so something asked it to stop rather than the daemon dying.
+
+**What asks has not been found**, and this is recorded rather than guessed at.
+The consequence is understood and is the part that matters: postinst uses
+`try-restart`, which acts only on an active unit, so by the time it runs the
+daemon is already down and the verb correctly does nothing. Every netcfgd
+upgrade therefore leaves the machine's network daemon stopped.
+
 ## 10.68 The switch worked, and `/run` is `noexec`
 
 The retry of 10.67's switch, on the same machine, with the package rebuilt and
