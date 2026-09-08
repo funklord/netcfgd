@@ -198,7 +198,18 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$work/etc" "$work/run"
 
-mount -t tmpfs tmpfs /run || die "cannot put a tmpfs over /run"
+# **`noexec`, which is the whole of 0178 and what this suite could not see.**
+# systemd mounts /run `nosuid,nodev,noexec` by default -- its own default since
+# v256, not a hardening choice -- and netcfgd used to generate dhcpcd's hook
+# there and pass it with `-c`. dhcpcd could not exec it, said
+# `script_runreason: Permission denied` in its own log and nowhere netcfgd
+# could see, and every lease nameserver was lost. This suite mounted a plain
+# tmpfs, so every check below passed against a /run no real machine has.
+#
+# With the flags the machine actually uses, the shipped hook is what makes them
+# pass: put the hook back under /run and the nameserver checks go red.
+mount -t tmpfs -o nosuid,nodev,noexec tmpfs /run ||
+	die "cannot put a tmpfs over /run"
 mount -t tmpfs tmpfs /var/lib/dhcpcd || die "cannot put a tmpfs over /var/lib/dhcpcd"
 
 # The decoy resolv.conf. A machine whose resolver writes into /run points
@@ -234,7 +245,26 @@ mount --bind "$work/etc-resolv" "$resolv" ||
 hostname localhost
 
 export NCFG_CONFIG_DIR="$work/etc"
-export NCFG_RUN_DIR="$work/run"
+# **`/run/netcfgd`, not `$work/run`, and the reason is the hook.** dhcpcd's hook
+# is shipped rather than generated now (0178), because systemd mounts /run
+# `noexec` and a script written there cannot be executed. A shipped script has
+# to find the report directory on its own, and dhcpcd gives it nothing to find
+# it with: the hook environment is `interface`, `reason`, `pid` and the
+# interface flags, dhcpcd builds it rather than passing its own on, and
+# dhcpcd.conf has an `env` directive but no `include` -- so using that would
+# mean replacing the operator's configuration rather than pointing at it
+# (0143). All three were measured before this line was written.
+#
+# So the hook uses the run directory netcfgd actually uses, and a test wanting
+# a different one has to arrange for that path to *be* it. There is a tmpfs
+# over /run above, so this costs nothing and the test now drives the same paths
+# a real machine does -- which `dhcpcd_orphan.sh` already did.
+mkdir -p /run/netcfgd
+export NCFG_RUN_DIR=/run/netcfgd
+# The hook, from this tree rather than from an install. Without it netcfgd
+# refuses to start the client and says why, which is a better failure than the
+# silent one this replaced -- but it is not what this test is about.
+export NCFG_DHCPCD_HOOK="$repo/packaging/hooks/dhcpcd-hook"
 export NCFG_RESOLV_CONF="$work/resolv.conf"
 # netcfgd looks for its client on PATH. sbin is where dhcpcd lives and is not on
 # an ordinary user's, so without this the daemon would fall through to busybox
@@ -432,7 +462,7 @@ contains "netcfgd starts the client" "$(cat "$work/apply.log")" "backend.start c
 if ! wait_for 'ip -4 -br addr show cli | grep -q 10.44.0.20'; then
 	echo "FAIL the lease never reached the interface"
 	echo "       the hook netcfgd generated:"
-	sed 's/^/       /' "$work/run/dhcpcd/cli.script" 2>/dev/null || true
+	sed 's/^/       /' "$NCFG_DHCPCD_HOOK" 2>/dev/null || true
 	echo "       the server said:"
 	sed 's/^/       /' "$work/udhcpd.log"
 	failures=$((failures + 1))
@@ -443,7 +473,7 @@ fi
 # and did *not* write /etc/resolv.conf, and a hook that has not run yet satisfies
 # both. Waiting until the hook has demonstrably done its one job is what stops
 # them passing for the wrong reason.
-report=$work/run/reported/cli
+report=/run/netcfgd/reported/cli
 wait_for '[ -r "$report" ]' || true
 
 addresses=$(ip -4 -br addr show cli)
@@ -661,12 +691,12 @@ CONF
 	# carried them, so a v6-only network resolved nothing at all. The client
 	# has a script of netcfgd's now, reporting into a fragment of its own
 	# rather than into the one file the v4 client already owns.
-	fragment=$work/run/reported.d/cli/dhcpcd6
+	fragment=/run/netcfgd/reported.d/cli/dhcpcd6
 	if wait_for '[ -f "$fragment" ]'; then
 		echo "ok   the DHCPv6 client reports through a fragment of its own"
 	else
 		echo "FAIL the DHCPv6 client reports through a fragment of its own"
-		echo "       $work/run/reported.d holds: $(ls -R "$work/run/reported.d" 2>&1)"
+		echo "       /run/netcfgd/reported.d holds: $(ls -R /run/netcfgd/reported.d 2>&1)"
 		failures=$((failures + 1))
 	fi
 	check "which carries the lease's nameserver" \

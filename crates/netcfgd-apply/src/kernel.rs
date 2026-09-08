@@ -2338,7 +2338,16 @@ fn start_backend(
 			}
 			// dhcpcd gets one too, for the nameservers and to stop its own hooks
 			// writing resolv.conf behind netcfgd's back (0066).
-			let hook = write_dhcpcd_script(iface, None)?;
+			//
+			// The report directory is made here because the hook no longer
+			// makes it: a generated script was written into a directory
+			// netcfgd had just created, and a shipped one arrives with nothing
+			// around it. The hook creates the leaf itself as well -- belt and
+			// braces, since it runs after a stop may have taken /run/netcfgd.
+			let hook = dhcpcd_hook_path()?;
+			let reported = report_dir(&run_dir_path());
+			std::fs::create_dir_all(&reported)
+				.map_err(|error| format!("{}: {error}", reported.display()))?;
 			let config = write_dhcpcd_config(iface, "4")?;
 
 			// **The one backend netcfgd cannot recognise from its process
@@ -2455,6 +2464,14 @@ const DHCPCD_V6: &str = "-6";
 ///
 /// Sorts after the `DHCPv4` client's single file, which is what puts a v4
 /// lease's nameservers before a v6 lease's without anything having to say so.
+/// The fragment name the shipped dhcpcd hook writes for a `DHCPv6` lease.
+///
+/// **Two places now hold this name**: here and
+/// `packaging/hooks/dhcpcd-hook`, which computes its own report path because
+/// nothing reaches it from netcfgd (0178). That is the two-lists shape this
+/// tree keeps finding, so `the_shipped_dhcpcd_hook_reports_and_configures_nothing`
+/// asserts the hook contains this exact string rather than trusting them to
+/// stay in step.
 const REPORT_DHCPCD6: &str = "dhcpcd6";
 
 /// Where netcfgd points dhcpcd's `-f`, and what it points at.
@@ -2478,6 +2495,41 @@ const REPORT_DHCPCD6: &str = "dhcpcd6";
 /// a normal lease and applies its defaults -- byte for byte what it already
 /// does today on a machine with no `/etc/dhcpcd.conf`. The only thing that
 /// changes is the path in the message.
+/// Where the shipped dhcpcd hook is, and a check that it is there.
+///
+/// **Shipped rather than generated, because `/run` is `noexec`.** netcfgd wrote
+/// this script per interface into `/run/netcfgd/dhcpcd/<iface>.script` and
+/// passed it with `-c`; systemd mounts `/run` `nosuid,nodev,noexec` by default,
+/// so dhcpcd could not exec it and reported `script_runreason: Permission
+/// denied` in its own log, once per lease event. The hook is the only route a
+/// lease's nameservers have into netcfgd, so the DNS delivery had no servers
+/// and `write_resolv_conf` wrote a resolver that resolved nothing -- 1,350 of
+/// those messages on the machine that reported it. Decision 0178.
+///
+/// **The path is checked rather than assumed.** A missing hook is the same
+/// silent outcome as an unexecutable one: dhcpcd starts, gets a lease,
+/// configures the interface, and netcfgd never learns a nameserver. Saying so
+/// at the point of use costs one `exists` per client start and turns a resolver
+/// that quietly resolves nothing into a message naming the file.
+///
+/// `NCFG_DHCPCD_HOOK` overrides it, for a test driving an uninstalled tree.
+fn dhcpcd_hook_path() -> Result<std::path::PathBuf, String> {
+	let path = std::env::var_os("NCFG_DHCPCD_HOOK").map_or_else(
+		|| std::path::PathBuf::from("/usr/libexec/netcfgd/dhcpcd-hook"),
+		std::path::PathBuf::from,
+	);
+	if !path.exists() {
+		return Err(format!(
+			"the dhcpcd hook is not installed at {}, so a lease's nameservers would \
+			 never reach netcfgd and the resolver would be written empty. It ships \
+			 with netcfgd; `make install` places it, and NCFG_DHCPCD_HOOK points at \
+			 it in a tree that is not installed",
+			path.display()
+		));
+	}
+	Ok(path)
+}
+
 fn write_dhcpcd_config(iface: &str, family: &str) -> Result<std::path::PathBuf, String> {
 	let dir = run_dir_path().join("dhcpcd");
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -2631,7 +2683,10 @@ fn start_dhcp6(iface: &str, delegating: Option<&netcfgd_model::PdRequest>) -> Re
 		// Still no prefix through it: dhcpcd has nothing to report one with,
 		// and 0050 refuses the pairing that would want it.
 		_ => {
-			let hook = write_dhcpcd_script(iface, Some(REPORT_DHCPCD6))?;
+			let hook = dhcpcd_hook_path()?;
+			let fragments = report_fragment_dir(&run_dir_path(), iface);
+			std::fs::create_dir_all(&fragments)
+				.map_err(|error| format!("{}: {error}", fragments.display()))?;
 			run_client(
 				"dhcpcd",
 				&dhcpcd_start_args(
@@ -2882,48 +2937,6 @@ fn write_pd_hook(iface: &str) -> Result<std::path::PathBuf, String> {
 	let path = hooks.join(format!("pd-{iface}"));
 	let script = pd_hook_script(iface, &prefixes.join(iface));
 
-	let mut file = std::fs::File::create(&path)
-		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-	file.write_all(script.as_bytes())
-		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-	std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-		.map_err(|error| format!("cannot make {} executable: {error}", path.display()))?;
-	Ok(path)
-}
-
-/// Write the hook script dhcpcd runs, and return its path.
-///
-/// `source` is `None` for the `DHCPv4` client, which reports through the single
-/// file the contract documents and has done since 0066, and `Some(name)` for any
-/// other client on the same interface -- which reports through a fragment,
-/// because two writers on one file is what silenced the `DHCPv6` client's
-/// nameservers for a milestone (0086).
-fn write_dhcpcd_script(iface: &str, source: Option<&str>) -> Result<std::path::PathBuf, String> {
-	use std::io::Write;
-	use std::os::unix::fs::PermissionsExt;
-
-	let run = run_dir_path();
-	let dir = run.join("dhcpcd");
-	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
-
-	// Where it reports, and under what name. The single file is the interface's
-	// own and the fragment is the client's, which is the whole of 0086 in two
-	// lines.
-	let (parent, name) = match source {
-		Some(source) => (report_fragment_dir(&run, iface), source),
-		None => (report_dir(&run), iface),
-	};
-	std::fs::create_dir_all(&parent).map_err(|error| format!("{}: {error}", parent.display()))?;
-	let report = parent.join(name);
-
-	// The script is named for the client too, not the interface alone: a
-	// dual-stack interface has two, and one name would mean the second apply
-	// overwriting the first client's script while it was running.
-	let path = match source {
-		Some(source) => dir.join(format!("{iface}-{source}.script")),
-		None => dir.join(format!("{iface}.script")),
-	};
-	let script = dhcpcd_script(iface, &report);
 	let mut file = std::fs::File::create(&path)
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
 	file.write_all(script.as_bytes())
@@ -3222,87 +3235,6 @@ fn quote_ppp(value: &str) -> String {
 	}
 	out.push('"');
 	out
-}
-
-/// The hook script dhcpcd runs, replacing its own.
-///
-/// dhcpcd configures the interface itself, so unlike udhcpc's this script does no
-/// addressing at all. What it is for is the half netcfgd cannot get any other way:
-/// **the nameservers the lease carried**, written into the interface report.
-///
-/// **And what it stops is a fight.** dhcpcd's own `20-resolv.conf` hook writes
-/// `/etc/resolv.conf`, directly or through `resolvconf` -- so on a machine where
-/// netcfgd's DNS mode owns that file, both were writing it and whichever ran last
-/// won. Passing `-c` replaces the whole hook directory, which ends the contention
-/// and is the reason this is not simply a file dropped in beside dhcpcd's own
-/// hooks. Decision 0066.
-///
-/// Two things dhcpcd's default hooks did that this deliberately does not:
-///
-/// - **Write `resolv.conf`**, per above.
-/// - **Set the hostname.** `30-hostname` sets it from the lease when the current
-///   one is blank or `localhost`. netcfgd refuses `hostname = "dhcp"` by name
-///   (0061) on the grounds that a machine's identity is not a remote server's to
-///   change, and leaving dhcpcd to do it anyway would have been that decision
-///   holding in the config and not in fact.
-///
-/// The variable names are dhcpcd's and were read out of its own
-/// `20-resolv.conf`, not remembered: `$new_domain_name_servers`,
-/// `$new_domain_name`, and `$reason` -- which is `BOUND`, `RENEW`, `REBIND`,
-/// `REBOOT` or `INFORM` for a lease and their `6` suffixed forms for `DHCPv6`,
-/// where the servers arrive in `$new_dhcp6_name_servers` instead. 0050 is the scar
-/// that makes this worth reading rather than assuming: `$new_dhcp6_prefix` is not
-/// a dhcpcd variable at all and netcfgd's hook read it for years.
-#[must_use]
-pub fn dhcpcd_script(iface: &str, report: &std::path::Path) -> String {
-	format!(
-		"#!/bin/sh\n\
-		 # Written by netcfgd for dhcpcd on {iface}. Regenerated on every apply.\n\
-		 #\n\
-		 # This replaces dhcpcd's own hook directory (-c), so nothing here writes\n\
-		 # /etc/resolv.conf -- netcfgd's DNS backend owns that file, and dhcpcd's\n\
-		 # 20-resolv.conf hook was writing it too. dhcpcd installs the address and\n\
-		 # the routes itself; this only reports what netcfgd cannot otherwise see.\n\
-		 set -u\n\
-		 report={report}\n\
-		 iface=${{interface:-{iface}}}\n\
-		 \n\
-		 servers=${{new_domain_name_servers:-}}\n\
-		 # Option 119 where the server sent one, option 15 otherwise, which is the\n\
-		 # precedence dhcpcd's own 20-resolv.conf uses.\n\
-		 search=${{new_domain_search:-${{new_domain_name:-}}}}\n\
-		 case \"${{reason:-}}\" in\n\
-		 *6)\n\
-		 \t# The DHCPv6 names for the same two things.\n\
-		 \tservers=${{new_dhcp6_name_servers:-}}\n\
-		 \tsearch=${{new_dhcp6_domain_search:-}}\n\
-		 \t;;\n\
-		 esac\n\
-		 \n\
-		 case \"${{reason:-}}\" in\n\
-		 BOUND*|RENEW*|REBIND*|REBOOT*|INFORM*)\n\
-		 \t{{\n\
-		 \t\tprintf '# %s, from a dhcpcd lease. Written by netcfgd.\\n' \"$iface\"\n\
-		 \t\tfor server in $servers; do\n\
-		 \t\t\tprintf 'dns=%s\\n' \"$server\"\n\
-		 \t\tdone\n\
-		 \t\t# A suffix to complete a bare name with, and never a routing domain:\n\
-		 \t\t# 0049 refuses one from a server and 0067 says why a suffix is not one.\n\
-		 \t\tfor suffix in $search; do\n\
-		 \t\t\tprintf 'search=%s\\n' \"$suffix\"\n\
-		 \t\tdone\n\
-		 \t}} > '{staged}'\n\
-		 \tmv '{staged}' \"$report\"\n\
-		 \t;;\n\
-		 EXPIRE*|FAIL*|NAK*|STOP*|RELEASE*|NOCARRIER*)\n\
-		 \trm -f \"$report\"\n\
-		 \t;;\n\
-		 esac\n\
-		 exit 0\n",
-		iface = iface,
-		staged = staged_report(report).display(),
-		report = report.display()
-	)
 }
 
 /// The script busybox `udhcpc` runs when its lease changes.
@@ -4337,11 +4269,15 @@ mod udhcpc_tests {
 	/// dhcpcd's script, on the same terms and with one more thing to prove: it
 	/// configures nothing, because dhcpcd does that itself.
 	#[test]
-	fn the_dhcpcd_script_reports_and_configures_nothing() {
-		let script = super::dhcpcd_script("eth0", std::path::Path::new("/run/x/reported/eth0"));
-		let dir = netcfgd_testdir::TestDir::new("dhcpcd");
-		let path = dir.join("script");
-		std::fs::write(&path, &script).expect("written");
+	fn the_shipped_dhcpcd_hook_reports_and_configures_nothing() {
+		// **The shipped file, not a generated string.** netcfgd used to write
+		// this per interface into /run, where systemd's `noexec` meant dhcpcd
+		// could never run it (0178). Reading the installed artifact is what
+		// makes this a test of the thing that runs.
+		let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("../../packaging/hooks/dhcpcd-hook");
+		let script = std::fs::read_to_string(&path)
+			.unwrap_or_else(|error| panic!("{} is not readable: {error}", path.display()));
 		let checked = std::process::Command::new("sh")
 			.arg("-n")
 			.arg(&path)
@@ -4349,7 +4285,7 @@ mod udhcpc_tests {
 			.expect("sh runs");
 		assert!(
 			checked.status.success(),
-			"the generated script is not valid shell: {}",
+			"the shipped hook is not valid shell: {}",
 			String::from_utf8_lossy(&checked.stderr)
 		);
 		let code: String = script
@@ -4376,5 +4312,25 @@ mod udhcpc_tests {
 		// The variable names are dhcpcd's own, read out of its `20-resolv.conf`.
 		assert!(code.contains("new_domain_name_servers"));
 		assert!(code.contains("new_dhcp6_name_servers"));
+		// And it stages under a dotted name, which is what keeps `ncfg status`
+		// from reporting an interface called `eth0.tmp` (0113).
+		assert!(
+			code.contains(".$(basename \"$report\").tmp"),
+			"it does not stage under a dotted name: {code}"
+		);
+		// **The fragment name, held in two places now.** The hook computes its
+		// own report path, so this constant and that script have to agree and
+		// nothing else makes them.
+		assert!(
+			code.contains(super::REPORT_DHCPCD6),
+			"the hook does not write the `{}` fragment this crate reads: {code}",
+			super::REPORT_DHCPCD6
+		);
+		// The same for the two report directories.
+		assert!(
+			code.contains("reported.d/"),
+			"no fragment directory: {code}"
+		);
+		assert!(code.contains("reported/"), "no report directory: {code}");
 	}
 }

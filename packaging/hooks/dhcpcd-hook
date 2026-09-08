@@ -1,0 +1,90 @@
+#!/bin/sh
+# The hook dhcpcd runs for netcfgd, reporting a lease's nameservers.
+#
+# **Shipped, not generated, because /run is `noexec`.** netcfgd used to write
+# this per interface into /run/netcfgd/dhcpcd/<iface>.script and pass it with
+# `-c`. systemd mounts /run `nosuid,nodev,noexec` -- its own default since v256,
+# not a hardening choice anybody made -- so dhcpcd could not exec it and said
+# so, once per lease event, in its own log and nowhere netcfgd could see:
+#
+#     dhcpcd: script_runreason: Permission denied
+#
+# The hook is the only way a lease's nameservers reach netcfgd, so the DNS
+# delivery had no servers and `write_resolv_conf` wrote a resolver file that
+# resolved nothing. 1,350 of those messages on the machine that reported it,
+# going back to the day netcfgd first ran a dhcpcd there. Decision 0178.
+#
+# **What it must NOT do**, both by deliberate omission (0066):
+#
+#   * Write /etc/resolv.conf. `-c` replaces dhcpcd's whole hook directory, which
+#     is the point: dhcpcd's own 20-resolv.conf was writing that file too, and
+#     whichever ran last won. netcfgd's DNS backend owns it.
+#   * Set the hostname. dhcpcd's 30-hostname sets it from the lease; netcfgd
+#     refuses `hostname = "dhcp"` by name (0061), and leaving dhcpcd to do it
+#     would be that decision holding in the config and not in fact.
+#
+# The variable names are dhcpcd's, read out of its own 20-resolv.conf rather
+# than remembered: 0050 is the scar -- `$new_dhcp6_prefix` is not a dhcpcd
+# variable at all and netcfgd's hook read it for years.
+set -u
+
+# **A fixed root, because nothing reaches this script from netcfgd.** Measured
+# against dhcpcd 10.1.0: the hook environment is `interface`, `reason`, `pid`,
+# the interface flags and PATH -- dhcpcd builds it rather than passing its own
+# on, so an exported NCFG_RUN_DIR does not arrive. dhcpcd.conf has an `env`
+# directive but no `include`, so using it would mean netcfgd replacing the
+# operator's configuration rather than pointing at it (0143). And `$pid` came
+# back stale when tried.
+#
+# So the run directory is the one netcfgd actually uses, and a test that wants
+# a different one has to arrange for this path to be it -- which inside a mount
+# namespace with a tmpfs over /run it can. `NCFG_RUN_DIR` is honoured for the
+# case where this script is driven directly; under dhcpcd it is always unset.
+run=${NCFG_RUN_DIR:-/run/netcfgd}
+iface=${interface:-}
+[ -n "$iface" ] || exit 0
+
+# Which report this client writes. The single file is the interface's own; a
+# fragment is one client's, because two writers on one file is what silenced
+# the DHCPv6 client's nameservers for a milestone (0086). `*6` on the reason is
+# how dhcpcd distinguishes them, and it is the same test used to pick the
+# variable names below.
+case "${reason:-}" in
+*6) report="$run/reported.d/$iface/dhcpcd6" ;;
+*) report="$run/reported/$iface" ;;
+esac
+staged="$(dirname "$report")/.$(basename "$report").tmp"
+
+servers=${new_domain_name_servers:-}
+# Option 119 where the server sent one, option 15 otherwise, which is the
+# precedence dhcpcd's own 20-resolv.conf uses.
+search=${new_domain_search:-${new_domain_name:-}}
+case "${reason:-}" in
+*6)
+	# The DHCPv6 names for the same two things.
+	servers=${new_dhcp6_name_servers:-}
+	search=${new_dhcp6_domain_search:-}
+	;;
+esac
+
+case "${reason:-}" in
+BOUND*|RENEW*|REBIND*|REBOOT*|INFORM*)
+	mkdir -p "$(dirname "$report")" || exit 0
+	{
+		printf '# %s, from a dhcpcd lease. Written by netcfgd.\n' "$iface"
+		for server in $servers; do
+			printf 'dns=%s\n' "$server"
+		done
+		# A suffix to complete a bare name with, and never a routing domain:
+		# 0049 refuses one from a server and 0067 says why a suffix is not one.
+		for suffix in $search; do
+			printf 'search=%s\n' "$suffix"
+		done
+	} > "$staged"
+	mv "$staged" "$report"
+	;;
+EXPIRE*|FAIL*|NAK*|STOP*|RELEASE*|NOCARRIER*)
+	rm -f "$report"
+	;;
+esac
+exit 0

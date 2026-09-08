@@ -396,6 +396,11 @@ PREFIX  ?= /usr
 SBINDIR ?= $(PREFIX)/sbin
 BINDIR  ?= $(PREFIX)/bin
 DATADIR ?= $(PREFIX)/share
+# Where netcfgd's own executables that are not commands go. `libexec` and not
+# `share`, because these are run rather than read -- and not /run, which is the
+# whole point: systemd mounts /run `noexec` by default, so a script generated
+# there cannot be executed by the client netcfgd hands it to (0178).
+LIBEXECDIR ?= $(PREFIX)/libexec
 # Where gui/Makefile leaves its binary. Its own BUILD_DIR defaults to `build`
 # and is not visible here, so this tracks it and is overridable the same way.
 GUI_BUILD_DIR ?= gui/build
@@ -436,6 +441,15 @@ install:
 	@# because it drives OpenRC and sysvinit too.
 	install -m 0755 packaging/netcfgd_select.sh \
 		$(DESTDIR)$(SBINDIR)/netcfgd_select.sh
+	@# The dhcpcd hook, which netcfgd passes with `-c` and dhcpcd execs. It has
+	@# to live on a filesystem that permits execution: netcfgd generated it per
+	@# interface under /run/netcfgd until 0178, and systemd mounts /run `noexec`
+	@# by default -- so dhcpcd refused it, the lease's nameservers never
+	@# reached netcfgd, and `write_resolv_conf` wrote a resolver that resolved
+	@# nothing.
+	install -d $(DESTDIR)$(LIBEXECDIR)/netcfgd
+	install -m 0755 packaging/hooks/dhcpcd-hook \
+		$(DESTDIR)$(LIBEXECDIR)/netcfgd/dhcpcd-hook
 	@echo "install: netcfgd and ncfg installed; no init glue"
 	@echo "install:   $(SYSCONFDIR)/netcfgd/netcfgd.conf.example documents every feature"
 	@echo "install:   make install-systemd | install-openrc | install-procd"
@@ -1784,6 +1798,12 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/ncfg
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd_select.sh
+	rm -f $(DESTDIR)$(LIBEXECDIR)/netcfgd/dhcpcd-hook
+	@# Named, and removed only if this is the last thing in it -- the directory
+	@# is netcfgd's, so an empty one is ours to take away and a non-empty one
+	@# holds something a later version installed that this uninstall does not
+	@# know about.
+	@rmdir $(DESTDIR)$(LIBEXECDIR)/netcfgd 2>/dev/null || true
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-gui
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-tui
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop

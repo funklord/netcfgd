@@ -212,17 +212,20 @@ fn every_writer_generated_by_this_crate_stages_under_a_dot() {
 	//
 	// The list is still hand-written and still cannot see a sixth writer added
 	// to this crate. What the name no longer does is promise otherwise.
-	use netcfgd_apply::kernel::{dhcpcd_script, pd_hook_script, udhcpc_script};
+	use netcfgd_apply::kernel::{pd_hook_script, udhcpc_script};
 	use std::path::Path;
 
 	let report = Path::new("/run/netcfgd/reported/eth0");
 	let state = Path::new("/run/netcfgd/udhcpc/eth0.state");
 	let staged = "/run/netcfgd/reported/.eth0.tmp";
 
+	// **dhcpcd is not in this list any more and that is not a gap.** Its hook is
+	// shipped rather than generated (0178), so there is no string to inspect
+	// here; `the_shipped_dhcpcd_hook_reports_and_configures_nothing` asserts the
+	// same dotted staging against the installed file.
 	let scripts = [
 		("ppp ip-up", ppp_script("eth0", report, true)),
 		("ppp ip-down", ppp_script("eth0", report, false)),
-		("dhcpcd", dhcpcd_script("eth0", report)),
 		("udhcpc", udhcpc_script("eth0", state, report)),
 		("odhcp6c", pd_hook_script("eth0", report)),
 	];
