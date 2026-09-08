@@ -9807,13 +9807,30 @@ Fixed by `ExecPaths=`, above. **This is the case that decided the shape of the
 fix**: a hook body is the operator's, so the shipped-artifact answer 0178 used
 has nothing to ship.
 
-`tests/live/hooks.sh` still cannot see it: it sets `NCFG_RUN_DIR="$work/run"`
-under `/tmp`, the same blind spot `dhcpcd.sh` had. The guard is in
-`sandbox_writes.sh` instead, which asks systemd to impose the unit's own
-declaration and requires a child to exec there -- with a control imposing
-everything *except* `ExecPaths=` and requiring that to fail, because `/run` is
-only `noexec` on a systemd new enough to make it so and the check would
-otherwise pass for a reason that has nothing to do with the unit.
+`tests/live/hooks.sh` covers it now, and did not: it pointed `NCFG_RUN_DIR` at
+`/tmp`, where execution is permitted and the fault cannot occur -- the same
+blind spot `dhcpcd.sh` had. It makes a mount namespace of its own, puts a tmpfs
+over `/run` with the flags a real machine uses, and bind-mounts `/run/netcfgd`
+`exec` over itself, which is what `ExecPaths=` does and the closest a script
+outside systemd can come to imposing it.
+
+**With a control that drives a run directory without the grant**, because
+everything passing under a `noexec` `/run` proves nothing until the same run is
+shown to fail without the exec bind. It asserts what a real machine did: the
+hook is materialised, it does not run, netcfgd names the file and the reason,
+and -- the part worth having -- **the actions behind the veto are skipped**.
+`pre_up` vetoes, so `link.up` and `addr.add` never happen: every interface
+carrying a hook stayed down and unaddressed on any machine whose `/run` is
+`noexec`, which is the default.
+
+Sabotaged both ways. Dropping the exec bind makes the suite exit 1 with `could
+not run ... Permission denied`, which is the fault itself; mounting `/run`
+`exec` -- the old fixture -- turns the four control checks red, because the hook
+then runs and "does not run" is false. Neither half means anything alone.
+
+`sandbox_writes.sh` keeps the other end of it: it asks systemd to impose the
+unit's own declaration and requires a child to exec there, with a control
+imposing everything *except* `ExecPaths=`.
 
 ### The suite had been passing against a `/run` no machine has
 

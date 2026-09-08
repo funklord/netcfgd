@@ -14,7 +14,24 @@
 # lets it unmount a share or stop a service that is using them. This checks that
 # by having the hook look.
 #
-# Runs under `unshare -rn`: it creates a dummy interface and brings it down.
+# Runs under `unshare -rn`: it creates a dummy interface and brings it down, and
+# makes a mount namespace of its own for the reason below.
+#
+# WHY /run IS MOUNTED noexec HERE
+#   A hook body written inline in the configuration is materialised into
+#   `<run>/hooks/` at mode 0700 and executed directly. systemd mounts /run
+#   `nosuid,nodev,noexec` -- its own default since v256 -- so on a real machine
+#   every one of those answers EACCES on exec, and no `pre_up`, `post_up`,
+#   `pre_down` or `post_down` runs at all. That went unnoticed for as long as it
+#   existed because this script pointed `NCFG_RUN_DIR` at /tmp, where execution
+#   is permitted and the fault cannot occur.
+#
+#   So the run directory is under a /run mounted the way a real machine mounts
+#   it, and `/run/netcfgd` is bind-mounted `exec` over itself -- which is what
+#   `ExecPaths=/run/netcfgd` in the unit does, and the closest a script outside
+#   systemd can come to imposing it. The control at the end drives a run
+#   directory without that grant and requires the hook *not* to run, so the
+#   grant is shown to be load-bearing rather than assumed.
 
 set -eu
 
@@ -32,12 +49,36 @@ skip() {
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
+# **A mount namespace, made here rather than asked of the caller.** The Makefile
+# runs this under `unshare -rn`, which is user and network and no mount -- and a
+# developer runs it bare. Re-exec'ing once covers both, and the guard variable
+# is what stops it recursing.
+if [ -z "${NCFG_HOOKS_NS:-}" ]; then
+	NCFG_HOOKS_NS=1
+	export NCFG_HOOKS_NS
+	if unshare -m true 2>/dev/null; then
+		exec unshare -m -- sh "$0" "$@"
+	fi
+	skip "no mount namespace, so /run cannot be given the flags a real machine has"
+fi
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-hooks.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM
-mkdir -p "$work/etc" "$work/run"
+mkdir -p "$work/etc"
+
+# The flags a real machine has. `nosuid,nodev` come along because systemd sets
+# them too and a fixture that differs from the thing it models is how this fault
+# survived in the first place.
+mount -t tmpfs -o nosuid,nodev,noexec tmpfs /run ||
+	skip "cannot put a tmpfs over /run"
+mkdir -p /run/netcfgd
+# `ExecPaths=/run/netcfgd`, as close as a script can come to it: a bind mount of
+# the directory over itself, remounted `exec`. systemd does the same thing.
+mount --bind /run/netcfgd /run/netcfgd || skip "cannot bind netcfgd's run directory"
+mount -o remount,bind,exec /run/netcfgd || skip "cannot permit execution under it"
 
 export NCFG_CONFIG_DIR="$work/etc"
-export NCFG_RUN_DIR="$work/run"
+export NCFG_RUN_DIR=/run/netcfgd
 ncfg="$repo/target/debug/ncfg"
 
 failures=0
@@ -104,9 +145,9 @@ if ! "$ncfg" apply > "$work/apply.log" 2>&1; then
 fi
 
 # The materialised script, which is the thing the document only references.
-hooks=$(find "$work/run/hooks" -type f 2>/dev/null | wc -l)
+hooks=$(find /run/netcfgd/hooks -type f 2>/dev/null | wc -l)
 check "every hook is materialised under /run" "$hooks" "6"
-for file in "$work/run/hooks"/*; do
+for file in /run/netcfgd/hooks/*; do
 	[ -x "$file" ] || {
 		echo "FAIL a materialised hook is not executable: $file"
 		failures=$((failures + 1))
@@ -208,7 +249,7 @@ write_config false
 "$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ]; do
+while [ ! -e /run/netcfgd/netcfgd.sock ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 60 ]; then
 		cat "$work/daemon.log" >&2
@@ -224,7 +265,7 @@ done
 # -- with no config change, so the daemon's materialised file is the one it wrote at
 # startup and the tampering below survives.
 ip link set hooked0 up
-for file in "$work/run/hooks"/*.down.*; do
+for file in /run/netcfgd/hooks/*.down.*; do
 	echo "echo tampered >> $log" >> "$file"
 done
 
@@ -384,6 +425,53 @@ check "unplugging runs it"    "$(grep -c '^carrier ' "$log" || true)" "1"
 contains "with the direction" "$(grep '^carrier ' "$log")" "reason=down"
 check "and the address was still there when it ran" \
 	"$(sed -n 's/.*addresses=//p' "$log")" "1"
+
+# ------------------------------------------------- the grant is load-bearing
+
+# **Everything above passed under a `noexec` /run, which proves nothing on its
+# own** -- not until the same run is shown to fail without the exec grant. A
+# fixture that models the hazard and then quietly removes it is how this fault
+# lived for as long as it did.
+#
+# Same tmpfs, same flags, a run directory with no bind mount over it. netcfgd
+# materialises the hook there exactly as before and the kernel refuses to
+# execute it, which is what a real machine did on every apply.
+mkdir -p /run/netcfgd-nogrant "$work/etc2"
+controllog=$work/control-transcript
+: > "$controllog"
+cat > "$work/etc2/netcfgd.conf" <<CONF
+device nogrant0 {
+	kind    = "dummy"
+}
+interface nogrant0 {
+	config  = "10.6.0.1/24"
+	enabled = true
+	pre_up {
+	echo ran >> $controllog
+	}
+}
+CONF
+NCFG_CONFIG_DIR="$work/etc2" NCFG_RUN_DIR=/run/netcfgd-nogrant \
+	"$ncfg" apply > "$work/nogrant.log" 2>&1 || true
+
+check "without the exec grant the hook is materialised" \
+	"$(find /run/netcfgd-nogrant/hooks -type f 2>/dev/null | wc -l)" "1"
+check "and does not run, which is what a real machine did on every apply" \
+	"$(grep -c '^ran' "$controllog" 2>/dev/null || true)" "0"
+# Loudly, unlike the DHCP hook: netcfgd spawns this one itself, so it sees the
+# refusal rather than losing it in another daemon's log.
+# Loudly, unlike the DHCP hook: netcfgd spawns this one itself, so it sees the
+# refusal rather than losing it in another daemon's log.
+contains "and netcfgd names the file and the reason" \
+	"$(cat "$work/nogrant.log")" "Permission denied"
+contains "rather than reporting the hook as run" \
+	"$(cat "$work/nogrant.log")" "could not run /run/netcfgd-nogrant/hooks/"
+# **And this is what it cost a machine.** `pre_up` is a veto phase, so the
+# actions behind it do not run: the interface never comes up and never gets its
+# address. Every interface carrying a hook was in this state on any machine
+# whose /run is noexec, which is the default.
+contains "and the actions behind the veto are skipped, so the link stays down" \
+	"$(cat "$work/nogrant.log")" "skip link.up nogrant0"
 
 echo
 if [ "$failures" -eq 0 ]; then
