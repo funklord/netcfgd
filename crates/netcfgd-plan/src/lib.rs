@@ -4698,6 +4698,16 @@ impl Builder {
 		// true, so without it every document that manages no DNS at all -- which is
 		// the default -- got told its resolver file would resolve nothing. Two
 		// existing fixtures caught that, both of them asserting no warnings.
+		// Computed here rather than at its use below, because the empty-delivery
+		// refusal needs it: a departed scope is the difference between "netcfgd
+		// has nothing to write" and "netcfgd is withdrawing what it wrote".
+		let departed: Vec<&str> = observed
+			.dns
+			.iter()
+			.map(|applied| applied.scope.as_str())
+			.filter(|scope| !scopes.iter().any(|(name, _)| name == scope))
+			.collect();
+
 		if !scopes.is_empty()
 			&& scopes.iter().all(|(_, policy)| {
 				policy.servers.is_empty() && policy.mode != netcfgd_model::DnsMode::None
@@ -4720,11 +4730,73 @@ impl Builder {
 			};
 			self.warnings.push(Warning {
 				message: format!(
-					"the DNS delivery has no servers in it, so it will write a resolver \
+					"the DNS delivery has no servers in it, so it would write a resolver \
 					 file that resolves nothing: {remedy}"
 				),
 				interface: None,
 			});
+			// **Refused, not warned and then done anyway.**
+			//
+			// This was a warning alone, and the delivery proceeded: netcfgd
+			// truncated `resolv.conf` to a header and no `nameserver` line,
+			// every reconcile tick, and `resolv_guard` then defended that
+			// emptiness against anything that put a resolver back -- signalling
+			// whatever rewrote the file three times in a row. A machine with no
+			// name resolution and a daemon actively keeping it that way is one
+			// an operator cannot repair by the ordinary means, which is how it
+			// was reported: "netcfgd keeps rewriting an empty resolv.conf
+			// making it impossible to fix whatever problem it has."
+			//
+			// **The warning was correct and was not enough**, and the reason is
+			// worth keeping: an empty delivery is never something anybody asked
+			// for. `dns { }` with no servers means "use what the network hands
+			// out", so no servers at this point means the lease has not arrived
+			// or its nameservers never reached netcfgd -- both transient or
+			// broken, neither an instruction to erase the resolver. Writing
+			// nothing preserves whatever is on disk, which is the one behaviour
+			// that leaves the machine fixable.
+			//
+			// Refusing the whole pass rather than the empty scopes: the
+			// executor delivers every scope on any `dns.apply`, so a single
+			// planned action would rewrite the file from the empty set anyway.
+			// The condition above is already "every scope is empty", so there is
+			// no partial delivery to preserve.
+			//
+			// A first-class `Refusal` rather than a second warning, because
+			// "what did netcfgd decline, and how do I consent?" is a question a
+			// script has to answer as well as a person (0010).
+			// **Only when there is nothing of netcfgd's to take back.** A scope
+			// that has left the document still has its nameservers in the file,
+			// and the empty write is exactly how they are withdrawn -- so
+			// refusing there would strand them for ever, which is the fault the
+			// departed-scope handling below exists to fix. Caught by
+			// `a_dns_scope_that_left_the_document_is_delivered_away`, which
+			// failed on the first version of this refusal: neither "always
+			// write" nor "never write" is right, and what separates them is
+			// whether the file currently holds a delivery of netcfgd's that the
+			// document no longer asks for.
+			if !departed.is_empty() {
+				// Fall through: the withdrawal below is the repair, and it is
+				// the one empty write that is correct.
+			} else {
+				self.refusals.push(Refusal {
+					interface: "globals".to_owned(),
+					op: "dns.apply".to_owned(),
+					guard: "the delivery names no servers, and writing it would \
+				        leave the machine unable to resolve anything"
+						.to_owned(),
+					reason: Reason::differs(
+						"globals",
+						"dns.servers",
+						"at least one nameserver".to_owned(),
+						"none".to_owned(),
+					),
+					override_with: "set `servers` in the `dns` block, or fix why the lease \
+				                carries no nameservers"
+						.to_owned(),
+				});
+				return;
+			}
 		}
 
 		// **A scope netcfgd applied and the document no longer has.** The loop
@@ -4743,12 +4815,6 @@ impl Builder {
 		// prevent. A machine whose last `dns` block goes keeps what it has,
 		// which is the same answer `plan_qdisc` gives a qdisc netcfgd did not
 		// set.
-		let departed: Vec<&str> = observed
-			.dns
-			.iter()
-			.map(|applied| applied.scope.as_str())
-			.filter(|scope| !scopes.iter().any(|(name, _)| name == scope))
-			.collect();
 		if let (Some((scope, policy)), false) = (scopes.first(), departed.is_empty()) {
 			// Named for the reader rather than for the executor, which
 			// delivers every scope on any `dns.apply` whatever this says.

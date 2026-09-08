@@ -5695,6 +5695,75 @@ fn a_hook_on_a_network_is_reported_as_running_at_no_phase() {
 /// write the empty `resolv.conf` that `plan_dns` already carries a warning to
 /// prevent -- so a machine whose last `dns` block goes keeps what it has.
 #[test]
+/// A delivery with no servers is refused rather than written.
+///
+/// The reported fault: `global { dns { mode = "write_resolv_conf" } }` with no
+/// `servers`, on a machine whose lease nameservers never reached netcfgd --
+/// `/run` was mounted `noexec`, so dhcpcd could not exec the hook script that
+/// reports them. netcfgd warned that the delivery would "write a resolver file
+/// that resolves nothing" and then wrote it, every reconcile tick, while
+/// `resolv_guard` signalled whatever put a resolver back. "netcfgd keeps
+/// rewriting an empty resolv.conf making it impossible to fix whatever problem
+/// it has."
+///
+/// The pair is the test. Writing nothing is correct when netcfgd has nothing to
+/// say; writing the empty file is correct when netcfgd is taking back a scope
+/// that has left the document, which is
+/// `a_dns_scope_that_left_the_document_is_delivered_away` below. What separates
+/// them is whether the file holds a delivery of netcfgd's the document no
+/// longer asks for -- not whether the delivery is empty, which both are.
+fn an_empty_delivery_is_refused_unless_it_withdraws_something() {
+	let desired = document(
+		"global { dns { mode = \"write_resolv_conf\" } }\n\
+		 device e0 { kind = \"dummy\" }\ninterface e0 { config = \"null\" }\n",
+	);
+
+	// Nothing of netcfgd's in the resolver file: no delivery recorded at all.
+	let mut observed = observed_with(&["e0"]);
+	observed.links[0].up = true;
+	let refused = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&refused).contains(&"dns.apply"),
+		"an empty delivery with nothing to withdraw must not be written: {:?}",
+		names(&refused)
+	);
+	assert!(
+		refused
+			.refusals
+			.iter()
+			.any(|refusal| refusal.op == "dns.apply"),
+		"and it must say so as a refusal rather than only a warning: {:?}",
+		refused.refusals
+	);
+
+	// The control: the same empty delivery, with a scope of netcfgd's that has
+	// left the document. Now the empty write is the withdrawal and must happen,
+	// or the departed scope's nameservers stay in the file for ever.
+	let mut withdrawing = observed_with(&["e0"]);
+	withdrawing.links[0].up = true;
+	withdrawing.dns.push(AppliedDns {
+		scope: "globals".to_owned(),
+		policy: netcfgd_model::DnsPolicy {
+			mode: netcfgd_model::DnsMode::WriteResolvConf,
+			..netcfgd_model::DnsPolicy::default()
+		},
+	});
+	withdrawing.dns.push(AppliedDns {
+		scope: "e0".to_owned(),
+		policy: netcfgd_model::DnsPolicy {
+			mode: netcfgd_model::DnsMode::WriteResolvConf,
+			..netcfgd_model::DnsPolicy::default()
+		},
+	});
+	let withdrawal = plan(&desired, &withdrawing, &PlanOptions::default());
+	assert!(
+		names(&withdrawal).contains(&"dns.apply"),
+		"withdrawing a departed scope is the one empty write that is correct: {:?}",
+		names(&withdrawal)
+	);
+}
+
+#[test]
 fn a_dns_scope_that_left_the_document_is_delivered_away() {
 	let still_managed = document(
 		"global { dns { mode = \"write_resolv_conf\" } }\n\
