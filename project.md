@@ -9543,7 +9543,7 @@ over its control socket which `-f` it recites, for exactly this reason -- and th
 switcher was using the process image because that is what worked for everything
 else.
 
-### Open: `dpkg --unpack` stops the daemon and nothing restarts it
+### Fixed: a preinst stopped the daemon and `--no-start` removed what restarted it
 
 Reproduced three times. `dpkg -i` of the netcfgd package with the daemon running
 leaves it `inactive`, and the network survives only because `KillMode=process`
@@ -9557,11 +9557,41 @@ running daemon stops nothing. The package declares no triggers, and the
 native one. systemd records a stop *job* (`Result=success`, SIGTERM,
 `ExecMainCode=2`), so something asked it to stop rather than the daemon dying.
 
-**What asks has not been found**, and this is recorded rather than guessed at.
-The consequence is understood and is the part that matters: postinst uses
-`try-restart`, which acts only on an active unit, so by the time it runs the
-daemon is already down and the verb correctly does nothing. Every netcfgd
-upgrade therefore leaves the machine's network daemon stopped.
+**Found: `dh_installsystemd` generates a preinst that stops it.**
+
+    if [ -z "$DPKG_ROOT" ] && [ "$1" = upgrade ] && [ -d /run/systemd/system ]
+    then deb-systemd-invoke stop 'netcfgd.service'
+
+That is half of a stop-then-start pair, and `--no-start` suppresses the other
+half. So the stop shipped and the start did not, and the postinst's
+`try-restart` always ran against a unit that was already inactive -- correctly
+doing nothing, because `try-restart` acts on an *active* unit and that is
+exactly what the preinst had stopped it being. `--no-stop-on-upgrade` removes
+the stop; the daemon then runs through the unpack and the postinst restarts it,
+which is what that postinst already said it intended.
+
+**Why three reproductions missed it.** Hand-running the shipped `prerm upgrade`
+and `postrm upgrade` against a live daemon stopped nothing, which read as *"not
+the maintainer scripts"* -- and it was wrong in the most ordinary way: **preinst
+is the one dpkg runs on an upgrade that neither of those tests reaches.** The
+package declaring no triggers and `--no-triggers` changing nothing had ruled out
+everything except the scripts, and the scripts had been ruled out by testing two
+of the three.
+
+**What named it was systemd's own debug log.** At `log-level debug` it recorded
+`Accepting direct incoming connection from <pid> (systemctl)` immediately before
+enqueueing the stop -- over systemd's *private* socket, which is why
+`dbus-monitor --system` had shown no `StopUnit` call and made the stop look
+internal to systemd. **A bus monitor that sees no call is not evidence that no
+call was made**, only that none crossed the bus it was watching.
+
+**And it had only just started biting.** The `#DEBHELPER#` token was added to the
+maintainer scripts to stop debhelper generating snippets and dropping them --
+correct, and recorded in the prerm -- and that is what put this preinst on a
+machine for the first time. **The fix that makes a mechanism work is what
+exposes what the mechanism does**, so a change that is right in itself can be
+the proximate cause of a fault, and looking for the fault among recent *wrong*
+changes will not find it.
 
 ## 10.68 The switch worked, and `/run` is `noexec`
 
