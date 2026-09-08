@@ -9461,6 +9461,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.70 Asked whether it switches networks, and the association was never observed
+
+The question was *"does it switch to other wifi networks automatically?"* --
+which is a question about behaviour nothing drove, and building the test to
+answer it found the reason the answer was no.
+
+### What was already true
+
+Both configured networks reach the supplicant and are enabled; wpa_supplicant
+associates with whichever is in range. Verified on the reporting machine's own
+running supplicant. **Ranking is expressible**: `network { metric = N }` is one
+number for both questions -- the routes' metric while associated, and, inverted
+through `join_rank`, the supplicant's join priority (0154). `wifi.sh` asserts
+that reaches the supplicant.
+
+### And what was not: an adopted backend was in no observation
+
+`adopt_running_backend` returning true made the executor `return Ok(())` before
+any `started_backends.push`. So a backend netcfgd **adopted** existed on the
+machine and in no observation, and everything keyed on "the supplicant is
+running" was dead for the whole life of that adoption.
+
+Measured: `observed.json` held a `dhcp4` backend and **no Supplicant one**,
+while the pid file was there, the control socket answered, and `ncfg wifi
+radios` called the radio netcfgd's. The association pass filters on
+`kind == Supplicant && running`, so it never ran, so `link.network` stayed
+`None` -- and with it every consumer of the network a radio is on. The visible
+one is `metric`, which decided neither the route metric nor the join order
+despite the model documenting both.
+
+**Adoption is not a rare path.** It is what `KillMode=process` exists to make
+possible (0134, 0142), so this was the state after *every* restart of the
+daemon. `ncfg plan` said `backend.start ... (was <absent>)` on every pass for
+ever, planning a start that every apply turned back into an adoption -- a loop
+that looks like steady state and is a report that nobody read as one.
+
+Fixed, and confirmed on the machine: `link.network: 'OpenPC.se'`, with the
+supplicant backend observed as running for the first time.
+
+### The test, and what it does not prove
+
+`tests/live/switch_network.sh` moves a station between two networks --
+`fake_supplicant.py` grew `JOIN <ssid>` beside its `ROAM <bssid>`, for the same
+reason that one exists -- and netcfgd starts the fake as its own supplicant so
+the backend is recorded the way a real one is.
+
+**Sabotage says which checks the switch gates**, and it is one of three. Making
+`JOIN` emit the event without moving the station reddens the association check
+and nothing else: the two resolver checks pass anyway, because the script writes
+the report and netcfgd delivers whatever is in it. They are kept for what they
+do prove -- a second lease *replaces* the first network's nameserver rather than
+accumulating beside it -- and the header says so rather than letting three
+checks read as three switch checks.
+
+**What is still not driven**: that the DHCP client notices the change and
+re-leases, which is dhcpcd's own behaviour; and the route metric the new network
+carries, which needs a lease with a default route in it and therefore
+`dhcpcd.sh`'s fixture rather than this one. The two networks in the fixture
+carry different metrics already, so the document is ready for that check when
+somebody joins the two.
+
 ## 10.69 The switch works, and what the two empty-resolver faults were
 
 The retry of 10.68's switch, with both halves of the DNS failure fixed. The
