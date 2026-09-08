@@ -9457,6 +9457,97 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.66 Handover: what is known about the machine where wifi works occasionally
+
+Written to be read by whoever is next in front of the failing machine, with
+root, rather than as a record of a finished investigation. The report was:
+*"no way to get any connection working automatically in netcfgd or in NM"*,
+*"I already have a config for netcfgd that has worked occasionally"*, and
+*"NMs config system is known broken and has to be reconfigured every time"*.
+
+**Nothing here is a diagnosis of that machine.** Two hypotheses were formed and
+one was disproved by the operator before it was built, which is the only reason
+a starter-config generator is not in this tree.
+
+### Run these first, in this order, and stop at the first surprise
+
+    systemctl cat netcfgd | grep -E 'ProtectSystem|ReadWritePaths'
+    systemctl is-active netcfgd NetworkManager wpa_supplicant
+    ncfg wifi radios
+    ncfg plan
+    journalctl -u netcfgd -n 40
+
+What each answer means, because the order is chosen to separate causes rather
+than to gather everything:
+
+- **`ReadWritePaths` absent, or naming `/etc/netcfgd` rather than `/etc`.**
+  The machine is running a unit older than `aef7d4a` (2026-08-21) *or* the
+  unit on disk is current and systemd never reloaded it -- which was true of
+  every upgrade until 10.61, because `dh_installsystemd --no-enable
+  --no-start` emits no postinst snippet at all and therefore no
+  `daemon-reload`. **`systemctl daemon-reload && systemctl restart netcfgd`
+  is the whole fix if so**, and netcfgd now says at startup when it cannot
+  write its configuration (10.60), so the journal will carry it.
+- **`ncfg wifi radios` says *not activated*.** Then the gui greys every wifi
+  button and that is the "unhelpful gui" -- correctly, since scanning needs a
+  supplicant and netcfgd runs none on a radio nobody gave it. The cause is
+  upstream of the gui entirely. `ncfg wifi activate <iface>` writes the two
+  blocks; `ncfg wifi add SSID` does it in one command.
+- **`ncfg plan` empty while the machine has no address.** The configuration
+  names interfaces that do not exist under those names. **The language has no
+  wildcard** (`netcfgd-compile/src/lib.rs:87`), so a config written for `wlan0`
+  does nothing on a machine that renamed it `wlp3s0` -- and says nothing,
+  because an interface netcfgd is not told about is not netcfgd's.
+- **`plan` has actions and applying changes nothing.** Then it is the apply
+  path and the journal is the next thing to read, not this list.
+
+### Three defects verified here, none of them proven to be that machine's
+
+**A fresh install with no configuration takes the network away.** The package
+installs `netcfgd.conf.example`, which netcfgd deliberately never reads, so
+`/etc/netcfgd/netcfgd.conf` is absent; the postinst runs
+`netcfgd_select.sh netcfgd`, which masks NetworkManager and starts a daemon
+whose document is empty. `ncfg plan` on an empty document is `nothing to do`.
+That is 0168's install-time takeover meeting constraint 1, and each is right
+alone. **The operator's machine is not in this state** -- they have a config --
+but any machine installing netcfgd for the first time is, and the switcher has
+no interlock: it will stand a working daemon down for one that will do
+nothing. A wildcard, a generated starter config, or a refusal are the three
+answers; which one is the copyright holder's, because the first is a language
+change and the second writes configuration nobody asked for.
+
+**`device X { wifi { autoconnect = ... } }` is parsed and read by nothing.**
+Set at `netcfgd-compile/src/lower.rs:1600` into `WifiDevicePolicy`; no reader
+in `netcfgd-plan`, `netcfgd-apply`, `netcfgd-daemon`, `netcfgd-observe` or
+`netcfgd-supplicant`. The only `autoconnect` the supplicant honours is the
+per-`network` one at `netcfgd-supplicant/src/lib.rs:286`. **netcfgd writes the
+device key itself** into every radio it activates (`config.rs:1682`), so it is
+in the file of anybody who has ever run `ncfg wifi activate`, doing nothing.
+It defaults to `true`, so this does not explain an intermittent -- it explains
+that turning it off has no effect.
+
+**`ncfg profile save` refuses on any machine with an activated radio.**
+`render.rs:783` reports `device X: a wifi policy` as unrenderable, so the whole
+save is refused. That is the renderer being honest rather than dropping a
+setting, and it means profiles are unavailable to exactly the people who use
+wifi.
+
+### The intermittent did not reproduce, and here is the lens that failed
+
+`tests/live/wifi_journey.sh` six times and `tests/live/gui_wifi.sh` five
+times: no failures. Earlier in the same day `live_wifi` failed
+*"activating scans straight away, so the table is already filled"* once, during
+an unrelated sabotage run, and has not since.
+
+**Recorded because a negative sweep is only a measurement if its lens is
+written down.** What was looked for: a scan that does not fill the table after
+activation, in a namespace with a fake radio and a fake supplicant. What that
+cannot see: real hardware, rfkill, a driver that creates the interface after
+netcfgd has started, a supplicant that survives a restart and is re-adopted,
+and anything about association timing with a real access point. **Every one of
+those is a candidate the harness structurally cannot reach**, which is the
+next lens rather than a reason to believe the fault is absent.
+
 ## 10.65 A tier is about netcfgd, and the argument kept being about the disk
 
 Two corrections from the copyright holder, in one exchange:
