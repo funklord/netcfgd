@@ -53,7 +53,14 @@ NETWORKS = [
 ]
 
 # The one this fake radio claims to be associated with.
-ASSOCIATED = NETWORKS[0]
+#
+# **A list so it can move.** A real station changes network when the one it is
+# on goes out of range and another it holds credentials for is present, and
+# every consequence netcfgd owns hangs off that -- the route metric the network
+# carries, the lease, the resolver. `JOIN` below is how a test says it happened;
+# `ROAM` is the *same* network under a different access point and is a different
+# thing entirely.
+ASSOCIATED = [NETWORKS[0]]
 
 
 def hexify(text):
@@ -70,7 +77,7 @@ def scan_results():
 
 
 def status():
-	bssid, frequency, _signal, _flags, ssid = ASSOCIATED
+	bssid, frequency, _signal, _flags, ssid = ASSOCIATED[0]
 	return (
 	    f"bssid={bssid}\n"
 	    f"freq={frequency}\n"
@@ -277,6 +284,36 @@ def serve(ctrl_dir, interface, pidfile):
 			# `ROAM <bssid>` is not a wpa_supplicant command. It is this fake's
 			# way of being told to emit the event a real one emits when the
 			# station moves, which needs two access points and a radio.
+			# `JOIN <ssid>` is not a wpa_supplicant command either. It is how a
+			# test says the station left one network for another -- which needs
+			# two networks in range and a radio -- so that `STATUS` reports the
+			# new one from here on and netcfgd sees what it would see.
+			#
+			# The event is the same `CTRL-EVENT-CONNECTED` a real supplicant
+			# sends, because from netcfgd's side a network change and a roam
+			# arrive identically and it is `STATUS` that tells them apart. A
+			# fake that sent something special here would be testing a protocol
+			# no supplicant speaks.
+			elif command.startswith("JOIN "):
+				wanted = command.split(None, 1)[1]
+				match = [n for n in NETWORKS if n[4] == wanted]
+				if not match:
+					reply(server, sender, b"FAIL\n")
+					print(f"{command} (no such network)", flush=True)
+					continue
+				ASSOCIATED[0] = match[0]
+				event = (
+				    "<3>CTRL-EVENT-CONNECTED - Connection to "
+				    f"{match[0][0]} completed [id=0 id_str=]"
+				)
+				for listener in attached:
+					try:
+						server.sendto(event.encode(), listener)
+					except OSError:
+						pass
+				reply(server, sender, b"OK\n")
+				print(command, flush=True)
+				continue
 			elif command.startswith("ROAM "):
 				bssid = command.split(None, 1)[1]
 				event = (

@@ -1502,6 +1502,12 @@ live:
 	@# The other daemon-driven hook: a roam is wpa_supplicant's decision and
 	@# reaches netcfgd on its event socket, so no apply can exercise it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/roam.sh"
+	@# And the thing a roam is not: the station moving to a DIFFERENT network,
+	@# where the association netcfgd observes has to follow and the new lease's
+	@# resolver has to replace the old one rather than sit beside it. roam.sh
+	@# is one network under two access points and says so in its first line;
+	@# this was the half nothing drove.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch_network.sh"
 	@# The wireless journey with nothing configured to begin with, which is
 	@# the state every M8 wifi fault was found in and no test was ever run
 	@# from. It asserts the machine rather than the artifacts: a supplicant
