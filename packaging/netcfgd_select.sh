@@ -268,6 +268,19 @@ claims_of() {
 # and the sweep would report nothing while looking as though it had looked.
 children_of() {
 	case "$1" in
+	# **netcfgd's own, and their absence here was a bug with three names.**
+	# netcfgd starts every one of these as a *binary* with a `/run/netcfgd/`
+	# marker (0140) and `KillMode=process` deliberately leaves them running
+	# when the service stops (0134, 0142) -- so stopping netcfgd is precisely
+	# the case where something else has to sweep them, and this arm was
+	# missing, so `stand_down netcfgd` swept nothing at all. Reported after a
+	# switch to `none`: "I STILL had to kill orphaned dhcpcd and
+	# wpa_supplicant."
+	#
+	# `comm` names, so all of these must be 15 characters or fewer -- the
+	# kernel truncates, and a name one character too long never matches while
+	# the sweep looks as though it had looked. `wpa_supplicant` is 14.
+	netcfgd) echo 'wpa_supplicant dhcpcd dhclient udhcpc odhcp6c hostapd pppd openvpn' ;;
 	networkmanager) echo 'wpa_supplicant dhclient dhcpcd iwd' ;;
 	networkd) echo 'wpa_supplicant' ;;
 	connman) echo 'wpa_supplicant dhclient' ;;
@@ -393,6 +406,58 @@ in_our_netns() {
 
 # ---------------------------------------------------------------------------
 
+# The processes a manager started and did not stop.
+#
+# **Whose they are decides it, in both directions.** `is_netcfgds` reads the
+# `/run/netcfgd/` marker the process carries in its own argv (0140), and the
+# test is not "skip netcfgd's" -- it is "take the ones belonging to the manager
+# being stood down". Standing down NetworkManager must not kill netcfgd's
+# supplicant, and standing down *netcfgd* must kill exactly that one and leave
+# NetworkManager's alone. The old form skipped netcfgd's unconditionally, which
+# is correct for every manager except the one whose orphans anybody actually
+# needed swept.
+sweep_children() {
+	manager=$1
+	for program in $(children_of "$manager"); do
+		for pid in $(pgrep -x "$program" 2>/dev/null || true); do
+			# Written as one comparison rather than two `&&`/`||` guards.
+			# Under `set -eu` a trailing `[ ... ] && continue` returns 1 when
+			# the test is false, and if it ever becomes the last command in
+			# this loop body it aborts the script -- which is how the mask
+			# guard in `stand_aside` was caught. This form cannot acquire that
+			# property by being reordered.
+			# **`sweep_` prefixes, because POSIX sh has no locals and the
+			# obvious names are taken.** The first version of this used
+			# `target`, which is the script-wide variable holding the selected
+			# manager -- so the managers loop clobbered it on its first
+			# `stand_down`, `needs_of "$target"` was then `needs_of no`,
+			# nothing was wanted, and `netcfgd_select.sh networkmanager` masked
+			# the supplicant. That is 0169's machine-breaking fault restored by
+			# a variable name. Caught by `tests/live/select.sh`, which asserts
+			# that selection does not mask it.
+			sweep_mine=no
+			if is_netcfgds "$pid"; then
+				sweep_mine=yes
+			fi
+			sweep_wanted=no
+			if [ "$manager" = netcfgd ]; then
+				sweep_wanted=yes
+			fi
+			# Sweep a process only when it belongs to the manager standing
+			# down: netcfgd's own when that is netcfgd, somebody else's
+			# otherwise.
+			if [ "$sweep_mine" != "$sweep_wanted" ]; then
+				continue
+			fi
+			if ! in_our_netns "$pid"; then
+				continue
+			fi
+			say "terminating $program (pid $pid) left behind by $manager"
+			run kill "$pid"
+		done
+	done
+}
+
 stand_down() {
 	manager=$1
 
@@ -413,19 +478,7 @@ stand_down() {
 		run "/etc/init.d/$manager" stop
 	fi
 
-	# The orphans: what it started and did not stop.
-	for program in $(children_of "$manager"); do
-		for pid in $(pgrep -x "$program" 2>/dev/null || true); do
-			if is_netcfgds "$pid"; then
-				continue
-			fi
-			if ! in_our_netns "$pid"; then
-				continue
-			fi
-			say "terminating $program (pid $pid) left behind by $manager"
-			run kill "$pid"
-		done
-	done
+	sweep_children "$manager"
 
 	# The claim it left on interfaces it no longer manages. Removing the files
 	# rather than the directory: the directory belongs to that package, and a
@@ -542,13 +595,35 @@ none)
 	# What `postrm` calls. Unmask everything and start nothing: the operator
 	# chooses what runs next, and a machine that has just had its network
 	# daemon removed must not be left unable to run any of them.
-	say "unmasking every network daemon and starting none"
+	say "standing netcfgd down and unmasking every network daemon"
+	# **netcfgd's own processes, which nothing else will ever stop.**
+	# `KillMode=process` keeps the supplicant and the DHCP clients alive
+	# across a stop on purpose (0134, 0142), so stopping the service leaves
+	# them holding the radio and the lease. This is `prerm`'s call, which
+	# means netcfgd is going away and there is no later run to collect them.
+	#
+	# The old version unmasked and did nothing else, then said "nothing is
+	# running the network now" -- which was false in exactly the case it was
+	# written for. Reported: "I STILL had to kill orphaned dhcpcd and
+	# wpa_supplicant after running the script to switch to none."
+	if [ -d /run/systemd/system ]; then
+		for unit in $(unit_of netcfgd); do
+			run systemctl stop "$unit"
+		done
+	fi
+	sweep_children netcfgd
+	# **Only netcfgd's, and deliberately not every manager's.** `none` means
+	# netcfgd stops, not that the machine loses its network: an operator
+	# removing the package while NetworkManager runs must keep the connection
+	# they are removing it over. Nothing here touches another manager's
+	# processes -- `sweep_children` takes only what carries netcfgd's marker.
 	unmask_all
 	# Diversions outlive the package that made them, so this is the one
 	# chance to undo them. A machine left with connmand renamed and netcfgd
 	# gone has a daemon that cannot start and nothing saying why.
 	undivert
-	say "nothing is running the network now. Start one, for example:"
+	say "netcfgd is stopped and every network daemon is unmasked."
+	say "  anything else that was running still is. If nothing is, start one:"
 	say "  systemctl enable --now NetworkManager"
 	;;
 *)

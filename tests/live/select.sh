@@ -75,37 +75,108 @@ echo "invoke $@" >> "$SEL_LOG"
 STUB
 chmod +x "$work/bin/systemctl" "$work/bin/deb-systemd-invoke"
 
-# A decoy for the kill path, inside the namespace and nowhere near anything
-# real. `cp` rather than a wrapper script: `pgrep -x` matches `comm`, which the
-# kernel takes from the executable.
-cp "$(command -v sleep)" "$work/bin/wpa_supplicant" 2>/dev/null || true
+# **Two decoys, because the sweep is a question about ownership and one decoy
+# can only ever answer half of it.** `sweep_children` takes the processes
+# belonging to the manager standing down: somebody else's when that is
+# NetworkManager, netcfgd's own when it is netcfgd. A test with one process
+# cannot tell a correct sweep from one that kills everything it finds.
+#
+# Both must be named `wpa_supplicant`, because `pgrep -x` matches `comm`, which
+# the kernel takes from the executable file -- so they are two copies under that
+# name in different directories. A `#!` wrapper would be `sh` and never match.
+#
+#   theirs  a copy of `sleep`, plain argv -- stands in for NetworkManager's
+#   ours    a copy of `sh`, with `/run/netcfgd/` in its argv -- stands in for a
+#           backend netcfgd started and `KillMode=process` left behind (0140)
+#
+# `sh -c 'sleep 120' <marker>` puts the marker in argv as $0 while the shell
+# sleeps, which is what `is_netcfgds` reads.
+mkdir -p "$work/theirs" "$work/ours"
+cp "$(command -v sleep)" "$work/theirs/wpa_supplicant" 2>/dev/null || true
+cp "$(command -v sh)" "$work/ours/wpa_supplicant" 2>/dev/null || true
 
-unshare -rmn sh -c '
-	set -eu
-	work=$1; sel=$2
-	mount -t tmpfs tmpfs /run
-	mkdir -p /run/systemd/system
-	export PATH="$work/bin:$PATH"
-	# Bounded twice: it exits on its own, and it is killed below whether or not
-	# the switcher signalled it.
-	decoy=
-	if [ -x "$work/bin/wpa_supplicant" ]; then
-		"$work/bin/wpa_supplicant" 120 &
-		decoy=$!
-	fi
-	for target in netcfgd networkmanager none; do
-		SEL_LOG="$work/$target.log"; export SEL_LOG
-		: > "$SEL_LOG"
+# One namespace per target, with fresh decoys each time. The three targets used
+# to share one, so a decoy killed by the first was already gone for the third
+# and `none` could not be tested at all.
+for target in netcfgd networkmanager none; do
+	SEL_LOG="$work/$target.log"; export SEL_LOG
+	: > "$SEL_LOG"
+	unshare -rmn sh -c '
+		set -eu
+		work=$1; sel=$2; target=$3
+		mount -t tmpfs tmpfs /run
+		mkdir -p /run/systemd/system
+		export PATH="$work/bin:$PATH"
+		# Bounded twice: each exits on its own, and each is signalled below
+		# whether or not the switcher reached it.
+		theirs= ours=
+		if [ -x "$work/theirs/wpa_supplicant" ]; then
+			"$work/theirs/wpa_supplicant" 120 &
+			theirs=$!
+		fi
+		if [ -x "$work/ours/wpa_supplicant" ]; then
+			"$work/ours/wpa_supplicant" -c "sleep 120" \
+				/run/netcfgd/supplicant/decoy.pid &
+			ours=$!
+		fi
+		# Let them reach the process table before the switcher looks.
+		waited=0
+		while [ "$waited" -lt 20 ]; do
+			[ -r "/proc/$ours/cmdline" ] && break
+			waited=$((waited + 1))
+			sleep 0.05
+		done
 		sh "$sel" "$target" > "$work/$target.out" 2>&1 || true
-	done
-	if [ -n "$decoy" ]; then
-		kill "$decoy" 2>/dev/null || true
-		# Whether the switcher reached it, recorded for the check below. The
-		# decoy is gone either way by now, so this asks the log rather than the
-		# process table.
-		:
+		# Which survived, recorded from inside where the pids mean something.
+		#
+		# **`if`, never a trailing `&&`.** Under `set -eu` a false
+		# `[ ... ] && cmd` returns 1, and as the last command of this block it
+		# aborts before the cleanup below -- which leaked a decoy onto the host
+		# and, the failure propagating to the outer `set -e`, killed the whole
+		# test before a single check printed. Third time this shape has cost
+		# something in this file; written out longhand now.
+		#
+		# No apostrophes anywhere in this block: it is inside `sh -c ...` under
+		# single quotes, and one in a comment ends the quoting. That cost a
+		# syntax error on the very edit that added the note above.
+		#
+		# **Read `/proc/<pid>/cmdline`; do not stat it and do not use
+		# `kill -0`.** Both of the obvious forms are wrong in opposite
+		# directions. `kill -0` reports a zombie as alive -- these are children
+		# of this shell, so a signalled one stays a zombie until it is waited
+		# for -- and that read both decoys as surviving every sweep, failing
+		# three checks that were describing correct behaviour. `[ -s ]` is
+		# worse: procfs reports size 0 for every file, so it calls a *live*
+		# process dead and the same checks pass by accident. Measured both ways
+		# before this line was written. Reading the content answers correctly
+		# for both.
+		: > "$work/$target.alive"
+		if [ -n "$theirs" ] && [ -n "$(tr -d "\0" 2>/dev/null < "/proc/$theirs/cmdline")" ]; then
+			echo theirs >> "$work/$target.alive"
+		fi
+		if [ -n "$ours" ] && [ -n "$(tr -d "\0" 2>/dev/null < "/proc/$ours/cmdline")" ]; then
+			echo ours >> "$work/$target.alive"
+		fi
+		if [ -n "$theirs" ]; then
+			kill "$theirs" 2>/dev/null || true
+		fi
+		if [ -n "$ours" ]; then
+			kill "$ours" 2>/dev/null || true
+		fi
+		exit 0
+	' sh "$work" "$select_sh" "$target" || true
+done
+
+# **Whatever the namespace did not reap.** The decoys share the host's pid
+# namespace -- `unshare -rmn` takes mount, network and user, not pid -- so a
+# block that dies before its own cleanup leaves them visible to everything.
+# They are harmless (a different netns, so the real switcher's 0167 check skips
+# them) and they are still this script's to remove.
+for pid in $(pgrep -x wpa_supplicant 2>/dev/null || true); do
+	if grep -qa "$work" "/proc/$pid/cmdline" 2>/dev/null; then
+		kill "$pid" 2>/dev/null || true
 	fi
-' sh "$work" "$select_sh"
+done
 
 failures=0
 check() {
@@ -172,7 +243,34 @@ check "no selection masks systemd-resolved" \
 # zero, and asserted zero -- passing by doing nothing, which is the shape every
 # other check here exists to avoid.
 check "selecting netcfgd signals a supplicant left behind in our namespace" \
-	"$(grep -c 'terminating wpa_supplicant' "$work/netcfgd.out" 2>/dev/null || echo 0)" "1"
+	"$(grep -c 'terminating wpa_supplicant' "$work/netcfgd.out" 2>/dev/null || true)" "1"
+
+# **And it takes the right one.** Selecting netcfgd stands the other managers
+# down, so their supplicant goes and netcfgd's own must not -- netcfgd is about
+# to use it. One decoy could not tell this from a sweep that kills whatever it
+# finds.
+check "and leaves netcfgd's own supplicant alone" \
+	"$(grep -c ours "$work/netcfgd.alive" 2>/dev/null || true)" "1"
+check "while the other manager's is gone" \
+	"$(grep -c theirs "$work/netcfgd.alive" 2>/dev/null || true)" "0"
+
+# **The other direction, which is what a machine is left with after switching
+# away.** `stand_down netcfgd` had no `children_of` arm at all, so netcfgd's
+# supplicant and DHCP clients survived every selection -- `KillMode=process`
+# keeps them alive across the stop on purpose, and nothing else was ever going
+# to collect them.
+check "selecting NetworkManager sweeps netcfgd's own backends" \
+	"$(grep -c ours "$work/networkmanager.alive" 2>/dev/null || true)" "0"
+
+# **`none` is prerm's, and it used to stop nothing while saying otherwise.**
+# Reported: "I STILL had to kill orphaned dhcpcd and wpa_supplicant after
+# running the script to switch to none."
+check "none stops netcfgd's own backends" \
+	"$(grep -c ours "$work/none.alive" 2>/dev/null || true)" "0"
+# And does not reach for anybody else's: an operator removing netcfgd over a
+# NetworkManager connection keeps it.
+check "and leaves another manager's supplicant running" \
+	"$(grep -c theirs "$work/none.alive" 2>/dev/null || true)" "1"
 
 # `none` is postrm's, and a machine that cannot start anything is the outcome
 # 0145 records.
