@@ -9461,6 +9461,146 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.68 The switch worked, and `/run` is `noexec`
+
+The retry of 10.67's switch, on the same machine, with the package rebuilt and
+installed rather than files copied into place by hand.
+
+**The wifi half worked.** `netcfgd_select.sh netcfgd` at 16:21:41; associated to
+`OpenPC.se` at 16:21:57; `leased 10.0.125.56 for 86400 seconds` and both routes
+added by 16:22:04. No second supplicant, no eviction, no flip-flop -- the three
+faults 10.67 fixed all stayed fixed under a real switch. That is the first time
+netcfgd has taken this machine's network and kept it.
+
+**And then it made the machine unfixable**, which is the report:
+
+> netcfgd keeps rewriting an empty resolv.conf making it impossible to fix what
+> ever problem it has. And I STILL had to kill orphaned dhcpcd and
+> wpa_supplicant after running the script to switch to none.
+
+### `/run` is mounted `noexec`, and netcfgd execs from `/run`
+
+This is the root cause and it is nothing to do with DNS.
+
+    /run rw,nosuid,nodev,noexec,relatime,size=3255096k,mode=755
+
+No `/etc/fstab` entry: **systemd mounts it that way itself**, and this machine
+runs systemd 257. netcfgd writes its dhcpcd hook script to
+`/run/netcfgd/dhcpcd/<iface>.script` with mode 0755 and passes it to dhcpcd with
+`-c`. dhcpcd cannot exec it:
+
+    dhcpcd[1264991]: script_runreason: Permission denied
+
+That message appears 1,350 times in this machine's journal, from 2026-08-26
+onwards -- so it predates every change in 10.67 and was never the sandbox fix's
+doing. What the sandbox fix changed is what happens *next*.
+
+**The hook is how a lease's nameservers reach netcfgd at all.** dhcpcd learns
+them, runs the script to report them, the script cannot run, and netcfgd's
+delivery therefore has no servers. `ncfg plan` says so exactly -- *"the DNS
+delivery has no servers in it, so it will write a resolver file that resolves
+nothing"* -- and then wrote it anyway, every reconcile tick, while
+`resolv_guard` signalled whatever put a resolver back. **A machine with no name
+resolution and a daemon keeping it that way is one an operator cannot repair by
+the ordinary means.**
+
+**Four scripts are affected, not one.** `write_dhcpcd_script`,
+its `DHCPv6` sibling, `write_udhcpc_script` and hook materialisation (10.47) all
+`set_permissions(0o755)` under `/run/netcfgd/`. On any machine whose `/run` is
+`noexec` -- which is now the systemd default rather than a hardening choice --
+**none of them can run**, so lease nameservers never arrive and no user hook
+ever fires. Nothing reports this: dhcpcd's `Permission denied` goes to the
+journal as its own message and netcfgd never sees a failure.
+
+**Not fixed, because the repair is a decision.** The options, with what each
+costs:
+
+- **Write the scripts under `StateDirectory=netcfgd`** (`/var/lib/netcfgd`),
+  which is exec. Smallest change; puts generated executables outside `/run`,
+  against constraint 1's "runtime state in `/run/netcfgd/` is derived and
+  disposable" -- though a materialised script is arguably not state.
+- **Ship one static hook** in `/usr/libexec/netcfgd` and have it read the
+  per-interface report path from `/run`. Keeps `/run` for data only, which is
+  what the constraint is about, and is the arrangement most daemons use.
+- **Stop using a hook**: read dhcpcd's own lease file. Loses the one contract
+  `doc/interface-report.md` documents for every client, not just dhcpcd.
+
+Which one is the copyright holder's. **The second looks right and that is
+exactly why it is written down rather than done** -- see `working-practice.md`
+on describing a mechanism thoroughly being a way of proposing it.
+
+### An empty delivery is refused now, which makes the failure survivable
+
+Whatever the servers are missing *for*, netcfgd must not answer by erasing the
+resolver. `plan_dns` pushes a `Refusal` and plans nothing when every scope has
+no servers.
+
+**The distinction that took a test failure to find.** "Never write an empty
+resolver" is wrong: a scope that has *left* the document still has its
+nameservers in the file, and the empty write is exactly how they are withdrawn
+-- which is what `a_dns_scope_that_left_the_document_is_delivered_away` covers,
+and it went red on the first version of this. So the refusal fires only when
+there is nothing of netcfgd's to take back. Neither "always write" nor "never
+write" is right; what separates them is whether the file holds a delivery of
+netcfgd's that the document no longer asks for, and both cases are "the delivery
+is empty".
+
+### Orphans: three faults, and the switcher could not stand netcfgd down at all
+
+`children_of` had **no `netcfgd` arm**, so `stand_down netcfgd` swept nothing --
+and `KillMode=process` keeps the supplicant and DHCP clients alive across the
+stop on purpose (0134, 0142), so switching away from netcfgd left every backend
+running. `is_netcfgds` then skipped exactly those processes, because the guard
+was written as "never touch netcfgd's" rather than "take the ones belonging to
+the manager standing down". And `none` -- which `prerm` calls -- stopped nothing
+whatever, while printing *"nothing is running the network now"*.
+
+The rule that replaces it: **sweep the processes belonging to the manager
+standing down.** netcfgd's own when that is netcfgd, somebody else's otherwise.
+`none` stands netcfgd down and deliberately touches no other manager, because an
+operator removing the package over a NetworkManager connection must keep it.
+
+### What the test caught that review did not
+
+**`sweep_children` set a variable called `target`.** POSIX sh has no locals, and
+`target` is the script-wide variable holding the selected manager -- so the
+managers loop clobbered it on its first `stand_down`, `needs_of "$target"` became
+`needs_of no`, nothing was wanted, and `netcfgd_select.sh networkmanager` masked
+the supplicant. **That is 0169's machine-breaking fault restored by a variable
+name**, in the same commit that was fixing orphans, and `--dry-run` on the host
+had looked correct before the function existed.
+
+`tests/live/select.sh` caught it on the first run. It also cost three false
+failures of its own first, both from the liveness check:
+
+- **`kill -0` reports a zombie as alive.** The decoys are children of the test's
+  own shell, so a signalled one stays a zombie until waited for. Three checks
+  describing correct behaviour went red.
+- **`[ -s /proc/<pid>/cmdline ]` reports a *live* process as dead**, because
+  procfs reports size 0 for every file -- which would have made the same three
+  checks pass by accident. Measured both ways before the third form was written.
+  Reading the content is the one that answers correctly.
+
+`running-code.md` names the first of those. The second is its mirror and is
+worse, because it fails towards green.
+
+### Two more, smaller
+
+**The postinst says the machine has been taken over even on an upgrade.** The
+switcher call is guarded by `[ -z "$2" ]` and correctly does not run, but the
+sixteen `echo` lines below it are unguarded -- so `dpkg -i` over an existing
+install prints "it is now this machine's network daemon" and "the other network
+services are stopped, disabled and masked" while having changed none of that.
+
+**Three `netcfgd-cli` wifi tests fail when the suite is run as root**, and pass
+as an ordinary user: `an_unwritable_config_directory_is_not_written_to` and two
+beside it make a directory unwritable with a mode, and root walks through a mode
+with `CAP_DAC_OVERRIDE`. Confirmed pre-existing by stashing every change in this
+pass and watching them stay red. This tree already knows the lesson -- 0161
+records it, and `sandbox_writes.sh` makes real mounts because of it -- and these
+three did not get it. They have no root guard, so the suite silently asserts the
+opposite of what it means whenever it is run with privilege.
+
 ## 10.67 The machine 10.66 was written for, with root on it
 
 10.66 was written to be read by whoever was next in front of that machine with
