@@ -109,6 +109,16 @@ reproduce.
   route. They are not fixed here because each carries more than a report --
   udhcpc's does the addressing -- and turning them into shipped hooks is its own
   piece of work. Named here so the omission is deliberate rather than forgotten.
+- **Superseded as the *general* answer, the same day, and kept as the right one
+  for a generated script.** `ExecPaths=/run/netcfgd` re-permits execution inside
+  netcfgd's own runtime directory, children included, and fixes all five scripts
+  at once. It was not found until the fifth of them forced the question, because
+  an inline hook body is the operator's content and has no artifact to ship --
+  so the grant has to exist for that case whatever else is done. Shipping this
+  hook remains worth having (a static artifact beats a regenerated one, and it
+  is one fewer thing written at runtime), but it is no longer what makes dhcpcd
+  work. Recorded rather than reframed: the decision below was reached without
+  knowing about `ExecPaths=`.
 - **User hooks are the fifth, and the most visible.** `PendingHooks`
   materialises every configured hook into `<run>/hooks/` at mode `0700` and
   spawns it, so no `pre_up`, `post_up`, `pre_down` or `post_down` runs on a

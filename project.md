@@ -9635,26 +9635,42 @@ one of its own, which `dhcpcd_orphan.sh` already did.
 file. A missing hook is the same silent outcome as an unexecutable one, and the
 entire cost of this defect was that nothing said anything.
 
-**The other four scripts are unchanged and still broken this way.** udhcpc's,
-the PD hook and the two ppp scripts write into `/run` and are made executable
-there by the same code shape. Each carries more than a report -- udhcpc's does
-the addressing -- so converting them is its own piece of work, named here so the
-omission is deliberate.
+**The other four are fixed by one line, and that line was the right answer all
+along.** `ExecPaths=/run/netcfgd` in the unit re-permits execution inside
+netcfgd's own runtime directory and nowhere else -- measured: a 0700 script under
+`/run` is refused, is permitted with the line, and **a child process inherits the
+permission**, which is the case that matters because udhcpc and pppd do the exec
+rather than netcfgd.
 
-**And user hooks, which is the fifth and the most visible.** `PendingHooks`
-materialises every configured hook into `<run>/hooks/` at mode `0700` and
-`hooks.rs` spawns it -- its own module comment says so: *"it materialises hooks
-under `/run` and spawns backends"*. Proven directly on this machine: a `0700`
-script under `/run` answers `Permission denied` on exec. So **no `pre_up`,
-`post_up`, `pre_down` or `post_down` hook can run on a default systemd
-machine.**
+**The deciding case is the one that cannot be shipped.** A generated script can
+be replaced by a shipped one, and 0178 did that for dhcpcd. An **inline hook
+body is the operator's content** -- materialised into `<run>/hooks/` at 0700 and
+executed directly -- so there is no artifact to ship and no path but to permit
+execution where it lands. Once the grant exists for that, udhcpc's script, the
+PD hook and the two ppp scripts need nothing further.
 
-Two things separate it from the dhcpcd case. It fails **loudly** -- netcfgd
-spawns these itself, so it sees the `EACCES` rather than losing it in another
-daemon's log, and a failed `pre_up` stops the actions behind it. And
-`tests/live/hooks.sh` cannot see it either: it sets `NCFG_RUN_DIR="$work/run"`
-under `/tmp`, which is the same blind spot `dhcpcd.sh` had until this pass.
-Recorded, not fixed.
+So 0178's shipped hook is not wasted but is no longer *load-bearing*: it stands
+as the better artifact for a generated script, and would have been unnecessary
+had this been found first. Recorded that way rather than quietly reframed.
+
+**And user hooks, which is the fifth and was the most visible.**
+`PendingHooks` materialises every inline hook body into `<run>/hooks/` at mode
+`0700` and `hooks.rs` spawns it directly. So **no `pre_up`, `post_up`,
+`pre_down` or `post_down` ran on a default systemd machine** -- loudly, since
+netcfgd spawns these itself and sees the `EACCES`, and a failed `pre_up` stops
+the actions behind it.
+
+Fixed by `ExecPaths=`, above. **This is the case that decided the shape of the
+fix**: a hook body is the operator's, so the shipped-artifact answer 0178 used
+has nothing to ship.
+
+`tests/live/hooks.sh` still cannot see it: it sets `NCFG_RUN_DIR="$work/run"`
+under `/tmp`, the same blind spot `dhcpcd.sh` had. The guard is in
+`sandbox_writes.sh` instead, which asks systemd to impose the unit's own
+declaration and requires a child to exec there -- with a control imposing
+everything *except* `ExecPaths=` and requiring that to fail, because `/run` is
+only `noexec` on a systemd new enough to make it so and the check would
+otherwise pass for a reason that has nothing to do with the unit.
 
 ### The suite had been passing against a `/run` no machine has
 
