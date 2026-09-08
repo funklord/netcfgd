@@ -9612,11 +9612,45 @@ Not yet implemented. What it touches: the refusal at `kernel.rs:1985`, 0134's
 | D-Bus activation evicts netcfgd | fixed, `revived_over_dbus` |
 | netcfgd starts a second supplicant on an orphan | fixed, `adopt_running_backend` |
 | `tests/live/select.sh` killed the host's supplicant | fixed, `unshare -rmn` |
-| `tests/live/sandbox_writes.sh` models mounts systemd does not make | **open** |
+| `tests/live/sandbox_writes.sh` models mounts systemd does not make | fixed, it asks systemd now |
 
-**None of this has been run against a real machine.** The fixes are gated,
-unit-tested and sabotaged; the switch itself has not been retried, deliberately,
-and doing so is the copyright holder's call.
+**The switch has not been retried.** The fixes are gated, unit-tested and
+sabotaged, and `sandbox_writes.sh` now drives the unit's real sandbox on a
+machine that has systemd -- but netcfgd has not been made this machine's network
+daemon again, deliberately, and doing so is the copyright holder's call.
+
+### The sandbox test could not fail on the bug it was written for
+
+Every block in `tests/live/sandbox_writes.sh` builds its own mounts -- a
+read-only bind, then a writable bind over the granted path. That is deliberate
+and is what lets it run on a machine with no systemd, and it makes the file a
+good test of *what netcfgd does given a sandbox*. It is not a test of **what the
+unit's declaration produces**, and those are different questions.
+
+The only checks against the real unit were two `grep`s asserting the
+`ReadWritePaths=/etc` line is present. It was present. Both were green
+throughout the period netcfgd could write nothing under /etc at all. **A test
+that models the mechanism it is guarding cannot detect that the mechanism is not
+the one in force** -- and 0164's own consequence list said this file "asserts
+the unit still grants the directory", which is exactly the declaration check
+that could not fail.
+
+The block that closes it asks systemd for the unit's own `ProtectSystem=` and
+`ReadWritePaths=`, parsed from the unit rather than restated, and reads back
+whether /etc is writable. `findmnt -T` rather than a write probe: it names the
+mount covering a path, answers correctly under `ProtectSystem=yes` where there
+is no /etc mount at all, and creates nothing in the real /etc.
+
+**With a control, because `rw` is also what a sandbox that never applied would
+say.** A second run imposes `ProtectSystem=full` with `ReadWritePaths=/etc` and
+requires the probe to see `ro` -- so the first result is the unit's doing rather
+than the properties having been ignored. Proven by reverting the unit, where the
+effect check fails and the control still passes, which is the pair that says the
+unit is at fault rather than the probe; and by neutering the control, which
+fails on its own.
+
+It skips where there is no systemd or no root, and refuses to skip under
+`NCFG_LIVE`, which is the file's existing bargain.
 
 ### What the two fixes are
 

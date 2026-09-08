@@ -3,13 +3,27 @@
 #
 #     sh tests/live/sandbox_writes.sh
 #
-# `packaging/systemd/netcfgd.service` sets `ProtectSystem=full`, which mounts
-# /etc read-only, and opens one path back up with
+# The fault this was written for: the unit set `ProtectSystem=full`, which
+# mounts /etc read-only, and opened one path back up with
 # `ReadWritePaths=-/etc/resolv.conf`. That grants the **file**. Creating a new
 # entry in /etc is still refused, and `write_resolv_conf` staged a temporary
 # beside the target before renaming it -- so on every systemd machine it failed
 # with "Read-only file system" naming a dotfile the operator has never seen,
 # for a file they had explicitly made writable.
+#
+# The unit now sets `ProtectSystem=yes` and `ReadWritePaths=/etc` (0176). The
+# blocks below still drive the narrow grant on purpose: a hardened drop-in or a
+# read-only root still produces one, and the fallback and the symlink refusal
+# are what runs there.
+#
+# **What every block below cannot see, and the last one now asks.** They make
+# their own mounts, so they check what netcfgd does *given* a sandbox rather
+# than what the unit's own declaration produces -- and those are different
+# questions. `ProtectSystem=full` with `ReadWritePaths=/etc` grants nothing,
+# because the remount is applied after the bind mount; this file went on
+# passing throughout the period that pairing was shipped. The final block asks
+# systemd to impose the unit's real properties and reads back whether /etc is
+# writable, with a control that proves the probe can see a sandbox at all.
 #
 # **This makes the mounts rather than using permissions, and the difference is
 # the whole point of the script.** A `chmod a-w` on the directory reproduces
@@ -329,6 +343,69 @@ check "the unit grants the directory rather than the file" \
 	"$(grep -c '^ReadWritePaths=/etc$' "$unit")" "1"
 check "and no longer grants resolv.conf alone" \
 	"$(grep -c '^ReadWritePaths=-*/etc/resolv.conf$' "$unit")" "0"
+
+# **And that the grant does anything, which is a different question and is the
+# one this file could not ask.** Everything above makes its own mounts. That is
+# deliberate and is what lets the script run on a machine with no systemd -- but
+# it means every functional check models a sandbox rather than meeting one, and
+# the two checks above assert that a *line is present*. Both were true, and
+# green, throughout the period when netcfgd could write nothing under /etc at
+# all.
+#
+# `ProtectSystem=` applies its read-only remount AFTER the `ReadWritePaths=`
+# bind mounts, so an entry naming the very path being remounted is covered
+# straight back over and grants nothing. `ProtectSystem=full` with
+# `ReadWritePaths=/etc` is exactly that pairing. A subpath survives, which is
+# why the four narrow paths this file was written against worked and the single
+# wide one that replaced them did not. Decision 0176.
+#
+# Read from the unit rather than restated here, so that changing either line is
+# what changes this check. `findmnt -T` names the mount covering a path, which
+# answers for `ProtectSystem=yes` too -- there is no /etc mount at all under it,
+# and the covering mount is `/`. A write probe would work as well and is not
+# used: it would create a file in the real /etc, and this needs to observe
+# rather than modify.
+if ! command -v systemd-run >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+	note="no systemd here, so the unit's real sandbox is unchecked"
+elif [ "$(id -u)" != 0 ]; then
+	note="not root, so systemd-run cannot impose the unit's sandbox"
+else
+	note=
+fi
+if [ -n "${note:-}" ]; then
+	if [ -n "${NCFG_LIVE:-}" ]; then
+		echo "sandbox_writes.sh: NCFG_LIVE is set but $note" >&2
+		exit 1
+	fi
+	echo "note $note"
+else
+	protect=$(sed -n 's/^ProtectSystem=\(.*\)$/\1/p' "$unit" | tail -1)
+	properties="-p ProtectSystem=$protect"
+	for granted in $(sed -n 's/^ReadWritePaths=\(.*\)$/\1/p' "$unit"); do
+		properties="$properties -p ReadWritePaths=$granted"
+	done
+	# Bounded from outside as well as by the command: a transient unit that
+	# hung would otherwise hold this script for ever.
+	etc_state=$(timeout 60 systemd-run --quiet --wait --pipe --collect \
+		$properties /bin/sh -c 'findmnt -T /etc -no OPTIONS | cut -d, -f1' \
+		2>/dev/null || echo unknown)
+
+	check "the unit's own ProtectSystem= and ReadWritePaths= leave /etc writable" \
+		"$etc_state" "rw"
+
+	# **The control, and this check is worth nothing without it.** `rw` above
+	# would also be the answer if the properties had failed to apply, if
+	# `systemd-run` had ignored them, or if this had probed a path no sandbox
+	# covers. Impose a level known to hold /etc read-only and require the
+	# probe to see it: that proves the mechanism is being exercised, so the
+	# `rw` above is the unit's doing rather than the sandbox's absence.
+	sealed=$(timeout 60 systemd-run --quiet --wait --pipe --collect \
+		-p ProtectSystem=full -p ReadWritePaths=/etc \
+		/bin/sh -c 'findmnt -T /etc -no OPTIONS | cut -d, -f1' \
+		2>/dev/null || echo unknown)
+	check "and the probe can see a sandbox that does not, so rw means something" \
+		"$sealed" "ro"
+fi
 
 if [ "$failures" -eq 0 ]; then
 	echo "sandbox_writes.sh: all checks passed"
