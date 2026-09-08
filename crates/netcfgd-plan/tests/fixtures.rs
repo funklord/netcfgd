@@ -5695,7 +5695,7 @@ fn a_hook_on_a_network_is_reported_as_running_at_no_phase() {
 /// write the empty `resolv.conf` that `plan_dns` already carries a warning to
 /// prevent -- so a machine whose last `dns` block goes keeps what it has.
 #[test]
-/// A delivery with no servers is refused rather than written.
+/// A delivery with no servers writes nothing rather than emptying the file.
 ///
 /// The reported fault: `global { dns { mode = "write_resolv_conf" } }` with no
 /// `servers`, on a machine whose lease nameservers never reached netcfgd --
@@ -5712,7 +5712,7 @@ fn a_hook_on_a_network_is_reported_as_running_at_no_phase() {
 /// `a_dns_scope_that_left_the_document_is_delivered_away` below. What separates
 /// them is whether the file holds a delivery of netcfgd's the document no
 /// longer asks for -- not whether the delivery is empty, which both are.
-fn an_empty_delivery_is_refused_unless_it_withdraws_something() {
+fn an_empty_delivery_writes_nothing_unless_it_withdraws_something() {
 	let desired = document(
 		"global { dns { mode = \"write_resolv_conf\" } }\n\
 		 device e0 { kind = \"dummy\" }\ninterface e0 { config = \"null\" }\n",
@@ -5729,10 +5729,25 @@ fn an_empty_delivery_is_refused_unless_it_withdraws_something() {
 	);
 	assert!(
 		refused
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("leaving the existing file alone")),
+		"and it must say why it wrote nothing: {:?}",
+		refused.warnings
+	);
+	// **Said, but not as a refusal.** A refusal makes `ncfg apply` exit non-zero
+	// because a decision is outstanding (0010), and on any DHCP machine the
+	// servers are absent between starting the client and the lease landing --
+	// so refusing turned the ordinary first apply into a failed one, which is
+	// how `tests/live/dhcpcd.sh` died at its first apply with the client
+	// started and the address already on the interface. Not writing is correct;
+	// failing the pass around it is not.
+	assert!(
+		!refused
 			.refusals
 			.iter()
 			.any(|refusal| refusal.op == "dns.apply"),
-		"and it must say so as a refusal rather than only a warning: {:?}",
+		"an absent lease is not a decision the operator has to make: {:?}",
 		refused.refusals
 	);
 

@@ -9512,28 +9512,66 @@ its `DHCPv6` sibling, `write_udhcpc_script` and hook materialisation (10.47) all
 ever fires. Nothing reports this: dhcpcd's `Permission denied` goes to the
 journal as its own message and netcfgd never sees a failure.
 
-**Not fixed, because the repair is a decision.** The options, with what each
-costs:
+**Fixed: the hook is shipped at `/usr/libexec/netcfgd/dhcpcd-hook`**, chosen by
+the copyright holder from the three options this section used to list.
+[0178](doc/decision/0178-a-generated-hook-cannot-live-where-it-cannot-run.md)
+carries the reasoning, what the hook cannot be told and why, and the two
+alternatives declined.
 
-- **Write the scripts under `StateDirectory=netcfgd`** (`/var/lib/netcfgd`),
-  which is exec. Smallest change; puts generated executables outside `/run`,
-  against constraint 1's "runtime state in `/run/netcfgd/` is derived and
-  disposable" -- though a materialised script is arguably not state.
-- **Ship one static hook** in `/usr/libexec/netcfgd` and have it read the
-  per-interface report path from `/run`. Keeps `/run` for data only, which is
-  what the constraint is about, and is the arrangement most daemons use.
-- **Stop using a hook**: read dhcpcd's own lease file. Loses the one contract
-  `doc/interface-report.md` documents for every client, not just dhcpcd.
+**What the hook cannot be told shaped it, and all three were measured.** dhcpcd
+builds a clean environment for hooks -- `interface`, `reason`, `pid`, the
+interface flags, `PATH`, `PWD` -- so an exported `NCFG_RUN_DIR` does not arrive.
+`dhcpcd.conf` has an `env` directive and no `include`, so using it would mean
+netcfgd replacing the operator's configuration where today it points at it
+(0143). And reading the run directory back out of `/proc/$pid/environ` returned
+nothing, with the pid itself stale. So the hook derives the interface from
+`$interface`, the report from whether `$reason` ends in `6`, and takes its root
+from `/run/netcfgd` -- and `tests/live/dhcpcd.sh` now uses that path rather than
+one of its own, which `dhcpcd_orphan.sh` already did.
 
-Which one is the copyright holder's. **The second looks right and that is
-exactly why it is written down rather than done** -- see `working-practice.md`
-on describing a mechanism thoroughly being a way of proposing it.
+**netcfgd refuses to start the client when the hook is missing**, naming the
+file. A missing hook is the same silent outcome as an unexecutable one, and the
+entire cost of this defect was that nothing said anything.
 
-### An empty delivery is refused now, which makes the failure survivable
+**The other four scripts are unchanged and still broken this way.** udhcpc's,
+the PD hook and the two ppp scripts write into `/run` and are made executable
+there by the same code shape. Each carries more than a report -- udhcpc's does
+the addressing -- so converting them is its own piece of work, named here so the
+omission is deliberate.
+
+### The suite had been passing against a `/run` no machine has
+
+`tests/live/dhcpcd.sh` mounted a plain tmpfs over `/run`. The machine's own
+`/run` is `nosuid,nodev,noexec`, and the `noexec` is the entire defect -- so
+every check in that file ran against conditions that could not reproduce it, and
+passed throughout the period the fault was shipping.
+
+It mounts the real flags now. **38 checks pass with the shipped hook; copy the
+hook back under `/run` and 12 go red**, and they are exactly the report and
+nameserver ones. That pair is the evidence, and neither half means anything
+alone.
+
+**A stale binary made the first two runs meaningless**, which is worth its own
+line because it nearly closed the investigation the wrong way. `tests/live/`
+drives `target/debug`, `make deb` had rebuilt only `--release`, and the debug
+binary predated the change by an hour. So the first noexec run failed for the
+right reason with the wrong cause, and the run before it had passed while
+proving nothing. The tell was the *warning text* in the output: it read "will
+write a resolver file", which is the wording this pass had already replaced.
+
+### An empty delivery writes nothing now, which makes the failure survivable
 
 Whatever the servers are missing *for*, netcfgd must not answer by erasing the
-resolver. `plan_dns` pushes a `Refusal` and plans nothing when every scope has
-no servers.
+resolver. `plan_dns` plans nothing and says so when every scope has no servers.
+
+**A warning and not a `Refusal`, and getting that wrong cost a suite run.** The
+first version pushed a refusal, which is first-class and makes `ncfg apply` exit
+non-zero because a decision is outstanding (0010). That is not this: on any DHCP
+machine the servers are absent between starting the client and the lease
+landing, so refusing turned the ordinary first apply into a failed one --
+`tests/live/dhcpcd.sh` died at its first apply with the client started and the
+address already on the interface. **Not writing is correct; failing the pass
+around it is not.**
 
 **The distinction that took a test failure to find.** "Never write an empty
 resolver" is wrong: a scope that has *left* the document still has its
