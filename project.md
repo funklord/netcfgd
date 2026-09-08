@@ -9513,6 +9513,36 @@ The existing test could not see it: it asserts that what activation writes plans
 a *supplicant*, and a supplicant was always planned. The new one asks whether,
 given a lease that offered nameservers, the resolver gets written.
 
+### Fixed: dhcpcd is stopped by its own verb, because argv cannot name it
+
+`sweep_children` decides ownership from the `/run/netcfgd/` marker a backend
+carries in its argv (0140). **dhcpcd calls `setproctitle` and destroys argv**:
+its command line reads `dhcpcd: wlp0s20f3 [ip4]`, and the BOOTP proxy has no
+interface in it either. So the marker is gone and the test cannot answer.
+
+**A test that cannot answer does not abstain.** `is_netcfgds` returns false,
+which reads as "somebody else's" -- so the sweep classified netcfgd's own client
+as another manager's leftover, and `--dry-run netcfgd` on a machine already
+running netcfgd proposed killing the client netcfgd had just started, five
+processes at a time. That is also why *"I STILL had to kill orphaned dhcpcd"*
+survived the sweep being fixed in 10.68: the fix worked for the supplicant and
+could never work for this one.
+
+dhcpcd leaves `children_of` entirely and is stopped from netcfgd's own
+bookkeeping -- `/run/netcfgd/dhcpcd/<iface>-<family>.conf`, one per client it
+started -- with `dhcpcd -4 -k <iface>`, which takes the privilege-separated
+children with it where a signal to the pid leaves them. **The list is captured
+before anything is stopped**, because `RuntimeDirectoryPreserve=restart` deletes
+`/run/netcfgd` on a real stop; measured, an orphan that outlives it logs
+`read_config: ... No such file or directory`, expires its lease and solicits a
+second one, which is how the machine ended with two addresses on one interface.
+
+**The shape worth keeping: identify a process by what it was started with, not
+by what it looks like now.** netcfgd already had this answer -- 0143 asks dhcpcd
+over its control socket which `-f` it recites, for exactly this reason -- and the
+switcher was using the process image because that is what worked for everything
+else.
+
 ### Open: `dpkg --unpack` stops the daemon and nothing restarts it
 
 Reproduced three times. `dpkg -i` of the netcfgd package with the daemon running
