@@ -1110,6 +1110,29 @@ impl Executor for KernelExecutor {
 				// returns early.** Adoption used to live in `start_backend`,
 				// which five of these seven kinds never reach.
 				if adopt_running_backend(*kind, iface)? {
+					// **Recorded as running, exactly as a start is.** This
+					// returned without pushing the effect, so an *adopted*
+					// backend existed on the machine and in no observation --
+					// and everything keyed on "the supplicant is running" was
+					// dead for the whole life of the adoption.
+					//
+					// What that cost, measured on a machine where netcfgd had
+					// restarted and re-adopted its supplicant: the association
+					// pass in `netcfgd-observe` filters on
+					// `kind == Supplicant && running`, so it never ran, so
+					// `link.network` stayed `None` -- and with it every
+					// consumer of the network a radio is actually on. The
+					// visible one is `network { metric = N }`, which decides
+					// both the route metric and the join order (0154) and
+					// silently did neither. `ncfg plan` also showed
+					// `backend.start ... (was <absent>)` on every pass for
+					// ever, planning a start that every apply then turned back
+					// into an adoption.
+					//
+					// Adoption is what `KillMode=process` exists to make
+					// possible (0134, 0142), so this is not a rare path: it is
+					// what happens after every restart of the daemon.
+					self.effects.started_backends.push((*kind, iface.clone()));
 					return Ok(());
 				}
 				// PPPoE and hostapd first, and before `start_backend`: both are
