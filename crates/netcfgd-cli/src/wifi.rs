@@ -1302,7 +1302,28 @@ mod tests {
 	/// and it let a write succeed that the test was asserting could not happen.
 	/// A fixture that does not model the situation tests a situation nobody is
 	/// in.
-	fn make_read_only(etc: &Path) -> impl FnOnce() + use<> {
+	/// Make the config directory unwritable, or say that it could not be.
+	///
+	/// **`None` means the mode did not take, which means the caller is root.**
+	/// `CAP_DAC_OVERRIDE` walks straight through a mode -- that is
+	/// [0161]'s own finding, from a reproduction that passed for the wrong
+	/// reason until it was redone against a read-only *mount*, which root does
+	/// not walk through. So under root the premise of every test that uses
+	/// this is unreachable, and a `0o555` that changed nothing would have them
+	/// asserting that a writable directory refuses writes.
+	///
+	/// Checked with the same probe the tests use rather than by asking who we
+	/// are: `geteuid() == 0` is the usual test and it is the wrong one -- a
+	/// container without `CAP_DAC_OVERRIDE`, or a filesystem mounted read-only
+	/// under a non-root user, are both cases where the identity and the
+	/// capability disagree. What matters is whether the directory actually
+	/// refuses a write, which is the thing being relied on.
+	///
+	/// The three callers return early when this is `None`. That is a skip and
+	/// not a pass, and it is why they say so on stderr: `tests/live/
+	/// sandbox_writes.sh` is where this behaviour is covered under real mounts,
+	/// and it runs as root on purpose.
+	fn make_read_only(etc: &Path) -> Option<impl FnOnce() + use<>> {
 		use std::os::unix::fs::PermissionsExt;
 
 		let directories = [etc.to_path_buf(), etc.join("conf.d")];
@@ -1310,13 +1331,36 @@ mod tests {
 			std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o555))
 				.expect("read-only");
 		}
-		move || {
+		let restore = |directories: &[std::path::PathBuf]| {
+			for directory in directories.iter().rev() {
+				let _ = std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755));
+			}
+		};
+		if can_write_dir(etc) {
+			restore(&directories);
+			return None;
+		}
+		Some(move || {
 			// Deepest first, and always: a fixture left unwritable cannot be
 			// removed, so the temporary directory would outlive the run.
 			for directory in directories.iter().rev() {
 				let _ = std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755));
 			}
-		}
+		})
+	}
+
+	/// What the three callers print when they cannot run.
+	///
+	/// A named function rather than three copies of a string, so that the
+	/// reason is stated once and a reader grepping for why a test said nothing
+	/// finds one place.
+	fn skip_unwritable(test: &str) {
+		eprintln!(
+			"{test}: skipped -- this process can write a 0o555 directory, so it holds \
+			 CAP_DAC_OVERRIDE and the premise cannot hold. tests/live/sandbox_writes.sh \
+			 covers this under a real read-only mount, which root does not walk through \
+			 (0161)."
+		);
 	}
 
 	/// A config tree with one radio in it and nothing else.
@@ -1374,7 +1418,10 @@ mod tests {
 		let (root, mut options) = fixture("unwritable");
 		options.wifi.open = true;
 		let etc = root.join("etc");
-		let restore = make_read_only(&etc);
+		let Some(restore) = make_read_only(&etc) else {
+			skip_unwritable("an_unwritable_config_directory_is_not_written_to");
+			return;
+		};
 
 		assert!(
 			!can_write(&wifi_profile::profile_path(&etc, "Cafe")),
@@ -1422,7 +1469,10 @@ mod tests {
 		options.wifi.eap = Some("peap");
 		options.wifi.identity = Some("you@example.ac.uk".to_owned());
 		options.wifi.ca_cert = Some("/etc/ssl/certs/corp.pem".to_owned());
-		let restore = make_read_only(&etc);
+		let Some(restore) = make_read_only(&etc) else {
+			skip_unwritable("a_certificate_path_is_refused_before_anyone_types_a_password");
+			return;
+		};
 
 		let error = add(&["eduroam".to_owned()], &options).expect_err("it cannot be added");
 		assert!(
@@ -1446,7 +1496,10 @@ mod tests {
 		options.wifi.eap = Some("peap");
 		options.wifi.identity = Some("you@example.ac.uk".to_owned());
 		options.wifi.ca_cert = Some("@secret:corp-ca".to_owned());
-		let restore = make_read_only(&etc);
+		let Some(restore) = make_read_only(&etc) else {
+			skip_unwritable("a_stored_certificate_is_not_refused_for_being_a_certificate");
+			return;
+		};
 
 		// No daemon in this fixture, so it still cannot finish -- but it fails
 		// for want of somewhere to send it, not for naming a certificate, and

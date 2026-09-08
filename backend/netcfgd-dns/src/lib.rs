@@ -587,6 +587,34 @@ mod tests {
 		shut.set_mode(0o555);
 		std::fs::set_permissions(dir.path(), shut).expect("close the directory");
 
+		// **A mode does not close a directory to root, and this test needs it
+		// closed.** `CAP_DAC_OVERRIDE` walks straight through `0o555`, so the
+		// staging path succeeds, `replace` never falls back, and the symlink
+		// refusal this exists to check is never reached -- the failure reads as
+		// "writing through the link must be refused" against a run where
+		// nothing was written through any link.
+		//
+		// That is 0161's own finding: its first reproduction used a mode,
+		// passed, and passed just as happily with the fix reverted. It was
+		// redone against a read-only *mount*, which root does not walk through,
+		// and `tests/live/sandbox_writes.sh` is where that lives.
+		//
+		// Probed rather than asking `geteuid`: what matters is whether the
+		// directory refuses a write, and identity and capability disagree in a
+		// container without `CAP_DAC_OVERRIDE` or on a read-only filesystem.
+		let probe = dir.path().join(".ncfg-writable-probe");
+		if std::fs::File::create(&probe).is_ok() {
+			let _ = std::fs::remove_file(&probe);
+			std::fs::set_permissions(dir.path(), opened).expect("reopen the directory");
+			eprintln!(
+				"the_fallback_will_not_write_through_a_symlink: skipped -- this process \
+				 can write a 0o555 directory, so it holds CAP_DAC_OVERRIDE and the \
+				 fallback is never reached. tests/live/sandbox_writes.sh covers the \
+				 symlink refusal under a real read-only mount (0161)."
+			);
+			return;
+		}
+
 		let outcome = replace(&link, "nameserver 192.0.2.9\n");
 
 		std::fs::set_permissions(dir.path(), opened).expect("reopen the directory");

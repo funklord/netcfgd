@@ -353,6 +353,22 @@ pub fn die_after(seconds: u32) {
 
 #[cfg(test)]
 mod tests {
+
+	/// Serialises the tests that shed, because shedding is not a private act.
+	///
+	/// **Measured: running the two of them concurrently fails, and running the
+	/// whole suite with `--test-threads=1` passes.** `shed()` drops the
+	/// bounding set and sets `PR_SET_NO_NEW_PRIVS`, and the harness gives each
+	/// test a thread out of a pool it reuses -- so "this thread kept what it
+	/// had" is a claim about state another test is concurrently taking away.
+	/// The failure looks like a defect in `shed` and is a defect in the test
+	/// arrangement.
+	///
+	/// Poison is stepped over rather than propagated: a panic in one of these
+	/// is a real failure and is already reported as one, and turning it into a
+	/// second failure in the other test hides which was first.
+	static SHEDDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 	use super::{effective_capabilities, shed};
 
 	/// **Shedding is only observable from something that had something.**
@@ -372,6 +388,7 @@ mod tests {
 	/// the thread it had changed.
 	#[test]
 	fn a_thread_that_sheds_holds_nothing_afterwards() {
+		let _serialised = SHEDDING.lock().unwrap_or_else(|e| e.into_inner());
 		let before = effective_capabilities().expect("/proc is mounted");
 		if before == 0 {
 			eprintln!(
@@ -433,6 +450,7 @@ mod tests {
 	/// which is the thing the doc comment promises does not happen.
 	#[test]
 	fn shedding_in_one_thread_leaves_another_alone() {
+		let _serialised = SHEDDING.lock().unwrap_or_else(|e| e.into_inner());
 		let before = effective_capabilities().expect("/proc is mounted");
 		if before == 0 {
 			eprintln!("privilege: skipping -- nothing to keep");

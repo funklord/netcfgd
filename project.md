@@ -9461,6 +9461,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.71 Six tests that could not hold their own premise under root
+
+The suite failed as root and passed as an ordinary user. Not flakiness: six
+tests whose *premise* root makes unreachable, in two families, plus one real
+interference bug they were hiding.
+
+### A mode does not close a directory to root
+
+Four of them made a directory unwritable with `chmod 0o555` and asserted that a
+write was refused. `CAP_DAC_OVERRIDE` walks straight through a mode -- which is
+**0161's own finding**, from a reproduction that passed, and passed just as
+happily with the fix reverted, until it was redone against a read-only *mount*.
+The lesson was recorded, acted on in `sandbox_writes.sh`, and never carried back
+to the unit tests that had the same shape.
+
+`make_read_only` now returns `None` when the mode did not take, and its three
+callers return early saying so; `netcfgd-dns`'s symlink test probes the same way
+inline. **Checked by writing rather than by asking `geteuid`**: identity and
+capability disagree in a container without `CAP_DAC_OVERRIDE` and on a read-only
+filesystem, and what the code relies on is whether the directory refuses.
+
+### A root-owned process is netcfgd's, by design
+
+The other two spawn a child and assert that a *foreign* uid is refused. `ours`
+answers "root, or whoever is asking" -- deliberately, because an unprivileged
+`ncfg status` must not read root's backends as stopped and then plan to start
+them all. So a suite running as root has a root-owned child, `ours` says yes to
+every caller, and there is no refusal to observe.
+
+### And one that was not a premise problem at all
+
+`shedding_in_one_thread_leaves_another_alone` failed **only in parallel** and
+passed under `--test-threads=1`. Two tests call `shed()`, which drops the
+bounding set and sets `PR_SET_NO_NEW_PRIVS`, and the harness hands out threads
+from a pool it reuses -- so "this thread kept what it had" is a claim about state
+another test is concurrently taking away. A `SHEDDING` mutex serialises them.
+**It read as a defect in `shed` and was a defect in the arrangement.**
+
+### What made it hard to see, and is worth more than the fixes
+
+**`cargo test` stops at the first failing suite.** Each pass reported *one*
+failing suite, so fixing the wifi four revealed the dns one, which revealed the
+`netcfgd-sys` three -- three rounds of "the last one" that were nothing of the
+kind. `--no-fail-fast` gives the real list, and the count of failures under
+fail-fast is not a measurement.
+
+**And a skip has to be audible.** Each of these prints why, and the pair is
+asserted from both sides: as an ordinary user the suite reports **zero skips and
+zero failures**, so the guards are not quietly disabling the tests everywhere;
+as root, **six skips and zero failures**. Neither number means anything without
+the other.
+
 ## 10.70 Asked whether it switches networks, and the association was never observed
 
 The question was *"does it switch to other wifi networks automatically?"* --

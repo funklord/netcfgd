@@ -570,6 +570,27 @@ mod tests {
 			.arg(&marker)
 			.spawn()
 			.expect("spawn");
+		// **A root-owned child cannot demonstrate this refusal, by design.**
+		// `ours` answers "root, or whoever is asking" -- a process owned by
+		// root is netcfgd's whatever uid asks, which is the rule the doc
+		// comment above argues for and the thing that makes an unprivileged
+		// `ncfg status` safe. So when this suite runs as root its own child is
+		// root's, `ours` says yes to every caller, and there is no refusal to
+		// observe.
+		//
+		// Probed on the child rather than asked of `geteuid`: what decides is
+		// who owns the process, and that is what is read here.
+		if uids_of(&child.id().to_string()).is_some_and(|(real, _)| real == 0) {
+			let _ = child.kill();
+			let _ = child.wait();
+			eprintln!(
+				"{}: skipped -- this suite is running as root, so its own child is \
+				 root-owned and `ours` returns true for every caller by design. The \
+				 refusal is exercised when the suite runs as an ordinary user.",
+				"a_marker_carried_by_another_user_is_refused"
+			);
+			return;
+		}
 		let mine = my_uid();
 		let mut ready = false;
 		for _ in 0..100 {
@@ -603,6 +624,27 @@ mod tests {
 			.arg(&marker)
 			.spawn()
 			.expect("spawn");
+		// **A root-owned child cannot demonstrate this refusal, by design.**
+		// `ours` answers "root, or whoever is asking" -- a process owned by
+		// root is netcfgd's whatever uid asks, which is the rule the doc
+		// comment above argues for and the thing that makes an unprivileged
+		// `ncfg status` safe. So when this suite runs as root its own child is
+		// root's, `ours` says yes to every caller, and there is no refusal to
+		// observe.
+		//
+		// Probed on the child rather than asked of `geteuid`: what decides is
+		// who owns the process, and that is what is read here.
+		if uids_of(&child.id().to_string()).is_some_and(|(real, _)| real == 0) {
+			let _ = child.kill();
+			let _ = child.wait();
+			eprintln!(
+				"{}: skipped -- this suite is running as root, so its own child is \
+				 root-owned and `ours` returns true for every caller by design. The \
+				 refusal is exercised when the suite runs as an ordinary user.",
+				"a_pid_file_naming_another_user_is_refused"
+			);
+			return;
+		}
 		let file = dir.join("pid");
 		std::fs::write(&file, format!("{}\n", child.id())).expect("write");
 		let mine = my_uid();
