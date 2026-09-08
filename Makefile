@@ -733,6 +733,18 @@ deb: version-check
 	@# A package with no unit has no maintainer script and enables nothing by
 	@# construction -- netcfgd-gui is that package. It counts as seen and not
 	@# as inspected, so the "checked nothing" guard still means what it says.
+	@#
+	@# **The preinst is checked too, and nothing stops the daemon on upgrade.**
+	@# dh_installsystemd generates a preinst that does, as half of a
+	@# stop-then-start pair whose other half `--no-start` suppresses -- so the
+	@# stop shipped, the start did not, and every upgrade left the machine's
+	@# network daemon dead, with the postinst's `try-restart` correctly doing
+	@# nothing to a unit the preinst had just stopped. `--no-stop-on-upgrade`
+	@# in debian/rules is the fix.
+	@#
+	@# Read from the artifact rather than the recipe, which is the whole reason
+	@# these checks live here: the snippet is generated at build time, so the
+	@# flag appearing in debian/rules is not evidence that it took.
 	@fail=0; \
 	seen=0; \
 	checked=0; \
@@ -755,12 +767,17 @@ deb: version-check
 		   ! printf '%s\n' "$$script" | grep -q 'debian-installed'; then \
 			echo "deb: $$deb enables a service on install"; fail=1; \
 		fi; \
+		pre=$$(dpkg-deb -I "$$deb" preinst 2>/dev/null | sed 's/#.*//'); \
+		if printf '%s\n' "$$pre" | grep -q 'deb-systemd-invoke stop'; then \
+			echo "deb: $$deb stops the daemon on upgrade and nothing starts it"; \
+			fail=1; \
+		fi; \
 	done; \
 	if [ "$$checked" -eq 0 ]; then \
 		echo "deb: no postinst was inspected, so this checked nothing"; fail=1; \
 	fi; \
 	[ $$fail -eq 0 ] || exit 1; \
-	echo "deb: $$seen packages, $$checked with a postinst, none enables or starts anything"
+	echo "deb: $$seen packages, $$checked with a postinst, none enables, starts or stops anything"
 	@ls -1 $(DIST)/*.deb
 
 # VERSION is the source; debian/changelog and Cargo.toml are held to it.

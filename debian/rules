@@ -69,8 +69,33 @@ endif
 # not: it takes org.freedesktop.NetworkManager, which stops NetworkManager --
 # on `apt install`, on a machine whose operator has not asked for anything
 # yet, and possibly over the network being reconfigured.
+#
+# **`--no-stop-on-upgrade`, and without it every upgrade left the machine's
+# network daemon stopped.** dh_installsystemd generates a *preinst* snippet that
+# stops the service on upgrade, before anything is unpacked:
+#
+#     if [ -z "$$DPKG_ROOT" ] && [ "$$1" = upgrade ] && [ -d /run/systemd/system ]
+#     then deb-systemd-invoke stop 'netcfgd.service'
+#
+# That is half of a pair -- debhelper stops in preinst and starts again in
+# postinst -- and `--no-start` suppresses the postinst half. So the stop was
+# emitted, the start was not, and the `try-restart` below it always ran against
+# a unit that was already dead: `try-restart` acts only on an ACTIVE unit, which
+# is exactly what the preinst had just stopped it being.
+#
+# It only began biting when the `#DEBHELPER#` token was added to the maintainer
+# scripts. Before that debhelper generated these snippets and dropped them --
+# the prerm records that -- so the preinst stop was written to
+# debian/.debhelper/ and never shipped. Adding the token was correct and turned
+# a latent generated fault into a live one, which is the shape worth naming: the
+# fix that makes a mechanism work is what exposes what the mechanism does.
+#
+# Reproduced as `dpkg --unpack` alone stopping a running daemon, three times,
+# with the maintainer scripts run by hand proving they were not the cause --
+# they were not: preinst is the one dpkg runs that hand-testing prerm and postrm
+# never reaches.
 override_dh_installsystemd:
-	dh_installsystemd --no-enable --no-start
+	dh_installsystemd --no-enable --no-start --no-stop-on-upgrade
 
 # The init scripts go in through `make install-sysvinit`, beside the unit and
 # for the same reason: `dh_installinit` wants them at debian/<package>.init and
