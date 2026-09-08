@@ -9539,6 +9539,21 @@ there by the same code shape. Each carries more than a report -- udhcpc's does
 the addressing -- so converting them is its own piece of work, named here so the
 omission is deliberate.
 
+**And user hooks, which is the fifth and the most visible.** `PendingHooks`
+materialises every configured hook into `<run>/hooks/` at mode `0700` and
+`hooks.rs` spawns it -- its own module comment says so: *"it materialises hooks
+under `/run` and spawns backends"*. Proven directly on this machine: a `0700`
+script under `/run` answers `Permission denied` on exec. So **no `pre_up`,
+`post_up`, `pre_down` or `post_down` hook can run on a default systemd
+machine.**
+
+Two things separate it from the dhcpcd case. It fails **loudly** -- netcfgd
+spawns these itself, so it sees the `EACCES` rather than losing it in another
+daemon's log, and a failed `pre_up` stops the actions behind it. And
+`tests/live/hooks.sh` cannot see it either: it sets `NCFG_RUN_DIR="$work/run"`
+under `/tmp`, which is the same blind spot `dhcpcd.sh` had until this pass.
+Recorded, not fixed.
+
 ### The suite had been passing against a `/run` no machine has
 
 `tests/live/dhcpcd.sh` mounted a plain tmpfs over `/run`. The machine's own
@@ -9624,11 +9639,14 @@ worse, because it fails towards green.
 
 ### Two more, smaller
 
-**The postinst says the machine has been taken over even on an upgrade.** The
-switcher call is guarded by `[ -z "$2" ]` and correctly does not run, but the
-sixteen `echo` lines below it are unguarded -- so `dpkg -i` over an existing
-install prints "it is now this machine's network daemon" and "the other network
-services are stopped, disabled and masked" while having changed none of that.
+**The postinst said the machine had been taken over even on an upgrade, and is
+fixed.** The switcher call is guarded by `[ -z "$2" ]` and correctly did not
+run; the four lines claiming its effect were not, so `dpkg -i` over an existing
+install announced "it is now this machine's network daemon" and "the other
+network services are stopped, disabled and masked" having changed none of that.
+Seen twice in this pass, while upgrading a machine deliberately running
+NetworkManager. The claim now shares the guard with the act, and an upgrade says
+what is true: which daemon owns the network is unchanged.
 
 **Three `netcfgd-cli` wifi tests fail when the suite is run as root**, and pass
 as an ordinary user: `an_unwritable_config_directory_is_not_written_to` and two

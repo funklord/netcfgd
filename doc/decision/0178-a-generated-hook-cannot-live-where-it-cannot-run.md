@@ -109,6 +109,14 @@ reproduce.
   route. They are not fixed here because each carries more than a report --
   udhcpc's does the addressing -- and turning them into shipped hooks is its own
   piece of work. Named here so the omission is deliberate rather than forgotten.
+- **User hooks are the fifth, and the most visible.** `PendingHooks`
+  materialises every configured hook into `<run>/hooks/` at mode `0700` and
+  spawns it, so no `pre_up`, `post_up`, `pre_down` or `post_down` runs on a
+  default systemd machine. It fails loudly, unlike this one -- netcfgd spawns
+  them itself and sees the `EACCES` -- but it fails absolutely, and
+  `tests/live/hooks.sh` cannot see it because it points `NCFG_RUN_DIR` at
+  `/tmp`. That is the same blind spot `dhcpcd.sh` had, and closing it is the
+  same one-line change to how the suite mounts `/run`.
 
 ## Alternatives rejected
 

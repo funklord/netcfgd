@@ -95,14 +95,23 @@ configure)
 			-exec chown root:root {} + -exec chmod 0600 {} + || true
 	fi
 
+	# **The takeover and the sentence claiming it must share a guard.** They did
+	# not: the call is first-install only, correctly, and the four lines below it
+	# ran unconditionally -- so `dpkg -i` over an existing install announced "it
+	# is now this machine's network daemon" and "the other network services are
+	# stopped, disabled and masked" having changed none of that. Seen while
+	# upgrading a machine deliberately running NetworkManager at the time.
 	if [ -z "$2" ] && [ -x /usr/sbin/netcfgd_select.sh ]; then
 		/usr/sbin/netcfgd_select.sh netcfgd || true
+		echo "netcfgd: installed, and it is now this machine's network daemon."
+		echo "netcfgd:   the other network services are stopped, disabled and"
+		echo "netcfgd:   masked -- the SERVICES only. No package was removed and"
+		echo "netcfgd:   no binary renamed."
+	else
+		echo "netcfgd: upgraded. Which daemon owns the network is unchanged:"
+		echo "netcfgd:   netcfgd_select.sh --dry-run   # what a switch would do"
 	fi
 
-	echo "netcfgd: installed, and it is now this machine's network daemon."
-	echo "netcfgd:   the other network services are stopped, disabled and"
-	echo "netcfgd:   masked -- the SERVICES only. No package was removed and"
-	echo "netcfgd:   no binary renamed."
 	echo "netcfgd:"
 	echo "netcfgd:   to go back, or to choose something else:"
 	echo "netcfgd:     netcfgd_select.sh networkmanager"
