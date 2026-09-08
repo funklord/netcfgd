@@ -227,6 +227,50 @@ def main() -> int:
 				print("select-gate:   whichever manager was chosen")
 				failures += 1
 
+	# **`dhcpcd` may not appear in `children_of`, ever.** That sweep decides
+	# ownership from the `/run/netcfgd/` marker in a process's argv, and dhcpcd
+	# calls `setproctitle`: its command line becomes `dhcpcd: eth0 [ip4]`, with
+	# the marker gone and, in the BOOTP proxy, the interface gone too. A test
+	# that cannot answer does not abstain -- `is_netcfgds` returns false, which
+	# reads as "somebody else's", which had `netcfgd_select.sh netcfgd`
+	# proposing to kill the client netcfgd had just started.
+	#
+	# It is stopped by `stop_netcfgd_dhcpcd` instead, from netcfgd's own
+	# bookkeeping under `/run/netcfgd/dhcpcd/` and with `dhcpcd -4 -k`, which
+	# takes the privilege-separated children with it where a signal to the pid
+	# does not. `tests/live/select.sh` proves that end to end; this refuses the
+	# regression without needing root or a namespace.
+	# Comments stripped, for the third time in this file: the arm that removed
+	# dhcpcd carries a paragraph explaining why, and scanning the raw body found
+	# the word there and failed on correct code. A check satisfied -- or broken
+	# -- by the prose that explains it is the shape this tree keeps meeting.
+	# **The programs echoed, not the case labels.** `children_of` has a
+	# `dhcpcd) echo \'\' ;;` arm, which is a legitimate statement that dhcpcd
+	# has no children of its own -- matching that read as the fault and failed
+	# on correct code. What matters is whether any arm *names dhcpcd as a
+	# program to sweep*, which is the echoed value.
+	#
+	# Comments stripped as well, for the third time in this file: the arm that
+	# removed dhcpcd carries a paragraph explaining why, and the word is in it.
+	# A check broken -- or satisfied -- by the prose that explains it is the
+	# shape this tree keeps meeting.
+	code = "\n".join(
+		line
+		for line in body(text, "children_of").splitlines()
+		if not line.lstrip().startswith("#")
+	)
+	swept = " ".join(re.findall(r"echo\s+\'([^\']*)\'", code))
+	if "dhcpcd" in swept.split():
+		print("select-gate: `dhcpcd` is in children_of, so the argv sweep will")
+		print("select-gate:   classify it -- and it cannot be classified, because")
+		print("select-gate:   setproctitle has destroyed the marker. Stop it with")
+		print("select-gate:   stop_netcfgd_dhcpcd instead")
+		failures += 1
+	if "stop_netcfgd_dhcpcd" not in text:
+		print("select-gate: nothing stops the dhcpcd netcfgd started, so it")
+		print("select-gate:   survives every switch and keeps the lease")
+		failures += 1
+
 	for function in ("claims_of", "children_of"):
 		covered = arms(text, function)
 		if "*" not in covered:

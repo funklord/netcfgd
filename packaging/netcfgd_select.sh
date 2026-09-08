@@ -280,12 +280,26 @@ children_of() {
 	# `comm` names, so all of these must be 15 characters or fewer -- the
 	# kernel truncates, and a name one character too long never matches while
 	# the sweep looks as though it had looked. `wpa_supplicant` is 14.
-	netcfgd) echo 'wpa_supplicant dhcpcd dhclient udhcpc odhcp6c hostapd pppd openvpn' ;;
-	networkmanager) echo 'wpa_supplicant dhclient dhcpcd iwd' ;;
+	#
+	# **`dhcpcd` is deliberately in none of these lists**, and it used to be in
+	# three. This sweep decides ownership from the `/run/netcfgd/` marker in a
+	# process's argv, and dhcpcd calls `setproctitle`: its command line reads
+	# `dhcpcd: wlp0s20f3 [ip4]`, with the marker gone and, for the BOOTP proxy,
+	# the interface gone too. So the test cannot answer for it, and a test that
+	# cannot answer does not abstain -- it returns "not netcfgd's", which made
+	# `netcfgd_select.sh netcfgd` propose killing the client netcfgd had just
+	# started, five processes at a time, as NetworkManager's leftover. Caught by
+	# `--dry-run` on a machine that was already running netcfgd.
+	#
+	# It is stopped by `stop_netcfgd_dhcpcd` instead, from netcfgd's own
+	# bookkeeping and with dhcpcd's own verb. Another manager's dhcpcd goes down
+	# with that manager's service, which is `unit_of dhcpcd` and `stand_aside`.
+	netcfgd) echo 'wpa_supplicant dhclient udhcpc odhcp6c hostapd pppd openvpn' ;;
+	networkmanager) echo 'wpa_supplicant dhclient iwd' ;;
 	networkd) echo 'wpa_supplicant' ;;
 	connman) echo 'wpa_supplicant dhclient' ;;
 	modemmanager) echo 'mbim-proxy qmi-proxy' ;;
-	ifupdown) echo 'dhclient dhcpcd wpa_supplicant udhcpc' ;;
+	ifupdown) echo 'dhclient wpa_supplicant udhcpc' ;;
 	wicd) echo 'wpa_supplicant dhclient' ;;
 	iwd) echo '' ;;
 	dhcpcd) echo '' ;;
@@ -406,6 +420,58 @@ in_our_netns() {
 
 # ---------------------------------------------------------------------------
 
+# The dhcpcd clients netcfgd started, named by its own bookkeeping.
+#
+# **dhcpcd is the one backend `sweep_children` structurally cannot find.** Every
+# other one carries `/run/netcfgd/...` in its argv for as long as it lives
+# (0140), which is what `is_netcfgds` reads. dhcpcd calls `setproctitle` and
+# destroys argv outright -- it reads `dhcpcd: wlp0s20f3 [ip4]` -- so the marker
+# is gone and the sweep skips it. That is why "I STILL had to kill orphaned
+# dhcpcd" survived the sweep being fixed: the fix worked for the supplicant and
+# could never work for this.
+#
+# netcfgd's own answer is the same one (0143): it does not look at argv either,
+# it asks dhcpcd over its control socket which `-f` it recites. The shell
+# equivalent is the file that `-f` names -- netcfgd creates
+# `/run/netcfgd/dhcpcd/<iface>-<family>.conf` for every client it starts, so the
+# directory listing *is* the list of clients, and a dhcpcd somebody else started
+# has no entry there.
+#
+# **Read before anything is stopped.** `RuntimeDirectoryPreserve=restart` means
+# a real stop of netcfgd.service deletes `/run/netcfgd` and takes these markers
+# with it -- measured, the orphan then logs `read_config: ... No such file or
+# directory` and re-solicits a *second* lease, which is where the machine got
+# two addresses. So the caller captures this at the top and passes it down.
+netcfgd_dhcpcd_clients() {
+	for marker in /run/netcfgd/dhcpcd/*.conf; do
+		[ -e "$marker" ] || continue
+		base=${marker##*/}
+		printf '%s ' "${base%.conf}"
+	done
+}
+
+# Stop them with dhcpcd's own verb, not a signal.
+#
+# `dhcpcd -4 -k <iface>` takes the client and its privilege-separated children
+# together; signalling the pid leaves the proxies behind, which is what left
+# five processes after a kill that looked like it had worked. The family flag is
+# not decoration: a client started with `-4` writes `<iface>-4.pid`, and a bare
+# `dhcpcd -k <iface>` looks for `<iface>.pid`, finds nothing and exits 1 (0070).
+stop_netcfgd_dhcpcd() {
+	[ -n "$1" ] || return 0
+	command -v dhcpcd >/dev/null 2>&1 || return 0
+	for client in $1; do
+		client_iface=${client%-*}
+		client_family=${client##*-}
+		case "$client_family" in
+		4 | 6) ;;
+		*) continue ;;
+		esac
+		say "stopping the dhcpcd netcfgd started on $client_iface (-$client_family)"
+		run dhcpcd "-$client_family" -k "$client_iface"
+	done
+}
+
 # The processes a manager started and did not stop.
 #
 # **Whose they are decides it, in both directions.** `is_netcfgds` reads the
@@ -418,6 +484,13 @@ in_our_netns() {
 # needed swept.
 sweep_children() {
 	manager=$1
+	# dhcpcd first, by netcfgd's bookkeeping rather than by argv -- see
+	# `stop_netcfgd_dhcpcd`. The argv sweep below still runs and still finds
+	# nothing for it, which is correct and cheap: a dhcpcd this did somehow
+	# match would be one that had not yet rewritten its own command line.
+	if [ "$manager" = netcfgd ]; then
+		stop_netcfgd_dhcpcd "${netcfgd_clients:-}"
+	fi
 	for program in $(children_of "$manager"); do
 		for pid in $(pgrep -x "$program" 2>/dev/null || true); do
 			# Written as one comparison rather than two `&&`/`||` guards.
@@ -589,6 +662,12 @@ warn_about_netplan() {
 }
 
 # ---------------------------------------------------------------------------
+
+# **Captured here, before a single unit is stopped.** Stopping netcfgd.service
+# deletes /run/netcfgd and takes the dhcpcd markers with it, so anything that
+# reads them afterwards reads an empty directory and sweeps nothing. This is the
+# one piece of state that has to outlive the stop.
+netcfgd_clients=$(netcfgd_dhcpcd_clients)
 
 case "$target" in
 none)

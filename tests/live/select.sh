@@ -73,7 +73,15 @@ cat > "$work/bin/deb-systemd-invoke" <<'STUB'
 #!/bin/sh
 echo "invoke $@" >> "$SEL_LOG"
 STUB
-chmod +x "$work/bin/systemctl" "$work/bin/deb-systemd-invoke"
+# **dhcpcd, because it cannot be swept by argv and is stopped by its own verb.**
+# Records rather than acts, like the systemctl stub: what is under test is
+# whether the script reaches for `dhcpcd -4 -k <iface>` on the right selections,
+# which is a property of the script.
+cat > "$work/bin/dhcpcd" <<'STUB'
+#!/bin/sh
+echo "dhcpcd $@" >> "$SEL_LOG"
+STUB
+chmod +x "$work/bin/systemctl" "$work/bin/deb-systemd-invoke" "$work/bin/dhcpcd"
 
 # **Two decoys, because the sweep is a question about ownership and one decoy
 # can only ever answer half of it.** `sweep_children` takes the processes
@@ -94,6 +102,12 @@ chmod +x "$work/bin/systemctl" "$work/bin/deb-systemd-invoke"
 mkdir -p "$work/theirs" "$work/ours"
 cp "$(command -v sleep)" "$work/theirs/wpa_supplicant" 2>/dev/null || true
 cp "$(command -v sh)" "$work/ours/wpa_supplicant" 2>/dev/null || true
+# **A dhcpcd process too, or the check that dhcpcd is never argv-swept passes by
+# finding nothing.** Measured: putting `dhcpcd` back into `children_of` fails no
+# check at all without this, because the sweep runs `pgrep -x dhcpcd` in a
+# namespace that has none. Not the `$work/bin/dhcpcd` stub, which is a script
+# and whose `comm` is `sh`.
+cp "$(command -v sleep)" "$work/theirs/dhcpcd" 2>/dev/null || true
 
 # One namespace per target, with fresh decoys each time. The three targets used
 # to share one, so a decoy killed by the first was already gone for the third
@@ -106,6 +120,13 @@ for target in netcfgd networkmanager none; do
 		work=$1; sel=$2; target=$3
 		mount -t tmpfs tmpfs /run
 		mkdir -p /run/systemd/system
+		# netcfgd names every dhcpcd it starts with one of these (0143). The
+		# directory listing is the client list, and it has to be read before
+		# anything stops netcfgd -- a real stop deletes /run/netcfgd and takes
+		# it away, which is the ordering this fixture exists to pin.
+		mkdir -p /run/netcfgd/dhcpcd
+		: > /run/netcfgd/dhcpcd/probe0-4.conf
+		: > /run/netcfgd/dhcpcd/probe1-6.conf
 		export PATH="$work/bin:$PATH"
 		# Bounded twice: each exits on its own, and each is signalled below
 		# whether or not the switcher reached it.
@@ -113,6 +134,11 @@ for target in netcfgd networkmanager none; do
 		if [ -x "$work/theirs/wpa_supplicant" ]; then
 			"$work/theirs/wpa_supplicant" 120 &
 			theirs=$!
+		fi
+		theirdh=
+		if [ -x "$work/theirs/dhcpcd" ]; then
+			"$work/theirs/dhcpcd" 120 &
+			theirdh=$!
 		fi
 		if [ -x "$work/ours/wpa_supplicant" ]; then
 			"$work/ours/wpa_supplicant" -c "sleep 120" \
@@ -162,6 +188,14 @@ for target in netcfgd networkmanager none; do
 		fi
 		if [ -n "$ours" ]; then
 			kill "$ours" 2>/dev/null || true
+		fi
+		# **By pid, never by `pgrep -x dhcpcd`.** The namespace shares the
+		# host pid namespace, so a name sweep here reaches the machine own
+		# running client -- which on a box where netcfgd is the network daemon
+		# is the thing carrying the network. The switcher is protected from
+		# that by its 0167 netns check; a raw cleanup loop is not.
+		if [ -n "$theirdh" ]; then
+			kill "$theirdh" 2>/dev/null || true
 		fi
 		exit 0
 	' sh "$work" "$select_sh" "$target" || true
@@ -271,6 +305,32 @@ check "none stops netcfgd's own backends" \
 # NetworkManager connection keeps it.
 check "and leaves another manager's supplicant running" \
 	"$(grep -c theirs "$work/none.alive" 2>/dev/null || true)" "1"
+
+# **dhcpcd, which no argv sweep can reach.** It calls `setproctitle`, so its
+# command line reads `dhcpcd: wlp0s20f3 [ip4]` with netcfgd's marker gone -- and
+# a sweep that cannot answer returns "not netcfgd's", which had
+# `netcfgd_select.sh netcfgd` proposing to kill the client netcfgd had just
+# started. It is stopped from netcfgd's own bookkeeping instead, with dhcpcd's
+# own verb, and the family flag matters: a client started with `-4` writes
+# `<iface>-4.pid`, and a bare `-k` finds nothing and exits 1 (0070).
+check "standing netcfgd down stops the dhcpcd it started" \
+	"$(count networkmanager 'dhcpcd -4 -k probe0')" "1"
+check "and the DHCPv6 one, by the family it was started with" \
+	"$(count networkmanager 'dhcpcd -6 -k probe1')" "1"
+check "none stops them too, which is what prerm needs" \
+	"$(count none 'dhcpcd -4 -k probe0')" "1"
+
+# **The half that matters most: selecting netcfgd must not stop netcfgd's own
+# client.** `stand_down` runs for every manager except the target, so
+# `sweep_children netcfgd` is never reached here -- and this is the assertion
+# that fails if dhcpcd is ever put back into `children_of`.
+check "selecting netcfgd stops no dhcpcd of its own" \
+	"$(count netcfgd 'dhcpcd -')" "0"
+# And the other route to the same harm: putting `dhcpcd` back into
+# `children_of` makes the argv sweep signal it as some other manager's
+# leftover. Read from the switcher's own stdout, where that sweep reports.
+check "and signals none as another manager's leftover either" \
+	"$(grep -c 'terminating dhcpcd' "$work/netcfgd.out" 2>/dev/null || true)" "0"
 
 # `none` is postrm's, and a machine that cannot start anything is the outcome
 # 0145 records.
