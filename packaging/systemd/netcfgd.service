@@ -27,6 +27,30 @@ Before=network-pre.target
 # contention check is per-device for exactly that reason. The drop-in beside
 # this file adds the conflict for anybody who does want it.
 
+# **No start limit, because the thing that gives up is the network daemon.**
+# systemd's default is five starts in ten seconds and then `failed` for good --
+# with `RestartSec=2` netcfgd spends that budget in eight seconds. Measured on
+# a transient unit carrying exactly these settings:
+#
+#     ncfg-cliff-probe.service: Start request repeated too quickly.
+#     Active: failed (Result: exit-code)
+#
+# The end state is a machine with no network daemon and nothing that will ever
+# try again, until somebody who probably has no network runs
+# `systemctl reset-failed`. And the failures that reach here are environmental
+# rather than about the configuration -- a run directory not ready, a stale
+# socket, a filesystem still mounting -- which is exactly the case where
+# trying again in two seconds works. A configuration that does not compile is
+# deliberately *not* one of them: netcfgd runs with none and says so, rather
+# than exiting.
+#
+# The cost of the other direction is one line every two seconds in the journal
+# for a daemon that is genuinely broken. That is a machine somebody has to fix
+# either way, and the loud version is the one that says what is wrong every
+# time rather than once, eight seconds after boot, in a message about rate
+# limiting. Decision 0188.
+StartLimitIntervalSec=0
+
 [Service]
 Type=exec
 ExecStart=/usr/sbin/netcfgd

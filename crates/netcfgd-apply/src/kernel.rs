@@ -92,6 +92,7 @@ pub fn apply_lock() -> std::io::Result<netcfgd_sys::lock::FileLock> {
 /// the lock file, which is the thing to look at next.
 const APPLY_PATIENCE: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Executes actions against rtnetlink and the backend helpers.
 pub struct KernelExecutor {
 	/// Held for the executor's whole life, which is one apply.
 	///
@@ -215,6 +216,11 @@ impl KernelExecutor {
 		self
 	}
 
+	/// Open a socket and learn the current interface indices.
+	///
+	/// # Errors
+	///
+	/// Returns the underlying `io::Error`.
 	pub fn new() -> std::io::Result<Self> {
 		let mut socket = Netlink::open()?;
 		socket.set_timeout(5)?;
@@ -2627,6 +2633,14 @@ const DHCPCD_V6: &str = "-6";
 /// tree keeps finding, so `the_shipped_dhcpcd_hook_reports_and_configures_nothing`
 /// asserts the hook contains this exact string rather than trusting them to
 /// stay in step.
+///
+/// **`cfg(test)`, because the test is now its only reader.** 0178 moved the
+/// `DHCPv6` report path into the shipped hook, which computes it in shell, so
+/// nothing in netcfgd composes this name any more -- it is an expectation
+/// about a file somebody else writes. Left in the library it was dead code
+/// that `make clippy` refused, and refused for a fortnight before anybody ran
+/// the target rather than the tool. Decision 0188.
+#[cfg(test)]
 const REPORT_DHCPCD6: &str = "dhcpcd6";
 
 /// Where netcfgd points dhcpcd's `-f`, and what it points at.

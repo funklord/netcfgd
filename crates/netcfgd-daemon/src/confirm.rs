@@ -237,7 +237,7 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 			// neither the new configuration nor the old one, which is the one
 			// outcome a revert exists to prevent.
 			Err(error) => {
-				netcfgd_sys::log_error!("confirm", "revert: undoing {} failed: {error}", op.name())
+				netcfgd_sys::log_error!("confirm", "revert: undoing {} failed: {error}", op.name());
 			}
 		}
 	}

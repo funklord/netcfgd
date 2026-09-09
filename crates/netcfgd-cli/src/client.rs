@@ -311,8 +311,8 @@ fn render_event(value: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::{ask, Answer};
-	use netcfgd_proto::{write_message, Request, Response};
+	use super::Answer;
+	use netcfgd_proto::{write_message, Response};
 
 	/// `Answer` mirrors `Response`'s tags by hand, which is a real coupling
 	/// and therefore checked rather than trusted. If a tag is ever renamed on

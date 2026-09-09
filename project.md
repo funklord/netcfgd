@@ -9461,6 +9461,52 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.81 And shutdown and restart, where the checks turned out to be half-run
+
+The shutdown story was already right and nothing had asserted it. netcfgd has
+no signal handler and no `ExecStop` on purpose -- 0134's argument is that
+stopping the daemon must not take the network down. Measured, and now in
+`tests/live/restart.sh`: **SIGTERM to exit is 20 ms**, so the unit's
+90-second `TimeoutStopSec` never matters; the address and the route survive
+the stop; a restart walks over its own leftovers and the machine stays
+configured; and **SIGKILL mid-apply leaves no lock held**, because `flock` is
+held by the open file description and the kernel drops it -- which is why 0184
+chose it, now turned into a check.
+
+### The fault: a start limit on the daemon that carries the network
+
+`Restart=on-failure`, `RestartSec=2`, and systemd's default of five starts in
+ten seconds: netcfgd spends that budget in **eight seconds** and lands in
+`failed` for good. Measured on a transient unit with exactly those settings --
+`Start request repeated too quickly`. The end state is a machine with no
+network daemon and nothing that will ever retry, until somebody who probably
+has no network runs `systemctl reset-failed`. `StartLimitIntervalSec=0`.
+
+And the key belongs in `[Unit]`; in `[Service]` systemd ignores it with a
+line saying so. `make packaging` already runs `systemd-analyze verify` and
+caught that within a minute.
+
+### What the audit actually found
+
+**`make check` was red, and had been for most of a day, while every report I
+wrote said the gates passed.** Three faults, all mine:
+
+* `make packaging` extracts `^Exec[A-Za-z]*=` as programs that must be
+  installed -- and 10.67's `ExecPaths=/run/netcfgd` made it call a run
+  directory an uninstalled binary.
+* `make clippy` runs `--workspace --all-targets -- -D warnings`. What I ran
+  was `cargo clippy --all-targets` grepped for `^error`, which is neither. It
+  was red on a `print_literal`, on `REPORT_DHCPCD6` going dead when the report
+  path moved into the shipped hook, and on a doc comment my own edit had
+  displaced: I inserted a constant between `KernelExecutor`'s doc comment and
+  the struct, so the comment documented the constant.
+
+Every one of those rode in on a commit whose report said "11 gates pass". The
+gates did pass. **`make check` runs twenty things and eleven of them are the
+gates.** It is the same lesson this document keeps writing down, turned on the
+person writing it: a check run in pieces is a different check, and the pieces
+that are easy to run are not the ones that were failing.
+
 ## 10.80 And the messages, which took flog's shape
 
 Fifty daemon messages, every one an `eprintln!("netcfgd: ...")`. The prose was

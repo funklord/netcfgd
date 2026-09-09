@@ -969,9 +969,16 @@ packaging:
 		if [ -n "$$out" ]; then echo "$$out"; fail=1; fi; \
 	fi; \
 	installed="$(SBINDIR)/netcfgd $(BINDIR)/ncfg $(BINDIR)/netcfgd-nm"; \
+	: "The Exec* keys that name a program, not every key beginning Exec." \
+	  "ExecPaths= is a sandbox directory list, and when 0178 added" \
+	  "ExecPaths=/run/netcfgd this check began reporting a run directory as" \
+	  "an uninstalled program -- and went on doing it, because whoever added" \
+	  "it was running the python gates rather than make check. 0188."; \
 	declared=$$( { \
-		sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service; \
-		sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd-nm.service; \
+		sed -n 's/^Exec\(Start\|Stop\|Reload\|StartPre\|StartPost\|StopPost\)=-\?\([^ ]*\).*/\2/p' \
+			packaging/systemd/netcfgd.service; \
+		sed -n 's/^Exec\(Start\|Stop\|Reload\|StartPre\|StartPost\|StopPost\)=-\?\([^ ]*\).*/\2/p' \
+			packaging/systemd/netcfgd-nm.service; \
 		sed -n 's/^command="\([^"]*\)".*/\1/p' packaging/openrc/netcfgd; \
 		sed -n 's/.*procd_set_param command \([^ ]*\).*/\1/p' packaging/procd/netcfgd; \
 		sed -n 's/^\t*\(\/[^ ]*ncfg\) .*/\1/p' packaging/procd/netcfgd; \
@@ -1531,6 +1538,10 @@ live:
 	@# down -- flog's shape, from the sibling projects. Before it, fifty
 	@# `eprintln!` calls with no severity, no subsystem and no filter. 0187.
 	@NCFG_LIVE=1 sh tests/live/log_shape.sh
+	@# Stopping, killing and restarting the daemon. netcfgd has no signal
+	@# handler and no ExecStop on purpose (0134): stopping it must not take the
+	@# network down, and that was a claim nothing checked. 0188.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/restart.sh"
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"

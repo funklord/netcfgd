@@ -635,10 +635,10 @@ mod tests {
 			let _ = child.kill();
 			let _ = child.wait();
 			eprintln!(
-				"{}: skipped -- this suite is running as root, so its own child is \
-				 root-owned and `ours` returns true for every caller by design. The \
-				 refusal is exercised when the suite runs as an ordinary user.",
-				"a_marker_carried_by_another_user_is_refused"
+				"a_marker_carried_by_another_user_is_refused: skipped -- this suite is running as root, so its own \
+				 child is root-owned and `ours` returns true for every caller by \
+				 design. The refusal is exercised when the suite runs as an \
+				 ordinary user."
 			);
 			return;
 		}
@@ -689,10 +689,10 @@ mod tests {
 			let _ = child.kill();
 			let _ = child.wait();
 			eprintln!(
-				"{}: skipped -- this suite is running as root, so its own child is \
-				 root-owned and `ours` returns true for every caller by design. The \
-				 refusal is exercised when the suite runs as an ordinary user.",
-				"a_pid_file_naming_another_user_is_refused"
+				"a_pid_file_naming_another_user_is_refused: skipped -- this suite is running as root, so its own \
+				 child is root-owned and `ours` returns true for every caller by \
+				 design. The refusal is exercised when the suite runs as an \
+				 ordinary user."
 			);
 			return;
 		}
