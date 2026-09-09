@@ -316,9 +316,24 @@ impl Resolver {
 		}
 		let path = self.secrets_dir.join(name);
 
-		let metadata = std::fs::metadata(&path).map_err(|_| Error::NotFound {
-			name: name.to_owned(),
-			where_: self.secrets_dir.display().to_string(),
+		// **"Not there" and "cannot be looked at" are different sentences.**
+		// Every error used to become `NotFound`, whose message tells the
+		// operator to run `ncfg secret set` -- advice that is wrong, and
+		// destructive if taken, for a secret that is sitting right there
+		// behind a permission error, a symlink loop or a failing disk. The
+		// kind is what separates them; the words after it are the kernel's.
+		let metadata = std::fs::metadata(&path).map_err(|error| {
+			if error.kind() == std::io::ErrorKind::NotFound {
+				Error::NotFound {
+					name: name.to_owned(),
+					where_: self.secrets_dir.display().to_string(),
+				}
+			} else {
+				Error::Failed {
+					name: name.to_owned(),
+					reason: format!("{}: {error}", path.display()),
+				}
+			}
 		})?;
 
 		check_mode(name, &path, &metadata)?;

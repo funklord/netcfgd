@@ -9461,6 +9461,75 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.74 And every read, where the same question has a worse answer
+
+> now check the read errors too
+
+The write audit's twin, and the finding is not symmetrical. **A write that
+fails loses something netcfgd wanted to keep; a read that fails can produce a
+false statement about the machine** -- and netcfgd acts on statements.
+
+Ninety-seven reads: twelve propagate, thirty-two are handled where they stand,
+fifty-three drop the error, and **nearly all fifty-three are right**. Absence
+is usually the answer -- no pid file, nothing running; no record, nothing to
+compare against -- and the rule was already written down on
+`config_file_of`: *"None is not 'somebody else's', it is 'netcfgd could not
+tell'"*. The observation code follows it: four currency checks all leave
+`None` for a record they cannot read, each with a sentence saying why.
+
+The fault was in a population the search for `fs::` calls does not reach:
+**forty-seven `exists()`, `is_file()` and `is_dir()` calls, which swallow the
+error by construction.**
+
+### Measured: a config that could not be read deconfigured the machine
+
+`/etc/netcfgd/netcfgd.conf` made a symlink to itself:
+
+    $ ncfg apply
+    ok   addr.del read0  addressing: <absent> (was 10.11.0.1/24)
+    $ echo $?
+    0
+
+`if main.is_file()` answers `false` for a file it cannot examine, so an
+unreadable config became an **empty** one -- and an empty config is not
+nothing. It is the statement *nothing here is netcfgd's*, which netcfgd acted
+on: address off the interface, exit 0. Four ways in, none exotic: a symlink
+loop, a dangling symlink (a config on a disk that is not mounted, which is the
+likeliest), a directory in place of the file, `EIO`. The same gate guarded
+`conf.d`, so the wifi networks and the DNS policy could go the same way.
+
+`present()` now keeps three states apart where `is_file` has two: not there
+(skip -- an ordinary machine), there (read it), **cannot tell (refuse, naming
+the path and the kernel's words)**. It looks at the link before resolving it,
+because `metadata` follows one and would put the likeliest case back in "not
+there".
+
+### The same shape one crate over
+
+`netcfgd-secret` mapped every `metadata` failure to `NotFound`, whose message
+ends *"`ncfg secret set <name>` stores one"*. Right for a secret nobody
+stored; **wrong for one behind a permission error or a symlink loop, and
+destructive if the advice is taken**, because storing over it replaces a
+credential that was there.
+
+### What the control is for, and why it is not optional
+
+`tests/live/config_unreadable.sh` requires the address to survive all four
+unreadable shapes -- and then requires that an **absent** config still applies
+and still takes the address back. The fix could easily have been "refuse
+anything that is not a readable regular file", which would break every machine
+that has no netcfgd configuration at all. Sabotaged back to `is_file()`, eight
+checks go red including the interface losing its address.
+
+### The through-line of the week
+
+`ProtectSystem=full` made a grant inert; `/run` `noexec` made a hook
+unrunnable; a bounding set made a signal impossible; a full disk made a write
+half-happen; and an unreadable file made a configuration look empty. Five
+faults, one shape: **netcfgd could not do something, and what it reported was
+either success or a state it had guessed.** Every one of them was found by
+making the failure happen rather than by reading the code that handles it.
+
 ## 10.73 Every write netcfgd makes, asked the same question at once
 
 > Have you checked all the write errors on all files netcfgd has to write?

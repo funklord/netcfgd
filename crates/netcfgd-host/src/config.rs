@@ -38,17 +38,69 @@ pub fn load(dir: &Path) -> io::Result<SourceMap> {
 
 /// Add one directory's files to a source map already being built.
 fn extend(sources: &mut SourceMap, dir: &Path) -> io::Result<()> {
-	let main = dir.join("netcfgd.conf");
-	if main.is_file() {
-		add_file(sources, &main)?;
+	if present(&dir.join("netcfgd.conf"))? {
+		add_file(sources, &dir.join("netcfgd.conf"))?;
 	}
 
 	let drop_in_dir = dir.join("conf.d");
-	if drop_in_dir.is_dir() {
+	if present(&drop_in_dir)? {
 		add_drop_ins(sources, &drop_in_dir)?;
 	}
 
 	Ok(())
+}
+
+/// Whether a configuration path is there -- refusing to answer "no" for one it
+/// cannot look at.
+///
+/// **`Path::is_file` answers `false` for a file it cannot examine**, and that
+/// is the whole of this function's reason. It swallows the error, so a
+/// `netcfgd.conf` that is a symlink loop, a dangling symlink onto an unmounted
+/// disk, or a path on a filesystem returning `EIO` all read as *no
+/// configuration at all* -- and an empty configuration is a legitimate,
+/// meaningful state. Measured: with `netcfgd.conf` made a symlink to itself,
+/// `ncfg apply` printed `ok addr.del read0`, **took the address off the
+/// interface, and exited 0**. The machine was deconfigured because a file
+/// could not be read, and nothing said so.
+///
+/// So the three states are kept apart, which `is_file` cannot do:
+///
+///   * not there -- `Ok(false)`, and the caller skips it. A machine with no
+///     `/etc/netcfgd` is an ordinary machine, and the doc comment on [`load`]
+///     has always promised that.
+///   * there -- `Ok(true)`, and the caller reads it. If it turns out not to be
+///     a regular file, `add_file` refuses with a sentence about devices and
+///     fifos, which is a better error than this could give.
+///   * cannot tell -- `Err`, naming the path and the kernel's own words. A
+///     dangling symlink lands here rather than in "not there": the operator
+///     wrote a link, so the honest answer is that it points at nothing, not
+///     that they configured nothing.
+fn present(path: &Path) -> io::Result<bool> {
+	// The link itself first. `metadata` follows one, so a dangling symlink
+	// would answer `NotFound` and be indistinguishable from an absent file.
+	match fs::symlink_metadata(path) {
+		Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+		Err(error) => {
+			return Err(io::Error::new(
+				error.kind(),
+				format!("{}: {error}", path.display()),
+			));
+		}
+		Ok(_) => {}
+	}
+	// It is there. Resolving it has to work as well, or what is there cannot
+	// be read and saying "no configuration" would be a guess.
+	fs::metadata(path).map_err(|error| {
+		io::Error::new(
+			error.kind(),
+			format!(
+				"{}: {error} -- it is there but cannot be read, which is not the \
+				 same as a machine with no configuration",
+				path.display()
+			),
+		)
+	})?;
+	Ok(true)
 }
 
 /// Every `.conf` in one directory, in lexical filename order.
@@ -60,7 +112,8 @@ fn extend(sources: &mut SourceMap, dir: &Path) -> io::Result<()> {
 /// nested `conf.d` -- so it found nothing, silently, and the profile appeared
 /// to be empty.
 fn add_drop_ins(sources: &mut SourceMap, dir: &Path) -> io::Result<()> {
-	let mut drop_ins: Vec<PathBuf> = fs::read_dir(dir)?
+	let mut drop_ins: Vec<PathBuf> = fs::read_dir(dir)
+		.map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", dir.display())))?
 		.filter_map(Result::ok)
 		.map(|entry| entry.path())
 		.filter(|path| {
@@ -294,7 +347,9 @@ pub fn load_with_profile(factory: &Path, runtime: &Path) -> io::Result<SourceMap
 	};
 	for root in roots {
 		let dir = root.join("profile").join(&name);
-		if dir.is_dir() {
+		// `present` rather than `is_dir`, for its reason: a profile directory
+		// that cannot be examined is not a profile that is empty.
+		if present(&dir)? {
 			add_drop_ins(&mut sources, &dir)?;
 		}
 	}
@@ -646,6 +701,78 @@ pub fn resolve_dir(explicit: Option<&str>) -> PathBuf {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// **A configuration that is there and cannot be read is not an empty
+	/// one**, and `Path::is_file` cannot tell the difference.
+	///
+	/// This gate used to be `if main.is_file()`, which answers `false` for a
+	/// file it cannot examine. Measured before the fix, with `netcfgd.conf`
+	/// made a symlink to itself: `ncfg apply` compiled an empty document,
+	/// printed `ok addr.del read0`, took the address off the interface and
+	/// **exited 0**. A machine deconfigured because a file could not be read,
+	/// with nothing anywhere saying so.
+	///
+	/// A symlink loop is the refusal used here because it needs no privilege
+	/// and no mount -- root gets `ELOOP` exactly as anybody does, where a mode
+	/// would be walked straight through (10.71).
+	#[test]
+	fn a_config_that_cannot_be_examined_is_refused_rather_than_read_as_empty() {
+		let dir = netcfgd_testdir::TestDir::new("config-unreadable");
+		std::os::unix::fs::symlink("netcfgd.conf", dir.join("netcfgd.conf")).expect("linked");
+
+		let error = load(&dir).expect_err("a config that cannot be read is not an empty config");
+		let text = error.to_string();
+		assert!(text.contains("netcfgd.conf"), "names the path: {text}");
+		assert!(
+			text.contains("os error"),
+			"carries the kernel's own reason: {text}"
+		);
+		assert!(
+			text.contains("no configuration"),
+			"says which two states it is keeping apart: {text}"
+		);
+	}
+
+	/// And the same for the drop-in directory, which had the same gate.
+	#[test]
+	fn a_drop_in_directory_that_cannot_be_examined_is_refused() {
+		let dir = netcfgd_testdir::TestDir::new("config-unreadable");
+		std::fs::write(dir.join("netcfgd.conf"), "interface eth0 { }\n").expect("written");
+		std::os::unix::fs::symlink("conf.d", dir.join("conf.d")).expect("linked");
+
+		let error = load(&dir).expect_err("a conf.d that cannot be read is not an empty one");
+		assert!(error.to_string().contains("conf.d"), "got {error}");
+	}
+
+	/// **A link that points at nothing is not a machine with no config.**
+	///
+	/// `metadata` follows a symlink and answers `NotFound` for a dangling one,
+	/// which is why the check looks at the link itself first. The operator
+	/// wrote a link -- to a config on a disk that is not mounted, most likely
+	/// -- so the honest answer names it rather than silently configuring
+	/// nothing.
+	#[test]
+	fn a_dangling_symlink_is_reported_rather_than_treated_as_absent() {
+		let dir = netcfgd_testdir::TestDir::new("config-unreadable");
+		std::os::unix::fs::symlink(dir.join("elsewhere.conf"), dir.join("netcfgd.conf"))
+			.expect("linked");
+
+		let error = load(&dir).expect_err("a link to nothing is not nothing");
+		assert!(error.to_string().contains("netcfgd.conf"), "got {error}");
+	}
+
+	/// **The control, and the state this must go on allowing.** A machine with
+	/// no `/etc/netcfgd` at all is an ordinary machine, and `load`'s own doc
+	/// comment has always promised that an absent config is not an error.
+	#[test]
+	fn a_config_that_is_simply_absent_is_still_not_an_error() {
+		let dir = netcfgd_testdir::TestDir::new("config-absent");
+		let sources = load(&dir.join("nothing-here")).expect("an absent config is a valid state");
+		assert!(sources.is_empty(), "and it holds nothing");
+
+		let empty = load(&dir).expect("an empty directory is a valid state");
+		assert!(empty.is_empty());
+	}
 
 	/// A file that includes itself is refused rather than recursed into.
 	///

@@ -161,6 +161,37 @@ fn a_missing_secret_says_where_it_looked() {
 	let _ = fs::remove_dir_all(&dir);
 }
 
+/// **A secret that is there and cannot be read must not be called missing.**
+///
+/// `NotFound`'s message ends with "`ncfg secret set <name>` stores one", which
+/// is the right advice for a secret nobody has stored and the wrong advice for
+/// one sitting behind a symlink loop, a permission error or a failing disk --
+/// wrong, and destructive if taken, because storing over it replaces a
+/// credential that was there. Every `metadata` failure used to become
+/// `NotFound`.
+///
+/// The refusal is a symlink loop, which needs no privilege: root gets `ELOOP`
+/// exactly as anybody does, where a mode would be walked straight through.
+#[test]
+fn a_secret_that_cannot_be_read_is_not_reported_as_missing() {
+	let dir = scratch("unreadable");
+	std::os::unix::fs::symlink("looped", dir.join("looped")).expect("linked");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+
+	match resolver.resolve(&reference("looped", SecretProvider::File)) {
+		Err(Error::Failed { reason, .. }) => {
+			assert!(reason.contains("looped"), "names the path: {reason}");
+			assert!(
+				reason.contains("os error"),
+				"the kernel's own words: {reason}"
+			);
+		}
+		other => panic!("expected Failed, got {other:?}"),
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+}
+
 /// The type refuses to print itself. Anything holding a passphrase ends up
 /// inside a derived Debug, an error, or a panic message eventually, and the
 /// one place to stop that is here.

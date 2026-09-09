@@ -1506,6 +1506,12 @@ live:
 	@# `replace` declining to fall back on a full disk -- the fallback there
 	@# truncates a working resolv.conf and then reports success. 0180.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/write_full.sh"
+	@# The read side of the same question, and the more expensive half: a
+	@# configuration that could not be *read* was compiled as an empty one,
+	@# which is a meaningful state -- so `ncfg apply` took the address off the
+	@# interface and exited 0. `Path::is_file` answers false for a file it
+	@# cannot examine. 0181.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_unreadable.sh"
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
