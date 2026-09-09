@@ -264,6 +264,30 @@ fn chown_group(path: &Path, gid: u32) -> std::io::Result<()> {
 	std::os::unix::fs::chown(path, None, Some(gid))
 }
 
+/// How long an accepted connection has to make its first request.
+///
+/// **A connection that has said nothing is not a client**, and until 0183 one
+/// could hold a slot for ever: `handle` blocked in `read_request` with no
+/// deadline, so sixty-four connections that connect and stay silent took every
+/// slot the cap allows and the daemon answered "too many connections" to
+/// everybody else. Measured, against a real daemon: sixty-four idle
+/// connections, and `ncfg reload` refused for as long as they were held. On a
+/// machine whose `control` policy opens `observe` to `any` -- which is the
+/// shape `debian/postinst` suggests -- that is any local user.
+///
+/// Generous, because it is only about *silence*. A client that connects and
+/// asks something inside ten seconds keeps its connection with no deadline at
+/// all after that: the timeout is cleared once a request has been read, so a
+/// tray that holds an idle connection between clicks, and a `monitor` stream
+/// that by design says nothing for hours, are untouched.
+///
+/// **What this does not close**, said plainly: a caller that sends one valid
+/// request and then idles still holds its slot. Closing that means an idle
+/// timeout on an established client, which would drop the tray and the
+/// monitor stream this exempts. The cap remains what bounds the damage, and
+/// `MAX_CONNECTIONS` says so.
+const FIRST_REQUEST: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn handle(stream: UnixStream, origin: Origin, commands: &Sender<Command>) {
 	// Read once, at accept time, rather than per request: the credentials
 	// belong to the connection, and re-reading them would only widen the
@@ -274,8 +298,15 @@ fn handle(stream: UnixStream, origin: Origin, commands: &Sender<Command>) {
 	let Ok(write_half) = stream.try_clone() else {
 		return;
 	};
+	// The deadline above, set before the first read and cleared after it.
+	// Failing to set it is not a reason to refuse the connection: the
+	// consequence is one slot that can be held, which is the state every
+	// release before this one shipped.
+	let _ = stream.set_read_timeout(Some(FIRST_REQUEST));
+	let deadline = stream.try_clone().ok();
 	let mut reader = BufReader::new(stream);
 	let mut writer = BufWriter::new(write_half);
+	let mut spoken = false;
 
 	loop {
 		// `read_request` and not `read_message`: this is the surface that reads
@@ -291,6 +322,15 @@ fn handle(stream: UnixStream, origin: Origin, commands: &Sender<Command>) {
 				return;
 			}
 		};
+		// **Cleared on the first request, and never set again.** What the
+		// deadline is for is a connection that never speaks; one that has
+		// spoken is a client, and a client is allowed to be quiet.
+		if !spoken {
+			spoken = true;
+			if let Some(socket) = deadline.as_ref() {
+				let _ = socket.set_read_timeout(None);
+			}
+		}
 
 		if matches!(request, Request::Monitor) {
 			// Streaming is still a request and still gets checked. The loop

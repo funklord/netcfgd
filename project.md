@@ -9461,6 +9461,77 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.76 And the sockets, which fail in ways files do not
+
+The fourth audit. A socket adds failures a file has never had: a peer that
+connects and never speaks, a message that does not fit, an answer that arrives
+before the question. One of each, in three different places.
+
+### A connection that says nothing held a slot for ever
+
+The control socket caps concurrent connections at 64 and answers the 65th with
+a message rather than a dropped connection -- both deliberate, both right.
+Neither covers a connection that is not a client: `handle` blocked in
+`read_request` with no deadline. Measured against a real daemon, **64 silent
+connections and `ncfg reload` refused for as long as they were held** -- and
+where the policy opens `observe` to `any`, which is this machine's own, that
+is any local user with no credential and no request.
+
+A ten-second deadline on the *first* request, cleared once one arrives, so the
+tray that idles between clicks and the `monitor` stream that says nothing for
+hours are untouched. What it does not close is written down rather than
+implied: one valid request and then silence still holds a slot, and closing
+that would drop the very clients the exemption exists for.
+
+### The refusal reached the buffer and not the operator
+
+With the cap reached, `ncfg reload` said `cannot send: Broken pipe (os error
+32)`. The daemon answers on accept and closes, so the client's write lands on
+a closed socket **while the sentence explaining why is already in the client's
+own receive buffer**. A message composed carefully at one end, thrown away one
+function later at the other.
+
+Pinned on the function, not through a socket: through a socket it is a race,
+and the first version of that test passed for the wrong reason -- the write
+went into a buffer, the read found the refusal, and the path being fixed was
+never taken.
+
+### A netlink reply that did not fit was silently short
+
+`recv` without `MSG_TRUNC`. Netlink delivers a datagram whole or not at all,
+so a buffer too small takes what fits, the kernel drops the rest, and the
+return value is the buffer's length: **an incomplete dump that reports itself
+as complete**, and a wait to the socket timeout where the lost tail held the
+`NLMSG_DONE`.
+
+**Latent here, and measured rather than assumed**: the kernel caps a dump's
+datagrams just under the 32 KiB buffer -- 31,944 bytes for 800 interfaces,
+whatever the count. What reaches it is a single oversized message, and a
+WireGuard device with many peers is one message.
+
+`MSG_PEEK | MSG_TRUNC` asks the size without consuming; the buffer grows and
+takes the datagram whole, bounded at a megabyte.
+
+**The first fix was wrong and the test caught it.** Re-sending the request
+with a bigger buffer leaves the truncated reply's remaining datagrams queued,
+to be skipped against the new sequence number while the new reply waits behind
+them: it passed once and returned an empty dump on the next run. That is the
+second time this week a fix of mine passed its first run and failed its
+second, and both times what found it was running the test again rather than
+reading it.
+
+### What the four audits say together
+
+* **Writes** (10.73): the failure was heard by nobody.
+* **Reads** (10.74): the failure became a false statement, and netcfgd acted.
+* **Execs** (10.75): sound, but one message covered two repairs.
+* **Sockets** (10.76): a peer that says nothing, an answer nobody read, and a
+  reply that did not fit.
+
+Four passes, four different shapes, and one method: make the failure happen.
+None of these was found by reading the code that handles it -- including the
+two where the code that handles it was mine, written an hour earlier.
+
 ## 10.75 And every exec, where the audit came back clean but for one sentence
 
 The third of the three. Sixteen places run a program, and **every one of them

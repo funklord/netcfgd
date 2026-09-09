@@ -175,6 +175,14 @@ impl Netlink {
 		self.seq
 	}
 
+	/// The largest netlink reply this will grow a buffer to hold.
+	///
+	/// A megabyte is far past anything the kernel sends in one datagram -- a link
+	/// dump message is a kilobyte or so -- and the point of the number is that
+	/// growing is bounded rather than that this is the right size. A reply beyond
+	/// it is reported with its size, which is the number whoever raises it needs.
+	const MAX_REPLY: usize = 1024 * 1024;
+
 	/// Send a request and collect every reply message belonging to it.
 	///
 	/// Handles the multipart protocol: a dump answers with a run of messages
@@ -194,14 +202,35 @@ impl Netlink {
 		body: &[u8],
 		attrs: &wire::AttrBuf,
 	) -> io::Result<Vec<Vec<u8>>> {
+		self.request_from(kind, request_flags, body, attrs, 32 * 1024)
+	}
+
+	/// [`request`](Self::request), starting from a buffer of a given size.
+	///
+	/// **The size is a parameter so that the growth can be tested.** The
+	/// kernel caps a dump's datagrams just under 32 KiB -- measured, 31,944
+	/// bytes for a link dump of 800 interfaces -- so the ordinary buffer is
+	/// never exceeded by one and no test could make it overflow by asking for
+	/// more interfaces. Starting deliberately small reaches the same code the
+	/// way a single oversized message would, which is the case that does
+	/// happen: one netlink message is delivered whole or not at all, and a
+	/// device with a great many peers is one message.
+	fn request_from(
+		&mut self,
+		kind: u16,
+		request_flags: u16,
+		body: &[u8],
+		attrs: &wire::AttrBuf,
+		initial: usize,
+	) -> io::Result<Vec<Vec<u8>>> {
 		let seq = self.next_seq();
 		let message = wire::build_request(kind, request_flags, seq, body, attrs);
 		self.send(&message)?;
 
 		let mut collected = Vec::new();
-		let mut buffer = vec![0_u8; 32 * 1024];
+		let mut buffer = vec![0_u8; initial.max(1)];
 		loop {
-			let read = self.receive(&mut buffer)?;
+			let read = self.receive_whole(&mut buffer)?;
 			let mut saw_done = false;
 			for message in wire::Messages::new(&buffer[..read]) {
 				if message.header.seq != seq && message.header.seq != 0 {
@@ -320,7 +349,7 @@ impl Netlink {
 				self.fd,
 				bytes.as_ptr().cast::<libc::c_void>(),
 				bytes.len(),
-				0,
+				libc::MSG_TRUNC,
 			)
 		};
 		if sent < 0 {
@@ -329,12 +358,78 @@ impl Netlink {
 		Ok(())
 	}
 
+	/// Take the next datagram whole, growing the buffer first if it will not
+	/// fit.
+	///
+	/// **`MSG_PEEK` asks the size without consuming**, which is what makes
+	/// this recoverable at all. A netlink datagram is delivered whole or not
+	/// at all: read it into something too small and the remainder is
+	/// discarded, so there is no second chance at the part that was dropped.
+	/// Asking first and then reading is the standard shape for exactly that
+	/// reason.
+	///
+	/// **Re-sending the request instead does not work, and the test caught
+	/// it.** A first version doubled the buffer and asked again -- which
+	/// leaves the truncated reply's remaining datagrams queued on the same
+	/// socket, to be read and skipped against the new sequence number while
+	/// the new reply queues behind them. It passed once and failed the next
+	/// run with an empty dump. Decision 0183.
+	fn receive_whole(&self, buffer: &mut Vec<u8>) -> io::Result<usize> {
+		let needed = self.peek_size(buffer)?;
+		if needed > buffer.len() {
+			if needed > Self::MAX_REPLY {
+				let cap = Self::MAX_REPLY;
+				return Err(io::Error::new(
+					io::ErrorKind::InvalidData,
+					format!("a netlink reply of {needed} bytes is past the {cap} this will hold"),
+				));
+			}
+			buffer.resize(needed, 0);
+		}
+		self.receive(buffer)
+	}
+
+	/// How large the next datagram is, leaving it queued.
+	fn peek_size(&self, buffer: &mut [u8]) -> io::Result<usize> {
+		// SAFETY: as `receive`, and `MSG_PEEK` additionally leaves the
+		// datagram where it is, so the read that follows sees the same one.
+		let read = unsafe {
+			libc::recv(
+				self.fd,
+				buffer.as_mut_ptr().cast::<libc::c_void>(),
+				buffer.len(),
+				libc::MSG_PEEK | libc::MSG_TRUNC,
+			)
+		};
+		if read < 0 {
+			return Err(io::Error::last_os_error());
+		}
+		Ok(usize::try_from(read).unwrap_or(0))
+	}
+
+	/// Receive one datagram, returning **the size the kernel had**, which may
+	/// be larger than the buffer.
+	///
+	/// **`MSG_TRUNC`, because without it a reply that does not fit is lost
+	/// without a word.** A netlink datagram is delivered whole or not at all:
+	/// a plain `recv` fills the buffer, discards the rest, and returns the
+	/// buffer's length, so the caller parses the messages that fit and never
+	/// learns there were more. What that costs is not a failure but an
+	/// *incomplete observation* -- interfaces, addresses or routes missing
+	/// from a dump -- and, where the lost tail held the `NLMSG_DONE`, a wait
+	/// that runs to the socket's timeout for no reason anybody could see.
+	///
+	/// With the flag the return value is the true size and truncation is
+	/// `read > buffer.len()`, which every caller here checks. Callers must
+	/// slice with the smaller of the two: the bytes past the buffer are the
+	/// kernel's count, not memory anybody wrote. Decision 0183.
 	fn receive(&self, buffer: &mut [u8]) -> io::Result<usize> {
 		// SAFETY: `buffer` is a live, uniquely borrowed slice for the duration
 		// of the call, and the length passed is its actual length, so the
-		// kernel writes only within memory we own and may mutate. The return
-		// value is bounded by that length, so the `usize` conversion below
-		// cannot exceed the slice.
+		// kernel writes only within memory we own and may mutate. With
+		// `MSG_TRUNC` the *return value* may exceed that length -- it is the
+		// datagram's size, not a count of bytes written -- so it is not used
+		// to slice the buffer without being clamped first.
 		let read = unsafe {
 			libc::recv(
 				self.fd,
@@ -357,5 +452,71 @@ impl Drop for Netlink {
 		// does not hand the descriptor out. Dropping is therefore the only
 		// close, and nothing can use it afterwards.
 		unsafe { libc::close(self.fd) };
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{flags, msg_type, wire, Netlink};
+
+	/// **A reply that does not fit is asked for again, and nothing is lost.**
+	///
+	/// Netlink delivers a datagram whole or not at all: a plain `recv` fills
+	/// the buffer, silently discards the rest, and reports the buffer's
+	/// length. What that costs is an *incomplete* dump -- interfaces missing
+	/// from an observation with nothing anywhere saying so -- and, where the
+	/// lost tail held the `NLMSG_DONE`, a wait that runs to the socket's
+	/// timeout for no visible reason. `MSG_TRUNC` makes the true size the
+	/// return value, so truncation is visible and the request is re-sent
+	/// against a bigger buffer.
+	///
+	/// **Driven by starting small rather than by making a huge reply**,
+	/// because the kernel will not make one on demand: measured, it caps a
+	/// dump's datagrams just under 32 KiB -- 31,944 bytes for 800 interfaces
+	/// -- so asking for more interfaces never overflows the ordinary buffer.
+	/// A single oversized *message* does reach this, and a device with a great
+	/// many peers is one message. Starting at 128 bytes takes the same path
+	/// deterministically, on any machine, with no privilege: a link dump is
+	/// readable by anybody.
+	///
+	/// The assertion is equality with the same dump read the ordinary way, so
+	/// this fails both if the growth loses messages and if it invents any.
+	#[test]
+	fn a_dump_too_big_for_its_buffer_is_read_again_rather_than_truncated() {
+		let Ok(mut netlink) = Netlink::open() else {
+			eprintln!("socket: skipping -- no netlink socket here");
+			return;
+		};
+		let body = vec![0_u8; wire::IFINFO_LEN];
+		let attrs = wire::AttrBuf::new();
+
+		let roomy = netlink
+			.request_from(
+				msg_type::RTM_GETLINK,
+				flags::NLM_F_REQUEST | flags::NLM_F_DUMP,
+				&body,
+				&attrs,
+				32 * 1024,
+			)
+			.expect("a link dump is readable without privilege");
+		assert!(
+			!roomy.is_empty(),
+			"a machine with no interfaces at all cannot check this"
+		);
+
+		let cramped = netlink
+			.request_from(
+				msg_type::RTM_GETLINK,
+				flags::NLM_F_REQUEST | flags::NLM_F_DUMP,
+				&body,
+				&attrs,
+				128,
+			)
+			.expect("a buffer too small is grown, not given up on");
+		assert_eq!(
+			cramped.len(),
+			roomy.len(),
+			"the same dump, whatever it was read into"
+		);
 	}
 }

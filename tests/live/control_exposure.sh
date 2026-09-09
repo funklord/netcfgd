@@ -73,6 +73,28 @@ export NCFG_RUN_DIR="$work/run"
 export NCFG_WPA_CTRL_DIR="$work/ctrl"
 
 failures=0
+contains() {
+	case "$2" in
+	*"$3"*) echo "ok   $1" ;;
+	*)
+		echo "FAIL $1"
+		echo "       expected to contain: $3"
+		echo "       actual:              $2"
+		failures=$((failures + 1))
+		;;
+	esac
+}
+missing() {
+	case "$2" in
+	*"$3"*)
+		echo "FAIL $1"
+		echo "       expected NOT to contain: $3"
+		echo "       actual:                  $2"
+		failures=$((failures + 1))
+		;;
+	*) echo "ok   $1" ;;
+	esac
+}
 check() {
 	if [ "$2" = "$3" ]; then
 		echo "ok   $1"
@@ -161,6 +183,62 @@ for candidate in $(id -Gn); do
 		break
 	fi
 done
+# ------------------------------------------ a connection that says nothing
+
+# **The cap protects the daemon from clients; nothing protected it from a
+# connection that is not one.** `handle` blocked in `read_request` with no
+# deadline, so a caller that connected and stayed silent held a slot for ever
+# -- and sixty-four of them held every slot the cap allows. Any local user can
+# do it wherever the policy opens the socket, which `observe = "any"` above
+# does. Decision 0183.
+#
+# Two things are asserted, and they were two separate faults. That the slots
+# come back, and that while they are gone the client is told *which wall it
+# met*: the daemon answers the cap on accept and closes, so the client's write
+# landed on a closed socket and reported `Broken pipe` while the daemon's own
+# sentence sat unread in its receive buffer.
+start_daemon
+python3 - "$work/run/netcfgd.sock" "$repo/target/debug/ncfg" > "$work/cap.log" 2>&1 <<'PROBE' || true
+import socket, subprocess, sys, time
+
+sock, ncfg = sys.argv[1], sys.argv[2]
+
+# More than the cap, opened as fast as they can be, so the wall is reached
+# before the first of them times out.
+held = []
+for _ in range(70):
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    connection.connect(sock)
+    held.append(connection)
+
+def reload_says():
+    done = subprocess.run([ncfg, "reload"], capture_output=True, text=True, timeout=30)
+    lines = (done.stdout or done.stderr).splitlines()
+    return lines[0] if lines else "<nothing>"
+
+print("full:", reload_says())
+# The deadline is ten seconds; this waits it out with a margin rather than
+# racing it.
+time.sleep(13)
+print("later:", reload_says())
+PROBE
+
+contains "a client that meets the connection cap is told so, not left with a write error" \
+	"$(grep '^full:' "$work/cap.log" || true)" "too many connections"
+missing "and not left holding the kernel's word for a closed socket" \
+	"$(grep '^full:' "$work/cap.log" || true)" "Broken pipe"
+# **What changes is that the cap is gone, not what the daemon then says.**
+# A first version asserted "reloaded", which is what root gets; run as an
+# ordinary user the same request is refused by the `admin` tier and the check
+# failed for a reason that had nothing to do with connection slots. The
+# property is that the answer is no longer about capacity -- and that there is
+# an answer at all, so this cannot pass on silence.
+missing "and silent connections give their slots back, so the daemon recovers" \
+	"$(grep '^later:' "$work/cap.log" || true)" "too many connections"
+contains "and the daemon is answering rather than saying nothing" \
+	"$(grep -c '^later: .' "$work/cap.log" || true)" "1"
+stop_daemon
+
 [ -n "$group" ] || skip "this user has no secondary group, so a chown cannot be observed"
 cat > "$work/etc/netcfgd.conf" <<CONF
 global {
@@ -251,6 +329,8 @@ check "and the answer is about the name rather than about the filesystem" \
 check "while an ordinary name still gets the real diagnosis" \
 	"$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 |
 		grep -c 'no control socket' || true)" "1"
+stop_daemon
+
 stop_daemon
 
 if [ "$failures" -eq 0 ]; then

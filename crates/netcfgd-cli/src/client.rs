@@ -128,6 +128,26 @@ fn connect(socket: &Path) -> Result<UnixStream, String> {
 	})
 }
 
+/// Say what the daemon said, where a failed send means it had already spoken.
+///
+/// **A refusal arrives before the request goes out**, and this used to lose
+/// it. The daemon's connection cap answers on accept -- "too many
+/// connections, 64 are open" -- and then closes, so the client's write lands
+/// on a closed socket and fails with `EPIPE` while the sentence explaining why
+/// is already sitting in its own receive buffer, unread. Measured: with the
+/// cap reached, `ncfg reload` said `cannot send: Broken pipe (os error 32)`,
+/// which sends the reader looking for a crashed daemon.
+///
+/// So a send that fails asks the socket what is there before reporting. The
+/// write error is kept where nothing was said, because then it is the whole
+/// story. Decision 0183.
+fn what_it_said_instead<R: std::io::BufRead>(reader: &mut R, error: &std::io::Error) -> String {
+	match read_message::<Answer, _>(reader) {
+		Ok(Some(Answer::Error { message })) => message,
+		_ => format!("cannot send: {error}"),
+	}
+}
+
 /// Returns a message naming what could not be reached, which for a missing
 /// daemon is the useful half: "connection refused" alone sends the reader
 /// looking for a network problem.
@@ -140,7 +160,9 @@ pub(crate) fn ask(socket: &Path, request: &Request) -> Result<Answer, String> {
 	let mut reader = BufReader::new(stream);
 	let mut writer = BufWriter::new(write_half);
 
-	write_message(&mut writer, request).map_err(|error| format!("cannot send: {error}"))?;
+	if let Err(error) = write_message(&mut writer, request) {
+		return Err(what_it_said_instead(&mut reader, &error));
+	}
 	match read_message::<Answer, _>(&mut reader) {
 		Ok(Some(response)) => Ok(response),
 		Ok(None) => Err("the daemon closed the connection without answering".to_owned()),
@@ -165,7 +187,9 @@ pub(crate) fn ask_value(socket: &Path, request: &Request) -> Result<serde_json::
 	let mut reader = BufReader::new(stream);
 	let mut writer = BufWriter::new(write_half);
 
-	write_message(&mut writer, request).map_err(|error| format!("cannot send: {error}"))?;
+	if let Err(error) = write_message(&mut writer, request) {
+		return Err(what_it_said_instead(&mut reader, &error));
+	}
 	match read_message::<serde_json::Value, _>(&mut reader) {
 		Ok(Some(value)) => Ok(value),
 		Ok(None) => Err("the daemon closed the connection without answering".to_owned()),
@@ -287,8 +311,8 @@ fn render_event(value: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::Answer;
-	use netcfgd_proto::{write_message, Response};
+	use super::{ask, Answer};
+	use netcfgd_proto::{write_message, Request, Response};
 
 	/// `Answer` mirrors `Response`'s tags by hand, which is a real coupling
 	/// and therefore checked rather than trusted. If a tag is ever renamed on
@@ -308,6 +332,59 @@ mod tests {
 			let answer: Answer = serde_json::from_slice(&buffer).expect("the mirror parses it");
 			assert_eq!(answer.describe(), expected);
 		}
+	}
+
+	/// **A refusal that arrived before the request went out is not lost.**
+	///
+	/// The daemon answers its connection cap on accept and then closes, so a
+	/// client's write can land on a socket that is already gone: `EPIPE` on
+	/// the send, with the sentence explaining why sitting unread in the
+	/// client's own receive buffer. Measured against a real daemon before
+	/// this -- `ncfg reload` said `cannot send: Broken pipe (os error 32)`
+	/// while the daemon had already said "too many connections, 64 are open".
+	///
+	/// **Asserted on the function and not through a socket, because through a
+	/// socket it is a race.** Whether the write fails at all depends on
+	/// whether the close beats it, and a first attempt at this test passed for
+	/// that reason rather than for the right one: the write went into a buffer,
+	/// the read then found the refusal, and the path being fixed was never
+	/// taken. What is deterministic is the question the fix asks -- *did the
+	/// daemon already say something* -- so that is what is checked. The
+	/// end-to-end behaviour is in `tests/live/control_exposure.sh`.
+	#[test]
+	fn a_refusal_already_in_the_buffer_is_what_gets_reported() {
+		let mut buffer = Vec::new();
+		write_message(
+			&mut buffer,
+			&Response::Error {
+				message: "too many connections, 64 are open".to_owned(),
+			},
+		)
+		.expect("writes");
+
+		let broken = std::io::Error::from(std::io::ErrorKind::BrokenPipe);
+		assert_eq!(
+			super::what_it_said_instead(&mut buffer.as_slice(), &broken),
+			"too many connections, 64 are open",
+			"the daemon's own sentence, not the kernel's word for a closed socket"
+		);
+	}
+
+	/// And where the daemon said nothing, the write error is the whole story.
+	///
+	/// The half that keeps the fix honest: a client that cannot reach a daemon
+	/// at all must still say so, rather than reporting an empty message or
+	/// waiting for one that is not coming.
+	#[test]
+	fn a_send_that_fails_with_nothing_said_still_reports_the_send() {
+		let broken = std::io::Error::from(std::io::ErrorKind::BrokenPipe);
+		let said = super::what_it_said_instead(&mut [].as_slice(), &broken);
+		assert!(said.starts_with("cannot send"), "got {said}");
+
+		// And a half-written message is not a sentence either: it is not an
+		// error response, so the send failure stands.
+		let said = super::what_it_said_instead(&mut b"{\"respon".as_slice(), &broken);
+		assert!(said.starts_with("cannot send"), "got {said}");
 	}
 
 	/// A response the CLI does not handle is reported as unexpected rather
