@@ -9590,7 +9590,7 @@ and deliberately not a second reading of the document", because rebuilding from
 the document alone once delivered an empty `resolv.conf` while the plan said
 otherwise. `preferences` was that mistake, unnoticed, two fields further down.
 
-### Open, and it is a decision: the metric does not follow a switch
+### Decided and closed: the client is restarted so the metric follows
 
 The metric is read when netcfgd *starts* the client and passed as `-m`. A
 station moving to a network with a different metric does not re-drive a client
@@ -9598,21 +9598,38 @@ that is already running, so the lease's route keeps the metric of the network it
 was obtained on -- measured: 100 on HomeFiber, still 100 after joining a Cafe
 that carries 400.
 
-**Both answers cost something, which is why this is the holder's.** Restarting
-the client applies the new metric and drops the lease for as long as the
-exchange takes -- on a laptop moving between networks, the moment least able to
-afford it. Rewriting the route in place avoids that and means netcfgd editing a
-route the DHCP client owns, which is what constraint 1 exists to stop.
-`ObservedBackend::started_with` is the empty slot either answer would fill, and
-`Op::BackendStart` carries no metric to compare against, so the plan cannot
-express the difference today.
+**Both answers cost something.** Restarting the client applies the new metric
+and drops the lease for as long as the exchange takes -- on a laptop moving
+between networks, the moment least able to afford it. Rewriting the route in
+place avoids that and means netcfgd editing a route the DHCP client owns, which
+is what constraint 1 exists to stop. **The copyright holder chose the restart**,
+and the warning says what it costs.
 
-**The test asserts the value it actually has**, named as a known gap, so closing
-it turns the check red and says so -- rather than leaving a wish in a comment
-nobody reruns.
+**Compared against the route, not against a record.** The route is what the
+metric is *for* and is already observed, so there is nothing new to keep true.
+`ObservedBackend::started_with` was named here as the slot either answer would
+fill and that was wrong -- it is typed `Option<ObservedAccessPoint>`, hostapd's,
+not a spare. Matching is on `RTPROT_DHCP` rather than on any default route,
+because netcfgd installs default routes of its own from the document and
+restarting a client over one of those would be acting on something it never put
+there.
 
-**Still not driven**: that the DHCP client notices a network change and
-re-leases, which is dhcpcd's own behaviour rather than netcfgd's.
+**Bounded on the counter the wedged path already uses.** A client that ignores
+`-m`, or a kernel reporting a metric netcfgd did not ask for, costs five
+restarts and a warning rather than a loop.
+
+`restart_for_metric` sits with `restart_stale_tunnel`, which is the same
+question asked of a different backend -- is what is running still what the
+document says (0053).
+
+The test asserts the metric follows -- 100 on the first network, 400 after the
+switch -- and waits for it, because the restart is the mechanism: the route goes
+away and comes back through a fresh exchange and dhcpcd's ARP probe. Reading it
+once caught the gap between the two and reported no route at all, which is a
+timing bug in a test wearing a fault's clothes.
+
+**Still not driven**: that the DHCP client notices a network change *by itself*
+and re-leases, which is dhcpcd's own behaviour rather than netcfgd's.
 
 ## 10.69 The switch works, and what the two empty-resolver faults were
 

@@ -343,6 +343,13 @@ fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Obs
 /// minutes to reach the limit, which is the right shape. Decision 0079.
 const RESTART_LIMIT: u32 = 5;
 
+/// `RTPROT_DHCP`: the route protocol a DHCP client stamps on what it installs.
+///
+/// Matched rather than taking any default route, because netcfgd installs
+/// default routes of its own from the document and restarting a DHCP client
+/// over one of those would be acting on something the client never put there.
+const DHCP_ROUTE_PROTO: u8 = 16;
+
 /// The hook phases this build actually runs.
 ///
 /// The phases a *plan* fires. Not the phases that run.
@@ -1601,6 +1608,12 @@ impl Builder {
 		for device in &desired.devices {
 			self.restart_stale_tunnel(&device.name, observed);
 		}
+		// The same question of a DHCP client: is what is running still what the
+		// document asks for? Asked here rather than beside the addressing,
+		// because it is about a backend and this is where backends are.
+		for interface in &desired.interfaces {
+			self.restart_for_metric(interface, observed);
+		}
 	}
 
 	/// Restart a tunnel whose `.ovpn` is no longer the one it was started from.
@@ -1662,6 +1675,103 @@ impl Builder {
 			vec![stop],
 			Some(Op::BackendStop {
 				kind,
+				iface: name.to_owned(),
+			}),
+		);
+	}
+
+	/// Restart a DHCP client whose route no longer carries its network's metric.
+	///
+	/// **The metric is read once, when the client is started.** netcfgd passes
+	/// it as `-m` and the client installs the lease's default route with it, so
+	/// a station that moves to a network carrying a different metric keeps the
+	/// old one -- measured, 100 on one network and still 100 after joining one
+	/// that says 400. On a `config = "dhcp"` radio that route is the
+	/// interface's only route, so the ranking `network { metric = N }` exists
+	/// to express simply did not hold after a switch.
+	///
+	/// **A restart drops the lease, and the warning says so.** That is the cost
+	/// the copyright holder accepted in choosing this over netcfgd rewriting a
+	/// route the client owns, which constraint 1 exists to stop. It is one
+	/// exchange on a link that has just changed network and is being
+	/// reconfigured anyway.
+	///
+	/// **Compared against the route rather than against a record**, because the
+	/// route is what the metric is *for* and is already observed. A record of
+	/// what the client was started with would be a second thing to keep true,
+	/// and `ObservedBackend::started_with` is an access point's, not a slot
+	/// going spare.
+	///
+	/// Bounded by `RESTART_LIMIT` on the same counter the wedged path uses: a
+	/// client that ignores `-m`, or a kernel that reports a metric netcfgd did
+	/// not ask for, costs five restarts and a warning rather than a loop.
+	fn restart_for_metric(&mut self, interface: &Interface, observed: &Observed) {
+		let name = &interface.name;
+		let Some(wanted) = self.effective_metric(interface, observed) else {
+			return;
+		};
+		if !interface
+			.addressing
+			.iter()
+			.any(|source| matches!(source, AddressSource::Dhcp4(_)))
+			|| !observed.backend_running(BackendKind::Dhcp4, name)
+		{
+			return;
+		}
+		let Some(seen) = observed
+			.routes_on(name)
+			.filter(|route| route.destination == "default" && route.proto == Some(DHCP_ROUTE_PROTO))
+			.find_map(|route| route.metric)
+		else {
+			return;
+		};
+		if seen == wanted {
+			return;
+		}
+		let restarts = observed.backend_restarts(BackendKind::Dhcp4, name);
+		if restarts >= RESTART_LIMIT {
+			self.warn(
+				name,
+				format!(
+					"{name}'s lease route still carries metric {seen} rather than the \
+					 {wanted} its network asks for, and the client has been restarted \
+					 {restarts} times -- netcfgd is leaving it alone rather than looping"
+				),
+			);
+			return;
+		}
+		self.warn(
+			name,
+			format!(
+				"restarting the dhcp client on {name} so its route takes metric \
+				 {wanted} rather than {seen}; the lease is dropped for as long as the \
+				 exchange takes"
+			),
+		);
+		let reason = Reason::differs(name, "route.metric", wanted.to_string(), seen.to_string());
+		let stop = self.push_root(
+			Op::BackendStop {
+				kind: BackendKind::Dhcp4,
+				iface: name.to_owned(),
+			},
+			reason.clone(),
+			Some(Op::BackendStart {
+				kind: BackendKind::Dhcp4,
+				iface: name.to_owned(),
+			}),
+		);
+		if stop == u32::MAX {
+			return;
+		}
+		self.push(
+			Op::BackendStart {
+				kind: BackendKind::Dhcp4,
+				iface: name.to_owned(),
+			},
+			reason,
+			vec![stop],
+			Some(Op::BackendStop {
+				kind: BackendKind::Dhcp4,
 				iface: name.to_owned(),
 			}),
 		);

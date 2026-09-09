@@ -401,8 +401,20 @@ CONF
 	# Asserted at the value it actually has, so that closing the gap turns
 	# this red and says so, rather than leaving a wish in a comment nobody
 	# reruns.
-	check "the metric does NOT follow a switch -- known gap, see project.md" \
-		"$(lease_metric)" "100"
+	# **Waited for, because the restart is the mechanism.** netcfgd stops the
+	# client and starts it again with the new `-m`, so the route goes away and
+	# comes back -- through a fresh DHCP exchange and dhcpcd's ARP probe, which
+	# is seconds rather than milliseconds. Reading once here caught the gap
+	# between the two and reported no route at all.
+	waited=0
+	while [ "$(lease_metric)" != "400" ] && [ "$waited" -lt 300 ]; do
+		timeout 60 "$ncfg" apply >/dev/null 2>&1 || true
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+
+	check "and the metric follows the station onto the other network" \
+		"$(lease_metric)" "400"
 
 	kill "$server" 2>/dev/null || true
 	wait "$server" 2>/dev/null || true
