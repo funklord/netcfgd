@@ -224,7 +224,7 @@ fn apply_policy_permissions(path: &Path, reach: &[&netcfgd_model::Principal]) {
 	};
 
 	if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)) {
-		eprintln!("netcfgd: could not set socket mode {mode:o}: {error}");
+		netcfgd_sys::log_error!("control", "could not set socket mode {mode:o}: {error}");
 	}
 
 	// One group can own the socket. Where the policy names several, the first
@@ -235,8 +235,9 @@ fn apply_policy_permissions(path: &Path, reach: &[&netcfgd_model::Principal]) {
 		return;
 	};
 	if groups.len() > 1 {
-		eprintln!(
-			"netcfgd: the control policy names {} groups ({}); the socket can belong to one, \
+		netcfgd_sys::log_warning!(
+			"control",
+			"the control policy names {} groups ({}); the socket can belong to one, \
 			 so it is given to `{name}`. Members of the others will not be able to connect.",
 			groups.len(),
 			groups.join(", ")
@@ -245,15 +246,17 @@ fn apply_policy_permissions(path: &Path, reach: &[&netcfgd_model::Principal]) {
 	match group_id(name) {
 		Some(gid) => {
 			if let Err(error) = chown_group(path, gid) {
-				eprintln!(
-					"netcfgd: the control policy opens access to group `{name}`, but the socket \
+				netcfgd_sys::log_warning!(
+					"control",
+					"the control policy opens access to group `{name}`, but the socket \
 					 could not be given to it: {error}. Nobody outside root will be able to \
 					 connect."
 				);
 			}
 		}
-		None => eprintln!(
-			"netcfgd: the control policy names group `{name}`, which does not exist in \
+		None => netcfgd_sys::log_warning!(
+			"control",
+			"the control policy names group `{name}`, which does not exist in \
 			 /etc/group. Nobody outside root will be able to connect."
 		),
 	}
@@ -395,8 +398,9 @@ fn handle(stream: UnixStream, origin: Origin, commands: &Sender<Command>) {
 			// with nothing anywhere saying otherwise. It cost a probe to find
 			// once; it will not again.
 			if error.kind() == std::io::ErrorKind::InvalidData {
-				eprintln!(
-					"netcfgd: could not serialise a response, which is a bug: {error}. \
+				netcfgd_sys::log_error!(
+					"control",
+					"could not serialise a response, which is a bug: {error}. \
 					 The client was told nothing."
 				);
 			}

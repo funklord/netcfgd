@@ -9461,6 +9461,51 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.80 And the messages, which took flog's shape
+
+Fifty daemon messages, every one an `eprintln!("netcfgd: ...")`. The prose was
+good -- this tree has spent a long time on what a message says, and the last
+two days sharpened a dozen more. What none of them had was structure: **no
+severity, no subsystem, no filter.** Measured the same day, an adoption line
+printed every five seconds for twenty minutes while a restart loop ran --
+ordinary, correct, and indistinguishable at a glance from the failure causing
+it.
+
+`flog` is the C logging library `fuzzypickles` and `fuzznet` share as a
+submodule, and the holder asked for its shape here. What is taken:
+
+* the severity vocabulary, name for name -- critical, error, warning, note,
+  info, verbose, debug;
+* the rendering `[subsystem] Error: text`, `!` for a note, and **no label at
+  all for info**, which is flog's judgement that an ordinary line should read
+  as a sentence;
+* the accept mask, as a threshold rather than a bitmask, because netcfgd's
+  severities are ordered and "warnings but not errors" answers nothing;
+* the subsystem argument, which is what netcfgd most obviously lacked.
+
+Not taken: **message ids and source location**. flog carries both for embedded
+targets, where an id saves the string table and `__FILE__` places a crash.
+netcfgd runs under a journal that timestamps and attributes every line, and
+`file:line` in a message an operator reads is noise.
+
+That split is already drawn in the sibling tree: fuzzypickles keeps `diag` as
+the severity/subsystem/detail vocabulary with no dependencies, and bridges it
+to flog in the daemon with `severity_to_flog()`. netcfgd's `log` module is
+that vocabulary; where flog would be linked, it writes a line.
+
+**The CLI stays out of it.** `ncfg` prints `ok`/`FAIL` per action and names a
+file, line and column in a refusal. That is a user interface, and
+`[subsystem] Error:` would make every one of those lines worse. flog is
+daemon-only in fuzzypickles for the same reason.
+
+### The gate that caught its own author
+
+`write_gate.py`, written this morning, refused this change: `emit` drops the
+result of `write_all`. It is right to drop it -- a message about a message
+that could not be written has nowhere to go -- so the allowlist gets its first
+entry, with that reason. Its header had said "nothing in the tree is that
+today", which was true when it was written and lasted nine hours.
+
 ## 10.79 And the config language, where three things compiled that cannot work
 
 Thirty-two malformed configurations through `ncfg show`: **twenty-nine

@@ -21,5 +21,8 @@
 # was also completely silent. They now say what could not be written and what
 # that costs, and carry on, so none of them needs an entry here.
 #
-# A line will be needed the day a write genuinely must be dropped without a
-# word. Nothing in the tree is that today.
+# A line was needed the day the log itself arrived, and it is the one case the
+# rule cannot cover: a message about a message that could not be written has
+# nowhere to go.
+
+crates/netcfgd-sys/src/log.rs::emit -- a log line that cannot be written to stderr has nowhere to report that, and a daemon that fails an apply because the journal is full is worse than one that goes quiet

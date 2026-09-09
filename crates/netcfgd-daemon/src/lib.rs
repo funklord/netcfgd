@@ -65,9 +65,17 @@ const TICK_MS: i32 = 5_000;
 #[must_use]
 pub fn main() -> ExitCode {
 	let arguments: Vec<String> = std::env::args().skip(1).collect();
+	// **Before `run`, because a level that arrives late cannot filter what
+	// happened early** -- and startup is exactly when somebody turns this up.
+	netcfgd_sys::log::accept_from_env();
+
 	match run(&arguments) {
 		Ok(code) => code,
 		Err(message) => {
+			// **The one message that is not the log's.** It is what a person
+			// who typed `netcfgd` sees when it will not start, printed before
+			// a level exists to filter it and before there is a subsystem to
+			// attribute it to.
 			eprintln!("netcfgd: {message}");
 			ExitCode::from(1)
 		}
@@ -147,7 +155,10 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 
 	let mut state = State::new(paths.clone());
 	if let Some(diagnostics) = &state.diagnostics {
-		eprintln!("netcfgd: config does not compile, running with none:\n{diagnostics}");
+		netcfgd_sys::log_error!(
+			"config",
+			"config does not compile, running with none:\n{diagnostics}"
+		);
 	}
 
 	let (commands, incoming) = mpsc::channel();
@@ -169,8 +180,9 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	);
 	let mechanism = spawn_config_watcher(&commands, &paths, options.poll_config);
 
-	eprintln!(
-		"netcfgd: watching {} via {mechanism}, socket {}",
+	netcfgd_sys::log_info!(
+		"config",
+		"watching {} via {mechanism}, socket {}",
 		paths.config.display(),
 		socket_path.display()
 	);
@@ -353,8 +365,9 @@ fn establish_first_last_good(state: &State) {
 	}
 	let empty = netcfgd_model::Document::default();
 	if netcfgd_host::confirm::write_last_good(&state.paths.run, &empty).is_ok() {
-		eprintln!(
-			"netcfgd: no previous configuration recorded, so a revert would undo \
+		netcfgd_sys::log_note!(
+			"confirm",
+			"no previous configuration recorded, so a revert would undo \
 			 everything netcfgd does from here. `ncfg apply --confirm-within N` \
 			 works from the first apply."
 		);
@@ -440,8 +453,9 @@ fn report_contention(state: &State) {
 		.collect();
 
 	for contender in netcfgd_host::contention::contenders(&claimed) {
-		eprintln!(
-			"netcfgd: {}",
+		netcfgd_sys::log_error!(
+			"apply",
+			"{}",
 			netcfgd_host::contention::describe(&contender)
 		);
 	}
@@ -663,7 +677,10 @@ fn release_contended(state: &mut State) {
 	}
 
 	let Ok(mut executor) = state.executor() else {
-		eprintln!("netcfgd: cannot start an apply to release a contended radio");
+		netcfgd_sys::log_error!(
+			"apply",
+			"cannot start an apply to release a contended radio"
+		);
 		return;
 	};
 	for contender in netcfgd_host::contention::contenders(&held) {
@@ -676,8 +693,9 @@ fn release_contended(state: &mut State) {
 				.map(|backend| backend.kind)
 				.collect();
 			for kind in kinds {
-				eprintln!(
-					"netcfgd: {} claims {interface}, which netcfgd is running a {kind:?} on -- \
+				netcfgd_sys::log_warning!(
+					"contention",
+					"{} claims {interface}, which netcfgd is running a {kind:?} on -- \
 					 two managers on one interface drop the association, so netcfgd is \
 					 stopping its own and leaving the interface to {}. {}",
 					contender.name,
@@ -688,7 +706,10 @@ fn release_contended(state: &mut State) {
 					kind,
 					iface: interface.clone(),
 				}) {
-					eprintln!("netcfgd: could not stop the {kind:?} on {interface}: {error}");
+					netcfgd_sys::log_error!(
+						"contention",
+						"could not stop the {kind:?} on {interface}: {error}"
+					);
 				}
 			}
 		}
@@ -697,23 +718,27 @@ fn release_contended(state: &mut State) {
 
 fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 	let Ok(mut executor) = state.executor() else {
-		eprintln!("netcfgd: cannot start an apply");
+		netcfgd_sys::log_error!("apply", "cannot start an apply");
 		return;
 	};
 	let (plan, journal) = state.apply(&PlanOptions::default(), &mut executor);
 	let _ = run_state::update_owned(&state.paths.run, |owned| owned.absorb(&executor.effects));
 
 	if let Some(failure) = journal.failure() {
-		eprintln!(
-			"netcfgd: {} failed: {}",
+		netcfgd_sys::log_error!(
+			"apply",
+			"{} failed: {}",
 			failure.op,
 			failure.error.as_deref().unwrap_or("no detail")
 		);
 	}
 	for refusal in &plan.refusals {
-		eprintln!(
-			"netcfgd: refused {} on {} -- {} depends on it",
-			refusal.op, refusal.interface, refusal.guard
+		netcfgd_sys::log_warning!(
+			"apply",
+			"refused {} on {} -- {} depends on it",
+			refusal.op,
+			refusal.interface,
+			refusal.guard
 		);
 	}
 	state.reobserve();
@@ -890,8 +915,9 @@ fn bind_sockets(
 	// Said out loud, because a listening socket that reaches the network is
 	// the one thing about this daemon an operator should never discover by
 	// finding the file.
-	eprintln!(
-		"netcfgd: remote access is open on {} to `{}` -- observe {}, wifi {}, admin {}",
+	netcfgd_sys::log_note!(
+		"control",
+		"remote access is open on {} to `{}` -- observe {}, wifi {}, admin {}",
 		remote_path.display(),
 		remote.agent.render(),
 		remote.observe,
@@ -1013,8 +1039,9 @@ fn run_portal_checks(state: &State) -> Vec<(String, String)> {
 			// that ran on every successful join would be a hook nobody keeps.
 			netcfgd_host::portal::Verdict::Clear => continue,
 			netcfgd_host::portal::Verdict::Portal { detail } => {
-				eprintln!(
-					"netcfgd: {} looks like a captive portal: {detail}",
+				netcfgd_sys::log_note!(
+					"portal",
+					"{} looks like a captive portal: {detail}",
 					device.name
 				);
 				detail.clone()
@@ -1025,7 +1052,11 @@ fn run_portal_checks(state: &State) -> Vec<(String, String)> {
 			// with no route sends the operator to a login page that is not
 			// there.
 			netcfgd_host::portal::Verdict::Unreachable { detail } => {
-				eprintln!("netcfgd: {} could not be checked: {detail}", device.name);
+				netcfgd_sys::log_warning!(
+					"portal",
+					"{} could not be checked: {detail}",
+					device.name
+				);
 				continue;
 			}
 		};
@@ -1043,7 +1074,7 @@ fn run_portal_checks(state: &State) -> Vec<(String, String)> {
 					netcfgd_apply::hooks::Outcome::Ok => {}
 					netcfgd_apply::hooks::Outcome::Vetoed(message)
 					| netcfgd_apply::hooks::Outcome::Noted(message) => {
-						eprintln!("netcfgd: {message}");
+						netcfgd_sys::log_note!("hook", "{message}");
 					}
 				}
 			}
@@ -1081,7 +1112,7 @@ fn run_roam_hooks(state: &State, interface: &str, bssid: &str) {
 			netcfgd_apply::hooks::Outcome::Ok => {}
 			netcfgd_apply::hooks::Outcome::Vetoed(message)
 			| netcfgd_apply::hooks::Outcome::Noted(message) => {
-				eprintln!("netcfgd: {message}");
+				netcfgd_sys::log_note!("hook", "{message}");
 			}
 		}
 	}
@@ -1148,7 +1179,10 @@ fn advance_failed_sims(state: &mut State, probe_changed: bool) {
 	};
 	for iface in state.probes.failing() {
 		if let Some(source) = state.sims.advance(&document, &iface, &state.paths.run) {
-			eprintln!("netcfgd: {iface}: probe says this link is dead; trying SIM `{source}`");
+			netcfgd_sys::log_note!(
+				"modem",
+				"{iface}: probe says this link is dead; trying SIM `{source}`"
+			);
 		}
 	}
 }
@@ -1208,8 +1242,9 @@ fn window_for_a_config_change(state: &State, config_changed: bool) -> Option<(u3
 		// who set the key and watched the change apply would otherwise believe
 		// they had a window and have none.
 		Err(error) => {
-			eprintln!(
-				"netcfgd: not arming a window for this change: {}",
+			netcfgd_sys::log_warning!(
+				"confirm",
+				"not arming a window for this change: {}",
 				error.message()
 			);
 			return None;
@@ -1230,8 +1265,9 @@ fn window_for_a_config_change(state: &State, config_changed: bool) -> Option<(u3
 	// with nobody present. That is the disaster the startup exclusion above
 	// exists to prevent, arriving one pass later by another road.
 	if last_good == Document::default() {
-		eprintln!(
-			"netcfgd: not arming a window for this change: the last-good \
+		netcfgd_sys::log_warning!(
+			"confirm",
+			"not arming a window for this change: the last-good \
 			 configuration is empty, so reverting would undo everything \
 			 netcfgd has done rather than this change"
 		);
@@ -1271,7 +1307,7 @@ fn reconcile_drift(
 		return;
 	}
 	for note in dropped {
-		eprintln!("netcfgd: not reconciled in isolation: {note}");
+		netcfgd_sys::log_note!("apply", "not reconciled in isolation: {note}");
 	}
 
 	// **After the early returns, not before them.** Computing it earlier read
@@ -1284,7 +1320,7 @@ fn reconcile_drift(
 	let arming = window_for_a_config_change(state, config_changed);
 
 	let Ok(mut executor) = state.executor() else {
-		eprintln!("netcfgd: cannot start an apply to reconcile drift");
+		netcfgd_sys::log_error!("apply", "cannot start an apply to reconcile drift");
 		return;
 	};
 	let journal = netcfgd_apply::apply(&restricted, &mut executor);
@@ -1349,8 +1385,9 @@ fn reconcile_drift(
 	// nothing else. `plan.last.json` named the cause exactly. The daemon knew
 	// and did not say.
 	if let Some(failure) = journal.failure() {
-		eprintln!(
-			"netcfgd: reconcile stopped at {}: {}; {} done, {} not attempted",
+		netcfgd_sys::log_error!(
+			"apply",
+			"reconcile stopped at {}: {}; {} done, {} not attempted",
 			failure.op,
 			failure.error.as_deref().unwrap_or("no detail"),
 			journal.done(),
@@ -1477,8 +1514,9 @@ fn apply_request(
 		// this apply is inside it rather than instead of it.
 		_ => {
 			if netcfgd_host::confirm::read_window(&state.paths.run).is_some() {
-				eprintln!(
-					"netcfgd: applied inside an open confirm window; the window \
+				netcfgd_sys::log_note!(
+					"confirm",
+					"applied inside an open confirm window; the window \
 					 still reverts to what it was armed against"
 				);
 			} else {
@@ -1786,8 +1824,9 @@ fn take_off_profile(state: &State, name: &str) -> Result<Option<String>, String>
 	match netcfgd_host::config::adopt_profile(&state.paths.config, &state.paths.factory) {
 		Ok(None) => Ok(None),
 		Ok(Some(profile)) => {
-			eprintln!(
-				"netcfgd: a setting was changed by hand, so the `{profile}` \
+			netcfgd_sys::log_note!(
+				"profile",
+				"a setting was changed by hand, so the `{profile}` \
 				 profile was folded into conf.d and no profile is chosen now"
 			);
 			Ok(Some(profile))
@@ -1992,14 +2031,16 @@ fn report_writability(config: &std::path::Path) {
 				std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
 			) =>
 		{
-			eprintln!(
-				"netcfgd: cannot write {} ({error}), so no client can store \
+			netcfgd_sys::log_error!(
+				"config",
+				"cannot write {} ({error}), so no client can store \
 				 configuration: `ncfg wifi add`, `ncfg config put`, `ncfg secret set`, \
 				 `ncfg profile save` and the gui's write buttons will all be refused",
 				config.display()
 			);
-			eprintln!(
-				"netcfgd:   netcfgd is the only writer of that directory (0127). Under \
+			netcfgd_sys::log_error!(
+				"config",
+				"  netcfgd is the only writer of that directory (0127). Under \
 				 systemd this is `ProtectSystem=`, and the unit has to name the path \
 				 in `ReadWritePaths=` -- `systemctl cat netcfgd` shows what yours says"
 			);
@@ -2208,7 +2249,10 @@ fn spawn_kernel_watcher(commands: &Sender<Command>) {
 		.name("netlink".to_owned())
 		.spawn(move || {
 			let Ok(socket) = Netlink::open_with_groups(groups::OBSERVED) else {
-				eprintln!("netcfgd: cannot watch netlink; kernel changes will be missed");
+				netcfgd_sys::log_error!(
+					"netlink",
+					"cannot watch netlink; kernel changes will be missed"
+				);
 				return;
 			};
 			// A timeout rather than an indefinite block, so the loop keeps
@@ -2227,7 +2271,7 @@ fn spawn_kernel_watcher(commands: &Sender<Command>) {
 						}
 					}
 					Err(error) => {
-						eprintln!("netcfgd: netlink watch failed: {error}");
+						netcfgd_sys::log_error!("netlink", "netlink watch failed: {error}");
 						return;
 					}
 				}
@@ -2265,7 +2309,7 @@ fn spawn_config_watcher(
 				}
 				Ok(false) => {}
 				Err(error) => {
-					eprintln!("netcfgd: config watch failed: {error}");
+					netcfgd_sys::log_error!("config", "config watch failed: {error}");
 					return;
 				}
 			}

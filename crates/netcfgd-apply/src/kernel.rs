@@ -736,8 +736,9 @@ impl KernelExecutor {
 				// is indistinguishable from a correct machine unless somebody
 				// says otherwise.
 				if let Err(complaint) = write_record(&path, digest.as_bytes()) {
-					eprintln!(
-						"netcfgd: cannot keep the supplicant's network record for \
+					netcfgd_sys::log_warning!(
+						"supplicant",
+						"cannot keep the supplicant's network record for \
 						 {iface}: {complaint}; a changed passphrase, bssid or network \
 						 list will not be noticed"
 					);
@@ -951,7 +952,7 @@ impl KernelExecutor {
 			// Reported and not returned: 0180's rule, that a record which could
 			// not be kept must not fail an apply that worked.
 			if let Err(complaint) = record_key(&self.run_dir, name, &private) {
-				eprintln!("netcfgd: {complaint}");
+				netcfgd_sys::log_warning!("wireguard", "{complaint}");
 			}
 		}
 		// Only where the peer list was actually sent. A `wg.set_device` leaves
@@ -959,7 +960,7 @@ impl KernelExecutor {
 		// would say every preshared key had gone.
 		if matches!(parts, WgParts::Whole | WgParts::Peers) {
 			if let Err(complaint) = record_presets(&self.run_dir, name, &presets) {
-				eprintln!("netcfgd: {complaint}");
+				netcfgd_sys::log_warning!("wireguard", "{complaint}");
 			}
 		}
 		Ok(())
@@ -1045,11 +1046,12 @@ impl Executor for KernelExecutor {
 							// Said rather than swallowed: the link works, and
 							// the thing that was lost is only visible later,
 							// as a restart that fails to reconcile it.
-							eprintln!(
-								"netcfgd: could not mark {name} as netcfgd's with the alternative name {altname}: {error}"
+							netcfgd_sys::log_warning!("link",
+								"could not mark {name} as netcfgd's with the alternative name {altname}: {error}"
 							);
-							eprintln!(
-								"netcfgd:   its ownership is recorded in /run instead, which a restart loses"
+							netcfgd_sys::log_warning!(
+								"link",
+								"  its ownership is recorded in /run instead, which a restart loses"
 							);
 						}
 					}
@@ -1477,7 +1479,7 @@ impl Executor for KernelExecutor {
 					// the rest of the machine unconfigured because a logging
 					// script exited 1.
 					crate::hooks::Outcome::Noted(message) => {
-						eprintln!("netcfgd: {message}");
+						netcfgd_sys::log_note!("hook", "{message}");
 						Ok(())
 					}
 				}
@@ -2053,8 +2055,9 @@ fn set_forwarding(iface: &str, enabled: bool) -> Result<(), String> {
 
 	write("ipv4").map_err(|error| format!("cannot set IPv4 forwarding on {iface}: {error}"))?;
 	if let Err(error) = write("ipv6") {
-		eprintln!(
-			"netcfgd: cannot set IPv6 forwarding on {iface}: {error}; IPv4 is set and IPv6 \
+		netcfgd_sys::log_warning!(
+			"forwarding",
+			"cannot set IPv6 forwarding on {iface}: {error}; IPv4 is set and IPv6 \
 			 traffic will not be routed"
 		);
 	}
@@ -2359,8 +2362,8 @@ fn adopt_running_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Resul
 				std::fs::write(&pidfile, format!("{pid}\n")).map_err(|error| {
 					format!("cannot record the {kind:?} backend on {iface}: {error}")
 				})?;
-				eprintln!(
-					"netcfgd: adopted the {kind:?} backend already running on {iface} (pid {pid}); it is netcfgd's, by the `{marker}` it was started with and the privilege it runs with"
+				netcfgd_sys::log_info!("backend",
+					"adopted the {kind:?} backend already running on {iface} (pid {pid}); it is netcfgd's, by the `{marker}` it was started with and the privilege it runs with"
 				);
 				return Ok(true);
 			}
@@ -2416,16 +2419,16 @@ fn adopt_running_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Resul
 				// this fails closed -- an unreadable link means "not ours to
 				// signal".
 				if netcfgd_sys::process::shares_network_namespace(pid) {
-					eprintln!(
-						"netcfgd: stopping the {kind:?} backend orphaned on {iface} (pid {pid}); 						 it is netcfgd's by the `{marker}` in its own argv, it does not answer 						 its control socket, and starting a second beside it would drop the 						 association"
+					netcfgd_sys::log_note!("backend",
+						"stopping the {kind:?} backend orphaned on {iface} (pid {pid}); 						 it is netcfgd's by the `{marker}` in its own argv, it does not answer 						 its control socket, and starting a second beside it would drop the 						 association"
 					);
 					if let Err(error) = netcfgd_sys::process::terminate(pid) {
 						// Reported and not fatal: the start below is still the
 						// better move than refusing the radio outright, and a
 						// terminate that failed is visible here rather than as
 						// a mystery two interfaces later.
-						eprintln!(
-							"netcfgd: could not stop the orphaned {kind:?} backend on {iface} 							 (pid {pid}): {error}"
+						netcfgd_sys::log_error!("backend",
+							"could not stop the orphaned {kind:?} backend on {iface} 							 (pid {pid}): {error}"
 						);
 					}
 				}
@@ -2481,8 +2484,8 @@ fn start_backend(
 					std::fs::write(&pidfile, format!("{pid}\n")).map_err(|error| {
 						format!("cannot record the dhcp client on {iface}: {error}")
 					})?;
-					eprintln!(
-						"netcfgd: adopted the dhcp client already running on {iface} (pid {pid}); it is netcfgd's, by the `-p {}` it was started with and the privilege it runs with",
+					netcfgd_sys::log_info!("dhcp",
+						"adopted the dhcp client already running on {iface} (pid {pid}); it is netcfgd's, by the `-p {}` it was started with and the privilege it runs with",
 						pidfile.display()
 					);
 					return Ok(());
@@ -2521,8 +2524,8 @@ fn start_backend(
 					// the `-f` string in dhcpcd's memory survives the wipe, but
 					// a later `dhcpcd -n` reload would read a dangling path and
 					// silently drop the operator's options.
-					eprintln!(
-						"netcfgd: adopted the dhcp client already running on {iface}; it is netcfgd's, by the `-f {}` it recites",
+					netcfgd_sys::log_info!("dhcp",
+						"adopted the dhcp client already running on {iface}; it is netcfgd's, by the `-f {}` it recites",
 						config.display()
 					);
 					return Ok(());
@@ -3972,8 +3975,8 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 			}
 			std::fs::write(&pidfile, format!("{pid}\n"))
 				.map_err(|error| format!("cannot record the supplicant on {iface}: {error}"))?;
-			eprintln!(
-				"netcfgd: adopted the supplicant already running on {iface} (pid {pid}); it is netcfgd's, by the `-P {}` it was started with and the privilege it runs with"
+			netcfgd_sys::log_info!("supplicant",
+				"adopted the supplicant already running on {iface} (pid {pid}); it is netcfgd's, by the `-P {}` it was started with and the privilege it runs with"
 			, pidfile.display());
 			return Ok(());
 		}

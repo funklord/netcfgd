@@ -1527,6 +1527,10 @@ live:
 	@# kilobyte per reconcile is invisible at startup and is 100 MB by the end
 	@# of a quarter. No namespace: it binds a socket and touches no interface.
 	@NCFG_LIVE=1 sh tests/live/steady_state.sh
+	@# Every message carries a severity and a subsystem, and a level turns them
+	@# down -- flog's shape, from the sibling projects. Before it, fifty
+	@# `eprintln!` calls with no severity, no subsystem and no filter. 0187.
+	@NCFG_LIVE=1 sh tests/live/log_shape.sh
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"

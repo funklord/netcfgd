@@ -67,8 +67,9 @@ pub(crate) fn may_arm(state: &State) -> Result<Document, ArmError> {
 pub(crate) fn arm(state: &State, window_seconds: u32, last_good: &Document) -> Event {
 	let window = confirm::arm(window_seconds, confirm::document_hash(last_good));
 	if let Err(error) = confirm::write_window(&state.paths.run, &window) {
-		eprintln!(
-			"netcfgd: could not write the confirm window: {error}; \
+		netcfgd_sys::log_error!(
+			"confirm",
+			"could not write the confirm window: {error}; \
 			 this change is NOT covered and will not revert on its own"
 		);
 	}
@@ -176,8 +177,9 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 		);
 	};
 
-	eprintln!(
-		"netcfgd: reverting to {} ({reason})",
+	netcfgd_sys::log_note!(
+		"confirm",
+		"reverting to {} ({reason})",
 		&window.last_good_hash[..window.last_good_hash.len().min(12)]
 	);
 
@@ -234,12 +236,15 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 			// failed to take back. Stopping here would leave a machine that is
 			// neither the new configuration nor the old one, which is the one
 			// outcome a revert exists to prevent.
-			Err(error) => eprintln!("netcfgd: revert: undoing {} failed: {error}", op.name()),
+			Err(error) => {
+				netcfgd_sys::log_error!("confirm", "revert: undoing {} failed: {error}", op.name())
+			}
 		}
 	}
 	if !undo.is_empty() {
-		eprintln!(
-			"netcfgd: revert: undid {undone} of {} applied action(s)",
+		netcfgd_sys::log_note!(
+			"confirm",
+			"revert: undid {undone} of {} applied action(s)",
 			undo.len()
 		);
 		// **The re-plan below has to see the machine the inverses left.**
@@ -258,8 +263,9 @@ pub(crate) fn revert(state: &mut State, reason: &str) -> (Response, Vec<Event>) 
 	state.reobserve();
 
 	if let Some(failure) = journal.failure() {
-		eprintln!(
-			"netcfgd: revert incomplete: {} failed: {}",
+		netcfgd_sys::log_error!(
+			"confirm",
+			"revert incomplete: {} failed: {}",
 			failure.op,
 			failure.error.as_deref().unwrap_or("no detail")
 		);
@@ -281,7 +287,10 @@ pub(crate) fn resolve_on_startup(state: &mut State) -> Vec<Event> {
 	if confirm::read_window(&state.paths.run).is_none() {
 		return Vec::new();
 	}
-	eprintln!("netcfgd: a confirm window was open when this daemon started");
+	netcfgd_sys::log_note!(
+		"confirm",
+		"a confirm window was open when this daemon started"
+	);
 	let (_, events) = revert(state, "the daemon restarted inside the window");
 	events
 }

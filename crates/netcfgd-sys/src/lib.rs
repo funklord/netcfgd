@@ -25,6 +25,7 @@ pub mod ethtool;
 pub mod genl;
 pub mod inotify;
 pub mod lock;
+pub mod log;
 pub mod nft;
 pub mod ops;
 pub mod peer;
