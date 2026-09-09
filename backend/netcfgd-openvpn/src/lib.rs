@@ -96,6 +96,40 @@ pub fn hash_of(config: &str) -> Option<String> {
 		.map(|bytes| netcfgd_model::hash::sha256_hex(&bytes))
 }
 
+/// Record which `.ovpn` the running tunnel was started from.
+///
+/// **A function with a return value rather than three lines and a `let _ =`,
+/// because its failure is a silence with consequences.** This hash is the only
+/// thing that makes an *edited* config visible to a later reconcile (0053), so
+/// a record that could not be written means the operator edits the file and
+/// netcfgd never restarts the tunnel. Until 0180 it said nothing about that.
+///
+/// `Ok(())` where the file cannot be hashed at all: that is not a write
+/// failing, it is there being nothing to write, and `hash_of` documents why
+/// the two are kept apart.
+fn record_started_from(run: &Path, iface: &str, config: &str) -> Result<(), String> {
+	let Some(hash) = hash_of(config) else {
+		return Ok(());
+	};
+	let path = config_hash_path(run, iface);
+	if let Some(dir) = path.parent() {
+		std::fs::create_dir_all(dir).map_err(|error| {
+			format!(
+				"cannot record what {iface} was started from: {} ({error}); an \
+				 edited config will not be noticed",
+				dir.display()
+			)
+		})?;
+	}
+	std::fs::write(&path, hash).map_err(|error| {
+		format!(
+			"cannot record what {iface} was started from: {} ({error}); an edited \
+			 config will not be noticed",
+			path.display()
+		)
+	})
+}
+
 /// The script `OpenVPN` calls to say what it negotiated.
 ///
 /// Generated rather than installed, for the same reason a hook is materialised
@@ -528,8 +562,11 @@ pub fn start(
 	// the next reconcile can notice. Written after the daemon took it, because
 	// a hash of a file openvpn refused is a record of nothing.
 	if status.success() {
-		if let Some(hash) = hash_of(config) {
-			let _ = std::fs::write(config_hash_path(run, iface), hash);
+		// Reported and not returned: the tunnel is up, and a record that could
+		// not be kept must not turn a working start into a failure. What it
+		// costs is named all the same. Decision 0180.
+		if let Err(complaint) = record_started_from(run, iface, config) {
+			eprintln!("netcfgd: {complaint}");
 		}
 	}
 
@@ -731,6 +768,70 @@ fn complaints(path: &Path, count: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// **A record of what the tunnel was started from, or a sentence saying
+	/// why not.**
+	///
+	/// This was `let _ = std::fs::write(...)` inside `start`, which is two
+	/// silences at once: unreachable from a test without a real openvpn, and
+	/// unreported when it failed. What it costs is not visible until much
+	/// later -- the hash is the only thing that makes an *edited* `.ovpn`
+	/// something a reconcile can notice (0053), so without it netcfgd leaves a
+	/// stale tunnel up and says nothing. Decision 0180.
+	///
+	/// The refusal is a file where the directory has to be, which needs no
+	/// privilege: a mode would not do, because root walks through one.
+	#[test]
+	fn a_config_record_that_cannot_be_written_names_the_file_and_the_reason() {
+		let dir = netcfgd_testdir::TestDir::new("ovpn-record");
+		let config = dir.join("office.ovpn");
+		std::fs::write(&config, b"remote vpn.example.com 1194\n").expect("written");
+
+		let run = dir.join("run");
+		std::fs::create_dir_all(&run).expect("made");
+		// `run_dir` is a subdirectory of this, and it cannot be made.
+		std::fs::write(run.join("openvpn"), b"in the way").expect("written");
+
+		let error = record_started_from(&run, "vpn0", &config.display().to_string())
+			.expect_err("a record under a file is not a record");
+		assert!(error.contains("vpn0"), "names the interface: {error}");
+		assert!(error.contains("openvpn"), "names the path: {error}");
+		assert!(
+			error.contains("os error"),
+			"carries the kernel's own reason: {error}"
+		);
+		assert!(
+			error.contains("edited config"),
+			"says what is lost rather than only that something failed: {error}"
+		);
+	}
+
+	/// And it succeeds where it can, so the check above is about the failure.
+	#[test]
+	fn a_config_record_is_the_hash_of_the_file_the_tunnel_was_started_from() {
+		let dir = netcfgd_testdir::TestDir::new("ovpn-record");
+		let config = dir.join("office.ovpn");
+		std::fs::write(&config, b"remote vpn.example.com 1194\n").expect("written");
+
+		record_started_from(&dir, "vpn0", &config.display().to_string()).expect("recorded");
+		assert_eq!(
+			std::fs::read_to_string(config_hash_path(&dir, "vpn0")).expect("read"),
+			hash_of(&config.display().to_string()).expect("hashed"),
+		);
+	}
+
+	/// A `.ovpn` that is not there is not a write that failed.
+	///
+	/// `hash_of` answers `None` for a file it cannot read, and that is a
+	/// different statement from "it changed" -- so this returns `Ok`, leaves
+	/// no record, and lets the caller's own check on the missing file speak.
+	#[test]
+	fn a_config_that_cannot_be_read_leaves_no_record_and_no_complaint() {
+		let dir = netcfgd_testdir::TestDir::new("ovpn-record");
+		record_started_from(&dir, "vpn0", &dir.join("absent.ovpn").display().to_string())
+			.expect("nothing to hash is not a failure");
+		assert!(!config_hash_path(&dir, "vpn0").exists());
+	}
 
 	/// The script stages under a dotted name, so netcfgd skips it.
 	///

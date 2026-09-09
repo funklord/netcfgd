@@ -923,6 +923,12 @@ packaging:
 	@# nothing to clean up. It also refuses to name a program netcfgd runs
 	@# itself, which would be netcfgd disabling its own tools. 0168.
 	@python3 tool/select_gate.py
+	@# Every write in the shipped crates, against what happens when it fails.
+	@# Four records were written with `let _ =` -- a considered decision in each
+	@# case, and completely silent in all four, which is how a full /run would
+	@# have stopped netcfgd noticing a rotated key or an edited .ovpn without
+	@# one word anywhere. 0180.
+	@python3 tool/write_gate.py
 	@# `kill %1` needs job control, which a non-interactive shell does not
 	@# have, so it does nothing and reads as cleanup. Four netcfgd daemons
 	@# outlived their probes that way before this existed, and the leak

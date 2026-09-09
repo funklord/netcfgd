@@ -674,10 +674,18 @@ impl KernelExecutor {
 		let path = networks_record_path(&self.run_dir, iface);
 		match netcfgd_supplicant::fingerprint(&self.networks, policy, resolver) {
 			Some(digest) => {
-				if let Some(dir) = path.parent() {
-					let _ = std::fs::create_dir_all(dir);
+				// Reported and not returned: 0180's rule, that a record which
+				// could not be kept must not fail an apply that worked. What it
+				// costs is named, because "the planner sees no reason to act"
+				// is indistinguishable from a correct machine unless somebody
+				// says otherwise.
+				if let Err(complaint) = write_record(&path, digest.as_bytes()) {
+					eprintln!(
+						"netcfgd: cannot keep the supplicant's network record for \
+						 {iface}: {complaint}; a changed passphrase, bssid or network \
+						 list will not be noticed"
+					);
 				}
-				let _ = std::fs::write(&path, digest);
 			}
 			// Nothing to compare against later, so leave no claim behind.
 			None => {
@@ -884,13 +892,19 @@ impl KernelExecutor {
 		// the reason a `.ovpn` hash is written after openvpn accepted the file:
 		// a record of a configuration that was refused is a record of nothing.
 		if let Some(private) = private {
-			record_key(&self.run_dir, name, &private);
+			// Reported and not returned: 0180's rule, that a record which could
+			// not be kept must not fail an apply that worked.
+			if let Err(complaint) = record_key(&self.run_dir, name, &private) {
+				eprintln!("netcfgd: {complaint}");
+			}
 		}
 		// Only where the peer list was actually sent. A `wg.set_device` leaves
 		// the kernel's peers alone, so rewriting this record from an empty list
 		// would say every preshared key had gone.
 		if matches!(parts, WgParts::Whole | WgParts::Peers) {
-			record_presets(&self.run_dir, name, &presets);
+			if let Err(complaint) = record_presets(&self.run_dir, name, &presets) {
+				eprintln!("netcfgd: {complaint}");
+			}
 		}
 		Ok(())
 	}
@@ -1708,13 +1722,29 @@ pub fn key_record_path(run: &std::path::Path, iface: &str) -> std::path::PathBuf
 /// attack -- unlike a passphrase, which is why this technique would be a poor
 /// answer for one. The file is 0600 under `/run`, nothing reads it but the
 /// observer, and what leaves the observer is a boolean.
-fn record_key(run: &std::path::Path, iface: &str, private: &[u8; 32]) {
+///
+/// **Best effort, and audible.** A record that could not be kept does not make
+/// a correctly configured device wrong, so this never fails an apply -- but it
+/// is not nothing either: the next reconcile loses its only way to notice a
+/// rotated key, and silently. Decision 0180. The caller says the sentence; this
+/// returns it.
+fn record_key(run: &std::path::Path, iface: &str, private: &[u8; 32]) -> Result<(), String> {
 	let path = key_record_path(run, iface);
 	if let Some(parent) = path.parent() {
-		let _ = std::fs::create_dir_all(parent);
+		std::fs::create_dir_all(parent).map_err(|error| {
+			format!(
+				"cannot keep the key record for {iface}: {} ({error}); a rotated \
+				 key will not be noticed",
+				parent.display()
+			)
+		})?;
 	}
 	let digest = netcfgd_model::hash::sha256_hex(private);
-	write_private(&path, digest.as_bytes());
+	write_private(&path, digest.as_bytes()).map_err(|error| {
+		format!(
+			"cannot keep the key record for {iface}: {error}; a rotated key will not be noticed"
+		)
+	})
 }
 
 /// Write a file that is 0600 from the instant it exists.
@@ -1731,23 +1761,42 @@ fn record_key(run: &std::path::Path, iface: &str, private: &[u8; 32]) {
 /// being closed -- but the intent is 0600, and a mode that arrives late is not
 /// the mode the file had. `write_ppp_options` had the same shape for a file
 /// holding a password outright.
-fn write_private(path: &std::path::Path, bytes: &[u8]) {
+///
+/// **Every one of the three calls used to be discarded**, so a run directory
+/// that had filled up, or a mode that would not take, produced a file that was
+/// absent, wider than 0600, or truncated to nothing -- and netcfgd said none of
+/// it. The error is returned rather than printed here because this has no name
+/// for what it is writing; the caller does. Decision 0180.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 	use std::io::Write as _;
 	use std::os::unix::fs::OpenOptionsExt as _;
 
-	let Ok(mut file) = std::fs::OpenOptions::new()
+	let mut file = std::fs::OpenOptions::new()
 		.write(true)
 		.create(true)
 		.truncate(true)
 		.mode(0o600)
 		.open(path)
-	else {
-		return;
-	};
+		.map_err(|error| format!("{}: {error}", path.display()))?;
 	// A file that already existed keeps its own mode through `open`, so one
 	// left wider by an older build is tightened rather than trusted.
-	let _ = std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
-	let _ = file.write_all(bytes);
+	std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+		.map_err(|error| format!("{} could not be made 0600: {error}", path.display()))?;
+	file.write_all(bytes)
+		.map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// Write one of netcfgd's own records, making its directory first.
+///
+/// **The plain sibling of [`write_private`]**, for records that hold no
+/// secret: a digest of a configuration, a fingerprint of a network list. Both
+/// return the complaint rather than printing it, because neither has a name
+/// for what it is recording and every caller does.
+fn write_record(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+	if let Some(dir) = path.parent() {
+		std::fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+	}
+	std::fs::write(path, bytes).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// Where netcfgd records which preshared key each peer was given.
@@ -1766,16 +1815,30 @@ pub fn preset_record_path(run: &std::path::Path, iface: &str) -> std::path::Path
 ///
 /// Written whole every time the peer list is sent, so a peer that lost its
 /// preshared key loses its line rather than keeping a stale one.
-fn record_presets(run: &std::path::Path, iface: &str, presets: &[String]) {
+fn record_presets(run: &std::path::Path, iface: &str, presets: &[String]) -> Result<(), String> {
 	let path = preset_record_path(run, iface);
-	if let Some(parent) = path.parent() {
-		let _ = std::fs::create_dir_all(parent);
-	}
+	// **Before the directory, because nothing to record needs no directory.**
+	// The other order asks the filesystem for somewhere to put a file this
+	// call is not going to write, and reports its refusal as a lost record.
 	if presets.is_empty() {
 		let _ = std::fs::remove_file(&path);
-		return;
+		return Ok(());
 	}
-	write_private(&path, presets.join("\n").as_bytes());
+	if let Some(parent) = path.parent() {
+		std::fs::create_dir_all(parent).map_err(|error| {
+			format!(
+				"cannot keep the preshared-key record for {iface}: {} ({error}); a \
+				 rotated key will not be noticed",
+				parent.display()
+			)
+		})?;
+	}
+	write_private(&path, presets.join("\n").as_bytes()).map_err(|error| {
+		format!(
+			"cannot keep the preshared-key record for {iface}: {error}; a rotated \
+			 key will not be noticed"
+		)
+	})
 }
 
 /// Every interface whose kind's own settings are corrected on a live device.
@@ -4034,6 +4097,131 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 #[cfg(test)]
 mod tests {
 	use super::dhcp6_client;
+
+	/// **A record netcfgd cannot keep says which file, and why.**
+	///
+	/// Every one of these writes was discarded before 0180: `let _ =` on the
+	/// open, the `chmod` and the write alike, so a full `/run`, a directory
+	/// that had gone, or a mode that would not take produced a missing,
+	/// truncated or world-readable record and not one word anywhere. The
+	/// consequence is never an error at the time -- it is a *later* reconcile
+	/// unable to tell that a key, a passphrase or a config file changed.
+	///
+	/// **The refusal is made with a file where a directory has to be**, which
+	/// needs no privilege and no mount: the kernel refuses it for root exactly
+	/// as for anybody, unlike a mode, which `CAP_DAC_OVERRIDE` walks straight
+	/// through (10.71). So this runs everywhere rather than only where the
+	/// suite happens to be root -- which is the other half of what those tests
+	/// taught. The errno is not pinned, because which one arrives depends on
+	/// where in the path the file sits; that the kernel's own words are
+	/// carried through is the property worth asserting.
+	#[test]
+	fn a_private_record_that_cannot_be_written_names_the_file_and_the_reason() {
+		let dir = netcfgd_testdir::TestDir::new("record");
+		let blocked = dir.join("wireguard");
+		std::fs::write(&blocked, b"a file where the directory has to be").expect("written");
+
+		let error = super::record_key(&dir, "wg0", &[7_u8; 32])
+			.expect_err("a record under a file is not a record");
+		assert!(error.contains("wg0"), "names the interface: {error}");
+		assert!(
+			error.contains(&blocked.display().to_string()),
+			"names the path: {error}"
+		);
+		assert!(
+			error.contains("os error"),
+			"carries the kernel's own reason rather than a summary of it: {error}"
+		);
+		assert!(
+			error.contains("rotated"),
+			"says what is lost, not just that something failed: {error}"
+		);
+	}
+
+	/// The same for the peers' preshared keys, which take the same route.
+	#[test]
+	fn a_preshared_key_record_that_cannot_be_written_says_so() {
+		let dir = netcfgd_testdir::TestDir::new("record");
+		std::fs::write(dir.join("wireguard"), b"in the way").expect("written");
+
+		let error = super::record_presets(&dir, "wg0", &["peer=digest".to_owned()])
+			.expect_err("a record under a file is not a record");
+		assert!(
+			error.contains("wg0") && error.contains("os error"),
+			"got {error}"
+		);
+	}
+
+	/// And an empty peer list is not a failure: there is nothing to keep.
+	#[test]
+	fn no_preshared_keys_is_not_a_record_that_failed() {
+		let dir = netcfgd_testdir::TestDir::new("record");
+		std::fs::write(dir.join("wireguard"), b"in the way").expect("written");
+		super::record_presets(&dir, "wg0", &[]).expect("nothing to write is not a failure");
+	}
+
+	/// **What a record looks like when it works**, so the checks above are
+	/// about the failure rather than about the function never succeeding.
+	///
+	/// 0600 from the instant it exists, and the mode is asserted rather than
+	/// assumed: these hold digests of key material, and the create-time mode
+	/// is the whole reason `write_private` is not `fs::write`.
+	#[test]
+	fn a_private_record_is_written_0600_and_tightened_if_it_was_wider() {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let dir = netcfgd_testdir::TestDir::new("record");
+		let path = dir.join("secret");
+		std::fs::write(&path, b"an older build left this").expect("written");
+		std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+
+		super::write_private(&path, b"digest").expect("a writable path takes a record");
+		assert_eq!(std::fs::read(&path).expect("read"), b"digest");
+
+		// The open's own refusal, which the directory check cannot reach.
+		let occupied = dir.join("taken");
+		std::fs::create_dir(&occupied).expect("made");
+		let error = super::write_private(&occupied, b"digest").expect_err("not over a directory");
+		assert!(
+			error.contains(&occupied.display().to_string()) && error.contains("os error"),
+			"got {error}"
+		);
+		assert_eq!(
+			std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777,
+			0o600,
+			"a file left wider by an older build is tightened rather than trusted"
+		);
+	}
+
+	/// The plain sibling, which the supplicant's network fingerprint uses.
+	#[test]
+	fn a_plain_record_that_cannot_be_written_names_the_file_and_the_reason() {
+		let dir = netcfgd_testdir::TestDir::new("record");
+		std::fs::write(dir.join("supplicant"), b"in the way").expect("written");
+
+		let error = super::write_record(&super::networks_record_path(&dir, "wlan0"), b"digest")
+			.expect_err("a record under a file is not a record");
+		assert!(
+			error.contains("supplicant") && error.contains("os error"),
+			"got {error}"
+		);
+		super::write_record(&dir.join("kept"), b"digest").expect("a writable path takes one");
+
+		// **Both halves, because they fail separately and the first hid the
+		// second.** Made to matter: with the write's error discarded and the
+		// directory's kept, the check above went on passing -- it was reading
+		// `create_dir_all`'s refusal every time and had never reached the
+		// write at all. A directory where the file belongs is the refusal that
+		// gets past the first call.
+		let occupied = dir.join("taken");
+		std::fs::create_dir(&occupied).expect("made");
+		let error = super::write_record(&occupied, b"digest")
+			.expect_err("a record cannot be written over a directory");
+		assert!(
+			error.contains(&occupied.display().to_string()) && error.contains("os error"),
+			"the write's own refusal names the file and the reason: {error}"
+		);
+	}
 
 	/// The branch no config file can reach yet, made to fire.
 	///

@@ -9461,6 +9461,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.73 Every write netcfgd makes, asked the same question at once
+
+> Have you checked all the write errors on all files netcfgd has to write?
+
+No. The ones that had failed had been checked -- a resolver file under an
+inert grant (10.66), a hook under a `noexec` mount (10.67) -- and nothing had
+asked the question of the rest. Asking it mechanically took an afternoon and
+is now a gate.
+
+**Ninety-one writes in the shipped crates, forty-four functions**, removals
+aside. Sixty-three propagate with `?`; twenty are handled where they stand;
+**four dropped the failure on the floor**, and all four are records netcfgd
+keeps of its own past: the supplicant's network fingerprint, the WireGuard key
+digest, the peers' preshared-key digests, and the hash of the `.ovpn` a tunnel
+was started from.
+
+**Every one of the four was a considered decision, and the decision was
+right.** A record that could not be kept must not fail an apply -- a device the
+kernel accepted is not made wrong by a digest that would not write, and 0079's
+restart counter would turn a full `/run` into a loop. One of them says so in
+its own doc comment.
+
+**What none of them did was say anything**, and that is the part worth
+keeping. The cost never lands at the time. It lands at some later reconcile as
+netcfgd having no opinion about a passphrase, a rotated key or an edited config
+-- which looks exactly like a machine that is fine. Three faults this week had
+that shape already, and in all three netcfgd reported success. So: report it,
+then carry on. One line each, no change to what an apply returns.
+
+### The gate, and why the list under it is empty
+
+`tool/write_gate.py` requires every write to propagate, to be handled where it
+stands, or to be named in `tool/write-best-effort.txt` with what its loss
+costs. The list is empty, which is the finding and not the default: nothing in
+the tree now drops a write's failure silently. It refuses in both directions --
+one reintroduced `let _ =` fails it, and so does an entry for a write that is
+no longer silent, so the allowance cannot rot into one nobody rechecks.
+Removals are exempt by rule, because `remove_file` is asked for a state and
+the usual error is that the state already held.
+
+### The test that passed for the wrong reason, caught by sabotaging it
+
+The refusals are made with **a file where a directory has to be**: no
+privilege, no mount, so these run wherever the suite runs -- which is the
+lesson of 10.71, where the tests that only assert as root or under `unshare -r`
+turned out to assert nothing for months. A mode would not do; root walks
+through one.
+
+The first version of the plain-record test passed with the write's error
+deliberately discarded. It was reading `create_dir_all`'s refusal every time
+and had never reached the write at all -- one call in the pair hiding the
+other. A *directory* where the file belongs is the refusal that gets past the
+first call, and both halves are now sabotaged separately.
+
+**Still uncovered, and said rather than left implied**: a `write_all` that
+fails after a successful `open` -- the filesystem filling between the two.
+That needs a full filesystem, which needs a mount, which belongs in the live
+suite. The error is propagated and worded; nothing has watched it arrive.
+
 ## 10.72 The first machine to ask netcfgd to stop a DHCP client
 
 Two wifi networks were given a `metric` -- 100 for the network this machine is
