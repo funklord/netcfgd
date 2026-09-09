@@ -9537,11 +9537,13 @@ taken. It now refuses the host's network namespace outright, comparing its own
 anything is created. A header that says how a script must be run is a comment;
 the machine needed a check.
 
-## 10.71 Six tests that could not hold their own premise under root
+## 10.71 Seven tests that could not hold their own premise under root
 
-The suite failed as root and passed as an ordinary user. Not flakiness: six
-tests whose *premise* root makes unreachable, in two families, plus one real
-interference bug they were hiding.
+The suite failed as root and passed as an ordinary user. Not flakiness: seven
+tests whose *premise* root makes unreachable, in three families, plus one bug
+they were hiding that took two attempts to name. The seventh and the second
+diagnosis came later, on 2026-09-09, when a root run was made for a different
+reason and turned one of the "fixed" ones red again.
 
 ### A mode does not close a directory to root
 
@@ -9566,14 +9568,56 @@ answers "root, or whoever is asking" -- deliberately, because an unprivileged
 them all. So a suite running as root has a root-owned child, `ours` says yes to
 every caller, and there is no refusal to observe.
 
-### And one that was not a premise problem at all
+### And one that was diagnosed twice, because the first answer was a symptom
 
-`shedding_in_one_thread_leaves_another_alone` failed **only in parallel** and
-passed under `--test-threads=1`. Two tests call `shed()`, which drops the
-bounding set and sets `PR_SET_NO_NEW_PRIVS`, and the harness hands out threads
-from a pool it reuses -- so "this thread kept what it had" is a claim about state
-another test is concurrently taking away. A `SHEDDING` mutex serialises them.
-**It read as a defect in `shed` and was a defect in the arrangement.**
+`shedding_in_one_thread_leaves_another_alone` failed in parallel and passed
+under `--test-threads=1`, and that was read as the whole story: two tests call
+`shed()`, the harness reuses threads from a pool, so "this thread kept what it
+had" is a claim about state another test is taking away. A `SHEDDING` mutex
+serialised them and the parallel failure went.
+
+**It went on failing as real root**, and the cause is neither the pool nor
+`shed`. POSIX makes credentials a property of the *process*, so glibc's
+`setuid` signals every other thread to make the same change -- nptl calls it
+setxid. Measured directly, one thread calling `setuid(65534)` while the main
+thread read `/proc/thread-self`:
+
+    main before: uid 0     CapEff 000001ffffffffff
+    main after:  uid 65534 CapEff 0000000000000000
+
+So a thread that never called anything loses its uid and every capability with
+it. The doc comment on `shed` promised the opposite -- "sheds for the caller's
+thread and no other" -- and the test asserted the promise. **Both were
+corrected to what the machine does**: `Shed::Fully` disarms the whole process,
+which is stronger than per-thread rather than weaker; `Shed::CapabilitiesOnly`
+-- `unshare -r`, where uid 0 is the only mapping and there is no id to become
+-- disarms one thread, and that is the case the "call it before spawning
+anything" rule exists for.
+
+**Merged into one test, because a process can be measured shedding once.**
+Whichever test shed first left the binary at `CapEff 0`, so the second could
+only skip -- and as root under `--test-threads=1` that is exactly what the
+"fixed" one did: it printed "nothing to keep" and asserted nothing. One shed
+read from both sides cannot go quiet that way, and the mutex retires with the
+second test, since what it guarded against was one test taking away what the
+other asserted.
+
+**And it took a second test with it.**
+`the_real_uid_is_read_before_the_effective_one` asks `ours` to refuse a
+foreign uid, which `ours` will not do for a root-owned process -- the same
+premise as the two above. It was passing as root **only because the shed ran
+first and moved the process to 65534**: a green check standing on an unrelated
+test's side effect. It now says so and skips, and under `unshare -r`, where it
+had always failed, it passes.
+
+**Nothing ran them where they can speak.** `shed` is observable only from a
+process that has something to give up, so under `cargo test` as a person both
+skip; as root they assert, but a root `cargo test` is not how anybody runs this
+tree. `make live` now runs the `netcfgd-sys` unit-test binary under
+`unshare -rn` beside the WireGuard one, which is the environment that gives
+them a full capability set. Sabotage confirms the branch that was wrong is
+load-bearing: with `setuid` issued as a raw syscall -- per-thread, no broadcast
+-- the root run goes red.
 
 ### What made it hard to see, and is worth more than the fixes
 
@@ -9586,8 +9630,10 @@ fail-fast is not a measurement.
 **And a skip has to be audible.** Each of these prints why, and the pair is
 asserted from both sides: as an ordinary user the suite reports **zero skips and
 zero failures**, so the guards are not quietly disabling the tests everywhere;
-as root, **six skips and zero failures**. Neither number means anything without
-the other.
+as root, skips and no failures. Neither number means anything without the
+other -- and the count as root was wrong when it was written here, because the
+shedding test above was still failing at the time. A tally is a measurement and
+goes stale like any other.
 
 ## 10.70 Asked whether it switches networks, and the association was never observed
 

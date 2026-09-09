@@ -1467,6 +1467,15 @@ live:
 	if [ -n "$$binary" ]; then \
 		unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
 	fi
+	@# netcfgd-sys's own unit tests, and this is the only place they can say
+	@# anything. `shed()` is observable only from a process that has something
+	@# to give up, so under `cargo test` as a person they skip -- which is how
+	@# the half that asserted the wrong thing about a uid broadcast survived
+	@# until a root run met it. `unshare -r` is the full set they need.
+	@binary=$$(ls -t target/debug/deps/netcfgd_sys-* 2>/dev/null | grep -v '\.d$$' | head -1); \
+	if [ -n "$$binary" ]; then \
+		unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
+	fi
 	@binary=$$(ls -t target/debug/deps/live-* 2>/dev/null | grep -v '\.d$$' | head -1); \
 	if [ -z "$$binary" ]; then echo "live: no test binary was built"; exit 1; fi; \
 	unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1" || { \

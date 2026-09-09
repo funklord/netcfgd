@@ -683,6 +683,14 @@ mod tests {
 	/// fields are read in the right order against a process whose real and
 	/// effective uid are the same, which is the only case a test can build
 	/// without privilege; the setuid measurement is in `uids_of`'s comment.
+	///
+	/// **The negative half needs the caller not to be root**, because `ours`
+	/// accepts a root-owned process for anybody on purpose -- "root, or
+	/// whoever is asking", and its comment says why. So under `unshare -r`,
+	/// where uid 0 is mapped and the test *is* root, `and no other is` asked
+	/// for a refusal the rule does not make, and failed. It had been passing
+	/// as real root only by accident of ordering: the privilege tests run
+	/// first, shed, and take the whole process to uid 65534 on the way.
 	#[test]
 	fn the_real_uid_is_read_before_the_effective_one() {
 		let (real, effective) = uids_of("self").expect("this process has a status file");
@@ -691,6 +699,13 @@ mod tests {
 			ours(i32::try_from(std::process::id()).expect("a pid fits"), real),
 			"its own uid is its own"
 		);
+		if real == 0 {
+			eprintln!(
+				"process: skipping the refusal -- this process is root, and `ours` \
+				 accepts a root-owned process for every caller by design"
+			);
+			return;
+		}
 		assert!(
 			!ours(
 				i32::try_from(std::process::id()).expect("a pid fits"),

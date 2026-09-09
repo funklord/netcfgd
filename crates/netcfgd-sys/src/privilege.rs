@@ -65,13 +65,25 @@ struct CapData {
 /// which a setuid binary could climb back through -- so `NO_NEW_PRIVS` is not
 /// belt and braces here, it is what makes the order forgiving.
 ///
-/// **Capabilities are per-thread on Linux, so this sheds for the caller's
-/// thread and no other.** `capset` with a pid of 0, `PR_CAPBSET_DROP` and
-/// `PR_SET_NO_NEW_PRIVS` all act on the calling thread. In the one place this
-/// is used that is the whole process, because the caller is `main` in a freshly
-/// `exec`ed image that has not spawned anything -- and it has to stay that way:
-/// calling this from a worker in a threaded process would leave every other
-/// thread holding what it held, which looks like shedding and is not.
+/// **Capabilities are per-thread on Linux and credentials are not, so how much
+/// of a threaded process this disarms depends on which outcome it reaches.**
+/// `capset` with a pid of 0, `PR_CAPBSET_DROP` and `PR_SET_NO_NEW_PRIVS` all
+/// act on the calling thread alone. The uid change does not: POSIX makes
+/// credentials a property of the process, so glibc's `setuid` signals every
+/// other thread to make the same change -- nptl calls it setxid -- and a
+/// thread that never called it comes out at the new uid with its capabilities
+/// gone. Measured: a worker calling `setuid(65534)` took the main thread from
+/// `uid 0 CapEff 000001ffffffffff` to `uid 65534 CapEff 0`.
+///
+/// So `Shed::Fully` disarms the whole process and `Shed::CapabilitiesOnly`
+/// disarms one thread, and **the weaker of those is the one to design
+/// around**: where there is no id to become -- `unshare -r`, every rootless
+/// container -- a worker that sheds leaves every other thread holding what it
+/// held, which looks like shedding and is not.
+///
+/// In the one place this is used the question does not arise, because the
+/// caller is `main` in a freshly `exec`ed image that has not spawned anything
+/// -- and it has to stay that way.
 ///
 /// It was measured being wrong about exactly this. A first test shed inside a
 /// libtest worker thread and read `/proc/self/status`, which reports the
@@ -354,41 +366,62 @@ pub fn die_after(seconds: u32) {
 #[cfg(test)]
 mod tests {
 
-	/// Serialises the tests that shed, because shedding is not a private act.
-	///
-	/// **Measured: running the two of them concurrently fails, and running the
-	/// whole suite with `--test-threads=1` passes.** `shed()` drops the
-	/// bounding set and sets `PR_SET_NO_NEW_PRIVS`, and the harness gives each
-	/// test a thread out of a pool it reuses -- so "this thread kept what it
-	/// had" is a claim about state another test is concurrently taking away.
-	/// The failure looks like a defect in `shed` and is a defect in the test
-	/// arrangement.
-	///
-	/// Poison is stepped over rather than propagated: a panic in one of these
-	/// is a real failure and is already reported as one, and turning it into a
-	/// second failure in the other test hides which was first.
-	static SHEDDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+	use super::{effective_capabilities, shed, Shed};
 
-	use super::{effective_capabilities, shed};
-
-	/// **Shedding is only observable from something that had something.**
+	/// **Shedding is only observable from something that had something, and a
+	/// process can be measured shedding exactly once.**
+	///
+	/// One test rather than two, because `shed` is irreversible: whichever
+	/// test shed first left the binary with `CapEff 0`, so the second could
+	/// only skip. It did -- as real root under `--test-threads=1` the sibling
+	/// this was merged from printed "nothing to keep" and asserted nothing,
+	/// which is the vacuous pass this tree keeps finding. One shed read from
+	/// both sides cannot go quiet that way, and it retires the mutex that used
+	/// to serialise the two: what that was guarding against was one test
+	/// taking away the state the other was asserting about.
 	///
 	/// As an ordinary user the effective set is already empty, so an assertion
-	/// of "zero afterwards" would hold without the call and prove nothing --
-	/// the vacuous pass this tree keeps finding. It refuses to claim anything
-	/// unless it started from a non-empty set, which is what `unshare -r` gives
-	/// it and how `make live` runs it.
+	/// of "zero afterwards" would hold without the call and prove nothing. It
+	/// refuses to claim anything unless it started from a non-empty set, which
+	/// is what `unshare -r` gives it -- and is why `make live` runs this
+	/// binary, since `cargo test` as a person does not.
 	///
 	/// **In a thread, and that is the point rather than a convenience.**
-	/// Capabilities are per-thread, so shedding here confines the loss to this
-	/// worker and leaves the rest of the run intact -- which is also why the
-	/// reader has to ask `/proc/thread-self`. An earlier version spawned a
-	/// child process instead: it took ninety seconds, reported a full set
-	/// after a successful shed, and needed two fixes before it was measuring
-	/// the thread it had changed.
+	/// Capabilities are per-thread, which is why the reader has to ask
+	/// `/proc/thread-self` rather than `/proc/self`. An earlier version
+	/// spawned a child process instead: it took ninety seconds, reported a
+	/// full set after a successful shed, and needed two fixes before it was
+	/// measuring the thread it had changed.
+	///
+	/// **What the shed takes from the threads that did not call it follows the
+	/// uid, and this asserted the wrong thing about that.** It read "the other
+	/// thread kept what it had" unconditionally and failed as real root, for a
+	/// reason that is the C library's rather than netcfgd's: POSIX makes
+	/// credentials a property of the process, so glibc's `setuid` signals
+	/// every other thread to make the same change -- nptl calls it setxid --
+	/// and a thread that never called it loses its uid and every capability
+	/// with it. Measured outside this crate, one thread calling `setuid` while
+	/// the main thread read `/proc/thread-self`:
+	///
+	///     main before: uid 0     CapEff 000001ffffffffff
+	///     main after:  uid 65534 CapEff 0000000000000000
+	///
+	/// So which outcome `shed` reached decides how much of the process is
+	/// disarmed, and that is a fact about the environment rather than about
+	/// the code -- which is why it is reported and branched on rather than
+	/// asserted:
+	///
+	///   * `Fully` -- there was an id to become, the broadcast went out, and
+	///     the whole process is disarmed. **Stronger than per-thread, not
+	///     weaker.** It is also why every test that runs after this one in a
+	///     root run is running as 65534.
+	///   * `CapabilitiesOnly` -- `unshare -r` maps uid 0 and nothing else, so
+	///     there is no id to move to and nothing is broadcast. Only the
+	///     calling thread's capabilities go. That is the case `shed`'s rule
+	///     exists for: call it before anything is spawned, because there a
+	///     worker that sheds looks like it has disarmed a process it has not.
 	#[test]
-	fn a_thread_that_sheds_holds_nothing_afterwards() {
-		let _serialised = SHEDDING.lock().unwrap_or_else(|e| e.into_inner());
+	fn a_shed_leaves_its_own_thread_nothing_and_the_others_what_the_uid_allows() {
 		let before = effective_capabilities().expect("/proc is mounted");
 		if before == 0 {
 			eprintln!(
@@ -399,25 +432,37 @@ mod tests {
 			return;
 		}
 
-		let (reached, after) = std::thread::spawn(|| {
+		let (reached, inside) = std::thread::spawn(|| {
 			let reached = shed().expect("shedding must succeed where there is something to shed");
 			(reached, effective_capabilities().expect("/proc is mounted"))
 		})
 		.join()
 		.expect("the shedding thread did not panic");
+		let outside = effective_capabilities().expect("/proc is mounted");
 
-		// **Which of the two it reached is a fact about the environment rather
-		// than about the code, so it is reported and not asserted.** Under
-		// `unshare -r` only uid 0 is mapped, so there is no id to become and
-		// `CapabilitiesOnly` is the right answer; on a real root machine
-		// `Fully` is. Asserting either would fail in one environment for no
-		// defect at all.
 		eprintln!("privilege: reached {}", reached.describe());
 
 		assert_eq!(
-			after, 0,
-			"started with {before:x} and the thread kept {after:x}"
+			inside, 0,
+			"started with {before:x} and the thread that shed kept {inside:x}"
 		);
+		match reached {
+			Shed::Fully => {
+				assert_eq!(
+					outside, 0,
+					"the uid change is broadcast to every thread, so this one lost \
+					 what it held without asking"
+				);
+				assert!(
+					!super::is_root(),
+					"and its uid, which is the mechanism that took the capabilities"
+				);
+			}
+			Shed::CapabilitiesOnly => assert_eq!(
+				outside, before,
+				"nothing was broadcast, so this thread kept what it had"
+			),
+		}
 	}
 
 	/// **The id to become is the kernel's, and it is never root.**
@@ -441,28 +486,5 @@ mod tests {
 			// A machine publishing 0, or nothing: the compiled-in default.
 			_ => assert_eq!(id, 65534),
 		}
-	}
-
-	/// And the thread that shed took nothing from the one that did not.
-	///
-	/// The other half of "per-thread": without it, a passing test above would
-	/// be equally consistent with the whole process having been disarmed,
-	/// which is the thing the doc comment promises does not happen.
-	#[test]
-	fn shedding_in_one_thread_leaves_another_alone() {
-		let _serialised = SHEDDING.lock().unwrap_or_else(|e| e.into_inner());
-		let before = effective_capabilities().expect("/proc is mounted");
-		if before == 0 {
-			eprintln!("privilege: skipping -- nothing to keep");
-			return;
-		}
-		std::thread::spawn(|| shed().expect("shed"))
-			.join()
-			.expect("no panic");
-		assert_eq!(
-			effective_capabilities().expect("/proc is mounted"),
-			before,
-			"this thread kept what it had"
-		);
 	}
 }
