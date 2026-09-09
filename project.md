@@ -9461,6 +9461,53 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.79 And the config language, where three things compiled that cannot work
+
+Thirty-two malformed configurations through `ncfg show`: **twenty-nine
+refused**, each naming file, line, column and the specific fault -- an octet
+of 300, a prefix length of 99, a metric that is a string, an unknown key in
+every block kind, an unclosed block, an unterminated string, a `via` with no
+address, a name too long for the kernel, a passphrase written in the clear.
+The front end is in good shape and most of this section is a record that it
+is.
+
+Three were accepted.
+
+**A route destination that is neither `default` nor a network.** `parse_route`
+canonicalised anything that parsed as a prefix and let everything else through
+-- because `default` is not a prefix. So a typo compiled, planned, and failed
+at `route.add` **after three other actions had been carried out**, leaving the
+machine half configured over a spelling. Now refused where the neighbouring
+value checks are.
+
+**A network with no name.** `network "" { }` produced a document with an
+unjoinable entry. `Ssid::new` allows an empty SSID on purpose -- a hidden
+access point beacons a zero-length one, so an observation must hold it -- and
+that is exactly why the rule belongs in the compiler: **what may be seen and
+what may be written down are different questions.**
+
+**A `device` block with no `interface` block.** The planner walks interfaces,
+so a device alone is inert. `netcfgd.conf.example` warns about this in prose,
+added after a config written from an earlier version of that example "started
+no supplicant and joined nothing". The example was corrected; the product went
+on saying `nothing to do`. Now a warning that names the line which would make
+it live -- and a test that it does *not* fire when the interface block is
+there, because a warning on every ordinary wireless machine is one people
+learn to read past.
+
+### What was accepted and is right
+
+`config = []` is `null` spelled another way, which is what a bridge member
+wants. The same key twice appends rather than replaces, which is the
+documented list semantics and the mechanism drop-in merging depends on.
+Refusing either would refuse a real state.
+
+### And one thing the green suite said
+
+All 1019 tests passed with the two new refusals in place, which means nothing
+in the tree -- no fixture, no example, not the shipped `netcfgd.conf.example`
+that the suite compiles -- was relying on any of the three.
+
 ## 10.78 And the resources, where the audit found the work already done
 
 The sixth pass, and the first that did not find a fault. The codec is bounded

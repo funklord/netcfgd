@@ -1814,6 +1814,22 @@ fn lower_network(
 	// a separate handle would mean two names for one thing in every
 	// diagnostic. A profile for a name that is not text uses `ssid` below, and
 	// one whose name is not the operator's to state uses `ssid = "@bssid"`.
+	// **A network with no name is one nothing can join.** `Ssid::new` allows
+	// an empty one deliberately -- a hidden access point beacons a zero-length
+	// SSID, so an *observation* has to be able to hold it -- but an operator
+	// cannot configure a network by that name, and `network "" { }` compiled
+	// into a document with an unjoinable entry in it. The rule belongs here,
+	// where the difference between what may be seen and what may be written
+	// down is the difference between the two paths.
+	if label.is_empty() {
+		diags.push(
+			Diagnostic::new(block.span, "a `network` block needs a name".to_owned()).with_help(
+				"the label is the SSID; a hidden network is `hidden = true` beside its \
+				 own name, not an empty one",
+			),
+		);
+		return None;
+	}
 	let ssid = match Ssid::new(label.as_bytes().to_vec()) {
 		Ok(ssid) => Some(ssid),
 		Err(error) => {
@@ -4425,6 +4441,26 @@ fn parse_route(entry: &Spanned<String>, diags: &mut Diagnostics) -> Option<Route
 					format!("`{destination}` has host bits set, so it is not a network"),
 				)
 				.with_help(format!("write `{network}`, which is the network it names")),
+			);
+			return None;
+		}
+		// **`default`, or a prefix, and nothing else.** This used to let any
+		// word through on the grounds that `default` is not a prefix, so a
+		// typo compiled, planned, and failed at `route.add` -- measured,
+		// after three other actions had already been carried out, leaving the
+		// machine half configured over a spelling. The apply side accepts
+		// exactly `default` or what `parse_cidr` takes, so this refuses
+		// exactly the rest, and does it before anything has been done.
+		None if destination != "default" => {
+			diags.push(
+				Diagnostic::new(
+					entry.span,
+					format!("`{destination}` is not a route destination"),
+				)
+				.with_help(
+					"a destination is `default` or a network like `10.0.0.0/8`; the \
+					 gateway goes after `via`",
+				),
 			);
 			return None;
 		}

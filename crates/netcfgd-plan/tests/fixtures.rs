@@ -4542,6 +4542,71 @@ fn nat_without_forwarding_is_warned_about() {
 		.any(|w| w.message.contains("no interface has `forwarding = true`")));
 }
 
+/// **A `device` block with no `interface` block is inert, and says so now.**
+///
+/// The planner walks interfaces, so a device on its own produces no actions.
+/// `netcfgd.conf.example` carries this in prose because a configuration
+/// written from an earlier version of that example "started no supplicant and
+/// joined nothing" -- device block, network block, no interface block.
+/// Measured against a real device before this: `nothing to do`, in silence.
+#[test]
+fn a_device_block_with_no_interface_block_is_warned_about() {
+	let desired = document(
+		r#"
+		device wlan0 {
+			wifi { autoconnect = true }
+		}
+		network "Home" {
+			wifi { psk = "@secret:home" }
+		}
+		"#,
+	);
+	let observed = observed_with(&["wlan0"]);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|w| w.message.contains("no `interface` block")),
+		"got {:?}",
+		plan.warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|w| w.message.contains("interface wlan0")),
+		"and names the line that would make it live"
+	);
+}
+
+/// And a device with its interface beside it is not warned about, or the
+/// warning would be on every ordinary wireless machine -- which is how an
+/// operator learns to read past them.
+#[test]
+fn a_device_block_with_its_interface_is_not_warned_about() {
+	let desired = document(
+		r#"
+		device wlan0 {
+			wifi { autoconnect = true }
+		}
+		interface wlan0 {
+			config = "dhcp"
+		}
+		"#,
+	);
+	let observed = observed_with(&["wlan0"]);
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!plan
+			.warnings
+			.iter()
+			.any(|w| w.message.contains("no `interface` block")),
+		"got {:?}",
+		plan.warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+	);
+}
+
 /// A second table doing source NAT is reported and never deleted.
 #[test]
 fn a_foreign_nat_table_is_reported_not_removed() {

@@ -52,6 +52,81 @@ fn errors(text: &str) -> String {
 	}
 }
 
+/// **A route destination is `default` or a network, and a typo is neither.**
+///
+/// `parse_route` let any word through that was not a prefix, on the grounds
+/// that `default` is not one. So a misspelling compiled, planned, and failed
+/// at `route.add` -- measured, *after three other actions had been carried
+/// out*, leaving a machine half configured over a spelling. The apply side
+/// takes `default` or what `parse_cidr` takes, so the compiler now refuses
+/// exactly the rest, before anything has been done.
+#[test]
+fn a_route_destination_that_is_neither_default_nor_a_network_is_refused() {
+	let said = errors(
+		r#"
+		interface eth0 {
+			config = "10.0.0.1/24"
+			routes = ["not-a-prefix via 10.0.0.254"]
+		}
+		"#,
+	);
+	assert!(said.contains("not-a-prefix"), "names it: {said}");
+	assert!(
+		said.contains("route destination"),
+		"says what it is not: {said}"
+	);
+	assert!(
+		said.contains("10.0.0.0/8") || said.contains("`default`"),
+		"shows what one looks like: {said}"
+	);
+}
+
+/// And the two spellings that are destinations still are.
+#[test]
+fn default_and_a_network_are_both_route_destinations() {
+	let document = build_ok(
+		r#"
+		interface eth0 {
+			config = "10.0.0.1/24"
+			routes = ["default via 10.0.0.254", "10.50.0.0/16 via 10.0.0.254"]
+		}
+		"#,
+	);
+	// By destination rather than by position: the compiler orders routes for
+	// its own reasons -- a default route sorts after a more specific one --
+	// and asserting the order here would pin something this test is not about.
+	let mut seen: Vec<&str> = document.interfaces[0]
+		.routes
+		.iter()
+		.map(|route| route.destination.as_str())
+		.collect();
+	seen.sort_unstable();
+	assert_eq!(seen, ["10.50.0.0/16", "default"]);
+}
+
+/// **A network with no name is one nothing can join.**
+///
+/// `Ssid::new` allows an empty SSID on purpose -- a hidden access point
+/// beacons a zero-length one, so an observation has to be able to hold it --
+/// and `network "" { }` therefore compiled into a document with an unjoinable
+/// entry. What may be *seen* and what may be *written down* are different
+/// questions, and only the second is the compiler's.
+#[test]
+fn a_network_block_with_no_name_is_refused() {
+	let said = errors(
+		r#"
+		network "" {
+			wifi { open = true }
+		}
+		"#,
+	);
+	assert!(said.contains("needs a name"), "got {said}");
+	assert!(
+		said.contains("hidden"),
+		"points at the thing an empty name was probably meant to express: {said}"
+	);
+}
+
 /// The worked example from design section 3.2, which is the shape a netifrc
 /// user will type first.
 #[test]

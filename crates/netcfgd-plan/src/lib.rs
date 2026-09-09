@@ -396,6 +396,43 @@ const UNPLANNED_PHASES: &[HookPhase] = &[HookPhase::Drift, HookPhase::Roam, Hook
 /// Per phase and per interface rather than one blanket sentence, for the reason
 /// the `ethtool` block's warning is: an operator who wrote a `post_up` and a
 /// `down` should be told about the `down`, not that hooks are unimplemented.
+/// A `device` block with no `interface` block beside it.
+///
+/// **The planner walks interfaces, so a device on its own is inert** -- and
+/// silently so. `netcfgd.conf.example` carries the warning in prose, added
+/// after a configuration written from an earlier version of that example
+/// "started no supplicant and joined nothing": the operator had a `device`
+/// block with `wifi { autoconnect = true }`, a `network` block with the
+/// passphrase, and no `interface` block. Measured against this build, with
+/// the device present and a network configured: `nothing to do`.
+///
+/// The example was corrected; the product still said nothing. This is the
+/// product saying it. **A warning and not a refusal**, because the
+/// configuration is legal and an operator may be building one up a block at a
+/// time -- but an inert block is worth a sentence, and the sentence names the
+/// line that would make it live. Decision 0186.
+fn warn_inert_devices(builder: &mut Builder, desired: &Document) {
+	for device in &desired.devices {
+		if desired
+			.interfaces
+			.iter()
+			.any(|interface| interface.name == device.name)
+		{
+			continue;
+		}
+		builder.warnings.push(Warning {
+			interface: Some(device.name.clone()),
+			message: format!(
+				"{} has a `device` block and no `interface` block, so nothing is \
+				 planned for it: netcfgd plans by interface, and a `device` block on \
+				 its own is policy about hardware nobody has asked it to configure. \
+				 `interface {} {{ config = \"dhcp\" }}` is what makes it netcfgd's",
+				device.name, device.name
+			),
+		});
+	}
+}
+
 fn warn_unfired_hooks(builder: &mut Builder, desired: &Document) {
 	for interface in &desired.interfaces {
 		let mut said: Vec<HookPhase> = Vec::new();
@@ -606,6 +643,7 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_bluetooth(builder, desired);
 	warn_wifi_device_policy(builder, desired);
 	warn_unfired_hooks(builder, desired);
+	warn_inert_devices(builder, desired);
 	// `portal_check` was here, as "recognised and not applied", from 0061 until
 	// 0095 gave it the shape 0061 specified: an operator's URL rather than a
 	// boolean with a default inside netcfgd. It is probed by the daemon when an
