@@ -686,6 +686,14 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		};
 	}
 
+	// **Before the observation, not before the actions.** An apply is
+	// observe, plan, act, and two of them racing plan against a machine the
+	// other is changing: measured, two simultaneous applies produced a failed
+	// `route.add` every run because the second had planned against a route the
+	// first then installed. Taking it here covers the whole cycle. 0184.
+	let _serialised = netcfgd_apply::apply_lock()
+		.map_err(|error| format!("could not start an apply: {error}"))?;
+
 	let (plan, document, observed, run_dir, pending) = build_plan(options)?;
 
 	// **The one verb that needs the hooks on disk.** Every other path through

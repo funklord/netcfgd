@@ -21,7 +21,7 @@ pub mod kernel;
 
 pub use hooks::{HookEnv, Outcome as HookOutcome};
 pub use journal::{Journal, Outcome, Record};
-pub use kernel::{backend_pid_file, is_staging, staged_report, KernelExecutor};
+pub use kernel::{apply_lock, backend_pid_file, is_staging, staged_report, KernelExecutor};
 
 use netcfgd_plan::{Action, Op, Plan};
 

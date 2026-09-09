@@ -288,8 +288,16 @@ impl State {
 	///
 	/// Returns a rendered message if a netlink socket cannot be opened.
 	pub(crate) fn executor(&self) -> Result<netcfgd_apply::KernelExecutor, String> {
+		// The lock first, and the executor carries it: the daemon plans inside
+		// `apply`, after this returns, so holding it here covers the plan as
+		// well as the actions. **Not "cannot open a netlink socket" any
+		// more**, because this now covers two very different refusals and
+		// naming one of them would make the other a lie. 0184.
+		let lock = netcfgd_apply::apply_lock()
+			.map_err(|error| format!("cannot start an apply: {error}"))?;
 		let executor = netcfgd_apply::KernelExecutor::new()
-			.map_err(|error| format!("cannot open a netlink socket: {error}"))?;
+			.map_err(|error| format!("cannot start an apply: {error}"))?
+			.holding(lock);
 		Ok(match &self.desired {
 			Some(document) => executor.with_context(&self.paths.run, document, &self.observed),
 			None => executor,

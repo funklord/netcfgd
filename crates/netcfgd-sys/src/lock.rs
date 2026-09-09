@@ -73,6 +73,58 @@ impl FileLock {
 		}
 		Ok(Self { file })
 	}
+
+	/// Take the exclusive lock, giving up after `patience`.
+	///
+	/// **Blocking for ever is the wrong shape for an apply.** The lock in
+	/// [`exclusive`](Self::exclusive) guards a read-modify-write that takes
+	/// microseconds, so waiting is free; an apply can hold one for as long as
+	/// a hook takes, and a hook is an operator's shell script. Waiting for
+	/// ever on that turns one stuck apply into a daemon that never reconciles
+	/// again -- so this waits, and then says what it was waiting for.
+	///
+	/// # Errors
+	///
+	/// `WouldBlock` when the lock was held throughout, or the underlying
+	/// `io::Error` when the file cannot be opened at all.
+	pub fn exclusive_within(path: &Path, patience: std::time::Duration) -> io::Result<Self> {
+		if let Some(parent) = path.parent() {
+			std::fs::create_dir_all(parent)?;
+		}
+		let file = OpenOptions::new()
+			.write(true)
+			.create(true)
+			.truncate(false)
+			.open(path)?;
+
+		let deadline = std::time::Instant::now() + patience;
+		loop {
+			// SAFETY: as in `exclusive`. `LOCK_NB` only changes whether the
+			// call waits.
+			let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+			if rc == 0 {
+				return Ok(Self { file });
+			}
+			let error = io::Error::last_os_error();
+			if !matches!(
+				error.kind(),
+				io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+			) {
+				return Err(error);
+			}
+			if std::time::Instant::now() >= deadline {
+				return Err(io::Error::new(
+					io::ErrorKind::WouldBlock,
+					format!(
+						"{} is held by another apply, which has not finished in {} seconds",
+						path.display(),
+						patience.as_secs()
+					),
+				));
+			}
+			std::thread::sleep(std::time::Duration::from_millis(20));
+		}
+	}
 }
 
 impl Drop for FileLock {

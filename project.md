@@ -9461,6 +9461,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.77 And the races, where an apply turned out to be one of two
+
+The fifth audit. `FileLock` has been in the tree since the ownership record
+needed one, and **that was its only caller**: an apply -- observe, plan, act --
+had no lock at all. Two of them against one machine each plan against a state
+the other is changing, and the pair that meets in practice is an operator's
+`ncfg apply` and the daemon's reconcile a few seconds later.
+
+Measured, five rounds of two simultaneous applies over four addresses and two
+routes: **five failed actions, one per round**, each a `route.add` for a route
+the other had installed between this one's observation and its action.
+
+### Two things the measuring got wrong before it got them right
+
+**The first probe measured its own fixture.** It handed netcfgd a stub
+`dhcpcd` and counted two clients started -- which was not the race at all:
+netcfgd recognises a running dhcpcd by asking its control socket which config
+it was started with (0143), a stub answers nothing, so netcfgd correctly
+declined to adopt it and started its own. Two applies would have done that on
+a quiet machine. The finding survived only because the second probe used
+netlink alone, where nothing is faked. **A fixture that cannot play the part
+produces a number that looks like a fault.**
+
+**The lock in the wrong place fixed nothing.** Taken when the executor is
+built -- after the plan is computed -- it serialised the actions and left the
+failure exactly where it was. It has to be held across the observation, which
+is where `command_apply` and the daemon's `executor()` now take it.
+
+### The one-line fix that would have been wrong
+
+Tolerating `EEXIST` on `route.add` would have made the symptom vanish.
+Addresses are added with `NLM_F_REPLACE` so adding one twice is success;
+routes are added with `NLM_F_CREATE` alone. But `EEXIST` for a route means the
+*key* exists -- destination, table, tos, priority -- not that the gateway is
+what netcfgd asked for. A tolerant add would report success over a route
+pointing somewhere else, which is 10.73 through 10.76 in a single line.
+
+### The five audits together
+
+* **Writes** (10.73): the failure was heard by nobody.
+* **Reads** (10.74): the failure became a false statement, and netcfgd acted.
+* **Execs** (10.75): sound, but one message covered two repairs.
+* **Sockets** (10.76): a peer that says nothing, an answer nobody read, a
+  reply that did not fit.
+* **Races** (10.77): two applies, and nothing between them.
+
+Five passes over one program in one day, each asking the same question about a
+different verb, and each finding something the tests were green over. What
+none of them found was a bug in the code that *handles* failure -- they found
+failures nothing had ever produced. The method is the whole result: **make the
+failure happen.**
+
 ## 10.76 And the sockets, which fail in ways files do not
 
 The fourth audit. A socket adds failures a file has never had: a peer that

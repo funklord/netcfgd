@@ -57,7 +57,49 @@ pub struct Effects {
 }
 
 /// Executes actions against rtnetlink and the backend helpers.
+/// Take the lock that makes an apply one at a time.
+///
+/// **Two applies against one machine race on every check this file makes.**
+/// Each asks "is a DHCP client running on this interface" (0143), each hears
+/// no, and each starts one -- a check and an act with a gap between them,
+/// which is a race whatever the check is worth. The pair that meets in
+/// practice is an operator's `ncfg apply` and the daemon's own reconcile.
+///
+/// **Held across observing and planning, not only across acting**, and that
+/// distinction was measured: with the lock taken when the executor was built
+/// -- after the plan was computed -- two simultaneous applies still produced
+/// one failed action per run, because the second had planned against a
+/// machine the first then changed. `route.add` is where it showed, since
+/// adding a route that is already there is `EEXIST` while adding an address
+/// that is already there is not (`NLM_F_REPLACE`).
+///
+/// # Errors
+///
+/// `WouldBlock` where another apply held it throughout, naming the file.
+/// Decision 0184.
+pub fn apply_lock() -> std::io::Result<netcfgd_sys::lock::FileLock> {
+	netcfgd_sys::lock::FileLock::exclusive_within(
+		&run_dir_path().join("apply.lock"),
+		APPLY_PATIENCE,
+	)
+}
+
+/// How long an apply waits for another one to finish before giving up.
+///
+/// Long enough for an ordinary apply -- which is a few netlink calls and
+/// whatever a hook does -- and short enough that a wedged one is reported
+/// rather than inherited. A caller that waits this long gets a message naming
+/// the lock file, which is the thing to look at next.
+const APPLY_PATIENCE: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct KernelExecutor {
+	/// Held for the executor's whole life, which is one apply.
+	///
+	/// **What it serialises is the check-then-act, not the netlink calls.**
+	/// Two applies asking "is a DHCP client running here" both hear no and
+	/// both start one; the same shape covers every adoption in this file.
+	/// Never read -- dropping it is the release. Decision 0184.
+	apply_lock: Option<netcfgd_sys::lock::FileLock>,
 	socket: Netlink,
 	/// The ethtool connection, opened the first time an offload is changed.
 	///
@@ -160,11 +202,25 @@ impl KernelExecutor {
 	/// # Errors
 	///
 	/// Returns the underlying `io::Error`.
+	/// Hold the apply lock for as long as this executor lives.
+	///
+	/// Separate from [`new`](Self::new) because the lock has to be taken
+	/// *before* the observation the plan is built from, and the executor is
+	/// built after it. A caller that has one hands it over; a caller that has
+	/// not is not made to take one, because the fake executor in the tests
+	/// takes none either and a lock nobody can see is not a check.
+	#[must_use]
+	pub fn holding(mut self, lock: netcfgd_sys::lock::FileLock) -> Self {
+		self.apply_lock = Some(lock);
+		self
+	}
+
 	pub fn new() -> std::io::Result<Self> {
 		let mut socket = Netlink::open()?;
 		socket.set_timeout(5)?;
 		let snapshot = netcfgd_sys::snapshot_with(&mut socket)?;
 		Ok(Self {
+			apply_lock: None,
 			socket,
 			ethtool: None,
 			nft: None,

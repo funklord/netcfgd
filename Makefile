@@ -1517,6 +1517,11 @@ live:
 	@# an executable file on a `noexec` mount -- and 0178 is the second one
 	@# costing a day. 0182.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/exec_refused.sh"
+	@# Two applies at once. An apply is observe, plan, act, and nothing
+	@# serialised the three: measured, two simultaneous applies produced a
+	@# failed `route.add` every run, because the second planned against a
+	@# machine the first then changed. 0184.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/apply_race.sh"
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"

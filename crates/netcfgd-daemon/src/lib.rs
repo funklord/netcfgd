@@ -663,7 +663,7 @@ fn release_contended(state: &mut State) {
 	}
 
 	let Ok(mut executor) = state.executor() else {
-		eprintln!("netcfgd: cannot open a netlink socket to release a contended radio");
+		eprintln!("netcfgd: cannot start an apply to release a contended radio");
 		return;
 	};
 	for contender in netcfgd_host::contention::contenders(&held) {
@@ -697,7 +697,7 @@ fn release_contended(state: &mut State) {
 
 fn converge(state: &mut State, subscribers: &mut Vec<SyncSender<Event>>) {
 	let Ok(mut executor) = state.executor() else {
-		eprintln!("netcfgd: cannot open a netlink socket to apply");
+		eprintln!("netcfgd: cannot start an apply");
 		return;
 	};
 	let (plan, journal) = state.apply(&PlanOptions::default(), &mut executor);
@@ -1284,7 +1284,7 @@ fn reconcile_drift(
 	let arming = window_for_a_config_change(state, config_changed);
 
 	let Ok(mut executor) = state.executor() else {
-		eprintln!("netcfgd: cannot open a netlink socket to reconcile drift");
+		eprintln!("netcfgd: cannot start an apply to reconcile drift");
 		return;
 	};
 	let journal = netcfgd_apply::apply(&restricted, &mut executor);
