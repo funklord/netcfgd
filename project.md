@@ -9461,6 +9461,44 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.75 And every exec, where the audit came back clean but for one sentence
+
+The third of the three. Sixteen places run a program, and **every one of them
+waits, reads the status, and reports a message naming what it ran.** Seven
+tell `NotFound` -- "not installed" -- from the rest, which is the distinction
+that matters, and the three-candidate DHCPv4 loop uses it to try the next
+client rather than to give up. The two sites that do not read a status are
+both right to: `dhcpcd -k`, where exit 1 is what a udhcpc machine always says
+(0070) and the outcome is confirmed on the control socket instead (0179), and
+the bounded `ETXTBSY` retry.
+
+Measured end to end, the four ways a client fails already gave four different
+messages. Two of them were the same sentence:
+
+    not executable         could not run dhcpcd: Permission denied (os error 13)
+    on a `noexec` mount    could not run dhcpcd: Permission denied (os error 13)
+
+**Two faults, different repairs.** A missing executable bit is a `chmod`; an
+executable file on a `noexec` mount is a mount option, and no `chmod` will
+ever touch it -- which is 10.67 one layer up, where the journal said
+`script_runreason: Permission denied` 1,350 times and it took a day to find
+with the answer sitting in `findmnt`. `exec_refusal` now resolves the program
+the way an exec would, reads the mode, and says which of the two it is. It
+stays quiet where it has nothing to add, so the caller's own "install one of
+these" survives.
+
+### What the three audits say together
+
+* **Writes** (10.73): four silent records -- the failure was heard by nobody.
+* **Reads** (10.74): `is_file()` answering false for a file it could not
+  examine -- the failure became a false statement, and netcfgd acted on it.
+* **Execs** (10.75): sound already, except one message covering two repairs.
+
+The risk changes direction with the operation, and so does the fix: **a write
+needs to be heard, a read needs to not be guessed, and an exec needs to be
+diagnosed.** All three were found the same way -- by making the failure happen
+rather than by reading the code that handles it.
+
 ## 10.74 And every read, where the same question has a worse answer
 
 > now check the read errors too

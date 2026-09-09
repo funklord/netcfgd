@@ -474,6 +474,57 @@ pub fn hangup(pid: i32) -> io::Result<()> {
 	}
 }
 
+/// Why a program would not run, when the kernel said `EACCES`.
+///
+/// **`Permission denied` on an exec has two causes and they need different
+/// repairs**, and the message the standard library gives is the same for
+/// both: the file is not executable, or it is executable and sits on a
+/// filesystem mounted `noexec`. Decision 0178 is the second one costing an
+/// afternoon -- systemd has mounted `/run` `noexec` by default since v256,
+/// netcfgd wrote a hook there, and dhcpcd's `script_runreason: Permission
+/// denied` appeared 1,350 times in a journal while netcfgd reported success.
+///
+/// So this answers the question the operator has next: **is the mode wrong,
+/// or is the mount?** It looks the program up the way an exec does -- an
+/// absolute path as given, a bare name along `PATH` -- and reports the first
+/// candidate that exists. A file that is there with an executable bit set,
+/// refused anyway, is the mount, and nothing else it could be.
+///
+/// Returns `None` where there is nothing useful to add: another errno, a
+/// program that is not there at all (the caller's own "not installed"
+/// message is better), or a `PATH` this cannot read.
+#[must_use]
+pub fn exec_refusal(program: &str, error: &io::Error) -> Option<String> {
+	use std::os::unix::fs::PermissionsExt as _;
+
+	if error.kind() != io::ErrorKind::PermissionDenied {
+		return None;
+	}
+	let path = if program.contains('/') {
+		Some(std::path::PathBuf::from(program))
+	} else {
+		std::env::var_os("PATH").and_then(|paths| {
+			std::env::split_paths(&paths)
+				.map(|dir| dir.join(program))
+				.find(|candidate| candidate.exists())
+		})
+	}?;
+	let mode = std::fs::metadata(&path).ok()?.permissions().mode();
+	Some(if mode & 0o111 == 0 {
+		format!(
+			"{} is there with mode {:04o}, which has no executable bit",
+			path.display(),
+			mode & 0o7777
+		)
+	} else {
+		format!(
+			"{} is there and executable, so the refusal is the filesystem it is on -- \
+			 a `noexec` mount. systemd mounts /run that way by default, and often /tmp",
+			path.display()
+		)
+	})
+}
+
 #[cfg(test)]
 mod tests {
 	/// A whole-argument match finds netcfgd's own process.
@@ -725,6 +776,83 @@ mod tests {
 	}
 
 	use super::*;
+
+	/// **`Permission denied` on an exec is two faults, and they are repaired
+	/// differently.** A missing executable bit is a `chmod`; an executable
+	/// file on a `noexec` mount is a mount option, and no amount of `chmod`
+	/// will touch it. The standard library gives the same four words for both.
+	#[test]
+	fn a_program_with_no_executable_bit_is_named_with_its_mode() {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let dir = netcfgd_testdir::TestDir::new("exec-refusal");
+		let program = dir.join("client");
+		std::fs::write(&program, b"#!/bin/sh\nexit 0\n").expect("written");
+		std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+
+		let denied = io::Error::from(io::ErrorKind::PermissionDenied);
+		let said = super::exec_refusal(&program.display().to_string(), &denied)
+			.expect("a program that is there has something to say");
+		assert!(said.contains("0644"), "names the mode it found: {said}");
+		assert!(said.contains("no executable bit"), "got {said}");
+	}
+
+	/// And a file that *is* executable and was refused anyway: the mount.
+	///
+	/// No mount is made here, and none is needed -- the function's whole job
+	/// is to read what is on disk and say which of the two remains. 0178 is
+	/// the case this exists for, and it cost a day with the answer sitting in
+	/// `findmnt`.
+	#[test]
+	fn an_executable_program_that_was_refused_points_at_the_mount() {
+		let dir = netcfgd_testdir::TestDir::new("exec-refusal");
+		let program = dir.join("client");
+		std::fs::write(&program, b"#!/bin/sh\nexit 0\n").expect("written");
+		make_executable(&program);
+
+		let denied = io::Error::from(io::ErrorKind::PermissionDenied);
+		let said = super::exec_refusal(&program.display().to_string(), &denied)
+			.expect("an executable file that would not run has something to say");
+		assert!(said.contains("noexec"), "names the mount option: {said}");
+		assert!(
+			said.contains(&program.display().to_string()),
+			"names the file: {said}"
+		);
+	}
+
+	/// **Nothing to add is said by saying nothing**, so the caller's own
+	/// message stands. Another errno is one; a program that is not installed
+	/// is the other, and there the caller's "install one of these" is better
+	/// than anything this could invent.
+	#[test]
+	fn nothing_is_added_where_there_is_nothing_to_add() {
+		let dir = netcfgd_testdir::TestDir::new("exec-refusal");
+		let program = dir.join("client");
+		std::fs::write(&program, b"#!/bin/sh\n").expect("written");
+		make_executable(&program);
+
+		assert!(
+			super::exec_refusal(
+				&program.display().to_string(),
+				&io::Error::from(io::ErrorKind::NotFound)
+			)
+			.is_none(),
+			"a different errno is not this function's question"
+		);
+		assert!(
+			super::exec_refusal(
+				&dir.join("never-installed").display().to_string(),
+				&io::Error::from(io::ErrorKind::PermissionDenied)
+			)
+			.is_none(),
+			"a program that is not there has nothing to look at"
+		);
+	}
+
+	fn make_executable(path: &std::path::Path) {
+		use std::os::unix::fs::PermissionsExt as _;
+		std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+	}
 
 	#[test]
 	fn a_pid_that_is_not_a_pid_is_refused() {

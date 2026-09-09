@@ -378,7 +378,7 @@ impl KernelExecutor {
 			.arg("file")
 			.arg(&path)
 			.status()
-			.map_err(|error| format!("could not run {}: {error}", program.display()))?;
+			.map_err(|error| ran_badly(&program.display().to_string(), &error))?;
 		if !status.success() {
 			return Err(format!(
 				"pppd exited with {status} for {iface}; its log will say why, and the \
@@ -2499,7 +2499,7 @@ fn start_backend(
 					Ok(status) => return Err(format!("{program} on {iface} exited with {status}")),
 					// Not installed: try the next one.
 					Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-					Err(error) => return Err(format!("could not run {program}: {error}")),
+					Err(error) => return Err(ran_badly(program, &error)),
 				}
 			}
 			Err(format!(
@@ -3062,6 +3062,20 @@ fn prefix_request(request: &netcfgd_model::PdRequest) -> String {
 	}
 }
 
+/// A program that would not run at all, said in a way that names the repair.
+///
+/// **`Permission denied` is two different faults**, and until 0182 netcfgd
+/// printed the kernel's four words for both: a program with no executable bit,
+/// and a program that has one on a filesystem mounted `noexec`. The second is
+/// 0178's fault one layer up -- and 0178 took a day to find with the answer
+/// sitting in a mount table. `exec_refusal` looks, so the message says which.
+fn ran_badly(program: &str, error: &std::io::Error) -> String {
+	netcfgd_sys::process::exec_refusal(program, error).map_or_else(
+		|| format!("could not run {program}: {error}"),
+		|why| format!("could not run {program}: {error} -- {why}"),
+	)
+}
+
 /// Whether a program is on `PATH`.
 fn which(program: &str) -> bool {
 	std::env::var_os("PATH")
@@ -3076,7 +3090,7 @@ fn run_client(program: &str, arguments: &[String], iface: &str) -> Result<(), St
 		Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(format!(
 			"no DHCPv6 client found for {iface}; install odhcp6c or dhcpcd"
 		)),
-		Err(error) => Err(format!("could not run {program}: {error}")),
+		Err(error) => Err(ran_badly(program, &error)),
 	}
 }
 
@@ -3955,7 +3969,7 @@ fn start_supplicant(iface: &str) -> Result<(), String> {
 	let status = Command::new(&program)
 		.args(supplicant_arguments(driver, iface, &dir, &pidfile))
 		.status()
-		.map_err(|error| format!("could not run {}: {error}", program.display()))?;
+		.map_err(|error| ran_badly(&program.display().to_string(), &error))?;
 	if !status.success() {
 		return Err(format!(
 			"wpa_supplicant on {iface} (driver {driver}) exited with {status}"

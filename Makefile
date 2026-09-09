@@ -1512,6 +1512,11 @@ live:
 	@# interface and exited 0. `Path::is_file` answers false for a file it
 	@# cannot examine. 0181.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_unreadable.sh"
+	@# The third audit: a program netcfgd runs and cannot. `Permission denied`
+	@# is two faults with one message from the kernel -- no executable bit, or
+	@# an executable file on a `noexec` mount -- and 0178 is the second one
+	@# costing a day. 0182.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/exec_refused.sh"
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
