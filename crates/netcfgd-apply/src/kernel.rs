@@ -2915,6 +2915,72 @@ fn stop_recorded_client(program: &str, iface: &str) -> Result<(), String> {
 	Ok(())
 }
 
+/// How long `dhcpcd -k` is given to take effect before the stop is called a
+/// failure.
+///
+/// A `-k` returns as soon as it has sent the signal, so an immediate look would
+/// call every successful stop a failure. Three seconds is the shape of the
+/// other patience constants here and long enough for a client that is releasing
+/// its lease on the way out.
+const DHCPCD_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Whether the `dhcpcd -k` just sent actually stopped netcfgd's client.
+///
+/// **The exit status cannot answer this and the socket can.** `dhcpcd -k` exits
+/// 1 both for "there was no dhcpcd" -- the ordinary answer on a udhcpc machine,
+/// which is why 0070 stopped reading the status at all -- and for "it is
+/// running and I was not allowed to signal it". The second was reached on the
+/// reporting machine for a month: dhcpcd's main process runs as its own user
+/// under privsep, signalling across uids needs `CAP_KILL`, and the unit did not
+/// grant it. Every `backend.stop` for a DHCP client returned success having
+/// stopped nothing.
+///
+/// **What that cost is not a lost stop but a loop.** The start that follows a
+/// stop adopts a client that is still running (0143), the observation then says
+/// the backend is up, so the restart counter that bounds this is cleared as
+/// "stayed up" (0079) and the same plan is made again on the next reconcile.
+/// Measured: a `metric` on a network produced one stop/start pair every five
+/// seconds, indefinitely, with nothing in netcfgd's own output saying anything
+/// had failed.
+///
+/// So the stop asks the same question the adoption asks -- is a dhcpcd out
+/// there reciting the config file netcfgd started it with -- and reports it.
+/// **Only netcfgd's own**: a dhcpcd holding somebody else's `-f` is not this
+/// stop's to account for, and 0141 keeps what to do about a stranger's daemon
+/// the caller's decision rather than this function's.
+fn confirm_dhcpcd_stopped(iface: &str, family: &str) -> Result<(), String> {
+	let run_dir = dhcpcd_run_dir();
+	let marker = run_dir_path()
+		.join("dhcpcd")
+		.join(format!("{iface}-{family}.conf"))
+		.display()
+		.to_string();
+	let deadline = std::time::Instant::now() + DHCPCD_STOP_PATIENCE;
+	loop {
+		match crate::dhcpcd_control::config_file_of(&run_dir, iface, family) {
+			// Somebody else's dhcpcd, which this stop neither reached nor
+			// disturbed, and which 0141 keeps the caller's business.
+			Some(seen) if seen != marker => return Ok(()),
+			// **`None` is "netcfgd could not tell", and that is deliberately
+			// not a failure here.** On a udhcpc machine there is no dhcpcd
+			// socket at all and never was, so treating silence as a client
+			// that would not die would fail every stop on every such machine.
+			// This reports what it can prove and says nothing otherwise,
+			// which is 0070's rule about the exit status one layer up.
+			None => return Ok(()),
+			Some(_) => {}
+		}
+		if std::time::Instant::now() >= deadline {
+			return Err(format!(
+				"the dhcp client on {iface} is still running after `dhcpcd -{family} -k`: it \
+				 answers its control socket and still recites `-f {marker}`. dhcpcd runs as \
+				 its own user, so stopping it needs CAP_KILL -- being root is not enough"
+			));
+		}
+		std::thread::sleep(std::time::Duration::from_millis(100));
+	}
+}
+
 /// What the document asks the ISP for, in odhcp6c's spelling.
 ///
 /// `-P <[pfx/]len>`, where `0` means "whatever you are giving out". Both parts
@@ -3894,6 +3960,7 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 				Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
 				Err(error) => return Err(format!("could not stop dhcpcd on {iface}: {error}")),
 			}
+			confirm_dhcpcd_stopped(iface, "4")?;
 			stop_recorded_client("udhcpc", iface)
 		}
 		BackendKind::Dhcp6 => {
@@ -3911,6 +3978,7 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 				Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
 				Err(error) => return Err(format!("could not stop dhcpcd on {iface}: {error}")),
 			}
+			confirm_dhcpcd_stopped(iface, "6")?;
 			stop_recorded_client("odhcp6c", iface)
 		}
 		BackendKind::Supplicant => {

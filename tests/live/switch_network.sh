@@ -143,6 +143,21 @@ check() {
 	fi
 }
 
+# **Refused outside a network namespace of its own, rather than trusted to be
+# in one.** The header says `unshare -rn` and the Makefile supplies it, and
+# neither of those stops somebody running the script directly -- which makes
+# `wlan0` and `wlan0p` on the real machine, puts a DHCP server on them, and
+# leaves both behind when a check fails before the cleanup. Measured, by doing
+# it: two veths survived on the host, and the next run skipped with "cannot
+# make a veth pair" because the names were taken.
+#
+# pid 1's namespace is the host's, and `/proc` is not remounted by `unshare
+# -rn`, so comparing the two links answers this without anything being
+# created first.
+if [ "$(readlink /proc/self/ns/net)" = "$(readlink /proc/1/ns/net 2>/dev/null)" ]; then
+	skip "this makes interfaces and must not do it on the machine's own network; run it under \`unshare -rn\`, as the Makefile does"
+fi
+
 # **A veth rather than a dummy**, so the metric section below can put a real
 # DHCP server on the far end. For everything above it behaves as a dummy did:
 # what makes netcfgd treat it as a radio is `NCFG_SYS_CLASS_NET`, not its kind.

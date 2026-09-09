@@ -432,6 +432,60 @@ else
 		"$denied_state" "denied"
 	rm -f "$probe_dir/.sandbox-probe"
 
+	# **And that a child can signal a process running as somebody else.**
+	# dhcpcd's main process drops to its own user under privsep, and
+	# `dhcpcd -4 -k <iface>` is a second dhcpcd signalling the first. Signalling
+	# across uids needs CAP_KILL -- root without it answers `Operation not
+	# permitted` -- so a bounding set that omits it makes every `backend.stop`
+	# for a DHCP client a no-op that reports success. Decision 0179.
+	#
+	# The process signalled is spawned here rather than found: this has to
+	# measure the capability rather than whatever a machine happens to be
+	# running, and signalling a stranger's daemon is not something a test does.
+	# It exits on its own after 30 seconds and is killed as soon as both probes
+	# have read it.
+	bounding=$(sed -n 's/^CapabilityBoundingSet=\(.*\)$/\1/p' "$unit" | tail -1)
+	ambient=$(sed -n 's/^AmbientCapabilities=\(.*\)$/\1/p' "$unit" | tail -1)
+	other=
+	for candidate in dhcpcd nobody; do
+		if id -u "$candidate" >/dev/null 2>&1; then
+			other=$candidate
+			break
+		fi
+	done
+	if [ -z "$other" ] || ! command -v setpriv >/dev/null 2>&1; then
+		unchecked="no unprivileged user to signal, so CAP_KILL is unchecked"
+		if [ -n "${NCFG_LIVE:-}" ]; then
+			echo "sandbox_writes.sh: NCFG_LIVE is set but $unchecked" >&2
+			exit 1
+		fi
+		echo "note $unchecked"
+	else
+		setpriv --reuid="$(id -u "$other")" --regid="$(id -g "$other")" \
+			--clear-groups sleep 30 &
+		victim=$!
+		signal_state=$(timeout 60 systemd-run --quiet --wait --pipe --collect \
+			-p "CapabilityBoundingSet=$bounding" -p "AmbientCapabilities=$ambient" \
+			/bin/sh -c "kill -0 $victim && echo SIGOK" 2>/dev/null || echo denied)
+		check "the unit's capabilities let a child signal a process of another uid" \
+			"$signal_state" "SIGOK"
+
+		# The control, and it is the same argument as ExecPaths= above: `SIGOK`
+		# would also be the answer if the properties had not applied, or if the
+		# process signalled were root's after all. Take CAP_KILL out of what the
+		# unit declares and the same probe has to fail.
+		nokill_bounding=$(printf '%s\n' $bounding | grep -v '^CAP_KILL$' | tr '\n' ' ')
+		nokill_ambient=$(printf '%s\n' $ambient | grep -v '^CAP_KILL$' | tr '\n' ' ')
+		denied_signal=$(timeout 60 systemd-run --quiet --wait --pipe --collect \
+			-p "CapabilityBoundingSet=$nokill_bounding" \
+			-p "AmbientCapabilities=$nokill_ambient" \
+			/bin/sh -c "kill -0 $victim && echo SIGOK" 2>/dev/null || echo denied)
+		check "and cannot without the unit's CAP_KILL, so that line is load-bearing" \
+			"$denied_signal" "denied"
+		kill "$victim" 2>/dev/null || true
+		wait "$victim" 2>/dev/null || true
+	fi
+
 	# **The control, and this check is worth nothing without it.** `rw` above
 	# would also be the answer if the properties had failed to apply, if
 	# `systemd-run` had ignored them, or if this had probed a path no sandbox

@@ -9461,6 +9461,82 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.72 The first machine to ask netcfgd to stop a DHCP client
+
+Two wifi networks were given a `metric` -- 100 for the network this machine is
+on, 200 for the other -- and netcfgd was selected. Everything worked except the
+thing the metric is for: the lease's default route kept `metric 3003`, dhcpcd's
+own default, and `ncfg plan` went on proposing the stop/start that 10.69 built
+to fix it.
+
+The journal had the answer twelve times a minute:
+
+    netcfgd[...]: sending signal ALRM to pid 1354671
+    netcfgd[...]: kill: Operation not permitted
+    netcfgd[...]: netcfgd: adopted the dhcp client already running on wlp0s20f3
+
+**dhcpcd's main process runs as user `dhcpcd`, and signalling across uids needs
+`CAP_KILL`.** The unit's bounding set did not have it. Root is not a separate
+power here -- root's authority over another uid *is* that capability -- so
+`dhcpcd -4 -k`, which netcfgd runs as a child and which inherits the set, could
+not signal the client netcfgd had started. Measured both ways on the machine:
+`kill -0` succeeds as root and answers `Operation not permitted` under
+`capsh --drop=cap_kill`.
+
+**The metric did not cause this; it revealed it.** Every `backend.stop` for a
+DHCP client on every systemd machine was a no-op -- dropping `dhcp` from a
+`config`, switching networks, `ncfg wifi disconnect`, `--restart-wedged`. What
+made a `metric` different is that it is the only configuration on this machine
+that has ever asked netcfgd to stop a running client, and somebody was watching
+the route afterwards.
+
+### Three correct mechanisms composing into a loop
+
+The stop reported success because its exit status is deliberately not read
+(0070: on a udhcpc machine, "dhcpcd is not running" is exit 1 and is the
+ordinary answer). The start that followed adopted the client that had never
+gone, which is 0143 doing its job. The observation then said the backend was
+up, so the restart counter that would have bounded this was cleared as "stayed
+up", which is 0079 doing its job. The same plan was made again five seconds
+later, and again, 78 times before anything looked.
+
+Each of those is right on its own and this document has now collected several
+of these; 0140's trap was the same shape. **What breaks the chain is a report,
+not a counter.** `confirm_dhcpcd_stopped` asks dhcpcd's control socket the same
+question the adoption asks -- is a client out there still reciting the `-f`
+netcfgd gave it -- and returns an error naming `CAP_KILL` when there is.
+
+### The third sandbox fault in three days, and the same countermeasure
+
+`ProtectSystem=full` made a grant inert (10.66, 0176). `/run` `noexec` made a
+generated hook unrunnable (10.67, 0178). A bounding set made a signal
+impossible (0179). In all three netcfgd reported success, and in all three the
+tests passed **because they ran the code without the sandbox that breaks it**.
+
+So both new checks are about the unit's own declaration rather than about a
+sandbox a test invents. `sandbox_writes.sh` hands systemd the unit's parsed
+`CapabilityBoundingSet=` and `AmbientCapabilities=` and requires a child to be
+able to signal a process of another uid, with the control that the same probe
+fails when `CAP_KILL` is removed. `dhcpcd.sh` runs the real stop under
+`capsh --drop=cap_kill` against a dhcpcd that has genuinely dropped privileges
+-- that script already skips unless it can guarantee it has -- and requires
+netcfgd to refuse to call it stopped. Sabotage confirmed each: removing the
+capability from the unit reddens the first, removing `confirm_dhcpcd_stopped`
+reddens the second while the "and the client really is still there" check stays
+green, which is the pair measuring two different things.
+
+### And one hazard found by tripping over it
+
+`switch_network.sh` makes a veth pair and puts a DHCP server on it, and its
+header says it runs under `unshare -rn`. Run directly -- which is how it was
+run while checking all this -- it made `wlan0` and `wlan0p` **on the machine's
+own network**, and left both behind when a check failed before the cleanup; the
+next run then skipped with "cannot make a veth pair" because the names were
+taken. It now refuses the host's network namespace outright, comparing its own
+`/proc/self/ns/net` against pid 1's, which costs nothing and answers before
+anything is created. A header that says how a script must be run is a comment;
+the machine needed a check.
+
 ## 10.71 Six tests that could not hold their own premise under root
 
 The suite failed as root and passed as an ordinary user. Not flakiness: six

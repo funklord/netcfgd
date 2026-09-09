@@ -95,8 +95,34 @@ RestartSec=2
 # the client could not bind. Either alone produces the same empty resolver, and
 # fixing one leaves the symptom exactly where it was -- which is how the first
 # fix looked like no fix at all.
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_NET_BIND_SERVICE
+#
+# **`CAP_KILL`, because the client netcfgd must stop does not run as root.**
+# The same privilege separation the three capabilities above exist for is what
+# takes the process out of reach: dhcpcd's main process runs as user `dhcpcd`,
+# and signalling a process whose uid differs from the sender's needs CAP_KILL
+# -- being root is not enough, because root's power over another uid *is* that
+# capability. `dhcpcd -4 -k <iface>` is a second dhcpcd that signals the first,
+# it inherits this set, and without the line it answers:
+#
+#     sending signal ALRM to pid 1354671
+#     kill: Operation not permitted
+#
+# Measured on the reporting machine, both ways: as unrestricted root
+# `kill -0 <the client>` succeeds, and under `capsh --drop=cap_kill` the same
+# call answers `Operation not permitted`.
+#
+# **Every `backend.stop` for a DHCP client was a silent no-op**, because exit 1
+# from `dhcpcd -k` is also what "no dhcpcd is running" looks like on a machine
+# whose client is udhcpc, so the status is deliberately not read (0070). The
+# stop reported success, the start that followed adopted the client that had
+# never gone, and the reconcile made the same plan five seconds later -- for
+# ever. Found by setting a network's `metric`, which is a stop and a start
+# (0053): the loop ran 78 times before anything looked at the journal.
+#
+# Ambient as well as bounded, for `CAP_NET_BIND_SERVICE`'s reason: it is the
+# child that signals, not netcfgd.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE CAP_KILL
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_NET_BIND_SERVICE CAP_KILL
 NoNewPrivileges=yes
 ProtectHome=yes
 ProtectKernelLogs=yes

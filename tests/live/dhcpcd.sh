@@ -567,6 +567,35 @@ fi
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 interface cli { config = "10.44.9.9/24" }
 CONF
+
+# **First, the same stop with no CAP_KILL, which is what the unit shipped.**
+# This is the one script where that can be asked honestly: dhcpcd drops to its
+# own user here -- the skips at the top exist to guarantee it -- and signalling
+# across uids is precisely what the capability is for. Under systemd netcfgd is
+# root with a bounding set, and root without CAP_KILL cannot signal another
+# uid at all; `dhcpcd -k` then prints `kill: Operation not permitted` and exits
+# 1, which is indistinguishable by status from "no dhcpcd is running".
+#
+# So netcfgd reported a stopped backend, the start beside it adopted the client
+# that had never gone, and the next reconcile made the same plan. Measured on
+# the reporting machine at one stop/start pair every five seconds, for as long
+# as a network carried a `metric`. Decision 0179.
+if command -v capsh >/dev/null 2>&1 && [ "$pid" -gt 0 ]; then
+	capsh --drop=cap_kill -- -c "$ncfg apply" > "$work/apply-nokill.log" 2>&1 || true
+	contains "a stop that cannot signal the client refuses to call it stopped" \
+		"$(cat "$work/apply-nokill.log")" "CAP_KILL"
+	if still_running "$pid"; then
+		echo "ok   and the client really is still there, so that is not a guess"
+	else
+		echo "FAIL and the client really is still there, so that is not a guess"
+		echo "       pid $pid is gone, so this measured nothing: CAP_KILL was not dropped"
+		failures=$((failures + 1))
+	fi
+else
+	echo "note capsh is not installed (apt install libcap2-bin), so the stop that"
+	echo "     cannot signal is unchecked"
+fi
+
 "$ncfg" apply > "$work/apply-stop.log" 2>&1 || {
 	cat "$work/apply-stop.log" >&2
 	exit 1
