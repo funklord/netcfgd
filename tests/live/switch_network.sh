@@ -143,8 +143,14 @@ check() {
 	fi
 }
 
-ip link add wlan0 type dummy 2>/dev/null || skip "cannot make a dummy interface"
+# **A veth rather than a dummy**, so the metric section below can put a real
+# DHCP server on the far end. For everything above it behaves as a dummy did:
+# what makes netcfgd treat it as a radio is `NCFG_SYS_CLASS_NET`, not its kind.
+ip link add wlan0 type veth peer name wlan0p 2>/dev/null ||
+	skip "cannot make a veth pair"
 ip link set wlan0 up 2>/dev/null || true
+ip link set wlan0p up 2>/dev/null || true
+ip addr add 10.44.0.1/24 dev wlan0p 2>/dev/null || true
 
 # Two networks the fake advertises, with metrics that differ so the switch is
 # visible in something netcfgd owns. Lower wins, and it is a route metric.
@@ -169,7 +175,10 @@ device wlan0 {
 }
 
 interface wlan0 {
-	config = "dhcp"
+	# `null` to begin with: the metric section below turns this into `dhcp`
+	# once the association is observed, because that is when netcfgd has a
+	# metric to give the client. The checks above need no lease.
+	config = "null"
 	dns { }
 }
 CONF
@@ -302,6 +311,107 @@ check "the new network's nameserver reaches the resolver" \
 	"$(resolver_has 10.2.0.53)" "1"
 check "and the old network's is gone rather than left beside it" \
 	"$(resolver_has 10.1.0.53)" "0"
+
+# ------------------------------------------- the route metric the network sets
+
+# **`network { metric = N }` is documented to do two things and this is the
+# second.** `netcfgd_model::wifi`: *"Lower wins, and it is a route metric -- the
+# same number and the same scale as an interface's `preference` ... While the
+# radio is associated to this network, its interface's routes take this metric
+# instead of the interface's own."* The join-order half is asserted by
+# `wifi.sh`; this is the half nothing drove, and it needs a real lease with a
+# default route in it because on a `config = "dhcp"` radio -- which is what
+# `ncfg wifi activate` writes -- the lease's route *is* the interface's route.
+#
+# The fixture is `dhcpcd.sh`'s: busybox udhcpd on the far end of the veth,
+# offering a router. Skipped rather than failed where there is no server, the
+# way that script does, because the machine is what is missing and not the code.
+if command -v busybox >/dev/null 2>&1 && busybox --list | grep -qx udhcpd &&
+	command -v dhcpcd >/dev/null 2>&1; then
+	: > "$work/udhcpd.leases"
+	cat > "$work/udhcpd.conf" <<CONF
+start 10.44.0.20
+end 10.44.0.20
+interface wlan0p
+option subnet 255.255.255.0
+option router 10.44.0.1
+option dns 10.44.0.53
+option lease 600
+lease_file $work/udhcpd.leases
+pidfile $work/udhcpd.pid
+CONF
+	busybox udhcpd -f "$work/udhcpd.conf" > "$work/udhcpd.log" 2>&1 &
+	server=$!
+
+	# The metric on the lease's default route, which is what an operator sees
+	# and what decides whether this radio beats the wired link.
+	lease_metric() {
+		ip -4 route show default dev wlan0 2>/dev/null |
+			sed -n 's/.*metric \([0-9]*\).*/\1/p' | head -1
+	}
+
+	# Back onto the first network: the section above left the station on Cafe,
+	# and this half is about the metric each network carries, so it has to
+	# start from a known one.
+	send_event "JOIN HomeFiber"
+	settle_to HomeFiber || true
+
+	# **The client is started after the association is known, deliberately.**
+	# netcfgd reads the metric when it starts the client and passes it as
+	# `-m`, so a first apply that starts the supplicant and the client
+	# together has no association observed yet and nothing to read. Bringing
+	# `dhcp` in on a second apply is what a real machine does anyway: the
+	# radio associates before a lease is asked for.
+	sed -i 's/config = "null"/config = "dhcp"/' "$work/etc/netcfgd.conf"
+	timeout 60 "$ncfg" apply >/dev/null 2>&1 || true
+	waited=0
+	while [ -z "$(lease_metric)" ] && [ "$waited" -lt 200 ]; do
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+
+	check "the lease's default route arrives while on the first network" \
+		"$([ -n "$(lease_metric)" ] && echo yes || echo no)" "yes"
+	# HomeFiber carries `metric = 100`, so that is what its routes take.
+	check "and takes the metric that network carries" "$(lease_metric)" "100"
+
+	# Move to the network whose metric is 400 and let netcfgd reconcile.
+	send_event "JOIN Cafe"
+	settle_to Cafe || true
+	timeout 60 "$ncfg" apply >/dev/null 2>&1 || true
+	sleep 1
+	timeout 60 "$ncfg" apply >/dev/null 2>&1 || true
+
+	# **This is the half that does not work, pinned rather than wished for.**
+	# The metric is read when netcfgd *starts* the client and passed as `-m`;
+	# a station moving to a network with a different metric does not re-drive
+	# a client that is already running, so the lease's route keeps the metric
+	# of the network it was obtained on. Cafe carries 400 and this is still
+	# 100.
+	#
+	# Closing it is a decision rather than an oversight, and it is the
+	# copyright holder's. Restarting the client applies the new metric and
+	# drops the lease for as long as the exchange takes -- on a laptop moving
+	# between networks that is the moment least able to afford it. Rewriting
+	# the route in place avoids that and means netcfgd editing a route the
+	# DHCP client owns, which is the thing constraint 1 exists to stop.
+	# `ObservedBackend::started_with` is the empty slot either answer would
+	# fill, and `Op::BackendStart` carries no metric to compare against.
+	#
+	# Asserted at the value it actually has, so that closing the gap turns
+	# this red and says so, rather than leaving a wish in a comment nobody
+	# reruns.
+	check "the metric does NOT follow a switch -- known gap, see project.md" \
+		"$(lease_metric)" "100"
+
+	kill "$server" 2>/dev/null || true
+	wait "$server" 2>/dev/null || true
+	# The client netcfgd started, which KillMode=process would leave on a real
+	# machine and nothing here would otherwise reap.
+	timeout 30 dhcpcd -4 -k wlan0 >/dev/null 2>&1 || true
+else
+	echo "note the route metric section needs busybox udhcpd and dhcpcd; skipped"
+fi
 
 echo
 if [ "$failures" -eq 0 ]; then

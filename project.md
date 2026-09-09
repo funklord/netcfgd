@@ -9567,12 +9567,52 @@ do prove -- a second lease *replaces* the first network's nameserver rather than
 accumulating beside it -- and the header says so rather than letting three
 checks read as three switch checks.
 
-**What is still not driven**: that the DHCP client notices the change and
-re-leases, which is dhcpcd's own behaviour; and the route metric the new network
-carries, which needs a lease with a default route in it and therefore
-`dhcpcd.sh`'s fixture rather than this one. The two networks in the fixture
-carry different metrics already, so the document is ready for that check when
-somebody joins the two.
+### The route metric half, and what driving it found
+
+The fixture is joined now: `dhcpcd.sh`'s busybox udhcpd on the far end of a veth
+-- the radio is a veth rather than a dummy, since what makes netcfgd treat it as
+one is `NCFG_SYS_CLASS_NET` and not its kind -- so there is a real lease with a
+real default route to read a metric off.
+
+**The metric never reached the DHCP client at all.** Measured before the fix:
+the lease's route carried **1003**, which is dhcpcd's own default, on a document
+whose network said `metric = 100`. The executor built its metric list from
+`interface.preference` alone, so `network { metric = N }` reached the routes the
+*document* declares -- `plan_route` applies `effective_metric` -- and nothing
+else. On a `config = "dhcp"` radio, which is what `ncfg wifi activate` writes,
+**the lease's route is the interface's route**, so the documented behaviour was
+absent exactly where it is normally used.
+
+`netcfgd_model::wifi::effective_metric` is one rule with two entry points now,
+and both callers use it. **The executor's own file already argued for this**: the
+comment above `dns_scopes` says it calls "the same function the planner calls,
+and deliberately not a second reading of the document", because rebuilding from
+the document alone once delivered an empty `resolv.conf` while the plan said
+otherwise. `preferences` was that mistake, unnoticed, two fields further down.
+
+### Open, and it is a decision: the metric does not follow a switch
+
+The metric is read when netcfgd *starts* the client and passed as `-m`. A
+station moving to a network with a different metric does not re-drive a client
+that is already running, so the lease's route keeps the metric of the network it
+was obtained on -- measured: 100 on HomeFiber, still 100 after joining a Cafe
+that carries 400.
+
+**Both answers cost something, which is why this is the holder's.** Restarting
+the client applies the new metric and drops the lease for as long as the
+exchange takes -- on a laptop moving between networks, the moment least able to
+afford it. Rewriting the route in place avoids that and means netcfgd editing a
+route the DHCP client owns, which is what constraint 1 exists to stop.
+`ObservedBackend::started_with` is the empty slot either answer would fill, and
+`Op::BackendStart` carries no metric to compare against, so the plan cannot
+express the difference today.
+
+**The test asserts the value it actually has**, named as a known gap, so closing
+it turns the check red and says so -- rather than leaving a wish in a comment
+nobody reruns.
+
+**Still not driven**: that the DHCP client notices a network change and
+re-leases, which is dhcpcd's own behaviour rather than netcfgd's.
 
 ## 10.69 The switch works, and what the two empty-resolver faults were
 
