@@ -1404,12 +1404,16 @@ impl Builder {
 	/// asking to be ranked, not asking to have its routes withheld when the
 	/// cable is out.
 	fn effective_metric(&self, interface: &Interface, observed: &Observed) -> Option<u32> {
-		observed
-			.link(&interface.name)
-			.and_then(|link| link.network.as_deref())
-			.and_then(|id| self.network_metrics.get(id))
-			.copied()
-			.or(interface.preference)
+		// Delegated rather than kept here, because the executor has to apply
+		// the same rule and did not -- it built its list from
+		// `interface.preference` alone, so the metric a network carries never
+		// reached the DHCP client that installs the lease's route. One
+		// function, two callers, and the model owns it.
+		netcfgd_model::wifi::effective_metric_by(
+			interface,
+			|id| self.network_metrics.get(id).copied(),
+			observed,
+		)
 	}
 
 	/// Whether an interface currently has carrier.

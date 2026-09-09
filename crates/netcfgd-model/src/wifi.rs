@@ -265,6 +265,63 @@ pub fn network_for<'a>(
 	})
 }
 
+/// The metric an interface's routes take, given what it is associated to.
+///
+/// **The network's `metric` where the radio is on one that carries it, and the
+/// interface's own `preference` otherwise.** That is the rule
+/// [`WifiNetwork::metric`] states -- "while the radio is associated to this
+/// network, its interface's routes take this metric instead of the interface's
+/// own" -- and it is here rather than in either caller because *both* have to
+/// apply it and they were not.
+///
+/// **The planner applied it and the executor did not**, so a `config = "dhcp"`
+/// radio -- which is what `ncfg wifi activate` writes -- never saw it at all.
+/// The planner uses this for routes the document declares; the executor passes
+/// a metric to the DHCP client, which is what installs the *lease's* default
+/// route, and it built its list from `interface.preference` alone. Measured on
+/// a veth with a real server: the lease's route carried 1003, dhcpcd's own
+/// default, on a document whose network said 100 -- and it stayed 1003 across a
+/// switch to a network saying 400.
+///
+/// The same shape as `dns::scopes`, and the executor's comment on that one
+/// already says why: a value that can come from the observation rather than the
+/// document is one an executor must not rebuild from the document alone.
+#[must_use]
+pub fn effective_metric(
+	interface: &crate::Interface,
+	networks: &[WifiNetwork],
+	observed: &crate::Observed,
+) -> Option<u32> {
+	effective_metric_by(
+		interface,
+		|id| {
+			networks
+				.iter()
+				.find(|network| network.id == id)
+				.and_then(|network| network.metric)
+		},
+		observed,
+	)
+}
+
+/// [`effective_metric`], for a caller that already holds the metrics by id.
+///
+/// Two entry points and one rule. The planner keeps a map of the metrics it
+/// needs and the executor holds the networks themselves; making either carry
+/// the other's shape to share a function would be a worse trade than this.
+#[must_use]
+pub fn effective_metric_by(
+	interface: &crate::Interface,
+	metric_of: impl Fn(&str) -> Option<u32>,
+	observed: &crate::Observed,
+) -> Option<u32> {
+	observed
+		.link(&interface.name)
+		.and_then(|link| link.network.as_deref())
+		.and_then(metric_of)
+		.or(interface.preference)
+}
+
 /// The highest rank a derived join order takes, for a metric of 0.
 ///
 /// Above any metric worth writing -- an interface's `preference` is offered in

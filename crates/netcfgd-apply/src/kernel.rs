@@ -236,13 +236,23 @@ impl KernelExecutor {
 		self.link_kinds = comparable_kinds(document);
 		self.networks.clone_from(&document.networks);
 		self.access_points.clone_from(&document.access_points);
+		// **The network's metric where there is one, not the interface's alone.**
+		// This is what reaches the DHCP client as `-m`, and the client is what
+		// installs the lease's default route -- so on a `config = "dhcp"` radio
+		// it is the only route metric there is. Built from the document alone it
+		// missed `network { metric = N }` entirely, and the lease carried
+		// dhcpcd's own default across every network change.
+		//
+		// The same trap `dns_scopes` above records, and the same fix: call the
+		// function the planner calls rather than reading the document a second
+		// time. A value that can come from the observation is not the
+		// document's to rebuild.
 		self.preferences = document
 			.interfaces
 			.iter()
 			.filter_map(|interface| {
-				interface
-					.preference
-					.map(|preference| (interface.name.clone(), preference))
+				netcfgd_model::wifi::effective_metric(interface, &document.networks, observed)
+					.map(|metric| (interface.name.clone(), metric))
 			})
 			.collect();
 		self.openvpn = document
