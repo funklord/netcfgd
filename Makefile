@@ -1522,6 +1522,11 @@ live:
 	@# failed `route.add` every run, because the second planned against a
 	@# machine the first then changed. 0184.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/apply_race.sh"
+	@# A daemon that has done work does not keep growing. `make rss` measures
+	@# one two seconds after it starts, which is the floor and not the risk: a
+	@# kilobyte per reconcile is invisible at startup and is 100 MB by the end
+	@# of a quarter. No namespace: it binds a socket and touches no interface.
+	@NCFG_LIVE=1 sh tests/live/steady_state.sh
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"

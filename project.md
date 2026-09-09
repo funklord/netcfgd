@@ -9461,6 +9461,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.78 And the resources, where the audit found the work already done
+
+The sixth pass, and the first that did not find a fault. The codec is bounded
+(`MAX_LINE`, and a `take()` *before* the `read_until`, with the reason above
+it); the event fan-out drops slow subscribers instead of waiting for them;
+connections are capped at 64, so threads and descriptors are bounded by that
+-- measured, 20 connections take the daemon from 9 descriptors and 6 threads
+to 69 and 26, and both come back.
+
+**And the budgets are gated.** `make check` runs `size`, `footprint` and
+`rss`; today `rss: netcfgd peak 4792 KB of 5120 limit`. A comment in
+`config.rs` says the project gates on the RSS budget, and I went looking for
+the gate in order to correct the claim. The claim was correct. My grep was
+not: the gate is a Makefile *target* named `rss`, and I had searched for the
+word.
+
+### What was missing was the daemon that has been running a while
+
+`make rss` measures one two seconds after it starts, which is the floor and
+not the risk. netcfgd runs for months, and **a kilobyte leaked per reconcile
+is invisible at startup and 100 MB by the end of a quarter.**
+
+Measured over 260 configuration reloads: 10868 → 11004 → 11044 KB, with the
+second burst three times the size of the first and adding a fifth as much --
+an allocator settling, not accumulation. Descriptors and threads did not move.
+`tests/live/steady_state.sh` pins that shape and deliberately asserts no
+absolute number: `make rss` owns the ceiling against a release build, and a
+ratchet in two places is a ratchet that disagrees with itself.
+
+### Two of my own measurements were wrong before they were right
+
+Both produced a confident number that meant nothing, and both are the same
+mistake in different clothes.
+
+**A fixture that could not play the part**: the concurrency probe gave netcfgd
+a stub `dhcpcd` and counted two clients started -- but netcfgd identifies a
+dhcpcd by asking its control socket which config it was started with, so it
+declined to adopt a stub that answers nothing and started its own. The number
+was the fixture's.
+
+**A measurement taken after the thing measured had gone**: the
+descriptor-exhaustion probe read `/proc/<pid>/fd` *after* the client process
+had exited and reported the idle count as the count under load. Two runs and a
+control were built on that before the ordering was noticed.
+
+Six audits, and the two worst measurements in all of them were mine, on the
+day I was auditing measurement.
+
+### Left open, and written down rather than resolved
+
+Whether a failing `accept` spins: the loop retries immediately by
+construction, so a persistent `EMFILE` would be a hot core. Driven against a
+daemon with `RLIMIT_NOFILE` 24 and 40 clients queued it burned 0 CPU ticks in
+five seconds, so no spin was seen -- but the branch was not positively
+reached, and a fix for a path nothing can exercise is a fix nothing can check.
+
+And a netlink dump collects into memory proportional to what the kernel holds:
+kilobytes on a laptop, not on a machine with a full routing table. netcfgd is
+not a router, so it is a limit rather than a defect -- but it was not written
+down anywhere.
+
 ## 10.77 And the races, where an apply turned out to be one of two
 
 The fifth audit. `FileLock` has been in the tree since the ownership record
