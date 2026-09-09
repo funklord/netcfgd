@@ -9515,10 +9515,34 @@ and had never reached the write at all -- one call in the pair hiding the
 other. A *directory* where the file belongs is the refusal that gets past the
 first call, and both halves are now sabotaged separately.
 
-**Still uncovered, and said rather than left implied**: a `write_all` that
-fails after a successful `open` -- the filesystem filling between the two.
-That needs a full filesystem, which needs a mount, which belongs in the live
-suite. The error is propagated and worded; nothing has watched it arrive.
+### The write that fails after the open, and what it caught on the way
+
+The gap above was real and is now closed: every unit test refuses at the
+`open`, and the half a real machine reaches is the other one. **Opening an
+existing file needs no space** -- truncating it hands some back -- so on a full
+filesystem the open succeeds, the mode is set, and the write stops part way
+with the operator's script half on disk.
+
+`tests/live/write_full.sh` fills a 256 KiB tmpfs with `dd` and drives the two
+writers a shell can reach without a radio, a modem or a VPN: an inline
+`pre_up` hook and the resolver. Twenty checks. netcfgd names the file, gives
+the kernel's words, says which action it stopped at and exits non-zero -- and
+the hook file is left *shorter than the body*, which is what tells a failed
+write from a failed open.
+
+**And it caught a promise nothing had checked.** `netcfgd-dns`'s `replace`
+declines to fall back to writing in place when staging fails for want of
+space, with a comment saying why: the fallback would truncate a working
+`resolv.conf` and then fail to refill it. Sabotaged by removing that guard,
+the run does not merely lose the resolver -- **it empties it and reports
+success.** That is 10.66 and 10.67's fault exactly, sitting behind a comment
+that was right all along and had never been asserted. Two checks now hold it:
+the old content survives, and no staging file is left beside it.
+
+Three ways of finding the same thing in one week: a grant that was inert, a
+hook that could not run, and a fallback that would have emptied a file. What
+made all three visible was **making the failure happen**, not reading the
+code that handles it.
 
 ## 10.72 The first machine to ask netcfgd to stop a DHCP client
 

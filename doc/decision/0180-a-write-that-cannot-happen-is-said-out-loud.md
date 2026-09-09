@@ -75,10 +75,29 @@ was reading `create_dir_all`'s refusal every time and never reached the write.
 A directory where the file belongs is the refusal that gets past the first
 call. Sabotage confirms each half separately.
 
-## What is still uncovered, said plainly
+## The write that fails after the open
 
-The `write_all` failing after a successful `open` -- a filesystem that fills up
-between the two -- is not reproduced by any test here. It needs a full
-filesystem, which needs a mount, which puts it in the live suite rather than
-beside the code. The error is propagated and worded; nothing has watched it
-arrive.
+Every unit test above makes its refusal at the `open`, with a file where a
+directory has to be. That leaves the second half of each write unexercised --
+and it is the half a real machine reaches, because **opening an existing file
+needs no space at all**: truncating it hands some back, the mode is set, and
+then the write returns `ENOSPC` with the operator's script half on disk.
+
+`tests/live/write_full.sh` drives it against a 256 KiB tmpfs filled with `dd`,
+through the two writers a shell can reach without a radio, a modem or a VPN:
+an inline `pre_up` hook materialised into `<run>/hooks/`, and the resolver.
+Measured, and each is now a check: netcfgd names the file, gives the kernel's
+own words, says which action it stopped at, and exits non-zero -- and the hook
+file is left **shorter than the body**, which is what distinguishes a failed
+write from a failed open.
+
+**It also caught something nothing had checked.** `replace` declines to fall
+back to writing in place when staging fails for want of space, and says why in
+a comment: the fallback truncates a working `resolv.conf` and then cannot
+refill it. Sabotaged by removing that guard, the run does not merely lose the
+resolver -- it **empties it and reports success**, which is 0176's and 0178's
+fault exactly. The comment was right and had never been a check; now it is
+two: the old content survives, and no staging file is left beside it.
+
+Both directions are sabotage-confirmed: discarding the hook write's error
+turns three checks red, and removing the fallback guard turns four.

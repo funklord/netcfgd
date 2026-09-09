@@ -1500,6 +1500,12 @@ live:
 	@# makes its own namespace the way dhcpcd.sh does.
 	@sh tests/live/slaac.sh
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/hooks.sh"
+	@# A write that fails after the file is already open, which is what a full
+	@# filesystem produces and what every unit test beside those writers
+	@# cannot reach: they refuse at the open. It also holds the only check on
+	@# `replace` declining to fall back on a full disk -- the fallback there
+	@# truncates a working resolv.conf and then reports success. 0180.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/write_full.sh"
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
