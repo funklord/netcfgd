@@ -1372,6 +1372,14 @@ fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), Str
 		);
 		return Ok(());
 	}
+	// Before the list, not after it: a person reads the first line and then
+	// the networks, and a caveat printed underneath is one they have already
+	// acted on. It also has to come before the empty case, since "nothing is in
+	// range" and "netcfgd could not scan" are different answers and the second
+	// one printed as the first is the whole complaint this fixes.
+	if let Some(why) = &report.stale {
+		println!("these are the previous scan's results: {why}");
+	}
 	if report.access_points.is_empty() {
 		println!("no access points in range of {}", report.interface);
 		return Ok(());

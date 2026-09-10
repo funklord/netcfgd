@@ -814,6 +814,43 @@ fn serve_requests(
 			.as_ref()
 			.map(|document| document.globals.remote.clone())
 			.unwrap_or_default();
+		// **A scan is the one request that waits on a radio**, and since 0194
+		// it waits properly: seconds, while the hardware visits every channel
+		// it is allowed to use. Answering it here would hold the reconcile
+		// loop for that whole time, and 0111 is the record of what that costs
+		// -- a wedged `PING` on an unrelated interface blocked this loop for
+		// 12.2 seconds and the fix was to stop waiting, not to wait better.
+		//
+		// So authorise on the loop, where the policy and the peer are, and do
+		// the waiting off it. The answer travels on a channel and does not
+		// care which thread sends it, and the server already runs a thread per
+		// connection, so this is the model the daemon already has rather than
+		// a new one.
+		if matches!(request, Request::WifiScan { .. }) {
+			let response = authorize::permitted(&policy, &remote, origin, &peer, &request)
+				.err()
+				.map(Response::error);
+			if let Some(refusal) = response {
+				let _ = reply.send(refusal);
+				continue;
+			}
+			let document = state.desired.clone();
+			let Request::WifiScan { interface } = request else {
+				unreachable!("matched just above")
+			};
+			// Detached: nothing joins it, and it ends when the scan does. A
+			// client that hung up first leaves the send failing, which is
+			// ordinary and is what the `let _` says.
+			let spawned = std::thread::Builder::new()
+				.name("scan".to_owned())
+				.spawn(move || {
+					let _ = reply.send(wifi::scan(document.as_ref(), &interface));
+				});
+			if let Err(error) = spawned {
+				netcfgd_sys::log_error!("supplicant", "cannot start a thread to scan: {error}");
+			}
+			continue;
+		}
 		let response = authorized(
 			state,
 			&policy,
@@ -1671,7 +1708,18 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 			let observed = state.observed.clone();
 			wifi::set_radio(state, &observed, interface, *activate)
 		}
-		Request::WifiScan { interface } => wifi::scan(state.desired.as_ref(), interface),
+		// **Served off the loop since 0194 and so unreachable from here.** The
+		// request dispatch answers a scan on its own thread, because waiting
+		// for a radio to visit every channel would hold this loop for seconds
+		// (0111). This arm exists because the match is exhaustive, and it says
+		// so rather than calling `wifi::scan` -- a scan that came back through
+		// here would work, and would quietly restore the stall the split was
+		// made to avoid. A message is a regression somebody sees.
+		Request::WifiScan { .. } => Response::error(
+			"a scan reached the reconcile loop, which should not happen: it is \
+			 answered on its own thread so that waiting for the radio does not \
+			 stall everything else. Worth reporting.",
+		),
 		Request::ApStations { interface } => {
 			wifi::ap_stations(state.desired.as_ref(), &state.paths.run, interface)
 		}
@@ -2297,6 +2345,16 @@ fn report_supplicant_event(interface: &str, event: &netcfgd_supplicant::protocol
 		// exchanged. A different fault from the one above and worth its own
 		// line: a station refused here is refused by the access point, not by
 		// anything in netcfgd's configuration.
+		// **Missed by 0192**, which read the events that say an association is
+		// failing and not the one that says the radio could not even look. 24
+		// of these in three days on the reporting machine, and a scan that
+		// failed is exactly when `SCAN_RESULTS` hands back something old.
+		// `ret=` is the driver's errno, negated: -16 is EBUSY, -100 ENETDOWN.
+		"CTRL-EVENT-SCAN-FAILED" => netcfgd_sys::log_note!(
+			"supplicant",
+			"{interface}: the radio could not scan (ret={})",
+			field("ret")
+		),
 		"CTRL-EVENT-AUTH-REJECT" | "CTRL-EVENT-ASSOC-REJECT" => netcfgd_sys::log_warning!(
 			"supplicant",
 			"{interface}: the access point refused this station, status {}",

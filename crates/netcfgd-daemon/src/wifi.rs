@@ -467,10 +467,38 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 		}
 	};
 
-	// A scan already in progress answers FAIL, which is not a failure worth
-	// reporting: the results are about to be fresh either way. Anything else
-	// wrong will surface on the read below.
+	// **Attached before `SCAN` is sent, and that order is the whole of it.**
+	// The completion event only reaches connections that asked for events, and
+	// asking afterwards would race the scan finishing on a radio with little
+	// to look at.
+	//
+	// A failure to attach is not a failure to scan. What is lost is the wait
+	// below, so the old behaviour returns: results one scan out of date. Said
+	// in `stale` rather than swallowed.
+	let listening = client.attach().map_err(|error| error.to_string());
+
+	// A scan already in progress answers FAIL. Not a failure worth reporting
+	// and not a reason to skip the wait either: a scan *is* running, and its
+	// completion event is the one being waited for.
 	let _ = client.command("SCAN");
+
+	// The comment this replaces said the results were "about to be fresh
+	// either way", which is exactly the fault: about to be is not are.
+	let stale = match &listening {
+		Ok(()) => {
+			netcfgd_supplicant::wait_for_scan(&client, netcfgd_supplicant::SCAN_PATIENCE).err()
+		}
+		Err(error) => Some(format!(
+			"netcfgd could not listen for the scan to finish ({error}), so these are \
+			 the results of the scan before it"
+		)),
+	};
+	// **Not logged here.** The reason travels to whoever asked, in `stale`,
+	// and a scan that failed already reaches the journal through the event
+	// watcher (0192) -- which sees the same `CTRL-EVENT-SCAN-FAILED` this
+	// waited on. Logging it in both places put two nearly identical lines in
+	// the journal for one event, from two subsystems, which is how a log stops
+	// being read.
 
 	let body = match client.ask("SCAN_RESULTS") {
 		Ok(body) => body,
@@ -514,6 +542,7 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 	Response::WifiScan(Box::new(ScanReport {
 		interface: interface.to_owned(),
 		access_points: entries,
+		stale,
 	}))
 }
 

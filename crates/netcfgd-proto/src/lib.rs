@@ -891,6 +891,16 @@ pub struct ScanReport {
 	pub interface: String,
 	/// What it found, strongest first.
 	pub access_points: Vec<ScanEntry>,
+	/// Why these are the *previous* scan's results, when they are.
+	///
+	/// **`SCAN` queues a scan and `SCAN_RESULTS` reads a cache**, so a client
+	/// that sends one and immediately reads the other always answers with the
+	/// scan before the one it asked for. netcfgd waits for the supplicant to
+	/// say the scan finished; this is what it says when that did not happen --
+	/// the radio was busy, the interface went down, or the scan outlasted its
+	/// patience. Absent on the ordinary answer, which is fresh. Decision 0194.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub stale: Option<String>,
 }
 
 /// One access point a scan found.
@@ -1252,6 +1262,7 @@ mod shape_tests {
 		let response = Response::WifiScan(Box::new(ScanReport {
 			interface: "wl0".to_owned(),
 			access_points: Vec::new(),
+			stale: None,
 		}));
 		let value: serde_json::Value =
 			serde_json::from_str(&serde_json::to_string(&response).expect("serialises"))

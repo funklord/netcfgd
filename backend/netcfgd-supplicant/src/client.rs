@@ -52,6 +52,81 @@ pub fn is_reply_socket(name: &str) -> bool {
 	name.starts_with(REPLY_PREFIX)
 }
 
+/// How long a scan gets to finish before its results are read anyway.
+///
+/// A scan is not a round trip. The radio leaves the channel it is on and
+/// visits every other one it is allowed to use, in both bands and in 6 GHz
+/// where the hardware has it, dwelling on each long enough to hear a beacon.
+/// Seconds, not milliseconds -- and the number is a property of the band plan
+/// and the regulatory domain rather than of anything netcfgd controls.
+///
+/// Ten, which is `REPLY_TIMEOUT`'s reasoning applied to the thing it was
+/// written about. Being wrong in the impatient direction here returns the
+/// previous results and says so; being wrong in the other direction makes a
+/// person wait for a radio that is not going to answer.
+pub const SCAN_PATIENCE: Duration = Duration::from_secs(10);
+
+/// Wait for a scan to finish.
+///
+/// **`SCAN` does not answer with results and `SCAN_RESULTS` does not scan.**
+/// The first queues a scan and returns at once; the second reads the cache the
+/// last completed scan filled. Sending one and immediately reading the other
+/// therefore returns *the previous scan's* results, always -- and the scan
+/// just asked for lands in whatever reads the cache next.
+///
+/// Measured on the reporting machine before this existed: `ncfg wifi scan`
+/// returned in **7 milliseconds**, which is four orders of magnitude short of
+/// a real scan, and three consecutive calls returned 15, then 20, then 20
+/// access points. The first call's list was five networks out of date and the
+/// scan it had just asked for is what made the second call's list right.
+///
+/// So wait for the supplicant to say it finished. `CTRL-EVENT-SCAN-RESULTS`
+/// is that statement; `CTRL-EVENT-SCAN-FAILED` is the other outcome and is
+/// worth returning early for, since nothing further is coming.
+///
+/// The caller must have sent `ATTACH` -- without it no event reaches this
+/// connection and every scan waits out the full patience. It is not done here
+/// because attaching has to happen *before* `SCAN` is sent, and this is called
+/// after.
+///
+/// # Errors
+///
+/// Returns a description when the scan failed or did not finish in time. The
+/// caller can still read `SCAN_RESULTS`; what it gets is stale, and the point
+/// of the error is that it now knows that.
+pub fn wait_for_scan(client: &Client, patience: Duration) -> Result<(), String> {
+	let deadline = Instant::now() + patience;
+	loop {
+		let left = deadline.saturating_duration_since(Instant::now());
+		if left.is_zero() {
+			return Err(format!(
+				"the scan did not finish within {}s",
+				patience.as_secs()
+			));
+		}
+		// Capped so a supplicant that goes quiet is noticed at the deadline
+		// rather than one poll interval after it.
+		match client.next_event(left.min(Duration::from_millis(250))) {
+			Ok(Some(event)) => match event.name() {
+				"CTRL-EVENT-SCAN-RESULTS" => return Ok(()),
+				// `ret=` is the driver's own errno, negated: -16 is EBUSY, a
+				// radio doing something else, and -100 is ENETDOWN. Passed
+				// through rather than translated, because the set is the
+				// kernel's and any translation here would be a partial one.
+				"CTRL-EVENT-SCAN-FAILED" => {
+					return Err(match event.field("ret") {
+						Some(code) => format!("the supplicant could not scan (ret={code})"),
+						None => "the supplicant could not scan".to_owned(),
+					})
+				}
+				_ => {}
+			},
+			Ok(None) => {}
+			Err(error) => return Err(format!("the supplicant stopped answering: {error}")),
+		}
+	}
+}
+
 /// Remove reply sockets left behind by processes that are gone.
 ///
 /// **`Drop` removes the socket and cannot be relied on to.** netcfgd installs

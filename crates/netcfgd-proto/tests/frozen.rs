@@ -596,6 +596,10 @@ fn wifi_scan_sample() -> Response {
 				mobility_domain: None,
 			},
 		],
+		// The fresh answer, which is the ordinary one and the reason `stale`
+		// is skipped when absent. A witness that only ever carried the
+		// caveat would pin the wrong half.
+		stale: None,
 	}))
 }
 
@@ -626,6 +630,18 @@ fn every_response_sample() -> Vec<Response> {
 		// pinned by nothing -- which a second client implementation then
 		// disagreed about without any gate noticing.
 		wifi_scan_sample(),
+		// The other form of a scan: results that are not the ones just asked
+		// for, and the reason. `stale` is skip_serializing_if, so the sample
+		// above -- which is fresh, as the ordinary answer is -- pins its
+		// absence and nothing else. Without this the field could be renamed or
+		// dropped and no witness would move. Empty of access points on
+		// purpose: those are pinned above, and what is being added here is one
+		// field on the report.
+		Response::WifiScan(Box::new(ScanReport {
+			interface: "wlan0".to_owned(),
+			access_points: Vec::new(),
+			stale: Some("the supplicant could not scan (ret=-16)".to_owned()),
+		})),
 		// Both states, because the pair is the point: a radio netcfgd holds
 		// and one another manager does, which a client renders differently.
 		Response::Radios {

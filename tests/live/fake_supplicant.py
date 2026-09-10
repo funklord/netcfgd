@@ -73,6 +73,14 @@ ASSOCIATED = [NETWORKS[0]]
 # authenticate against an access point that is not here.
 KNOWN = []
 
+# Return codes the next scans should fail with, one each, set by
+# `FAIL_NEXT_SCAN`. Empty means every scan succeeds, which is the state every
+# other test needs.
+FAIL_SCAN = []
+
+# Whether the next scans should be answered and then never spoken of again.
+SILENT_SCAN = []
+
 
 def hexify(text):
 	return "".join(f"{byte:02x}" for byte in text.encode())
@@ -126,6 +134,10 @@ def answer(command):
 	if command in ("ATTACH", "DETACH"):
 		return "OK\n"
 	if command == "SCAN":
+		# Handled in the loop below, which is where the listeners are: a real
+		# supplicant answers OK and then sends CTRL-EVENT-SCAN-RESULTS when the
+		# radio has finished, and since 0194 netcfgd waits for the second.
+		# Reaching here would mean the loop stopped doing that.
 		return "OK\n"
 	if command == "SCAN_RESULTS":
 		return scan_results()
@@ -336,6 +348,51 @@ def serve(ctrl_dir, interface, pidfile):
 			# Verbatim on purpose. The texts the tests send are copied out of a
 			# real supplicant's journal, so what is being checked is netcfgd's
 			# reading of the real format and not this file's idea of it.
+			# **A scan is two things: an answer and, later, an event.** A fake
+			# that only answered OK made every netcfgd scan wait out its full
+			# patience and then report the results as stale, because the
+			# supplicant it was talking to never said it had finished. There is
+			# no radio here so there is nothing to wait for -- the event goes
+			# out immediately, which is the fake's usual bargain: the protocol
+			# is real, the hardware's timing is not.
+			#
+			# `FAIL_NEXT_SCAN <ret>` is how a test asks for the other outcome.
+			# A *mode* rather than an event a test sends directly, because the
+			# connection netcfgd scans on attaches for that scan and goes: an
+			# event sent out of band arrives at nobody, and the test would pass
+			# on a fake talking to itself.
+			elif command.startswith("FAIL_NEXT_SCAN "):
+				FAIL_SCAN.append(command.split(None, 1)[1])
+				reply(server, sender, b"OK\n")
+				print(command, flush=True)
+				continue
+			# `SILENT_NEXT_SCAN` answers the next `SCAN` with OK and then says
+			# nothing at all, which is a radio that took the request and never
+			# came back. It is how a test gets a scan that lasts its full
+			# patience without waiting on real hardware.
+			elif command == "SILENT_NEXT_SCAN":
+				SILENT_SCAN.append(True)
+				reply(server, sender, b"OK\n")
+				print(command, flush=True)
+				continue
+			elif command == "SCAN":
+				if SILENT_SCAN:
+					SILENT_SCAN.pop(0)
+					reply(server, sender, b"OK\n")
+					print("SCAN", flush=True)
+					continue
+				if FAIL_SCAN:
+					event = f"<3>CTRL-EVENT-SCAN-FAILED ret={FAIL_SCAN.pop(0)}"
+				else:
+					event = "<3>CTRL-EVENT-SCAN-RESULTS "
+				reply(server, sender, b"OK\n")
+				for listener in attached:
+					try:
+						server.sendto(event.encode(), listener)
+					except OSError:
+						pass
+				print("SCAN", flush=True)
+				continue
 			elif command.startswith("DISABLE "):
 				# Flags first, name last, because the name is the one that can
 				# contain a space -- and a name with a space in it is exactly

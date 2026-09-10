@@ -9461,6 +9461,71 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.87 A scan is not a round trip
+
+    $ time ncfg wifi scan wlp0s20f3
+     -58 dBm   5500 MHz  enterprise  EMP-XYLEM  [EMP-XYLEM]
+
+    real	0m0.007s
+
+**Seven milliseconds**, for an operation in which the radio leaves its channel
+and visits every other one it is allowed to use. Three consecutive calls
+returned 15, then 20, then 20 access points: the first list was five networks
+out of date, and the scan it asked for is what made the second one right.
+
+`SCAN` queues a scan and returns at once; `SCAN_RESULTS` reads the cache the
+last completed scan filled. Sending one and immediately reading the other
+returns **the previous scan's results, always**. The comment in place said they
+were "about to be fresh either way" -- the fault stated as a reassurance, since
+about to be is not are and the client is gone before it becomes true.
+
+Worst in the case that matters most: a supplicant that has just started has an
+empty cache, so the first scan after netcfgd brings a radio up returns nothing.
+"I pressed scan and nothing appeared" is not a mystery.
+
+### Attach, scan, wait, read
+
+`ATTACH` before `SCAN`, because events reach only connections that asked and
+asking afterwards races the scan finishing. A `SCAN` answering `FAIL` is a scan
+already running and is not a reason to skip the wait -- its completion event is
+the one being waited for.
+
+Ten seconds of patience, and a `stale` reason on the report when they run out.
+Stale results beat no results, so they are still returned, labelled, with the
+driver's own `ret=` passed through: -16 is EBUSY, -100 ENETDOWN, both in this
+machine's journal.
+
+### The regression it would have been
+
+Requests are answered on the reconcile loop, so a scan that now takes seconds
+would hold that loop for seconds -- and **0111 is the record of that exact
+cost**, a wedged `PING` blocking the loop for 12.2 seconds where the fix was to
+stop waiting rather than wait better. So authorise on the loop and wait off it.
+The reply travels on a channel and does not care which thread sends it, and the
+server already runs a thread per connection.
+
+The unreachable `answer()` arm returns a message rather than calling
+`wifi::scan`: a scan routed back through it would *work*, and would quietly
+restore the stall. A message is a regression somebody sees.
+
+### And the event 0192 missed
+
+`CTRL-EVENT-SCAN-FAILED`, twenty-four of them in three days here. 0192 read the
+events that say an association is failing and not the one that says the radio
+could not look at all. It is also why the scan path does not log its own
+failure -- the same event reaches the journal through the watcher, and doing
+both put two near-identical lines there for one event.
+
+### The fixture had only half a supplicant
+
+`fake_supplicant.py` answered `SCAN` with OK and never sent an event, which a
+real one does. That had to be fixed before anything else could be checked,
+since a fake that never announces a result makes every scan wait out its
+patience. `FAIL_NEXT_SCAN` and `SILENT_NEXT_SCAN` are modes rather than events
+a test sends directly, because the scan connection attaches for its own scan
+and goes: an out-of-band event arrives at nobody and the test would pass on a
+fake talking to itself. Decision 0194.
+
 ## 10.86 A socket outlives the process that bound it
 
 Found in the same directory the roam watcher walks. `/run/wpa_supplicant` held

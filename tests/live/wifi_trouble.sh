@@ -231,6 +231,84 @@ check "with the supplicant's own flag, not a translation of it" \
 check "and says what a temporary disable actually means" \
 	"$(printf '%s\n' "$status" | grep -c 'not a network out of range' || true)" 1
 
+# --------------------------------------------------------------- the scan half
+#
+# `SCAN` queues a scan and `SCAN_RESULTS` reads the cache the last one filled,
+# so a client that sends one and reads the other answers with the scan *before*
+# the one it asked for. Measured on the reporting machine before this was
+# fixed: `ncfg wifi scan` returned in 7ms -- four orders of magnitude short of
+# a real scan -- and three consecutive calls gave 15, then 20, then 20 access
+# points, the first list being five networks out of date.
+#
+# The fake has no radio, so what is checked here is not the timing but the
+# protocol: that netcfgd waits to be told the scan finished, and that it says
+# so when it was not told.
+
+scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
+check "an ordinary scan does not call its results stale" \
+	"$(printf '%s\n' "$scan" | grep -c "previous scan" || true)" 0
+# The control from the other side: the scan really did return something, so
+# the check above is not passing on an empty answer.
+check "and it returned what the fake radio can see" \
+	"$(printf '%s\n' "$scan" | grep -c 'HomeFiber' || true)" 1
+
+# -16 is EBUSY, which is what a radio doing something else answers, and one of
+# the two this machine's journal actually shows.
+send 'FAIL_NEXT_SCAN -16'
+sleep 1
+scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
+check "a scan the radio refused says the results are the previous ones" \
+	"$(printf '%s\n' "$scan" | grep -c "previous scan" || true)" 1
+check "and passes the driver's own return code through" \
+	"$(printf '%s\n' "$scan" | grep -c 'ret=-16' || true)" 1
+# Still a list, not an error: stale results are worth more than nothing, so
+# long as they are labelled.
+check "and still lists what the last scan found" \
+	"$(printf '%s\n' "$scan" | grep -c 'HomeFiber' || true)" 1
+
+# And the failure reaches the log through the event watcher, which 0192 built
+# and which did not read this event.
+check "the failed scan is in netcfgd's own log too" \
+	"$(grep -c 'could not scan (ret=-16)' "$work/daemon.log" || true)" 1
+
+# The mode is one scan deep, so the next one is fresh again -- the assertion
+# that netcfgd is reading the event rather than latching on a first failure.
+scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
+check "and the scan after it is fresh again" \
+	"$(printf '%s\n' "$scan" | grep -c "previous scan" || true)" 0
+
+# ------------------------------------------- and it does not stall the daemon
+#
+# Making the scan wait is only correct if the waiting happens somewhere the
+# rest of netcfgd is not. 0111 is the record of what a blocking wait costs
+# here: a wedged PING on an unrelated interface held the reconcile loop for
+# 12.2 seconds, and the fix was to stop waiting rather than to wait better.
+# So a scan is answered on its own thread, and this is the check that says so.
+#
+# The fake takes the next SCAN and never announces a result, so the scan below
+# lasts its full ten seconds. While it is out, an unrelated request has to come
+# back promptly -- promptly meaning "not queued behind ten seconds", which is
+# what a two-second bound tests without being flaky on a loaded machine.
+send 'SILENT_NEXT_SCAN'
+sleep 1
+"$repo/target/debug/ncfg" wifi scan wlan0 > "$work/slow_scan" 2>&1 &
+slow=$!
+sleep 1
+
+started=$(date +%s)
+"$repo/target/debug/ncfg" wifi status wlan0 > /dev/null 2>&1 || true
+waited=$(( $(date +%s) - started ))
+check "another request is answered while a scan is still waiting" \
+	"$([ "$waited" -lt 2 ] && echo prompt || echo "blocked for ${waited}s")" prompt
+
+# And the scan itself finishes, saying what happened rather than hanging for
+# ever or returning an unlabelled list.
+wait "$slow" 2>/dev/null || true
+check "and the silent scan gives up and says the results are stale" \
+	"$(grep -c 'previous scan' "$work/slow_scan" || true)" 1
+check "and says it was the deadline rather than a refusal" \
+	"$(grep -c 'did not finish within 10s' "$work/slow_scan" || true)" 1
+
 if [ "$failures" -eq 0 ]; then
 	echo "wifi_trouble.sh: all checks passed"
 else
