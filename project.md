@@ -9486,17 +9486,21 @@ Measured on the live lease, and it decides which field to read:
 `IFA_PROTO` on an address needs Linux 5.18+; `RTPROT_DHCP` on a route is old
 enough to rely on.
 
-### A precondition, and never a verdict
+### The asymmetry, which is the whole of it
 
-A lease is weaker than connectivity, and the probe exists for exactly that gap
-(10.x/0119: a cable in a switch that lost its uplink). A local DHCP server
-hands out leases happily on such a network. What a lease is good for is the
-other direction: an interface that asked for DHCP and has none has **nothing a
-reachability probe could succeed over**, so the program can only fail and
-costs a process every interval to say so. `require_lease` answers from the
-route table and spawns nothing -- counted as a probe that ran and said no,
+**A failed lease is a failed connection.** An interface that asked for DHCP
+and has not got one cannot carry traffic: no address, no route. "Down" is the
+fact rather than an assumption, which is why the outcome is a verdict of
+`false` and not a skipped run -- counted as a probe that ran and said no,
 never as one that could not start, because that counter is for a typo in
 `command`.
+
+**A lease held is not a connection made**, and that direction does not
+reverse: a DHCP server on a network whose uplink is dead hands out leases
+happily, which is the case 0119 was written for. So no lease decides, and a
+lease only permits. My first heading -- "a precondition, not a verdict" --
+said the second half and undersold the first, which the holder caught: *"but
+failed dhcp-lease is failed connection, right?"*
 
 Default on; off is for the operator whose client netcfgd cannot recognise,
 where requiring a lease would hold a working link down for ever. And it

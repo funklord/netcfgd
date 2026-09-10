@@ -37,19 +37,26 @@ Measured on the reporting machine, on a live DHCP lease:
 absent on plenty of running kernels. `RTPROT_DHCP` on a route is old enough to
 rely on, so the predicate reads the route.
 
-## A precondition, and never a verdict
+## The asymmetry, which is the whole of it
 
-**A lease is a weaker claim than connectivity**, and the probe exists because
-of exactly that gap: 0119 was written for a cable in a switch that had lost its
-own uplink. A local DHCP server hands out leases happily on such a network. So
-this must not be a probe *method* that could stand in for the reachability
-check.
+**A failed lease is a failed connection.** An interface whose `config` asks
+for DHCP and has not got one cannot carry traffic -- there is no address and
+no route -- so "down" is not an assumption, it is the fact. That is why the
+outcome here is a verdict of `false` and not a skipped run: netcfgd says the
+link is down, from the route table, without spending a process to be told
+what it already knows.
 
-What it is good for is the other direction. An interface whose `config` asks
-for DHCP and has no lease has **nothing a reachability probe could succeed
-over**: the program can only fail, and finding that out costs a process every
-interval on the links that are already in trouble. `require_lease` answers from
-the route table and spawns nothing.
+**A lease held is not a connection made.** This is the direction that does not
+reverse, and it is why this cannot be a probe *method* standing in for the
+reachability check: a DHCP server on a network whose uplink is dead hands out
+leases happily, which is the exact case 0119 was written for -- a cable in a
+switch that has lost its own uplink.
+
+So the two halves are not symmetric, and the name is for the weaker one: no
+lease decides, a lease only permits. The heading this decision first carried
+-- "a precondition, not a verdict" -- said the second half and undersold the
+first, which the holder caught: *"but failed dhcp-lease is failed connection,
+right?"* Right, and the code already said so; the sentence did not.
 
 Counted as a probe that *ran and said no*, not as one that could not start:
 the start-failure counter exists to set aside a probe with a typo in its
