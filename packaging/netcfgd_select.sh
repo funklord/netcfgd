@@ -228,7 +228,7 @@ unit_of() {
 	# it -- which is what `debian/rules` already decided with
 	# `dh_installsystemd --no-enable --no-start`. Standing it down is a bug
 	# fix; starting it is a policy this script does not get to make.
-	netcfgd) echo 'netcfgd.service netcfgd-nm.service' ;;
+	netcfgd) echo 'netcfgd.service netcfgd-wait-online.service netcfgd-nm.service' ;;
 	networkmanager) echo 'NetworkManager.service NetworkManager-wait-online.service NetworkManager-dispatcher.service' ;;
 	networkd) echo 'systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service' ;;
 	connman) echo 'connman.service connman-wait-online.service' ;;
@@ -579,6 +579,22 @@ bring_up() {
 		primary=$(unit_of "$manager" | cut -d' ' -f1)
 		run systemctl enable "$primary"
 		run systemctl start "$primary"
+		# **The wait-online helper is enabled and not started**, and that is
+		# the whole of what makes `network-online.target` mean anything.
+		# Selecting a daemon masks the other daemons' helpers -- correctly,
+		# they belong to what is being stood aside -- and until netcfgd had one
+		# of its own that left the target ungated: measured after a switch,
+		# `NetworkManager-wait-online`, `systemd-networkd-wait-online` and
+		# `connman-wait-online` all masked, with docker, cups-browsed and
+		# fwupd-refresh ordered after a target nothing held. Enabling puts it
+		# in `network-online.target.wants` for the next boot, which is when it
+		# is wanted; starting it now would block this script until the network
+		# is up, which is not what selecting a daemon means. Decision 0190.
+		for unit in $(unit_of "$manager"); do
+			case "$unit" in
+			*-wait-online.service) run systemctl enable "$unit" ;;
+			esac
+		done
 	elif command -v rc-update >/dev/null 2>&1; then
 		run rc-update add "$manager" default
 		run rc-service "$manager" start

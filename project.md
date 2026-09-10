@@ -9461,6 +9461,50 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.83 And boot, where selecting netcfgd left `network-online.target` ungated
+
+`network-online.target` is a promise to whatever is ordered after it -- here
+`docker`, `cups-browsed`, `fwupd-refresh` -- that the network can be reached.
+Nothing in systemd makes it true: every manager ships a helper that blocks
+until its own idea of "up" holds, and the target is reached when that helper
+finishes.
+
+An hour after switching this machine to netcfgd:
+
+    connman-wait-online.service            masked
+    NetworkManager-wait-online.service     masked  -> /dev/null (13:23)
+    systemd-networkd-wait-online.service   masked  -> /dev/null (13:23)
+
+**All three masked by netcfgd's own selector**, correctly -- they belong to
+the daemons being stood aside -- and netcfgd shipped no replacement. The
+target was being reached immediately at boot with three services ordered
+after it.
+
+`ncfg wait-online [SECONDS]` blocks until there is a global address outside
+loopback and a default route; `netcfgd-wait-online.service` runs it, in the
+shape NetworkManager's own unit has. *Online* is deliberately not "every
+interface the document names", which would keep a laptop waiting for a dock it
+is not plugged into -- and a link-local address does not count, because
+`169.254/16` is what a machine has when DHCP did **not** answer, which is the
+state this exists to tell from success.
+
+It observes locally rather than asking the daemon: it runs while the machine
+is still coming up, and a helper that needs the control socket cannot report
+on the seconds before it is listening.
+
+**Enabled by the selector, not the package.** Installing netcfgd must not make
+it the machine's daemon (0113), so `bring_up` enables any `*-wait-online`
+unit of the manager being selected and starts none of them: enabling puts it
+in `network-online.target.wants` for the next boot, and starting it here would
+block the selector until the network is up.
+
+### The gate that was already there
+
+`make packaging` refused the first version: `install-systemd` put a file in
+place that `uninstall` did not remove, and the uninstall gate named it in the
+first minute. Two days ago that gate would have been running against a
+`make check` I was not running.
+
 ## 10.82 The wifi fault the project was opened for: `ca_cert=""`
 
 > It was not able to switch...

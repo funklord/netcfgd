@@ -566,7 +566,13 @@ install-systemd:
 	install -d $(DESTDIR)/usr/lib/systemd/system
 	install -m 0644 packaging/systemd/netcfgd.service \
 		$(DESTDIR)/usr/lib/systemd/system/netcfgd.service
+	install -m 0644 packaging/systemd/netcfgd-wait-online.service \
+		$(DESTDIR)/usr/lib/systemd/system/netcfgd-wait-online.service
 	@echo "install-systemd: netcfgd.service installed, not enabled"
+	@echo "install-systemd:   and netcfgd-wait-online.service, which the"
+	@echo "install-systemd:   selector enables: network-online.target means"
+	@echo "install-systemd:   nothing without one, and selecting netcfgd masks"
+	@echo "install-systemd:   the helpers that belong to the other daemons"
 	@echo "install-systemd:   to make netcfgd the only network daemon:"
 	@echo "install-systemd:     netcfgd_select.sh"
 
@@ -1892,6 +1898,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-umbim
 	rm -f $(DESTDIR)$(PREFIX)/share/netcfgd/modem-quirks
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
+	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-wait-online.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-nm
 	rm -f $(DESTDIR)$(DATADIR)/dbus-1/system.d/netcfgd-nm.conf

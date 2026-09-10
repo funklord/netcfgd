@@ -107,6 +107,11 @@ usage:
   ncfg monitor [options]   stream events until interrupted (needs netcfgd)
   ncfg confirm [options]   keep a change made under a confirm window
   ncfg revert [options]    undo it now rather than at expiry
+  ncfg wait-online [SECONDS]
+                           block until the machine has an address and a
+                             default route, or fail after SECONDS (30 by
+                             default). What netcfgd-wait-online.service runs,
+                             so that `network-online.target` means something
   ncfg reload [options]    re-read the config directory now, and say here
                            whether it compiled. netcfgd notices an edit by
                            itself; this is for when the answer belongs in your
@@ -259,6 +264,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		"tui" => tui::run(&options),
 		#[cfg(not(feature = "tui"))]
 		"tui" => Err("this build has no TUI; it was compiled without the `tui` feature".to_owned()),
+		"wait-online" => command_wait_online(&options, &positional),
 		"reload" => command_reload(&options),
 		"reset" => command_reset(&options),
 		"confirm" => command_confirm(&options, &netcfgd_proto::Request::Confirm),
@@ -1623,6 +1629,103 @@ fn print_link_settings(link: &netcfgd_model::ObservedLink, observed: &netcfgd_mo
 	}
 }
 
+/// Whether the machine is online, in the sense `network-online.target` means.
+///
+/// **A global address and a default route**, which is what the other
+/// wait-online helpers wait for and what the services ordered after that
+/// target actually need: docker, a mail spool, a package refresh. Not "every
+/// interface the document names", which would keep a laptop waiting for a
+/// dock it is not plugged into.
+///
+/// Loopback is excluded because it is always there, and a link-local address
+/// is not being online -- it is what a machine has when DHCP did not answer.
+fn is_online(observed: &Observed) -> bool {
+	let routed = observed
+		.routes
+		.iter()
+		.any(|route| route.destination == "default");
+	let addressed = observed.addresses.iter().any(|address| {
+		address.interface != "lo"
+			&& !address.address.starts_with("169.254.")
+			&& !address.address.to_ascii_lowercase().starts_with("fe80:")
+	});
+	routed && addressed
+}
+
+/// Wait until the machine is online, or say what it was still waiting for.
+///
+/// **This exists because netcfgd's selector masks the other ones.** Every
+/// network manager ships a wait-online helper and `network-online.target`
+/// means nothing without one: `netcfgd_select.sh netcfgd` stands
+/// `NetworkManager-wait-online.service` and its siblings aside, correctly,
+/// and until this there was nothing in their place. Measured on the reporting
+/// machine after a switch: three units ordered after that target -- docker,
+/// cups-browsed, fwupd-refresh -- with nothing left to gate it. Decision 0190.
+///
+/// Local observation rather than a request to the daemon, deliberately: this
+/// runs while the machine is still coming up, and a helper that needs the
+/// control socket to be listening cannot report on the seconds before it is.
+fn command_wait_online(options: &Options, positional: &[String]) -> Result<ExitCode, String> {
+	let timeout = match positional.first() {
+		Some(text) => text
+			.parse::<u64>()
+			.map_err(|_| format!("`{text}` is not a number of seconds"))?,
+		None => DEFAULT_WAIT_ONLINE,
+	};
+	let run_dir = state::resolve_dir(options.run_dir.as_deref());
+	let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout);
+
+	loop {
+		// A failure to observe is not a failure to be online: the netlink
+		// socket can be refused while the machine is still coming up, and this
+		// is called at exactly that moment. Keep waiting; the deadline is what
+		// ends it.
+		if let Ok(observed) = observe_with_document(options, &run_dir) {
+			if is_online(&observed) {
+				return Ok(ExitCode::SUCCESS);
+			}
+		}
+		if std::time::Instant::now() >= deadline {
+			// **Say which half is missing.** "Timed out" sends the reader to
+			// the wrong place half the time, and this runs at boot where
+			// nobody is watching: the journal line is the whole report.
+			let observed = observe_with_document(options, &run_dir).ok();
+			let detail = observed.as_ref().map_or_else(
+				|| "the machine could not be observed at all".to_owned(),
+				|observed| {
+					let routed = observed
+						.routes
+						.iter()
+						.any(|route| route.destination == "default");
+					let addresses = observed
+						.addresses
+						.iter()
+						.filter(|address| address.interface != "lo")
+						.count();
+					format!(
+						"{} address(es) outside loopback and {} default route",
+						addresses,
+						if routed { "a" } else { "no" }
+					)
+				},
+			);
+			return Err(format!(
+				"still not online after {timeout}s: {detail}. `ncfg status` says what \
+				 each interface is doing, and `ncfg plan` says what netcfgd would still \
+				 do about it"
+			));
+		}
+		std::thread::sleep(std::time::Duration::from_millis(250));
+	}
+}
+
+/// How long `wait-online` waits when nobody says.
+///
+/// Thirty seconds, which is what `NetworkManager-wait-online.service` uses.
+/// Long enough for DHCP on a slow switch with spanning tree, short enough that
+/// a machine with no network still finishes booting.
+const DEFAULT_WAIT_ONLINE: u64 = 30;
+
 fn command_status(options: &Options) -> Result<ExitCode, String> {
 	let run_dir = state::resolve_dir(options.run_dir.as_deref());
 	let observed = observe_with_document(options, &run_dir)?;
@@ -1799,6 +1902,66 @@ fn describe(op: &str, reason: &netcfgd_plan::Reason) -> String {
 
 #[cfg(test)]
 mod tests {
+	/// **What "online" means here, and why it is not "every interface".**
+	///
+	/// `network-online.target` is a promise to docker, a mail spool and a
+	/// package refresh that the machine can reach the network. A global
+	/// address and a default route is what the other wait-online helpers wait
+	/// for and what those services need. Waiting for every interface the
+	/// document names would keep a laptop waiting for a dock it is not
+	/// plugged into.
+	#[test]
+	fn online_means_a_global_address_and_a_default_route() {
+		use netcfgd_model::observed::{ObservedAddress, ObservedRoute};
+		use netcfgd_model::Ownership;
+
+		let address = |interface: &str, cidr: &str| ObservedAddress {
+			interface: interface.to_owned(),
+			address: cidr.to_owned(),
+			proto: None,
+			ownership: Ownership::Ours,
+			origin: None,
+		};
+		let default_route = ObservedRoute {
+			interface: "eth0".to_owned(),
+			destination: "default".to_owned(),
+			via: None,
+			metric: None,
+			table: None,
+			src: None,
+			scope: None,
+			proto: None,
+			ownership: Ownership::Ours,
+			origin: None,
+		};
+
+		let mut observed = netcfgd_model::Observed::default();
+		assert!(
+			!super::is_online(&observed),
+			"an empty machine is not online"
+		);
+
+		// Loopback is always there, so it cannot be what says a machine is up.
+		observed.addresses = vec![address("lo", "127.0.0.1/8")];
+		observed.routes = vec![default_route.clone()];
+		assert!(!super::is_online(&observed), "loopback is not being online");
+
+		// **A link-local address is what a machine has when DHCP did not
+		// answer**, which is the state this is most needed to distinguish.
+		observed.addresses = vec![address("eth0", "169.254.7.7/16")];
+		assert!(!super::is_online(&observed), "169.254 is not being online");
+		observed.addresses = vec![address("eth0", "fe80::1/64")];
+		assert!(!super::is_online(&observed), "fe80:: is not being online");
+
+		// An address with no way out is not online either.
+		observed.addresses = vec![address("eth0", "10.0.0.5/24")];
+		observed.routes = Vec::new();
+		assert!(!super::is_online(&observed), "no default route, not online");
+
+		// And the pair together is.
+		observed.routes = vec![default_route];
+		assert!(super::is_online(&observed), "an address and a way out");
+	}
 
 	/// A bare `-` reaches a command as a filename rather than as an option.
 	///

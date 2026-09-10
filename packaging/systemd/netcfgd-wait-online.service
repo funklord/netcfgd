@@ -1,0 +1,35 @@
+[Unit]
+Description=netcfgd waits for the network to be configured
+Documentation=file:///usr/share/doc/netcfgd/first-run.md
+
+# **What this is for.** `network-online.target` is a promise to the units
+# ordered after it -- docker, a mail spool, a package refresh -- that the
+# machine can reach the network. Nothing in systemd makes that true: every
+# manager ships a helper that blocks until its own idea of "up" holds, and the
+# target is reached when the helper finishes.
+#
+# netcfgd had none, and `netcfgd_select.sh netcfgd` masks the others --
+# correctly, since they belong to the daemons being stood aside. Measured on
+# the reporting machine an hour after a switch: `NetworkManager-wait-online`,
+# `systemd-networkd-wait-online` and `connman-wait-online` all masked, three
+# units ordered after the target, and nothing left to gate it. Decision 0190.
+#
+# `Requires=` rather than `Wants=`, matching NetworkManager's own unit: a
+# machine whose network daemon failed to start is not one where waiting for
+# the network can succeed, and pretending otherwise moves the failure to
+# whatever starts next.
+Requires=netcfgd.service
+After=netcfgd.service
+Before=network-online.target
+
+[Service]
+Type=oneshot
+# The timeout is the command's, not systemd's: `ncfg wait-online` reports what
+# it was still waiting for, and a `TimeoutStartSec` firing first would replace
+# that sentence with systemd's own. Ninety seconds is the room for it to speak.
+ExecStart=/usr/bin/ncfg wait-online 30
+TimeoutStartSec=90
+RemainAfterExit=yes
+
+[Install]
+WantedBy=network-online.target
