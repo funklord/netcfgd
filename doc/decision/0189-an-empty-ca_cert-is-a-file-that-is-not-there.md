@@ -70,6 +70,30 @@ cannot pass by rendering nothing), and one that pins a certificate still names
 the file. Sabotage confirms: putting the empty setting back turns the first
 red.
 
+## Confirmed on the machine it was reported from
+
+Built, installed, and `netcfgd_select.sh netcfgd` run at the office, on the
+same access point that had refused forty-five times that morning:
+
+    CTRL-EVENT-EAP-METHOD EAP vendor 0 method 25 (PEAP) selected
+    EAP-MSCHAPV2: Authentication succeeded
+    CTRL-EVENT-EAP-SUCCESS EAP authentication completed successfully
+    CTRL-EVENT-CONNECTED - Connection to a0:a4:7f:23:60:8f completed
+
+First attempt. Address `10.78.60.134/22`, resolver from the lease, `ncfg plan`
+saying `nothing to do`.
+
+**And the default route came up on `metric 200`** -- the metric the
+`EMP-XYLEM` block carries, applied by 0053's restart path. That is the first
+time that feature has done anything on a network nobody built for it.
+
+`phase2 = "auth=MSCHAPV2"` was added to the network at the same time, matching
+what NetworkManager's working profile sets, so the two changes were made
+together and this decision cannot claim which was load-bearing. What is known:
+the supplicant's failure was in TLS setup, *before* an inner method is
+proposed, so `phase2` cannot have been what stopped it. It is stated rather
+than negotiated, which is worth having either way.
+
 ## Why nothing caught this
 
 `tests/live/enterprise.sh` and the EAP unit tests all supply a `ca_cert`,

@@ -9492,6 +9492,22 @@ argument for emitting a *broken* setting. A feature that cannot connect does
 not teach an operator to pin a certificate; it teaches them to use something
 else.
 
+### It works, on the machine and the network it was reported from
+
+Installed and switched at the office, same access point, minutes later:
+`EAP-MSCHAPV2: Authentication succeeded`, `CTRL-EVENT-CONNECTED`, address
+`10.78.60.134/22`, resolver from the lease, `nothing to do`. First attempt,
+after forty-five failures that morning.
+
+**The default route came up on `metric 200`**, the metric the `EMP-XYLEM`
+block carries -- the first time 10.69's work has done anything on a real
+network.
+
+`phase2 = "auth=MSCHAPV2"` went in at the same time, so this cannot claim
+which change was load-bearing. What is known is that the failure was in TLS
+setup, before an inner method is proposed, so `phase2` was not what stopped
+it.
+
 ### Why nothing caught it
 
 `enterprise.sh` and every EAP unit test supply a `ca_cert`, because a test
