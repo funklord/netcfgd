@@ -441,6 +441,35 @@ impl ObservedRfkill {
 	pub fn blocked(&self) -> bool {
 		self.soft || self.hard
 	}
+
+	/// What is holding it off and what would clear it, in one clause.
+	///
+	/// **The two blocks have different answers and saying the wrong one wastes
+	/// somebody's evening.** A soft block is software and `rfkill unblock wifi`
+	/// clears it; a hard block is a slider or a firmware button and nothing in
+	/// software will move it, so telling a person to run a command is telling
+	/// them to do something that cannot work.
+	///
+	/// Here rather than at each caller because the sentence is now needed in
+	/// three places and a wording that drifts between them is a wording that
+	/// contradicts itself. The planner keeps its own phrasing, which is built
+	/// into a longer sentence about what netcfgd will do anyway.
+	#[must_use]
+	pub fn remedy(&self) -> String {
+		if self.hard {
+			format!(
+				"the radio is switched off at {} by a hardware switch -- the button \
+				 or slider on the machine, which nothing in software can clear",
+				self.switch
+			)
+		} else {
+			format!(
+				"the radio is switched off at {} in software, which \
+				 `rfkill unblock wifi` clears",
+				self.switch
+			)
+		}
+	}
 }
 
 /// A macvlan's own settings, as the kernel reports them.

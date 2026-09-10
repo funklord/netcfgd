@@ -44,7 +44,7 @@
 {"response":"wifi_scan","interface":"wlan0","access_points":[],"stale":"the supplicant could not scan (ret=-16)"}
 {"response":"radios","radios":[{"interface":"wlan0","activated":true,"supplicant":true},{"interface":"wlan1","activated":false,"supplicant":true}]}
 {"response":"wifi_status","interface":"wlan0","state":"COMPLETED","ssid":"686f6d65","name":"home","bssid":"00:11:22:33:44:55","network":"home","not_trying":[{"ssid":"6f6666696365","name":"office","flags":"[TEMP-DISABLED]"},{"ssid":"6c6162","flags":"[DISABLED]"}]}
-{"response":"wifi_status","interface":"wlan0","state":"SCANNING"}
+{"response":"wifi_status","interface":"wlan0","state":"SCANNING","blocked":"the radio is switched off at phy0 in software, which `rfkill unblock wifi` clears"}
 {"response":"status","links":[],"addresses":[],"routes":[],"backends":[],"dns":[],"rules":[],"bridge_vlans":[],"delegations":[],"reports":[],"qdisc_applied":[],"ingress_applied":[],"privacy_applied":[],"backend_restarts":[],"accept_ra_applied":[],"forwarding_applied":[],"nat":[],"nat_conflicts":[],"hook_state":[],"address_proto_supported":false}
 {"response":"plan","actions":[],"warnings":[],"refusals":[],"stranded":[]}
 {"response":"document","schema_version":{"major":1,"minor":1},"globals":{"dns":{"mode":"none","servers":[],"search":[],"domains":[],"options":[]},"on_drift_default":"reconcile","confirm_default":null,"networking":"on","hostname_policy":"none","control":{"observe":"root","wifi":"root","admin":"root"},"remote":{"observe":false,"wifi":false,"admin":false,"agent":"root"}},"devices":[],"interfaces":[],"networks":[],"rules":[],"access_points":[]}

@@ -454,7 +454,11 @@ fn name_of(ssid: &Ssid) -> Option<String> {
 }
 
 /// `SCAN`, then `SCAN_RESULTS`.
-pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
+pub(crate) fn scan(
+	document: Option<&Document>,
+	rfkill: Option<&netcfgd_model::ObservedRfkill>,
+	interface: &str,
+) -> Response {
 	if let Err(message) = check_backend(document, interface) {
 		return Response::error(message);
 	}
@@ -466,6 +470,24 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 			return Response::error(why_no_supplicant(document, interface).unwrap_or(message))
 		}
 	};
+
+	// **A switched-off radio cannot scan, so do not ask it to.** Without this
+	// the scan is sent, the supplicant answers with a failure or nothing at
+	// all, and the report says the previous results are stale "because the
+	// supplicant could not scan (ret=-100)" -- true, and a translation of
+	// ENETDOWN rather than the fact that somebody pressed the button. It also
+	// spends the full patience waiting for an event that is not coming.
+	//
+	// The cached results are still returned. They are what the radio last saw
+	// and they are worth more than nothing, so long as the reason they are old
+	// is the one a person can act on.
+	let switched_off = rfkill
+		.filter(|switch| switch.blocked())
+		.map(netcfgd_model::ObservedRfkill::remedy);
+	if let Some(why) = switched_off {
+		let body = client.ask("SCAN_RESULTS").unwrap_or_default();
+		return scan_report(document, &client, interface, &body, Some(why));
+	}
 
 	// **Attached before `SCAN` is sent, and that order is the whole of it.**
 	// The completion event only reaches connections that asked for events, and
@@ -504,8 +526,23 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 		Ok(body) => body,
 		Err(error) => return Response::error(format!("scan failed on `{interface}`: {error}")),
 	};
+	scan_report(document, &client, interface, &body, stale)
+}
 
-	let mut entries: Vec<ScanEntry> = parse_scan_results(&body)
+/// Turn `SCAN_RESULTS` into a report.
+///
+/// Split out so the switched-off path above can answer with the same shape:
+/// the cached results, and the reason they are not fresh. A second copy of
+/// this would be a second place for the ordering, the naming and the
+/// mobility-domain lookup to drift.
+fn scan_report(
+	document: Option<&Document>,
+	client: &Client,
+	interface: &str,
+	body: &str,
+	stale: Option<String>,
+) -> Response {
+	let mut entries: Vec<ScanEntry> = parse_scan_results(body)
 		.into_iter()
 		.map(|result| ScanEntry {
 			secured: result.is_secured(),
@@ -547,7 +584,11 @@ pub(crate) fn scan(document: Option<&Document>, interface: &str) -> Response {
 }
 
 /// `STATUS`, resolved back to the document where possible.
-pub(crate) fn status(document: Option<&Document>, interface: &str) -> Response {
+pub(crate) fn status(
+	document: Option<&Document>,
+	rfkill: Option<&netcfgd_model::ObservedRfkill>,
+	interface: &str,
+) -> Response {
 	let client = match connect(interface) {
 		Ok(client) => client,
 		Err(message) => return Response::error(message),
@@ -581,6 +622,13 @@ pub(crate) fn status(document: Option<&Document>, interface: &str) -> Response {
 				configured_for(document, ssid, status_field(&status, "bssid").unwrap_or(""))
 			})
 			.map(|network| network.id.clone()),
+		// **Asked here because this is the command somebody runs when wifi is
+		// not working**, and a kill switch is one keystroke away on any laptop.
+		// The planner has warned about this since 0062 and the plan is not what
+		// a person reaches for when the network is simply absent.
+		blocked: rfkill
+			.filter(|switch| switch.blocked())
+			.map(netcfgd_model::ObservedRfkill::remedy),
 		not_trying: not_trying(&client),
 	}))
 }

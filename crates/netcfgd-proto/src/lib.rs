@@ -1046,6 +1046,15 @@ pub struct WifiState {
 	/// showing this is showing a discrepancy worth reporting, not a gap.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub network: Option<String>,
+	/// Why the radio is off, when it is.
+	///
+	/// **The question `ncfg wifi status` is asked when wifi is not working**,
+	/// and a kill switch is one keystroke away on any laptop. The supplicant
+	/// reports `INACTIVE` or `SCANNING` either way, so without this the answer
+	/// to "why is there no network" looks identical whether the hardware is
+	/// switched off or the network simply is not there. Decision 0199.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub blocked: Option<String>,
 	/// The networks the supplicant is not trying, and why it is not.
 	///
 	/// Empty on a healthy radio, which is why it is skipped when empty rather

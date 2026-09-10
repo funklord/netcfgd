@@ -540,6 +540,66 @@ fn every_response() -> Vec<Response> {
 	all
 }
 
+/// A wifi status with everything present, lifted out of
+/// [`every_response_sample`] so that list stays inside its line budget.
+///
+/// **It pairs with [`wifi_status_absent_sample`] and the pair is the point.**
+/// Every optional member is spelled by one and omitted by the other, so both
+/// forms of each are pinned -- a `skip_serializing_if` field that is only ever
+/// absent in a sample is a field nothing pins at all.
+fn wifi_status_sample() -> Response {
+	Response::WifiStatus(Box::new(WifiState {
+		interface: "wlan0".to_owned(),
+		state: "COMPLETED".to_owned(),
+		ssid: Some("686f6d65".to_owned()),
+		name: Some("home".to_owned()),
+		bssid: Some("00:11:22:33:44:55".to_owned()),
+		network: Some("home".to_owned()),
+		blocked: None,
+		// Both flags, because they are different situations that share a
+		// substring: one is a network somebody turned off and the other is
+		// one the supplicant gave up on by itself.
+		not_trying: vec![
+			netcfgd_proto::DisabledNetwork {
+				ssid: "6f6666696365".to_owned(),
+				name: Some("office".to_owned()),
+				flags: "[TEMP-DISABLED]".to_owned(),
+			},
+			netcfgd_proto::DisabledNetwork {
+				ssid: "6c6162".to_owned(),
+				name: None,
+				flags: "[DISABLED]".to_owned(),
+			},
+		],
+	}))
+}
+
+/// The same response with its optional members absent, except the one that
+/// only makes sense when something is wrong.
+fn wifi_status_absent_sample() -> Response {
+	// A radio that is associated with nothing, which is every one of
+	// this response's optional fields in its absent form. Four
+	// `skip_serializing_if` members that the sample above spells and
+	// this one does not.
+	Response::WifiStatus(Box::new(WifiState {
+		interface: "wlan0".to_owned(),
+		state: "SCANNING".to_owned(),
+		ssid: None,
+		name: None,
+		bssid: None,
+		network: None,
+		// The switched-off form, which is the half a person reads when
+		// nothing works. `blocked` is skipped when absent, so the sample
+		// above pins only its absence.
+		blocked: Some(
+			"the radio is switched off at phy0 in software, which \
+				 `rfkill unblock wifi` clears"
+				.to_owned(),
+		),
+		not_trying: Vec::new(),
+	}))
+}
+
 /// The scan response, lifted out of [`every_response_sample`] so that list
 /// stays inside its line budget.
 ///
@@ -658,42 +718,8 @@ fn every_response_sample() -> Vec<Response> {
 				},
 			],
 		},
-		Response::WifiStatus(Box::new(WifiState {
-			interface: "wlan0".to_owned(),
-			state: "COMPLETED".to_owned(),
-			ssid: Some("686f6d65".to_owned()),
-			name: Some("home".to_owned()),
-			bssid: Some("00:11:22:33:44:55".to_owned()),
-			network: Some("home".to_owned()),
-			// Both flags, because they are different situations that share a
-			// substring: one is a network somebody turned off and the other is
-			// one the supplicant gave up on by itself.
-			not_trying: vec![
-				netcfgd_proto::DisabledNetwork {
-					ssid: "6f6666696365".to_owned(),
-					name: Some("office".to_owned()),
-					flags: "[TEMP-DISABLED]".to_owned(),
-				},
-				netcfgd_proto::DisabledNetwork {
-					ssid: "6c6162".to_owned(),
-					name: None,
-					flags: "[DISABLED]".to_owned(),
-				},
-			],
-		})),
-		// A radio that is associated with nothing, which is every one of
-		// this response's optional fields in its absent form. Four
-		// `skip_serializing_if` members that the sample above spells and
-		// this one does not.
-		Response::WifiStatus(Box::new(WifiState {
-			interface: "wlan0".to_owned(),
-			state: "SCANNING".to_owned(),
-			ssid: None,
-			name: None,
-			bssid: None,
-			network: None,
-			not_trying: Vec::new(),
-		})),
+		wifi_status_sample(),
+		wifi_status_absent_sample(),
 		// Empty payloads, deliberately: the tag and the framing are this
 		// witness's business and the contents belong to `observed.json`,
 		// `plan.json` and `document.json`. An empty one still moves these bytes

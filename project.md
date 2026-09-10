@@ -9461,6 +9461,57 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.92 The switch is news where somebody is looking
+
+The rfkill handling was mostly finished before this audit and worth saying so:
+`/dev/rfkill` is read with the record-growth hazard handled explicitly, the
+observation reads the phy's own switch rather than the platform button beside it
+(0062), the plan warns with a different remedy per switch type, `explain` says
+it, and the device is opened read-only on purpose so "netcfgd does not overrule
+a switch somebody flipped" is a property of the code. `powersave`, `regdom` and
+`scan_randomization` are compiled, kept and reported as understood-and-not-acted-
+on, which is honest rather than a gap.
+
+**What was wrong is that nobody reads a plan when the wifi is off.**
+`warn_blocked_radios` carries the diagnosis exactly:
+
+> a blocked radio looks exactly like a network that will not associate. The
+> supplicant starts, the scan comes back empty, nothing fails, and the operator
+> has no way to tell that the hardware is off
+
+and the fix went into the plan. The two commands somebody actually runs are
+`ncfg wifi status` and `ncfg wifi scan`, and neither looked at the switch:
+status said `SCANNING`, the scan said "no access points in range" -- the exact
+output the comment calls indistinguishable.
+
+Status names it above the association, since a switched-off radio explains
+everything below it. The scan does not send `SCAN` at all: nothing can scan, the
+cached results are returned labelled, and it saves waiting out 0194's full
+patience for an event that is not coming.
+
+### One wording, because the two blocks differ
+
+`ObservedRfkill::remedy()` is on the model: `rfkill unblock wifi` clears a soft
+block and does nothing whatever to a slider, so telling somebody the wrong one
+wastes their evening. Three callers needed the sentence and a wording that
+drifts between them contradicts itself.
+
+### And the silence in the watcher
+
+`Rfkill::open` failing returned without a word, as did the stream ending or
+erroring. A machine with no radio has no `/dev/rfkill` and that is right;
+anything else costs kill-switch detection for the life of the daemon, after
+which a flipped switch is never noticed -- the same misdiagnosis from the other
+side. `NotFound` still returns quietly; everything else says what was lost.
+
+### A number that was wrong by *sometimes*
+
+Seven seconds between changing the fake `/sys` and asking, because a file
+changing there produces no netlink event and no rfkill record, so the reconcile
+loop's five-second backstop is what picks it up. Two seconds passed the soft
+case by luck of where in the cycle it landed and failed the hard one. Decision
+0199.
+
 ## 10.91 Two faults that were cancelling out
 
 Found in the log of a switch that otherwise worked. netcfgd joined, took a

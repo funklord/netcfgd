@@ -1425,6 +1425,12 @@ fn render_wifi_status(state: &netcfgd_proto::WifiState, json: bool) -> Result<()
 		return Ok(());
 	}
 	println!("{} {}", state.interface, state.state);
+	// **First, above the association.** A switched-off radio is the answer to
+	// "why is there no network", and printing it under the details of what the
+	// supplicant is not doing buries the one line that explains all of them.
+	if let Some(why) = &state.blocked {
+		println!("    {why}");
+	}
 	// Keyed on the ssid, which is the field that says "associated at all", and
 	// rendered by the shared namer. `name.or(ssid)` printed the raw hex with
 	// nothing marking it as hex whenever the SSID was not text -- the exact

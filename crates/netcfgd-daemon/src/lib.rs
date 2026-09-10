@@ -871,13 +871,19 @@ fn serve_requests(
 			let Request::WifiScan { interface } = request else {
 				unreachable!("matched just above")
 			};
+			// Cloned with the document, because the thread outlives this
+			// borrow. One switch, four fields.
+			let switch = state
+				.observed
+				.link(&interface)
+				.and_then(|link| link.rfkill.clone());
 			// Detached: nothing joins it, and it ends when the scan does. A
 			// client that hung up first leaves the send failing, which is
 			// ordinary and is what the `let _` says.
 			let spawned = std::thread::Builder::new()
 				.name("scan".to_owned())
 				.spawn(move || {
-					let _ = reply.send(wifi::scan(document.as_ref(), &interface));
+					let _ = reply.send(wifi::scan(document.as_ref(), switch.as_ref(), &interface));
 				});
 			if let Err(error) = spawned {
 				netcfgd_sys::log_error!("supplicant", "cannot start a thread to scan: {error}");
@@ -1034,8 +1040,24 @@ fn spawn_rfkill_watcher(commands: &Sender<Command>, device: PathBuf) {
 	let _ = std::thread::Builder::new()
 		.name("rfkill".to_owned())
 		.spawn(move || {
-			let Ok(mut rfkill) = netcfgd_sys::rfkill::Rfkill::open(&device) else {
-				return;
+			// **A machine with no radio has no `/dev/rfkill`, and that is not a
+			// fault.** Anything else is: the device exists and netcfgd cannot
+			// read it, which costs kill-switch detection for the life of the
+			// daemon and used to do so without a word. On a laptop that is the
+			// difference between "the radio is switched off" and a wireless
+			// interface that silently never associates. Decision 0199.
+			let mut rfkill = match netcfgd_sys::rfkill::Rfkill::open(&device) {
+				Ok(rfkill) => rfkill,
+				Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+				Err(error) => {
+					netcfgd_sys::log_warning!(
+						"rfkill",
+						"cannot read {}: {error}. netcfgd will not notice a kill \
+						 switch being flipped on this machine",
+						device.display()
+					);
+					return;
+				}
 			};
 			loop {
 				match rfkill.next_event() {
@@ -1045,8 +1067,28 @@ fn spawn_rfkill_watcher(commands: &Sender<Command>, device: PathBuf) {
 						}
 					}
 					// The device went away, or cannot be read. Either way there
-					// is nothing to watch and nothing to retry against.
-					Ok(None) | Err(_) => return,
+					// is nothing to watch and nothing to retry against -- but
+					// it is still worth saying, for the same reason the open
+					// is: from here on a flipped switch goes unnoticed, and
+					// silence about that reads as a radio that is simply not
+					// working.
+					Ok(None) => {
+						netcfgd_sys::log_note!(
+							"rfkill",
+							"{} ended; kill-switch changes are no longer being watched",
+							device.display()
+						);
+						return;
+					}
+					Err(error) => {
+						netcfgd_sys::log_warning!(
+							"rfkill",
+							"{} stopped answering ({error}); kill-switch changes are \
+							 no longer being watched",
+							device.display()
+						);
+						return;
+					}
 				}
 			}
 		});
@@ -1756,7 +1798,16 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 		Request::ApStations { interface } => {
 			wifi::ap_stations(state.desired.as_ref(), &state.paths.run, interface)
 		}
-		Request::WifiStatus { interface } => wifi::status(state.desired.as_ref(), interface),
+		Request::WifiStatus { interface } => {
+			// The switch the observation already holds, rather than a second
+			// read of `/sys`: two paths answering the same question are two
+			// paths that can disagree, and this one is the reconciled view.
+			let switch = state
+				.observed
+				.link(interface)
+				.and_then(|link| link.rfkill.clone());
+			wifi::status(state.desired.as_ref(), switch.as_ref(), interface)
+		}
 		// Served off the loop since 0197, for the reason the scan is (0194).
 		// The arm stays because the match is exhaustive, and says so rather
 		// than joining: a join that came back through here would work, and

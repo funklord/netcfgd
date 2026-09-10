@@ -69,6 +69,14 @@ export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 export NCFG_WPA_CTRL_DIR="$work/ctrl"
 export NCFG_RUN_ROOT="$work/runroot"
+# The radio's kill switch is read from here. Staged empty to begin with, so the
+# observation finds a phy with a clear switch, and rewritten below.
+mkdir -p "$work/sys/class/net/wlan0/phy80211" "$work/sys/class/rfkill/rfkill0"
+printf 'phy0\n' > "$work/sys/class/net/wlan0/phy80211/name"
+printf 'phy0\n' > "$work/sys/class/rfkill/rfkill0/name"
+printf '0\n' > "$work/sys/class/rfkill/rfkill0/soft"
+printf '0\n' > "$work/sys/class/rfkill/rfkill0/hard"
+export NCFG_SYS_ROOT="$work/sys"
 
 failures=0
 check() {
@@ -296,6 +304,69 @@ attaches=$(grep -c '^ATTACH$' "$work/fake.log" || true)
 detaches=$(grep -c '^DETACH$' "$work/fake.log" || true)
 check "every scan's ATTACH is matched by a DETACH" \
 	"$((attaches - detaches))" 1
+
+# -------------------------------------------------------- the switch, and it
+#
+# **A blocked radio looks exactly like a network that will not associate.** The
+# planner has said so since 0062 and warns about it -- but a plan is not what
+# anybody reaches for when the wifi is simply not working. `ncfg wifi status`
+# and `ncfg wifi scan` are, and neither of them looked at the switch: status
+# reported SCANNING and the scan reported no access points in range, which is
+# the same output a laptop gives in a field.
+#
+# Staged through NCFG_SYS_ROOT rather than by blocking the real radio, which
+# would take the network off the machine running the test.
+sysroot=$work/sys
+mkdir -p "$sysroot/class/net/wlan0/phy80211" "$sysroot/class/rfkill/rfkill0"
+printf 'phy0\n' > "$sysroot/class/net/wlan0/phy80211/name"
+printf 'phy0\n' > "$sysroot/class/rfkill/rfkill0/name"
+printf '0\n' > "$sysroot/class/rfkill/rfkill0/soft"
+printf '0\n' > "$sysroot/class/rfkill/rfkill0/hard"
+
+# The control first: with the switch clear, nothing is said about it. Without
+# this the checks below pass on a daemon that prints the line unconditionally.
+check "an unblocked radio says nothing about a switch" \
+	"$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 | grep -c 'switched off' || true)" 0
+
+# Soft: the one a command can clear, and the message has to say which command.
+printf '1\n' > "$sysroot/class/rfkill/rfkill0/soft"
+"$repo/target/debug/ncfg" reload >/dev/null 2>&1 || true
+# **Seven seconds, because the switch is read by the reconcile loop.** A
+# `/sys` file changing produces no netlink event and no rfkill record here --
+# the real thing would emit one, and this fake cannot -- so what picks it up is
+# the loop's five-second backstop. Two seconds passed the soft case by luck of
+# where in that cycle it landed, and failed the hard one.
+sleep 7
+status=$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 || true)
+check "a soft-blocked radio says so in status" \
+	"$(printf '%s\n' "$status" | grep -c 'switched off at phy0' || true)" 1
+check "and names the command that clears it" \
+	"$(printf '%s\n' "$status" | grep -c 'rfkill unblock wifi' || true)" 1
+
+scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
+check "and a scan says it too, rather than 'no access points'" \
+	"$(printf '%s\n' "$scan" | grep -c 'switched off at phy0' || true)" 1
+
+# Hard: telling somebody to run a command that cannot work wastes their evening.
+printf '0\n' > "$sysroot/class/rfkill/rfkill0/soft"
+printf '1\n' > "$sysroot/class/rfkill/rfkill0/hard"
+"$repo/target/debug/ncfg" reload >/dev/null 2>&1 || true
+# **Seven seconds, because the switch is read by the reconcile loop.** A
+# `/sys` file changing produces no netlink event and no rfkill record here --
+# the real thing would emit one, and this fake cannot -- so what picks it up is
+# the loop's five-second backstop. Two seconds passed the soft case by luck of
+# where in that cycle it landed, and failed the hard one.
+sleep 7
+status=$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 || true)
+check "a hard-blocked radio is not offered a software remedy" \
+	"$(printf '%s\n' "$status" | grep -c 'rfkill unblock wifi' || true)" 0
+check "and is told it is the button on the machine" \
+	"$(printf '%s\n' "$status" | grep -c 'button' || true)" 1
+
+# Back to clear, so the checks after this see an ordinary radio.
+printf '0\n' > "$sysroot/class/rfkill/rfkill0/hard"
+"$repo/target/debug/ncfg" reload >/dev/null 2>&1 || true
+sleep 2
 
 # ------------------------------------------------------------- joining, or not
 #
