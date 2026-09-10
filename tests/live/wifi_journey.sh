@@ -224,8 +224,14 @@ while ! grep -q SELECT_NETWORK "$work/daemon.log" 2>/dev/null &&
 	[ "$waited" -gt 30 ] && break
 	sleep 0.1
 done
-contains "joining reached the supplicant" \
-	"$(cat "$work/connect.log" 2>&1)" "joining"
+# **"joined", not "joining", and the difference is the point.** Until 0197 the
+# daemon returned as soon as SELECT_NETWORK was acknowledged and the client
+# printed "joining; `ncfg wifi status` says whether it worked" -- so this check
+# could only ever assert that a command had been sent. It now waits for the
+# association and reports it, which is a far stronger thing to assert: a join
+# that did not happen is an error and never reaches this line.
+contains "joining reached the supplicant and the join happened" \
+	"$(cat "$work/connect.log" 2>&1)" "joined"
 
 # ---------------------------------------------------------------------------
 # 4b. A running supplicant is reconciled against the document.

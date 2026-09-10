@@ -212,6 +212,86 @@ pub fn reap_reply_sockets(dir: &Path) -> usize {
 	removed
 }
 
+/// How long a join gets before netcfgd says it did not happen.
+///
+/// Association is milliseconds; the key exchange is a few round trips; EAP is
+/// a TLS handshake against a server somewhere else, and on the reporting
+/// machine a successful PEAP join took a little over two seconds. Twenty is
+/// generous for all of them and short enough that a person waiting on it has
+/// not gone to do something else.
+///
+/// It also has to outlast the *first* failure rather than the last: a
+/// supplicant that cannot authenticate says so within a second or two and then
+/// waits ten before trying again, so the answer arrives long before this.
+pub const CONNECT_PATIENCE: Duration = Duration::from_secs(20);
+
+/// Wait for a join to succeed or fail.
+///
+/// **`SELECT_NETWORK` answering OK means the supplicant accepted the command**,
+/// not that the machine joined anything. Association, the key exchange and --
+/// on an enterprise network -- a whole TLS handshake all happen afterwards, and
+/// every way they fail is an event rather than a reply.
+///
+/// So netcfgd used to return success the moment the command was acknowledged,
+/// and `ncfg wifi connect` printed "joining; `ncfg wifi status` says whether it
+/// worked" -- the program admitting it did not know the answer to the question
+/// it had just been asked. On the network that started this work that answer
+/// was forty-five consecutive authentication failures.
+///
+/// The caller must have sent `ATTACH` before `SELECT_NETWORK`, for the reason
+/// [`wait_for_scan`] gives.
+///
+/// # Errors
+///
+/// Returns what went wrong, in the supplicant's own words where it has them.
+pub fn wait_for_connect(client: &Client, patience: Duration) -> Result<(), String> {
+	let deadline = Instant::now() + patience;
+	loop {
+		let left = deadline.saturating_duration_since(Instant::now());
+		if left.is_zero() {
+			return Err(format!(
+				"it did not join within {}s, and the supplicant did not say why",
+				patience.as_secs()
+			));
+		}
+		match client.next_event(left.min(Duration::from_millis(250))) {
+			Ok(Some(event)) => match event.name() {
+				"CTRL-EVENT-CONNECTED" => return Ok(()),
+				// The supplicant has given up on this network for a while.
+				// Its `reason` is worth more than any sentence here --
+				// `WRONG_KEY` and `CONN_FAILED` send a person to different
+				// places -- so it is passed through.
+				"CTRL-EVENT-SSID-TEMP-DISABLED" => {
+					return Err(
+						match (event.field("reason"), event.field("auth_failures")) {
+							(Some(why), Some(count)) => format!(
+								"the supplicant gave up after {count} failed attempt(s): {why}"
+							),
+							(Some(why), None) => format!("the supplicant gave up: {why}"),
+							_ => "the supplicant gave up on this network".to_owned(),
+						},
+					)
+				}
+				"CTRL-EVENT-AUTH-REJECT" | "CTRL-EVENT-ASSOC-REJECT" => {
+					return Err(match event.field("status_code") {
+						Some(code) => {
+							format!("the access point refused this station, status {code}")
+						}
+						None => "the access point refused this station".to_owned(),
+					})
+				}
+				// **Not a failure.** `SELECT_NETWORK` leaves whatever the
+				// radio was on before it, so a disconnect is the ordinary
+				// first step of a join and treating it as the outcome would
+				// fail every successful switch between networks.
+				_ => {}
+			},
+			Ok(None) => {}
+			Err(error) => return Err(format!("the supplicant stopped answering: {error}")),
+		}
+	}
+}
+
 /// How long to wait for a reply.
 ///
 /// Generous, because `SCAN_RESULTS` on a busy band is not instant, and a

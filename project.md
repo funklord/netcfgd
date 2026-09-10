@@ -9461,28 +9461,56 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
-## 10.89 Attaching is a registration
+## 10.90 Selecting a network is not joining one
 
-    CTRL_IFACE: Detach monitor that cannot receive messages: /run/wpa_supplicant/netcfgd-2466975-516
+    match client.command(&format!("SELECT_NETWORK {id}")) {
+        Ok(()) => Response::Ok,
 
-`ATTACH` registers a connection inside `wpa_supplicant`, and removing the socket
-underneath it unregisters nothing -- the supplicant finds out on the next event
-it fails to deliver. Harmless once, and it stopped being once in 10.87: a scan
-now attaches and drops, so **every `ncfg wifi scan` left a dead monitor**, at
-serials 482 and 516 of one daemon's life. The cost is delivery, not
-registration: every event walks the monitor list, and each dead entry is a
-failed send first.
+`OK` to `SELECT_NETWORK` means the supplicant took the command. The
+authentication, the association, the four-way handshake and any TLS exchange
+all come after it, and every way they fail arrives as an event rather than a
+reply. netcfgd called the acknowledgement success, and `ncfg wifi connect`
+printed *"joining; `ncfg wifi status` says whether it worked"* -- the program
+admitting in its own success message that it did not know the answer to what it
+was just asked. On the network that started this work, that answer was
+forty-five consecutive authentication failures.
 
-`Drop` sends `DETACH` and does not wait. Asking would block up to the
-connection's ten-second timeout against a supplicant that has stopped
-answering, on the one code path whose whole job is to let go -- and 0111 is the
-record of what a blocking wait on this socket costs. Cleanup that can be missed
-beats cleanup that can block.
+### The same shape, three times
 
-The roam watcher attaches too and needs none of this: it holds its connection
-for the daemon's life. The difference is lifetime, which is why the fix is in
-`Drop` and not at the call site that currently needs it. `ATTACH` minus
-`DETACH` must be exactly one -- the watcher's. Decision 0196.
+Worth naming as a pattern rather than as three bugs:
+
+- **10.87 / 0194**: `SCAN` returns at once, `SCAN_RESULTS` reads a cache -- the
+  scan was always the previous one.
+- **10.88 / 0195**: `systemctl start` returns when the unit starts, not when
+  the machine is on a network -- success announced 13 minutes early.
+- **10.90 / 0197**: `SELECT_NETWORK` returns when the command is taken, not
+  when the radio has joined.
+
+Each reported an asynchronous operation's *acknowledgement* as its *outcome*.
+The fix is identical every time: attach first, do the thing, wait for the event
+that says what happened, say that instead.
+
+### What counts as the answer
+
+`CTRL-EVENT-CONNECTED` is success; `SSID-TEMP-DISABLED` carries the
+supplicant's own `reason` (`WRONG_KEY` and `CONN_FAILED` send a person to
+different places, so it is passed through); `AUTH-REJECT` is the access point
+refusing rather than a credential netcfgd got wrong.
+
+**`CTRL-EVENT-DISCONNECTED` is deliberately not a failure**: `SELECT_NETWORK`
+leaves whatever the radio was on, so a disconnect is the ordinary first step of
+a join, and treating it as the outcome would fail every successful switch
+between networks.
+
+Off the reconcile loop, like the scan, for 0111's reason -- an EAP handshake is
+not something to hold that loop for.
+
+Five checks, and the sabotage is instructive: removing the wait takes the three
+*failure* checks red and leaves the success check green, which is correct.
+Returning `Ok` unconditionally passes "it worked" every time; only the failure
+cases can tell the difference. `wifi_journey.sh` now asserts **joined** rather
+than **joining**, which is a stronger claim than it could make before.
+Decision 0197.
 
 ## 10.87 A scan is not a round trip
 

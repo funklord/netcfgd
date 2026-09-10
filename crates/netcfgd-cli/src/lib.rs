@@ -1035,8 +1035,15 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 			println!(
 				"{}",
 				match &request {
-					netcfgd_proto::Request::WifiConnect { .. } =>
-						"joining; `ncfg wifi status` says whether it worked".to_owned(),
+					// **It has joined by the time this prints.** Since 0197 the
+					// daemon waits for the association and reports what
+					// happened, so a failure arrives as an error and never
+					// reaches here. The old text -- "joining; `ncfg wifi
+					// status` says whether it worked" -- was the program
+					// admitting it did not know the answer to the question it
+					// had just been asked.
+					netcfgd_proto::Request::WifiConnect { interface, network } =>
+						format!("joined `{network}` on {interface}"),
 					netcfgd_proto::Request::RadioSet {
 						interface,
 						activate,

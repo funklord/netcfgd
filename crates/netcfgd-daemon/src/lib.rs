@@ -826,6 +826,39 @@ fn serve_requests(
 		// care which thread sends it, and the server already runs a thread per
 		// connection, so this is the model the daemon already has rather than
 		// a new one.
+		// A join waits on a radio for the same reason a scan does -- since 0197
+		// it waits for the association, the key exchange and any EAP handshake
+		// to finish rather than for the supplicant to acknowledge a command --
+		// so it belongs on the same thread the scan got and for the same
+		// reason (0111).
+		if matches!(request, Request::WifiConnect { .. }) {
+			let refusal = authorize::permitted(&policy, &remote, origin, &peer, &request)
+				.err()
+				.map(Response::error);
+			if let Some(refusal) = refusal {
+				let _ = reply.send(refusal);
+				continue;
+			}
+			let document = state.desired.clone();
+			let secrets = state.paths.config.join("secrets");
+			let Request::WifiConnect { interface, network } = request else {
+				unreachable!("matched just above")
+			};
+			let spawned = std::thread::Builder::new()
+				.name("join".to_owned())
+				.spawn(move || {
+					let _ = reply.send(wifi::connect_to(
+						document.as_ref(),
+						&secrets,
+						&interface,
+						&network,
+					));
+				});
+			if let Err(error) = spawned {
+				netcfgd_sys::log_error!("supplicant", "cannot start a thread to join: {error}");
+			}
+			continue;
+		}
 		if matches!(request, Request::WifiScan { .. }) {
 			let response = authorize::permitted(&policy, &remote, origin, &peer, &request)
 				.err()
@@ -1724,11 +1757,14 @@ fn answer_wifi(state: &mut State, request: &Request) -> Response {
 			wifi::ap_stations(state.desired.as_ref(), &state.paths.run, interface)
 		}
 		Request::WifiStatus { interface } => wifi::status(state.desired.as_ref(), interface),
-		Request::WifiConnect { interface, network } => wifi::connect_to(
-			state.desired.as_ref(),
-			&state.paths.config.join("secrets"),
-			interface,
-			network,
+		// Served off the loop since 0197, for the reason the scan is (0194).
+		// The arm stays because the match is exhaustive, and says so rather
+		// than joining: a join that came back through here would work, and
+		// would hold the reconcile loop for as long as an EAP handshake takes.
+		Request::WifiConnect { .. } => Response::error(
+			"a join reached the reconcile loop, which should not happen: it is \
+			 answered on its own thread so that waiting for the radio does not \
+			 stall everything else. Worth reporting.",
 		),
 		Request::WifiDisconnect { interface } => {
 			wifi::disconnect(state.desired.as_ref(), interface)

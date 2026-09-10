@@ -297,6 +297,49 @@ detaches=$(grep -c '^DETACH$' "$work/fake.log" || true)
 check "every scan's ATTACH is matched by a DETACH" \
 	"$((attaches - detaches))" 1
 
+# ------------------------------------------------------------- joining, or not
+#
+# `SELECT_NETWORK` answering OK means the supplicant took the command.
+# Association, the key exchange and any EAP handshake happen after it, and
+# every way they fail is an event. netcfgd used to return success on the
+# acknowledgement, and `ncfg wifi connect` printed "joining; `ncfg wifi status`
+# says whether it worked" -- the program admitting it did not know the answer
+# to what it had just been asked. On the network that started this work, that
+# answer was forty-five consecutive authentication failures.
+
+# The network has to exist in the document: `wifi connect` joins what the
+# configuration already describes, which is the boundary 0124 draws.
+mkdir -p "$work/etc/conf.d" "$work/etc/secrets"
+printf 'hunter2hunter2' > "$work/etc/secrets/home"
+chmod 600 "$work/etc/secrets/home"
+cat > "$work/etc/conf.d/net.conf" <<'CONF'
+network "HomeFiber" {
+	wifi {
+		psk = "@secret:home"
+	}
+}
+CONF
+"$repo/target/debug/ncfg" reload >/dev/null 2>&1 || true
+sleep 1
+
+join=$("$repo/target/debug/ncfg" wifi connect HomeFiber 2>&1 || true)
+check "a join that works says so, in the past tense" \
+	"$(printf '%s\n' "$join" | grep -c 'joined' || true)" 1
+check "and does not say it is still trying" \
+	"$(printf '%s\n' "$join" | grep -c 'joining' || true)" 0
+
+# The failure that started all of this: the supplicant gives up, and says why.
+send 'FAIL_NEXT_JOIN CONN_FAILED'
+sleep 1
+join=$("$repo/target/debug/ncfg" wifi connect HomeFiber 2>&1 || true)
+check "a join that fails is reported as a failure" \
+	"$(printf '%s\n' "$join" | grep -c 'did not join' || true)" 1
+check "and carries the supplicant's own reason" \
+	"$(printf '%s\n' "$join" | grep -c 'CONN_FAILED' || true)" 1
+# Nothing is invented: the count comes from the event, not from netcfgd.
+check "and the count of attempts the supplicant reported" \
+	"$(printf '%s\n' "$join" | grep -c '1 failed attempt' || true)" 1
+
 # ------------------------------------------- and it does not stall the daemon
 #
 # Making the scan wait is only correct if the waiting happens somewhere the

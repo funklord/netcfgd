@@ -710,13 +710,38 @@ pub(crate) fn connect_to(
 		}
 	};
 
+	// **Attached before the join is asked for**, so the outcome cannot happen
+	// between the command and the listening. Same order and same reason as the
+	// scan (0194).
+	//
+	// A connection that could not attach still joins; what is lost is knowing
+	// whether it worked, which is said rather than swallowed.
+	let listening = client.attach().is_ok();
+
 	// SELECT_NETWORK rather than ENABLE_NETWORK: it disables the others, which
 	// is what "join this one" means. ENABLE would leave the supplicant free to
 	// pick a different network it also knows about, and the operator would
 	// have asked for one thing and got another.
-	match client.command(&format!("SELECT_NETWORK {id}")) {
+	if let Err(error) = client.command(&format!("SELECT_NETWORK {id}")) {
+		return Response::error(format!("cannot join `{wanted}`: {error}"));
+	}
+
+	// **OK to that command means the supplicant took it, not that anything
+	// joined.** Association, the key exchange and any EAP handshake all happen
+	// after it, and every way they fail arrives as an event. Returning here is
+	// what made `ncfg wifi connect` print "joining; `ncfg wifi status` says
+	// whether it worked" -- the program admitting it did not know the answer
+	// to what it had just been asked. Decision 0197.
+	if !listening {
+		return Response::error(format!(
+			"`{wanted}` was selected on `{interface}`, but netcfgd could not listen for \
+			 the result, so it cannot say whether the join worked. `ncfg wifi status \
+			 {interface}` reports what the supplicant is doing now"
+		));
+	}
+	match netcfgd_supplicant::wait_for_connect(&client, netcfgd_supplicant::CONNECT_PATIENCE) {
 		Ok(()) => Response::Ok,
-		Err(error) => Response::error(format!("cannot join `{wanted}`: {error}")),
+		Err(why) => Response::error(format!("`{wanted}` did not join on `{interface}`: {why}")),
 	}
 }
 

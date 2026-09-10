@@ -78,6 +78,10 @@ KNOWN = []
 # other test needs.
 FAIL_SCAN = []
 
+# How the next joins should fail, one each, set by `FAIL_NEXT_JOIN`. Empty
+# means every join succeeds, which is what every other test needs.
+FAIL_JOIN = []
+
 # Whether the next scans should be answered and then never spoken of again.
 SILENT_SCAN = []
 
@@ -361,6 +365,36 @@ def serve(ctrl_dir, interface, pidfile):
 			# connection netcfgd scans on attaches for that scan and goes: an
 			# event sent out of band arrives at nobody, and the test would pass
 			# on a fake talking to itself.
+			# **A join is two things as well**: OK to the command, and later an
+			# event saying what became of it. The fake answered only the first,
+			# which is exactly the gap 0197 closed in netcfgd -- so a fake that
+			# kept the old shape would make every join here wait out its full
+			# patience and then be reported as not having happened.
+			#
+			# `FAIL_NEXT_JOIN <reason>` is the other outcome, as a mode, for
+			# the reason FAIL_NEXT_SCAN is one.
+			elif command.startswith("FAIL_NEXT_JOIN "):
+				FAIL_JOIN.append(command.split(None, 1)[1])
+				reply(server, sender, b"OK\n")
+				print(command, flush=True)
+				continue
+			elif command.startswith("SELECT_NETWORK "):
+				if FAIL_JOIN:
+					why = FAIL_JOIN.pop(0)
+					event = ('<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="'
+					         + ASSOCIATED[0][4] + '" auth_failures=1 duration=10 reason='
+					         + why)
+				else:
+					event = ("<3>CTRL-EVENT-CONNECTED - Connection to "
+					         + ASSOCIATED[0][0] + " completed [id=0 id_str=]")
+				reply(server, sender, b"OK\n")
+				for listener in attached:
+					try:
+						server.sendto(event.encode(), listener)
+					except OSError:
+						pass
+				print(command, flush=True)
+				continue
 			elif command.startswith("FAIL_NEXT_SCAN "):
 				FAIL_SCAN.append(command.split(None, 1)[1])
 				reply(server, sender, b"OK\n")
