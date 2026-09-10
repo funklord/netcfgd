@@ -70,7 +70,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
+.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -107,7 +107,7 @@ ncfg-link:
 # can build the tree. BUDGET_GATES measure *this* machine, and running them
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
-                 nm-containment packaging client-test conformance test \
+                 nm-containment packaging client-test conformance test example \
                  adapters gui linkage
 BUDGET_GATES   = size footprint rss
 
@@ -1845,6 +1845,20 @@ style-source:
 # one with the answer.
 style-docs:
 	python3 tool/style_gate.py docs
+
+# The shipped reference, compiled rather than trusted.
+#
+# `netcfgd.conf.example` calls itself "every feature, with the syntax to use
+# it" and the postinst points an operator at it as the thing to read on a
+# machine with no network. Nothing checked a word of it until this: the
+# Makefile installed it and removed it, and that was the whole relationship.
+# Two faults had been found in it by hand -- a missing `probe` block, and a
+# `mac_policy` value the compiler rejects.
+#
+# After `test`, because it compiles each block with the debug `ncfg` that the
+# test target has just built.
+example:
+	@python3 tool/example_gate.py
 
 # The clean ladder, matching the sibling projects: `clean` removes build
 # products, `veryclean` adds the build directories themselves, `distclean`

@@ -643,6 +643,7 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_access_points(builder, desired);
 	warn_bluetooth(builder, desired);
 	warn_wifi_device_policy(builder, desired);
+	warn_mac_contradiction(builder, desired);
 	warn_unfired_hooks(builder, desired);
 	warn_inert_devices(builder, desired);
 	// `portal_check` was here, as "recognised and not applied", from 0061 until
@@ -720,6 +721,64 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 /// for anything, and three warnings on every wireless device would be noise
 /// rather than news -- which is the mistake `plan_dns`'s empty-scope guard
 /// records having made once already.
+/// A fixed address and a policy that replaces it.
+///
+/// **Both settings are honoured, and they contradict each other.** `mac` is
+/// planned as a `link.set_mac`, and a randomising `mac_policy` is sent to the
+/// supplicant as `mac_addr=1` or `2` -- which the supplicant applies when it
+/// associates, over whatever the link is carrying. So the configured address
+/// is on the interface right up until the moment it starts being used, and
+/// from then on it is not.
+///
+/// Measured on a plan for a device with both:
+///
+/// ```text
+/// 0  link.set_mac wlan0  mac: 02:00:00:00:00:01 (was 6a:d3:38:d3:a9:bb)
+/// ```
+///
+/// -- netcfgd dutifully setting an address it is about to have overwritten,
+/// and saying nothing about it anywhere.
+///
+/// **What it costs is the reason somebody sets a fixed address at all.**
+/// `MacPolicy::Permanent`'s own documentation names it: "a network with
+/// MAC-based admission control is the usual reason". An operator who set `mac`
+/// for admission and `mac_policy` for privacy gets neither the admission nor a
+/// diagnosis -- the network refuses them and nothing on this machine explains
+/// why.
+///
+/// **Warned rather than refused, and rather than picked between.** Either
+/// could be what was meant: a fixed address that a random one is layered over
+/// is wrong, and so is a randomised association on a device whose address was
+/// pinned for some other purpose. Choosing for the operator would silently
+/// discard whichever was actually wanted, which is the failure this warning is
+/// about. 0200.
+fn warn_mac_contradiction(builder: &mut Builder, desired: &Document) {
+	for device in &desired.devices {
+		let Some(mac) = &device.mac else {
+			continue;
+		};
+		let Some(wifi) = &device.wifi else {
+			continue;
+		};
+		if wifi.mac_policy == netcfgd_model::MacPolicy::Permanent {
+			continue;
+		}
+		builder.warnings.push(Warning {
+			message: format!(
+				"{} sets `mac` to {mac} and a `mac_policy` of `{}`, which replaces it: \
+				 the supplicant applies a randomised address when it associates, over \
+				 whatever the link is carrying. netcfgd does both, so the configured \
+				 address holds until the radio joins a network and not after. If the \
+				 fixed address is for MAC-based admission, `mac_policy = \"permanent\"` \
+				 is what keeps it",
+				device.name,
+				wifi.mac_policy.name()
+			),
+			interface: Some(device.name.clone()),
+		});
+	}
+}
+
 fn warn_wifi_device_policy(builder: &mut Builder, desired: &Document) {
 	for device in &desired.devices {
 		let Some(wifi) = &device.wifi else {

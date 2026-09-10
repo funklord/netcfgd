@@ -461,10 +461,27 @@
 #	}
 #}
 
-# `scan_randomization` and `mac_policy = "random"` are the privacy pair: one
-# hides you while looking, the other while connected. `portal_check` is what
-# notices a captive portal instead of reporting a working network that
-# resolves nothing.
+# `mac_policy` is the address the radio uses once it has joined something:
+#   permanent       the hardware address. Trackable, and what a network with
+#                   MAC-based admission control needs.
+#   per_network     a fresh address per network, kept for the association.
+#   per_connection  a fresh address every time, including rejoining the same
+#                   network. Breaks DHCP reservations and portal sessions.
+#
+# **`scan_randomization` is accepted and does nothing yet.** It is the other
+# half -- the address in probe requests, before anything is joined -- and
+# nothing in netcfgd sets it. `ncfg plan` says so about any device that asks
+# for it. It is kept so a configuration written now still means this when the
+# code arrives, and it is named here rather than quietly omitted because a
+# reference that lists only what works cannot be used to find out what does
+# not.
+#
+# **Setting `mac` on the device and a randomising `mac_policy` contradict each
+# other**, and netcfgd does both: the fixed address holds until the radio
+# associates and not after. `ncfg plan` warns.
+#
+# `portal_check` is what notices a captive portal instead of reporting a
+# working network that resolves nothing.
 #
 # THE MODEM. Which SIM source to use, and which APN to ask for (0150).
 

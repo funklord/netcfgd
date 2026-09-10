@@ -9461,6 +9461,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.93 Two settings that contradict each other, and a reference nothing read
+
+IPv6 privacy is applied properly and `mac_policy` reaches the supplicant
+correctly. What was wrong is what happens when both halves of the MAC story are
+set at once.
+
+`mac` on a device is planned as a `link.set_mac`; a randomising `mac_policy`
+goes to the supplicant, which applies its own address **when it associates**,
+over whatever the link is carrying. netcfgd does both and said nothing:
+
+    0  link.set_mac wlan0  mac: 02:00:00:00:00:01 (was 6a:d3:38:d3:a9:bb)
+
+netcfgd setting an address it is about to have overwritten. **What it costs is
+the reason somebody pins an address at all** -- `MacPolicy::Permanent`'s own
+documentation says "a network with MAC-based admission control is the usual
+reason", so an operator who set `mac` for admission and `mac_policy` for
+privacy gets neither the admission nor a diagnosis.
+
+Warned rather than resolved. Either could be what was meant, and picking for the
+operator would silently discard whichever was actually wanted.
+
+### The shipped reference was wrong
+
+`netcfgd.conf.example` said *"`scan_randomization` and `mac_policy = "random"`
+are the privacy pair"*. **`random` is not a MAC policy** -- confirmed against
+the compiler, which answers "one of permanent, per_network, per_connection".
+And the sentence presents the two as equals when `scan_randomization` is
+accepted and inert.
+
+That file calls itself "every feature, with the syntax to use it" and the
+postinst points an operator at it as the thing to read on a machine with no
+network. **Nothing checked a word of it** -- the Makefile installed it and
+removed it, which is also how it came to have no `probe` block at all (10.84).
+Two faults, one file, one session, both found only by reading.
+
+### `tool/example_gate.py`, and what it does not do
+
+Every commented top-level block, uncommented and compiled alone: 81 blocks, 79
+compile, and the two that cannot are named rather than skipped by pattern, so a
+third joining them is a failure.
+
+**It does not read prose**, and the gate's own header says so. The
+`mac_policy = "random"` was in a sentence, not a block, and this gate would have
+passed the file carrying it -- worth stating where somebody will read it,
+because a check trusted for more than it does is worse than none. It also
+refuses to pass on an empty block list, which is the trap every gate shares.
+Decision 0200.
+
 ## 10.92 The switch is news where somebody is looking
 
 The rfkill handling was mostly finished before this audit and worth saying so:
