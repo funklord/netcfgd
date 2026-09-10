@@ -17,7 +17,9 @@ pub mod client;
 pub mod network;
 pub mod protocol;
 
-pub use client::{is_reply_socket, nothing_is_listening, Client, DEFAULT_CTRL_DIR, IMPATIENT};
+pub use client::{
+	is_reply_socket, nothing_is_listening, reap_reply_sockets, Client, DEFAULT_CTRL_DIR, IMPATIENT,
+};
 pub use network::{fingerprint, mac_addr_value, settings, wired_settings, Setting, Unsupported};
 pub use protocol::{Event, NetworkEntry, Reply, ScanResult};
 

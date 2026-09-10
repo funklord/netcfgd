@@ -169,7 +169,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		.unwrap_or_default();
 	bind_sockets(&socket_path, &control, &state, &commands)?;
 	spawn_kernel_watcher(&commands);
-	spawn_roam_watcher(&commands, netcfgd_supplicant::ctrl_dir());
+	spawn_roam_watcher(&commands, swept_ctrl_dir());
 	spawn_rfkill_watcher(
 		&commands,
 		// Overridable for the reason the supplicant's directory is: a network
@@ -2332,6 +2332,30 @@ fn report_supplicant_event(interface: &str, event: &netcfgd_supplicant::protocol
 		// stream by volume.
 		_ => {}
 	}
+}
+
+/// The supplicant's control directory, with the dead sockets taken out of it.
+///
+/// **Before the watcher starts listing that directory**, and once. What is
+/// swept is netcfgd's own reply sockets belonging to processes that are gone --
+/// this daemon's previous lives, mostly, since it installs no `SIGTERM` handler
+/// and so leaves two behind on every restart (0193).
+///
+/// Startup is the whole of the schedule. The set can only grow when a process
+/// dies, so there is nothing a later sweep would find that this one missed, and
+/// sweeping on each connect would mean a `read_dir` for every command netcfgd
+/// sends.
+fn swept_ctrl_dir() -> PathBuf {
+	let ctrl_dir = netcfgd_supplicant::ctrl_dir();
+	let reaped = netcfgd_supplicant::reap_reply_sockets(&ctrl_dir);
+	if reaped > 0 {
+		netcfgd_sys::log_note!(
+			"supplicant",
+			"removed {reaped} reply socket(s) in {} left by processes that are gone",
+			ctrl_dir.display()
+		);
+	}
+	ctrl_dir
 }
 
 fn spawn_kernel_watcher(commands: &Sender<Command>) {

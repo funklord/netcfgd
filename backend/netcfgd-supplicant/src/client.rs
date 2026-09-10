@@ -52,6 +52,91 @@ pub fn is_reply_socket(name: &str) -> bool {
 	name.starts_with(REPLY_PREFIX)
 }
 
+/// Remove reply sockets left behind by processes that are gone.
+///
+/// **`Drop` removes the socket and cannot be relied on to.** netcfgd installs
+/// no `SIGTERM` handler, so the default disposition kills the process outright
+/// and nothing unwinds -- and a `SIGKILL` would skip `Drop` even if a handler
+/// existed. Measured on the reporting machine: an ordinary
+/// `systemctl restart netcfgd` took the directory from 18 entries to 20, two
+/// per daemon lifetime, for ever. Sixteen of the eighteen belonged to processes
+/// that no longer existed. Nothing had noticed because 0112 taught every reader
+/// to skip these entries, so the litter was invisible to exactly the code that
+/// was walking past it.
+///
+/// It is not a correctness fault and it is not nothing: the directory belongs
+/// to `wpa_supplicant`, the roam watcher lists all of it on every pass, and a
+/// runtime directory that only ever grows is one somebody eventually has to
+/// explain.
+///
+/// **This deletes files, so it parses rather than prefix-matches.**
+/// [`is_reply_socket`] is a prefix test and that is right for a reader deciding
+/// what to skip; it is not enough for something removing what it finds. Five
+/// things must hold, and a candidate failing any of them is left alone:
+///
+/// 1. the name is exactly `netcfgd-<pid>-<serial>`, both of them digits;
+/// 2. it is a socket, by `symlink_metadata` so a symlink is never followed to
+///    whatever it points at;
+/// 3. the pid is not this process;
+/// 4. `/proc/<pid>` does not exist, which is how the rest of this tree asks
+///    whether a pid is alive -- and it needs no `unsafe`, so the promise at the
+///    top of this file still holds;
+/// 5. `/proc/self` *does* exist.
+///
+/// The last is the one that matters. Without `/proc` mounted, step 4 answers
+/// "dead" for every pid on the machine, including the live ones -- so the
+/// reaper would delete the reply sockets of running clients, which is the
+/// failure it exists to prevent, committed wholesale. Where it cannot tell, it
+/// removes nothing.
+///
+/// A pid that has been reused by an unrelated process leaves its socket in
+/// place. Wrong in the direction that costs one stale entry rather than one
+/// live connection.
+///
+/// Returns how many were removed, for the caller to say so. Decision 0193.
+pub fn reap_reply_sockets(dir: &Path) -> usize {
+	if !Path::new("/proc/self").exists() {
+		return 0;
+	}
+	let Ok(entries) = std::fs::read_dir(dir) else {
+		return 0;
+	};
+	let mine = std::process::id().to_string();
+	let mut removed = 0;
+	for entry in entries.flatten() {
+		let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+			continue;
+		};
+		let Some(rest) = name.strip_prefix(REPLY_PREFIX) else {
+			continue;
+		};
+		let Some((pid, serial)) = rest.split_once('-') else {
+			continue;
+		};
+		let shaped = !pid.is_empty()
+			&& !serial.is_empty()
+			&& pid.bytes().all(|byte| byte.is_ascii_digit())
+			&& serial.bytes().all(|byte| byte.is_ascii_digit());
+		if !shaped || pid == mine {
+			continue;
+		}
+		let path = dir.join(&name);
+		let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+			continue;
+		};
+		if !std::os::unix::fs::FileTypeExt::is_socket(&metadata.file_type()) {
+			continue;
+		}
+		if Path::new(&format!("/proc/{pid}")).exists() {
+			continue;
+		}
+		if std::fs::remove_file(&path).is_ok() {
+			removed += 1;
+		}
+	}
+	removed
+}
+
 /// How long to wait for a reply.
 ///
 /// Generous, because `SCAN_RESULTS` on a busy band is not instant, and a
@@ -370,7 +455,7 @@ impl Drop for Client {
 
 #[cfg(test)]
 mod tests {
-	use super::{is_reply_socket, nothing_is_listening, Client};
+	use super::{is_reply_socket, nothing_is_listening, reap_reply_sockets, Client};
 	use std::io;
 	use std::os::unix::net::UnixDatagram;
 
@@ -569,5 +654,81 @@ mod tests {
 		assert!(!nothing_is_listening(&io::Error::from(
 			io::ErrorKind::InvalidData
 		)));
+	}
+
+	/// The reaper takes the dead and leaves everything else.
+	///
+	/// Written as one directory holding every case at once, because what this
+	/// function has to get right is not "does it delete" but "does it delete
+	/// *only* that" -- and a test with one candidate per run cannot fail in the
+	/// way that matters. Six entries go in; exactly one comes out.
+	#[test]
+	fn only_sockets_of_dead_processes_are_reaped() {
+		use std::os::unix::net::UnixDatagram;
+
+		let dir = std::env::temp_dir().join(format!("ncfg-reap-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).expect("a directory to sweep");
+
+		// A pid that cannot be alive. Pid 0 is the scheduler from userspace's
+		// point of view and never appears in /proc, so `/proc/0` is absent on
+		// every Linux -- which is the whole condition being tested, arranged
+		// without having to kill something and race its reaping.
+		let dead = dir.join("netcfgd-0-7");
+		let _dead_socket = UnixDatagram::bind(&dead).expect("a socket to leave behind");
+
+		// Ours, and the process holding it is this one.
+		let mine = dir.join(format!("netcfgd-{}-0", std::process::id()));
+		let _mine_socket = UnixDatagram::bind(&mine).expect("a live socket");
+
+		// **Another process' socket, and that process is alive.** This is the
+		// case the whole function turns on, and the first version of this test
+		// did not have it: every other entry here is excluded by its name, its
+		// type, or by being ours, so removing the liveness check entirely left
+		// the test passing. Pid 1 is alive on any machine this runs on and is
+		// never us.
+		let live = dir.join("netcfgd-1-3");
+		let _live_socket = UnixDatagram::bind(&live).expect("another client's socket");
+
+		// A real interface socket, which is what the directory is *for*.
+		let interface = dir.join("wlan0");
+		let _interface_socket = UnixDatagram::bind(&interface).expect("an interface socket");
+
+		// Shaped like ours and not a socket. A regular file with this name is
+		// not something netcfgd made, and a reaper that removes it is removing
+		// somebody else's file on the strength of its name alone.
+		let regular = dir.join("netcfgd-0-8");
+		std::fs::write(&regular, b"not a socket").expect("a regular file");
+
+		// Nearly ours: the serial is not a number, so the name did not come
+		// from `connect_within` and the pid in it means nothing.
+		let malformed = dir.join("netcfgd-0-x");
+		let _malformed_socket = UnixDatagram::bind(&malformed).expect("a socket");
+
+		// Ours in prefix only, with no serial at all.
+		let truncated = dir.join("netcfgd-0");
+		let _truncated_socket = UnixDatagram::bind(&truncated).expect("a socket");
+
+		let removed = reap_reply_sockets(&dir);
+
+		assert_eq!(removed, 1, "exactly the one dead socket");
+		assert!(!dead.exists(), "the dead process' socket is gone");
+		assert!(mine.exists(), "this process' own socket is untouched");
+		assert!(
+			live.exists(),
+			"a living process' socket is not the reaper's to take"
+		);
+		assert!(
+			interface.exists(),
+			"an interface socket is not ours to remove"
+		);
+		assert!(regular.exists(), "a regular file is not a reply socket");
+		assert!(
+			malformed.exists(),
+			"a name that did not come from here is left"
+		);
+		assert!(truncated.exists(), "a prefix match alone is not enough");
+
+		let _ = std::fs::remove_dir_all(&dir);
 	}
 }

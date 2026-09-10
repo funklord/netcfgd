@@ -9461,6 +9461,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.86 A socket outlives the process that bound it
+
+Found in the same directory the roam watcher walks. `/run/wpa_supplicant` held
+twenty `netcfgd-<pid>-<n>` reply sockets and sixteen belonged to processes that
+were gone.
+
+`Drop` removes the bound path, and its comment has always said why leaving it
+behind is bad. It was right about the consequence and wrong about the mechanism
+being enough: **netcfgd installs no `SIGTERM` handler**, so the default
+disposition kills the process and nothing unwinds. Measured -- an ordinary
+`systemctl restart netcfgd` took the count from 18 to 20. Two per daemon
+lifetime, for ever. Client requests do not leak; two `ncfg wifi` calls left it
+at 18.
+
+**Nothing had noticed because 0112 made it invisible.** That decision taught
+every reader of the directory to skip these entries, after the watcher was
+found connecting to them and waiting out its whole timeout against a process
+that would never answer. Correct, and it meant the litter was ignored by
+exactly the code walking past it on every pass.
+
+### Not a signal handler
+
+It does nothing for `SIGKILL`, a crash, or a test harness's cleanup trap, which
+is most of what was in that directory. And netcfgd's shutdown is deliberately
+not a teardown -- `KillMode=process` is there so the supplicant and the lease
+survive a restart, which they did throughout this. A staleness rule covers
+every case the handler would and every case it would not, in one bounded sweep
+at startup.
+
+### Because it deletes, it parses
+
+`is_reply_socket()` is a prefix test, right for a reader deciding what to skip
+and not enough for something removing what it finds. Name parsed as
+`netcfgd-<pid>-<serial>`, both digits; a socket by `symlink_metadata` so no
+symlink is followed; not our own pid; `/proc/<pid>` absent.
+
+And the rule that matters most: **`/proc/self` must exist.** Without `/proc`
+mounted, the liveness check answers "dead" for every pid on the machine, and
+the reaper would delete running clients' sockets -- the failure it exists to
+prevent, committed wholesale. Where it cannot tell, it removes nothing.
+
+### The first test was not evidence
+
+Seven entries in one directory, exactly one expected out. Removing the liveness
+check left it **passing**, because every entry was excluded by name, by type or
+by being ours -- the rule the function turns on was covered by nothing. Adding
+a socket owned by pid 1 is what makes that sabotage land. Decision 0193.
+
 ## 10.85 The supplicant was talking and nobody listened
 
 The roaming and reconnect audit, and it found the daemon attached to
