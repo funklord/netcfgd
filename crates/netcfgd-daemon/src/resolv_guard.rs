@@ -114,18 +114,36 @@ pub(crate) fn sweep(run_dir: &Path) -> usize {
 			// dhcpcd is on the list by construction and is not interference.
 			continue;
 		}
+		// **Ours by cgroup, which is how netcfgd finds the children it has no
+		// record of.** `ours` reads pid files under netcfgd's own run
+		// directory, and dhcpcd does not write one there -- it writes
+		// `/run/dhcpcd/<iface>-4.pid`. So netcfgd's own DHCP client, and every
+		// privsep helper it forks, reached this sweep looking foreign. It
+		// survived only because the supervision check below was answering yes
+		// about it for the wrong reason; correcting that alone would have made
+		// netcfgd terminate the client holding this machine's lease, which
+		// this file's own header calls the worst outcome available. 0198.
+		if netcfgd_sys::process::in_our_service(pid) {
+			continue;
+		}
 		if !netcfgd_sys::process::shares_network_namespace(pid) {
 			// Not a diagnostic: on a machine running containers this is most
 			// of what the scan finds, and saying so every three reclaims
 			// would bury the lines that matter.
 			continue;
 		}
+		// **Another manager's service, which is not the same as any service.**
+		// Everything netcfgd starts inherits netcfgd's own cgroup, so this
+		// used to answer yes about netcfgd's own dhcpcd and the sweep declined
+		// to signal a process it had started -- leaving in place exactly the
+		// interference it exists to remove. Decision 0198.
 		if netcfgd_sys::process::is_service_supervised(pid) {
-			eprintln!(
-				"netcfgd: {program} (pid {pid}) keeps rewriting resolv.conf and is run by a service manager, so netcfgd is not signalling it"
-			);
-			eprintln!(
-				"netcfgd:   a killed service is restarted; stand it down with Conflicts= -- see packaging/systemd/netcfgd-exclusive.conf"
+			netcfgd_sys::log_warning!(
+				"resolv",
+				"{program} (pid {pid}) keeps rewriting resolv.conf and another \
+				 service manager restarts it, so netcfgd is not signalling it. A \
+				 killed service comes straight back; stand it down with Conflicts= \
+				 -- see packaging/systemd/netcfgd-exclusive.conf"
 			);
 			continue;
 		}

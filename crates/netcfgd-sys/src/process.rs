@@ -210,10 +210,95 @@ pub fn program_of(pid: i32) -> Option<String> {
 /// matches the caller: an unreadable cgroup on a kernel without the
 /// controller is not evidence of supervision, and treating it as such would
 /// make the sweep do nothing on exactly the machines it is wanted on.
+///
+/// **The question is whose service, and it used to be "any service".** Every
+/// process netcfgd spawns inherits netcfgd's own cgroup, so a dhcpcd that
+/// netcfgd started is in `/system.slice/netcfgd.service` -- which contains
+/// `.service`, so the old test answered yes about netcfgd's own child.
+///
+/// Measured on the reporting machine the moment netcfgd was selected:
+///
+/// ```text
+/// dhcpcd (pid 2538344) keeps rewriting resolv.conf and is run by a service
+/// manager, so netcfgd is not signalling it
+/// resolv.conf has been taken back 3 times and netcfgd found nothing it could signal
+/// ```
+///
+/// -- netcfgd declining to signal a process it had started itself, and
+/// advising the operator to stand it down with `Conflicts=`. The guard exists
+/// so netcfgd does not fight *another* supervisor; turned on netcfgd's own
+/// children it does the one thing it was written to prevent, which is leave an
+/// interference in place.
+///
+/// So compare the unit rather than look for the word. A pid in the same
+/// `*.service` as this process is this process' own and is netcfgd's to
+/// signal; one in a different service belongs to somebody who will restart it.
+/// Where *our* unit cannot be read the old answer stands: not being able to
+/// prove it is ours is not evidence that it is.
 #[must_use]
 pub fn is_service_supervised(pid: i32) -> bool {
-	std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
-		.is_ok_and(|text| text.lines().any(|line| line.contains(".service")))
+	supervised_by_another(
+		service_of(&pid.to_string()).as_deref(),
+		service_of("self").as_deref(),
+	)
+}
+
+/// The `*.service` unit a `/proc` entry belongs to, if any.
+///
+/// A cgroup line is `0::/system.slice/netcfgd.service`, and a delegated child
+/// may sit below it -- `.../netcfgd.service/something.scope` -- so this takes
+/// the nearest `.service` component rather than the last one.
+fn service_of(pid: &str) -> Option<String> {
+	let text = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+	text.lines()
+		.find_map(|line| line.rsplit('/').find(|part| part.ends_with(".service")))
+		.map(ToOwned::to_owned)
+}
+
+/// Whether a process is in *this* process' own service.
+///
+/// **The other half of the cgroup question, and the load-bearing one.** A
+/// process netcfgd started inherits netcfgd's cgroup, so this is a positive
+/// identification of netcfgd's own children -- including the ones netcfgd has
+/// no record of.
+///
+/// It has one, and it matters: dhcpcd writes its pid file to its own run
+/// directory, `/run/dhcpcd/<iface>-4.pid`, and netcfgd's `ours()` scans
+/// `/run/netcfgd/*/*.pid`. Measured on the reporting machine:
+///
+/// ```text
+/// /run/dhcpcd/wlp0s20f3-4.pid          <- dhcpcd's, where netcfgd does not look
+/// /run/netcfgd/supplicant/wlp0s20f3.pid <- the only pid netcfgd knows
+/// ```
+///
+/// So netcfgd's own DHCP client is not on its list of its own processes, and
+/// the resolv.conf sweep treated it as a foreign writer. Nothing bad followed
+/// only because [`is_service_supervised`] was answering yes about it for the
+/// wrong reason -- two faults cancelling, and fixing either one alone makes
+/// netcfgd terminate the client holding this machine's lease.
+///
+/// The cgroup answers where a pid file cannot: dhcpcd forks a privileged
+/// proxy, a control proxy and a BPF helper, all of which inherit the cgroup
+/// and none of which appear in any pid file.
+///
+/// **False where netcfgd is not under a service manager at all** -- run from a
+/// shell, or under `unshare` as the live suite does -- which leaves the
+/// existing identification to do the work it already does there.
+#[must_use]
+pub fn in_our_service(pid: i32) -> bool {
+	let ours = service_of("self");
+	ours.is_some() && service_of(&pid.to_string()) == ours
+}
+
+/// The decision, without the filesystem, so it can be checked.
+///
+/// `None` for theirs is a process in no service at all: killable. Equal units
+/// mean it is one of ours. `None` for ours -- netcfgd not under systemd, or a
+/// `/proc` that will not answer about this process -- leaves the conservative
+/// answer, since a service netcfgd cannot prove is its own is one that may
+/// come straight back.
+fn supervised_by_another(theirs: Option<&str>, ours: Option<&str>) -> bool {
+	theirs.is_some() && ours != theirs
 }
 
 /// Whether a process is in the same network namespace as this one.
@@ -868,5 +953,77 @@ mod tests {
 		// The state the caller asked for. A pid that cannot exist stands in for
 		// one that has exited: the kernel answers ESRCH either way.
 		assert!(terminate(0x0040_0000).is_ok());
+	}
+
+	/// Whose service, not any service.
+	///
+	/// Every process netcfgd spawns inherits netcfgd's cgroup, so the old test
+	/// -- does this cgroup mention `.service` -- answered yes about netcfgd's
+	/// own dhcpcd and netcfgd declined to signal a child it had started. The
+	/// live symptom was resolv.conf being taken back three times with netcfgd
+	/// reporting it had "found nothing it could signal".
+	#[test]
+	fn a_process_in_our_own_service_is_ours_to_signal() {
+		let ours = Some("netcfgd.service");
+
+		// The bug, as an assertion: netcfgd's own child.
+		assert!(!supervised_by_another(Some("netcfgd.service"), ours));
+
+		// Somebody else's, which is the whole reason the guard exists. A
+		// killed `systemd-resolved` comes straight back.
+		assert!(supervised_by_another(
+			Some("systemd-resolved.service"),
+			ours
+		));
+		assert!(supervised_by_another(Some("dhcpcd.service"), ours));
+
+		// In no service at all -- a shell, a hook, an init script that does
+		// not supervise. A kill holds for these.
+		assert!(!supervised_by_another(None, ours));
+
+		// netcfgd not under systemd, or a `/proc` that will not answer about
+		// this process. Not being able to prove it is ours is not evidence
+		// that it is, so the conservative answer stands.
+		assert!(supervised_by_another(Some("dhcpcd.service"), None));
+		assert!(!supervised_by_another(None, None));
+	}
+
+	/// The two halves answer opposite questions about the same fact.
+	///
+	/// `in_our_service` identifies netcfgd's own children -- the thing a pid
+	/// file could not do, since dhcpcd writes its own to `/run/dhcpcd` and
+	/// forks helpers that appear in no file at all. `is_service_supervised`
+	/// identifies somebody else's. A process cannot be both, and the pair has
+	/// to stay exclusive: they guard the same sweep, one skipping and one
+	/// terminating, and an overlap would mean netcfgd killing its own client.
+	#[test]
+	fn ours_and_another_managers_are_exclusive() {
+		for (theirs, ours) in [
+			(Some("netcfgd.service"), Some("netcfgd.service")),
+			(Some("dhcpcd.service"), Some("netcfgd.service")),
+			(None, Some("netcfgd.service")),
+			(Some("dhcpcd.service"), None),
+			(None, None),
+		] {
+			// `in_our_service`'s rule, spelled the way the function spells it.
+			let mine = ours.is_some() && theirs == ours;
+			assert!(
+				!(mine && supervised_by_another(theirs, ours)),
+				"a process cannot be both ours and another manager's: \
+				 theirs={theirs:?} ours={ours:?}"
+			);
+		}
+	}
+
+	/// The unit is read out of a real cgroup line, including a delegated child.
+	#[test]
+	fn the_service_is_the_nearest_one_in_the_path() {
+		// This process, whatever is running the tests, has to be answerable
+		// without panicking -- which is the only property available here,
+		// since a test runner may be in a service, a user scope or neither.
+		let _ = service_of("self");
+
+		// Absent for a pid that cannot exist, rather than a panic.
+		assert_eq!(service_of("0x00400000"), None);
 	}
 }

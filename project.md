@@ -9461,6 +9461,60 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.91 Two faults that were cancelling out
+
+Found in the log of a switch that otherwise worked. netcfgd joined, took a
+lease, and then:
+
+    dhcpcd (pid 2538344) keeps rewriting resolv.conf and is run by a service
+    manager, so netcfgd is not signalling it
+    resolv.conf has been taken back 3 times and netcfgd found nothing it could signal
+
+netcfgd declining to signal a process **it had started itself**, and advising
+the operator to stand it down with `Conflicts=`.
+
+**The first fault** is that `is_service_supervised` asked whether a cgroup
+mentions `.service`. Every process netcfgd spawns inherits netcfgd's cgroup,
+and that is `/system.slice/netcfgd.service` -- so the test answered yes about
+netcfgd's own child. Asking *whose* service rather than *any* service is a
+one-line change of question.
+
+**The second fault was hidden underneath it.** The sweep already skips
+netcfgd's own processes, from pid files under netcfgd's run directory. But:
+
+    /run/dhcpcd/wlp0s20f3-4.pid           <- dhcpcd's, where netcfgd does not look
+    /run/netcfgd/supplicant/wlp0s20f3.pid <- the only pid netcfgd knows
+
+dhcpcd writes its pid file to *its own* run directory, so netcfgd's DHCP client
+has never been in that set, and the sweep has been treating it as a foreign
+writer for as long as the sweep has existed. It cost nothing only because the
+broken supervision check said "leave it alone" -- for the wrong reason.
+
+**Fixing either alone makes netcfgd terminate the client holding the machine's
+lease**, which `resolv_defended.sh`'s own header calls the worst outcome
+available. Two faults, each harmless only while the other stood. Worth
+remembering as a shape: a guard that fires for the wrong reason can be load
+bearing, and the tempting one-line fix is the dangerous one.
+
+### The cgroup answers what a pid file cannot
+
+`in_our_service` identifies netcfgd's own children positively -- including
+dhcpcd's privileged proxy, control proxy and BPF helper, which appear in no pid
+file at all and all inherit the cgroup. `is_service_supervised` now means
+somebody else's service, which is what its name always claimed.
+
+The two guard the same sweep with opposite effects, one skipping and one
+terminating, so a test asserts they can never overlap over every combination.
+Both answer false where netcfgd is not under a service manager, which is why
+`resolv_defended.sh` -- which runs it from a shell under `unshare` -- passes
+unchanged.
+
+**Not fixed here**: dhcpcd's pid file is still somewhere netcfgd does not look.
+The cgroup covers it on any systemd machine and covers the privsep children
+besides; closing the rest belongs wherever netcfgd chooses dhcpcd's run
+directory, and wants its own measurement rather than being smuggled into a bug
+fix. Decision 0198.
+
 ## 10.90 Selecting a network is not joining one
 
     match client.command(&format!("SELECT_NETWORK {id}")) {
@@ -9511,6 +9565,79 @@ Returning `Ok` unconditionally passes "it worked" every time; only the failure
 cases can tell the difference. `wifi_journey.sh` now asserts **joined** rather
 than **joining**, which is a stronger claim than it could make before.
 Decision 0197.
+
+## 10.89 Attaching is a registration
+
+    CTRL_IFACE: Detach monitor that cannot receive messages: /run/wpa_supplicant/netcfgd-2466975-516
+
+`ATTACH` registers a connection inside `wpa_supplicant`, and removing the socket
+underneath it unregisters nothing -- the supplicant finds out on the next event
+it fails to deliver. Harmless once, and it stopped being once in 10.87: a scan
+now attaches and drops, so **every `ncfg wifi scan` left a dead monitor**, at
+serials 482 and 516 of one daemon's life. The cost is delivery, not
+registration: every event walks the monitor list, and each dead entry is a
+failed send first.
+
+`Drop` sends `DETACH` and does not wait. Asking would block up to the
+connection's ten-second timeout against a supplicant that has stopped
+answering, on the one code path whose whole job is to let go -- and 0111 is the
+record of what a blocking wait on this socket costs. Cleanup that can be missed
+beats cleanup that can block.
+
+The roam watcher attaches too and needs none of this: it holds its connection
+for the daemon's life. The difference is lifetime, which is why the fix is in
+`Drop` and not at the call site that currently needs it. `ATTACH` minus
+`DETACH` must be exactly one -- the watcher's. Decision 0196.
+
+## 10.88 A switch that cannot fail is not a switch
+
+Reported as "switching is still completely broken", and reproduced twice on the
+machine. Both switches were announced as successful.
+
+**To netcfgd**: the success line at 20:33:08, the lease at 20:33:20. Twelve
+seconds during which the sentence was false.
+
+**To NetworkManager**: the success line at 20:38:07, and **no default route
+until 20:51:08 -- thirteen minutes**, ended not by NetworkManager recovering but
+by a person running `nmtui`:
+
+    20:50:57  agent-manager: agent[...,/nmtui/0]: agent registered
+    20:51:08  device (wlp0s20f3): Activation: successful, device activated.
+
+NM had tried once, at 20:38:10, and stopped: *"access point 'OpenPC.se' has
+security, but secrets are required"*, then *"no secrets: No agents were
+available for this request"*. The profile carries `psk-flags=1` -- the
+passphrase is agent-owned rather than stored -- so NM must ask a secret agent,
+and outside a desktop session there is none.
+
+**None of that is netcfgd's doing.** What is netcfgd's doing is that the program
+which had just rearranged this machine's networking said it had succeeded, exited
+0, and left nothing anywhere saying the machine was off the network.
+
+### Why nothing could report it
+
+`run()` is `"$@" >/dev/null 2>&1 || true` -- every systemctl's output discarded
+and failure ignored. Mostly right: masking a unit that does not exist and
+killing a pid that has gone are ordinary here. But it means no individual step
+can report anything, so **the outcome check is the only place truth can come
+from**, and there wasn't one.
+
+### A default route, and nothing else
+
+It is what was missing in both measurements and what every manager in `unit_of`
+exists to install. A global address is explicitly *not* the test: `docker0` has
+one, so "some interface has a global address" is true on a laptop with no
+network at all, and a check that passes while the machine is offline is worse
+than none.
+
+Bounded wait, default 30s, then the truth either way -- with the primary unit's
+state, a `journalctl` pointer, and exit 1. This does not contradict 0190's
+refusal to start `<manager>-wait-online.service`: that unit gates
+`network-online.target` for the next boot and has no deadline of its own.
+
+Six checks in `select.sh`, in a namespace that has no default route until one is
+added through `lo`. Both directions, because a confirmation that cannot pass is
+as useless as one that cannot fail. Decision 0195.
 
 ## 10.87 A scan is not a round trip
 
