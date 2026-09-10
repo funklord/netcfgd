@@ -412,14 +412,34 @@ fn eap_settings(
 			"ca_cert",
 			quote(&path.display().to_string()),
 		));
-	} else {
-		// No CA certificate means the supplicant will accept any server that
-		// speaks the protocol, which is the whole attack. Refusing outright
-		// would break real deployments that pin nothing, so this is left to
-		// the compile stage to warn about -- but it is noted here so the next
-		// reader does not conclude it was never considered.
-		out.push(Setting::plain("ca_cert", "\"\""));
 	}
+	// **No `ca_cert` line at all where nothing is pinned, and this was the
+	// wifi fault the whole project was opened for.**
+	//
+	// This used to send `ca_cert=""`. wpa_supplicant reads that as a
+	// *filename* -- every one of these is a path it opens -- so it tried to
+	// open a file whose name is the empty string, OpenSSL refused, and PEAP
+	// never got as far as an inner method. Measured on the reporting machine's
+	// corporate network, which pins nothing:
+	//
+	//     OpenSSL: tls_connection_ca_cert - Failed to load root certificates
+	//              error:80000002:system library::No such file or directory
+	//     TLS: Failed to set TLS connection parameters
+	//     EAP-PEAP: Failed to initialize SSL.
+	//     EAP: Failed to initialize EAP method: vendor 0 method 25 (PEAP)
+	//     CTRL-EVENT-SSID-TEMP-DISABLED ... auth_failures=45 reason=CONN_FAILED
+	//
+	// NetworkManager joined the same network on the same laptop minutes later.
+	// The difference was this line: it writes no `ca_cert` when nothing is
+	// pinned, and an omitted `ca_cert` is what "verify nothing" is spelled as.
+	//
+	// **The security argument the old comment made is unchanged and is not
+	// this line's to make.** A network with no pinned CA does accept any
+	// server that answers, which is how the credential is taken -- and the
+	// compile stage warns about exactly that, by name, on every apply. What it
+	// must not do is emit a setting that stops the network working at all,
+	// because a feature that cannot connect teaches an operator to use
+	// something else rather than to pin a certificate. Decision 0189.
 	if let Some(client_cert) = &eap.client_cert {
 		let path = resolver.path_for(client_cert, "client.pem")?;
 		out.push(Setting::plain(

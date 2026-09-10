@@ -533,6 +533,93 @@ fn an_eap_method_missing_its_credential_says_which() {
 	);
 }
 
+/// **A network that pins no CA gets no `ca_cert` line, and this is the fault
+/// the project was opened for.**
+///
+/// `wpa_supplicant` opens every one of these as a file, so `ca_cert=""` is a
+/// filename of zero length -- OpenSSL refuses it and PEAP never reaches an
+/// inner method. Measured on the reporting machine's corporate network,
+/// which pins nothing:
+///
+///     OpenSSL: tls_connection_ca_cert - Failed to load root certificates
+///     EAP-PEAP: Failed to initialize SSL.
+///     CTRL-EVENT-SSID-TEMP-DISABLED ... auth_failures=45 reason=CONN_FAILED
+///
+/// `NetworkManager` joined the same network on the same laptop minutes later,
+/// writing no `ca_cert` at all. An omitted setting is how "verify nothing" is
+/// spelled. Decision 0189.
+#[test]
+fn a_network_that_pins_no_ca_certificate_sends_no_ca_cert_at_all() {
+	let dir = scratch("ca-cert");
+	write_secret(&dir, "password", "corporate");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+	let eap = Security::Eap(EapConfig {
+		method: EapMethod::Peap,
+		identity: "someone@example.com".to_owned(),
+		anonymous_identity: None,
+		password: Some(SecretRef {
+			provider: SecretProvider::File,
+			name: "password".to_owned(),
+		}),
+		ca_cert: None,
+		client_cert: None,
+		private_key: None,
+		phase2: None,
+	});
+
+	let rendered = settings(&network("corp", eap), MacPolicy::Permanent, &resolver)
+		.expect("a network with a password and no pinned CA is renderable");
+	let keys: Vec<&str> = rendered
+		.iter()
+		.map(|setting| setting.variable.as_str())
+		.collect();
+
+	assert!(
+		!keys.contains(&"ca_cert"),
+		"an empty ca_cert is a filename wpa_supplicant cannot open: {keys:?}"
+	);
+	// The rest of the network still has to be there: a test that passes
+	// because nothing was rendered would be no test.
+	assert!(keys.contains(&"key_mgmt"), "got {keys:?}");
+	assert!(keys.contains(&"eap"), "got {keys:?}");
+	assert!(keys.contains(&"identity"), "got {keys:?}");
+	let _ = fs::remove_dir_all(&dir);
+}
+
+/// And a network that *does* pin one still says so, with the path.
+#[test]
+fn a_network_that_pins_a_ca_certificate_still_names_the_file() {
+	let dir = scratch("ca-cert");
+	write_secret(&dir, "password", "corporate");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+	let eap = Security::Eap(EapConfig {
+		method: EapMethod::Peap,
+		identity: "someone@example.com".to_owned(),
+		anonymous_identity: None,
+		password: Some(SecretRef {
+			provider: SecretProvider::File,
+			name: "password".to_owned(),
+		}),
+		ca_cert: Some(CertSource::Path("/etc/ssl/certs/corporate.pem".to_owned())),
+		client_cert: None,
+		private_key: None,
+		phase2: None,
+	});
+
+	let rendered = settings(&network("corp", eap), MacPolicy::Permanent, &resolver)
+		.expect("a pinned CA is renderable");
+	let pinned = rendered
+		.iter()
+		.find(|setting| setting.variable == "ca_cert")
+		.expect("the pinned certificate is sent");
+	assert!(
+		pinned.value.contains("/etc/ssl/certs/corporate.pem"),
+		"got {}",
+		pinned.value
+	);
+	let _ = fs::remove_dir_all(&dir);
+}
+
 /// The `mac_addr` mapping, which is the whole of the MAC randomization
 /// feature at this layer. The numbers are not guessable from the names, and
 /// getting one wrong is a privacy setting that silently does something else.

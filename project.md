@@ -9461,6 +9461,64 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.82 The wifi fault the project was opened for: `ca_cert=""`
+
+> It was not able to switch...
+
+The laptop moved to the corporate network and netcfgd could not join it. The
+supplicant said why, forty-five times:
+
+    OpenSSL: tls_connection_ca_cert - Failed to load root certificates
+             error:80000002:system library::No such file or directory
+    TLS: Failed to set TLS connection parameters
+    EAP-PEAP: Failed to initialize SSL.
+    CTRL-EVENT-SSID-TEMP-DISABLED ssid="EMP-XYLEM" auth_failures=45
+
+netcfgd was stopped, NetworkManager started, and it joined the same network on
+the same laptop a minute later with `EAP-MSCHAPV2: Authentication succeeded`.
+
+**The line is `out.push(Setting::plain("ca_cert", "\"\""))`**, taken when a
+network pins no CA. Every value in that block is a *path* -- the code says so
+two lines above about the branch that does have a certificate -- so this asks
+wpa_supplicant to open a file whose name is the empty string. OpenSSL refuses,
+the TLS context is never built, and PEAP fails before proposing an inner
+method. **The network could never have authenticated.** NetworkManager writes
+no such line, which is the whole difference.
+
+The old comment's security argument was right and is untouched: a network with
+no pinned CA accepts any server that answers, and the compile stage warns
+about that by name on every apply. What it got wrong was making a security
+argument for emitting a *broken* setting. A feature that cannot connect does
+not teach an operator to pin a certificate; it teaches them to use something
+else.
+
+### Why nothing caught it
+
+`enterprise.sh` and every EAP unit test supply a `ca_cert`, because a test
+that pins a certificate is what somebody writes when the feature is about
+certificates. **The default case -- the corporate network that pins nothing,
+which is most of them -- was the untested one.** The oldest lesson in this
+document, in a new place: the fixture modelled the careful configuration and
+the machine ran the ordinary one.
+
+### And the upgrade/downgrade audit it arrived during
+
+The finding is next door. `read_owned` treats an unreadable ownership record
+as empty -- right, since refusing to start over a disposable `/run` file would
+turn it into an outage -- and said nothing. That record is what tells netcfgd
+which addresses and routes are its own to remove, so forgetting it silently
+means an address netcfgd configured reads as somebody else's from then on. A
+downgrade is exactly how a machine gets one.
+
+Measured both ways: unknown fields from a future version parse and are
+ignored, which is serde's default and the right one; a file that is not JSON
+at all is discarded, the daemon starts, the machine stays configured, and the
+next apply writes a good record. Now it says so as well.
+
+**Version skew is otherwise unguarded**, recorded rather than fixed: `Hello`
+carries a protocol and a schema version, both ends send them, nothing compares
+them. What saves it is that `ncfg` and `netcfgd` ship in one package.
+
 ## 10.81 And shutdown and restart, where the checks turned out to be half-run
 
 The shutdown story was already right and nothing had asserted it. netcfgd has

@@ -592,10 +592,32 @@ fn remember(list: &mut Vec<String>, interface: &str, ours: bool) {
 /// and disposable by design (constraint 1), and the worst case of treating it
 /// as empty is that netcfgd under-claims ownership, which is the safe
 /// direction.
+/// **Absent and unreadable are treated the same and reported differently.**
+/// Falling back to empty is right in both cases -- but a file that is there
+/// and will not parse is a record netcfgd is *forgetting*, and what it forgets
+/// is which addresses and routes are its own to remove. That is a downgrade's
+/// most likely shape: an older netcfgd meeting state a newer one wrote. It
+/// carries on, because refusing to start would turn a disposable file into an
+/// outage, and it says so, because "netcfgd stopped claiming an address it had
+/// configured" is not something to work out from behaviour. Decision 0189.
 #[must_use]
 pub fn read_owned(run_dir: &Path) -> OwnedState {
 	let path = run_dir.join("owned.json");
-	let owned: OwnedState = fs::read_to_string(path)
+	let text = fs::read_to_string(&path);
+	if let Ok(body) = &text {
+		if serde_json::from_str::<OwnedState>(body).is_err() {
+			netcfgd_sys::log_warning!(
+				"state",
+				"{} is there and does not parse, so netcfgd is starting with no record \
+				 of what it owns: an address or route it configured earlier will read as \
+				 somebody else's and be left alone. Written by a newer netcfgd, most \
+				 likely. Removing the file makes this quiet; the record rebuilds on the \
+				 next apply",
+				path.display()
+			);
+		}
+	}
+	let owned: OwnedState = text
 		.ok()
 		.and_then(|text| serde_json::from_str(&text).ok())
 		.unwrap_or_default();
@@ -973,6 +995,35 @@ mod tests {
 	/// implementation *must* interleave; with the lock the wait is inside the
 	/// critical section, so the second updater reads what the first wrote.
 	/// Without it this leaves one name where there should be two, every time.
+	/// **A record that will not parse is discarded, and said out loud.**
+	///
+	/// This is a downgrade's most likely shape: an older netcfgd meeting an
+	/// `owned.json` a newer one wrote. Falling back to empty is right --
+	/// refusing to start would turn a disposable file into an outage -- but
+	/// what netcfgd forgets is which addresses and routes are its own to
+	/// remove, so an address it configured earlier reads as somebody else's
+	/// from then on. Measured before this: the daemon started, stayed
+	/// configured, and said nothing at all. Decision 0189.
+	#[test]
+	fn a_record_that_will_not_parse_is_discarded_rather_than_fatal() {
+		let dir = netcfgd_testdir::TestDir::new("owned-unparseable");
+		fs::write(dir.join("owned.json"), b"this is not json\n").expect("written");
+
+		// The empty default, rather than a panic or a partially filled one.
+		let owned = read_owned(&dir);
+		assert_eq!(read_owned(&dir).addresses.len(), owned.addresses.len());
+		assert!(
+			owned.addresses.is_empty(),
+			"nothing is claimed from nonsense"
+		);
+
+		// And an update over it still works, which is what stops a bad file
+		// being permanent: the next apply writes a good one.
+		update_owned(&dir, |state| state.forwarding.push("eth0".to_owned()))
+			.expect("an update over an unreadable record still writes one");
+		assert_eq!(read_owned(&dir).forwarding, vec!["eth0".to_owned()]);
+	}
+
 	#[test]
 	fn two_updaters_do_not_lose_each_others_records() {
 		let dir = netcfgd_testdir::TestDir::new("state-two-updaters");
