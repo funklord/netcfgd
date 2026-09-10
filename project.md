@@ -9461,6 +9461,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.85 The supplicant was talking and nobody listened
+
+The roaming and reconnect audit, and it found the daemon attached to
+`wpa_supplicant`'s event socket -- correctly, since 0091, with `ATTACH` sent
+exactly once and roam.sh asserting it -- reading **one event out of the
+stream**. `connected_bssid()` answers `None` for anything that is not a
+connect, and `continue` was the whole handling of every event that says a link
+is failing rather than working.
+
+What that cost is on this machine's record. `EMP-XYLEM` with `ca_cert ""`
+(0189) failed PEAP inside OpenSSL before an inner method was proposed, and the
+supplicant said so forty-five times:
+
+    CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="EMP-XYLEM" auth_failures=45 duration=60 reason=CONN_FAILED
+
+Every one arrived on a socket netcfgd was holding open. netcfgd's log for that
+morning does not mention them; what it said was that the interface had no
+carrier -- true, and useless. **A day, for a fault the machine was announcing
+every ten seconds.**
+
+### Four events, at three levels, and the rest still dropped
+
+Temporary disable at warning, re-enable at note, an access point refusing the
+station at warning, a disconnect at note or verbose depending on **who ended
+it** -- forty-three in three days here and nearly all of them this machine
+leaving. Everything else still goes on the floor, DSCP policy included, which
+is most of the stream by volume. Being told everything is the same failure as
+being told nothing.
+
+Terse lines, because the count and the wait climb with each failure: these are
+forty-five *distinct* lines, and a paragraph explaining what a climbing count
+means would have been forty-five paragraphs.
+
+### And `LIST_NETWORKS` was ignored the same way
+
+`NetworkEntry` has parsed the flags since it was written and `is_current()` is
+the only thing that ever read them, so `[TEMP-DISABLED]` was parsed, carried
+and discarded. `STATUS` cannot close that gap -- it describes the one
+association an interface has, so an interface with none reads `SCANNING`
+whether it is scanning hopefully or has abandoned everything it was given.
+
+`ncfg wifi status` lists them now, flags passed through rather than translated,
+with the one sentence that belongs where it is read once: **a temporary disable
+is not a network out of range.** Out of range is absent from a scan, not
+disabled -- the difference between checking a passphrase and walking closer to
+the router.
+
+### The reader underneath
+
+`Event::field()` is not a `split_whitespace().find()`, because `ssid=` is
+quoted and `printf_encode` leaves a space alone. `ssid="Guest Wifi"
+auth_failures=3` splits into a network called `"Guest` with the count lost
+behind it -- both of the things the event is read for, destroyed by the reader.
+A two-word network name is what a router ships with.
+
+Fifteen checks in `tests/live/wifi_trouble.sh`, all green on the first run and
+therefore each made to fail: six on removing the reporting call, three on an
+empty `not_trying`, three on a whitespace-split field reader. Decision 0192.
+
 ## 10.84 A lease as a probe precondition, and why not as a probe
 
 Asked as "another probe method I forgot -- whether or not we have a

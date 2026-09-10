@@ -1565,6 +1565,11 @@ live:
 	@# The other daemon-driven hook: a roam is wpa_supplicant's decision and
 	@# reaches netcfgd on its event socket, so no apply can exercise it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/roam.sh"
+	@# The other half of that event socket, which was read for one event and
+	@# throwing away every one that says a link is failing. Both ends: the
+	@# supplicant's trouble events becoming lines in netcfgd's log, and the
+	@# `LIST_NETWORKS` flags reaching `ncfg wifi status`.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi_trouble.sh"
 	@# And the thing a roam is not: the station moving to a DIFFERENT network,
 	@# where the association netcfgd observes has to follow and the new lease's
 	@# resolver has to replace the old one rather than sit beside it. roam.sh

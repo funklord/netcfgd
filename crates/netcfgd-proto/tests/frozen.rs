@@ -649,6 +649,21 @@ fn every_response_sample() -> Vec<Response> {
 			name: Some("home".to_owned()),
 			bssid: Some("00:11:22:33:44:55".to_owned()),
 			network: Some("home".to_owned()),
+			// Both flags, because they are different situations that share a
+			// substring: one is a network somebody turned off and the other is
+			// one the supplicant gave up on by itself.
+			not_trying: vec![
+				netcfgd_proto::DisabledNetwork {
+					ssid: "6f6666696365".to_owned(),
+					name: Some("office".to_owned()),
+					flags: "[TEMP-DISABLED]".to_owned(),
+				},
+				netcfgd_proto::DisabledNetwork {
+					ssid: "6c6162".to_owned(),
+					name: None,
+					flags: "[DISABLED]".to_owned(),
+				},
+			],
 		})),
 		// A radio that is associated with nothing, which is every one of
 		// this response's optional fields in its absent form. Four
@@ -661,6 +676,7 @@ fn every_response_sample() -> Vec<Response> {
 			name: None,
 			bssid: None,
 			network: None,
+			not_trying: Vec::new(),
 		})),
 		// Empty payloads, deliberately: the tag and the framing are this
 		// witness's business and the contents belong to `observed.json`,

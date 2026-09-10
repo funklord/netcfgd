@@ -1036,6 +1036,36 @@ pub struct WifiState {
 	/// showing this is showing a discrepancy worth reporting, not a gap.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub network: Option<String>,
+	/// The networks the supplicant is not trying, and why it is not.
+	///
+	/// Empty on a healthy radio, which is why it is skipped when empty rather
+	/// than always present: the ordinary answer to "what is this interface
+	/// doing" should not carry a list of nothing.
+	#[serde(skip_serializing_if = "Vec::is_empty", default)]
+	pub not_trying: Vec<DisabledNetwork>,
+}
+
+/// A network the supplicant knows and has stopped trying.
+///
+/// **`LIST_NETWORKS` carried this the whole time and nothing read it.** The
+/// flags were parsed into `NetworkEntry` and only `[CURRENT]` was ever asked
+/// about, so a network the supplicant had given up on was indistinguishable,
+/// through netcfgd, from one it was about to join. Decision 0192.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisabledNetwork {
+	/// Its name as hex, the encoding `WifiState::ssid` uses.
+	pub ssid: String,
+	/// That name as text, where it is valid UTF-8.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub name: Option<String>,
+	/// The supplicant's own flags, such as `[TEMP-DISABLED]`.
+	///
+	/// Passed through rather than translated. `[DISABLED]` and
+	/// `[TEMP-DISABLED]` mean different things -- one is a network somebody
+	/// turned off and the other is one the supplicant gave up on by itself --
+	/// and a future release adding a third would be shown rather than dropped.
+	pub flags: String,
 }
 
 /// Something that happened, for a monitor stream.

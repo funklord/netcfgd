@@ -2215,6 +2215,7 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 				for (interface, client, last) in &mut watching {
 					match client.next_event(std::time::Duration::from_millis(250)) {
 						Ok(Some(event)) => {
+							report_supplicant_event(interface, &event);
 							let Some(bssid) = event.connected_bssid() else {
 								continue;
 							};
@@ -2241,6 +2242,96 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 				watching.retain(|(interface, _, _)| !lost.contains(interface));
 			}
 		});
+}
+
+/// Say, in netcfgd's own log, what the supplicant just said about the link.
+///
+/// **The audit that produced this found the daemon attached to the supplicant's
+/// event stream and reading exactly one event out of it.** `next_event` was
+/// called, `connected_bssid()` was asked, and everything that was not a
+/// connect was dropped on the floor -- which is every event that says a link is
+/// failing rather than working.
+///
+/// What that cost is on the record. On the reporting machine, `EMP-XYLEM` was
+/// configured with `ca_cert ""` (0189), so PEAP failed inside OpenSSL before
+/// any inner method was proposed. The supplicant said so 45 times:
+///
+/// ```text
+/// CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="EMP-XYLEM" auth_failures=45 duration=60 reason=CONN_FAILED
+/// ```
+///
+/// Every one of those arrived on a socket this daemon was holding open, and
+/// netcfgd's log for the morning says nothing whatever about them. The operator
+/// asking "why is the wifi not connecting" was told, by the program whose job
+/// that is, that the interface had no carrier -- true, unhelpful, and the
+/// reason the fault took a day to find rather than a minute.
+///
+/// **Terse on purpose.** The count and the wait climb with each failure, so
+/// these are 45 distinct lines rather than one repeated, and a paragraph
+/// explaining what a climbing count means would be 45 paragraphs. The
+/// explanation is in `ncfg wifi status`, which is read once and asked exactly
+/// when somebody wants it.
+fn report_supplicant_event(interface: &str, event: &netcfgd_supplicant::protocol::Event) {
+	let field = |key: &str| event.field(key).unwrap_or("?").to_owned();
+	match event.name() {
+		// The one that matters. `reason` is the supplicant's own word for what
+		// gave up -- `CONN_FAILED`, `AUTH_FAILED`, `WRONG_KEY` -- and is worth
+		// more than any sentence written here, so it is passed through.
+		"CTRL-EVENT-SSID-TEMP-DISABLED" => netcfgd_sys::log_warning!(
+			"supplicant",
+			"{interface}: not trying `{}` for {}s -- {} failed attempts so far ({})",
+			field("ssid"),
+			field("duration"),
+			field("auth_failures"),
+			field("reason")
+		),
+		// The recovery half, and it is not decoration: without it the log only
+		// ever says things got worse, and a network that came back looks
+		// exactly like one that is still broken.
+		"CTRL-EVENT-SSID-REENABLED" => netcfgd_sys::log_note!(
+			"supplicant",
+			"{interface}: trying `{}` again",
+			field("ssid")
+		),
+		// Refused at the 802.11 layer, before any key or credential is
+		// exchanged. A different fault from the one above and worth its own
+		// line: a station refused here is refused by the access point, not by
+		// anything in netcfgd's configuration.
+		"CTRL-EVENT-AUTH-REJECT" | "CTRL-EVENT-ASSOC-REJECT" => netcfgd_sys::log_warning!(
+			"supplicant",
+			"{interface}: the access point refused this station, status {}",
+			field("status_code")
+		),
+		"CTRL-EVENT-DISCONNECTED" => {
+			// **Who ended it is the whole content of a disconnect.**
+			// `locally_generated=1` is this machine leaving -- netcfgd
+			// selecting another network, a scan, a rekey -- and there are
+			// dozens of them on an ordinary day. The access point dropping the
+			// station is the rarer one and the one somebody would want to know
+			// about, so they get different levels rather than the same line
+			// forty-three times.
+			if event.field("locally_generated") == Some("1") {
+				netcfgd_sys::log_at!(
+					"supplicant",
+					netcfgd_sys::log::Severity::Verbose,
+					"{interface}: left {} (reason {})",
+					field("bssid"),
+					field("reason")
+				);
+			} else {
+				netcfgd_sys::log_note!(
+					"supplicant",
+					"{interface}: dropped by {} (reason {})",
+					field("bssid"),
+					field("reason")
+				);
+			}
+		}
+		// Everything else, including the connect the caller goes on to read,
+		// the scan results, and the DSCP policy traffic that is most of the
+		// stream by volume.
+		_ => {}
+	}
 }
 
 fn spawn_kernel_watcher(commands: &Sender<Command>) {

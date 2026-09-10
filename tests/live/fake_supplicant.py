@@ -62,6 +62,17 @@ NETWORKS = [
 # thing entirely.
 ASSOCIATED = [NETWORKS[0]]
 
+# What `LIST_NETWORKS` reports, as `(id, ssid, flags)`.
+#
+# **Empty by default, which is the answer every other test needs**: with no
+# networks listed netcfgd adds one rather than selecting one it thinks is
+# already there, and exercising the add is what wifi_journey.sh is for. The
+# `DISABLE` command below is how a test that cares says otherwise, so a fake
+# radio can hold a network the supplicant has given up on -- the state no test
+# could produce before, because producing it for real means failing to
+# authenticate against an access point that is not here.
+KNOWN = []
+
 
 def hexify(text):
 	return "".join(f"{byte:02x}" for byte in text.encode())
@@ -121,9 +132,9 @@ def answer(command):
 	if command == "STATUS":
 		return status()
 	if command == "LIST_NETWORKS":
-		# Empty, so netcfgd adds the network rather than selecting one it
-		# thinks is already there. Exercising the add is the point.
-		return "network id / ssid / bssid / flags\n"
+		header = "network id / ssid / bssid / flags"
+		rows = [f"{id}\t{ssid}\tany\t{flags}" for id, ssid, flags in KNOWN]
+		return "\n".join([header, *rows]) + "\n"
 	# The association commands, answered the way a supplicant would. This is
 	# what lets a test assert that a D-Bus `ActivateConnection` became a
 	# `SELECT_NETWORK` on a control socket, rather than only that it returned
@@ -306,6 +317,40 @@ def serve(ctrl_dir, interface, pidfile):
 				    "<3>CTRL-EVENT-CONNECTED - Connection to "
 				    f"{match[0][0]} completed [id=0 id_str=]"
 				)
+				for listener in attached:
+					try:
+						server.sendto(event.encode(), listener)
+					except OSError:
+						pass
+				reply(server, sender, b"OK\n")
+				print(command, flush=True)
+				continue
+			# `DISABLE <ssid> <flags>` and `TROUBLE <event text>` are not
+			# wpa_supplicant commands either, and are here for the same reason
+			# `JOIN` and `ROAM` are: what they stand for needs an access point
+			# that refuses this station, which is not a thing a test can
+			# arrange. `DISABLE` puts a network into `LIST_NETWORKS` carrying
+			# the flags a real supplicant would give it; `TROUBLE` sends one
+			# event, verbatim, to whoever attached.
+			#
+			# Verbatim on purpose. The texts the tests send are copied out of a
+			# real supplicant's journal, so what is being checked is netcfgd's
+			# reading of the real format and not this file's idea of it.
+			elif command.startswith("DISABLE "):
+				# Flags first, name last, because the name is the one that can
+				# contain a space -- and a name with a space in it is exactly
+				# what these tests are here to carry through.
+				parts = command.split(None, 2)
+				if len(parts) != 3:
+					reply(server, sender, b"FAIL\n")
+					print(f"{command} (needs flags and an ssid)", flush=True)
+					continue
+				KNOWN.append((len(KNOWN), parts[2], parts[1]))
+				reply(server, sender, b"OK\n")
+				print(command, flush=True)
+				continue
+			elif command.startswith("TROUBLE "):
+				event = "<3>" + command.split(None, 1)[1]
 				for listener in attached:
 					try:
 						server.sendto(event.encode(), listener)

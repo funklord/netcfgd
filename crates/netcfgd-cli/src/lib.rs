@@ -1431,6 +1431,33 @@ fn render_wifi_status(state: &netcfgd_proto::WifiState, json: bool) -> Result<()
 		),
 		None => {}
 	}
+	// The half `wpa_state` cannot say. An interface with nothing to show above
+	// reads `SCANNING` whether it is looking hopefully or has given up on
+	// everything it was given, and this is the difference. Decision 0192.
+	if !state.not_trying.is_empty() {
+		println!("    not being tried:");
+		for network in &state.not_trying {
+			let name = access_point_name(network.name.as_deref(), &network.ssid);
+			println!("        {name} {}", network.flags);
+		}
+	}
+	// Said once, here, rather than on each of the log lines that got the
+	// operator to this command: a temporary disable is the supplicant giving
+	// up after repeated failures, and what it means is that the credentials or
+	// the settings are wrong rather than that the network is far away. A
+	// network merely out of range is never disabled -- it is simply not found.
+	if state
+		.not_trying
+		.iter()
+		.any(|network| network.flags.contains("TEMP-DISABLED"))
+	{
+		println!(
+			"    a temporary disable is the supplicant giving up after repeated failures \
+			 and waiting before it tries again. It is not a network out of range -- that \
+			 one is absent from a scan, not disabled. `journalctl -u netcfgd | grep \
+			 supplicant` has the count and the reason."
+		);
+	}
 	Ok(())
 }
 

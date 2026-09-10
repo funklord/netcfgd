@@ -122,6 +122,42 @@ impl Event {
 				.all(|pair| pair.len() == 2 && pair.chars().all(|c| c.is_ascii_hexdigit()));
 		looks_right.then_some(bssid)
 	}
+
+	/// A `key=value` field of the event text, with any quotes taken off.
+	///
+	/// Most of the events worth reading are shaped this way and the shape is
+	/// the supplicant's own, from its own format strings:
+	///
+	/// ```text
+	/// CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="OpenPC.se" auth_failures=1 duration=10 reason=CONN_FAILED
+	/// CTRL-EVENT-DISCONNECTED bssid=a0:a4:7f:23:9a:cf reason=3 locally_generated=1
+	/// ```
+	///
+	/// **The value is not always whitespace-delimited**, which is why this is
+	/// not a `split_whitespace().find()`. `ssid=` is quoted, and an SSID is
+	/// escaped by `printf_encode` -- which leaves a space alone, a space being
+	/// printable ASCII. So `ssid="Guest Wifi" auth_failures=3` splits into two
+	/// fields on whitespace and the network is reported as `"Guest`, with the
+	/// failure count lost behind it. Names with spaces in them are not exotic;
+	/// they are what a router ships with. A quoted value therefore runs to the
+	/// closing quote and an unquoted one to the next space.
+	///
+	/// The key is matched at a field boundary, so asking for `reason` does not
+	/// answer with `locally_generated`'s value on some future event that spells
+	/// a key ending in it.
+	#[must_use]
+	pub fn field(&self, key: &str) -> Option<&str> {
+		self.text
+			.match_indices(key)
+			.filter(|(at, _)| *at == 0 || self.text[..*at].ends_with(' '))
+			.find_map(|(at, _)| {
+				let value = self.text[at + key.len()..].strip_prefix('=')?;
+				Some(match value.strip_prefix('"') {
+					Some(quoted) => quoted.split('"').next().unwrap_or(quoted),
+					None => value.split(' ').next().unwrap_or(value),
+				})
+			})
+	}
 }
 
 /// Decode `wpa_supplicant`'s escaping of a text field.

@@ -552,7 +552,42 @@ pub(crate) fn status(document: Option<&Document>, interface: &str) -> Response {
 				configured_for(document, ssid, status_field(&status, "bssid").unwrap_or(""))
 			})
 			.map(|network| network.id.clone()),
+		not_trying: not_trying(&client),
 	}))
+}
+
+/// The networks the supplicant has and is not trying.
+///
+/// **`STATUS` cannot answer this and never could.** It describes the one
+/// association the interface has, so an interface with none reads `SCANNING`
+/// whether the supplicant is scanning hopefully or has given up on every
+/// network it was given -- and those are the same three lines of output for
+/// two opposite situations. `LIST_NETWORKS` is where the difference lives, in
+/// flags this tree has parsed since the beginning and never read past
+/// `[CURRENT]`.
+///
+/// One test covers both flags because `[TEMP-DISABLED]` contains `DISABLED`:
+/// deliberate, and the reason the flags are passed through rather than
+/// translated, since the caller needs to tell "somebody turned this off" from
+/// "the supplicant gave up on this".
+///
+/// A failure here is not a failure of the status. The interface's state is the
+/// answer to the question that was asked and this is context on top of it, so
+/// a supplicant that answers `STATUS` and not `LIST_NETWORKS` reports what it
+/// did answer rather than nothing at all.
+fn not_trying(client: &Client) -> Vec<netcfgd_proto::DisabledNetwork> {
+	let Ok(body) = client.ask("LIST_NETWORKS") else {
+		return Vec::new();
+	};
+	parse_network_list(&body)
+		.into_iter()
+		.filter(|entry| entry.flags.contains("DISABLED"))
+		.map(|entry| netcfgd_proto::DisabledNetwork {
+			ssid: entry.ssid.to_hex(),
+			name: name_of(&entry.ssid),
+			flags: entry.flags,
+		})
+		.collect()
 }
 
 /// Join a network the configuration already describes.

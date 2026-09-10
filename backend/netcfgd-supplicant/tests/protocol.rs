@@ -1228,3 +1228,65 @@ fn two_networks_with_different_cas_do_not_share_one_file() {
 		read(&uni)
 	);
 }
+
+/// The `key=value` fields of a supplicant event, on the real texts.
+///
+/// All four samples are copied out of this machine's journal rather than
+/// invented, because the fields are the supplicant's own format strings and a
+/// test written from the documentation would be testing the documentation.
+#[test]
+fn an_event_gives_up_its_fields() {
+	let temp_disabled = netcfgd_supplicant::protocol::Event::parse(
+		"<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid=\"OpenPC.se\" auth_failures=2 \
+		 duration=20 reason=CONN_FAILED",
+	)
+	.expect("an event");
+	assert_eq!(temp_disabled.field("ssid"), Some("OpenPC.se"));
+	assert_eq!(temp_disabled.field("auth_failures"), Some("2"));
+	assert_eq!(temp_disabled.field("duration"), Some("20"));
+	assert_eq!(temp_disabled.field("reason"), Some("CONN_FAILED"));
+	assert_eq!(temp_disabled.field("bssid"), None);
+
+	let disconnected = netcfgd_supplicant::protocol::Event::parse(
+		"<3>CTRL-EVENT-DISCONNECTED bssid=a0:a4:7f:23:9a:cf reason=3 locally_generated=1",
+	)
+	.expect("an event");
+	assert_eq!(disconnected.field("bssid"), Some("a0:a4:7f:23:9a:cf"));
+	assert_eq!(disconnected.field("locally_generated"), Some("1"));
+
+	// `reason` is a suffix of `locally_generated`'s neighbours in no event
+	// today, but `id` is a suffix of `bssid` in this one -- and a reader that
+	// did not require a field boundary answers `id` with the tail of the
+	// address. The boundary is what makes the short keys usable at all.
+	assert_eq!(disconnected.field("reason"), Some("3"));
+	assert_eq!(disconnected.field("id"), None);
+
+	let rejected = netcfgd_supplicant::protocol::Event::parse(
+		"<3>CTRL-EVENT-AUTH-REJECT f0:9f:c2:7e:bd:7d auth_type=3 auth_transaction=2 \
+		 status_code=1",
+	)
+	.expect("an event");
+	assert_eq!(rejected.field("status_code"), Some("1"));
+
+	// A field with no `=` after it is not a field. The address above is
+	// positional, and answering `f0:9f:c2:7e:bd:7d` to a question about a key
+	// that is not there would be worse than answering nothing.
+	assert_eq!(rejected.field("bssid"), None);
+}
+
+/// A network whose name has a space in it, which is what a router ships with.
+///
+/// The whitespace-split reader this replaced reported the network as `"Guest`
+/// and lost the failure count behind it -- the two things the event is read
+/// for. `printf_encode` escapes bytes outside printable ASCII and leaves a
+/// space alone, so the quotes are the only delimiter there is.
+#[test]
+fn a_quoted_name_runs_to_its_closing_quote() {
+	let event = netcfgd_supplicant::protocol::Event::parse(
+		"<3>CTRL-EVENT-SSID-TEMP-DISABLED id=1 ssid=\"Guest Wifi\" auth_failures=45 \
+		 duration=60 reason=CONN_FAILED",
+	)
+	.expect("an event");
+	assert_eq!(event.field("ssid"), Some("Guest Wifi"));
+	assert_eq!(event.field("auth_failures"), Some("45"));
+}
