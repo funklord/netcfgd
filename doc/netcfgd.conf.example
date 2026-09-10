@@ -334,6 +334,57 @@
 # That is a statement about networks, so it is made on the network: see
 # `metric` under WIRELESS NETWORKS below.
 #
+# LINK DETECTION, because carrier is not connectivity. A cable plugged into a
+# switch that has lost its own uplink has carrier and no path, and netcfgd used
+# to keep preferring it. A probe runs a program on an interval and takes its
+# exit status: zero means this link carries traffic. A link that fails
+# `down_after` times in a row has its routes withheld exactly as an unplugged
+# one does, so the wifi that works stops sitting behind the cable that does not.
+#
+# `/usr/share/netcfgd/probe/default` is shipped and is an example: it pings two
+# public resolvers and the addresses in it are yours to change. Read it before
+# using it -- it says why a ping is not enough on a cellular link, and what to
+# ask instead.
+
+#interface eth0 {
+#	config = "dhcp"
+#	probe {
+#		command    = "/usr/share/netcfgd/probe/default"
+#		args       = ["eth0"]
+#		interval   = 30
+#		timeout    = 5
+#		down_after = 3
+#		up_after   = 2
+#		hold_down  = 60
+#	}
+#}
+
+# `down_after` is larger than `up_after` on purpose: one lost packet is not an
+# outage, and symmetric counts make a marginal link oscillate at whatever
+# `interval` sets. `hold_down` is the dwell -- the earliest a verdict may
+# change again -- for a link that flaps faster than the counts can settle.
+#
+# `require_lease` is on unless you turn it off, and applies only to an
+# interface whose `config` asks for DHCP. Such an interface with no lease has
+# nothing the probe could succeed over, so netcfgd answers "down" from the
+# route table -- a DHCP client stamps `RTPROT_DHCP` on what it installs,
+# whichever client it is -- and does not spawn the program at all. Turn it off
+# where your client installs routes netcfgd cannot recognise, or none:
+# requiring a lease there would hold a working link down for ever.
+#
+# It is a precondition and not a verdict. A lease means a DHCP server
+# answered, which one on a network with a dead uplink does happily -- which is
+# the case the probe itself exists for.
+
+#interface wwan0 {
+#	config = "dhcp"
+#	probe {
+#		command       = "/usr/share/netcfgd/probe/default"
+#		args          = ["wwan0"]
+#		require_lease = false
+#	}
+#}
+
 # PER-INTERFACE DNS, which beats the global block for names in its domains.
 
 #global {

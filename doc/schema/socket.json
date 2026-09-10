@@ -38,7 +38,7 @@
 {"request":"wifi_forget","id":"home"}
 {"request":"config_list"}
 {"request":"ap_stations","interface":"wlan0"}
-{"response":"hello","protocol":{"major":1,"minor":2},"schema":{"major":1,"minor":0},"tiers":["observe","admin"]}
+{"response":"hello","protocol":{"major":1,"minor":2},"schema":{"major":1,"minor":1},"tiers":["observe","admin"]}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"enterprise":false,"ssid":"686f6d65","name":"home","mobility_domain":"a1b2","configured":"home"},{"bssid":"00:11:22:33:44:66","frequency":5180,"signal":-58,"secured":false,"enterprise":false,"ssid":"","name":""},{"bssid":"00:11:22:33:44:77","frequency":2437,"signal":-71,"secured":true,"enterprise":true,"ssid":"ff00ff"}]}
 {"response":"radios","radios":[{"interface":"wlan0","activated":true,"supplicant":true},{"interface":"wlan1","activated":false,"supplicant":true}]}
@@ -46,7 +46,7 @@
 {"response":"wifi_status","interface":"wlan0","state":"SCANNING"}
 {"response":"status","links":[],"addresses":[],"routes":[],"backends":[],"dns":[],"rules":[],"bridge_vlans":[],"delegations":[],"reports":[],"qdisc_applied":[],"ingress_applied":[],"privacy_applied":[],"backend_restarts":[],"accept_ra_applied":[],"forwarding_applied":[],"nat":[],"nat_conflicts":[],"hook_state":[],"address_proto_supported":false}
 {"response":"plan","actions":[],"warnings":[],"refusals":[],"stranded":[]}
-{"response":"document","schema_version":{"major":1,"minor":0},"globals":{"dns":{"mode":"none","servers":[],"search":[],"domains":[],"options":[]},"on_drift_default":"reconcile","confirm_default":null,"networking":"on","hostname_policy":"none","control":{"observe":"root","wifi":"root","admin":"root"},"remote":{"observe":false,"wifi":false,"admin":false,"agent":"root"}},"devices":[],"interfaces":[],"networks":[],"rules":[],"access_points":[]}
+{"response":"document","schema_version":{"major":1,"minor":1},"globals":{"dns":{"mode":"none","servers":[],"search":[],"domains":[],"options":[]},"on_drift_default":"reconcile","confirm_default":null,"networking":"on","hostname_policy":"none","control":{"observe":"root","wifi":"root","admin":"root"},"remote":{"observe":false,"wifi":false,"admin":false,"agent":"root"}},"devices":[],"interfaces":[],"networks":[],"rules":[],"access_points":[]}
 {"response":"journal","records":[{"id":1,"op":"addr.add","interface":"eth0","reason":{"interface":"eth0","field":"addressing[0]","desired":"192.0.2.1/24","observed":"<absent>"},"outcome":"done"}]}
 {"response":"event","event":"confirm_armed","seconds":90}
 {"response":"ap_stations","interface":"wlan0","access_point":"home","access_control":"deny","stations":[{"address":"00:11:22:33:44:55","authorized":true,"listed":true,"signal":-52,"connected_seconds":184,"inactive_msec":120,"rx_bytes":4096,"tx_bytes":8192}]}

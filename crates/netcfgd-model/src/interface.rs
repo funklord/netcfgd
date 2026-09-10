@@ -838,6 +838,26 @@ pub struct Guard {
 ///
 /// A path with a timeout and never inline shell, the shape `HookRef` already
 /// has -- section 2.2's argument that a document able to carry shell is remote
+/// `true`, for a field whose default is on.
+///
+/// A function rather than `Default::default()` because `bool`'s default is
+/// `false` and this one is the other way round -- and a field that silently
+/// defaults to the wrong value is how a precondition becomes optional in name
+/// only.
+fn yes() -> bool {
+	true
+}
+
+/// Whether a `bool` is at its default, for `skip_serializing_if`.
+///
+/// Keeps the serialised document byte-identical for every configuration that
+/// does not set this, which is what stops one added field re-blessing every
+/// frozen witness in the tree.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_yes(value: &bool) -> bool {
+	*value
+}
+
 /// code execution with extra steps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -862,6 +882,25 @@ pub struct ProbePolicy {
 	/// parses as the head of a hook body, which is a grammar collision rather
 	/// than a naming preference.
 	pub down_after: u32,
+	/// Whether a lease is a precondition for running the command.
+	///
+	/// **Only where the interface asked for DHCP**, and default on. An
+	/// interface configured for DHCP that has no lease has nothing a
+	/// reachability probe could succeed over: the probe can only fail, and it
+	/// costs a process every interval to find that out. With this, netcfgd
+	/// answers from the observation it already has -- a route carrying
+	/// `RTPROT_DHCP` -- and spawns nothing.
+	///
+	/// **It is not a substitute for the probe.** A lease says a DHCP server
+	/// answered, which a local server on a network with a dead uplink does
+	/// happily; that is the exact case 0119 built the reachability probe for.
+	/// This is a precondition, not a verdict.
+	///
+	/// Off is for the operator whose DHCP client netcfgd cannot see -- one
+	/// installing routes with a proto of its own, or none -- where requiring a
+	/// lease would hold a working link down. Decision 0191.
+	#[serde(default = "yes", skip_serializing_if = "is_yes")]
+	pub require_lease: bool,
 	/// Consecutive successes before they come back.
 	///
 	/// Smaller than `down_after`, because returning is cheaper to get wrong

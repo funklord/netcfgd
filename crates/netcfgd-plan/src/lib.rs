@@ -343,12 +343,13 @@ fn warn_blocked_radios(builder: &mut Builder, desired: &Document, observed: &Obs
 /// minutes to reach the limit, which is the right shape. Decision 0079.
 const RESTART_LIMIT: u32 = 5;
 
-/// `RTPROT_DHCP`: the route protocol a DHCP client stamps on what it installs.
+/// `RTPROT_DHCP`, from the model, which is where the probe precondition reads
+/// it too (0191).
 ///
 /// Matched rather than taking any default route, because netcfgd installs
 /// default routes of its own from the document and restarting a DHCP client
 /// over one of those would be acting on something the client never put there.
-const DHCP_ROUTE_PROTO: u8 = 16;
+use netcfgd_model::observed::DHCP_ROUTE_PROTO;
 
 /// The hook phases this build actually runs.
 ///

@@ -678,6 +678,38 @@ pub struct ObservedRule {
 	pub ownership: Ownership,
 }
 
+/// `RTPROT_DHCP`: the route protocol a DHCP client stamps on what it installs.
+///
+/// **The kernel is what normalises the clients.** dhcpcd keeps leases in
+/// `/var/lib/dhcpcd`, dhclient in `dhclient.leases`, udhcpc keeps none at all
+/// -- but whichever installed the route, the kernel records this on it. So
+/// "has this interface got a lease" is one question with one answer, and
+/// netcfgd needs to know nothing about which client is running.
+pub const DHCP_ROUTE_PROTO: u8 = 16;
+
+impl Observed {
+	/// Whether a DHCP client has installed a route on `interface`.
+	///
+	/// **The route and not the address.** `IFA_PROTO` -- the same stamp on an
+	/// address -- arrived in Linux 5.18 and is absent on plenty of running
+	/// kernels: measured on the reporting machine, a DHCP address came back
+	/// with `proto: None` while its route said `proto: 16`. `RTPROT_DHCP` is
+	/// old enough to rely on.
+	///
+	/// This is a *lease*, which is a weaker claim than connectivity and is not
+	/// a substitute for it: a local DHCP server hands out leases happily on a
+	/// network whose uplink is dead, which is the case the reachability probe
+	/// exists for (0119). What it is good for is the other direction -- an
+	/// interface that asked for DHCP and has no lease has nothing for a probe
+	/// to succeed over. Decision 0191.
+	#[must_use]
+	pub fn has_dhcp_lease(&self, interface: &str) -> bool {
+		self.routes
+			.iter()
+			.any(|route| route.interface == interface && route.proto == Some(DHCP_ROUTE_PROTO))
+	}
+}
+
 /// A route as the kernel reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

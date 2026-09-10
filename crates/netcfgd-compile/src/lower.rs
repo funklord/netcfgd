@@ -2391,6 +2391,9 @@ fn lower_probe(block: &Block, diags: &mut Diagnostics) -> Option<ProbePolicy> {
 	let mut down_after = ProbePolicy::default_down_after();
 	let mut up_after = ProbePolicy::default_up_after();
 	let mut hold_down = 0u32;
+	// On unless the operator says otherwise: an interface that asked for DHCP
+	// and has no lease has nothing a reachability probe could succeed over.
+	let mut require_lease = true;
 
 	for item in &block.items {
 		let Item::Assignment(assignment) = item else {
@@ -2412,6 +2415,12 @@ fn lower_probe(block: &Block, diags: &mut Diagnostics) -> Option<ProbePolicy> {
 				down_after = as_u32(&assignment.value, diags).unwrap_or(down_after);
 			}
 			"up_after" => up_after = as_u32(&assignment.value, diags).unwrap_or(up_after),
+			// Default on, and named for what it requires rather than for what
+			// it switches off: `require_lease = false` reads as a decision,
+			// where `skip_lease_check = true` reads as a workaround. 0191.
+			"require_lease" => {
+				require_lease = as_bool(&assignment.value, diags).unwrap_or(require_lease);
+			}
 			"hold_down" => {
 				hold_down = as_u32(&assignment.value, diags).unwrap_or(hold_down);
 			}
@@ -2453,6 +2462,7 @@ fn lower_probe(block: &Block, diags: &mut Diagnostics) -> Option<ProbePolicy> {
 	}
 
 	Some(ProbePolicy {
+		require_lease,
 		command,
 		args,
 		interval,

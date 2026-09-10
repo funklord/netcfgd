@@ -304,6 +304,17 @@ impl State {
 		})
 	}
 
+	/// Run whatever probes are due, against the observation this state holds.
+	///
+	/// A method because the call needs two of `State`'s fields at once -- the
+	/// tallies mutably, the observation to read -- and doing it at the call
+	/// site put `run`'s line count over the limit for a borrow that is
+	/// disjoint and uninteresting. The observation is there for 0191's lease
+	/// precondition; `Probes::run_due` says why.
+	pub(crate) fn run_due_probes(&mut self) -> bool {
+		self.probes.run_due(self.desired.as_ref(), &self.observed)
+	}
+
 	pub(crate) fn apply(
 		&mut self,
 		options: &PlanOptions,

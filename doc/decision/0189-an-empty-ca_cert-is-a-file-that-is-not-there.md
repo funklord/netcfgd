@@ -114,10 +114,18 @@ reads as somebody else's from then on. A downgrade is exactly how a machine
 gets one: an older netcfgd meeting state a newer one wrote.
 
 It now carries on and says so, naming the file and what is lost. Measured
-either way: unknown fields from a future version parse and are ignored (serde's
-default, and the right one); a file that is not JSON at all is discarded, the
-daemon starts, the machine stays configured, and the next apply writes a good
-record.
+either way: unknown fields from a future version parse and are ignored; a file
+that is not JSON at all is discarded, the daemon starts, the machine stays
+configured, and the next apply writes a good record.
+
+**That leniency is the record's and not the document's**, and the difference
+is deliberate. `owned.json` is netcfgd's own note about what it configured --
+derived, disposable, and rebuilt by the next apply -- so ignoring a field it
+does not know costs nothing. A *document* is the opposite: most of its types
+carry `deny_unknown_fields`, because section 2's rule is that a consumer
+rejects a document containing a field it does not recognise. Silent
+field-dropping there would mean applying a configuration somebody wrote and
+netcfgd only partly understood.
 
 **Version skew is not otherwise guarded**, and that is recorded rather than
 fixed: `Hello` carries a protocol and a schema version, both ends send them,

@@ -277,6 +277,11 @@ fn maximal_interface(name: &str) -> Interface {
 			// Non-zero, so the present form is pinned and not only the
 			// default: `hold_down` is skip_serializing_if too.
 			hold_down: 120,
+			// `false`, for the same reason and it is the harder direction:
+			// `require_lease` is skipped when *on*, which is its default, so
+			// the only way its key appears on the wire at all is a witness
+			// that turns it off. 0191.
+			require_lease: false,
 		}),
 	}
 }

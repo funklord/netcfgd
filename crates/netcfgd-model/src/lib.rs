@@ -104,7 +104,7 @@ pub(crate) fn default_true() -> bool {
 /// Bumping `major` means a consumer of the old version must refuse the
 /// document outright, which is what [`Document::from_json`] does. `minor`
 /// starts counting at the first release.
-pub const SCHEMA_VERSION: Version = Version { major: 1, minor: 0 };
+pub const SCHEMA_VERSION: Version = Version { major: 1, minor: 1 };
 
 /// A `{major, minor}` schema version.
 ///

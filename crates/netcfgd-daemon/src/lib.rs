@@ -292,7 +292,7 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		// program it runs and nothing else -- no re-observation, no plan, no
 		// event. Run before the block below so a verdict that did change goes
 		// round the same path a carrier change does (0119).
-		let probe_changed = state.probes.run_due(state.desired.as_ref());
+		let probe_changed = state.run_due_probes();
 
 		advance_failed_sims(&mut state, probe_changed);
 

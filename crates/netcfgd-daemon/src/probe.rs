@@ -17,6 +17,20 @@ use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Whether the document asks this interface for DHCP.
+///
+/// The precondition hangs on this: a statically addressed interface has no
+/// lease to wait for, and requiring one would take its routes away and never
+/// give them back.
+fn wants_dhcp(interface: &netcfgd_model::Interface) -> bool {
+	interface.addressing.iter().any(|source| {
+		matches!(
+			source,
+			netcfgd_model::AddressSource::Dhcp4(_) | netcfgd_model::AddressSource::Dhcp6(_)
+		)
+	})
+}
+
 /// What one interface's probe has been saying.
 #[derive(Debug, Default)]
 struct Tally {
@@ -188,7 +202,11 @@ impl Probes {
 	/// A changed verdict is what the caller needs, because it is the only
 	/// reason to re-plan: a probe that agrees with itself for an hour should
 	/// cost nothing but the program it runs.
-	pub(crate) fn run_due(&mut self, desired: Option<&Document>) -> bool {
+	/// **`observed` is here for the lease precondition and nothing else.**
+	/// A probe is still an observation of the *link*, made by running the
+	/// operator's program; what the kernel's own state decides is whether
+	/// running it could tell us anything. 0191.
+	pub(crate) fn run_due(&mut self, desired: Option<&Document>, observed: &Observed) -> bool {
 		let Some(document) = desired else {
 			self.tallies.clear();
 			return false;
@@ -227,7 +245,34 @@ impl Probes {
 				.settled_until
 				.is_some_and(|until| Instant::now() < until);
 
-			let outcome = run(policy);
+			// **The precondition, and only where there is a lease to want.**
+			// An interface the document configures statically has none and
+			// never will, so requiring one there would hold a working link
+			// down for ever. Where DHCP *was* asked for and no client has
+			// installed a route, the reachability probe can only fail: this
+			// says so without spawning anything, which is a process per
+			// interval per interface saved on exactly the links that are
+			// already in trouble.
+			let outcome = if policy.require_lease
+				&& wants_dhcp(interface)
+				&& !observed.has_dhcp_lease(&interface.name)
+			{
+				Outcome {
+					ok: false,
+					// Started, because this *is* an answer about the link
+					// rather than a probe that could not be run -- the
+					// blacklist counts the second kind and must not count
+					// this.
+					started: true,
+					detail: Some(
+						"no DHCP lease on this interface, so the probe was not run: \
+						 a client has installed no route here"
+							.to_owned(),
+					),
+				}
+			} else {
+				run(policy)
+			};
 			tally.detail = outcome.detail;
 
 			// **A program that cannot be started says nothing about the
@@ -382,6 +427,179 @@ mod tests {
 	/// Count how many times the verdict changes over six runs of a link that
 	/// alternates on every single run.
 	///
+	/// A document with a DHCP interface and a probe, for the precondition.
+	fn dhcp_document(command: &str, require_lease: bool) -> Document {
+		let mut sources = netcfgd_compile::SourceMap::new();
+		let line = if require_lease {
+			String::new()
+		} else {
+			"\t\trequire_lease = false\n".to_owned()
+		};
+		sources.add(
+			"netcfgd.conf",
+			format!(
+				"interface eth0 {{\n\tconfig = \"dhcp\"\n\tprobe {{\n\
+				 \t\tcommand = \"{command}\"\n\t\tinterval = 1\n\
+				 \t\ttimeout = 5\n\t\tdown_after = 1\n\t\tup_after = 1\n{line}\t}}\n}}\n"
+			),
+		);
+		netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
+			.expect("the test config compiles")
+	}
+
+	/// An observation carrying one route, as a DHCP client would have left it.
+	fn leased(interface: &str, proto: Option<u8>) -> Observed {
+		let mut observed = Observed::default();
+		observed.routes = vec![netcfgd_model::observed::ObservedRoute {
+			interface: interface.to_owned(),
+			destination: "default".to_owned(),
+			via: None,
+			metric: None,
+			table: None,
+			src: None,
+			scope: None,
+			proto,
+			ownership: netcfgd_model::Ownership::Foreign,
+			origin: None,
+		}];
+		observed
+	}
+
+	/// **No lease, no spawn**, and the verdict is still "down".
+	///
+	/// An interface that asked for DHCP and has no lease has nothing a
+	/// reachability probe could succeed over: it can only fail, and finding
+	/// that out costs a process every interval. The command here is one that
+	/// would *succeed* if it ran -- so a verdict of down proves the
+	/// precondition decided it, not the program. Decision 0191.
+	#[test]
+	fn an_interface_with_no_lease_is_down_without_running_the_probe() {
+		let dir = TestDir::new("probe-lease");
+		let marker = dir.join("ran");
+		let command = dir.join("probe.sh");
+		std::fs::write(
+			&command,
+			format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+		)
+		.expect("written");
+		make_executable(&command);
+
+		let document = dhcp_document(&command.display().to_string(), true);
+		let mut probes = Probes::default();
+		probes.run_due(Some(&document), &Observed::default());
+
+		assert!(
+			!marker.exists(),
+			"the probe was spawned for an interface with no lease"
+		);
+		assert_eq!(
+			verdict_of(&probes, "eth0"),
+			Some(false),
+			"no lease is an answer about the link, not an absence of one"
+		);
+	}
+
+	/// **With a lease the program runs**, which is what stops the check above
+	/// passing because nothing ever runs.
+	#[test]
+	fn an_interface_with_a_lease_runs_the_probe() {
+		let dir = TestDir::new("probe-lease");
+		let marker = dir.join("ran");
+		let command = dir.join("probe.sh");
+		std::fs::write(
+			&command,
+			format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+		)
+		.expect("written");
+		make_executable(&command);
+
+		let document = dhcp_document(&command.display().to_string(), true);
+		let mut probes = Probes::default();
+		probes.run_due(Some(&document), &leased("eth0", Some(16)));
+
+		assert!(
+			marker.exists(),
+			"the probe did not run with a lease present"
+		);
+		assert_eq!(verdict_of(&probes, "eth0"), Some(true));
+	}
+
+	/// A route from something that is not a DHCP client is not a lease.
+	///
+	/// netcfgd installs default routes of its own from the document, and
+	/// counting one of those would make the precondition pass on a static
+	/// interface that never had a lease at all.
+	#[test]
+	fn a_route_from_another_source_is_not_a_lease() {
+		let dir = TestDir::new("probe-lease");
+		let marker = dir.join("ran");
+		let command = dir.join("probe.sh");
+		std::fs::write(
+			&command,
+			format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+		)
+		.expect("written");
+		make_executable(&command);
+
+		let document = dhcp_document(&command.display().to_string(), true);
+		let mut probes = Probes::default();
+		// `proto 3` is boot/static, which is what netcfgd's own routes carry.
+		probes.run_due(Some(&document), &leased("eth0", Some(3)));
+
+		assert!(!marker.exists(), "a static route was taken for a lease");
+	}
+
+	/// **And it is optional**, because an operator whose client netcfgd cannot
+	/// see would otherwise have a working link held down for ever.
+	#[test]
+	fn require_lease_false_runs_the_probe_with_no_lease_at_all() {
+		let dir = TestDir::new("probe-lease");
+		let marker = dir.join("ran");
+		let command = dir.join("probe.sh");
+		std::fs::write(
+			&command,
+			format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+		)
+		.expect("written");
+		make_executable(&command);
+
+		let document = dhcp_document(&command.display().to_string(), false);
+		assert!(
+			!document.interfaces[0]
+				.probe
+				.as_ref()
+				.expect("the probe lowered")
+				.require_lease,
+			"`require_lease = false` did not survive the compiler, so this test \
+			 would be measuring the default"
+		);
+		let mut probes = Probes::default();
+		probes.run_due(Some(&document), &Observed::default());
+
+		assert!(
+			marker.exists(),
+			"the probe was skipped despite being told not to"
+		);
+	}
+
+	/// The verdict this module reached.
+	///
+	/// Read from the tally rather than through `apply`, which would mean
+	/// hand-building an `ObservedLink` and its twenty fields for one boolean --
+	/// noise in front of what these tests are about. That `apply` stamps the
+	/// tally onto a link is exercised by the dwell tests below.
+	fn verdict_of(probes: &Probes, interface: &str) -> Option<bool> {
+		probes
+			.tallies
+			.get(interface)
+			.and_then(|tally| tally.verdict)
+	}
+
+	fn make_executable(path: &std::path::Path) {
+		use std::os::unix::fs::PermissionsExt as _;
+		std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+	}
+
 	/// Paced at the real interval rather than driven synthetically, because the
 	/// compiler refuses `interval = 0` and a test that reached around it would
 	/// be exercising a configuration nobody can write.
@@ -394,7 +612,7 @@ mod tests {
 			if run > 0 {
 				std::thread::sleep(Duration::from_millis(1050));
 			}
-			if probes.run_due(Some(&document)) {
+			if probes.run_due(Some(&document), &Observed::default()) {
 				changed += 1;
 			}
 		}
@@ -508,7 +726,7 @@ mod probe_detail_tests {
 
 		let document = document_for(&script.to_string_lossy());
 		let mut probes = Probes::default();
-		probes.run_due(Some(&document));
+		probes.run_due(Some(&document), &Observed::default());
 
 		let mut observed = Observed::default();
 		observed.links.push(link_named("eth0"));
@@ -542,7 +760,7 @@ mod probe_detail_tests {
 		// One short of the limit: still trying, and no verdict has been
 		// reached because nothing ever ran.
 		for _ in 0..(START_FAILURES_BEFORE_BLACKLIST - 1) {
-			probes.run_due(Some(&document));
+			probes.run_due(Some(&document), &Observed::default());
 			std::thread::sleep(Duration::from_millis(1100));
 		}
 		let mut observed = Observed::default();
@@ -564,7 +782,7 @@ mod probe_detail_tests {
 			"and has not given up yet"
 		);
 
-		probes.run_due(Some(&document));
+		probes.run_due(Some(&document), &Observed::default());
 		let mut observed = Observed::default();
 		observed.links.push(link_named("eth0"));
 		probes.apply(&mut observed);

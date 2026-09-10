@@ -9461,6 +9461,61 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.84 A lease as a probe precondition, and why not as a probe
+
+Asked as "another probe method I forgot -- whether or not we have a
+dhcp-lease", with two candidate shapes: a script, or an `ncfg` command to poll.
+Both instincts point at real hazards; neither is the answer.
+
+**A script would have to know which client is running** -- dhcpcd's
+`/var/lib/dhcpcd`, dhclient's `dhclient.leases`, udhcpc's nothing at all. That
+is the client-specific knowledge netcfgd's DHCP code spends its time avoiding,
+and it is unnecessary: **the kernel normalises it.** Whichever client installed
+the route, the kernel stamps `RTPROT_DHCP` on it.
+
+**A polling command would ask netcfgd something it already knows.** The
+observation carries route protocols on every reconcile. (The endless-loop
+worry is right in general -- it is why `ncfg wait-online` has a deadline --
+and does not apply here.)
+
+Measured on the live lease, and it decides which field to read:
+
+    address: 10.78.60.134/22  proto: None
+    route:   default          proto: 16
+
+`IFA_PROTO` on an address needs Linux 5.18+; `RTPROT_DHCP` on a route is old
+enough to rely on.
+
+### A precondition, and never a verdict
+
+A lease is weaker than connectivity, and the probe exists for exactly that gap
+(10.x/0119: a cable in a switch that lost its uplink). A local DHCP server
+hands out leases happily on such a network. What a lease is good for is the
+other direction: an interface that asked for DHCP and has none has **nothing a
+reachability probe could succeed over**, so the program can only fail and
+costs a process every interval to say so. `require_lease` answers from the
+route table and spawns nothing -- counted as a probe that ran and said no,
+never as one that could not start, because that counter is for a typo in
+`command`.
+
+Default on; off is for the operator whose client netcfgd cannot recognise,
+where requiring a lease would hold a working link down for ever. And it
+applies **only where DHCP was asked for**: a static interface has no lease and
+never will, which is the difference between a precondition and a bug.
+
+### The tests are shaped so they cannot pass emptily
+
+Each probe command *would succeed if it ran*, and touches a file to prove
+whether it did. "No lease and the verdict is down" therefore cannot pass by
+the program failing -- only by the precondition deciding. Sabotage turns two
+of the four red.
+
+### And one thing found on the way
+
+`netcfgd.conf.example` calls itself "every feature, with the syntax to use it"
+and **had no `probe` block in it at all** -- a feature with a shipped script
+and no entry in the file an operator reads.
+
 ## 10.83 And boot, where selecting netcfgd left `network-online.target` ungated
 
 `network-online.target` is a promise to whatever is ordered after it -- here
@@ -9571,9 +9626,15 @@ means an address netcfgd configured reads as somebody else's from then on. A
 downgrade is exactly how a machine gets one.
 
 Measured both ways: unknown fields from a future version parse and are
-ignored, which is serde's default and the right one; a file that is not JSON
-at all is discarded, the daemon starts, the machine stays configured, and the
-next apply writes a good record. Now it says so as well.
+ignored; a file that is not JSON at all is discarded, the daemon starts, the
+machine stays configured, and the next apply writes a good record.
+
+**That leniency belongs to the record and not to the document.** `owned.json`
+is netcfgd's own note about what it configured -- derived, disposable, rebuilt
+by the next apply -- so ignoring an unknown field costs nothing. A document is
+the opposite: its types carry `deny_unknown_fields`, because §2 says a
+consumer rejects a document containing a field it does not recognise. The two
+look like one question and are not. Now it says so as well.
 
 **Version skew is otherwise unguarded**, recorded rather than fixed: `Hello`
 carries a protocol and a schema version, both ends send them, nothing compares
