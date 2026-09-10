@@ -9461,55 +9461,28 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
-## 10.88 A switch that cannot fail is not a switch
+## 10.89 Attaching is a registration
 
-Reported as "switching is still completely broken", and reproduced twice on the
-machine. Both switches were announced as successful.
+    CTRL_IFACE: Detach monitor that cannot receive messages: /run/wpa_supplicant/netcfgd-2466975-516
 
-**To netcfgd**: the success line at 20:33:08, the lease at 20:33:20. Twelve
-seconds during which the sentence was false.
+`ATTACH` registers a connection inside `wpa_supplicant`, and removing the socket
+underneath it unregisters nothing -- the supplicant finds out on the next event
+it fails to deliver. Harmless once, and it stopped being once in 10.87: a scan
+now attaches and drops, so **every `ncfg wifi scan` left a dead monitor**, at
+serials 482 and 516 of one daemon's life. The cost is delivery, not
+registration: every event walks the monitor list, and each dead entry is a
+failed send first.
 
-**To NetworkManager**: the success line at 20:38:07, and **no default route
-until 20:51:08 -- thirteen minutes**, ended not by NetworkManager recovering but
-by a person running `nmtui`:
+`Drop` sends `DETACH` and does not wait. Asking would block up to the
+connection's ten-second timeout against a supplicant that has stopped
+answering, on the one code path whose whole job is to let go -- and 0111 is the
+record of what a blocking wait on this socket costs. Cleanup that can be missed
+beats cleanup that can block.
 
-    20:50:57  agent-manager: agent[...,/nmtui/0]: agent registered
-    20:51:08  device (wlp0s20f3): Activation: successful, device activated.
-
-NM had tried once, at 20:38:10, and stopped: *"access point 'OpenPC.se' has
-security, but secrets are required"*, then *"no secrets: No agents were
-available for this request"*. The profile carries `psk-flags=1` -- the
-passphrase is agent-owned rather than stored -- so NM must ask a secret agent,
-and outside a desktop session there is none.
-
-**None of that is netcfgd's doing.** What is netcfgd's doing is that the program
-which had just rearranged this machine's networking said it had succeeded, exited
-0, and left nothing anywhere saying the machine was off the network.
-
-### Why nothing could report it
-
-`run()` is `"$@" >/dev/null 2>&1 || true` -- every systemctl's output discarded
-and failure ignored. Mostly right: masking a unit that does not exist and
-killing a pid that has gone are ordinary here. But it means no individual step
-can report anything, so **the outcome check is the only place truth can come
-from**, and there wasn't one.
-
-### A default route, and nothing else
-
-It is what was missing in both measurements and what every manager in `unit_of`
-exists to install. A global address is explicitly *not* the test: `docker0` has
-one, so "some interface has a global address" is true on a laptop with no
-network at all, and a check that passes while the machine is offline is worse
-than none.
-
-Bounded wait, default 30s, then the truth either way -- with the primary unit's
-state, a `journalctl` pointer, and exit 1. This does not contradict 0190's
-refusal to start `<manager>-wait-online.service`: that unit gates
-`network-online.target` for the next boot and has no deadline of its own.
-
-Six checks in `select.sh`, in a namespace that has no default route until one is
-added through `lo`. Both directions, because a confirmation that cannot pass is
-as useless as one that cannot fail. Decision 0195.
+The roam watcher attaches too and needs none of this: it holds its connection
+for the daemon's life. The difference is lifetime, which is why the fix is in
+`Drop` and not at the call site that currently needs it. `ATTACH` minus
+`DETACH` must be exactly one -- the watcher's. Decision 0196.
 
 ## 10.87 A scan is not a round trip
 

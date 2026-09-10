@@ -15,7 +15,7 @@ use crate::protocol::{is_event, Event, Reply};
 use std::io;
 use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 /// Distinguishes concurrent connections from one process.
@@ -258,6 +258,8 @@ pub struct Client {
 	interface: String,
 	/// How long to wait for a reply on this connection.
 	timeout: Duration,
+	/// Whether `ATTACH` succeeded, so `Drop` knows to undo it.
+	attached: AtomicBool,
 }
 
 impl Client {
@@ -344,6 +346,7 @@ impl Client {
 			local,
 			interface: interface.to_owned(),
 			timeout,
+			attached: AtomicBool::new(false),
 		};
 		client.ping()?;
 		Ok(client)
@@ -411,7 +414,11 @@ impl Client {
 	///
 	/// Returns an error if the supplicant refuses or does not answer.
 	pub fn attach(&self) -> io::Result<()> {
-		self.command("ATTACH")
+		let outcome = self.command("ATTACH");
+		if outcome.is_ok() {
+			self.attached.store(true, Ordering::Relaxed);
+		}
+		outcome
 	}
 
 	/// The next unsolicited event, or `None` if none arrived in time.
@@ -521,6 +528,25 @@ pub fn nothing_is_listening(error: &io::Error) -> bool {
 
 impl Drop for Client {
 	fn drop(&mut self) {
+		// **An attached connection is registered inside `wpa_supplicant`**,
+		// and removing the socket underneath it does not unregister anything.
+		// The supplicant finds out on the next event it tries to deliver, logs
+		//
+		//     CTRL_IFACE: Detach monitor that cannot receive messages: ...
+		//
+		// and drops it then. Harmless once; this connection is now made and
+		// dropped for every `ncfg wifi scan` (0194), so without this each scan
+		// leaves a monitor for the supplicant to trip over, and every event it
+		// emits walks a list of dead ones first.
+		//
+		// **Sent, not asked.** `command("DETACH")` would wait for OK, up to
+		// this connection's timeout -- ten seconds against a supplicant that
+		// has stopped answering, on a code path whose whole job is to let go.
+		// Cleanup that can block is worse than cleanup that can be missed, and
+		// the supplicant's own sweep is the backstop either way.
+		if self.attached.load(Ordering::Relaxed) {
+			let _ = self.socket.send(b"DETACH");
+		}
 		// The bound path is a real file. Leaving it behind fills
 		// `/run/wpa_supplicant` with dead sockets, and the next reader of that
 		// directory cannot tell which are live.

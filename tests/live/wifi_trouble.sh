@@ -85,6 +85,10 @@ check() {
 ip link add wlan0 type dummy 2>/dev/null || skip "cannot make a dummy interface"
 
 cat > "$work/etc/netcfgd.conf" <<'CONF'
+device wlan0 {
+	wifi {
+	}
+}
 interface wlan0 {
 }
 CONF
@@ -276,6 +280,22 @@ check "the failed scan is in netcfgd's own log too" \
 scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
 check "and the scan after it is fresh again" \
 	"$(printf '%s\n' "$scan" | grep -c "previous scan" || true)" 0
+
+# **A scan lets go of the event stream when it is done.** Attaching registers
+# this connection inside wpa_supplicant, and removing the socket underneath it
+# unregisters nothing -- the supplicant finds out on the next event it fails to
+# deliver, logging "Detach monitor that cannot receive messages". Harmless
+# once, and a scan now attaches every time, so those accumulate: the reporting
+# machine's journal carries them at serials 482 and 516 of one daemon's life.
+#
+# The fake records every command it is sent, so the count is readable directly.
+# One ATTACH belongs to the roam watcher and is held for the daemon's life;
+# the scans are the rest, and each must be paired.
+scans=$(grep -c '^SCAN$' "$work/fake.log" || true)
+attaches=$(grep -c '^ATTACH$' "$work/fake.log" || true)
+detaches=$(grep -c '^DETACH$' "$work/fake.log" || true)
+check "every scan's ATTACH is matched by a DETACH" \
+	"$((attaches - detaches))" 1
 
 # ------------------------------------------- and it does not stall the daemon
 #
