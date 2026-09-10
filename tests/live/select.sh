@@ -152,7 +152,13 @@ for target in netcfgd networkmanager none; do
 			waited=$((waited + 1))
 			sleep 0.05
 		done
-		sh "$sel" "$target" > "$work/$target.out" 2>&1 || true
+		# **--no-wait, and it is not a convenience.** Since the switcher
+		# confirms the machine is online before announcing success, and this
+		# namespace has no network by construction (that is the whole point of
+		# -n), every invocation here would otherwise sit out the full deadline
+		# and then correctly report failure. What is under test is which units
+		# the script acts on; the confirmation has its own checks below.
+		sh "$sel" --no-wait "$target" > "$work/$target.out" 2>&1 || true
 		# Which survived, recorded from inside where the pids mean something.
 		#
 		# **`if`, never a trailing `&&`.** Under `set -eu` a false
@@ -335,6 +341,54 @@ check "and signals none as another manager's leftover either" \
 # `none` is postrm's, and a machine that cannot start anything is the outcome
 # 0145 records.
 check "none masks nothing at all" "$(count none 'mask ')" "0"
+
+# --------------------------------------------- does it say whether it worked
+#
+# The switcher used to end by announcing success the moment the last
+# `systemctl start` returned, which is a statement about a unit and not about
+# the network. Measured on the reporting machine: selecting NetworkManager
+# printed "networkmanager is now this machine's network daemon" and the machine
+# then spent **13 minutes with no default route**, until somebody ran nmtui.
+# The manager was running the whole time; it was waiting for a secret agent it
+# could not ask for, and nothing said so.
+#
+# A fresh network namespace is the ideal place to check this, having exactly no
+# default route until one is put there. Both directions, because a confirmation
+# that cannot pass is as useless as one that cannot fail.
+confirm_out=$work/confirm.out
+unshare -rmn sh -c '
+	set -eu
+	work=$1; sel=$2
+	mkdir -p "$work/bin"
+	printf "%s\n" "#!/bin/sh" "exit 0" > "$work/bin/systemctl"
+	chmod +x "$work/bin/systemctl"
+	PATH="$work/bin:$PATH"; export PATH
+
+	# Offline: the namespace has lo, down, and no routes at all.
+	sh "$sel" --wait-online=1 netcfgd > "$work/confirm.offline" 2>&1 && echo "EXIT=0" >> "$work/confirm.offline" || echo "EXIT=$?" >> "$work/confirm.offline"
+
+	# Online: a default route through loopback is a real default route, which
+	# is all this check claims to read.
+	ip link set lo up
+	ip route add default dev lo
+	sh "$sel" --wait-online=1 netcfgd > "$work/confirm.online" 2>&1 && echo "EXIT=0" >> "$work/confirm.online" || echo "EXIT=$?" >> "$work/confirm.online"
+' sh "$work" "$select_sh" > "$confirm_out" 2>&1 || true
+
+check "with no default route it does not claim to have succeeded" \
+	"$(grep -c "is now this machine.s network daemon" "$work/confirm.offline" 2>/dev/null || true)" "0"
+check "it says the network is not up" \
+	"$(grep -c 'the network is not up' "$work/confirm.offline" 2>/dev/null || true)" "1"
+check "and it fails, so a script calling it can tell" \
+	"$(grep -c '^EXIT=1' "$work/confirm.offline" 2>/dev/null || true)" "1"
+# The other side. Without this the two checks above pass with the
+# confirmation hard-wired to fail, which would be a switcher that never works.
+check "with a default route it does claim to have succeeded" \
+	"$(grep -c "is now this machine.s network daemon" "$work/confirm.online" 2>/dev/null || true)" "1"
+check "and it succeeds" \
+	"$(grep -c '^EXIT=0' "$work/confirm.online" 2>/dev/null || true)" "1"
+# And the escape hatch the harness above depends on.
+check "--no-wait skips the check entirely" \
+	"$(grep -c "is now this machine.s network daemon" "$work/netcfgd.out" 2>/dev/null || true)" "1"
 
 echo
 if [ "$failures" -eq 0 ]; then

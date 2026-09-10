@@ -62,10 +62,16 @@ usage: $me [netcfgd|networkmanager|networkd|none]
   none            unmask everything and start nothing -- what postrm uses
 
   --dry-run       say what would happen and change nothing
+  --wait-online N wait up to N seconds for a default route (default 30)
+  --no-wait       do not wait, and do not check -- the old behaviour
 USAGE
 }
 
 dry=
+# How long to wait for the selected manager to put a default route on this
+# machine before saying whether it worked. Thirty seconds because the two
+# measured switches took 12 and, in the failing case, never.
+patience=30
 target=
 # What the persistence pass renamed, so the summary can say so rather than
 # claiming nothing was. Empty on every ordinary run.
@@ -73,6 +79,8 @@ renamed=
 for argument in "$@"; do
 	case "$argument" in
 	--dry-run) dry=yes ;;
+	--no-wait) patience=0 ;;
+	--wait-online=*) patience=${argument#*=} ;;
 	-h | --help)
 		usage
 		exit 0
@@ -106,6 +114,74 @@ run() {
 }
 
 say() { echo "$me: $*"; }
+
+# Is this machine on a network?
+#
+# **A default route and nothing else.** It is what was missing during the
+# outage that produced this check, it is what every manager here exists to
+# install, and it is the one fact that does not depend on which manager was
+# selected. A global address is not the test: `docker0` has one --
+# 172.17.0.1, on this very machine -- so "some interface has a global address"
+# is true on a laptop with no network at all, and a check that passes when
+# the machine is offline is worse than no check.
+machine_is_online() {
+	command -v ip >/dev/null 2>&1 || return 0
+	ip -4 route show default 2>/dev/null | grep -q . && return 0
+	ip -6 route show default 2>/dev/null | grep -q . && return 0
+	return 1
+}
+
+# Say whether selecting a manager actually worked, rather than assuming it.
+#
+# **This script used to end by announcing success unconditionally.** It printed
+# "<manager> is now this machine's network daemon" the moment the last
+# `systemctl start` returned -- which is true about the unit and says nothing
+# about the network. Measured twice on the reporting machine: selecting netcfgd
+# printed that line 12 seconds before the lease arrived, and selecting
+# NetworkManager printed it while the machine went on to spend **13 minutes
+# with no default route**, until a person ran `nmtui` by hand.
+#
+# The cause there was NetworkManager's own: the wifi profile carried
+# `psk-flags=1`, which means the passphrase is agent-owned rather than stored,
+# so NM asked for a secret agent, found none outside a desktop session, and
+# gave up -- `no secrets: No agents were available for this request`. Nothing
+# netcfgd did, and entirely invisible, because the thing that had just
+# rearranged the machine's networking said it had succeeded.
+#
+# So wait, bounded, and report what is true. Waiting is not the same as
+# starting `<manager>-wait-online.service`, which 0190 declined to do and still
+# declines: that unit gates `network-online.target` for the *next* boot and
+# blocking on it here would hold the script open with no deadline of its own.
+confirm_online() {
+	manager=$1
+	[ -n "$dry" ] && return 0
+	[ "$patience" -gt 0 ] || return 0
+	waited=0
+	while [ "$waited" -lt "$patience" ]; do
+		machine_is_online && return 0
+		sleep 1
+		waited=$((waited + 1))
+	done
+	machine_is_online && return 0
+
+	primary=$(unit_of "$manager" | cut -d' ' -f1)
+	say "$manager was selected, but this machine has no default route ${patience}s later"
+	if [ -d /run/systemd/system ]; then
+		say "  $primary is $(systemctl is-active "$primary" 2>/dev/null || echo unknown)"
+		say "  journalctl -u $primary -n 50   says what it is waiting for"
+	fi
+	# Named because it is the one that produced no message anywhere and cost
+	# this machine 13 minutes. A manager that is running and has configured
+	# nothing is nearly always waiting for something it cannot ask for.
+	case "$manager" in
+	networkmanager)
+		say "  if that says 'No agents were available', the wifi passphrase is"
+		say "  agent-owned (psk-flags=1 in the profile) and NetworkManager cannot"
+		say "  read it without a desktop session. nmtui will supply it once."
+		;;
+	esac
+	return 1
+}
 
 # ---------------------------------------------------------------------------
 # The managers, and what each leaves behind.
@@ -769,7 +845,18 @@ none)
 
 	bring_up "$target"
 	warn_about_netplan
-	say "$target is now this machine's network daemon"
+	# **The announcement is now conditional on the network existing**, which
+	# is the whole of what a person means by "did the switch work". The same
+	# reasoning as the "no binary renamed" line below, applied to the sentence
+	# that matters most: a summary that cannot report the unusual outcome is
+	# worse than none, because it is read instead of looking.
+	if confirm_online "$target"; then
+		say "$target is now this machine's network daemon"
+	else
+		say "$target is selected and its units are running; the network is not up"
+		say "  nothing here has been undone -- '$me <other>' switches again"
+		exit 1
+	fi
 	# **Said only when it is true.** The first version printed "no binary
 	# renamed" unconditionally, which is the common case and becomes a lie
 	# the moment the persistence pass above fires -- a summary that cannot
