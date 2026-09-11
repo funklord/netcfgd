@@ -47,7 +47,10 @@
 # including one demonstrably holding an eUICC. The card's own identifier is the
 # only fact that says which source is being read.
 #
-# So after a successful attach this writes, to the interface report:
+# So after a successful attach this writes, as a report *fragment* --
+# `/run/netcfgd/reported.d/<interface>/modem-at`, because on ECM the DHCP
+# client owns `reported/<interface>` and two writers on one file means the last
+# one wins:
 #
 #     iccid=8946080023614318322
 #     sim=socket
@@ -349,6 +352,20 @@ read_iccid() {
 
 # Tell netcfgd which card this source turned out to hold.
 #
+# **A fragment, not the interface's own report file, and that is the whole
+# point.** `doc/interface-report.md` gives `reported/<interface>` to one writer:
+# "the thing writing it is the thing that brought the interface up". On ECM
+# that is the DHCP client, not this -- the header above says so twice -- so
+# taking that file would be taking somebody else's.
+#
+# It is not a nicety. Both writers rename over the same path, so whichever went
+# last won outright: a lease renewal erased the card, and an attach erased the
+# lease's nameservers. Measured, on the second of those, `grep -c '^dns='` went
+# from two to zero -- a cellular link with an address, a route, and no resolver
+# at all. The contract provides for exactly this: "A helper may write there
+# too, if it genuinely has more than one source for one interface." A modem on
+# ECM does.
+#
 # **Written atomically, because netcfgd may read at any moment.** The contract
 # is explicit: a temporary file in the same directory and a rename over the
 # target, and the temporary name begins with a dot so that netcfgd skips it if
@@ -366,15 +383,15 @@ report_card() {
 	source=$(published sim)
 	[ -n "$source" ] || return 0
 
-	directory="$run_dir/reported"
+	directory="$run_dir/reported.d/$interface"
 	mkdir -p "$directory" 2>/dev/null || return 0
-	temporary="$directory/.$interface.tmp"
+	temporary="$directory/.modem-at.tmp"
 	{
 		echo "# $interface, written by netcfgd-modem-at"
 		echo "iccid=$iccid"
 		echo "sim=$source"
 	} > "$temporary" 2>/dev/null || return 0
-	mv -f "$temporary" "$directory/$interface" 2>/dev/null || {
+	mv -f "$temporary" "$directory/modem-at" 2>/dev/null || {
 		rm -f "$temporary" 2>/dev/null
 		return 0
 	}

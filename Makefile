@@ -955,6 +955,11 @@ packaging:
 	@# the tag has one producer. That is a property of the tree, so it is
 	@# checked here rather than trusted there.
 	@python3 tool/tag_producer_gate.py
+	@# Only a declared writer takes `/run/netcfgd/reported/<interface>`. That
+	@# file belongs to whatever brought the interface up, and a second writer
+	@# replaces it rather than joining it -- which cost a cellular link its
+	@# resolvers for one commit. 0212.
+	@python3 tool/report_writer_gate.py
 	@# The udev rules and the quirks table carry the same USB ids and the same
 	@# AT port index. Two files holding one fact is how the quirk somebody
 	@# reads stops being the quirk that runs.

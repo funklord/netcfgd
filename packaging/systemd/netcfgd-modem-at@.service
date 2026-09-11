@@ -84,13 +84,20 @@ SystemCallArchitectures=native
 # halves are different directories on purpose.
 #
 # It *reads* `/run/netcfgd/modem/%i`, which netcfgd writes: the SIM source and
-# the APN. It *writes* `/run/netcfgd/reported/%i`, which is the interface
-# report, carrying the one fact only a helper can know -- which card the module
-# is actually reading. Everything else under `/run/netcfgd` is netcfgd's and
-# stays read-only, so a grant for the report cannot become a grant for the
-# selection this helper is supposed to be obeying.
+# the APN. It *writes* `/run/netcfgd/reported.d/%i/modem-at`, a report
+# fragment, carrying the one fact only a helper can know -- which card the
+# module is actually reading. Everything else under `/run/netcfgd` is netcfgd's
+# and stays read-only, so a grant for the fragment cannot become a grant for
+# the selection this helper is supposed to be obeying.
+#
+# **`reported.d` and not `reported`, which this granted for one commit.** The
+# single file belongs to whatever brought the interface up -- on ECM the DHCP
+# client -- and the helper writing it erased that client's nameservers on every
+# attach. Moving the write moved the grant, and a grant left pointing at the
+# old path would have denied the new write instead: the helper is silent when
+# it cannot report, so the card would simply never have appeared.
 ReadOnlyPaths=/run/netcfgd
-ReadWritePaths=/run/netcfgd/reported
+ReadWritePaths=/run/netcfgd/reported.d
 
 [Install]
 WantedBy=multi-user.target

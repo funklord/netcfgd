@@ -9461,6 +9461,62 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.106 Two writers on one report
+
+Asked to audit the wifi DNS path, the first thing it turned up was a defect
+committed the same day, in 10.103.
+
+`interface-report.md` gives `reported/<interface>` to one writer -- "the thing
+writing it is the thing that brought the interface up" -- and 10.103 had
+`netcfgd-modem-at` take it to report the ICCID. On ECM the thing that brought
+the interface up is the **DHCP client**, and the helper's own header says so
+twice. Both writers rename over the same path, so they did not merge:
+
+    helper attaches, then a lease renews     -> the card is gone
+    lease taken, then the helper attaches    -> `grep -c '^dns='` 2 -> 0
+
+The second is a cellular link with an address, a default route and **no
+resolver at all**, produced by a helper whose only job at that moment was to
+say which SIM it had read. It writes `reported.d/<interface>/modem-at` now,
+which is what the contract provides for, and the test asserts the lease's
+nameservers survive an attach.
+
+### A rule in prose is not a rule
+
+This one was written down, in the file the author had read that morning to
+learn the report format. It broke within hours. So a gate: a shipped writer of
+the single file must be named in a list with the reason it is the one that
+brought the interface up. **Writing the reason is the check** -- for the AT
+helper there is no such sentence. Same idiom as `write-best-effort.txt`.
+
+### The gate found two things by being wrong
+
+Its first detector matched the literal `reported/`, and shell assembles paths
+from variables: the mutation that puts the defect back never spells a slash
+after the segment, and passed. Anchored on the slash *before* it now.
+
+Then it flagged the systemd unit, which names the directory in
+`ReadWritePaths=` rather than writing it -- a false positive pointing at a real
+fault, because the grant still said `reported` while the helper had moved to
+`reported.d`. Under `ProtectSystem=strict` that denies the write, and the
+helper is deliberately silent when it cannot report, so the card would simply
+never have appeared. The grant moved; the gate now reads only files with a
+shebang.
+
+### What the audit did not find
+
+The suspicion that started the DNS half was that `dns { }` -- the remedy
+netcfgd prints when a lease's nameservers go unclaimed -- did not claim them.
+**It does.** The appearance came from the harness: `ncfg plan` and `ncfg show`
+compile locally rather than asking the daemon, so a run with `NCFG_RUN_DIR` on
+a fixture and `NCFG_CONFIG_DIR` left alone plans `/etc/netcfgd` against the
+fixture's reports. The message was exactly right about the document it had.
+
+Recorded because the wrong conclusion was one step away, and what settled it
+was cheap: set both variables and check the control from the other side.
+
+Decision 0212.
+
 ## 10.105 The modem work was not in the package
 
 Three rounds of making the cellular path installable, and then `dpkg -L

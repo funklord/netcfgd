@@ -37,6 +37,20 @@ writer should honour so it can be tested somewhere other than `/run`.
 **Write this file. It is yours.** One file, one interface, one writer -- because
 the thing writing it is the thing that brought the interface up.
 
+**If you did not bring the interface up, this file is not yours.** Use the
+fragment directory below instead. The two are not interchangeable and the
+difference is not tidiness: a writer renames over this path, so a second one
+*replaces* the first rather than joining it. A modem helper reporting which SIM
+was in the module took this file on an interface whose address came from DHCP,
+and the two alternated -- a lease renewal erased the card, and an attach erased
+the lease's nameservers, leaving a link with an address, a route and no
+resolver at all ([0212](decision/0212-two-writers-on-one-report.md)).
+
+`tool/report_writer_gate.py` now refuses a shipped writer of this path that is
+not named in `tool/report-single-writers.txt` with the reason it is the one
+that brought the interface up. That list is short and adding to it should be
+hard.
+
 There is a second place, and it exists for netcfgd rather than for you:
 
 ```

@@ -311,14 +311,40 @@ contains "and its apn is the one used" "$out" "attached on late.cxn"
 #    behind, which is a test that passes for a reason it does not state.
 stop_modem
 start_modem --iccid 8944111122223333444
-rm -f "$NCFG_RUN_DIR/modem/wwan0" "$NCFG_RUN_DIR/reported/wwan0"
+rm -rf "$NCFG_RUN_DIR/modem/wwan0" "$NCFG_RUN_DIR/reported" "$NCFG_RUN_DIR/reported.d"
 mkdir -p "$NCFG_RUN_DIR/modem"
 printf 'sim=esim\napn=im.cxn\n' > "$NCFG_RUN_DIR/modem/wwan0"
 out=$(sh "$helper" attach -p "$port" -i wwan0 2>&1 || true)
 contains "the card is read and said" "$out" "esim holds card 8944111122223333444"
-report=$(cat "$NCFG_RUN_DIR/reported/wwan0" 2>/dev/null || echo MISSING)
+report=$(cat "$NCFG_RUN_DIR/reported.d/wwan0/modem-at" 2>/dev/null || echo MISSING)
 contains "an interface report is written" "$report" "iccid=8944111122223333444"
 contains "naming the source it was read on" "$report" "sim=esim"
+
+# **As a fragment, and never as the interface's own report file.** On ECM the
+# DHCP client owns `reported/<interface>` -- it is the thing that brought the
+# interface up -- and both writers rename over the same path, so whichever went
+# last won outright. This helper took that file for one commit, and the cost
+# was measured both ways: a lease renewal erased the card, and an attach left a
+# cellular link with an address, a route and no resolver at all.
+if [ -e "$NCFG_RUN_DIR/reported/wwan0" ]; then
+	echo "FAIL the helper does not take the interface's own report file"
+	failures=$((failures + 1))
+else
+	echo "ok   the helper does not take the interface's own report file"
+fi
+
+# And the two coexist: a DHCP client's report and this fragment are read
+# together, which is what makes the fragment the right place rather than merely
+# a different one.
+mkdir -p "$NCFG_RUN_DIR/reported"
+printf '# wwan0, from a dhcpcd lease. Written by netcfgd.\ndns=10.0.0.1\n' \
+	> "$NCFG_RUN_DIR/reported/wwan0"
+out=$(sh "$helper" attach -p "$port" -i wwan0 2>&1 || true)
+lease=$(cat "$NCFG_RUN_DIR/reported/wwan0" 2>/dev/null || echo MISSING)
+contains "a lease's nameservers survive an attach" "$lease" "dns=10.0.0.1"
+card=$(cat "$NCFG_RUN_DIR/reported.d/wwan0/modem-at" 2>/dev/null || echo MISSING)
+contains "and the card is still reported beside them" "$card" "iccid=8944111122223333444"
+rm -rf "$NCFG_RUN_DIR/reported"
 
 # **And no addressing, which is the half that must stay absent.** On ECM the
 # address is a DHCP lease; a helper reporting one would be a second writer for
@@ -330,11 +356,11 @@ lacks "and no nameserver" "$report" "dns="
 # No source published means no pairing, and an unpaired card is not written.
 # netcfgd could not use it: an ICCID with no idea which source it belongs to is
 # a fact about nothing, and guessing would be worse than staying quiet.
-rm -f "$NCFG_RUN_DIR/modem/wwan0" "$NCFG_RUN_DIR/reported/wwan0"
+rm -rf "$NCFG_RUN_DIR/modem/wwan0" "$NCFG_RUN_DIR/reported.d"
 out=$(sh "$helper" attach -p "$port" -i wwan0 -a im.cxn 2>&1 || true)
 contains "an attach with no published source still works" "$out" "attached on"
 lacks "and claims no card" "$out" "holds card"
-if [ -e "$NCFG_RUN_DIR/reported/wwan0" ]; then
+if [ -e "$NCFG_RUN_DIR/reported.d/wwan0/modem-at" ]; then
 	echo "FAIL an unpaired card is not reported"
 	failures=$((failures + 1))
 else

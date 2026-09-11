@@ -1,0 +1,27 @@
+# Who may write `/run/netcfgd/reported/<interface>`.
+#
+# One line each: `path -- why this is the writer that brought the interface up`.
+# Enforced by tool/report_writer_gate.py.
+#
+# **That file belongs to one writer.** `doc/interface-report.md`: "One file,
+# one interface, one writer -- because the thing writing it is the thing that
+# brought the interface up." Both writers rename over the same path, so a
+# second one does not merge with the first, it replaces it.
+#
+# A writer that did NOT bring the interface up has somewhere to go and does not
+# belong here: `/run/netcfgd/reported.d/<interface>/<source>`, which netcfgd
+# reads together with the file above. The contract provides for it in as many
+# words -- "A helper may write there too, if it genuinely has more than one
+# source for one interface."
+#
+# **This list exists because the rule was broken by somebody who had just read
+# it.** `netcfgd-modem-at` took the single file to report which SIM card the
+# module was on. On ECM the DHCP client owns that file, and the two alternated:
+# a lease renewal erased the card, and an attach erased the lease's
+# nameservers -- `grep -c '^dns='` going from two to zero, which is a cellular
+# link with an address, a route and no resolver at all. It writes a fragment
+# now. Decision 0212.
+
+packaging/hooks/dhcpcd-hook -- dhcpcd's own hook; the client took the lease that brought the interface up
+helper/netcfgd-modem-mbim -- obtains the bearer's address itself, so the interface says `config = "reported"` and no DHCP client runs
+helper/netcfgd-modem-umbim -- the same, through umbim rather than mbimcli
