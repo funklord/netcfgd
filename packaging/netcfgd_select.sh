@@ -304,7 +304,16 @@ unit_of() {
 	# it -- which is what `debian/rules` already decided with
 	# `dh_installsystemd --no-enable --no-start`. Standing it down is a bug
 	# fix; starting it is a policy this script does not get to make.
-	netcfgd) echo 'netcfgd.service netcfgd-wait-online.service netcfgd-nm.service' ;;
+	#
+	# **`netcfgd-modem-at@.service` is a template and is last.** Last because
+	# `bring_up` enables and starts only the first name, and a modem helper is
+	# not something selecting netcfgd should switch on -- which interface a
+	# module presents is the operator's to say, and 0044 keeps netcfgd out of
+	# starting helpers at all. Present because standing netcfgd down has to
+	# stop it: it drives a modem over AT, and leaving it running while
+	# ModemManager takes the same module over is two masters on one device,
+	# which is the failure this whole script exists to prevent.
+	netcfgd) echo 'netcfgd.service netcfgd-wait-online.service netcfgd-nm.service netcfgd-modem-at@.service' ;;
 	networkmanager) echo 'NetworkManager.service NetworkManager-wait-online.service NetworkManager-dispatcher.service' ;;
 	networkd) echo 'systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service' ;;
 	connman) echo 'connman.service connman-wait-online.service' ;;
@@ -612,8 +621,27 @@ stand_down() {
 
 	if [ -d /run/systemd/system ]; then
 		for unit in $(unit_of "$manager"); do
-			run systemctl stop "$unit"
-			run systemctl disable "$unit"
+			# **A template is not a unit you can stop.** `foo@.service` never
+			# runs; its instances do, and they are named for something this
+			# script cannot know -- an interface, a port, a device. So stop and
+			# disable the instances by glob, and mask the template itself,
+			# which is what stops any future instance starting.
+			#
+			# systemctl(1): a glob matches "the primary names of units
+			# currently in memory", so the stop reaches what is running and
+			# silently skips when nothing is. The mask is the half that lasts,
+			# and it works on the template because masking is a symlink over
+			# the unit file rather than anything to do with instances.
+			case "$unit" in
+			*@.service)
+				run systemctl stop "${unit%@.service}@*.service"
+				run systemctl disable "${unit%@.service}@*.service"
+				;;
+			*)
+				run systemctl stop "$unit"
+				run systemctl disable "$unit"
+				;;
+			esac
 			# `mask` and not merely `disable`: disable stops it starting at
 			# boot and does nothing about another package's dependency, an
 			# upgrade, or `systemctl start` typed by hand. A mask is what

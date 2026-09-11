@@ -1,0 +1,49 @@
+# A stable name for the AT port netcfgd's modem helper drives, and a request
+# that ModemManager leave it alone.
+#
+# ## WHY A SYMLINK AT ALL
+#
+# `/dev/ttyUSB3` is not a stable name. The number is assigned in enumeration
+# order, and a cellular module is reset as part of ordinary operation -- a SIM
+# source changes, the bearer wedges, the helper cycles it -- after which the
+# whole block of ports may land somewhere else. A unit file or a configuration
+# naming `ttyUSB3` is naming where the port was the first time somebody looked.
+#
+# So the rule matches the module and the USB interface number, which do not
+# move, and gives the port a name that does not either.
+#
+#     /dev/netcfgd-modem-at
+#
+# ## AND WHY `ID_MM_PORT_IGNORE`
+#
+# **ModemManager takes both AT ports once the modem registers.** Measured on a
+# Quectel EG916Q-GL: `ttyUSB2` only while unregistered, and `ttyUSB3` as well
+# afterwards -- which is precisely when the PDP context first has an APN and
+# resolvers worth reading. So a helper that shared the port would lose it at
+# the moment it became useful, and `netcfgd-modem-at` would report the granted
+# APN as "not known" for the rest of the modem's life.
+#
+# MM does not need the second port and was measured driving the module from
+# `ttyUSB2` alone throughout. `ID_MM_PORT_IGNORE=1` is MM's own documented way
+# of being told so; it is a request to a daemon that may not be installed, and
+# it costs nothing where it is not.
+#
+# **This is not a way to run netcfgd and ModemManager on the same modem.** Two
+# things driving one module is the failure netcfgd is arranged to avoid, and
+# `ncfg plan` says so about the device. The rule is for the machine where MM is
+# present for other reasons, or has not been removed yet.
+#
+# ## EVERY ENTRY IS A ROW IN `modem-quirks`
+#
+# The module and the port index are the table's, not this file's, and
+# `tool/modem_rules_gate.py` fails when the two disagree. A table that is the
+# source of one file and contradicted by another is worse than no table: the
+# quirk somebody reads is not the quirk that runs.
+#
+# So do not add an entry here from a datasheet. Add the row there, from a
+# module you have in front of you, and this follows.
+
+# Quectel EG916Q-GL. `at=3` in the table: a running ModemManager held ttyUSB2
+# and left ttyUSB3, checked by looking at what had the ports open rather than
+# assumed from the port order.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2c7c", ATTRS{idProduct}=="6007", ENV{ID_USB_INTERFACE_NUM}=="03", SYMLINK+="netcfgd-modem-at", ENV{ID_MM_PORT_IGNORE}="1"

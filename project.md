@@ -9461,6 +9461,70 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.102 A helper nobody was running
+
+Asked whether netcfgd could be put on a two-SIM LTE board, the honest answer
+was "most of it, and nothing starts the helper". Cellular support has been
+there since 0044 -- three helpers, a quirks table, an ordered SIM list,
+probe-driven fallback, `ncfg modem`. What was missing was everything between
+the binary and a running system.
+
+**Not closed by making netcfgd start it.** 0044 is explicit that netcfgd starts
+and supervises backends and does neither for a modem helper, and that is still
+right. Closed by making it possible to run, findable, and hard to run wrongly.
+
+### The port had no stable name
+
+`/dev/ttyUSB3` is where the port was the first time somebody looked. A module
+is reset as part of ordinary operation -- a SIM switch is a modem reset -- and
+the block of ports may land elsewhere. A udev rule matches the module and the
+USB interface number instead, and names the port `/dev/netcfgd-modem-at`.
+
+The same rule asks ModemManager to leave it alone, which matters because MM
+takes both AT ports once the modem registers -- exactly when the PDP context
+first has something worth reading.
+
+**The rule and the quirks table hold one fact between them**, so a gate fails
+when they disagree, including on the spelling that reads correctly and matches
+nothing: `at=3` in the table is `"03"` in udev. `udevadm verify` runs beside it,
+because a rules file that does not parse fails silently.
+
+### The selector's own gate found what was missed
+
+`select_gate.py` refused the new unit: a unit this project installs that no
+`unit_of` arm names cannot be stood down, so it survives every switch. It was
+right -- a modem helper still driving a module after a switch to NetworkManager
+is two masters on one device.
+
+Standing down a *template* needed a new case. A template never runs; its
+instances do, named for something the script cannot know. So instances are
+stopped by glob and the template is masked, which is what stops the next one
+starting.
+
+### The race ordering cannot fix
+
+netcfgd publishes the APN when it **reconciles**, not when it starts, so an
+init system starting both together loses however the units are ordered. With no
+APN the helper sets none, and on a module that dials itself that means
+attaching on the network's blank-request default -- which answers ICMP
+everywhere and routes almost nothing. Half a second of ordering, and the link
+is up and carries nothing.
+
+The helper waits for the file now, bounded, carrying on either way: the file's
+*existence* separates "netcfgd has not spoken" from "netcfgd has nothing to
+say". The test writes it a second into the wait, so what is checked is that the
+helper was waiting rather than lucky.
+
+### Still not possible
+
+Switching SIM needs a hook somebody writes -- netcfgd chooses the source and
+0150 keeps it out of driving the mux. And the ICCID, the only reliable
+discriminator of which card a module is reading, appears nowhere netcfgd
+reports: not `ncfg modem`, not `ModemStatus`, not the gui. That is the next
+piece.
+
+Decision 0209.
+
 ## 10.101 The APN register that answers with the question
 
 Two documents and a working tool for the same class of hardware, read against

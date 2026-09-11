@@ -1,0 +1,88 @@
+# The AT modem helper under systemd, one instance per interface.
+#
+#     systemctl enable --now netcfgd-modem-at@wwan0
+#
+# `%i` is the network interface the modem presents -- the `cdc_ether` one that
+# takes the DHCP lease, not a tty. It is what names the helper's log lines and
+# what it reads netcfgd's published APN and SIM source for.
+#
+# ## netcfgd DOES NOT START THIS, AND THAT IS THE DESIGN
+#
+# Decision 0044 is explicit: "netcfgd starts and supervises backends and speaks
+# their protocol. It does neither here." The helper talks to a modem and writes
+# a file; netcfgd reads files. Neither knows the other is running.
+#
+# So this unit exists because somebody has to run the helper and nothing did --
+# not because netcfgd grew an integration. `make install` does not install it
+# and nothing enables it. It is a worked example that happens to be correct.
+#
+# ## WHAT IT NEEDS
+#
+# A tty the module answers AT on. `71-netcfgd-modem.rules` gives that port a
+# stable name for the modules the quirks table knows, which is why the default
+# below is a symlink rather than a ttyUSB number: the number moves when the
+# module is reset, and a module is reset as part of ordinary operation.
+#
+# Where the rule does not cover your module, or the board has more than one,
+# write the port into an override:
+#
+#     systemctl edit netcfgd-modem-at@wwan0
+#     [Service]
+#     Environment=PORT=/dev/ttyUSB3
+#
+# ## ORDERING, AND WHY IT IS NOT ENOUGH ON ITS OWN
+#
+# `After=netcfgd.service` because the APN comes from the file netcfgd
+# publishes. That is necessary and not sufficient: netcfgd writes the file when
+# it *reconciles*, which is after it starts, so ordering alone still loses the
+# race. The helper waits for the file rather than relying on this line -- see
+# `-w` in its header. Both are here because the ordering costs nothing and
+# makes the wait the exception rather than the mechanism.
+
+[Unit]
+Description=netcfgd AT modem helper for %i
+Documentation=file:///usr/share/doc/netcfgd/first-run.md
+After=netcfgd.service
+Wants=netcfgd.service
+
+# **No start limit, for the daemon unit's reason.** systemd's default is five
+# starts in ten seconds and then `failed` for good. This unit restarts every
+# time the module re-enumerates -- which happens on every modem reset, and a
+# SIM switch is a modem reset -- so a board switching sources twice in quick
+# succession would spend the budget and end with no modem helper and nothing
+# that will ever try again. Decision 0188 has the measurement.
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+Environment=PORT=/dev/netcfgd-modem-at
+ExecStart=/usr/bin/netcfgd-modem-at monitor -p ${PORT} -i %i
+
+# **Always, not on-failure.** The helper exits cleanly when its port goes away,
+# which is what a modem reset looks like from here -- so the ordinary case is a
+# successful exit that must still be followed by another attempt. `on-failure`
+# would leave the modem down after exactly the event the helper exists to
+# recover from.
+Restart=always
+RestartSec=5
+
+# It opens a tty and runs no network configuration of its own: the interface is
+# netcfgd's and the address is a DHCP lease. So it needs nothing from the
+# capability set, and says so.
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+# The one directory it reads: netcfgd's, for the published SIM source and APN.
+# Read-only, because the traffic in that direction is netcfgd's to write.
+ReadOnlyPaths=/run/netcfgd
+
+[Install]
+WantedBy=multi-user.target

@@ -498,6 +498,19 @@ install-modem-mbim:
 	install -d $(DESTDIR)$(PREFIX)/share/netcfgd/hook
 	install -m 0644 packaging/hook/sim-select.example \
 		$(DESTDIR)$(PREFIX)/share/netcfgd/hook/sim-select.example
+	@# A stable name for the AT port, and a request that ModemManager leave it
+	@# alone. `/dev/ttyUSB3` is not stable across a modem reset, and a reset is
+	@# ordinary operation here -- a SIM switch is one. The rule is data about
+	@# modules, checked against the quirks table by `make packaging`.
+	install -d $(DESTDIR)$(PREFIX)/lib/udev/rules.d
+	install -m 0644 packaging/udev/71-netcfgd-modem.rules \
+		$(DESTDIR)$(PREFIX)/lib/udev/rules.d/71-netcfgd-modem.rules
+	@# And something to run the helper with. netcfgd does not start or
+	@# supervise it (0044), so this is a worked example that happens to be
+	@# correct rather than an integration -- installed, enabled by nobody.
+	install -d $(DESTDIR)/usr/lib/systemd/system
+	install -m 0644 packaging/systemd/netcfgd-modem-at@.service \
+		$(DESTDIR)/usr/lib/systemd/system/netcfgd-modem-at@.service
 	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
 	@echo "install-modem-mbim: netcfgd-modem-at installed too, for modules that"
 	@echo "install-modem-mbim:   offer neither MBIM nor QMI -- it needs only a tty"
@@ -506,6 +519,10 @@ install-modem-mbim:
 	@echo "install-modem-mbim: for a board that muxes two SIMs, copy"
 	@echo "install-modem-mbim:   share/netcfgd/hook/sim-select.example and fill in"
 	@echo "install-modem-mbim:   the two BOARD lines -- netcfgd has no GPIO"
+	@echo "install-modem-mbim: nothing runs a helper for you. For an AT module:"
+	@echo "install-modem-mbim:   udevadm control --reload && udevadm trigger"
+	@echo "install-modem-mbim:   systemctl enable --now netcfgd-modem-at@wwan0"
+	@echo "install-modem-mbim:   where wwan0 is the interface the modem presents"
 
 # The Qt client, opt-in the way install-modem-mbim is.
 #
@@ -918,6 +935,22 @@ packaging:
 	@# the tag has one producer. That is a property of the tree, so it is
 	@# checked here rather than trusted there.
 	@python3 tool/tag_producer_gate.py
+	@# The udev rules and the quirks table carry the same USB ids and the same
+	@# AT port index. Two files holding one fact is how the quirk somebody
+	@# reads stops being the quirk that runs.
+	@python3 tool/modem_rules_gate.py
+	@# And udev's own opinion of the rules file, which catches what the gate
+	@# above cannot: a syntax error. `="` where `=="` was meant is a rule that
+	@# *assigns* an attribute instead of matching one, which udev accepts as a
+	@# sentence and refuses as a rule -- and a rules file that does not load
+	@# fails silently, leaving the port with no stable name and no message
+	@# anywhere. Skipped loudly where udevadm is absent, which is every machine
+	@# this project targets that does not run systemd.
+	@if command -v udevadm >/dev/null 2>&1; then \
+		udevadm verify packaging/udev/71-netcfgd-modem.rules; \
+	else \
+		echo "udev-rules: udevadm not installed, skipping the syntax check"; \
+	fi
 	@# Conflicts= stops a unit and does not order against it, so netcfgd could
 	@# read another daemon's claim while it was still shutting down and decline
 	@# an interface on behalf of something one second from gone. A race, so it
@@ -1916,6 +1949,8 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-at
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-umbim
 	rm -f $(DESTDIR)$(PREFIX)/share/netcfgd/modem-quirks
+	rm -f $(DESTDIR)$(PREFIX)/lib/udev/rules.d/71-netcfgd-modem.rules
+	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-modem-at@.service
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-wait-online.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd

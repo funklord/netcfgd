@@ -10,6 +10,7 @@
 #   -a NAME   the APN to request          -n SECS  monitor interval, 15
 #   -i NAME   the ECM interface: names the log lines, and the file netcfgd
 #             publishes the APN in, so -a can be left off
+#   -w SECS   how long to wait for netcfgd to publish that file, 30
 #
 # ## WHY THIS EXISTS BESIDE THE MBIM ONE
 #
@@ -100,7 +101,7 @@ set -eu
 # helper's idiom and stops the two drifting apart -- and keeps the alignment
 # out of the script body, where the style gate wants tabs.
 usage() {
-	sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 port=
@@ -108,8 +109,16 @@ apn=
 interface=
 timeout=5
 interval=15
+publish_wait=30
 
 [ $# -ge 1 ] || { usage >&2; exit 2; }
+# `-h` before the command as well as after it. Asking a tool how to use it is
+# the one thing that must work when you do not yet know how to use it, and
+# without this `netcfgd-modem-at -h` took `-h` for the command name and
+# answered "--port is required".
+case $1 in
+-h|--help) usage; exit 0 ;;
+esac
 command=$1
 shift
 
@@ -120,6 +129,7 @@ while [ $# -gt 0 ]; do
 	-i|--interface) interface=${2:?--interface needs a name}; shift 2 ;;
 	-t|--timeout)   timeout=${2:?--timeout needs seconds}; shift 2 ;;
 	-n|--interval)  interval=${2:?--interval needs seconds}; shift 2 ;;
+	-w|--publish-wait) publish_wait=${2:?--publish-wait needs seconds}; shift 2 ;;
 	-h|--help)      usage; exit 0 ;;
 	*) echo "netcfgd-modem-at: unknown option $1" >&2; usage >&2; exit 2 ;;
 	esac
@@ -140,6 +150,48 @@ published() {
 	[ -f "$selection" ] || return 0
 	sed -n "s/^$1=//p" "$selection" | head -n 1
 }
+
+# **Wait for netcfgd to publish, rather than racing it.**
+#
+# netcfgd writes that file when it reconciles, not when it starts, so a helper
+# started by an init system alongside the daemon can easily look first. With
+# no APN this sets none -- and on a module that dials its own context the
+# moment it registers, that means attaching on whatever the network hands out
+# to a blank request. Measured on one operator, that default answers ICMP
+# everywhere and routes almost nothing, so the failure is a link that looks up
+# and carries no traffic: exactly the outcome the APN exists to avoid, arrived
+# at by starting half a second early.
+#
+# Bounded, and proceeding either way. The file's *existence* is what separates
+# "netcfgd has not spoken yet" from "netcfgd has nothing to say" -- a device
+# with no `modem` block never gets one, and that is an ordinary configuration
+# rather than a fault to wait out. So: wait for it to appear, say so if it
+# does not, and carry on.
+#
+# Skipped entirely when `--apn` was given, because then there is nothing to
+# wait for.
+wait_for_publication() {
+	[ -n "$interface" ] || return 0
+	[ -z "$apn" ] || return 0
+	[ ! -f "$selection" ] || return 0
+
+	waited=0
+	while [ "$waited" -lt "$publish_wait" ]; do
+		sleep 1
+		waited=$((waited + 1))
+		if [ -f "$selection" ]; then
+			echo "netcfgd-modem-at: netcfgd published $selection after ${waited}s" >&2
+			return 0
+		fi
+	done
+	echo "netcfgd-modem-at: $selection did not appear in ${publish_wait}s" >&2
+	echo "netcfgd-modem-at:   carrying on with no APN of netcfgd's. If this" >&2
+	echo "netcfgd-modem-at:   device has a \`modem\` block, the module may" >&2
+	echo "netcfgd-modem-at:   attach on the network's own default, which can" >&2
+	echo "netcfgd-modem-at:   route almost nothing -- check \`ncfg modem\`" >&2
+	return 0
+}
+wait_for_publication
 
 # `--apn` still wins, so this stays runnable by hand against a modem netcfgd
 # knows nothing about -- but a disagreement is said rather than silently

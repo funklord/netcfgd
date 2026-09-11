@@ -271,11 +271,42 @@ contains "and the override is called out" "$out" "overrides"
 contains "naming what netcfgd published" "$out" "im.cxn"
 
 # No file is not an error: a device with no `modem` block publishes nothing,
-# and the helper is still usable with a flag.
+# and the helper is still usable with a flag. `-w 0` because with `-a` given
+# there is nothing to wait for and the wait below must not be exercised here.
 rm -f "$NCFG_RUN_DIR/modem/wwan0"
 out=$(sh "$helper" attach -p "$port" -i wwan0 -a im.cxn 2>&1 || true)
 contains "no published file is not an error" "$out" "im.cxn"
 lacks "and nothing is claimed to be overridden" "$out" "overrides"
+
+# 8. **The race an init system creates.** netcfgd writes that file when it
+#    reconciles, not when it starts, so a helper started beside the daemon can
+#    look first -- and with no APN it sets none, which on a module that dials
+#    itself means attaching on whatever the network gives a blank request. That
+#    default routes almost nothing, so half a second of ordering produces a
+#    link that looks up and carries nothing.
+#
+#    The file is written a second into the wait, from a subshell, so what is
+#    being checked is that the helper was still waiting rather than that it
+#    was lucky.
+rm -f "$NCFG_RUN_DIR/modem/wwan0"
+(
+	sleep 2
+	mkdir -p "$NCFG_RUN_DIR/modem"
+	printf 'sim=socket\napn=late.cxn\n' > "$NCFG_RUN_DIR/modem/wwan0"
+) &
+writer=$!
+out=$(sh "$helper" attach -p "$port" -i wwan0 -w 20 2>&1 || true)
+wait "$writer" 2>/dev/null || true
+contains "a late publication is waited for" "$out" "published"
+contains "and its apn is the one used" "$out" "attached on late.cxn"
+
+# And the wait is bounded rather than indefinite: a device with no `modem`
+# block never publishes, and holding the modem down for ever over a file that
+# is never coming would be worse than attaching without an APN.
+rm -f "$NCFG_RUN_DIR/modem/wwan0"
+out=$(sh "$helper" attach -p "$port" -i wwan0 -w 2 2>&1 || true)
+contains "a file that never appears is given up on" "$out" "did not appear in 2s"
+contains "and says what that may cost" "$out" "route almost nothing"
 unset NCFG_RUN_DIR
 stop_modem
 

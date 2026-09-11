@@ -348,6 +348,126 @@ systemctl daemon-reload
 carries no ordering, so at boot the winner is whichever systemd reaches
 first. Enable exactly one.
 
+## 9. A cellular modem
+
+Nothing above applies to a modem, because netcfgd does not drive one. It reads
+files and configures interfaces; a **helper** talks to the module. That is
+decision 0044 and it is why this section is a list of things to run rather than
+a block of configuration.
+
+**Which helper is a property of the module, not a choice.** A module offering
+only ECM presents no `/dev/cdc-wdm` for `mbimcli` to open, so its whole control
+surface is AT over a tty. `/usr/share/netcfgd/modem-quirks` says which is which
+for the modules anybody has measured:
+
+```
+2c7c:6007  data=ecm helper=at at=3 autoconnect=yes
+```
+
+`data=ecm helper=at` is the case this section covers.
+
+### What to write
+
+Two blocks, and note what the interface block does **not** have:
+
+```
+device wwan0 {
+	modem {
+		sim = ["socket", "esim"]
+		apn = "internet.cxn"
+	}
+}
+
+interface wwan0 {
+	config = "dhcp"
+	probe {
+		command = "/usr/share/netcfgd/probe/default"
+		args    = ["wwan0"]
+	}
+}
+```
+
+**No `dns { }`, and that is the setting.** On ECM the module runs a DHCP server
+and hands over the address the operator assigned, so `config = "dhcp"` is
+right. The same DHCP also offers nameservers, and on the module measured they
+answer nothing at all -- they are on the module's own pre-attach subnet. The
+resolvers that work arrive in the PDP context and change with the APN. An
+interface takes its lease's nameservers only where it carries a `dns { }`
+block, so leaving it off is how you say "the address, not the resolvers".
+
+**`wwan0` is probably not what yours is called.** The ECM interface is a
+`cdc_ether` device and its name is derived from the module's MAC, so it is
+`enx…`. Use the real name -- and do not go looking for it by name pattern,
+because the wired ports carry `enx…` altnames too. `ls -l /sys/class/net/*/device/driver`
+is the honest way to find it.
+
+### What to run
+
+```sh
+udevadm control --reload && udevadm trigger
+systemctl enable --now netcfgd-modem-at@wwan0
+journalctl -u netcfgd-modem-at@wwan0 -n 20 -o cat
+```
+
+The udev rule gives the AT port a stable name, `/dev/netcfgd-modem-at`, and
+asks ModemManager to leave it alone. Both matter: `ttyUSB3` is not stable
+across a modem reset, and a reset is ordinary operation here -- **a SIM switch
+is a modem reset**. And ModemManager takes both AT ports once the modem
+registers, which is exactly when the PDP context first has something worth
+reading.
+
+### Whether it worked
+
+In increasing order of what each actually proves:
+
+```sh
+ncfg modem                       # which SIM source, and the APN asked for
+ip -4 addr show dev wwan0        # the lease arrived
+ip -4 route                      # and a default route
+curl -4 -o /dev/null -w '%{http_code} %{size_download}\n' \
+     https://deb.debian.org/debian/dists/trixie/Release
+```
+
+**Do not stop at `ping`, and do not add `-k`.** A cellular link that pings is
+not a cellular link that works: asking for an APN a subscription does not carry
+gets the network's own default rather than an error, and on that default ICMP
+succeeds everywhere while every other address blackholes the SYN. The bearer is
+up, the modem says so, and nothing useful crosses it. `-k` hides the other
+half, a missing CA bundle, which fails at certificate setup and reads exactly
+like the operator blocking 443.
+
+The helper says which APN the network **granted**, which is a different thing
+from the one asked for:
+
+```
+netcfgd-modem-at: attached on im.cxn
+netcfgd-modem-at: THE NETWORK SUBSTITUTED THE APN
+netcfgd-modem-at:   asked for `internet.cxn`, got `im.cxn`
+```
+
+That is not a fault to fix -- it is the network answering as it pleases, and
+both of those carry traffic. It is here so that the case where the substituted
+APN routes nothing is visible rather than silent.
+
+### Switching SIM
+
+netcfgd decides **which** source it wants, records what worked, falls back when
+a probe fails, and publishes the choice. Making the hardware agree is a
+`pre_up` hook, because the mux select line is your board's and netcfgd has no
+GPIO (0150). Start from
+`/usr/share/netcfgd/hook/sim-select.example` -- it is not a working hook and
+says so, and the two lines that matter are marked `BOARD`.
+
+**The reset in that hook is not optional on every module.** Measured on the
+EG916Q-GL: `+QSIMDET: 0,0`, so there is no hot-plug detection at all and a card
+fitted after boot is invisible until the module is reset.
+
+**And one SIM is visible at a time.** The mux is outside the module, so there
+is no way to ask about the other card without switching to it. `AT+CCID`
+through `netcfgd-modem-at iccid` is what says which one you are actually on --
+the ICCID is the only reliable discriminator, and an ISD-R probe is not: it
+reports absent at both mux positions, including one holding an eUICC.
+
 ## When something goes wrong
 
 **Ask what netcfgd thinks it did.** `ncfg status` for what the kernel has,
