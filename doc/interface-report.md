@@ -276,7 +276,7 @@ of them is privileged by netcfgd:
 
 - **`mbimcli`** from `libmbim-utils`. **There is one in this repository**:
   `helper/netcfgd-modem-mbim`, a shell script, installed by
-  `make install-modem-mbim`. It is a reference rather than a blessed
+  the `netcfgd-modem` package, or `make install-modem`. It is a reference rather than a blessed
   implementation -- netcfgd does not know it exists.
 - **`umbim`** on OpenWrt -- `+libubox +kmod-usb-net-cdc-mbim +wwan`, no glib and
   no D-Bus, on hardware where nothing heavier fits.

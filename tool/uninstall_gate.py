@@ -3,7 +3,7 @@
 
 This exists because it drifted, twice over and in opposite directions.
 
-`install-gui` and `install-modem-mbim` both placed files that `uninstall` had
+`install-gui` and `install-modem` both placed files that `uninstall` had
 never heard of, so removing netcfgd left root-owned binaries behind with
 nothing accounting for them. And `uninstall` removed
 `$(SYSCONFDIR)/netcfgd/netcfgd.conf`, which no install target has ever written

@@ -34,12 +34,15 @@ debian/.debhelper/
 debian/files
 debian/tmp/
 debian/netcfgd/
-# The second binary package's staging tree. Named rather than globbed as
-# `debian/netcfgd*/`, which would also swallow debian/netcfgd.postinst and any
-# other per-package packaging source somebody adds later -- the rule above
-# exists because debhelper's working state was committed once already.
+# The other binary packages' staging trees. Named rather than globbed as
+# `debian/netcfgd*/`, which would also swallow debian/netcfgd.postinst,
+# debian/netcfgd-modem.postrm and any other per-package packaging source
+# somebody adds later -- the rule above exists because debhelper's working
+# state was committed once already, and a glob here would hide the maintainer
+# scripts that are the packaging.
 debian/netcfgd-nm/
 debian/netcfgd-gui/
+debian/netcfgd-modem/
 
 # Python's own, beside whatever ran. `tools/` holds three gates now and
 # importing one leaves this; it is not build output anybody named, which is

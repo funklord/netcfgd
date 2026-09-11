@@ -355,6 +355,16 @@ files and configures interfaces; a **helper** talks to the module. That is
 decision 0044 and it is why this section is a list of things to run rather than
 a block of configuration.
 
+It is a separate package:
+
+```sh
+apt install netcfgd-modem
+```
+
+`Architecture: all` — three helpers, the quirks table, a udev rule, a systemd
+template unit and two SIM-select hook examples, none of it compiled and none of
+it useful on a machine with no modem.
+
 **Which helper is a property of the module, not a choice.** A module offering
 only ECM presents no `/dev/cdc-wdm` for `mbimcli` to open, so its whole control
 surface is AT over a tty. `/usr/share/netcfgd/modem-quirks` says which is which

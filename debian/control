@@ -34,8 +34,8 @@ Depends: ${shlibs:Depends}, ${misc:Depends}
 # means to take a bus name is close enough to that line to stay opt-in. A
 # Suggests is how somebody finds out it exists.
 Recommends: wpasupplicant, dhcpcd-base
-Suggests: netcfgd-nm, netcfgd-gui, hostapd, openvpn, ppp, pppoe, radvd,
- dnsmasq-base, unbound, openresolv, systemd-resolved
+Suggests: netcfgd-nm, netcfgd-gui, netcfgd-modem, hostapd, openvpn, ppp, pppoe,
+ radvd, dnsmasq-base, unbound, openresolv, systemd-resolved
 Description: network configuration daemon that states what it will do
  netcfgd reads one declarative configuration, reports what the machine
  currently looks like, and prints the exact list of operations that would
@@ -93,6 +93,51 @@ Description: NetworkManager-compatible D-Bus interface for netcfgd
  switch that cannot be undone by somebody who has just lost their network.
  NetworkManager's own connection profiles are never read or written by
  netcfgd, so it comes back knowing every network it knew.
+
+Package: netcfgd-modem
+Architecture: all
+# `${source:Version}` and not `${binary:Version}`, which is the rule for an
+# arch:all package depending on an arch:any one: a binNMU bumps the binary
+# version of netcfgd and not of this, and an exact dependency on the binary
+# version would then be unsatisfiable.
+Depends: ${misc:Depends}, netcfgd (= ${source:Version})
+# `mbimcli` for one of the three helpers and `gpiod` for the SIM-select hook
+# example, which is not run by anything as shipped. Neither is needed to
+# install this, and netcfgd-modem-at -- the one a board with no MBIM has to
+# use -- needs nothing but a serial port.
+Suggests: libmbim-utils, gpiod
+Description: cellular modem helpers for netcfgd
+ The programs that talk to a cellular module on netcfgd's behalf, and the
+ data that describes known modules. netcfgd itself drives no modem: it reads
+ a file a helper writes and publishes the SIM source and APN a helper reads,
+ and the two do not otherwise know about each other.
+ .
+ Three helpers, because one interface does not fit every module. MBIM through
+ mbimcli where glib is already paid for; MBIM through umbim for OpenWrt-class
+ boxes where it is not; and AT commands over a serial port, for the large
+ class of modules that offer neither MBIM nor QMI and appear only as a tty.
+ Which one a machine needs is a property of its module rather than a choice,
+ and /usr/share/netcfgd/modem-quirks says which is which for the modules
+ somebody has measured.
+ .
+ A udev rule gives the AT port a stable name and asks ModemManager to leave
+ it alone. Both matter on a module that is reset in ordinary operation --
+ switching SIM is a modem reset -- because the ttyUSB number moves, and
+ because ModemManager takes both AT ports once the modem registers, which is
+ exactly when the PDP context first has an APN and resolvers worth reading.
+ .
+ Architecture: all. Every file is a shell script or text; the work is done by
+ the module, by mbimcli or umbim, and by netcfgd.
+ .
+ Installing this package configures nothing and starts nothing. The systemd
+ unit is a template, installed and left disabled: which interface a module
+ presents is the operator's to say.
+ .
+ It ships two SIM-select hook examples and runs neither. netcfgd chooses
+ which SIM source it wants and publishes that; moving the mux means driving a
+ line that belongs to the board, and netcfgd has no GPIO. One example is
+ filled in for a mux on a GPIO expander driven with gpiod, and one is a bare
+ frame for a mux that is not GPIO at all.
 
 Package: netcfgd-gui
 Architecture: any

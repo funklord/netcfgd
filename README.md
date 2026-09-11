@@ -149,6 +149,14 @@ new setting.
 A quirks table explains known modules rather than deciding for them, so a
 module with no entry behaves identically and merely says less.
 
+The helpers, the quirks table, a udev rule that gives the AT port a stable
+name, a systemd template unit and two SIM-select hook examples are the
+**`netcfgd-modem`** package — `Architecture: all`, since every file is a shell
+script or text. Separate because a machine with no modem has no use for any of
+it, and a package rather than a source-tree target because the AT path needs
+nothing but a serial port and a board whose image is built from debs was
+getting none of it.
+
 **`ncfg modem` says which card each SIM source turned out to hold.** On a board
 that muxes two SIMs the module cannot be asked which one is selected — the mux
 is outside it — so the card's own identifier is the only fact that answers, and

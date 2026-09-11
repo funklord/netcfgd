@@ -9461,6 +9461,52 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.105 The modem work was not in the package
+
+Three rounds of making the cellular path installable, and then `dpkg -L
+netcfgd` carried zero modem files. `debian/rules` runs `install`,
+`install-systemd` and `install-sysvinit`; the helpers, the quirks table, the
+udev rule, the unit and the hook examples all lived in `install-modem-mbim`,
+which nothing in the packaging called. Everything was reachable only from a
+source tree -- and the board this was for builds its image from debs.
+
+The opt-in made sense when the target was `netcfgd-modem-mbim`, which needs
+`mbimcli`. It never fitted the AT path, which needs a serial port, or the
+quirks table, udev rule and unit, which need nothing at all.
+
+**`netcfgd-modem`, `Architecture: all`**, on the `netcfgd-nm` precedent: a
+separate dependency story, so a separate package. Every file is a shell script
+or text, so there is nothing to compile and no `-dbgsym`. The target is renamed
+`install-modem`, because the old name described one of the eight things it
+installs.
+
+### Two things the tree had already written down
+
+The `dist` move loop names each artifact rather than globbing, under a comment
+saying a glob "leaves a binary package in the parent directory for ever --
+which is what raidcfgd's rule found, and **adding a second binary package is
+exactly when it would have happened again**". It was, and the list was updated.
+
+And the deb gate iterates a hardcoded list of packages. A package missing from
+it is not checked for enabling or starting anything -- the gate would have gone
+on saying "none enables, starts or stops anything" about a set that no longer
+included the new one.
+
+### The template that debhelper does not see
+
+`dh_installsystemd` generated no maintainer script at all for the new package,
+where `netcfgd-nm` gets postinst, postrm and prerm. The difference is the `@`:
+a template cannot be enabled, so there is nothing for it to register.
+
+What that leaves is the **instances**. Enabling `netcfgd-modem-at@wwan0` puts a
+symlink in `multi-user.target.wants`; removing the package takes the template
+away and leaves the symlink pointing at nothing. Same defect the uninstall gate
+exists for, so it is closed with a postrm rather than noted.
+
+Checked from both sides on the real machine: with the postrm the orphan is
+gone after `dpkg -r`, and with the same package rebuilt without it the symlink
+is still there.
+
 ## 10.104 A worked hook is still not a GPIO in netcfgd
 
 The last thing between netcfgd and a working two-SIM board: netcfgd chooses a

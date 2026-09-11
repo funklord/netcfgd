@@ -1,0 +1,45 @@
+#!/bin/sh
+# Take the enable symlinks with the package.
+#
+# **debhelper generates nothing for this package, and that is correct.** Its
+# only unit is a template, `netcfgd-modem-at@.service`, and a template cannot
+# be enabled -- so `dh_installsystemd` has nothing to register and emits no
+# maintainer script at all. `netcfgd-nm` beside it ships a plain unit and gets
+# postinst, postrm and prerm; this one gets none, and the difference is the
+# `@`.
+#
+# What it leaves behind is the *instances*. An operator enables
+# `netcfgd-modem-at@wwan0`, which puts a symlink in
+# `/etc/systemd/system/multi-user.target.wants/`; removing the package takes
+# the template away and leaves the symlink pointing at nothing, and systemd
+# says so on every boot from then on.
+#
+# That is the same defect `tool/uninstall_gate.py` exists for -- removing
+# netcfgd leaving files behind with nothing accounting for them -- so it is
+# closed here rather than noted.
+#
+# Hand-written because there is no `deb-systemd-helper` idiom for it: the
+# helper works on unit names, and the names here are whatever interfaces this
+# machine's modules present, which the package cannot know.
+set -e
+
+case "$1" in
+remove | purge)
+	# Every `.wants` and `.requires` directory under /etc, which is where an
+	# enable puts a link. `-L` rather than `-e`: a dangling symlink fails an
+	# existence test, and a dangling symlink is exactly what this is for.
+	for link in /etc/systemd/system/*.wants/netcfgd-modem-at@*.service \
+	            /etc/systemd/system/*.requires/netcfgd-modem-at@*.service; do
+		[ -L "$link" ] || continue
+		rm -f "$link"
+	done
+	# Only where systemd is running and only to forget what was removed. Not
+	# a restart of anything: this package starts nothing and stops nothing.
+	if [ -d /run/systemd/system ]; then
+		systemctl --system daemon-reload >/dev/null 2>&1 || true
+	fi
+	;;
+upgrade | failed-upgrade | abort-install | abort-upgrade | disappear) ;;
+esac
+
+#DEBHELPER#

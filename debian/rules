@@ -49,6 +49,12 @@ override_dh_auto_install:
 	@# decide that this machine's other network daemons stop.
 	$(MAKE) install-nm DESTDIR=$(CURDIR)/debian/netcfgd-nm PREFIX=/usr
 	$(MAKE) install-sysvinit-nm DESTDIR=$(CURDIR)/debian/netcfgd-nm
+	@# The cellular helpers, the quirks table, the udev rule, the template
+	@# unit and the two SIM-select hook examples. Its own package because the
+	@# AT path needs nothing at all and was reachable only from a source tree
+	@# -- so a board whose image is built from debs got none of it -- while a
+	@# machine with no modem has no use for any of it.
+	$(MAKE) install-modem DESTDIR=$(CURDIR)/debian/netcfgd-modem PREFIX=/usr
 ifneq (,$(GUI_PROFILE))
 	$(MAKE) install-gui DESTDIR=$(CURDIR)/debian/netcfgd-gui PREFIX=/usr
 endif

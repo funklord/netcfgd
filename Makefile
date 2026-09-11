@@ -38,7 +38,7 @@
 #   make install-systemd, install-openrc, install-procd
 #                      -- the init glue for one system, chosen deliberately
 #   make install-gui   -- the Qt client, opt-in; not part of install
-#   make install-modem-mbim
+#   make install-modem
 #                      -- the reference modem helper; optional on purpose
 #   make uninstall     -- remove what install put there
 #   make deb           -- the Debian package; Depends read from the ELF
@@ -70,7 +70,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem-mbim install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
+.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -468,10 +468,19 @@ install:
 	@# example is not a feature's file and creates no capability, which is why
 	@# it does not breach that -- project.md section 1 records the distinction.
 
-# The reference modem helper. Optional and separate on purpose: decision 0045
-# says the helper is plural, and installing one by default would make it the
-# blessed one. It also needs `mbimcli`, which most machines have no use for.
-install-modem-mbim:
+# Everything a cellular machine needs and a machine without a modem does not:
+# three helpers, the quirks table, a udev rule, a systemd unit and two hook
+# examples. `debian/rules` stages it into the `netcfgd-modem` package.
+#
+# **Separate on purpose, and the reason changed.** It was separate because
+# `netcfgd-modem-mbim` needs `mbimcli` and most machines have no use for it,
+# and because 0045 says the helper is plural so installing one by default would
+# make it the blessed one. Both still hold. What made a *package* out of it is
+# that the AT path needs nothing at all -- a tty -- and was reachable only from
+# a source tree, so a board whose image is built from debs got none of it.
+#
+# `Architecture: all`: every file here is a shell script or text.
+install-modem:
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 0755 helper/netcfgd-modem-mbim $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	@# The AT helper goes with it: which one a machine needs is a property of
@@ -517,20 +526,20 @@ install-modem-mbim:
 	install -d $(DESTDIR)/usr/lib/systemd/system
 	install -m 0644 packaging/systemd/netcfgd-modem-at@.service \
 		$(DESTDIR)/usr/lib/systemd/system/netcfgd-modem-at@.service
-	@echo "install-modem-mbim: installed; it needs mbimcli from libmbim-utils"
-	@echo "install-modem-mbim: netcfgd-modem-at installed too, for modules that"
-	@echo "install-modem-mbim:   offer neither MBIM nor QMI -- it needs only a tty"
-	@echo "install-modem-mbim:   doc/interface-report.md is the contract -- write"
-	@echo "install-modem-mbim:   your own helper if this one does not fit"
-	@echo "install-modem-mbim: for a board that muxes two SIMs, copy"
-	@echo "install-modem-mbim:   share/netcfgd/hook/sim-select.example and fill in"
-	@echo "install-modem-mbim:   the two BOARD lines -- netcfgd has no GPIO"
-	@echo "install-modem-mbim: nothing runs a helper for you. For an AT module:"
-	@echo "install-modem-mbim:   udevadm control --reload && udevadm trigger"
-	@echo "install-modem-mbim:   systemctl enable --now netcfgd-modem-at@wwan0"
-	@echo "install-modem-mbim:   where wwan0 is the interface the modem presents"
+	@echo "install-modem: installed. netcfgd-modem-mbim needs mbimcli from"
+	@echo "install-modem:   libmbim-utils; netcfgd-modem-at needs only a tty,"
+	@echo "install-modem:   for modules offering neither MBIM nor QMI"
+	@echo "install-modem:   doc/interface-report.md is the contract -- write"
+	@echo "install-modem:   your own helper if this one does not fit"
+	@echo "install-modem: for a board that muxes two SIMs, copy"
+	@echo "install-modem:   share/netcfgd/hook/sim-select.example and fill in"
+	@echo "install-modem:   the two BOARD lines -- netcfgd has no GPIO"
+	@echo "install-modem: nothing runs a helper for you. For an AT module:"
+	@echo "install-modem:   udevadm control --reload && udevadm trigger"
+	@echo "install-modem:   systemctl enable --now netcfgd-modem-at@wwan0"
+	@echo "install-modem:   where wwan0 is the interface the modem presents"
 
-# The Qt client, opt-in the way install-modem-mbim is.
+# The Qt client, opt-in the way install-modem is.
 #
 # Not part of `make install`, and the reason is the same one that keeps it out
 # of the .deb: the daemon's whole claim is that it needs nothing, and a client
@@ -702,8 +711,12 @@ deb: version-check
 	@# names only the source package leaves a binary package in the parent
 	@# directory for ever -- which is what raidcfgd's rule found, and adding a
 	@# second binary package is exactly when it would have happened again.
+	@# `netcfgd-modem` has no `-dbgsym`: it is `Architecture: all` and carries
+	@# no compiled object to strip. Named anyway rather than globbed, which is
+	@# the rule this list exists to follow.
 	@for f in ../netcfgd_$(VERSION)_*.deb ../netcfgd-dbgsym_$(VERSION)_*.deb \
 	          ../netcfgd-nm_$(VERSION)_*.deb ../netcfgd-nm-dbgsym_$(VERSION)_*.deb \
+	          ../netcfgd-modem_$(VERSION)_*.deb \
 	          ../netcfgd-gui_$(VERSION)_*.deb ../netcfgd-gui-dbgsym_$(VERSION)_*.deb \
 	          ../netcfgd_$(VERSION)_*.buildinfo ../netcfgd_$(VERSION)_*.changes; do \
 		[ -e "$$f" ] && mv -f "$$f" $(DIST)/ || true; \
@@ -778,6 +791,7 @@ deb: version-check
 	seen=0; \
 	checked=0; \
 	for deb in $(DIST)/netcfgd_$(VERSION)_*.deb $(DIST)/netcfgd-nm_$(VERSION)_*.deb \
+	           $(DIST)/netcfgd-modem_$(VERSION)_*.deb \
 	           $(DIST)/netcfgd-gui_$(VERSION)_*.deb; do \
 		[ -e "$$deb" ] || continue; \
 		seen=$$(( seen + 1 )); \
@@ -1942,7 +1956,7 @@ distclean: veryclean
 # Named rather than globbed, and covering every install-* target rather than
 # only `install`, because an uninstall that leaves root-owned files behind is
 # how a machine ends up with a binary nobody can account for. `install-gui`
-# and `install-modem-mbim` were both missing.
+# and `install-modem` were both missing.
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/ncfg
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
@@ -1970,7 +1984,7 @@ uninstall:
 	rm -f $(DESTDIR)$(DATADIR)/dbus-1/system.d/netcfgd-nm.conf
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-nm.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd-nm
-	@# The example SIM-select hook, which install-modem-mbim ships beside the
+	@# The example SIM-select hook, which install-modem ships beside the
 	@# quirk table. An operator's copy of it lives elsewhere and is theirs.
 	rm -f $(DESTDIR)$(PREFIX)/share/netcfgd/hook/sim-select.example
 	@rmdir $(DESTDIR)$(PREFIX)/share/netcfgd/hook 2>/dev/null || true
