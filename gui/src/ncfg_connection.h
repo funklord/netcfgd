@@ -99,6 +99,14 @@ struct ncfg_profile_row {
  * source does not work. A view showing only one of them would either not say
  * what was asked for, or describe a machine that is not the machine.
  */
+/* A SIM source and the card a helper read while the module was on it. The
+ * ICCID is the only reliable way to tell which source a muxed board is
+ * reading -- the mux sits outside the module, so it cannot be asked. */
+struct ncfg_sim_card {
+	QString source;
+	QString iccid;
+};
+
 struct ncfg_modem_row {
 	QString     device;
 	QStringList sim;
@@ -107,6 +115,9 @@ struct ncfg_modem_row {
 	/* netcfgd has moved the selection and the link has not been cycled yet:
 	 * it wants the other SIM rather than being on it. */
 	bool        cycle_pending = false;
+	/* Not one per entry in `sim`: a source netcfgd has never been on has no
+	 * card, because learning what is in the other socket costs a switch. */
+	QList<ncfg_sim_card> cards;
 };
 
 /* One routing rule. `selector` is the matching half as one string: a rule with

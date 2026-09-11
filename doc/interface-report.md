@@ -94,6 +94,28 @@ dns=10.0.0.53
 | `dns` | yes | A nameserver. IPv4 or IPv6. |
 | `search` | yes | A suffix to complete an unqualified name with. One per line. **Not a routing domain** -- see below. |
 | `route` | yes | A route the far end handed over: `<destination>`, optionally followed by `via <gateway>`. |
+| `iccid` | no | The identifier of the SIM a cellular module is reading. Not addressing -- see below. |
+| `sim` | no | Which SIM source the writer had been asked for when it read that card. |
+
+**`iccid` and `sim` are the one pair here that is not addressing**, and they
+are what the "unknown keys are ignored" promise below was for: a modem helper
+knew them before netcfgd did, reported them, and netcfgd caught up. Nothing
+plans on them. They reach `ncfg modem` and stop.
+
+They exist because a board that muxes two SIMs **cannot be asked which one is
+selected** -- the mux sits outside the module, so the module does not know it
+is there, and an ISD-R probe answers "absent" at both positions including one
+demonstrably holding an eUICC. The card's own identifier is the only fact that
+says.
+
+**Report them as a pair or not at all.** An ICCID with no source names a card
+netcfgd cannot file, and the pairing has to be made by the writer because the
+writer is the only thing that saw both at one moment: netcfgd publishes a new
+SIM source the instant it advances, while the module is still reading the old
+card, so netcfgd pairing its own current selection with whatever ICCID last
+arrived would file one card under the other's name at exactly the moment a
+source changed. netcfgd ignores an unpaired `iccid` rather than guessing.
+
 
 A `route` line is spelled the way a `routes` line in a netcfgd config is, so
 that somebody reading a report and somebody reading a config are reading the

@@ -866,6 +866,12 @@ bool ncfg_connection::modems(QList<ncfg_modem_row> *out, QString *error)
 		row.selected = from_c(found.items[i].selected);
 		row.apn = from_c(found.items[i].apn);
 		row.cycle_pending = found.items[i].cycle_pending != 0;
+		for (size_t j = 0; j < found.items[i].card_count; j++) {
+			ncfg_sim_card card;
+			card.source = from_c(found.items[i].cards[j].source);
+			card.iccid = from_c(found.items[i].cards[j].iccid);
+			row.cards << card;
+		}
 		for (size_t j = 0; j < found.items[i].sim_count; j++) {
 			row.sim << from_c(found.items[i].sim[j]);
 		}

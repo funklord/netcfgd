@@ -330,6 +330,12 @@ fn maximal_report() -> ObservedReport {
 				via: None,
 			},
 		],
+		// The two a modem helper adds, which no other writer sets. Both, not
+		// one: they are only meaningful as a pair -- an ICCID with no source
+		// names a card netcfgd cannot file, and a source with no ICCID says
+		// nothing at all -- so a witness carrying one would pin half a fact.
+		iccid: Some("8946080023614318322".to_owned()),
+		sim: Some("socket".to_owned()),
 	}
 }
 

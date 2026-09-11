@@ -635,6 +635,16 @@ void ncfg_profiles_free(ncfg_profiles_t *profiles);
  * showing only the second cannot say what was asked for, and one showing only
  * the first describes a machine that is not the machine.
  */
+/* A SIM source and the card a helper read while the module was on it.
+ *
+ * The ICCID is the number printed on the card and returned by `AT+CCID`. It is
+ * the only reliable way to tell which source a muxed board is reading: the mux
+ * sits outside the module, so the module cannot be asked. */
+typedef struct {
+	char *source;
+	char *iccid;
+} ncfg_sim_card_t;
+
 typedef struct {
 	char  *device;
 	char **sim;
@@ -649,6 +659,15 @@ typedef struct {
 	 * been cycled yet -- the difference between "netcfgd wants the other
 	 * SIM" and "the machine is on the other SIM". */
 	int    cycle_pending;
+	/* The card seen in each source a helper has reported one for.
+	 *
+	 * Not one per entry in `sim`: a source netcfgd has never been on has no
+	 * card here, because the mux shows the module one SIM at a time and the
+	 * only way to learn what is in the other socket is to switch to it. So
+	 * `card_count` is between zero and `sim_count`, and an absent source is
+	 * the honest answer rather than a gap to fill in. */
+	ncfg_sim_card_t *cards;
+	size_t           card_count;
 } ncfg_modem_t;
 
 typedef struct {

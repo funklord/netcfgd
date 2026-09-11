@@ -882,6 +882,32 @@ pub struct ObservedReport {
 	/// parses.
 	#[serde(default)]
 	pub routes: Vec<ReportedRoute>,
+	/// The identifier of the SIM the module is reading, where it said.
+	///
+	/// **Not addressing, and the only field here that is not.** The contract
+	/// promises unknown keys are ignored so a writer can run ahead of netcfgd,
+	/// and names `operator=` as the kind of thing a writer might know; this is
+	/// that promise taken up. Nothing plans on it -- it reaches `ncfg modem`
+	/// and stops there.
+	///
+	/// It exists because a board that muxes two SIMs cannot be asked which one
+	/// is selected: the mux sits outside the module, so the card's own
+	/// identifier is the only fact that says which is being read. An ISD-R
+	/// probe is not an alternative -- measured, it reports absent at both mux
+	/// positions, including one demonstrably holding an eUICC.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub iccid: Option<String>,
+	/// Which SIM source the writer had been asked for when it read that card.
+	///
+	/// **Paired by the writer, because only the writer saw both at once.**
+	/// netcfgd publishes the source it wants; the helper reads the card some
+	/// seconds later, across a modem reset. netcfgd pairing its own current
+	/// selection with whatever ICCID last appeared would sooner or later file
+	/// one card under the other's name -- an advance publishes the new source
+	/// immediately and the module is still reading the old card. The helper
+	/// knows which source it was working on, so it is the one that says.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub sim: Option<String>,
 }
 
 /// One route a report names.

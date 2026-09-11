@@ -257,6 +257,13 @@ impl State {
 			// observation without the verdicts stamped on would say `None`
 			// for a link that has just been declared down.
 			self.probes.apply(&mut self.observed);
+			// Which card each SIM source turned out to hold, from whatever a
+			// modem helper reported. Here rather than in `status` because the
+			// pairing has to be taken when it is observed: a helper rewrites
+			// its report and moves on, and a client that asks an hour later
+			// would be reading whatever the last report happened to say.
+			self.sims
+				.observe(self.desired.as_ref(), &self.observed.reports);
 			let _ = run_state::write_observed(&self.paths.run, &self.observed);
 		}
 		link_shape(&self.observed) != before

@@ -27,15 +27,46 @@
 #
 # ## WHAT IT DOES NOT DO, WHICH IS MOST OF IT
 #
-# **It writes no interface report, and that is not an omission.** On ECM the
-# module presents an ordinary ethernet interface and runs a DHCP server on it,
-# handing over the address the operator assigned. So the host takes a lease like
-# it would from any other server, and netcfgd needs `config = "dhcp"` on the
+# **It reports no addressing, and that is not an omission.** On ECM the module
+# presents an ordinary ethernet interface and runs a DHCP server on it, handing
+# over the address the operator assigned. So the host takes a lease like it
+# would from any other server, and netcfgd needs `config = "dhcp"` on the
 # interface and nothing else. A helper reporting an address it did not obtain
 # would be a second writer for a job DHCP already does.
 #
 # It does not configure the interface either -- that is netcfgd's, and two
 # writers on one interface is the failure the whole arrangement avoids.
+#
+# **What it does report is the card**, which nothing else can. See below.
+#
+# ## THE ONE THING ONLY THIS CAN SAY: WHICH SIM
+#
+# A board that muxes two SIMs cannot be asked which one is selected. The mux is
+# outside the module, so the module does not know it is there, and an ISD-R
+# probe does not help -- measured, it answers "absent" at both positions,
+# including one demonstrably holding an eUICC. The card's own identifier is the
+# only fact that says which source is being read.
+#
+# So after a successful attach this writes, to the interface report:
+#
+#     iccid=8946080023614318322
+#     sim=socket
+#
+# `iccid` is `AT+CCID`. `sim` is the source netcfgd asked for, read back out of
+# the file netcfgd published -- and the pairing is made **here** because this is
+# the only place both are true at the same moment. netcfgd publishes a new
+# source the instant it advances, while the module is still reading the old
+# card; anything pairing those on netcfgd's side would file one card under the
+# other's name exactly when a source changed, which is the only time it matters.
+#
+# The contract promises unknown keys are ignored, and names `operator=` as the
+# kind of thing a writer might know before netcfgd does. This is that promise
+# taken up rather than an extension of it: a netcfgd too old to understand
+# these skips them.
+#
+# It stays no addressing. The file carries these two keys and nothing else, so
+# on a `config = "dhcp"` interface -- which is what ECM wants -- it contributes
+# nothing netcfgd would plan on.
 #
 # ## KNOWING WHETHER IT WORKS IS A PROBE, NOT THIS
 #
@@ -306,6 +337,50 @@ field() {
 		head -1
 }
 
+# The card's own identifier, which is the fact about which SIM is current.
+#
+# `AT+CCID` is the standard spelling and `AT+QCCID` is Quectel's; a module
+# answering neither leaves this empty, which is reported as nothing rather than
+# as a card called "ERROR".
+read_iccid() {
+	at "AT+CCID" 2>/dev/null | sed -n 's/.*+[QC]*CCID: *\([0-9A-Fa-f]*\).*/\1/p' |
+		head -1
+}
+
+# Tell netcfgd which card this source turned out to hold.
+#
+# **Written atomically, because netcfgd may read at any moment.** The contract
+# is explicit: a temporary file in the same directory and a rename over the
+# target, and the temporary name begins with a dot so that netcfgd skips it if
+# it looks while the write is in flight. A rename is only atomic within one
+# filesystem, so the same directory is not negotiable.
+#
+# Silent where it cannot write. This is a diagnostic the helper adds on top of
+# its job, and a modem that attached should not be reported as failed because
+# `/run` was read-only.
+report_card() {
+	[ -n "$interface" ] || return 0
+
+	iccid=$(read_iccid)
+	[ -n "$iccid" ] || return 0
+	source=$(published sim)
+	[ -n "$source" ] || return 0
+
+	directory="$run_dir/reported"
+	mkdir -p "$directory" 2>/dev/null || return 0
+	temporary="$directory/.$interface.tmp"
+	{
+		echo "# $interface, written by netcfgd-modem-at"
+		echo "iccid=$iccid"
+		echo "sim=$source"
+	} > "$temporary" 2>/dev/null || return 0
+	mv -f "$temporary" "$directory/$interface" 2>/dev/null || {
+		rm -f "$temporary" 2>/dev/null
+		return 0
+	}
+	echo "netcfgd-modem-at: $source holds card $iccid" >&2
+}
+
 do_attach() {
 	quiet
 	set_apn || return 1
@@ -384,6 +459,9 @@ do_attach() {
 			echo "netcfgd-modem-at:   this says the bearer is up and nothing" >&2
 			echo "netcfgd-modem-at:   about whether it carries traffic --" >&2
 			echo "netcfgd-modem-at:   configure a probe on the interface" >&2
+			# After the attach rather than before it: the card is read through
+			# the same module, and a module still resetting answers nothing.
+			report_card
 			return 0
 		fi
 		sleep 2

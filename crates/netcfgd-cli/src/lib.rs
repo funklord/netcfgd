@@ -1336,6 +1336,21 @@ fn render_modems(modems: &[netcfgd_proto::ModemStatus], json: bool) -> Result<()
 		if let Some(apn) = &modem.apn {
 			println!("    apn: {apn}");
 		}
+		// **Only the sources a card has actually been read on.** The mux shows
+		// the module one SIM at a time, so a source netcfgd has never been on
+		// has nothing to show and saying so by omission beats inventing a
+		// placeholder. `in use` marks the one the module is reading now, which
+		// is the question this answers: a muxed board cannot be asked which
+		// source is selected, and the card's own identifier is the only fact
+		// that says.
+		for card in &modem.cards {
+			let here = if modem.selected.as_ref() == Some(&card.source) {
+				"  (in use)"
+			} else {
+				""
+			};
+			println!("    {} card: {}{here}", card.source, card.iccid);
+		}
 	}
 	Ok(())
 }

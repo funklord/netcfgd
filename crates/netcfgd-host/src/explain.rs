@@ -996,6 +996,8 @@ mod tests {
 			nameservers: Vec::new(),
 			search: Vec::new(),
 			routes: Vec::new(),
+			iccid: None,
+			sim: None,
 		});
 
 		let explanation = explain(
@@ -1034,6 +1036,8 @@ mod tests {
 			nameservers: Vec::new(),
 			search: Vec::new(),
 			routes: Vec::new(),
+			iccid: None,
+			sim: None,
 		});
 
 		let explanation = explain(
@@ -1063,6 +1067,8 @@ mod tests {
 			nameservers: Vec::new(),
 			search: Vec::new(),
 			routes: Vec::new(),
+			iccid: None,
+			sim: None,
 		});
 
 		let explanation = explain(

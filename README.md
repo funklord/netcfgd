@@ -149,6 +149,13 @@ new setting.
 A quirks table explains known modules rather than deciding for them, so a
 module with no entry behaves identically and merely says less.
 
+**`ncfg modem` says which card each SIM source turned out to hold.** On a board
+that muxes two SIMs the module cannot be asked which one is selected — the mux
+is outside it — so the card's own identifier is the only fact that answers, and
+the helper reports it paired with the source it was read on. The list fills in
+as sources are used: a source netcfgd has not been on has no card, because
+learning what is in the other socket costs a switch and a modem reset.
+
 ## Bluetooth
 
 A `bluetooth` block per device, with a closed set of profiles: **PAN/NAP**

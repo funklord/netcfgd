@@ -1057,6 +1057,79 @@ static void radios_carry_the_three_states_a_client_has_to_tell_apart(void)
 	staged_close(&staged);
 }
 
+/* The modem list, which nothing here read until the cards arrived.
+ *
+ * `ncfg_client_modems` had no test at all -- the witness exercised the parser
+ * by being parsed, which says it does not crash and nothing about what it
+ * extracted. The cards made that worth fixing rather than extending: a source
+ * and an ICCID are two strings that are only meaningful paired, and a parser
+ * that dropped one would look exactly like a board that had not been on that
+ * source yet. */
+static void a_modem_carries_the_card_read_in_each_source(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[1024];
+
+	char answers[1024];
+	snprintf(answers, sizeof(answers), "%s",
+	     "{\"response\":\"modems\",\"modems\":["
+	     "{\"device\":\"wwan0\",\"sim\":[\"esim\",\"socket\"],"
+	     "\"selected\":\"socket\",\"apn\":\"im.cxn\",\"cycle_pending\":true,"
+	     "\"cards\":[{\"source\":\"esim\",\"iccid\":\"8946111\"},"
+	     "{\"source\":\"socket\",\"iccid\":\"8946222\"}]},"
+	     "{\"device\":\"wwan1\",\"sim\":[\"socket\"],\"selected\":\"socket\"}]}\n");
+	if (!staged_open(&staged, "a modem list can be staged", answers)) {
+		return;
+	}
+
+	ncfg_modems_t modems;
+	if (ncfg_client_modems(staged.client, &modems, err, sizeof(err))) {
+		(void)received(staged.server, sent, sizeof(sent));
+		ok("two modems come back", modems.count == 2, err);
+		if (modems.count == 2) {
+			equals("the device survives", modems.items[0].device, "wwan0");
+			equals("and the source in use", modems.items[0].selected, "socket");
+			ok("and the pending flag", modems.items[0].cycle_pending != 0, "");
+			ok("both sources are listed", modems.items[0].sim_count == 2, "");
+
+			ok("both cards come back", modems.items[0].card_count == 2, "");
+			if (modems.items[0].card_count == 2) {
+				/* Paired, and in the document's order. A parser that
+				 * took the fields positionally rather than by name
+				 * would pass the counts above and fail here. */
+				equals("the first card names its source",
+				       modems.items[0].cards[0].source, "esim");
+				equals("and its number",
+				       modems.items[0].cards[0].iccid, "8946111");
+				equals("the second names the other source",
+				       modems.items[0].cards[1].source, "socket");
+				equals("and its number",
+				       modems.items[0].cards[1].iccid, "8946222");
+			}
+
+			/* **A modem with no `cards` member at all**, which is what a
+			 * board netcfgd has not been on any source of looks like, and
+			 * what an older daemon sends. Zero rather than a crash, and
+			 * the count is what the caller loops on. */
+			ok("a modem with no cards has none",
+			   modems.items[1].card_count == 0 && modems.items[1].cards == NULL, "");
+		}
+		ncfg_modems_free(&modems);
+	} else {
+		ok("two modems come back", 0, err);
+	}
+
+	/* Freeing a list that was never filled in is nothing, which is the trap
+	 * calloc(0) sets: a machine with no modem at all takes this path. */
+	ncfg_modems_t empty;
+	memset(&empty, 0, sizeof(empty));
+	ncfg_modems_free(&empty);
+	ok("freeing an empty modem list is nothing", 1, "");
+
+	staged_close(&staged);
+}
+
 static void joining_names_a_network_and_never_a_secret(void)
 {
 	struct staged staged;
@@ -1973,6 +2046,7 @@ int main(int argc, char **argv)
 	an_enterprise_network_sends_a_nested_eap_object();
 	storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer();
 	radios_carry_the_three_states_a_client_has_to_tell_apart();
+	a_modem_carries_the_card_read_in_each_source();
 	saved_networks_come_from_the_document_not_a_scan();
 	dns_reports_that_it_is_not_managing_resolution();
 	a_link_knows_whether_a_default_route_leaves_through_it();

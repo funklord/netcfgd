@@ -460,6 +460,14 @@ fn every_response() -> Vec<Response> {
 					selected: Some("socket".to_owned()),
 					apn: Some("im.cxn".to_owned()),
 					cycle_pending: true,
+					// One card and two sources, deliberately: a witness
+					// carrying one per source would pin the shape that is
+					// wrong. A source netcfgd has not been on has no card,
+					// because the mux shows the module one SIM at a time.
+					cards: vec![netcfgd_proto::SimCard {
+						source: "socket".to_owned(),
+						iccid: "8946080023614318322".to_owned(),
+					}],
 				},
 				netcfgd_proto::ModemStatus {
 					device: "wwan1".to_owned(),
@@ -467,6 +475,9 @@ fn every_response() -> Vec<Response> {
 					selected: Some("socket".to_owned()),
 					apn: None,
 					cycle_pending: false,
+					// And none at all, which is the ordinary case until a
+					// helper has reported one.
+					cards: Vec::new(),
 				},
 			],
 		}])

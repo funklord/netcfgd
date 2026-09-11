@@ -1939,6 +1939,11 @@ void ncfg_modems_free(ncfg_modems_t *modems)
 		free(modems->items[i].sim);
 		free(modems->items[i].selected);
 		free(modems->items[i].apn);
+		for (size_t j = 0; j < modems->items[i].card_count; j++) {
+			free(modems->items[i].cards[j].source);
+			free(modems->items[i].cards[j].iccid);
+		}
+		free(modems->items[i].cards);
 	}
 	free(modems->items);
 	modems->items = NULL;
@@ -1989,6 +1994,30 @@ int ncfg_client_modems(ncfg_client_t *client, ncfg_modems_t *out, char *err,
 		out->items[i].apn = member_text(doc, entry, "apn");
 		out->items[i].cycle_pending =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "cycle_pending"), 0);
+
+		/* Before `sim`, because the loop below `continue`s on a modem
+		 * block that lists no source -- an ordinary configuration, an APN
+		 * with the SIM left alone -- and anything after it would be
+		 * skipped for exactly those. */
+		uint32_t cards = ncfg_json_member(doc, entry, "cards");
+		uint32_t seen = ncfg_json_count(doc, cards);
+		if (seen) {
+			out->items[i].cards = calloc(seen, sizeof(*out->items[i].cards));
+			if (!out->items[i].cards) {
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				ncfg_modems_free(out);
+				return 0;
+			}
+			out->items[i].card_count = seen;
+			for (uint32_t j = 0; j < seen; j++) {
+				uint32_t card = ncfg_json_at(doc, cards, j);
+				out->items[i].cards[j].source =
+				    member_text(doc, card, "source");
+				out->items[i].cards[j].iccid =
+				    member_text(doc, card, "iccid");
+			}
+		}
 
 		uint32_t sim = ncfg_json_member(doc, entry, "sim");
 		uint32_t sources = ncfg_json_count(doc, sim);

@@ -80,9 +80,17 @@ RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
 
-# The one directory it reads: netcfgd's, for the published SIM source and APN.
-# Read-only, because the traffic in that direction is netcfgd's to write.
+# netcfgd's run directory, which this both reads and writes -- and the two
+# halves are different directories on purpose.
+#
+# It *reads* `/run/netcfgd/modem/%i`, which netcfgd writes: the SIM source and
+# the APN. It *writes* `/run/netcfgd/reported/%i`, which is the interface
+# report, carrying the one fact only a helper can know -- which card the module
+# is actually reading. Everything else under `/run/netcfgd` is netcfgd's and
+# stays read-only, so a grant for the report cannot become a grant for the
+# selection this helper is supposed to be obeying.
 ReadOnlyPaths=/run/netcfgd
+ReadWritePaths=/run/netcfgd/reported
 
 [Install]
 WantedBy=multi-user.target

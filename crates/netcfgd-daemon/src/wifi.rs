@@ -1177,6 +1177,8 @@ mod tests {
 			nameservers: vec!["10.0.0.1".to_owned()],
 			search: vec!["vibes.se".to_owned()],
 			routes: Vec::new(),
+			iccid: None,
+			sim: None,
 		});
 
 		let plan = netcfgd_plan::plan(&document, &observed, &netcfgd_plan::PlanOptions::default());

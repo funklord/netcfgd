@@ -463,10 +463,23 @@ EG916Q-GL: `+QSIMDET: 0,0`, so there is no hot-plug detection at all and a card
 fitted after boot is invisible until the module is reset.
 
 **And one SIM is visible at a time.** The mux is outside the module, so there
-is no way to ask about the other card without switching to it. `AT+CCID`
-through `netcfgd-modem-at iccid` is what says which one you are actually on --
-the ICCID is the only reliable discriminator, and an ISD-R probe is not: it
-reports absent at both mux positions, including one holding an eUICC.
+is no way to ask about the other card without switching to it. The ICCID is the
+only reliable discriminator -- an ISD-R probe is not, reporting absent at both
+mux positions including one holding an eUICC -- and the helper reports it, so
+`ncfg modem` says which card each source turned out to hold:
+
+```
+wwan0  socket  fallen back
+    sources: esim, socket
+    apn: internet.cxn
+    esim card: 8946080801619663722
+    socket card: 8946080023614318322  (in use)
+```
+
+**The list fills in as sources are used, and that is the honest shape.** A
+source netcfgd has never been on has no card listed, because learning what is
+in the other socket costs a switch, a modem reset and the link. Nothing can
+show you both at once; this shows you both once both have been tried.
 
 ## When something goes wrong
 

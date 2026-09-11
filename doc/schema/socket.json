@@ -54,7 +54,7 @@
 {"response":"ok"}
 {"response":"error","message":"not permitted"}
 {"response":"secrets","secrets":[{"name":"cafe","stored":true,"used_by":["network Cafe"]},{"name":"campus","stored":false,"used_by":["network Campus"]},{"name":"old-vpn","stored":true}]}
-{"response":"modems","modems":[{"device":"wwan0","sim":["esim","socket"],"selected":"socket","apn":"im.cxn","cycle_pending":true},{"device":"wwan1","sim":["socket"],"selected":"socket"}]}
+{"response":"modems","modems":[{"device":"wwan0","sim":["esim","socket"],"selected":"socket","apn":"im.cxn","cycle_pending":true,"cards":[{"source":"socket","iccid":"8946080023614318322"}]},{"device":"wwan1","sim":["socket"],"selected":"socket"}]}
 {"response":"profiles","profiles":[{"name":"offline","shipped":true},{"name":"office","shipped":false}],"chosen":"office"}
 {"response":"configs","configs":[{"file":"netcfgd.conf","removable":false,"text":"global { }\n"},{"name":"wifi-home","file":"conf.d/wifi-home.conf","removable":true,"text":"network \"home\" { }\n"}]}
 {"response":"probes","probes":[{"name":"default","directory":"/usr/share/netcfgd/probe","text":"#!/bin/sh\nexit 0\n","editable":false},{"name":"office","directory":"/etc/netcfgd/probe","text":"#!/bin/sh\nexit 1\n","editable":true}]}

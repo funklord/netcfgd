@@ -300,6 +300,47 @@ wait "$writer" 2>/dev/null || true
 contains "a late publication is waited for" "$out" "published"
 contains "and its apn is the one used" "$out" "attached on late.cxn"
 
+# 9. **The card, paired with the source it was read on.** A muxed board cannot
+#    be asked which SIM is selected -- the mux is outside the module -- so the
+#    card's own identifier is the only fact that says. The pairing is made here
+#    rather than by netcfgd, because this is the only place both are true at
+#    the same moment.
+#
+#    A modem of its own, with the ICCID named here: asserting a value this case
+#    did not set would be pinning whatever the previous case happened to leave
+#    behind, which is a test that passes for a reason it does not state.
+stop_modem
+start_modem --iccid 8944111122223333444
+rm -f "$NCFG_RUN_DIR/modem/wwan0" "$NCFG_RUN_DIR/reported/wwan0"
+mkdir -p "$NCFG_RUN_DIR/modem"
+printf 'sim=esim\napn=im.cxn\n' > "$NCFG_RUN_DIR/modem/wwan0"
+out=$(sh "$helper" attach -p "$port" -i wwan0 2>&1 || true)
+contains "the card is read and said" "$out" "esim holds card 8944111122223333444"
+report=$(cat "$NCFG_RUN_DIR/reported/wwan0" 2>/dev/null || echo MISSING)
+contains "an interface report is written" "$report" "iccid=8944111122223333444"
+contains "naming the source it was read on" "$report" "sim=esim"
+
+# **And no addressing, which is the half that must stay absent.** On ECM the
+# address is a DHCP lease; a helper reporting one would be a second writer for
+# a job the client already does. The report carries two keys and nothing else.
+lacks "and no address" "$report" "address="
+lacks "no gateway" "$report" "gateway="
+lacks "and no nameserver" "$report" "dns="
+
+# No source published means no pairing, and an unpaired card is not written.
+# netcfgd could not use it: an ICCID with no idea which source it belongs to is
+# a fact about nothing, and guessing would be worse than staying quiet.
+rm -f "$NCFG_RUN_DIR/modem/wwan0" "$NCFG_RUN_DIR/reported/wwan0"
+out=$(sh "$helper" attach -p "$port" -i wwan0 -a im.cxn 2>&1 || true)
+contains "an attach with no published source still works" "$out" "attached on"
+lacks "and claims no card" "$out" "holds card"
+if [ -e "$NCFG_RUN_DIR/reported/wwan0" ]; then
+	echo "FAIL an unpaired card is not reported"
+	failures=$((failures + 1))
+else
+	echo "ok   an unpaired card is not reported"
+fi
+
 # And the wait is bounded rather than indefinite: a device with no `modem`
 # block never publishes, and holding the modem down for ever over a file that
 # is never coming would be worse than attaching without an APN.

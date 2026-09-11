@@ -9461,6 +9461,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.103 The card is the only thing that says which SIM
+
+10.102 ended by naming what it had not done: the ICCID is the only reliable
+discriminator of which SIM source a module is reading, the AT helper could read
+it, and it appeared nowhere netcfgd reported.
+
+**A muxed board cannot be asked which SIM is selected.** The mux sits outside
+the module, so the module has no register that answers, and netcfgd knows only
+which source it *asked* for -- a different question, and exactly the one that
+goes wrong, because a request that did not take looks identical to one that
+did. The obvious alternative fails too: an ISD-R probe reports absent at both
+mux positions, including one demonstrably holding an eUICC.
+
+### The pairing belongs to the writer
+
+The helper reports `iccid=` and `sim=` together, and netcfgd must not make that
+pairing itself. It publishes a new source the instant it advances while the
+module is still reading the old card, so pairing its own current selection with
+whatever ICCID last arrived would file one card under the other's name at
+exactly the moment a source changed -- the only moment anybody looks.
+
+The helper is the only thing that saw both at one time. An `iccid` with no
+`sim` contributes nothing, which is what an older helper sends, and filling it
+in from the current selection is the same defect wearing a hat.
+
+The test drives that window: advance to `socket`, deliver a report still saying
+`esim`, check the card lands on `esim`. Paired from `chosen` instead, it lands
+on both.
+
+### No new channel was needed
+
+`interface-report.md` has always promised that unknown keys are ignored so a
+writer can run ahead of netcfgd. This is that promise being taken up rather
+than extended. It stays no addressing -- `takes_reports` is false for a
+`config = "dhcp"` interface, so nothing in the report can reach a plan, and the
+tests assert the absence of `address=`, `gateway=` and `dns=` rather than
+trusting the sentence.
+
+### What is shown is what has been seen
+
+`ncfg modem` lists the card for each source a helper has reported one for, in
+document order, marking the one in use. **Not one line per listed source**: a
+source netcfgd has never been on has no card, and the absence is honest rather
+than a gap. Nothing can show both at once; this shows both once both have been
+tried.
+
+The memory sits beside `chosen` and is disposable for the same reason -- a card
+can be swapped while the machine is off, and a remembered ICCID that outlived
+its card would be a confident wrong answer.
+
+### The C client had no modem test at all
+
+Adding a field meant adding to a function nothing tested; the witness exercised
+the parser by being parsed. A source and an ICCID mean nothing apart, so a
+transposing parser would look like a board reporting odd cards. There is a test
+now, and swapping the two `member_text` keys takes it red.
+
+Decision 0210.
+
 ## 10.102 A helper nobody was running
 
 Asked whether netcfgd could be put on a two-SIM LTE board, the honest answer

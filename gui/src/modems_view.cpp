@@ -34,17 +34,34 @@ QString state_of(const ncfg_modem_row &modem)
 	return QString();
 }
 
+/* The cards, one source per line, with the one the module is reading now
+ * marked. Only the sources a card has actually been read on: the mux shows the
+ * module one SIM at a time, so a source netcfgd has never been on has nothing
+ * to show, and an empty cell says that better than a placeholder would. */
+QString cards_of(const ncfg_modem_row &modem)
+{
+	QStringList lines;
+	for (const ncfg_sim_card &card : modem.cards) {
+		const QString here =
+		    modem.selected == card.source ? QStringLiteral(" (in use)") : QString();
+		lines << QStringLiteral("%1 %2%3").arg(card.source, card.iccid, here);
+	}
+	return lines.join(QStringLiteral(", "));
+}
+
 } /* namespace */
 
 ncfg_modems_view::ncfg_modems_view(ncfg_connection *connection, QWidget *parent)
     : QWidget(parent), connection(connection)
 {
 	/* In the order the questions get asked: which device, what was asked for,
-	 * what is in force, whether netcfgd is mid-switch, and the APN -- last
-	 * because it is the one that does not change. */
+	 * what is in force, whether netcfgd is mid-switch, the APN, and which card
+	 * turned out to be in each source. The last two change least -- the APN
+	 * never, and a card only when somebody opens the unit. */
 	QStringList columns;
 	columns << QStringLiteral("device") << QStringLiteral("sim") << QStringLiteral("in use")
-	        << QStringLiteral("state") << QStringLiteral("apn");
+	        << QStringLiteral("state") << QStringLiteral("apn")
+	        << QStringLiteral("cards");
 	table = new ncfg_table_view(columns, QStringLiteral("modems_note"), this);
 
 	auto *layout = new QVBoxLayout(this);
@@ -74,6 +91,7 @@ void ncfg_modems_view::refresh()
 		cells << modem.selected;
 		cells << state_of(modem);
 		cells << modem.apn;
+		cells << cards_of(modem);
 		rows << cells;
 	}
 	table->show_rows(rows);
@@ -92,6 +110,9 @@ void ncfg_modems_view::refresh()
 	    "`sim` is what the configuration asks for, in order. `in use` is where netcfgd "
 	    "has got to: it moves to the next source when this interface's probe says the "
 	    "link does not work, and stops at the last one rather than starting over. A "
-	    "modem with no probe configured never falls back."));
+	    "modem with no probe configured never falls back. `cards` fills in as sources "
+	    "are used -- the mux shows the module one SIM at a time, so the only way to "
+	    "learn what is in the other socket is to switch to it, and a source with no "
+	    "card listed is one netcfgd has not been on."));
 	emit reported(QStringLiteral("%1 modems").arg(rows.size()));
 }

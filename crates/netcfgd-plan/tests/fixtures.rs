@@ -1844,6 +1844,8 @@ fn reporting(addresses: &[&str], gateways: &[&str]) -> Observed {
 		nameservers: Vec::new(),
 		search: Vec::new(),
 		routes: Vec::new(),
+		iccid: None,
+		sim: None,
 	});
 	observed
 }
@@ -2093,6 +2095,8 @@ interface vpn0 { }
 			destination: "10.0.0.0/8".to_owned(),
 			via: Some("10.8.0.1".to_owned()),
 		}],
+		iccid: None,
+		sim: None,
 	});
 
 	let plan = settle(&desired, &mut observed);
@@ -2137,6 +2141,8 @@ interface vpn0 {
 		nameservers: vec!["10.0.0.53".to_owned()],
 		search: Vec::new(),
 		routes: Vec::new(),
+		iccid: None,
+		sim: None,
 	});
 
 	let plan = settle(&desired, &mut observed);
@@ -2174,6 +2180,8 @@ interface ppp0 {{
 			nameservers: vec!["195.190.228.10".to_owned()],
 			search: Vec::new(),
 			routes: Vec::new(),
+			iccid: None,
+			sim: None,
 		});
 		observed
 	};
@@ -2221,6 +2229,8 @@ interface vpn0 {
 		nameservers: vec!["10.0.0.53".to_owned()],
 		search: Vec::new(),
 		routes: Vec::new(),
+		iccid: None,
+		sim: None,
 	});
 
 	let plan = settle(&desired, &mut observed);
@@ -6249,6 +6259,8 @@ fn a_reported_search_suffix_follows_the_servers() {
 		nameservers: vec!["192.168.1.1".to_owned()],
 		search: vec!["lan.example".to_owned()],
 		routes: Vec::new(),
+		iccid: None,
+		sim: None,
 	};
 
 	// Asked for: `dns { }` claims what the network offers.
@@ -6353,6 +6365,8 @@ interface eth0 { config = "dhcp" }
 		nameservers: vec!["192.168.1.1".to_owned()],
 		search: Vec::new(),
 		routes: Vec::new(),
+		iccid: None,
+		sim: None,
 	});
 	let offered = plan(&desired, &observed, &PlanOptions::default());
 	assert!(

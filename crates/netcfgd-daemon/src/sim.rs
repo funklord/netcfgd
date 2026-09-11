@@ -13,7 +13,7 @@
 //! to rediscover. What moves is the index, which is derived and disposable and
 //! gone after a reboot, so a cold start begins at the preference again.
 
-use netcfgd_model::{Device, Document};
+use netcfgd_model::{Device, Document, ObservedReport};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -30,6 +30,19 @@ pub(crate) struct Sims {
 	/// is planned, so a plan that could not run is tried again rather than
 	/// leaving the machine on a source nothing ever selected.
 	pending: BTreeSet<String>,
+	/// The card seen in each source, per device: `device -> source -> iccid`.
+	///
+	/// **Derived and disposable, like `chosen` above.** It is rebuilt as
+	/// sources are used and gone after a reboot, which is right: a card can be
+	/// swapped while the machine is off, and a remembered ICCID that outlived
+	/// the card it named would be a confident wrong answer to the one question
+	/// this exists to settle.
+	///
+	/// Filled in only for sources a helper has reported a card for. A source
+	/// netcfgd has never been on has no entry, and that absence is the honest
+	/// answer -- the mux shows the module one SIM at a time, so learning what
+	/// is in the other socket costs a switch, a modem reset and the link.
+	cards: HashMap<String, HashMap<String, String>>,
 }
 
 /// Where the selection is published, per the mirror of the interface report.
@@ -134,15 +147,72 @@ impl Sims {
 			.map(|device| {
 				let policy = device.modem.as_ref().expect("filtered on is_some");
 				let index = self.chosen.get(&device.name).copied().unwrap_or(0);
+				// Ordered by the document's own list rather than by whatever
+				// order the map iterates, so two runs on one machine print the
+				// same thing and a source the operator put first reads first.
+				let seen = self.cards.get(&device.name);
+				let cards = policy
+					.sim
+					.iter()
+					.filter_map(|source| {
+						seen?.get(source).map(|iccid| netcfgd_proto::SimCard {
+							source: source.clone(),
+							iccid: iccid.clone(),
+						})
+					})
+					.collect();
 				netcfgd_proto::ModemStatus {
 					device: device.name.clone(),
 					sim: policy.sim.clone(),
 					selected: policy.sim.get(index).cloned(),
 					apn: policy.apn.clone(),
 					cycle_pending: self.pending.contains(&device.name),
+					cards,
 				}
 			})
 			.collect()
+	}
+
+	/// Take note of the cards helpers have reported, so `status` can show them.
+	///
+	/// **The pairing comes from the report, not from `chosen`.** netcfgd
+	/// publishes the source it wants and a helper reads the card some seconds
+	/// later, across a modem reset -- so pairing the current selection with
+	/// whatever ICCID last appeared would file one card under the other's name
+	/// every time a source advanced. An advance publishes immediately while
+	/// the module is still reading the old card, which is exactly the window
+	/// where that mistake would be made and would then persist.
+	///
+	/// So a report without a `sim` key contributes nothing. It is not an
+	/// error, and older helpers write exactly that: an ICCID with no idea
+	/// which source it belongs to is a fact netcfgd cannot use, and guessing
+	/// would be worse than not showing it.
+	///
+	/// A source is only accepted if the document lists it, so a stale report
+	/// naming a source that has been edited out cannot resurrect it.
+	pub(crate) fn observe(&mut self, document: Option<&Document>, reports: &[ObservedReport]) {
+		let Some(document) = document else {
+			return;
+		};
+		for device in modems(document) {
+			let policy = device.modem.as_ref().expect("filtered on is_some");
+			let Some(report) = reports
+				.iter()
+				.find(|report| report.interface == device.name)
+			else {
+				continue;
+			};
+			let (Some(iccid), Some(source)) = (&report.iccid, &report.sim) else {
+				continue;
+			};
+			if !policy.sim.iter().any(|listed| listed == source) {
+				continue;
+			}
+			self.cards
+				.entry(device.name.clone())
+				.or_default()
+				.insert(source.clone(), iccid.clone());
+		}
 	}
 
 	/// Whether this device is waiting for its link to be cycled.
@@ -291,6 +361,107 @@ mod tests {
 		// returning to `esim` and resetting the modem for ever.
 		assert_eq!(sims.advance(&document, "wwan0", run.path()), None);
 		assert_eq!(sims.current(&document, "wwan0"), Some("socket"));
+	}
+
+	/// A report naming its source is what pairs a card with a SIM.
+	///
+	/// **And the pairing must not come from `chosen`.** netcfgd publishes a new
+	/// source the instant it advances, while the module is still reading the
+	/// old card -- so a `status` that paired its own current selection with
+	/// whatever ICCID last appeared would file one card under the other's name
+	/// at exactly the moment a source changed, which is the only moment anyone
+	/// looks. This drives that window directly: advance to `socket`, then
+	/// deliver a report that still says `esim`, and check the card lands on
+	/// `esim`.
+	#[test]
+	fn a_card_is_filed_under_the_source_the_report_names() {
+		let run = tempdir();
+		let document = document(&["esim", "socket"], None);
+		let mut sims = Sims::default();
+		sims.sync(&document, run.path());
+
+		sims.observe(
+			Some(&document),
+			&[report("wwan0", Some("8946000000000000001"), Some("esim"))],
+		);
+
+		// The advance happens, and the module has not caught up with it.
+		sims.advance(&document, "wwan0", run.path());
+		assert_eq!(sims.current(&document, "wwan0"), Some("socket"));
+		sims.observe(
+			Some(&document),
+			&[report("wwan0", Some("8946000000000000001"), Some("esim"))],
+		);
+
+		let status = sims.status(Some(&document));
+		let cards = &status[0].cards;
+		assert_eq!(cards.len(), 1, "one card seen, not one per listed source");
+		assert_eq!(cards[0].source, "esim", "the stale report named esim");
+		assert_eq!(cards[0].iccid, "8946000000000000001");
+
+		// And once the module does catch up, the second card joins the first
+		// rather than replacing it: both are now known, which is the whole
+		// point of remembering them.
+		sims.observe(
+			Some(&document),
+			&[report("wwan0", Some("8946000000000000002"), Some("socket"))],
+		);
+		let status = sims.status(Some(&document));
+		let cards = &status[0].cards;
+		assert_eq!(cards.len(), 2);
+		// In the document's order, so two runs print the same thing.
+		assert_eq!(cards[0].source, "esim");
+		assert_eq!(cards[1].source, "socket");
+	}
+
+	/// An unpaired card is not guessed at, and a source not in the document is
+	/// not resurrected by a stale report.
+	#[test]
+	fn a_card_with_no_source_and_a_source_with_no_entry_are_both_ignored() {
+		let run = tempdir();
+		let document = document(&["esim", "socket"], None);
+		let mut sims = Sims::default();
+		sims.sync(&document, run.path());
+
+		// An older helper reports the card and not the source. Nothing to do
+		// with it: an ICCID with no idea which source it belongs to is a fact
+		// netcfgd cannot use, and the current selection is not the answer.
+		sims.observe(
+			Some(&document),
+			&[report("wwan0", Some("8946000000000000003"), None)],
+		);
+		assert!(sims.status(Some(&document))[0].cards.is_empty());
+
+		// A source the document no longer lists, which is what a report left
+		// behind by an earlier configuration looks like.
+		sims.observe(
+			Some(&document),
+			&[report("wwan0", Some("8946000000000000004"), Some("spare"))],
+		);
+		assert!(sims.status(Some(&document))[0].cards.is_empty());
+
+		// The control, from the other side: the same call with a source that
+		// *is* listed does record, so the two refusals above are about the
+		// input rather than about `observe` never working.
+		sims.observe(
+			Some(&document),
+			&[report("wwan0", Some("8946000000000000005"), Some("socket"))],
+		);
+		assert_eq!(sims.status(Some(&document))[0].cards.len(), 1);
+	}
+
+	/// A report carrying only what a modem helper writes.
+	fn report(interface: &str, iccid: Option<&str>, sim: Option<&str>) -> ObservedReport {
+		ObservedReport {
+			interface: interface.to_owned(),
+			addresses: Vec::new(),
+			gateways: Vec::new(),
+			nameservers: Vec::new(),
+			search: Vec::new(),
+			routes: Vec::new(),
+			iccid: iccid.map(str::to_owned),
+			sim: sim.map(str::to_owned),
+		}
 	}
 
 	/// A single source is a list of one, not a special case.

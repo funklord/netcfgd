@@ -271,6 +271,8 @@ pub fn parse_report(interface: &str, body: &str) -> netcfgd_model::ObservedRepor
 		nameservers: Vec::new(),
 		search: Vec::new(),
 		routes: Vec::new(),
+		iccid: None,
+		sim: None,
 	};
 	for line in body.lines() {
 		// No `#` branch, deliberately. A comment is ignored because its key
@@ -297,6 +299,13 @@ pub fn parse_report(interface: &str, body: &str) -> netcfgd_model::ObservedRepor
 			// One suffix per line, like a nameserver. A writer with several has
 			// several lines, which is the shape every repeating key here has.
 			"search" => report.search.push(value.to_owned()),
+			// **Last writer wins, where every key above accumulates.** These
+			// two describe one card and one source rather than a list, and a
+			// report is rewritten whole each time -- so a second line is a
+			// writer correcting itself within one file, not a second card.
+			// Taking the last is what makes that mean what it looks like.
+			"iccid" => report.iccid = Some(value.to_owned()),
+			"sim" => report.sim = Some(value.to_owned()),
 			// The one key with a shape of its own, because a route needs two
 			// values and the contract will not make somebody number them.
 			// Whether the *addresses* in it are addresses is still decided

@@ -657,6 +657,31 @@ pub struct ModemStatus {
 	/// modem that will not attach needs to tell those apart.
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub cycle_pending: bool,
+	/// The card seen in each source a helper has actually reported one for.
+	///
+	/// **Not one per listed source.** A source netcfgd has never been on has
+	/// no card here, and that absence is the honest answer rather than a gap
+	/// to fill: the mux shows the module one SIM at a time, so the only way to
+	/// learn what is in the other socket is to switch to it, which costs a
+	/// modem reset and the link. So this fills in as sources are used.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub cards: Vec<SimCard>,
+}
+
+/// A SIM source and the card a helper read while on it.
+///
+/// The ICCID is the identifier printed on the card and returned by `AT+CCID`.
+/// It is here because it is the *only* reliable way to tell which source a
+/// muxed board is actually reading: the mux sits outside the module, so the
+/// module cannot be asked, and an ISD-R probe answers "absent" at both
+/// positions including one holding an eUICC.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimCard {
+	/// The source name from the document's `sim` list.
+	pub source: String,
+	/// The card's ICCID, as the helper read it.
+	pub iccid: String,
 }
 
 /// One radio, and whether netcfgd has been given it.
