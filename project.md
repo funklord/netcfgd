@@ -9461,6 +9461,44 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.98 The length rule belongs to a field, not to WPA
+
+**The classic WPA3 trap is already handled**, which is worth saying before the
+fault. `ieee80211w=2` for SAE, because WPA3 personal is not WPA3 without
+management frame protection -- and that requirement is what makes `FT-SAE` safe
+to name in the same arm. `ieee80211w=1` for transitional, with the reasoning
+written down: 2 excludes WPA2 access points and 0 excludes SAE, so 1 is the
+only value that works against both. OWE gets 2 as well.
+
+**The fault is that every passphrase went into `psk`, including for SAE**, and
+the 8..=63 check was applied to all three generations. That range is what
+`wpa_supplicant` accepts in the `psk` field. It is not a rule of WPA, and SAE
+does not have it -- a WPA3 password can be any length, and `sae_password` is
+the field for it. So a WPA3 network with a longer password could not be joined,
+and netcfgd said:
+
+    a WPA passphrase is 8 to 63 characters; this one is 70
+
+stating a protocol rule the protocol does not have. The limit was netcfgd's own
+choice of field, described as the standard's.
+
+`PskProto::Wpa3` now sends `sae_password` and takes any length. `Wpa2` and
+`Wpa2Wpa3` keep `psk` and keep the limit, because the WPA2 half reads that
+field and cannot read the other -- and in transitional mode the access point
+chooses, so one value has to work for both.
+
+### Checked against the live machine first
+
+The transitional arm is the default, so nothing changes for a network written
+without `proto`. The reporting machine's `OpenPC.se` sets none and negotiates
+`key_mgmt=SAE` with `mgmt_group_cipher=BIP` through that arm -- which is what
+it is for, and why this change cannot disturb it.
+
+Both directions tested. Sabotage: putting WPA3 back on `psk` takes the new test
+red; dropping the limit for everyone takes it red *and* the length test that
+predates this, which is the better signal -- the rule still holds where the
+field still does. Decision 0205.
+
 ## 10.97 A typo should not wait for an apply
 
 The channel logic is careful and unchanged here: `band` decides when present,

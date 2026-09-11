@@ -1290,3 +1290,54 @@ fn a_quoted_name_runs_to_its_closing_quote() {
 	assert_eq!(event.field("ssid"), Some("Guest Wifi"));
 	assert_eq!(event.field("auth_failures"), Some("45"));
 }
+
+/// WPA3 takes `sae_password`, and with it a password the `psk` field refuses.
+///
+/// **The 8..=63 rule belongs to `psk`, not to WPA.** netcfgd sent every
+/// passphrase in that field, including for SAE, so a WPA3 network with a
+/// longer password could not be joined -- and the refusal said "a WPA
+/// passphrase is 8 to 63 characters", which states a rule SAE does not have.
+///
+/// The field differs with the generation because the WPA2 half reads `psk`:
+/// transitional mode lets the access point choose, so one value has to work
+/// for both, and there the limit is real. Decision 0205.
+#[test]
+fn wpa3_alone_sends_sae_password_and_takes_a_longer_one() {
+	let long = "a".repeat(70);
+
+	// WPA3 only: the field is `sae_password` and 70 characters is fine.
+	let (resolver, security, _dir) = psk(&long, PskProto::Wpa3);
+	let mut wpa3 = network("home", security);
+	wpa3.hidden = false;
+	let commands = rendered(&wpa3, &resolver);
+	assert!(
+		commands.iter().any(|line| line.contains("sae_password")),
+		"WPA3 takes sae_password: {commands:?}"
+	);
+	assert!(
+		!commands.iter().any(|line| line.contains(" psk ")),
+		"and not psk, which is the field with the limit: {commands:?}"
+	);
+
+	// **Both other generations keep `psk` and keep the limit**, because the
+	// WPA2 half reads that field and cannot read the other one.
+	for proto in [PskProto::Wpa2, PskProto::Wpa2Wpa3] {
+		let (resolver, security, _dir) = psk("hunter2hunter2", proto);
+		let commands = rendered(&network("home", security), &resolver);
+		assert!(
+			commands.iter().any(|line| line.contains(" psk ")),
+			"{proto:?} takes psk: {commands:?}"
+		);
+		assert!(
+			!commands.iter().any(|line| line.contains("sae_password")),
+			"{proto:?} must not use sae_password: {commands:?}"
+		);
+
+		// And the length rule still applies where the field still does.
+		let (resolver, security, _dir) = psk(&long, proto);
+		assert!(
+			settings(&network("home", security), MacPolicy::Permanent, &resolver).is_err(),
+			"{proto:?} still refuses a passphrase the psk field cannot carry"
+		);
+	}
+}

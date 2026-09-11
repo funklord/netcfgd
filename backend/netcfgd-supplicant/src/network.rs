@@ -105,7 +105,9 @@ impl std::fmt::Display for Unsupported {
 			),
 			Self::PassphraseLength { len } => write!(
 				formatter,
-				"a WPA passphrase is 8 to 63 characters; this one is {len}"
+				"a WPA2 passphrase is 8 to 63 characters and this one is {len}. \
+				 That is what the `psk` field accepts; WPA3 on its own has no \
+				 such limit, so `proto = \"wpa3\"` would take it"
 			),
 			Self::MissingEapField { field } => {
 				write!(formatter, "this EAP method needs `{field}`")
@@ -355,13 +357,29 @@ fn psk_settings(passphrase: &Secret, proto: PskProto) -> Result<Vec<Setting>, Un
 	// detail is what it answers otherwise, and a passphrase with a stray space
 	// is a common enough mistake to deserve a real message. The length is safe
 	// to report; the value is not.
-	if !(8..=63).contains(&text.chars().count()) {
-		return Err(Unsupported::PassphraseLength {
-			len: text.chars().count(),
-		});
+	//
+	// **The 8..=63 rule belongs to `psk`, not to WPA.** It is what
+	// `wpa_supplicant` accepts in that field, and netcfgd used to send every
+	// passphrase there -- so a WPA3 network with a longer password could not be
+	// joined and was told "a WPA passphrase is 8 to 63 characters", which
+	// states a rule SAE does not have. SAE takes a password of any length, and
+	// `sae_password` is the field for it. Decision 0205.
+	let length = text.chars().count();
+	if !matches!(proto, PskProto::Wpa3) && !(8..=63).contains(&length) {
+		return Err(Unsupported::PassphraseLength { len: length });
 	}
 
-	let mut out = vec![Setting::secret("psk", passphrase_argument(text))];
+	// **The field differs with the generation**, which is the whole of the fix
+	// above. SAE alone takes `sae_password`; anything that can still negotiate
+	// WPA2 needs `psk`, because that is the field the WPA2 half reads -- and in
+	// transitional mode the access point chooses, so both halves have to work
+	// from one value.
+	let mut out = match proto {
+		PskProto::Wpa3 => vec![Setting::secret("sae_password", passphrase_argument(text))],
+		PskProto::Wpa2 | PskProto::Wpa2Wpa3 => {
+			vec![Setting::secret("psk", passphrase_argument(text))]
+		}
+	};
 	match proto {
 		PskProto::Wpa2 => {
 			out.push(Setting::plain("key_mgmt", "WPA-PSK FT-PSK"));
