@@ -356,3 +356,45 @@ pub const RANK_CEILING: u32 = 4096;
 pub fn join_rank(metric: Option<u32>) -> Option<u32> {
 	metric.map(|metric| RANK_CEILING.saturating_sub(metric))
 }
+
+#[cfg(test)]
+mod tests {
+	use super::{join_rank, RANK_CEILING};
+
+	/// The inversion, which had nothing checking its sign.
+	///
+	/// **This function exists to prevent a sign error and was untested.** Its
+	/// own documentation says why that matters: two copies of the flip are two
+	/// chances to get it backwards "and a wrong one is silent -- the machine
+	/// simply prefers the wrong network". Sharing one copy stops the two
+	/// backends disagreeing; it does nothing about the single copy being
+	/// wrong, and nothing in the tree read the sign back. Decision 0207.
+	#[test]
+	fn a_better_metric_ranks_higher_for_joining() {
+		// The whole of it: a metric counts up and a join rank counts down, so
+		// the better route metric has to come out the larger rank.
+		let better = join_rank(Some(100)).expect("ranked");
+		let worse = join_rank(Some(200)).expect("ranked");
+		assert!(
+			better > worse,
+			"metric 100 should outrank metric 200 for joining, got {better} and {worse}"
+		);
+
+		// Zero is the best metric a document can write, and must not collide
+		// with "no preference", which is what a backend reads a missing
+		// priority as.
+		assert_eq!(join_rank(Some(0)), Some(RANK_CEILING));
+
+		// **An absurd metric ranks last rather than first.** Subtracting from
+		// a ceiling rather than negating is what makes that true, and a wrap
+		// here would turn the most deprioritised network into the preferred
+		// one.
+		assert_eq!(join_rank(Some(RANK_CEILING)), Some(0));
+		assert_eq!(join_rank(Some(RANK_CEILING + 1)), Some(0));
+		assert_eq!(join_rank(Some(u32::MAX)), Some(0));
+
+		// No metric means the backend is told nothing, rather than being told
+		// a number the document did not ask for.
+		assert_eq!(join_rank(None), None);
+	}
+}

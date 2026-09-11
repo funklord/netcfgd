@@ -9461,6 +9461,86 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.100 A preference that walks
+
+0154's idea holds and is unchanged: a metric counts up, lower winning, and
+every backend that orders networks for joining counts the other way, so one
+conversion lives in the model and both backends share it.
+
+**The function that exists to prevent a silent sign error had nothing checking
+its sign.** Not indirectly either -- the only `priority` in any test in this
+tree is a bridge priority and the `<3>` prefix on a control-socket event.
+Sharing one copy stops two backends disagreeing; it does nothing about the
+single copy being backwards, and its own comment says what that costs: "the
+machine simply prefers the wrong network". A defence against divergence, taken
+for a defence against error.
+
+### And the conversion that was not one
+
+`emit.rs` says: *"Two conversions that are not inverses would make a profile
+change its own ranking every time a desktop client read it back and wrote it
+out."* They were not inverses. Measured on the real functions:
+
+    metric 100 -> autoconnect-priority 974 -> metric 103
+
+and it did not settle. Repeated read-and-write -- what happens every time
+somebody opens a connection in a desktop client and saves it -- walked it:
+
+    100, 103, 107, 111, 115, 119, 124
+
+far enough to cross another network's metric, after which the machine prefers
+one the operator did not choose. The failure the comment describes, in the code
+it is attached to.
+
+**The cause is which end of the band the trip lands on.** 4096 metrics share
+1000 priorities, so coming back is a choice of which metric in the band to
+name, and truncating chose the edge -- the value that maps to the next priority
+*down* when sent again. Adding half a band picks the midpoint, which maps back
+to where it came from: 100, 101, 101, 101. Over every metric in range, none
+moves more than 8 and none moves twice.
+
+Asserted on the real functions and on the two properties that can hold --
+ordering survives, and the second trip is a fixed point -- rather than on
+equality, which cannot hold when 4096 values share 1000.
+
+### And a rank of zero is not a rank
+
+Sweeping every metric rather than sampling turned up the same loss at the other
+end. The write side scales rank 0..4096 into 0..999 by integer division, so a
+rank under 4096/999 scales to nothing -- and NM's priority 0 is not a low
+priority but *no* priority, which the read side correctly reads back as no
+metric. Metrics 4092 and above made the trip and came back unranked.
+
+The write side's comment opens by refusing exactly that: clamping "would throw
+the ordering away for exactly the networks an operator ranked". Its scale did
+the same to the five worst ranks, which are the ones somebody went furthest out
+of their way to set. A floor of 1 costs six metrics of precision there and
+keeps the ranking.
+
+**Found only because the sweep is exhaustive.** Every sampled value in the
+first draft sat comfortably inside the range and could not have reached it.
+
+### One definition, not two
+
+The round-trip test began by restating `settings.rs`'s arithmetic inside
+itself -- the trap the next section is about, committed again in the test
+written to catch it, and it would have gone on agreeing after the write side
+grew the floor. `autoconnect_priority` is one function now, called by the
+profile writer and by the test.
+
+### The existing test asserted the bug
+
+`per_connection_options_become_the_keys_that_carry_them` pinned `metric = 3924`
+for NM priority 42, above the comment *"Asserting the number rather than its
+presence is what makes the two directions provably inverse."* It proved the
+opposite: 3924 comes back as priority **41**. The assertion was specific,
+deliberate, agreed with the defect, and the sentence calling it a proof is what
+made it look settled.
+
+**An exact number in a test is only as good as the property it came from.**
+This one was read off the implementation it was meant to check, so it could
+only ever agree with it. Decision 0207.
+
 ## 10.99 A pinned issuer is not a checked server
 
 netcfgd could say `ca_cert` and nothing else about the server.

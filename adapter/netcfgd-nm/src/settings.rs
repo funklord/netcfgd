@@ -287,6 +287,34 @@ pub(crate) fn key_management(security: &Security) -> Option<&'static str> {
 	}
 }
 
+/// A network's metric as the `autoconnect-priority` `NetworkManager` expects.
+///
+/// Its own function because `emit.rs` has to undo it exactly, and a round trip
+/// checked against a *restatement* of this arithmetic checks nothing -- 0207
+/// is about an assertion that agreed with the defect because it was read off
+/// the code it was meant to test. One definition, two callers.
+///
+/// **Scaled, not clamped.** `NetworkManager` takes -999..999 where the model's
+/// rank runs to 4096, and clamping would map every metric below about 3100
+/// onto the same number -- which is to say it would throw the ordering away
+/// for exactly the networks an operator ranked. The inversion itself is the
+/// model's, shared with the supplicant driver, because two copies of a sign
+/// flip are two chances to get it backwards and a wrong one is silent.
+///
+/// **And never 0, which is not a low priority but the absence of one.** The
+/// scale bottoms out five ranks early -- a rank under 4096/999 scales to
+/// nothing -- so metrics 4092 and above came out as NM's default, which the
+/// read side turns back into no metric at all. The worst-ranked networks are
+/// the ones an operator went furthest out of their way to rank, and they were
+/// the ones the trip discarded: the failure the paragraph above refuses,
+/// arrived at from the other end of the range. A floor of 1 costs six metrics
+/// of precision there and keeps the ranking.
+pub(crate) fn autoconnect_priority(metric: Option<u32>) -> Option<i32> {
+	let rank = netcfgd_model::wifi::join_rank(metric)?;
+	let scaled = i64::from(rank) * 999 / i64::from(netcfgd_model::wifi::RANK_CEILING);
+	Some(i32::try_from(scaled.max(1)).unwrap_or(1))
+}
+
 /// Render a profile as NM's settings dictionary.
 ///
 /// The shape was read off a running `NetworkManager` 1.52, which reports six
@@ -305,19 +333,8 @@ pub(crate) fn settings_of(profile: &Profile) -> Dict {
 	}
 	if let Profile::Network(network) = profile {
 		connection.insert("autoconnect".to_owned(), flag(network.autoconnect));
-		// **Scaled, not clamped.** NetworkManager takes -999..999 where the
-		// model's rank runs to 4096, and clamping would map every metric below
-		// about 3100 onto the same number -- which is to say it would throw the
-		// ordering away for exactly the networks an operator ranked. The
-		// inversion itself is the model's, shared with the supplicant driver,
-		// because two copies of a sign flip are two chances to get it backwards
-		// and a wrong one is silent.
-		if let Some(rank) = netcfgd_model::wifi::join_rank(network.metric) {
-			let scaled = i64::from(rank) * 999 / i64::from(netcfgd_model::wifi::RANK_CEILING);
-			connection.insert(
-				"autoconnect-priority".to_owned(),
-				signed(i32::try_from(scaled).unwrap_or(0)),
-			);
+		if let Some(priority) = autoconnect_priority(network.metric) {
+			connection.insert("autoconnect-priority".to_owned(), signed(priority));
 		}
 		// NM's `connection.metered` is a tri-state and netcfgd's is a boolean,
 		// so `false` becomes an explicit "no" rather than "unknown". An

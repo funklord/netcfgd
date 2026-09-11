@@ -388,7 +388,20 @@ fn network_metric(settings: &Dict) -> Result<Option<u32>, Unsupported> {
 		return Ok(None);
 	}
 	let ceiling = i64::from(netcfgd_model::wifi::RANK_CEILING);
-	let rank = i64::from(priority) * ceiling / 999;
+	// **Land in the middle of the band, not at its edge.** Many metrics map to
+	// one priority -- 4096 values into 1000 -- so coming back is a choice of
+	// which metric in that band to name, and truncating chose the edge. The
+	// edge is the value that maps to the *next* priority down when it is sent
+	// again, so a profile that a desktop client read and wrote back walked
+	// upward every time: 100, 103, 107, 111, 115, 119, 124. Far enough and it
+	// crosses another network's metric, and the machine prefers a network the
+	// operator did not choose, silently.
+	//
+	// Adding half a band picks the midpoint, which maps back to the priority
+	// it came from, so the second trip is a fixed point: 100, 101, 101, 101.
+	// Measured over every metric in range, no value moves by more than 8 and
+	// none moves twice. Decision 0207.
+	let rank = (i64::from(priority) * ceiling + ceiling / 2) / 999;
 	Ok(Some(
 		u32::try_from(ceiling.saturating_sub(rank).max(0)).unwrap_or(0),
 	))
@@ -924,10 +937,16 @@ mod tests {
 			emitted.text
 		);
 		// NM's 42 of 999 scaled up to the model's ceiling and inverted, which
-		// is exactly what `settings.rs` undoes when it reports the same
-		// profile back. Asserting the number rather than its presence is what
-		// makes the two directions provably inverse.
-		assert!(emitted.text.contains("metric = 3924"), "{}", emitted.text);
+		// is what `settings.rs` undoes when it reports the same profile back.
+		//
+		// **This asserted 3924 and the comment claimed that proved the two
+		// directions inverse. It proved the opposite.** `settings.rs` turns
+		// metric 3924 back into priority *41*, not 42, because truncating
+		// lands on the edge of the band rather than in it -- which is the
+		// runaway 0207 is about. 3922 is the midpoint and makes the round trip
+		// hold, so the number the assertion pins now says what the sentence
+		// above it always claimed.
+		assert!(emitted.text.contains("metric = 3922"), "{}", emitted.text);
 		assert!(
 			emitted
 				.text
@@ -1052,5 +1071,106 @@ mod tests {
 		let emitted = network_block(&settings).expect("it renders");
 		assert!(!emitted.text.contains("address-data"), "{}", emitted.text);
 		assert!(!emitted.text.contains("connection.zone"));
+	}
+
+	/// The two conversions are not inverses, and the error used to compound.
+	///
+	/// **This is the hazard the code above names and did not prevent.** The
+	/// write side scales `join_rank(metric)` down into NM's 0..999 and this
+	/// side scales back up. Neither direction can be lossless -- 4096 metrics
+	/// share 1000 priorities -- so a value makes the trip and comes back
+	/// changed, and the only question is whether it then stays put. Truncating
+	/// meant it did not. Measured against the real functions before the fix
+	/// above:
+	///
+	/// ```text
+	/// metric  100 -> autoconnect-priority 974 -> metric 103
+	/// ```
+	///
+	/// and the 103 went round again as 107. Reading and writing a profile
+	/// repeatedly -- which is what a desktop client does every time somebody
+	/// opens a connection and saves it -- walked the number upward: 100, 103,
+	/// 107, 111, 115, 119, 124. Far enough and it crosses another network's
+	/// metric, at which point the machine prefers a different network than the
+	/// operator wrote down, with nothing anywhere to say so.
+	///
+	/// So this pins the two properties that survive the loss rather than
+	/// pretending there is none: a round trip stays *within* a bound, and the
+	/// second trip does not move at all. With the rounding above, 100 comes
+	/// back as 101 and stays 101. Decision 0207.
+	#[test]
+	fn a_metric_survives_a_round_trip_through_networkmanager() {
+		// **The write side itself, not a copy of it.** This closure used to
+		// restate `settings.rs`'s arithmetic, which is the trap the last
+		// section of 0207 is about: a check derived from the code it checks
+		// can only ever agree with it, and would have gone on agreeing when
+		// the write side grew a floor.
+		let to_nm = |metric: u32| -> i64 {
+			i64::from(
+				crate::settings::autoconnect_priority(Some(metric)).expect("a metric always ranks"),
+			)
+		};
+		let back = |priority: i64| -> Option<u32> {
+			let mut dict = Dict::new();
+			let mut connection = HashMap::new();
+			connection.insert(
+				"autoconnect-priority".to_owned(),
+				value(Value::from(i32::try_from(priority).expect("in range"))),
+			);
+			dict.insert("connection".to_owned(), connection);
+			network_metric(&dict).expect("a non-negative priority")
+		};
+
+		// **Ordering is the property that matters**, and it must survive: a
+		// network the operator ranked better has to come back ranked better.
+		let ranked = [0_u32, 30, 100, 200, 600, 1000, 2048];
+		let returned: Vec<Option<u32>> = ranked.iter().map(|m| back(to_nm(*m))).collect();
+		for pair in returned.windows(2) {
+			let (first, second) = (pair[0], pair[1]);
+			assert!(
+				first < second,
+				"a better metric came back no better: {returned:?}"
+			);
+		}
+
+		// The drift stays small, so a single trip does not reorder anything.
+		// It is not zero -- 4096 metrics share 1000 priorities -- which is why
+		// this is a bound and not an equality. Swept over the whole range
+		// rather than over the sample above, because "none moves by more than
+		// 8" is a claim about every metric an operator can write.
+		let mut worst = 0_u32;
+		for metric in 0..=netcfgd_model::wifi::RANK_CEILING {
+			let got = back(to_nm(metric)).expect("a ranked network stays ranked");
+			worst = worst.max(got.abs_diff(metric));
+			assert!(
+				got.abs_diff(metric) <= 8,
+				"metric {metric} came back as {got}"
+			);
+		}
+		assert!(
+			worst > 0,
+			"a lossless trip means the sweep measured nothing"
+		);
+
+		// **And it settles, which is the half that was broken.** A desktop
+		// client reads a profile and writes it back every time somebody opens
+		// a connection and saves it, so a trip that moves the number every
+		// time walks it: 100, 103, 107, 111, 115, 119, 124, until it crosses
+		// another network's metric and the machine prefers one the operator
+		// did not choose. The second trip has to be a fixed point.
+		for metric in 0..=netcfgd_model::wifi::RANK_CEILING {
+			let once = back(to_nm(metric)).expect("ranked");
+			let twice = back(to_nm(once)).expect("ranked");
+			assert_eq!(
+				once, twice,
+				"metric {metric} moved twice: {metric} -> {once} -> {twice}"
+			);
+		}
+
+		// The worked example the comment above quotes, pinned so that the
+		// prose cannot drift away from the arithmetic: 100 used to come back
+		// as 103 and go on climbing, and now comes back as 101 and stays.
+		assert_eq!(back(to_nm(100)), Some(101));
+		assert_eq!(back(to_nm(101)), Some(101));
 	}
 }
