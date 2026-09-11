@@ -1304,8 +1304,8 @@ fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPo
 					access_point.channel =
 						as_u32(&assignment.value, diags).and_then(|n| u16::try_from(n).ok());
 				}
-				"band" => access_point.band = as_string(&assignment.value, diags),
-				"regdom" => access_point.regdom = as_string(&assignment.value, diags),
+				"band" => lower_band(&mut access_point.band, assignment, diags),
+				"regdom" => lower_regdom(&mut access_point.regdom, assignment, diags),
 				"hidden" => {
 					if let Some(flag) = as_bool(&assignment.value, diags) {
 						access_point.hidden = flag;
@@ -1546,7 +1546,76 @@ fn lower_ethtool(block: &Block, settings: &mut LinkSettings, diags: &mut Diagnos
 	}
 }
 
-/// The `mac_policy` key. Its own function only because the enum arm made
+/// The `regdom` key, checked here for the reason [`lower_band`] is.
+///
+/// Same shape and same lateness: the renderer requires two ASCII letters and
+/// says so well -- "it is an ISO 3166-1 alpha-2 country code, such as
+/// \"SE\"" -- but it said it at apply, after the interface was up.
+///
+/// ```text
+/// FAIL backend.start ap0  access_point: AccessPoint (was <absent>)
+///      `Home`: `Sweden` is not a regulatory domain
+/// ```
+///
+/// The check is the renderer's, moved to where a typo in a config file is
+/// found by reading the config file. The renderer keeps its own, because it is
+/// reachable from a document that did not come through this compiler.
+fn lower_regdom(regdom: &mut Option<String>, assignment: &Assignment, diags: &mut Diagnostics) {
+	let Some(name) = as_string(&assignment.value, diags) else {
+		return;
+	};
+	if name.len() == 2 && name.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+		*regdom = Some(name);
+		return;
+	}
+	diags.push(
+		Diagnostic::new(
+			assignment.span,
+			format!("`{name}` is not a regulatory domain"),
+		)
+		.with_help("an ISO 3166-1 alpha-2 country code, such as \"SE\""),
+	);
+}
+
+/// The `band` key, checked here rather than at render time./// The `band` key, checked here rather than at render time.
+///
+/// **It used to be `as_string`, so any text compiled.** The renderer decides
+/// what a band means, and it refused an unknown one with a good message --
+/// naming the value, the accepted set and the alternative -- but it refused at
+/// *apply*, by which time the interface is up and the operator is reading a
+/// failed action rather than a config diagnostic.
+///
+/// `netcfgd.conf.example` said `band = "5g"`, which is not one of them, so the
+/// documented access point could not be started. Compiling the block found
+/// nothing, planning it found nothing, and `ncfg apply` said:
+///
+/// ```text
+/// FAIL backend.start ap0  access_point: AccessPoint (was <absent>)
+///      `Home`: `5g` is not a band this build knows
+/// ```
+///
+/// Checking here is what makes that a config error like every other closed set
+/// -- and it is what lets the example gate catch the next one, since that gate
+/// compiles each block and a render-time refusal is invisible to it.
+///
+/// **`6` is accepted here and refused by the renderer**, deliberately. "Not a
+/// band" and "a band this build cannot do" are different answers and the
+/// operator needs the second one to stay distinguishable from the first.
+fn lower_band(band: &mut Option<String>, assignment: &Assignment, diags: &mut Diagnostics) {
+	let Some(name) = as_string(&assignment.value, diags) else {
+		return;
+	};
+	match name.as_str() {
+		"2.4" | "5" | "6" => *band = Some(name),
+		other => diags.push(
+			Diagnostic::new(assignment.span, format!("`{other}` is not a band")).with_help(
+				"one of 2.4, 5, 6 -- or leave `band` out and let the channel number say which",
+			),
+		),
+	}
+}
+
+/// The `mac_policy` key. Its own function only because the enum arm made/// The `mac_policy` key. Its own function only because the enum arm made
 /// [`lower_wifi_device`] longer than the style allows.
 fn lower_mac_policy(
 	policy: &mut WifiDevicePolicy,

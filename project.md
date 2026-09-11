@@ -9461,6 +9461,51 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.97 A typo should not wait for an apply
+
+The channel logic is careful and unchanged here: `band` decides when present,
+the channel decides when absent, a channel in neither band is refused rather
+than handed to hostapd, and the 5 GHz list is a *range* on purpose because
+which channels are usable is a regulatory question the kernel answers -- 149 is
+legal in one country and not the next. What netcfgd rejects is a number in no
+band at all, which is a typo rather than a regulatory refusal. That line is
+drawn in the right place.
+
+**The fault is that `band` and `regdom` were checked too late.** Both were
+`as_string` in the compiler, so any text compiled and the renderer decided. Its
+messages are good -- *"`5g` is not a band this build knows. Use "2.4" or "5""*
+and *"`Sweden` is not a regulatory domain; it is an ISO 3166-1 alpha-2 country
+code"* -- but it said them at **apply**, with the interface already up:
+
+    ok   link.up ap0  enabled: true (was false)
+    FAIL backend.start ap0  access_point: AccessPoint (was <absent>)
+    ncfg: stopped at action 2 (backend.start); 2 done, 1 not attempted
+
+And `netcfgd.conf.example` said `band = "5g"`, so the documented access point
+could not be started. Compiling found nothing; planning found nothing. Fourth
+fault in that file this run.
+
+Both checks moved to the compiler, where every other closed set is checked. The
+renderer keeps its own, being reachable from a document that did not come
+through the compiler. `6` is accepted by the compiler and refused by the
+renderer deliberately: "not a band" and "a band this build cannot do" are
+different answers.
+
+### What it did to the gate, which is the more useful half
+
+10.93's gate compiles each block of the example, so a **render-time** refusal
+was invisible to it -- the second blind spot found in it, after "valid and
+inert" in 10.94. Moving the check converted that class into one the gate
+catches. Restoring `"5g"` now fails it by file, line and diagnostic.
+
+**A gate gets better by moving checks into its reach, not only by widening the
+gate.**
+
+Compile test asserting both refusals name what is wrong *and* what is right,
+and that the accepted values still compile -- the half that stops a check from
+refusing everything. Scripted before committing this time, rather than after,
+which 10.96 had to be written about. Decision 0204.
+
 ## 10.96 Hiding a network is a trade, not a defence -- and two missing tests
 
 The SSID handling is the strongest part of this wifi surface and this audit

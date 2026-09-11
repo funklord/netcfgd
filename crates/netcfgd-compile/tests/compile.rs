@@ -2762,3 +2762,68 @@ fn the_names_people_write_still_compile() {
 		Some("br-lan")
 	);
 }
+
+/// `band` and `regdom` are checked here, not at render time.
+///
+/// **Both used to be `as_string`**, so any text compiled and the renderer
+/// refused it -- with good messages, at `ncfg apply`, after the interface was
+/// already up. `netcfgd.conf.example` said `band = "5g"`, which is not one of
+/// them, so the documented access point could not start; compiling found
+/// nothing, planning found nothing, and the apply said:
+///
+/// ```text
+/// FAIL backend.start ap0  access_point: AccessPoint (was <absent>)
+///      `Home`: `5g` is not a band this build knows
+/// ```
+///
+/// Moving the check is also what lets the example gate see this class at all:
+/// that gate compiles each block, and a render-time refusal is invisible to
+/// it. Restoring `"5g"` in the example now fails the gate by file and line,
+/// which it did not before.
+#[test]
+fn a_band_or_a_regdom_that_is_not_one_is_refused_at_compile_time() {
+	let block = |key: &str, value: &str| {
+		format!(
+			"access_point \"Home\" {{\n\tdevice = \"ap0\"\n\t{key} = \"{value}\"\n\t\
+			 wifi {{ open = true }}\n}}\n"
+		)
+	};
+
+	let band = errors(&block("band", "5g"));
+	assert!(band.contains("is not a band"), "got {band}");
+	assert!(
+		band.contains("2.4") && band.contains('5'),
+		"says which ones exist: {band}"
+	);
+
+	let regdom = errors(&block("regdom", "Sweden"));
+	assert!(
+		regdom.contains("is not a regulatory domain"),
+		"got {regdom}"
+	);
+	assert!(
+		regdom.contains("alpha-2"),
+		"says what one is rather than only that this is not: {regdom}"
+	);
+
+	// **The accepted values still compile**, which is the half that stops this
+	// from being a check that refuses everything. `6` is accepted here and
+	// refused by the renderer as unsupported, deliberately: "not a band" and
+	// "a band this build cannot do" are different answers.
+	for value in ["2.4", "5", "6"] {
+		let mut sources = SourceMap::new();
+		sources.add("netcfgd.conf", block("band", value));
+		assert!(
+			compile(&sources, &mut NoHooks).is_ok(),
+			"`{value}` is a band and has to compile"
+		);
+	}
+	for value in ["SE", "us", "DE"] {
+		let mut sources = SourceMap::new();
+		sources.add("netcfgd.conf", block("regdom", value));
+		assert!(
+			compile(&sources, &mut NoHooks).is_ok(),
+			"`{value}` is a country code and has to compile"
+		);
+	}
+}

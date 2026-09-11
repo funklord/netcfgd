@@ -532,7 +532,7 @@
 #access_point "Home" {
 #	device  = "wlan0"
 #	channel = 36
-#	band    = "5g"
+#	band    = "5"
 #	regdom  = "SE"
 #	hidden  = false
 #	wifi {
