@@ -163,6 +163,14 @@ pub fn mac_addr_value(policy: MacPolicy) -> &'static str {
 	}
 }
 
+/// The SSID a network named by its access points is fingerprinted against.
+///
+/// Never sent to anything: `add_network` resolves the real name from a scan on
+/// its own copy. This exists so that the rest of such a network still reaches
+/// the digest, and it is a constant rather than anything derived so that two
+/// passes agree.
+const UNRESOLVED: &[u8] = b"netcfgd:ssid-from-scan";
+
 /// A digest of everything a radio's networks would be given.
 ///
 /// **The supplicant cannot be asked what it holds.** `LIST_NETWORKS` returns
@@ -179,18 +187,34 @@ pub fn mac_addr_value(policy: MacPolicy) -> &'static str {
 /// makes. So rotating a secret changes this, which is the case that mattered
 /// most: it is invisible to every other observation.
 ///
-/// **`None` when any network's SSID is not stated in the document.** A network
-/// naming access points instead resolves its SSID from a scan at the moment it
-/// is sent, so what will be sent is not knowable from the document alone, and
-/// a digest that guessed would differ from the recorded one on every pass and
-/// re-send the whole set for ever. Absent means "cannot say", and the planner
-/// treats it as no reason to act.
+/// **A network naming access points instead of an SSID is fingerprinted, and
+/// used not to be.** Such a network resolves its SSID from a scan at the
+/// moment it is sent, so what reaches the supplicant is not knowable from the
+/// document -- and this returned `None` for the whole list because of it.
 ///
-/// `None` covers a network that cannot be rendered at all -- an unusable
-/// credential, or a secret that will not resolve -- for the same reason it
-/// covers an unresolved SSID: neither can be compared, and both are the
-/// planner's "no reason to act". An `Err` here would be a second way of saying
-/// the one thing the caller can do about it.
+/// The reason given was that "a digest that guessed would differ from the
+/// recorded one on every pass and re-send the whole set for ever". That is
+/// true of guessing the *scanned* name and false of the placeholder below,
+/// and the difference matters because both callers digest the same thing: the
+/// executor's set is `clone_from(&document.networks)` and the observation
+/// reads `document.networks`. Neither has ever seen a scan. A marker that is
+/// the same on both sides compares equal on the next pass, which is the whole
+/// of the loop that was feared.
+///
+/// What the old answer cost is written down in `kernel.rs`, which removes the
+/// record when this is `None`: "changing a passphrase, pinning a bssid, adding
+/// a network or deleting one all planned nothing, measured, and the supplicant
+/// kept the original credentials indefinitely". That was the defect the record
+/// exists to prevent, and **one network named by BSSID turned it back on for
+/// every network on the radio** -- silently, and for a configuration the model
+/// documents as supported.
+///
+/// `None` still covers a network that cannot be rendered at all -- an unusable
+/// credential, or a secret that will not resolve. That is a different case and
+/// is left as it was on purpose: netcfgd could not have handed such a network
+/// over, so it genuinely cannot say what the supplicant holds, and a digest
+/// built from the error text would move with the environment that produced it
+/// rather than with the document.
 #[must_use]
 pub fn fingerprint(
 	networks: &[WifiNetwork],
@@ -199,11 +223,27 @@ pub fn fingerprint(
 ) -> Option<String> {
 	let mut text = String::new();
 	for network in networks {
-		network.ssid.as_ref()?;
 		// The id as well as the settings: two networks that render identically
 		// are still two networks, and one being renamed is a change.
 		text.push_str(&network.id);
 		text.push('\n');
+
+		// A network whose SSID comes from a scan is rendered against a fixed
+		// stand-in, so that everything else about it -- its access points, its
+		// credential, its `mac_addr` -- still reaches the digest and an edit to
+		// any of them is still noticed. The marker line is what stops it
+		// colliding with a network an operator genuinely named this.
+		let stood_in;
+		let network = if network.ssid.is_some() {
+			network
+		} else {
+			text.push_str("ssid-from-scan\n");
+			let mut copy = network.clone();
+			copy.ssid = Some(netcfgd_model::Ssid::new(UNRESOLVED.to_vec()).ok()?);
+			stood_in = copy;
+			&stood_in
+		};
+
 		for setting in settings(network, policy, resolver).ok()? {
 			text.push_str(&setting.variable);
 			text.push(' ');

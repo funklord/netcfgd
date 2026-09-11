@@ -9461,6 +9461,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.108 One network by BSSID voided the record
+
+netcfgd cannot ask a supplicant what it holds -- a passphrase is write-only --
+so it records a digest of what it handed over and compares. `kernel.rs` says
+what losing that record costs, from a measurement: "changing a passphrase,
+pinning a bssid, adding a network or deleting one all planned nothing, and the
+supplicant kept the original credentials indefinitely."
+
+**`fingerprint` opened each network with `network.ssid.as_ref()?`.** The `?` is
+on an `Option` in a function returning `Option<String>`, so any network without
+a stated SSID returned `None` for the *whole list* -- and `record_networks`
+then removes the file.
+
+A network with no SSID is not an error. The model documents it: `ssid` may be
+absent where `bssid` names the access points, which is the BSSID-keyed
+configuration kept for forced-AP roaming. So one such network left its radio
+with no record at all and brought the defect back for every network beside it,
+permanently -- nothing ever resolves the document's `ssid: None` back, because
+`add_network` resolves it on a local clone that never returns.
+
+### The reason given was true about something else
+
+It was documented: "a digest that guessed would differ from the recorded one on
+every pass and re-send the whole set for ever." That is right about guessing
+the *scanned* name. Both callers digest the same value -- the executor's set is
+`clone_from(&document.networks)`, the observation reads `document.networks` --
+and neither has ever seen a scan, so a stand-in that is the same on both sides
+compares equal next pass.
+
+**The shape again**: a true statement about one approach used as a verdict
+about the whole question, with the cost recorded in a different file that the
+decision does not mention.
+
+It now renders such a network against a fixed stand-in with a marker line, so
+its access points, credential and `mac_addr` all reach the digest. Each half
+fails on its own mutation.
+
+### Checked and sound
+
+`bssid_accept` really is a per-network key -- asked of wpa_supplicant 2.10 over
+its own socket, with a bogus key returning `FAIL` as the control that makes the
+`OK`s mean something. It reads back normalised, with the all-ones mask dropped,
+which is only safe because the digest is taken from netcfgd's intent and never
+from a read-back. Roam detection does not fire on a first association. A roam
+re-plans nothing on purpose. `network_for` compares BSSIDs case-insensitively.
+
+Decision 0214.
+
 ## 10.107 An answer that was not an answer
 
 The captive portal check fires on a transition -- the interface has a routable

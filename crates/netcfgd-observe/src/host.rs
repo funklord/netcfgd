@@ -340,8 +340,11 @@ fn carried(state: &netcfgd_sys::wg::DeviceState) -> netcfgd_model::ObservedWireG
 ///
 /// Compares a digest of what netcfgd recorded handing over against a digest of
 /// what the document would produce now. `None` is "cannot say" and is the
-/// answer whenever either half is missing -- no record, or a network whose SSID
-/// comes from a scan. See `ObservedBackend::networks_match`.
+/// answer when the document cannot be digested at all -- a credential that
+/// will not render, or a secret that will not resolve. A network whose SSID
+/// comes from a scan is *not* one of those any more: it is digested against a
+/// stand-in, because excluding it removed the record for every network on the
+/// same radio. See `ObservedBackend::networks_match`.
 fn supplicant_networks_match(
 	interface: &str,
 	run_dir: &Path,
@@ -374,10 +377,18 @@ fn supplicant_networks_match(
 	// should be replaced with the document's.
 	//
 	// This cannot loop: handing the networks over writes the record, and the
-	// next observation compares equal. And it is reached only when `wanted`
-	// was computable, which is what keeps a network whose SSID comes from a
-	// scan out of it -- that case returns above, and would otherwise re-send
-	// the whole set on every pass for ever.
+	// next observation compares equal. Both digests are taken from the same
+	// thing -- the executor's set is `clone_from(&document.networks)` and this
+	// reads `document.networks` -- so there is nothing for them to disagree
+	// about.
+	//
+	// **That includes a network whose SSID comes from a scan**, which used to
+	// be excluded here and is not any more. `fingerprint` renders it against a
+	// fixed stand-in rather than returning `None` for the whole list, because
+	// the `None` was removing the record for the *radio*: one network named by
+	// BSSID turned off change detection for every network beside it. The loop
+	// that exclusion was guarding against needed a digest that guessed the
+	// scanned name, and neither caller has ever seen a scan.
 	let Ok(recorded) = fs::read_to_string(netcfgd_apply::kernel::networks_record_path(
 		run_dir, interface,
 	)) else {

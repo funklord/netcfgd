@@ -52,6 +52,75 @@ fn network(ssid: &str, security: Security) -> WifiNetwork {
 	}
 }
 
+/// A network named by its access points rather than by an SSID.
+///
+/// A supported configuration: `ssid` may be absent where `bssid` names the
+/// access points, and netcfgd reads the name off a scan before it configures
+/// the supplicant.
+fn by_bssid(bssid: &str) -> WifiNetwork {
+	let mut network = network("placeholder", Security::Open);
+	"by-bssid".clone_into(&mut network.id);
+	network.ssid = None;
+	network.bssid = vec![bssid.to_owned()];
+	network
+}
+
+/// **One network named by BSSID must not void the record for all of them.**
+///
+/// The fingerprint is how netcfgd knows a running supplicant still matches the
+/// document: `record_networks` writes it, and a later pass compares. Where it
+/// is `None` the record is *removed*, and `kernel.rs` says what that costs in
+/// as many words -- "changing a passphrase, pinning a bssid, adding a network
+/// or deleting one all planned nothing, measured, and the supplicant kept the
+/// original credentials indefinitely."
+///
+/// A network with no SSID yet is not an error and not an unknown. The document
+/// names its access points, netcfgd resolves the name from a scan inside
+/// `add_network` -- on a local copy that never comes back here -- so what this
+/// function sees keeps `ssid: None` for the life of that configuration. One
+/// such network therefore turned change detection off for the whole radio,
+/// permanently and silently.
+#[test]
+fn a_network_named_by_bssid_does_not_void_the_whole_fingerprint() {
+	let resolver = Resolver::with_secrets_dir(std::path::Path::new("/nonexistent"));
+	let ordinary = network("Corp", Security::Open);
+
+	let alone = netcfgd_supplicant::fingerprint(
+		std::slice::from_ref(&ordinary),
+		MacPolicy::Permanent,
+		&resolver,
+	)
+	.expect("an ordinary network fingerprints");
+
+	let together = netcfgd_supplicant::fingerprint(
+		&[ordinary.clone(), by_bssid("02:00:00:00:00:01")],
+		MacPolicy::Permanent,
+		&resolver,
+	)
+	.expect("a bssid-named network beside it must still fingerprint");
+
+	// Not equal: the second network is part of what the radio was given, so
+	// adding it is a change. The point is that there *is* an answer.
+	assert_ne!(
+		alone, together,
+		"adding a network by bssid changed nothing in the record"
+	);
+
+	// And the bssid is what identifies it, so changing the bssid is a change.
+	// Without this the record would exist and still not notice the one edit
+	// this kind of network is made of.
+	let moved = netcfgd_supplicant::fingerprint(
+		&[ordinary, by_bssid("02:00:00:00:00:02")],
+		MacPolicy::Permanent,
+		&resolver,
+	)
+	.expect("still fingerprints");
+	assert_ne!(
+		together, moved,
+		"pinning a different access point changed nothing in the record"
+	);
+}
+
 fn psk(passphrase: &str, proto: PskProto) -> (Resolver, Security, netcfgd_testdir::TestDir) {
 	let dir = scratch("psk");
 	write_secret(&dir, "pass", passphrase);
