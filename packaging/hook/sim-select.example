@@ -1,7 +1,13 @@
 #!/bin/sh
 # An example `pre_up` hook: put the modem on the SIM source netcfgd chose.
 #
-# **This is an example and not a working hook**, because the part that matters
+# **This is the bare frame.** `sim-select-gpiod.example` beside it is the same
+# hook filled in for the commonest shape -- a select line and a reset line on a
+# GPIO expander, driven with `gpioset` -- and if that is your board, start
+# there instead. This one is for a mux that is not GPIO at all: a regulator, a
+# vendor sysfs node, a `devmem` poke.
+#
+# **It is an example and not a working hook**, because the part that matters
 # is the part only you can write. netcfgd decides *which* source it wants and
 # publishes that; making the hardware agree means driving a mux select line,
 # and that line is your board's -- a GPIO number, a regulator, a vendor sysfs

@@ -9461,6 +9461,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.104 A worked hook is still not a GPIO in netcfgd
+
+The last thing between netcfgd and a working two-SIM board: netcfgd chooses a
+source and publishes it, and something has to move the mux. The only thing
+shipped was a frame whose two operative lines were marked `BOARD` and left
+blank.
+
+**Filling them in is not netcfgd growing a GPIO.** 0150 stands. What ships is a
+second example, non-executable, with five values at the top and no line number
+any board must have. What is now written and tested is everything *around*
+those five -- the backgrounding, the bounded wait, the kill, the check after
+release, the trap, the wait for the interface to return. None of that is a
+board fact; they are the same everywhere and they are where the traps are.
+
+### Two refusals that go opposite ways
+
+An unknown source name exits non-zero: the alternative is coming up on
+whichever source the mux was left on, which looks like the fallback working. An
+interface that does not re-enumerate exits **zero** with a loud message,
+because failing aborts the bring-up, and an aborted bring-up never reaches the
+probe -- which is what tells netcfgd to try the next source. A unit that cannot
+fall back is one somebody has to visit.
+
+One is a configuration error nobody discovers later; the other is a runtime
+fact the probe is about to establish anyway.
+
+### The test found a race, and then a lie in itself
+
+**The hook waited for the line to become an output before killing `gpioset`**,
+which is satisfied instantly on the second drive of the same line -- it is
+already an output. So the kill could land before the value was applied. The
+reset pulse is exactly that shape, and the failure is a modem held in reset
+with the hook reporting success. It waits for a *consumer* now.
+
+**And the check named "returns rather than hanging" did not check that.** It
+matched a phrase printed *before* the block, so calling `gpioset` in the
+foreground passed it. Only the sabotage pass found it; blocking is a duration,
+so the check is a duration now.
+
+Third instance this week of one shape, after 10.101 and the C client in 10.103:
+**a check is worth the property it measures, and a name is not a property.**
+Written by the same hand as the code, minutes apart, agreeing with it.
+
+### What the test cannot say
+
+No board, no `gpio-sim` in this kernel, no `gpiod` installed. The expander is
+faked and the hook is real, so it proves everything that is not the hardware
+and nothing that is. Written in the file, because the alternative is a green
+tick somebody reads as hardware coverage.
+
+Decision 0211.
+
 ## 10.103 The card is the only thing that says which SIM
 
 10.102 ended by naming what it had not done: the ICCID is the only reliable

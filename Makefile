@@ -498,6 +498,12 @@ install-modem-mbim:
 	install -d $(DESTDIR)$(PREFIX)/share/netcfgd/hook
 	install -m 0644 packaging/hook/sim-select.example \
 		$(DESTDIR)$(PREFIX)/share/netcfgd/hook/sim-select.example
+	@# And the same hook filled in for the commonest shape, a select line and a
+	@# reset line on a GPIO expander driven with gpiod. Still an example and
+	@# still non-executable: which line, which polarity and which chip are
+	@# facts about a board that netcfgd cannot know and must not guess (0150).
+	install -m 0644 packaging/hook/sim-select-gpiod.example \
+		$(DESTDIR)$(PREFIX)/share/netcfgd/hook/sim-select-gpiod.example
 	@# A stable name for the AT port, and a request that ModemManager leave it
 	@# alone. `/dev/ttyUSB3` is not stable across a modem reset, and a reset is
 	@# ordinary operation here -- a SIM switch is one. The rule is data about
@@ -1767,6 +1773,11 @@ live:
 	@# hardware: the fake is a real character device, so termios, CR-terminated
 	@# writes and byte-at-a-time reads are exercised rather than stubbed.
 	@sh tests/live/modem_at.sh
+	@# The gpiod SIM-select hook, against an expander that is a Python script.
+	@# No root and no board: what is faked is the expander, and what runs is
+	@# the hook -- its backgrounding, its bounded wait, its kill, its check
+	@# after the release, and its trap.
+	@sh tests/live/sim_select.sh
 	@sh tests/live/umbim.sh
 	@# A Bluetooth adapter, which needs real root: /dev/vhci is root-only and
 	@# the module autoloads on the open. Not under NCFG_LIVE and not under
@@ -1949,6 +1960,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-at
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-umbim
 	rm -f $(DESTDIR)$(PREFIX)/share/netcfgd/modem-quirks
+	rm -f $(DESTDIR)$(PREFIX)/share/netcfgd/hook/sim-select-gpiod.example
 	rm -f $(DESTDIR)$(PREFIX)/lib/udev/rules.d/71-netcfgd-modem.rules
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-modem-at@.service
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service

@@ -1,0 +1,229 @@
+#!/bin/sh
+# A `pre_up` hook that moves a SIM mux with libgpiod, for boards that have one.
+#
+# **This is an example and it is complete**, which is the difference between it
+# and `sim-select.example` beside it. That one marks the two lines only you can
+# write; this one fills them in for the commonest shape -- a select line and a
+# reset line on a GPIO expander, driven by `gpioset` from `gpiod` -- and leaves
+# you the five values at the top.
+#
+# It is still an example. netcfgd has no GPIO and is not going to grow any
+# (decision 0150): which line, which polarity and which chip are facts about
+# your board that netcfgd cannot know and must not guess. Copy it, set the five
+# values, and install it as a hook:
+#
+#     interface wwan0 {
+#         config  = "dhcp"
+#         pre_up { /etc/netcfgd/hook/sim-select }
+#     }
+#
+# `config = "dhcp"` for an ECM module, which is the usual case -- see
+# `modem-quirks`, where `data=ecm` says so. A module whose helper obtains the
+# address wants `config = "reported"` instead.
+#
+# ## THE FIVE VALUES
+#
+# `gpioinfo` lists every chip and line on the machine. The line *names* come
+# from `gpio-line-names` in the device tree, and this looks lines up by name
+# rather than by number deliberately: a number is a position in a list that a
+# kernel upgrade can renumber, and a name that stops existing fails loudly here
+# instead of driving whatever is now in that position.
+#
+# **The polarity is not readable from the schematic.** On the board these
+# values came from, the reset line reaches the module through an inverting
+# transistor, so the net name gives the opposite of the truth. The select
+# line's sense was established by selecting with the socket *empty*: a card
+# that answered could only have been the embedded one. If you are guessing,
+# you have not established it -- and guessing wrong here is silent, because
+# both sources look the same to everything downstream.
+
+# BOARD: the chip carrying the two lines, by label. `gpioinfo` names it.
+GPIO_CHIP=${GPIO_CHIP:-gpiochip2}
+# BOARD: the mux select line, and the value that selects each source. The
+# names on the left of the `=` are the names in your document's `sim` list.
+LINE_SEL=${LINE_SEL:-CELL_SIM_SEL#_3V3}
+VALUE_socket=${VALUE_socket:-0}
+VALUE_esim=${VALUE_esim:-1}
+# BOARD: the modem reset line, and which value asserts reset.
+LINE_RST=${LINE_RST:-M2_RST_3V3}
+RESET_ASSERT=${RESET_ASSERT:-1}
+RESET_RUN=${RESET_RUN:-0}
+
+# How long reset is held, and how long the modem is given to come back.
+RESET_PULSE=${RESET_PULSE:-1}
+ENUM_WAIT=${ENUM_WAIT:-20}
+
+set -eu
+
+run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
+iface=${NCFG_IFACE:?this is a netcfgd hook and expects NCFG_IFACE}
+selection="$run_dir/modem/$iface"
+# `NCFG_SYS_ROOT` for the reason netcfgd's own helpers have one: without it the
+# half of this that waits for the interface to come back can only be exercised
+# by owning the board, and a wait that has never succeeded is one that reports
+# "it did not come back" for a modem that did.
+sys_root=${NCFG_SYS_ROOT:-/sys}
+
+say() { echo "sim-select: $*" >&2; }
+die() { echo "sim-select: $*" >&2; exit 1; }
+
+# No file means netcfgd has nothing to say about this interface's SIM -- the
+# device has no `modem` block. Do nothing rather than guessing at a default: a
+# hook that picks a source on no information is the failure 0152 keeps netcfgd
+# itself away from.
+[ -f "$selection" ] || exit 0
+sim=$(sed -n 's/^sim=//p' "$selection" | head -n 1)
+
+# A `modem` block that lists no source is a machine that wants its APN
+# configured and its SIM left alone. An ordinary configuration.
+[ -n "$sim" ] || exit 0
+
+# The value for this source, by name. A source netcfgd was configured with and
+# this script has no value for is fatal: the alternative is bringing the
+# interface up on whichever source the mux happened to be left on, which looks
+# like the fallback working and is the machine ignoring you.
+eval "value=\${VALUE_$sim-}" 2>/dev/null || value=
+[ -n "$value" ] || die "no idea how to select \`$sim\` on $iface -- set VALUE_$sim"
+
+command -v gpioset >/dev/null 2>&1 || die "gpioset is not installed (apt install gpiod)"
+command -v gpioinfo >/dev/null 2>&1 || die "gpioinfo is not installed (apt install gpiod)"
+
+# ## HOLDING A LINE WITHOUT HOLDING THE HOOK
+#
+# **`gpioset` in libgpiod v2 holds the line for as long as it runs.** That is
+# correct of it -- a GPIO request belongs to a process, and releasing it is how
+# the kernel knows nobody wants the line any more -- and it means calling it
+# plainly from a script never returns. A `pre_up` that never returns holds
+# netcfgd's reconcile until the hook timeout kills it, sixty seconds later, on
+# every single bring-up.
+#
+# So it runs in the background, is waited for, and is killed. What makes that
+# work rather than merely appear to is the next paragraph.
+#
+# **Releasing a `pca953x` line does not return the pin to an input.** Both the
+# direction register and the output latch keep their values, so the pin goes on
+# driving what it was last set to with no process holding it. That is driver
+# behaviour rather than a documented guarantee, which is why the check after
+# the kill is not decoration: if a kernel ever restores the direction on
+# release, the mux springs back to whatever the pull-ups say and every
+# conclusion drawn afterwards is about the wrong SIM.
+#
+# It also means **a crash does not fail safe**: the line stays driven whichever
+# way it was last set. That is what the trap below is for on the reset line,
+# where "last set" can mean "in reset for ever".
+gpio_line() {
+	gpioinfo -c "$GPIO_CHIP" 2>/dev/null | grep -F "\"$1\""
+}
+gpio_is_output() {
+	gpio_line "$1" | grep -q output
+}
+
+# **Held by somebody, which is not the same as being an output.**
+#
+# The obvious wait here is for the line to become an output, and it is wrong in
+# a way that only shows up on the second drive of the same line: by then it
+# already *is* an output, left that way by the first, so the wait is satisfied
+# before `gpioset` has run at all and the kill below lands on a process that
+# never applied the value. The reset pulse is exactly that case -- assert, then
+# release -- and the failure is a modem held in reset with the script reporting
+# success. Found by the test, which is the only reason it is not on a board.
+#
+# A consumer appearing is the thing that actually says our request landed: a
+# line shows `consumer=` while it is requested, whoever left it an output.
+gpio_is_held() {
+	gpio_line "$1" | grep -q 'consumer='
+}
+
+gpio_drive() {
+	line=$1
+	wanted=$2
+
+	gpioset -c "$GPIO_CHIP" "$line=$wanted" &
+	setter=$!
+
+	# Bounded, and the loop running out is not itself an error: a gpioset that
+	# sets and exits immediately, or a gpioinfo that does not print consumers,
+	# leaves nothing to see. The settle afterwards is what covers those, and
+	# the check after the kill is what decides.
+	waited=0
+	while [ "$waited" -lt 20 ]; do
+		gpio_is_held "$line" && break
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	sleep 0.1
+
+	kill "$setter" 2>/dev/null || true
+	wait "$setter" 2>/dev/null || true
+
+	gpio_is_output "$line" ||
+		die "$line did not stay driven after release; the mux cannot be held"
+}
+
+# **A hook killed mid-reset leaves the modem in reset for ever**, because the
+# latch holds the line after the request is released. netcfgd sends SIGTERM at
+# the hook timeout and SIGKILL five seconds later, so the first of those has to
+# be caught. SIGKILL cannot be, which is one more reason the pulse below is
+# short.
+reset_release() {
+	status=$?
+	trap - EXIT INT TERM
+	if [ "${resetting:-0}" = 1 ]; then
+		say "releasing the modem from reset on the way out"
+		gpioset -c "$GPIO_CHIP" "$LINE_RST=$RESET_RUN" >/dev/null 2>&1 &
+		sleep 0.3
+		kill $! 2>/dev/null || true
+	fi
+	exit "$status"
+}
+trap reset_release EXIT INT TERM
+
+say "$iface: selecting $sim ($LINE_SEL=$value)"
+gpio_drive "$LINE_SEL" "$value"
+
+# **The reset is not optional on every module, and on some it is the only way.**
+# Measured on a Quectel EG916Q-GL: `+QSIMDET: 0,0`, so there is no hardware SIM
+# detection at all -- the module reads the card once, at power-on, and a mux
+# that moves underneath it changes nothing until it is reset. Without this the
+# mux has moved, the module is still talking to the card it read at boot, and
+# netcfgd will watch the probe keep failing, advance to the next source, and
+# run out, with nothing having actually changed.
+say "resetting the modem"
+resetting=1
+gpio_drive "$LINE_RST" "$RESET_ASSERT"
+sleep "$RESET_PULSE"
+gpio_drive "$LINE_RST" "$RESET_RUN"
+resetting=0
+
+# **Wait for the interface to come back, because the reset took it away.** The
+# module's `cdc_ether` interface disappears from the kernel with the USB device
+# and returns when it re-enumerates. netcfgd runs this hook with the interface
+# down and brings it up when the hook returns, so returning early hands it an
+# interface that is not there.
+#
+# **Returning 0 when it does not come back, and that is deliberate.** Failing
+# here would abort the bring-up, and an aborted bring-up never reaches the
+# probe -- which is the thing that tells netcfgd this source does not work and
+# to try the next one. A unit that cannot fall back is a unit somebody has to
+# physically visit, and this hook exists on boards where that is expensive. So
+# it says so loudly and lets the machine find out the ordinary way.
+#
+# That is the opposite of the refusal above, and the difference is worth
+# keeping: an unknown source name is a configuration error nobody will discover
+# later, while a modem that did not come back is a runtime fact the probe is
+# about to establish anyway.
+say "waiting up to ${ENUM_WAIT}s for $iface to re-enumerate"
+waited=0
+while [ "$waited" -lt "$ENUM_WAIT" ]; do
+	[ -e "$sys_root/class/net/$iface" ] && break
+	waited=$((waited + 1))
+	sleep 1
+done
+if [ -e "$sys_root/class/net/$iface" ]; then
+	say "$iface is back after ${waited}s, on $sim"
+else
+	say "$iface did not come back in ${ENUM_WAIT}s."
+	say "  The mux is on $sim and the modem was reset. Letting the bring-up"
+	say "  continue so the probe can fail and netcfgd can try the next source"
+	say "  -- refusing here would leave this board on $sim for ever."
+fi

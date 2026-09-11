@@ -454,9 +454,25 @@ APN routes nothing is visible rather than silent.
 netcfgd decides **which** source it wants, records what worked, falls back when
 a probe fails, and publishes the choice. Making the hardware agree is a
 `pre_up` hook, because the mux select line is your board's and netcfgd has no
-GPIO (0150). Start from
-`/usr/share/netcfgd/hook/sim-select.example` -- it is not a working hook and
-says so, and the two lines that matter are marked `BOARD`.
+GPIO (0150). Two examples ship:
+
+- **`sim-select-gpiod.example`** is complete for the commonest shape -- a
+  select line and a reset line on a GPIO expander, driven with `gpioset` -- and
+  leaves you five values at the top: the chip, the two line names, the value
+  that selects each source, and which value asserts reset.
+- **`sim-select.example`** is the bare frame, for a board whose mux is not
+  GPIO at all: a regulator, a vendor sysfs node, a `devmem` poke.
+
+Both are installed non-executable under `/usr/share/netcfgd/hook/`. Copy one,
+fill it in, and put it at the path your `pre_up` names.
+
+**The five values are not guessable and the polarity is the one that bites.**
+On the board these defaults came from, the reset line reaches the module
+through an inverting transistor, so the schematic's net name gives the opposite
+of the truth. The select line's sense was established by selecting with the
+socket *empty*: a card that answered could only have been the embedded one. If
+you are guessing, you have not established it, and guessing wrong is silent --
+both sources look identical to everything downstream.
 
 **The reset in that hook is not optional on every module.** Measured on the
 EG916Q-GL: `+QSIMDET: 0,0`, so there is no hot-plug detection at all and a card
