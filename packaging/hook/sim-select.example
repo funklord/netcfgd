@@ -15,6 +15,23 @@
 #         pre_up { /etc/netcfgd/hook/sim-select }
 #     }
 #
+# **`config` depends on which helper drives your module, and getting it wrong
+# gives an interface that never configures.** `reported` is right where the
+# helper obtains the address and writes it down -- MBIM, where `mbimcli` is
+# told the address the operator assigned. It is wrong on an ECM module, where
+# the module presents an ordinary ethernet interface and runs a DHCP server on
+# it: there `netcfgd-modem-at` deliberately writes no report, because the
+# address comes from a lease like any other, and the interface wants
+#
+#     interface wwan0 {
+#         config  = "dhcp"
+#         pre_up { /etc/netcfgd/hook/sim-select }
+#     }
+#
+# An ECM interface left on `reported` waits for a file that nothing is going to
+# write. `helper/modem-quirks` says which kind a module is -- `data=ecm` with
+# `helper=at` is the DHCP case.
+#
 # and say which sources exist, in the order you want them tried:
 #
 #     device wwan0 {
@@ -87,3 +104,41 @@ esac
 # it read at boot -- and netcfgd will see the probe keep failing, advance to
 # the next source, and eventually run out, all without anything having actually
 # changed.
+#
+# Measured on a Quectel EG916Q-GL: `+QSIMDET: 0,0`, so there is no hot-plug
+# detection at all and a card fitted after boot is invisible until the module
+# is reset. On that module the reset is not "if yours latches" -- it is the
+# only thing that re-reads the socket.
+#
+# ## FOUR THINGS ABOUT THE BOARD LINES THAT COST SOMEBODY A DAY
+#
+# These are measured on one two-SIM board, from another project driving the
+# same kind of mux. None of them is netcfgd's to do, and all four are things
+# the two BOARD lines above will meet.
+#
+# **A `pre_up` hook must return.** `gpioset` in libgpiod v2 holds the line for
+# as long as it runs, so calling it plainly from a script never comes back and
+# the hook hangs -- and a hook that hangs holds netcfgd's reconcile (0111).
+# Debian's `gpiod` ships no `gpio-manager` or `gpiocli`, so holding a line
+# across invocations is something a board script has to arrange itself.
+#
+# **Releasing an expander line does not return the pin to an input.** On a
+# `pca953x` both the direction register and the output latch keep their values,
+# which is what makes set-then-release work at all. It also means **a crash
+# does not fail safe**: the mux stays driven whichever way it was last set. A
+# script here should check the line is still an output after releasing it,
+# because everything downstream is meaningless if that stops being true.
+#
+# **The polarity is not readable from the schematic.** On that board the reset
+# line reaches the module through an inverting transistor, so the net name
+# gives the wrong answer; the select line's sense was established by selecting
+# with the socket *empty*, where a card that answered could only have been the
+# embedded one. A net name and a sheet annotation are design intent, and this
+# is one of the few places where guessing wrong is silent.
+#
+# **The mux selection survives a reboot and there is no out-of-band way to
+# change it.** A unit that comes up on a source with no subscription, and never
+# tries the other, is a unit somebody has to physically visit. That is the
+# failure netcfgd's ordered `sim` list exists for, and it is why the list is
+# worth filling in even when one source is obviously the right one today: an
+# eSIM subscription can be activated months after a unit ships.

@@ -9461,6 +9461,78 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.101 The APN register that answers with the question
+
+Two documents and a working tool for the same class of hardware, read against
+netcfgd's modem support: an i.MX91 flashing-and-testing runbook, and
+`cell-select`, which drives a two-SIM mux and has been run on the metal
+repeatedly.
+
+**Most of what they know, netcfgd already knew.** 0150 and 0152 got SIM
+selection right, the quirks table already carried the exact module, and "a link
+that pings is not a link that works" was already the first thing in
+`netcfgd-modem-at`'s header. That is the useful result of reading a second
+implementation: it says which of your own reasoning survived contact with
+somebody else's hardware.
+
+One thing was backwards.
+
+### The helper read the request and called it the outcome
+
+`netcfgd-modem-at` reported the APN in force with `AT+CGDCONT?`, under a comment
+saying *"The APN the context has, not the one we asked for"*.
+
+`AT+CGDCONT=` is what the helper writes the request with, two steps earlier.
+`AT+CGDCONT?` reads that same register back. So the value always equalled the
+request, and **the substitution warning beneath it could not fire on any modem
+on any network**. The failure the helper says it exists to catch was the one
+thing it could not see.
+
+The grant is in the dynamic parameters, `AT+CGCONTRDP`. Measured on one module,
+same SIM, two attaches four minutes apart: asked `im.cxn`, granted
+`internet.cxn`; then asked `internet.cxn`, granted `im.cxn`. The addresses came
+from different pools, which is independent of the string and so corroborates
+that the grant differed rather than the report being stale.
+
+### And the fake was built to match the helper
+
+`fake_at_modem.py` made `AT+CGDCONT=` store the *substituted* APN so that
+`AT+CGDCONT?` read it back changed. No module does that. The behaviour was
+invented to make the code under test look right, and the live test passed
+because of it -- under a header calling the substitution case "the case this
+file exists for". With the fake corrected, the old helper fails it.
+
+**This is 10.100's shape in another component, found the same week**: a check
+derived from the implementation it was meant to check. There it was an exact
+number read off the code; here it is a whole simulated device. The tell is the
+same -- written after the code, and from it, rather than from the thing being
+modelled.
+
+### Not known is not as-asked
+
+`+CGCONTRDP` is answerable only once a context is up, is missing from some
+firmware, and needs a port that a modem manager takes back on registration --
+which is exactly when there is finally something to read. The helper now says
+the grant is unknown rather than filling it in with the request, because
+filling it in puts the defect back in a quieter form.
+
+### The module's DHCP offers resolvers that do not answer
+
+`192.168.10.3` and `.4`, on the module's own pre-attach subnet; neither responds.
+The working pair is in the PDP context and changes with the APN.
+
+netcfgd needed nothing new to say this: an interface takes its lease's
+nameservers only where it carries a `dns { }` block, so **leaving that block off
+is what `UseDNS=no` says elsewhere**. Documented as the cellular default.
+
+The helper prints the granted resolvers and does not report them. A report
+merges with the lease's nameservers rather than replacing them, so reporting
+the live pair would leave the dead pair beside it -- ambiguous instead of
+wrong. Which source of nameservers wins on one interface is a real question and
+is left open rather than answered in passing.
+
+Decision 0208.
+
 ## 10.100 A preference that walks
 
 0154's idea holds and is unchanged: a metric counts up, lower winning, and

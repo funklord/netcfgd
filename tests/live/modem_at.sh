@@ -15,6 +15,15 @@
 # succeeds. A helper that reported the APN it *asked for* would print the same
 # sentence for a working link and a useless one, and the first version of the
 # helper did exactly that. The check below is the one that caught it.
+#
+# **And then it stopped catching it.** The substitution appears in
+# `AT+CGCONTRDP`, which reports what the network granted; the helper read
+# `AT+CGDCONT?`, which reads back the register the helper itself wrote and so
+# always agrees with the request. The fake was written to match the helper
+# rather than the modem -- it put the substituted APN into `+CGDCONT?` too --
+# so case 3 passed against code that could not have detected a substitution on
+# real hardware. Both are corrected together, and with the fake right the old
+# helper fails case 3. Decision 0208.
 
 set -eu
 
@@ -137,6 +146,42 @@ contains "a substituted APN is reported as the one in effect" "$out" "attached o
 lacks "and never as the one that was asked for" "$out" "attached on im.cxn"
 contains "and the substitution is called out" "$out" "SUBSTITUTED"
 contains "naming both APNs" "$out" "asked for \`im.cxn\`, got \`xlm.cxn\`"
+# The same reply carries the resolvers the context was given, and they are not
+# the ones the module's own DHCP advertises -- those are on its pre-attach
+# subnet and answer nothing. An interface that took its lease's nameservers
+# here would come up addressed, routed and unable to resolve.
+contains "and the granted resolvers are reported" "$out" "granted resolvers: 10.255.0.10 10.255.0.42"
+stop_modem
+
+# 3b. **The register that carries the substitution is the one that must be
+#     read.** `+CGDCONT?` is the request written back out, so a helper reading
+#     it reports `im.cxn` here and misses the substitution entirely. Asserted
+#     directly against the fake so that the claim about the two registers is
+#     checked rather than described.
+start_modem --wrong-apn xlm.cxn
+# Attach first: there is no context to describe until one is up, and a module
+# with nothing attached answers ERROR to `+CGCONTRDP` exactly as one lacking
+# the command does. The output is not what this case reads -- `status` below
+# is -- so it is dropped deliberately.
+sh "$helper" attach -p "$port" -a im.cxn >/dev/null 2>&1 || true
+out=$(sh "$helper" status -p "$port" 2>&1 || true)
+contains "the request register still answers with the request" "$out" '+CGDCONT: 1,"IP","im.cxn"'
+contains "and the grant register answers with the grant" "$out" '+CGCONTRDP: 1,5,"xlm.cxn"'
+stop_modem
+
+# 6. **A module that does not implement `+CGCONTRDP` leaves the grant
+#    unknown**, and unknown must not be filled in with the request. Firmware
+#    without the command, and a modem manager that takes this port back on
+#    registration, produce the same silence -- and a helper that answered it
+#    with the APN it asked for would be asserting the one thing it could not
+#    check.
+start_modem --no-cgcontrdp
+out=$(sh "$helper" attach -p "$port" -a im.cxn 2>&1 || true)
+contains "an attach with no readable grant still succeeds" "$out" "netcfgd-modem-at: attached"
+lacks "and does not name an APN it could not read" "$out" "attached on"
+contains "and says the APN is the request rather than the grant" \
+	"$out" "not known to be what is in force"
+lacks "and does not claim a substitution it cannot see" "$out" "SUBSTITUTED"
 stop_modem
 
 # 4. The ICCID, which is how netcfgd learns which SIM is current. A board that

@@ -51,11 +51,37 @@
 # ## THE APN IS YOURS AND CANNOT BE GUESSED
 #
 # It is not on the card: an APN Control List is a restriction rather than a
-# choice, and where one exists it is usually empty. It is not in an offline
-# carrier database either, which carries public APNs only -- a private APN is by
-# definition absent. And asking for one the subscription does not carry is
-# **silently overridden** with the network's default rather than refused, so a
-# wrong APN looks like a working attach.
+# choice, and where one exists it is usually empty. Measured on a Telenor SE
+# USIM: `EF_ACL` (`6F57`) is 100 bytes of `FF`, and `EF_UST` byte 5 is `0x73`
+# -- bit 3 clear, so USIM service 35 is not activated at all. The `EF_UST` read
+# through the same channel succeeded, which is what makes that a real negative
+# rather than a probe that failed. It is not in an offline carrier database
+# either, which carries public APNs only -- a private APN is by definition
+# absent. And asking for one the subscription does not carry is **silently
+# overridden** with the network's default rather than refused, so a wrong APN
+# looks like a working attach.
+#
+# **So the APN in force is read back from `AT+CGCONTRDP`, never `AT+CGDCONT?`.**
+# The second is the register this helper writes, so it answers with the request
+# whatever the network did with it. The substitution is only visible in the
+# first. See `granted()` below.
+#
+# ## THE MODULE'S OWN DHCP OFFERS RESOLVERS THAT DO NOT ANSWER
+#
+# Measured on an EG916Q-GL: the module advertises `192.168.10.3` and `.4` --
+# addresses on its own pre-attach subnet -- and neither answers a query. The
+# resolvers that work are the ones the network put in the PDP context, which
+# come out of `AT+CGCONTRDP` after registration and change with the APN, so
+# they cannot be written down anywhere in advance.
+#
+# In netcfgd's model an interface takes its lease's nameservers only where it
+# carries a `dns { }` block, so leaving that block off a cellular interface is
+# what `UseDNS=no` says elsewhere -- and is the right default here. This helper
+# **prints** the granted pair rather than reporting them: a report would merge
+# with the lease's own nameservers on the same interface rather than replace
+# them, which would leave the dead pair in the scope alongside the live one.
+# Making that a real report needs netcfgd to be able to say which source wins,
+# and that is a question rather than an omission.
 #
 # It is configuration, so it lives in netcfgd's document as
 # `device <name> { modem { apn = "..." } }` (decision 0150). netcfgd publishes
@@ -195,6 +221,39 @@ set_apn() {
 	return 1
 }
 
+# What the network actually assigned to context 1.
+#
+# **`AT+CGDCONT?` is the request and `AT+CGCONTRDP` is the grant**, and the two
+# disagree exactly when it matters. `AT+CGDCONT=` writes the context, so reading
+# it back reports what this helper just wrote -- on a module where the network
+# substituted its own APN it still answers with the one that was asked for.
+# `+CGCONTRDP` is the *dynamic* parameters: what the attach came back with.
+# Measured on an EG916Q-GL, same SIM, minutes apart, `internet.cxn` was asked
+# for and `im.cxn` granted, and the inverse on the next attach. The addresses
+# came from different pools, which is what makes that a real substitution
+# rather than a stale report.
+#
+#   +CGCONTRDP: 1,5,"im.cxn","10.8.40.56","10.8.40.56","10.255.0.10","10.255.0.42",,,,,1500
+#
+# Best effort by design. The command is answered only once a context is active,
+# some firmware does not implement it, and a modem manager takes this port back
+# on registration -- so an empty answer means "not known", never "as asked".
+granted() {
+	at "AT+CGCONTRDP=1" 2>/dev/null | sed -n 's/^.*\(+CGCONTRDP: .*\)$/\1/p' | head -1
+}
+
+# One comma-separated field of a `+CGCONTRDP:` line, unquoted.
+#
+# Counted from the first value after the colon, so 3 is the APN and 6 and 7 are
+# the primary and secondary resolvers. Quoting varies between firmwares -- the
+# APN is quoted on the module measured and the numbering is not -- so the quotes
+# come off rather than being matched.
+field() {
+	sed -n 's/^+CGCONTRDP: //p' |
+		awk -F, -v n="$1" '{ gsub(/[" ]/, "", $n); print $n }' |
+		head -1
+}
+
 do_attach() {
 	quiet
 	set_apn || return 1
@@ -221,25 +280,52 @@ do_attach() {
 			dialled=1
 		fi
 		if registered && attached; then
-			# **The APN the context has, not the one we asked for.**
+			# **The APN the network granted, which is a different register
+			# from the one we wrote.**
 			#
 			# Asking for an APN the subscription does not carry is not
 			# refused: the network substitutes its own default and the attach
 			# succeeds. Reporting the requested one would print exactly the
 			# same sentence for a working link and a useless one -- which is
-			# the failure this whole helper is most likely to be blamed for,
-			# and the first version of this file did it.
-			in_use=$(at "AT+CGDCONT?" 2>/dev/null |
-				sed -n 's/.*+CGDCONT: 1,"[^"]*","\([^"]*\)".*/\1/p' |
-				head -1)
+			# the failure this whole helper is most likely to be blamed for.
+			#
+			# **This read `AT+CGDCONT?` and called the answer "in use".** That
+			# is the context *we* wrote two steps above, so it always agreed
+			# with the request, the substitution warning below could never
+			# fire, and the line printed for a substituted APN was the same
+			# line printed for a granted one. `AT+CGCONTRDP` is the register
+			# that carries what the network assigned. See `modem-quirks`.
+			rdp=$(granted 2>/dev/null || true)
+			in_use=$(printf '%s' "$rdp" | field 3)
 			echo "netcfgd-modem-at: attached${in_use:+ on $in_use}"
-			if [ -n "$apn" ] && [ -n "$in_use" ] && [ "$in_use" != "$apn" ]; then
+			if [ -n "$apn" ] && [ -z "$in_use" ]; then
+				# Not silence about a matching APN: silence about an unknown
+				# one. A module whose firmware refuses `+CGCONTRDP`, or whose
+				# AT port a modem manager has taken back -- which is exactly
+				# what happens on registration -- leaves the grant unread, and
+				# a helper that filled the gap with the request would be
+				# asserting the thing it could not check.
+				echo "netcfgd-modem-at: the modem did not report a granted APN," >&2
+				echo "netcfgd-modem-at:   so \`$apn\` is what was asked for and" >&2
+				echo "netcfgd-modem-at:   not known to be what is in force" >&2
+			elif [ -n "$apn" ] && [ "$in_use" != "$apn" ]; then
 				echo "netcfgd-modem-at: THE NETWORK SUBSTITUTED THE APN" >&2
 				echo "netcfgd-modem-at:   asked for \`$apn\`, got \`$in_use\`" >&2
 				echo "netcfgd-modem-at:   this happens when the subscription does" >&2
 				echo "netcfgd-modem-at:   not carry the APN requested, and the" >&2
 				echo "netcfgd-modem-at:   default it gives instead may route" >&2
 				echo "netcfgd-modem-at:   almost nothing" >&2
+			fi
+			# The resolvers the context carries, which are the ones that
+			# answer. A module's own DHCP hands out resolvers on its pre-attach
+			# subnet that answer nothing at all -- measured on an EG916Q-GL,
+			# `192.168.10.3` and `.4` -- so a cellular interface that takes its
+			# lease's nameservers can come up addressed, routed and unable to
+			# resolve. Printed rather than reported: see the header.
+			first=$(printf '%s' "$rdp" | field 6)
+			second=$(printf '%s' "$rdp" | field 7)
+			if [ -n "$first$second" ]; then
+				echo "netcfgd-modem-at:   granted resolvers: ${first:-none} ${second:-none}" >&2
 			fi
 			# Said every time, because an attach that succeeded on the wrong
 			# APN looks exactly like one that succeeded on the right one.
@@ -323,7 +409,11 @@ status)
 	quiet
 	at "AT+CGREG?" || true
 	at "AT+CGATT?" || true
+	# Both, and in this order, because the pair is the point: `+CGDCONT?` is
+	# what was asked for and `+CGCONTRDP` is what the network granted. Reading
+	# only the first is how a substituted APN reads as a working one.
 	at "AT+CGDCONT?" || true
+	at "AT+CGCONTRDP=1" || true
 	;;
 iccid)
 	# The card's own identifier, which is the fact about which SIM is current.

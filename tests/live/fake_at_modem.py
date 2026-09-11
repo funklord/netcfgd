@@ -20,9 +20,23 @@ Three things a plausible fake would get wrong and this one does not:
 
   - **An APN the subscription does not carry is accepted and silently
     replaced**, which is what a real network does: `--wrong-apn` makes
-    `+CGDCONT?` read back a different APN from the one set. A fake that
+    `+CGCONTRDP` report a different APN from the one set. A fake that
     echoed back whatever it was given would make it impossible to test the
     one failure that matters most, because it looks like success.
+
+  - **The substitution appears in `+CGCONTRDP` and never in `+CGDCONT?`**,
+    which is the whole shape of it. `+CGDCONT=` writes a register and
+    `+CGDCONT?` reads that register back, so on real hardware it answers with
+    the request no matter what the network did; the grant is in the *dynamic*
+    parameters. This fake used to put the substituted APN into `+CGDCONT?`
+    as well, which made a helper reading the wrong register look correct --
+    the fake had been built to match the code rather than the modem, so the
+    test agreed with the defect. Decision 0208.
+
+  - **`+CGCONTRDP` carries the resolvers too**, in fields 6 and 7, and they
+    are not the ones the module's own DHCP hands out. `--no-cgcontrdp` models
+    the firmware that refuses the command at all, which must read as "not
+    known" rather than as "granted what was asked".
 
 Not a general AT emulator: it knows the commands this helper sends and answers
 ERROR to everything else, which is what a modem does for a command it lacks.
@@ -37,6 +51,12 @@ import sys
 parser = argparse.ArgumentParser()
 parser.add_argument("--print-path", action="store_true")
 parser.add_argument("--wrong-apn", default="", help="what the network substitutes")
+parser.add_argument(
+	"--no-cgcontrdp",
+	action="store_true",
+	help="answer ERROR to +CGCONTRDP, as firmware that lacks it does",
+)
+parser.add_argument("--dns", default="10.255.0.10,10.255.0.42")
 parser.add_argument("--never-attach", action="store_true")
 parser.add_argument("--iccid", default="8944000000000000000")
 args = parser.parse_args()
@@ -78,12 +98,27 @@ while True:
 		answer("\r\nOK\r\n")
 	elif line.startswith("AT+CGDCONT=") and "," in line:
 		wanted = re.findall(r'"([^"]*)"', line)
-		# The network's substitution, which is the case worth testing: asking
-		# for an APN the subscription does not carry is not refused.
-		state["apn"] = args.wrong_apn or (wanted[-1] if wanted else "")
+		# The request, stored as written. A real module keeps what it was
+		# given here whatever the network later grants, so the substitution
+		# below is deliberately NOT applied to this register.
+		state["apn"] = wanted[-1] if wanted else ""
 		answer("\r\nOK\r\n")
 	elif line == "AT+CGDCONT?":
 		answer('\r\n+CGDCONT: 1,"IP","%s",,0,0\r\n\r\nOK\r\n' % state["apn"])
+	elif line.startswith("AT+CGCONTRDP"):
+		# What the network granted, which is where a substitution shows. Only
+		# answered once there is a context to describe -- before the APN is
+		# set there is nothing attached and the module says ERROR, which is
+		# also what firmware lacking the command says.
+		if args.no_cgcontrdp or not state["apn"]:
+			answer("\r\nERROR\r\n")
+		else:
+			grant = args.wrong_apn or state["apn"]
+			first, _, second = args.dns.partition(",")
+			answer(
+				'\r\n+CGCONTRDP: 1,5,"%s","10.8.40.56","10.8.40.56",'
+				'"%s","%s",,,,,1500\r\n\r\nOK\r\n' % (grant, first, second)
+			)
 	elif line == "AT+CGREG?":
 		answer("\r\n+CGREG: 0,1\r\n\r\nOK\r\n")
 	elif line == "AT+CGATT?":

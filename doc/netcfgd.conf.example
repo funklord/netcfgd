@@ -506,6 +506,47 @@
 # own default rather than an error, so a wrong APN looks like a working attach
 # and only a probe of the thing you actually need will tell you otherwise.
 #
+# `apn` is a REQUEST, and the network answers as it pleases. Measured on one
+# board, same SIM, two attaches four minutes apart: one asked for `im.cxn` and
+# was granted `internet.cxn`, the next asked for `internet.cxn` and was granted
+# `im.cxn`. The addresses came from different pools, so the grant genuinely
+# differed rather than the report being stale. What decides it is not known.
+# The helper reads the APN in force back with `AT+CGCONTRDP` and says so --
+# never `AT+CGDCONT?`, which reads back the request it wrote a moment earlier
+# and would agree with itself on a link that had been substituted out from
+# under it.
+#
+# A CELLULAR INTERFACE TAKES ITS ADDRESS FROM THE LEASE AND ITS NAMESERVERS
+# FROM NOWHERE. Note what this block does not have.
+
+#interface wwan0 {
+#	config = "dhcp"
+#	probe {
+#		command = "/usr/share/netcfgd/probe/default"
+#		args    = ["wwan0"]
+#	}
+#}
+
+# On an ECM module the host takes an ordinary DHCP lease -- the module bridges
+# the operator's address -- so `config = "dhcp"` is right. **But the same DHCP
+# offers nameservers, and on the module measured they answer nothing at all:
+# `192.168.10.3` and `.4`, on the module's own pre-attach subnet.** The
+# resolvers that work are the ones the network put in the PDP context, they
+# change with the APN, and nothing outside the modem can know them in advance.
+#
+# An interface takes its lease's nameservers only where it carries a `dns { }`
+# block, so leaving that block off -- as above -- is how you say "the address,
+# not the resolvers". An interface that has one here comes up addressed,
+# routed and unable to resolve, which reads as an outage rather than as a
+# configuration choice.
+#
+# And the `probe` is not decoration. A cellular link that pings is not a
+# cellular link that works: on the default APN a network hands out when it does
+# not like the one requested, ICMP succeeds everywhere and the well-known
+# resolvers accept connections while every other address blackholes the SYN.
+# The bearer is up, the modem says so, and nothing useful crosses it. Only
+# fetching something real separates the two.
+#
 # ETHERNET OFFLOADS AND LINK SETTINGS, for a NIC whose defaults are wrong.
 # Each toggle is "on", "off" or "unmanaged" -- three values rather than two,
 # because "leave this one alone" is a different instruction from "turn it

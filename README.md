@@ -134,7 +134,17 @@ netcfgd falls back to the next and cycles the link so the change actually
 takes effect, and the choice is sticky — a marginal primary does not flap.
 The APN in effect is read back from the modem and reported, because a network
 that substitutes its own default produces a link where ICMP works everywhere
-and nothing else does.
+and nothing else does. It is read from the register that carries what the
+network **granted**, not the one the helper wrote the request into — those
+disagree exactly when it matters, and reading the second is how a substituted
+APN reads as a working one.
+
+A cellular interface takes its address from the module's DHCP and its
+nameservers from nothing: the resolvers that DHCP offers are on the module's
+own pre-attach subnet and answer nothing, while the ones that work arrive in
+the PDP context and change with the APN. netcfgd already says that with the
+absence of a `dns { }` block, so the fix is a documented default rather than a
+new setting.
 
 A quirks table explains known modules rather than deciding for them, so a
 module with no entry behaves identically and merely says less.

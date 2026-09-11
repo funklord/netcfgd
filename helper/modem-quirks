@@ -46,9 +46,78 @@
 # `at=3` because a running ModemManager held `ttyUSB2` and left `ttyUSB0`,
 # `ttyUSB1` and `ttyUSB3` free -- checked by looking at what had the ports open
 # rather than assumed from the port order. On a machine with no modem manager,
-# 2 answers as well.
+# 2 answers as well. `ttyUSB0` is the diagnostic port and answers binary;
+# `ttyUSB1` answers nothing at all.
+#
+# **ModemManager takes both AT ports once the modem registers** -- `ttyUSB2`
+# only while unregistered, and `ttyUSB3` as well afterwards, which is precisely
+# when the PDP context first has an APN and resolvers to read. Measured
+# 2026-09-11 on an i.MX91. Where MM is running, a udev rule setting
+# `ID_MM_PORT_IGNORE=1` on USB interface 3 is what keeps the port available;
+# MM does not need it and drove the module from `ttyUSB2` alone throughout.
+# Without that rule, `AT+CGCONTRDP` becomes unreadable exactly when it matters,
+# which the AT helper reports as "not known" rather than filling in.
 #
 # `nat=0` is why the host takes a DHCP lease: the module bridges the operator's
 # address rather than handing out a private one, so the ECM interface gets the
 # real address and `config = "dhcp"` is all netcfgd needs.
+#
+# **Its DHCP also offers resolvers, and they do not answer.** `192.168.10.3`
+# and `.4`, on the module's own pre-attach subnet; neither responds to a query.
+# The working pair is in the PDP context and comes out of `AT+CGCONTRDP`. An
+# interface here should therefore carry no `dns { }` block, which is how
+# netcfgd says "address from the lease, nameservers not".
 2c7c:6007  data=ecm helper=at at=3 autoconnect=yes note=EG916Q-GL,firmware_EG916QGLLGR01A05M04
+
+# ## WHAT THIS FIRMWARE REFUSES OR ANSWERS VACUOUSLY
+#
+# All measured on the module above, 2026-08-27 and 2026-09-11. Each is here
+# because it reads as a fact about the SIM or the radio and is a fact about the
+# firmware, which is the most expensive kind of wrong answer.
+#
+# **`AT+CRSM` is refused** -- `CME ERROR: 3` for every file, `EF_ICCID`
+# included, and that last one is the control: a file the card certainly has,
+# refused the same way, proves it is the command rather than the file. SIM file
+# access has to go through `AT+CCHO` and `AT+CGLA`, and `CCHO` wants a
+# **partial** AID -- `A0000000871002` opens a channel where the full 16-byte
+# padded USIM AID fails.
+#
+# **`AT+QSIMSTAT?` is a vacuous pass.** With `+QSIMDET: 0,0` the module reports
+# "inserted" unconditionally; it said so with the socket empty. Anything built
+# on it while detection is off is reading a constant, not a card.
+#
+# **There is no hot-plug detection** (`+QSIMDET: 0,0`), so a card fitted after
+# boot is invisible until the modem is reset. That is why a SIM change is a
+# reset and not a re-read.
+#
+# **An ISD-R probe cannot tell a socket from an eUICC.** `AT+CCHO` on the ISD-R
+# AID reports absent at both mux positions, including one demonstrably holding
+# an eUICC -- the module blocks it. The ICCID is the only discriminator, which
+# is what `netcfgd-modem-at iccid` is for.
+#
+# **`AT+CFUN=1,1` is not a safe reset on every board.** On one i.MX93 carrier it
+# rebooted the whole SoC -- uptime back to minutes, `/tmp` cleared -- and the
+# same command on an i.MX91 with the same module was harmless. It is the
+# carrier rather than the module, which is exactly why no helper here sends it:
+# resetting a modem is board enablement, and on a board with a reset line it is
+# that line's job.
+#
+# ## WHAT LOOKS LIKE A SIM FAULT AND IS NOT
+#
+# **A socket that cannot read is indistinguishable from an empty socket.**
+# Nothing in the AT interface separates them: a card that registers home in one
+# board read as absent in another's socket, `AT+CPIN?` giving `CME ERROR: 10`,
+# while the same runs read that board's eUICC through the same mux. Mux and
+# module were both fine; it was the socket's path on that board.
+#
+# **An eUICC with no enabled profile presents as no SIM.** That is not a fault
+# and no APN will change it.
+#
+# **`ESM cause 33` is the subscription, not the APN.**
+# `REQUESTED_SERVICE_OPTION_NOT_SUBSCRIBED`: the profile is live enough to
+# attempt registration and has no data entitlement until it is activated.
+# Measured against a shipped bootstrap profile, an empty APN and one operator
+# APN both gave cause 29 while two others gave 33 -- so a sweep of APNs against
+# a profile in this state reads as "every APN is wrong" and means none of them
+# was the problem. `AT+CEER` is what the AT helper prints on a failed attach
+# for this reason.
