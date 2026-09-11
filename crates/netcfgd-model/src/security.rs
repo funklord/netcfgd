@@ -63,6 +63,24 @@ pub struct EapConfig {
 	/// Password, for methods that use one.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub password: Option<SecretRef>,
+	/// Which server name the certificate must carry.
+	///
+	/// **`ca_cert` alone answers "who signed this", not "who is this".** It
+	/// accepts any certificate the pinned issuer signed, which is exactly right
+	/// when the issuer is the organisation's own CA and nearly worthless when
+	/// it is a public one -- and a commercial certificate on a RADIUS server is
+	/// ordinary. There, anyone who can buy a certificate from the same CA can
+	/// stand up an access point with the right SSID, be trusted, and collect
+	/// whatever the inner method hands over: an `MSCHAPv2` exchange to crack
+	/// offline, or the password itself.
+	///
+	/// This is `wpa_supplicant`'s `domain_suffix_match`, a suffix match against
+	/// the certificate's names -- `radius.example.com` matches that host, and
+	/// `example.com` matches any host under it. Absent means netcfgd sends
+	/// nothing and the supplicant keeps its own default, which is to check the
+	/// issuer and not the name. Decision 0206.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub domain_suffix_match: Option<String>,
 	/// The certificate the server is checked against.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub ca_cert: Option<CertSource>,

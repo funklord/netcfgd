@@ -619,17 +619,39 @@ fn warn_eap_without_ca(builder: &mut Builder, desired: &Document) {
 		let netcfgd_model::Security::Eap(eap) = &network.security else {
 			continue;
 		};
-		if eap.ca_cert.is_some() {
+		// **Pinning an issuer is most of the answer and not all of it**, which
+		// this warning used to imply by falling silent as soon as `ca_cert`
+		// appeared. `ca_cert` says who signed the server's certificate;
+		// `domain_suffix_match` says who the certificate is for. With only the
+		// first, every certificate that issuer ever signed is accepted -- fine
+		// for an organisation's own CA, nearly worthless for a public one, and
+		// a commercial certificate on a RADIUS server is ordinary. Decision
+		// 0206.
+		if eap.ca_cert.is_some() && eap.domain_suffix_match.is_some() {
 			continue;
 		}
-		builder.warnings.push(Warning {
-			message: format!(
+		let message = if eap.ca_cert.is_some() {
+			format!(
+				"network `{}` pins a `ca_cert` and no `domain_suffix_match`, so it \
+				 accepts any server certificate that issuer signed. Where the issuer \
+				 is a public CA that is anybody who can buy one: they raise an \
+				 access point with this name, are believed, and take what the inner \
+				 method sends. Set `domain_suffix_match` to the server's name, such \
+				 as `radius.example.com`",
+				network.id
+			)
+		} else {
+			format!(
 				"network `{}` authenticates with EAP and pins no `ca_cert`, so it \
 				 will trust any server that answers -- which is how the credential \
 				 is taken. Set `ca_cert` to the issuer's certificate, or \
-				 `ncfg wifi add ... --ca-cert PATH`",
+				 `ncfg wifi add ... --ca-cert PATH`, and `domain_suffix_match` to \
+				 the server's name",
 				network.id
-			),
+			)
+		};
+		builder.warnings.push(Warning {
+			message,
 			// A network is not an interface: the same profile can be handed to
 			// every radio on the machine, and naming one of them would be a
 			// guess dressed as a fact.

@@ -8111,27 +8111,59 @@ interface wlan0 { config = "dhcp" }
 	assert!(plan.refusals.is_empty(), "{:?}", plan.refusals);
 }
 
-/// And one that pins a CA says nothing.
+/// Pinning a CA is most of the answer; only both halves are silent.
+///
+/// **This test used to be called "one that pins a CA says nothing"**, and that
+/// is what the warning did: it fell silent the moment `ca_cert` appeared. But
+/// `ca_cert` says who *signed* the server's certificate and
+/// `domain_suffix_match` says who it is *for*, and with only the first, every
+/// certificate that issuer ever signed is accepted -- fine for an
+/// organisation's own CA, nearly worthless for a public one, and a commercial
+/// certificate on a RADIUS server is ordinary. Decision 0206.
+///
+/// All three states, because the silent one is what the old shape got wrong.
 #[test]
-fn an_eap_network_with_a_ca_certificate_is_not_warned_about() {
-	let desired = document(
-		r#"
-device wlan0 { wifi { } }
-network "Corp" {
-	wifi { eap = "ttls"; identity = "d"; password = "@secret:c"; ca_cert = "/ca.pem" }
-}
-interface wlan0 { config = "dhcp" }
-"#,
-	);
-	let observed = observed_with(&["wlan0"]);
-	let plan = plan(&desired, &observed, &PlanOptions::default());
-	assert!(
-		!plan
+fn an_eap_network_is_warned_about_until_both_halves_are_pinned() {
+	let network = |extra: &str| {
+		document(&format!(
+			"device wlan0 {{ wifi {{ }} }}\n\
+			 network \"Corp\" {{\n\twifi {{ eap = \"ttls\"; identity = \"d\"; \
+			 password = \"@secret:c\"{extra} }}\n}}\n\
+			 interface wlan0 {{ config = \"dhcp\" }}\n"
+		))
+	};
+	let warnings = |desired: &netcfgd_model::Document| {
+		plan(desired, &observed_with(&["wlan0"]), &PlanOptions::default())
 			.warnings
 			.iter()
-			.any(|warning| warning.message.contains("trust any server")),
-		"a network that pins a CA was warned about anyway: {:?}",
-		plan.warnings
+			.map(|warning| warning.message.clone())
+			.collect::<Vec<_>>()
+			.join("\n")
+	};
+
+	// Neither: the credential goes to whoever answers.
+	let said = warnings(&network(""));
+	assert!(said.contains("trust any server that answers"), "got {said}");
+
+	// The issuer only: better, and not finished. The message has to say what
+	// is still open rather than falling silent.
+	let said = warnings(&network("; ca_cert = \"/ca.pem\""));
+	assert!(
+		said.contains("any server certificate that issuer signed"),
+		"pinning a CA and nothing else is not the end of it: {said}"
+	);
+	assert!(
+		said.contains("domain_suffix_match"),
+		"and the message names what closes it: {said}"
+	);
+
+	// Both: nothing to say.
+	let said = warnings(&network(
+		"; ca_cert = \"/ca.pem\"; domain_suffix_match = \"radius.example.com\"",
+	));
+	assert!(
+		!said.contains("issuer signed") && !said.contains("trust any server"),
+		"a network with both halves pinned was warned about anyway: {said}"
 	);
 }
 

@@ -9461,6 +9461,55 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.99 A pinned issuer is not a checked server
+
+netcfgd could say `ca_cert` and nothing else about the server.
+
+**`ca_cert` answers who signed the certificate. It does not answer who the
+certificate is for.** Pinning an issuer accepts every certificate that issuer
+ever signed -- exactly the intent for an organisation's own CA, close to
+worthless for a public one, and a commercial certificate on a RADIUS server is
+ordinary. There, anybody who can buy a certificate from the same CA raises an
+access point with the right SSID, is believed, and takes what the inner method
+sends: an MSCHAPv2 exchange to crack offline, or the password. The client has
+checked that somebody it trusts signed the certificate, and nothing about
+*which* server it is.
+
+`domain_suffix_match` is the other half and now runs from the document through
+the compiler to the supplicant. Absent sends no line rather than an empty one,
+which is **0189's distinction** -- `ca_cert=""` was read as a filename and PEAP
+never reached an inner method, the fault this whole run of audits opened with.
+
+### The warning was too easily satisfied
+
+It fell silent the moment `ca_cert` appeared, which reads as "dealt with". It
+now distinguishes neither / issuer only / both, and the middle case is the
+common one: somebody who did the obvious thing and stopped. The existing test
+was named "one that pins a CA says nothing" and would have kept passing while
+its name became untrue.
+
+### The example taught the insecure pattern
+
+All three enterprise blocks pinned `/etc/ssl/certs/ca-certificates.crt` -- the
+system bundle, "trust every public CA on earth". Against somebody willing to
+buy a certificate that is barely better than pinning nothing, and it was the
+reference an operator copies, pointed at by the postinst as the thing to read
+on a machine with no network.
+
+Fifth fault in that file this run, and the only one with a security
+consequence. Like three of the other four it was not a compile failure, so no
+gate could have caught it.
+
+### Not done here
+
+`ncfg wifi add --ca-cert` has no companion flag, so a network added that way
+still needs the key written by hand. Named rather than quietly left.
+
+The privilege gate (0127) stopped the commit until the new key was classified,
+which is the gate doing exactly its job: `domain_suffix_match` names a host and
+nothing else, and *narrows* what the machine will believe -- omitting it gives
+weaker checking than any value could. Ordinary. Decision 0206.
+
 ## 10.98 The length rule belongs to a field, not to WPA
 
 **The classic WPA3 trap is already handled**, which is worth saying before the

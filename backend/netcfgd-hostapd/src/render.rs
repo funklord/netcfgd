@@ -691,6 +691,7 @@ mod tests {
 			client_cert: None,
 			private_key: None,
 			phase2: None,
+			domain_suffix_match: None,
 		});
 		assert_eq!(
 			config(&access_point(eap), Path::new("/run"), None),

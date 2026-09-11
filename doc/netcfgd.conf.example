@@ -683,21 +683,40 @@
 #		identity            = "you@example.ac.uk"
 #		anonymous_identity  = "anonymous@example.ac.uk"
 #		password            = "@secret:eduroam"
-#		ca_cert             = "/etc/ssl/certs/ca-certificates.crt"
+#		ca_cert             = "/etc/netcfgd/certs/example-ac-uk.pem"
+#		domain_suffix_match = "radius.example.ac.uk"
 #		phase2              = "mschapv2"
 #	}
 #}
+
+# **TWO FIELDS, AND BOTH ARE LOAD BEARING.** `ca_cert` says who signed the
+# server's certificate. `domain_suffix_match` says who that certificate is
+# for. With only the first, every certificate that issuer ever signed is
+# accepted -- which is the whole point when the issuer is the organisation's
+# own CA, and nearly worthless when it is a public one.
+#
+# This example used to pin `/etc/ssl/certs/ca-certificates.crt`, the system
+# bundle. That means "trust every public CA on earth": anybody who can buy a
+# certificate raises an access point with the right name, is believed, and
+# takes what the inner method sends -- an MSCHAPv2 exchange to crack offline,
+# or the password itself. Pin the issuer your organisation actually uses, and
+# name the server. `ncfg plan` warns while either is missing.
+#
+# A suffix matches downward: `example.ac.uk` accepts any host under it, and
+# `radius.example.ac.uk` accepts that one. Ask whoever runs the network which
+# to use; guessing wide defeats the point of setting it.
 
 # Certificate authentication instead of a password. The three certificate
 # fields each take either a path to a file already on this machine:
 
 #network "corp" {
 #	wifi {
-#		eap          = "tls"
-#		identity     = "you@corp.example"
-#		ca_cert      = "/etc/ssl/certs/ca-certificates.crt"
-#		client_cert  = "/etc/netcfgd/certs/you.pem"
-#		private_key  = "/etc/netcfgd/certs/you.key"
+#		eap                 = "tls"
+#		identity            = "you@corp.example"
+#		ca_cert             = "/etc/netcfgd/certs/corp-ca.pem"
+#		domain_suffix_match = "radius.corp.example"
+#		client_cert         = "/etc/netcfgd/certs/you.pem"
+#		private_key         = "/etc/netcfgd/certs/you.key"
 #	}
 #}
 
@@ -705,11 +724,12 @@
 
 #network "corp" {
 #	wifi {
-#		eap          = "tls"
-#		identity     = "you@corp.example"
-#		ca_cert      = "@secret:corp-ca"
-#		client_cert  = "@secret:corp-crt"
-#		private_key  = "@secret:corp-key"
+#		eap                 = "tls"
+#		identity            = "you@corp.example"
+#		ca_cert             = "@secret:corp-ca"
+#		domain_suffix_match = "radius.corp.example"
+#		client_cert         = "@secret:corp-crt"
+#		private_key         = "@secret:corp-key"
 #	}
 #}
 

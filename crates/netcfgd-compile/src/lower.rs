@@ -2064,6 +2064,7 @@ struct WifiKeys {
 	client_cert: Option<netcfgd_model::CertSource>,
 	private_key: Option<netcfgd_model::CertSource>,
 	phase2: Option<String>,
+	domain_suffix_match: Option<String>,
 }
 
 /// The `wifi` block inside a `network`: how to authenticate to it.
@@ -2235,6 +2236,9 @@ fn lower_wifi_key(
 		"ca_cert" => keys.ca_cert = as_cert_source(&assignment.value, diags),
 		"client_cert" => keys.client_cert = as_cert_source(&assignment.value, diags),
 		"phase2" => keys.phase2 = as_string(&assignment.value, diags),
+		"domain_suffix_match" => {
+			keys.domain_suffix_match = as_string(&assignment.value, diags);
+		}
 		// Retired by 0154, and named rather than left to "unknown wifi key".
 		// An operator who wrote `priority` had a working configuration, and
 		// the replacement runs the OTHER WAY UP -- so the one thing they must
@@ -2304,7 +2308,7 @@ fn lower_dot1x_key(keys: &mut WifiKeys, assignment: &Assignment, diags: &mut Dia
 				assignment.span,
 				format!("`{}` means nothing on a wired port", assignment.key),
 			)
-			.with_help("`dot1x` is EAP only: eap, identity, password, ca_cert, client_cert, private_key, phase2"),
+			.with_help("`dot1x` is EAP only: eap, identity, password, ca_cert, client_cert, private_key, phase2, domain_suffix_match"),
 		),
 		_ => {
 			// `network` is not in scope here, and none of the keys reaching
@@ -2363,6 +2367,7 @@ fn build_security(keys: WifiKeys, block: &Block, diags: &mut Diagnostics) -> Opt
 			client_cert: keys.client_cert,
 			private_key: keys.private_key,
 			phase2: keys.phase2,
+			domain_suffix_match: keys.domain_suffix_match,
 		}));
 	}
 	if keys.owe {

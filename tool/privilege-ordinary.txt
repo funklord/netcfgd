@@ -51,6 +51,13 @@ dns
 dns_domains
 dns_mode
 dns_search
+# The server name an EAP certificate must carry (0206). It names a host and
+# nothing else -- no path, no command, no principal -- and what it does is
+# *narrow* the set of servers this machine will believe. A client that omits it
+# entirely gets weaker checking than any value it could put here, so there is
+# nothing to gain by setting it badly that is not already available by leaving
+# it out.
+domain_suffix_match
 domains
 down_after
 dummy

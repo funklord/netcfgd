@@ -243,6 +243,10 @@ fn maximal_interface(name: &str) -> Interface {
 			client_cert: Some(CertSource::Path("/etc/ssl/client.pem".to_owned())),
 			private_key: Some(CertSource::Stored(secret("key", SecretProvider::Exec))),
 			phase2: Some("auth=MSCHAPV2".to_owned()),
+			// Present here and absent in the other sample, so both forms are
+			// pinned. A `skip_serializing_if` field that is only ever absent
+			// in a witness is a field nothing pins.
+			domain_suffix_match: Some("radius.example.com".to_owned()),
 		}),
 		advertise: Some(RaPolicy {
 			backend: RaBackend::Odhcpd,
@@ -570,6 +574,7 @@ fn every_network() -> Vec<WifiNetwork> {
 				client_cert: None,
 				private_key: Some(CertSource::Stored(secret("k", SecretProvider::File))),
 				phase2: None,
+				domain_suffix_match: None,
 			}),
 		),
 		("owe", Security::Owe),

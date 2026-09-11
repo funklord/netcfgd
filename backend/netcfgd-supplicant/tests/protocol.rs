@@ -466,6 +466,7 @@ fn eap_settings_quote_and_redact_the_identity() {
 		client_cert: None,
 		private_key: None,
 		phase2: Some("auth=MSCHAPV2".to_owned()),
+		domain_suffix_match: None,
 	});
 
 	let all = settings(&network("corp", eap), MacPolicy::Permanent, &resolver).expect("settings");
@@ -505,6 +506,7 @@ fn an_eap_method_missing_its_credential_says_which() {
 		client_cert: None,
 		private_key: None,
 		phase2: None,
+		domain_suffix_match: None,
 	});
 	let error =
 		settings(&network("corp", eap), MacPolicy::Permanent, &resolver).expect_err("refused");
@@ -522,6 +524,7 @@ fn an_eap_method_missing_its_credential_says_which() {
 		client_cert: Some(CertSource::Path("/etc/ssl/client.pem".to_owned())),
 		private_key: None,
 		phase2: None,
+		domain_suffix_match: None,
 	});
 	let error =
 		settings(&network("corp", tls), MacPolicy::Permanent, &resolver).expect_err("refused");
@@ -565,6 +568,7 @@ fn a_network_that_pins_no_ca_certificate_sends_no_ca_cert_at_all() {
 		client_cert: None,
 		private_key: None,
 		phase2: None,
+		domain_suffix_match: None,
 	});
 
 	let rendered = settings(&network("corp", eap), MacPolicy::Permanent, &resolver)
@@ -604,6 +608,7 @@ fn a_network_that_pins_a_ca_certificate_still_names_the_file() {
 		client_cert: None,
 		private_key: None,
 		phase2: None,
+		domain_suffix_match: None,
 	});
 
 	let rendered = settings(&network("corp", eap), MacPolicy::Permanent, &resolver)
@@ -959,6 +964,7 @@ fn stored_certificates_are_materialised_and_sent_as_paths() {
 		client_cert: Some(CertSource::Stored(stored("corp-crt"))),
 		private_key: Some(CertSource::Stored(stored("corp-key"))),
 		phase2: None,
+		domain_suffix_match: None,
 	});
 	let lines = rendered(&network("corp", tls), &resolver);
 
@@ -1073,6 +1079,7 @@ fn tls_with(private_key: CertSource) -> Security {
 		client_cert: Some(CertSource::Path("/etc/ssl/client.pem".to_owned())),
 		private_key: Some(private_key),
 		phase2: None,
+		domain_suffix_match: None,
 	})
 }
 
@@ -1194,6 +1201,7 @@ fn two_networks_with_different_cas_do_not_share_one_file() {
 			client_cert: None,
 			private_key: None,
 			phase2: None,
+			domain_suffix_match: None,
 		})
 	};
 
@@ -1340,4 +1348,67 @@ fn wpa3_alone_sends_sae_password_and_takes_a_longer_one() {
 			"{proto:?} still refuses a passphrase the psk field cannot carry"
 		);
 	}
+}
+
+/// A pinned issuer says who signed the certificate; this says who it is for.
+///
+/// **`ca_cert` alone accepts every certificate that issuer ever signed.** That
+/// is right when the issuer is the organisation's own CA and nearly worthless
+/// when it is a public one -- and a commercial certificate on a RADIUS server
+/// is ordinary. There, anybody who can buy one from the same CA raises an
+/// access point with the right name, is believed, and takes whatever the inner
+/// method sends: an `MSCHAPv2` exchange to crack offline, or the password.
+///
+/// Absent means no line at all rather than an empty one, which is 0189's fault
+/// in a different field: `ca_cert=""` was read as a filename and PEAP never
+/// reached an inner method. Decision 0206.
+#[test]
+fn a_server_name_is_checked_when_the_document_asks_for_it() {
+	let dir = scratch("dsm");
+	write_secret(&dir, "password", "corporate");
+	let resolver = Resolver::with_secrets_dir(&*dir);
+
+	let build = |domain: Option<&str>| {
+		Security::Eap(EapConfig {
+			method: EapMethod::Peap,
+			identity: "user@example.com".to_owned(),
+			anonymous_identity: None,
+			password: Some(SecretRef {
+				provider: SecretProvider::File,
+				name: "password".to_owned(),
+			}),
+			ca_cert: Some(CertSource::Path("/etc/ssl/certs/corporate.pem".to_owned())),
+			client_cert: None,
+			private_key: None,
+			phase2: Some("auth=MSCHAPV2".to_owned()),
+			domain_suffix_match: domain.map(ToOwned::to_owned),
+		})
+	};
+
+	let checked = rendered(
+		&network("corp", build(Some("radius.example.com"))),
+		&resolver,
+	);
+	assert!(
+		checked
+			.iter()
+			.any(|line| line.contains("domain_suffix_match \"radius.example.com\"")),
+		"the name reaches the supplicant, quoted: {checked:?}"
+	);
+
+	// **Not an empty one.** The absent case sends no line, so the supplicant
+	// keeps its own default rather than being handed a name nothing matches.
+	let unchecked = rendered(&network("corp", build(None)), &resolver);
+	assert!(
+		!unchecked
+			.iter()
+			.any(|line| line.contains("domain_suffix_match")),
+		"absent means no line at all: {unchecked:?}"
+	);
+	// And the issuer is still pinned either way, which is the half that was
+	// already there.
+	assert!(
+		unchecked.iter().any(|line| line.contains("ca_cert")),
+		"ca_cert is unaffected: {unchecked:?}"
+	);
 }

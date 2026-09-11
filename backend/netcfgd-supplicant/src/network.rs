@@ -431,6 +431,22 @@ fn eap_settings(
 			quote(&path.display().to_string()),
 		));
 	}
+
+	// **The second half of checking a server, and the one that was missing.**
+	// `ca_cert` answers who signed the certificate; this answers who the
+	// certificate is for. Pinning an issuer and nothing else accepts every
+	// certificate that issuer signed, which is right for an organisation's own
+	// CA and nearly worthless for a public one -- and a commercial certificate
+	// on a RADIUS server is ordinary. There, anybody who can buy one from the
+	// same CA can raise an access point with the right name, be believed, and
+	// take whatever the inner method hands over. Decision 0206.
+	//
+	// Sent only when the document asks for it. An absent line leaves the
+	// supplicant's own default, which is to check the issuer and not the name;
+	// sending an empty one would be 0189's fault again, in a different field.
+	if let Some(domain) = &eap.domain_suffix_match {
+		out.push(Setting::plain("domain_suffix_match", quote(domain)));
+	}
 	// **No `ca_cert` line at all where nothing is pinned, and this was the
 	// wifi fault the whole project was opened for.**
 	//
