@@ -483,6 +483,24 @@
 # `portal_check` is what notices a captive portal instead of reporting a
 # working network that resolves nothing.
 #
+# **The URL has to answer `204`, and nothing can check that for you.** That is
+# what a `generate_204` endpoint is for: an empty body and a status no portal
+# will produce by accident. netcfgd asks for the URL and calls anything that is
+# not a 204 a portal -- so an endpoint that answers `200`, which most ordinary
+# pages do, reports a captive portal on every join of a perfectly good network
+# and runs the hook each time. The message says which number it got, so the
+# mistake announces itself, but it is worth not making.
+#
+# It must be `http`, and the compiler refuses `https` by name: a portal works
+# by intercepting the request, which is the one thing TLS prevents, so an
+# `https` probe reports no portal on exactly the networks it is for.
+#
+# The check fires once per joining -- when the interface gains a routable
+# address, having not had one -- rather than on a timer. Where it cannot be
+# completed at all, because nothing routes yet or the name does not resolve,
+# netcfgd retries a few times and then says it has given up: an answer that was
+# not an answer must not be mistaken for "checked, and clear".
+#
 # THE MODEM. Which SIM source to use, and which APN to ask for (0150).
 
 #device wwan0 {

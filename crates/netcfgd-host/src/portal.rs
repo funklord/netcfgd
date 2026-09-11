@@ -319,7 +319,7 @@ fn legible(text: &str) -> String {
 	out
 }
 
-/// A status line into a verdict./// A status line into a verdict.
+/// A status line into a verdict.
 fn verdict(status_line: &str, expect: u16) -> Verdict {
 	// `HTTP/1.1 204 No Content` -- the code is the second word.
 	let code = status_line

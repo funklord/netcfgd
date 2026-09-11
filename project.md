@@ -9461,6 +9461,64 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.107 An answer that was not an answer
+
+The captive portal check fires on a transition -- the interface has a routable
+address now and did not before -- and the reasoning for that is sound. What it
+did with the answer was not.
+
+**An inconclusive check consumed the transition.** The code is careful about
+the three verdicts: it refuses to call a network with no route a portal,
+because "a portal is a thing that *replies*". Then it recorded all three the
+same way -- the interface is `addressed` -- so a check that could not be
+completed was filed as a check that had been, and nothing happened again until
+the link went down.
+
+The likely case is a wifi join, and the cause is ordering inside netcfgd:
+`run_portal_checks` runs **before** the reconcile that delivers DNS. The
+address arrives from the lease, the probe runs, the resolver has not been
+written yet, the name does not resolve, and the transition is spent. On a
+captive portal that is precisely the network the operator asked to be warned
+about, and DNS is precisely what a portal hijacks.
+
+Measured before the fix: with the address never leaving the interface and the
+network coming good afterwards, the hook never fired again.
+
+### Retried, and bounded
+
+The bound is not decoration. The loop has a five-second backstop, so retrying
+for ever is a request to somebody else's server every five seconds for as long
+as the machine sits on a dead network. Six attempts, then netcfgd says it has
+given up rather than going quiet about a check that was asked for.
+
+Both halves are asserted separately, because either alone is a defect -- and
+"the retries stopped" is counted rather than observed once, since no single
+look can say that.
+
+### The number the whole check rests on was written down nowhere
+
+`probe(url, 204)`. Neither the config example nor the field's documentation
+said the endpoint must answer 204, so pointing it at an ordinary page -- which
+answers `200` -- reports a captive portal on every join of a working network.
+
+**Not made configurable and not guessed at**: what a URL returns is not a
+property of the text, so the compiler cannot check it, and "any 2xx" would
+accept the `200` a portal's own login page returns. Documented in both places
+instead. Whether `expect` should become a setting is left open rather than
+answered in passing.
+
+### What held up
+
+The probe `exec`s a child that sheds privilege before resolving anything --
+`getaddrinfo` under `CAP_NET_ADMIN` being what CVE-2015-7547 turned into a root
+compromise -- and the child bounds itself with an alarm. The detail reaching a
+root hook is sanitised, and its test drives `verdict` rather than `legible` so
+that bypassing the call site fails it. `https` is refused at compile time.
+`is_routable` excludes link-local, without which the check would fire once at
+startup and never again.
+
+Decision 0213.
+
 ## 10.106 Two writers on one report
 
 Asked to audit the wifi DNS path, the first thing it turned up was a defect

@@ -55,6 +55,25 @@ options:
 /// forever.
 const TICK_MS: i32 = 5_000;
 
+/// What the portal record holds once the question has been answered.
+const PORTAL_DONE: &str = "addressed";
+/// And while the interface has no address worth asking about.
+const PORTAL_BARE: &str = "bare";
+/// The prefix of a record that is still counting inconclusive attempts.
+const PORTAL_TRYING: &str = "trying:";
+
+/// How many times an inconclusive portal check is retried before giving up.
+///
+/// The retry exists because the probe runs before the reconcile that delivers
+/// DNS, so a fresh join can fail to resolve for a pass or two through nothing
+/// being wrong. The *bound* exists because the loop has a five-second backstop
+/// and a network with no route would otherwise mean a request to somebody
+/// else's server every five seconds for as long as the machine sits on it.
+///
+/// Six is about thirty seconds of a quiet loop, which is far longer than a
+/// reconcile and far shorter than a nuisance.
+const PORTAL_ATTEMPTS: u32 = 6;
+
 /// The entry point, called by the multi-call binary rather than by the
 /// runtime.
 ///
@@ -1133,23 +1152,69 @@ fn run_portal_checks(state: &State) -> Vec<(String, String)> {
 		});
 		let was = State::last_told(&state.observed, &device.name, HookPhase::Portal);
 
-		// Nothing to do while it stays as it was. The record holds "addressed"
-		// or "bare" rather than the verdict, because what this fires on is the
-		// transition and not what the transition turned out to mean.
-		let now = if addressed { "addressed" } else { "bare" };
-		if was.as_deref() == Some(now) {
-			continue;
-		}
-		told.push((device.name.clone(), now.to_owned()));
 		if !addressed {
+			// The record holds the state rather than the verdict, because what
+			// this fires on is the transition and not what the transition
+			// turned out to mean.
+			if was.as_deref() != Some(PORTAL_BARE) {
+				told.push((device.name.clone(), PORTAL_BARE.to_owned()));
+			}
 			continue;
 		}
 
+		// **An answer that was not an answer must not consume the
+		// transition.** `Unreachable` means the check could not be completed
+		// -- no route yet, nothing listening, or, on the case this is most
+		// likely to meet, no resolver. The probe runs before the reconcile
+		// that delivers DNS, so on a fresh join the name may not resolve for
+		// another pass; and DNS is exactly what a portal hijacks. Recording
+		// that the same way as "checked, and clear" meant the one network
+		// behind a portal and slow to come up was the one netcfgd never told
+		// anybody about. Measured: the hook never fired again, however long
+		// the network worked for afterwards.
+		//
+		// So an inconclusive answer leaves a count behind and the next pass
+		// tries again -- bounded, because the loop has a five-second backstop
+		// and a question asked forever is a request to somebody else's server
+		// every five seconds for as long as the machine is on a network with
+		// no route.
+		let attempts = match was.as_deref() {
+			// Already answered. Nothing until the interface goes bare.
+			Some(PORTAL_DONE) => continue,
+			Some(record) => record
+				.strip_prefix(PORTAL_TRYING)
+				.and_then(|count| count.parse::<u32>().ok())
+				.unwrap_or(0),
+			None => 0,
+		};
+
 		let verdict = netcfgd_host::portal::probe(url, 204);
+		if let netcfgd_host::portal::Verdict::Unreachable { detail } = &verdict {
+			let next = attempts.saturating_add(1);
+			if next < PORTAL_ATTEMPTS {
+				netcfgd_sys::log_warning!(
+					"portal",
+					"{} could not be checked: {detail} (attempt {next} of {})",
+					device.name,
+					PORTAL_ATTEMPTS
+				);
+				told.push((device.name.clone(), format!("{PORTAL_TRYING}{next}")));
+			} else {
+				// Said once, loudly, rather than kept quiet: the operator
+				// asked for this network to be checked and it was not.
+				netcfgd_sys::log_warning!(
+					"portal",
+					"{} could not be checked after {} attempts, giving up until it \
+					 is addressed again: {detail}",
+					device.name,
+					PORTAL_ATTEMPTS
+				);
+				told.push((device.name.clone(), PORTAL_DONE.to_owned()));
+			}
+			continue;
+		}
+		told.push((device.name.clone(), PORTAL_DONE.to_owned()));
 		let detail = match &verdict {
-			// Nothing in the way. Said to the log and to nobody else: a hook
-			// that ran on every successful join would be a hook nobody keeps.
-			netcfgd_host::portal::Verdict::Clear => continue,
 			netcfgd_host::portal::Verdict::Portal { detail } => {
 				netcfgd_sys::log_note!(
 					"portal",
@@ -1158,19 +1223,19 @@ fn run_portal_checks(state: &State) -> Vec<(String, String)> {
 				);
 				detail.clone()
 			}
-			// Something else is wrong -- no route, no resolver, nothing
-			// listening. Reported and *not* called a portal: a portal is a
-			// thing that replies, and saying "captive portal" about a network
-			// with no route sends the operator to a login page that is not
-			// there.
-			netcfgd_host::portal::Verdict::Unreachable { detail } => {
-				netcfgd_sys::log_warning!(
-					"portal",
-					"{} could not be checked: {detail}",
-					device.name
-				);
-				continue;
-			}
+			// **Two verdicts, one action, and they are not the same finding.**
+			// `Clear` means nothing is in the way, which is said to the log and
+			// to nobody else: a hook that ran on every successful join is a
+			// hook nobody keeps. `Unreachable` is already handled above, where
+			// the retry is decided -- reported there and deliberately *not*
+			// called a portal, because a portal is a thing that replies, and
+			// saying "captive portal" about a network with no route sends an
+			// operator to a login page that is not there.
+			//
+			// Written as one arm because they do the same thing here, and two
+			// arms doing `continue` are one arm however differently they read.
+			netcfgd_host::portal::Verdict::Clear
+			| netcfgd_host::portal::Verdict::Unreachable { .. } => continue,
 		};
 
 		for interface in desired.interfaces.iter().filter(|i| i.name == device.name) {

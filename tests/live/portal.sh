@@ -205,6 +205,76 @@ check "a network where nothing answers does not run the portal hook" "$(runs)" "
 check "and says it could not be checked" \
 	"$(grep -c 'could not be checked' "$work/daemon.log" || true)" 1
 
+# **And a network that could not be checked is checked again.**
+#
+# The probe fires on a transition -- the interface has a routable address now
+# and did not before -- which is right, because a question asked on every
+# netlink event is a request to somebody else's server every time a cable
+# moves. What it must not do is *consume* the transition on an answer that was
+# not an answer: `Unreachable` means "could not be checked", and recording it
+# the same way as "checked, clear" means the one network that is behind a
+# portal and slow to come up is the one netcfgd never tells anybody about.
+#
+# The realistic case is a wifi join. The address arrives from the lease, the
+# probe runs, and the resolver netcfgd is about to write has not been written
+# yet -- so the name does not resolve, the verdict is `Unreachable`, and on a
+# portal the operator is never told. DNS is exactly what a portal hijacks.
+#
+# So: bring the network back without touching the address, and the portal must
+# still be found.
+before=$(runs)
+python3 "$work/server.py" 8731 "$work/mode" > "$work/server2.log" 2>&1 &
+server=$!
+waited=0
+while ! python3 -c "
+import socket,sys
+s=socket.socket(); s.settimeout(0.2)
+sys.exit(0 if s.connect_ex(('127.0.0.1',8731))==0 else 1)" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+# No `ip addr del` and no apply: the address never stops being there, so the
+# only thing that has changed is that the network works now.
+waited=0
+while [ "$(runs)" = "$before" ] && [ "$waited" -lt 150 ]; do
+	waited=$((waited + 1))
+	sleep 0.1
+done
+check "a network that could not be checked is checked again once it works" \
+	"$(runs)" "$((before + 1))"
+
+# **And it gives up, which is the half a retry makes necessary.**
+#
+# The loop has a five-second backstop, so a check that retried forever would be
+# a request to somebody else's server every five seconds for as long as the
+# machine sat on a network with no route. Asserted by counting, because "it
+# stopped" is not something a single observation can say: wait for the sentence
+# that says it gave up, then let several more ticks pass and require the count
+# not to move.
+kill "$server" 2>/dev/null || true
+wait "$server" 2>/dev/null || true
+server=
+ip addr del 10.3.3.1/24 dev portal0
+sleep 2
+"$repo/target/debug/ncfg" apply > /dev/null 2>&1 || true
+
+gave_up() { grep -c 'giving up' "$work/daemon.log" 2>/dev/null || true; }
+attempts() { grep -c 'attempt [0-9]* of' "$work/daemon.log" 2>/dev/null || true; }
+
+waited=0
+while [ "$(gave_up)" = "0" ] && [ "$waited" -lt 600 ]; do
+	waited=$((waited + 1))
+	sleep 0.1
+done
+check "an unreachable network is eventually given up on" "$(gave_up)" 1
+
+# Five tries and then the sentence, which is the bound this is about: the
+# sixth attempt is the one that gives up rather than a seventh happening.
+settled=$(attempts)
+sleep 12
+check "and the retries stop rather than running for ever" "$(attempts)" "$settled"
+
 if [ "$failures" -eq 0 ]; then
 	echo "portal.sh: all checks passed"
 else

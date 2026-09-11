@@ -76,6 +76,15 @@ pub struct WifiDevicePolicy {
 	/// cannot detect interception. Every implementation of this does it in
 	/// clear for the same reason. An `https` URL is refused with that sentence
 	/// rather than accepted and quietly useless (0095).
+	///
+	/// **The endpoint must answer `204`**, which is not configurable and is
+	/// what a `generate_204` URL is for: an empty body and a status nothing
+	/// answers by accident. Anything else is reported as a portal, so an
+	/// endpoint that answers `200` -- which most ordinary pages do -- names a
+	/// captive portal on every join of a working network. The verdict says
+	/// which number arrived, so the mistake is legible rather than silent, and
+	/// nothing in the compiler can check it: what a URL returns is not a
+	/// property of the text.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub portal_check: Option<String>,
 	/// Regulatory domain, ISO 3166-1 alpha-2.
