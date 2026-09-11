@@ -957,8 +957,13 @@ fn radio_request(subcommand: &str, rest: &[String]) -> Result<netcfgd_proto::Req
 fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, String> {
 	let Some(subcommand) = positional.first() else {
 		return Err(
+			// **`clients` was missing from this list and not from the code.**
+			// It has worked since access points did, and `netcfgd.conf.example`
+			// tells the reader to use it -- so the one place somebody looks to
+			// find out what `ncfg wifi` can do was the only place that did not
+			// mention it. 0201.
 			"`ncfg wifi` needs a subcommand: radios, activate, deactivate, scan, \
-			 status, add, forget, connect or disconnect"
+			 status, add, forget, connect, disconnect or clients"
 				.to_owned(),
 		);
 	};

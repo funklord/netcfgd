@@ -914,6 +914,48 @@ fn warn_access_points(builder: &mut Builder, desired: &Document) {
 			});
 		}
 
+		// **An access point with no address is a radio nobody can use.** The
+		// warning above tells the operator that `interface wlan0 { }` is
+		// enough, and it is -- enough to bring the radio up and start hostapd,
+		// which is what that sentence is about. It is not enough to have a
+		// working access point, and following it exactly produces:
+		//
+		//     0  link.up wlan0  enabled: true (was false)
+		//     1  backend.start wlan0  access_point: AccessPoint (was <absent>)
+		//
+		// hostapd runs, the SSID goes out, a station associates, and there is
+		// nothing on this end for it to talk to.
+		//
+		// **netcfgd runs no DHCP server**, which is the other half and the one
+		// an operator is most likely to assume. `dnsmasq` appears in this tree
+		// only as a `dns_mode` -- a way of writing resolver configuration --
+		// and nothing here hands out leases. So an address on this interface is
+		// necessary and is not sufficient, and both halves are said rather than
+		// the easy one. Decision 0201.
+		let served = desired
+			.interfaces
+			.iter()
+			.find(|interface| &interface.name == device)
+			.is_some_and(|interface| !interface.addressing.is_empty());
+		if !served
+			&& desired
+				.interfaces
+				.iter()
+				.any(|interface| &interface.name == device)
+		{
+			builder.warnings.push(Warning {
+				message: format!(
+					"access point `{}` runs on `{device}`, which has no address: a station \
+					 can associate and then has nothing here to talk to. netcfgd runs \
+					 hostapd and serves no DHCP, so give the interface an address -- \
+					 `interface {device} {{ config = \"192.168.4.1/24\" }}` -- and run a \
+					 DHCP server on it, or expect every station to be configured by hand",
+					access_point.id
+				),
+				interface: Some(device.clone()),
+			});
+		}
+
 		// An empty allow list is a legitimate thing to write -- it is how an
 		// access point is closed without taking it down -- and an easy thing to
 		// arrive at by deleting the last station from a list. It compiles

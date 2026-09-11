@@ -525,7 +525,9 @@
 #interface eth0 { config = "dhcp" }
 
 # AN ACCESS POINT. netcfgd generates hostapd's configuration under /run and
-# runs it; this is the whole of what you write.
+# runs it. It needs an `interface` block for the same radio: that is what
+# brings the device up and starts hostapd on it, and an `access_point` block
+# on its own plans nothing at all.
 
 #access_point "Home" {
 #	device  = "wlan0"
@@ -537,6 +539,26 @@
 #		psk = "@secret:ap"
 #	}
 #}
+#interface wlan0 {
+#	config = "192.168.4.1/24"
+#}
+
+# THE ADDRESS IS NOT OPTIONAL, and netcfgd cannot supply what comes after it.
+#
+# hostapd broadcasts and stations associate; that is the whole of what an
+# access point does. A station that has associated still needs an address, a
+# route and a resolver, and **netcfgd serves no DHCP** -- `dnsmasq` appears in
+# this file only as a `dns_mode`, which writes resolver configuration and
+# hands out nothing.
+#
+# So `interface wlan0 { }` with no `config` gives a radio that beacons and a
+# station that associates and can then reach nothing. Give the interface a
+# static address as above, and either run a DHCP server on it yourself or
+# configure the stations by hand. `ncfg plan` warns about the address; nothing
+# can warn about the server, because netcfgd cannot see one it does not run.
+#
+# Sharing an uplink additionally needs `forwarding` on and a `nat` rule, both
+# of which netcfgd does have -- see the sections for them.
 
 # Who may associate with it. One list or the other, never both, because
 # hostapd reads one file or the other.

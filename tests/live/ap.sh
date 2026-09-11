@@ -120,6 +120,39 @@ check "hidden means an empty ssid in the beacon" \
 check "the passphrase resolved from the secrets directory" \
 	"$(sed -n 's/^wpa_passphrase=//p' "$conf")" "$passphrase"
 
+# ---------------------------------------------- an access point with no address
+#
+# **hostapd running is not an access point working.** The planner's advice for
+# an `access_point` whose device has no `interface` block is that
+# `interface wlan0 { }` "is enough", and it is -- enough to bring the radio up
+# and start hostapd, which is what that sentence is about. Following it exactly
+# plans `link.up` and `backend.start` and no address, so the SSID beacons, a
+# station associates, and there is nothing on this end to talk to. netcfgd
+# serves no DHCP either, so an address here is necessary and not sufficient.
+#
+# The control comes first and from the config above, which has an address: a
+# warning that fired on every access point would tell nobody anything.
+check "an access point with an address is not warned about" \
+	"$(grep -c 'nothing here to talk to' "$work/plan.log" || true)" "0"
+
+mkdir -p "$work/noaddr"
+sed 's|^\tconfig = "192.168.9.1/24"||' "$work/etc/netcfgd.conf" > "$work/noaddr/netcfgd.conf"
+NCFG_CONFIG_DIR="$work/noaddr" "$ncfg" plan > "$work/noaddr.log" 2>&1 || true
+check "one with no address is" \
+	"$(grep -c 'nothing here to talk to' "$work/noaddr.log" || true)" "1"
+check "and is told netcfgd serves no DHCP, which is the half it cannot fix" \
+	"$(grep -c 'serves no DHCP' "$work/noaddr.log" || true)" "1"
+
+# The command that lists who is associated exists, and until 0201 the one place
+# somebody looks to find out what `ncfg wifi` can do was the only place that
+# did not mention it.
+# No backticks in a check name: inside double quotes they are command
+# substitution, and the first version of this line ran `ncfg wifi` and printed
+# a check called "  offers the command that lists stations". The assertion was
+# right and the label was gone.
+check "ncfg wifi offers the command that lists stations" \
+	"$("$ncfg" wifi 2>&1 | grep -c 'clients' || true)" "1"
+
 # The reference tool. hostapd cannot attach to a dummy, so it will exit
 # nonzero either way -- what separates a file it understood from one it did not
 # is whether it complained about a line.

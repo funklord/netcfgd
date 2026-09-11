@@ -9461,6 +9461,57 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.94 An access point is not a hotspot
+
+The access-point warnings were already thorough -- no `interface` block, an
+empty `allow` list, more than one BSS on a radio that runs one, a radio asked
+to be AP and station at once -- and `ap.sh` drives a real hostapd against the
+generated file. What was wrong is what happens when an operator follows the
+advice.
+
+The first of those warnings ends *"Adding `interface wlan0 { }` is enough"*.
+Doing exactly that plans:
+
+    0  link.up wlan0  enabled: true (was false)
+    1  backend.start wlan0  access_point: AccessPoint (was <absent>)
+
+**and no address.** The sentence is true about what it is about, and reads as
+an answer to "what do I need for an access point", which it is not. The SSID
+beacons, a station associates, and there is nothing on this end to talk to.
+
+**netcfgd serves no DHCP** -- `dnsmasq` is in this tree only as a `dns_mode`,
+which writes resolver configuration and hands out nothing. So an address is
+necessary and not sufficient, and the new warning says both halves rather than
+the easy one. Nothing can warn about the absent server, because netcfgd cannot
+see one it does not run; saying so is the honest substitute.
+
+### The reference claimed the block was the whole of it
+
+    # netcfgd generates hostapd's configuration under /run and
+    # runs it; this is the whole of what you write.
+
+Compiled exactly as printed, that block produces `nothing to do` and netcfgd's
+own warning that it needs an `interface` block.
+
+**The example gate could not have caught it.** 10.93's gate compiles each
+block, and this one compiles -- it plans nothing, which is a different failure.
+A block that is valid and inert is the shape that gate is blind to, worth
+knowing now that a gate exists and somebody might stop reading the file by
+hand.
+
+### And a command that existed everywhere except in the list of what exists
+
+`ncfg wifi clients` has worked since access points did and is named in the
+example, but `ncfg wifi`'s own usage line omitted it -- the one place somebody
+looks to find out what the command can do was the only place that did not
+mention it. Checked in both directions while fixing: `add` and `forget` are in
+that list and are handled a few lines above the match, so the list was wrong by
+omission only.
+
+Three checks in `ap.sh`, the control taken from the existing fixture which
+already has an address. Sabotage takes two red and the subcommand one red
+separately. Decision 0201.
+
 ## 10.93 Two settings that contradict each other, and a reference nothing read
 
 IPv6 privacy is applied properly and `mac_policy` reaches the supplicant
