@@ -109,7 +109,7 @@ pub fn write_config(
 	resolver: &Resolver,
 ) -> Result<PathBuf, String> {
 	use std::io::Write;
-	use std::os::unix::fs::OpenOptionsExt;
+	use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 	let dir = ctrl_dir(run_dir);
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -148,6 +148,22 @@ pub fn write_config(
 		.mode(0o600)
 		.open(&path)
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+	// **`.mode()` applies when the file is created and not otherwise**, which
+	// is the half the sentence above was missing. `open(2)`'s mode argument is
+	// ignored without `O_CREAT` actually creating something, so rewriting a
+	// file that already exists keeps whatever mode it already had -- and the
+	// line above then guarantees nothing at all. Measured: a file left at 0644
+	// stays 0644 through exactly this call, and the passphrase goes into it.
+	//
+	// `/run` survives a restart by design (`RuntimeDirectoryPreserve=restart`),
+	// so "the file cannot already exist" is not true either.
+	//
+	// Corrected on the open handle -- `fchmod`, not a path -- and **before a
+	// byte is written**, so there is no moment when the secret is in a file
+	// anybody can read. That is the property the paragraph above is about, and
+	// this is what makes it hold on the second write as well as the first.
+	file.set_permissions(std::fs::Permissions::from_mode(0o600))
+		.map_err(|error| format!("cannot secure {}: {error}", path.display()))?;
 	file.write_all(to_file(&access_point.id, &lines).as_bytes())
 		.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
 
@@ -495,8 +511,79 @@ fn complaints(path: &Path, count: usize) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-	use super::{pid_path, start_args};
+	use super::{pid_path, start_args, write_config};
 	use std::path::Path;
+
+	/// A configuration holding a passphrase is 0600 on the *second* write too.
+	///
+	/// **`.mode()` applies when `open(2)` creates the file and not otherwise.**
+	/// So the `OpenOptions` above guaranteed the mode of a file that did not
+	/// exist and nothing at all about one that did -- and `/run` survives a
+	/// restart by design, so "it cannot already exist" was not true either. A
+	/// file left at 0644 by anything stayed 0644 through the write that puts
+	/// the passphrase in it.
+	///
+	/// The pre-existing file here is 0644 deliberately: the first write is the
+	/// case that always worked, and asserting only that would pass against the
+	/// code this test exists to fail.
+	#[test]
+	fn a_rewritten_configuration_is_still_only_readable_by_root() {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let run = netcfgd_testdir::TestDir::new("hostapd-mode");
+		let point = point_with_passphrase();
+		let resolver = netcfgd_secret::Resolver::with_secrets_dir(run.path());
+		std::fs::write(run.join("ap-secret"), "hunter2hunter2").expect("secret written");
+		std::fs::set_permissions(
+			run.join("ap-secret"),
+			std::fs::Permissions::from_mode(0o600),
+		)
+		.expect("secret secured");
+
+		let path = write_config(run.path(), &point, &resolver).expect("first write");
+		let mode = |path: &Path| {
+			std::fs::metadata(path)
+				.expect("the configuration is there")
+				.permissions()
+				.mode() & 0o777
+		};
+		assert_eq!(mode(&path), 0o600, "the first write");
+
+		// Something -- an older netcfgd, another tool, a hand -- leaves it
+		// world-readable, and netcfgd writes over it.
+		std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("widened");
+		let path = write_config(run.path(), &point, &resolver).expect("second write");
+		assert_eq!(mode(&path), 0o600, "the second write");
+
+		// And the thing the mode is for is in fact in the file, so this is not
+		// passing over an empty one.
+		let body = std::fs::read_to_string(&path).expect("readable");
+		assert!(
+			body.contains("hunter2hunter2"),
+			"the passphrase is what the mode protects: {body}"
+		);
+	}
+
+	/// An access point with a passphrase, which is what makes the mode matter.
+	fn point_with_passphrase() -> netcfgd_model::AccessPoint {
+		netcfgd_model::AccessPoint {
+			id: "Lab".to_owned(),
+			ssid: netcfgd_model::Ssid::new(b"Lab".to_vec()).expect("a valid ssid"),
+			device: "ap0".to_owned(),
+			security: netcfgd_model::Security::Psk(netcfgd_model::security::PskConfig {
+				passphrase: netcfgd_model::secret::SecretRef {
+					provider: netcfgd_model::secret::SecretProvider::File,
+					name: "ap-secret".to_owned(),
+				},
+				proto: netcfgd_model::security::PskProto::Wpa2,
+			}),
+			channel: Some(6),
+			band: None,
+			hidden: false,
+			regdom: None,
+			access_control: None,
+		}
+	}
 
 	/// Both flags, in hostapd's order, with the pid file netcfgd chose.
 	///

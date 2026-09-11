@@ -354,6 +354,21 @@ fn started_backend(
 			ssid: point.ssid.clone(),
 			band: point.band.clone(),
 			channel: point.channel,
+			// **As the renderer would write them, not as the document states
+			// them.** This harness builds the observed side from the document,
+			// which is why it could not see the `channel` defect -- absent in
+			// the document is `channel=0` in the file. Any field where the two
+			// spellings differ has to be converted here or every reconcile
+			// plans a restart, which is what these three did the moment they
+			// were compared. `regdom` is the one that differs: hostapd's is
+			// upper case.
+			//
+			// What actually holds the renderer and the observation together is
+			// `netcfgd-observe`'s own round trip, which writes a file and reads
+			// it back. This only has to agree with it.
+			key_mgmt: netcfgd_model::security::key_mgmt_of(&point.security).map(ToOwned::to_owned),
+			hidden: point.hidden,
+			regdom: point.regdom.as_ref().map(|code| code.to_ascii_uppercase()),
 		}),
 		secret_matches: access_point.map(|_| true),
 		networks_match: None,
@@ -2265,6 +2280,13 @@ access_point "after" {
 			ssid: netcfgd_model::Ssid::new(b"before".to_vec()).expect("an ssid"),
 			band: None,
 			channel: None,
+			// `proto = "wpa2"` in the document above, which the renderer
+			// writes as `wpa_key_mgmt=WPA-PSK`. Stated rather than left at
+			// `None`, which is an open access point and would read as the
+			// generation having changed on every pass.
+			key_mgmt: Some("WPA-PSK".to_owned()),
+			hidden: false,
+			regdom: None,
 		}),
 		secret_matches: None,
 		networks_match: None,
@@ -2380,6 +2402,13 @@ access_point "home" {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
 			band: None,
 			channel: None,
+			// `proto = "wpa2"` in the document above, which the renderer
+			// writes as `wpa_key_mgmt=WPA-PSK`. Stated rather than left at
+			// `None`, which is an open access point and would read as the
+			// generation having changed on every pass.
+			key_mgmt: Some("WPA-PSK".to_owned()),
+			hidden: false,
+			regdom: None,
 		}),
 		secret_matches: Some(false),
 		networks_match: None,
@@ -2421,6 +2450,13 @@ access_point "home" {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
 			band: None,
 			channel: None,
+			// `proto = "wpa2"` in the document above, which the renderer
+			// writes as `wpa_key_mgmt=WPA-PSK`. Stated rather than left at
+			// `None`, which is an open access point and would read as the
+			// generation having changed on every pass.
+			key_mgmt: Some("WPA-PSK".to_owned()),
+			hidden: false,
+			regdom: None,
 		}),
 		secret_matches: None,
 		networks_match: None,
@@ -2431,6 +2467,67 @@ access_point "home" {
 
 	let plan = plan(&desired, &observed, &PlanOptions::default());
 	assert!(plan.actions.is_empty(), "got {:?}", names(&plan));
+}
+
+/// Changing the WPA generation restarts the access point.
+///
+/// **Nothing noticed this.** hostapd reads its configuration once, so an
+/// access point started as WPA2 goes on offering WPA2 however the document is
+/// edited -- and the passphrase comparison beside it says nothing, because
+/// changing `proto` with the same passphrase changes no secret. The result was
+/// a document saying WPA3 and a radio running WPA2, with `ncfg plan` reporting
+/// nothing to do.
+#[test]
+fn an_edited_generation_restarts_the_access_point() {
+	let desired = document(
+		r#"
+device wlan0 { }
+access_point "home" {
+	device  = "wlan0"
+	channel = 6
+	wifi    { psk = "@secret:ap"; proto = "wpa3" }
+}
+"#,
+	);
+	let mut observed = observed_with(&["wlan0"]);
+	observed.links[0].up = true;
+	observed.backends.push(netcfgd_model::ObservedBackend {
+		kind: netcfgd_model::BackendKind::AccessPoint,
+		interface: "wlan0".to_owned(),
+		running: true,
+		answering: None,
+		access_control: None,
+		started_with: Some(netcfgd_model::ObservedAccessPoint {
+			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
+			band: Some("2.4".to_owned()),
+			channel: Some(6),
+			// Started as WPA2, which is what hostapd is still running.
+			key_mgmt: Some("WPA-PSK".to_owned()),
+			hidden: false,
+			regdom: None,
+		}),
+		// The same passphrase, which is the point: the secret did not change,
+		// so the comparison that watches secrets has nothing to say.
+		secret_matches: Some(true),
+		networks_match: None,
+		config_matches: None,
+		config_present: None,
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let acted = names(&plan);
+	assert!(
+		acted.contains(&"backend.stop") && acted.contains(&"backend.start"),
+		"a generation change has to restart hostapd, got {acted:?}"
+	);
+	assert!(
+		plan.warnings
+			.iter()
+			.any(|warning| warning.message.contains("deauthenticated")),
+		"and say what the restart costs: {:?}",
+		plan.warnings
+	);
 }
 
 /// An access point running what the document asks for is left alone, which is
@@ -2462,6 +2559,13 @@ access_point "home" {
 			// the access point on every reconcile for a document nobody edited.
 			band: Some("2.4".to_owned()),
 			channel: Some(6),
+			// `proto = "wpa2"` in the document above, which the renderer
+			// writes as `wpa_key_mgmt=WPA-PSK`. Stated rather than left at
+			// `None`, which is an open access point and would read as the
+			// generation having changed on every pass.
+			key_mgmt: Some("WPA-PSK".to_owned()),
+			hidden: false,
+			regdom: None,
 		}),
 		secret_matches: None,
 		networks_match: None,

@@ -1092,6 +1092,26 @@ pub struct ObservedAccessPoint {
 	/// The channel, or `None` where hostapd was told to choose one.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub channel: Option<u16>,
+	/// The `wpa_key_mgmt` it is running, or `None` for an open network.
+	///
+	/// **The generation, which nothing used to notice changing.** hostapd
+	/// reads its file once, so an access point that was started as WPA2 goes
+	/// on offering WPA2 however the document is edited -- and the passphrase
+	/// comparison beside this says nothing about it, because changing `proto`
+	/// with the same passphrase changes no secret. Carried as the rendered
+	/// string so that both sides compare the same vocabulary.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub key_mgmt: Option<String>,
+	/// Whether it was started with the SSID left out of its beacons.
+	#[serde(default)]
+	pub hidden: bool,
+	/// The regulatory domain it was started with, as hostapd spells it.
+	///
+	/// Upper case, which is what the renderer writes -- so a document saying
+	/// `"se"` and a file saying `SE` are the same access point, and comparing
+	/// them as written would restart it on every reconcile.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub regdom: Option<String>,
 }
 
 /// hostapd's in-memory station lists, and the policy it is running under.

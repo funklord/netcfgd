@@ -647,6 +647,19 @@ fn started_with(run_dir: &Path, device: &str) -> Option<netcfgd_model::ObservedA
 		ssid: netcfgd_model::Ssid::from_hex(&value("ssid2")?).ok()?,
 		band: value("hw_mode").and_then(|mode| netcfgd_hostapd::band_of_hw_mode(&mode)),
 		channel: value("channel").and_then(|channel| channel.parse().ok()),
+		// The generation. Absent for an open access point, which writes no key
+		// management at all -- the same statement the document makes, so the
+		// two compare equal with no special case.
+		key_mgmt: value("wpa_key_mgmt"),
+		// `ignore_broadcast_ssid` is written only when the document asks, so
+		// its absence is "not hidden" rather than "not known".
+		hidden: value("ignore_broadcast_ssid").as_deref() == Some("1"),
+		// As hostapd spells it, which is upper case: the renderer uppercases
+		// on the way in, and comparing a document's `"se"` against a file's
+		// `SE` would differ on every pass and restart the access point for a
+		// document nobody had touched -- which is the defect the `channel`
+		// comparison already records having had.
+		regdom: value("country_code"),
 	})
 }
 
@@ -1001,6 +1014,105 @@ fn read_netfilter(observed: &mut Observed) {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// Everything the planner compares comes back out of the file unchanged.
+	///
+	/// **This is the test the `channel` defect needed and did not have.** The
+	/// planner decides whether a running access point must be restarted by
+	/// comparing the document against what `started_with` reads back, and the
+	/// plan fixtures build that side *from the document* -- so a field the
+	/// renderer writes differently from how the document states it compares
+	/// unequal on every pass, and the access point is stopped and started on
+	/// every reconcile with every station deauthenticated. That happened once,
+	/// with `channel`: absent in the document is `channel=0` in the file.
+	///
+	/// So this goes through the renderer and back, which is the only path that
+	/// can see such a difference. The fields are named one at a time rather
+	/// than compared as a struct, so a failure says which one moved.
+	#[test]
+	fn what_the_renderer_writes_is_what_the_observation_reads_back() {
+		let run = netcfgd_testdir::TestDir::new("started-with");
+		let point = netcfgd_model::AccessPoint {
+			id: "Lab".to_owned(),
+			ssid: netcfgd_model::Ssid::new(b"Lab".to_vec()).expect("an ssid"),
+			device: "ap0".to_owned(),
+			security: netcfgd_model::Security::Psk(netcfgd_model::security::PskConfig {
+				passphrase: netcfgd_model::secret::SecretRef {
+					provider: netcfgd_model::secret::SecretProvider::File,
+					name: "ap-secret".to_owned(),
+				},
+				proto: netcfgd_model::security::PskProto::Wpa2Wpa3,
+			}),
+			channel: Some(6),
+			band: Some("2.4".to_owned()),
+			hidden: true,
+			// Lower case on purpose: the renderer uppercases it, and a
+			// comparison that did not would restart the access point on every
+			// reconcile for a document nobody had touched.
+			regdom: Some("se".to_owned()),
+			access_control: None,
+		};
+		fs::write(run.join("ap-secret"), "hunter2hunter2").expect("a secret");
+		// The resolver refuses a secret anybody can read, which is its job.
+		fs::set_permissions(
+			run.join("ap-secret"),
+			<std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600),
+		)
+		.expect("secured");
+		let resolver = netcfgd_secret::Resolver::with_secrets_dir(run.path());
+		netcfgd_hostapd::write_config(run.path(), &point, &resolver).expect("written");
+
+		let read = started_with(run.path(), "ap0").expect("the file is readable");
+		assert_eq!(read.ssid, point.ssid, "ssid");
+		assert_eq!(read.band, point.band, "band");
+		assert_eq!(read.channel, point.channel, "channel");
+		assert_eq!(read.hidden, point.hidden, "hidden");
+		assert_eq!(
+			read.key_mgmt.as_deref(),
+			netcfgd_model::security::key_mgmt_of(&point.security),
+			"key_mgmt"
+		);
+		assert_eq!(
+			read.regdom.as_deref(),
+			Some("SE"),
+			"regdom, as hostapd spells it"
+		);
+	}
+
+	/// And the absences, which are where the loop came from.
+	///
+	/// A document that states none of these produces a file that says nothing
+	/// about them -- except `channel`, which is written as `0` and must read
+	/// back as "hostapd chooses" rather than as channel zero.
+	#[test]
+	fn what_the_document_leaves_out_reads_back_as_left_out() {
+		let run = netcfgd_testdir::TestDir::new("started-with-bare");
+		let point = netcfgd_model::AccessPoint {
+			id: "Bare".to_owned(),
+			ssid: netcfgd_model::Ssid::new(b"Bare".to_vec()).expect("an ssid"),
+			device: "ap1".to_owned(),
+			security: netcfgd_model::Security::Open,
+			channel: None,
+			band: Some("2.4".to_owned()),
+			hidden: false,
+			regdom: None,
+			access_control: None,
+		};
+		let resolver = netcfgd_secret::Resolver::with_secrets_dir(run.path());
+		netcfgd_hostapd::write_config(run.path(), &point, &resolver).expect("written");
+
+		let read = started_with(run.path(), "ap1").expect("the file is readable");
+		assert!(!read.hidden, "an access point that hides nothing");
+		assert_eq!(read.regdom, None, "no country_code was written");
+		assert_eq!(
+			read.key_mgmt, None,
+			"an open access point has no key management"
+		);
+		// `channel=0` is hostapd's "choose one", which the model spells `None`.
+		// Reading it back as `Some(0)` is what stopped and started an access
+		// point on every reconcile.
+		assert_eq!(read.channel, Some(0), "hostapd is told to choose");
+	}
 
 	/// A sysfs tree with one radio, one wired interface and two `wlan` switches.
 	///

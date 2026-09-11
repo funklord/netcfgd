@@ -116,6 +116,43 @@ pub enum PskProto {
 	Wpa2Wpa3,
 }
 
+/// The `wpa_key_mgmt` line a security choice produces in an access point's file.
+///
+/// **hostapd's spelling, kept here because two crates have to agree on it.**
+/// `netcfgd-hostapd` writes this line; the observation reads it back out of the
+/// file, into [`crate::ObservedAccessPoint::key_mgmt`]; and the planner compares
+/// the two to notice an access point whose *generation* changed under a running
+/// hostapd, which reads its configuration once. A second copy of the mapping
+/// could disagree with the first, and the disagreement would look like an
+/// access point that restarts on every reconcile.
+///
+/// It lives beside `Security` rather than in the backend because the planner
+/// must not depend on a backend crate to ask this, and the observed value it is
+/// compared against is already part of this model.
+///
+/// `None` for an open network, which writes no key management at all: absent in
+/// the file says the same thing, so the two compare equal with no special case.
+///
+/// Takes no passphrase, and must not: the planner has no secret in hand, and an
+/// observation may not read one out of `/run`.
+#[must_use]
+pub fn key_mgmt_of(security: &Security) -> Option<&'static str> {
+	match security {
+		Security::Open => None,
+		Security::Owe => Some("OWE"),
+		// Never actually written: the renderer refuses an enterprise access
+		// point, because hostapd needs a RADIUS server the document cannot
+		// describe. Named so the match is exhaustive by the compiler rather
+		// than by a wildcard that would silently absorb a variant added later.
+		Security::Eap(_) => Some("WPA-EAP"),
+		Security::Psk(psk) => Some(match psk.proto {
+			PskProto::Wpa2 => "WPA-PSK",
+			PskProto::Wpa3 => "SAE",
+			PskProto::Wpa2Wpa3 => "WPA-PSK SAE",
+		}),
+	}
+}
+
 /// A pre-shared key network's parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

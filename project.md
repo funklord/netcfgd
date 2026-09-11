@@ -9461,6 +9461,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.110 What a running access point is not asked
+
+Two findings, both in the gap between the file netcfgd writes and what anybody
+checks afterwards.
+
+### The mode was guaranteed on the first write and on no other
+
+The generated hostapd configuration holds the passphrase in clear, so it is
+opened 0600 -- "a mode set afterwards is a mode that was wrong once". The
+reasoning is right and the mechanism does not do it: **`open(2)`'s mode applies
+when `O_CREAT` creates the file and is ignored otherwise**, so a rewrite keeps
+whatever mode the file already had. Measured: 0644 stays 0644 through exactly
+this call, and the passphrase goes into it.
+
+"It cannot already exist" is not true either -- `/run` survives a restart by
+design, and this code replaced a version using `fs::write`, which creates 0644.
+
+Corrected with `fchmod` on the open handle, before a byte is written. The test
+widens an existing file deliberately, because asserting only the first write
+would pass against the code it exists to fail.
+
+### Three fields of a running access point were never compared
+
+hostapd reads its file once, so a change reaches the radio only on a restart --
+and `ObservedAccessPoint` carried `ssid`, `band` and `channel` and nothing else.
+Three fields were therefore inert once an access point was running: **`proto`**,
+`hidden` and `regdom`.
+
+The first is the one that matters. A document edited from `wpa2` to `wpa3`
+planned nothing and hostapd went on offering WPA2 -- the passphrase comparison
+beside it says nothing, because changing the generation with the same
+passphrase changes no secret. A radio advertising a weaker generation than the
+document asks for, with `ncfg plan` reporting nothing to do.
+
+### The comparison that must not be too eager
+
+Getting this wrong the other way is worse, and the `channel` arm records the
+cost: an absent channel is `channel=0` in the file, and comparing that against
+`None` stopped and started the access point on every reconcile. So each new
+field has its absent-value answer written down, and **`regdom` is the one that
+would have looped** -- the renderer uppercases it, so `"se"` and `SE` are the
+same access point.
+
+`key_mgmt_of` lives in the model beside `Security`: the planner must not depend
+on a backend crate to ask what generation a document names, and one definition
+cannot drift from itself.
+
+### The test that would have caught the original
+
+The plan fixtures build the observed side *from the document*, which is why
+they could not see the `channel` defect and did not see these. So the round
+trip is asserted where it can be: `netcfgd-observe` writes a real configuration
+through the renderer and reads it back, field by field, with a lower-case
+`regdom` among them.
+
+Adding the three fields made three existing fixtures fail at once -- they were
+planning a restart on every pass. That is the loop above, caught before it
+shipped rather than after.
+
+Decision 0216.
+
 ## 10.109 The length rule on the other side of the radio
 
 10.96 (0205) established that WPA's 8-to-63 limit belongs to the **field** a

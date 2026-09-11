@@ -5784,6 +5784,62 @@ impl Builder {
 				access_point.band.clone().unwrap_or_default(),
 				started.band.clone().unwrap_or_default(),
 			)
+		} else if started.key_mgmt.as_deref()
+			!= netcfgd_model::security::key_mgmt_of(&access_point.security)
+		{
+			// **The generation, which nothing noticed changing.** hostapd reads
+			// its file once, so an access point started as WPA2 goes on
+			// offering WPA2 however the document is edited -- and the secret
+			// comparison below says nothing about it, because changing `proto`
+			// with the same passphrase changes no secret. A document that says
+			// WPA3 and a radio that is running WPA2 is the one disagreement
+			// here that costs something more than a restart.
+			//
+			// Compared as the rendered string, from the one function that
+			// produces it, so the two sides cannot drift into disagreeing about
+			// what a generation is called.
+			(
+				"access_point.wifi.proto",
+				netcfgd_model::security::key_mgmt_of(&access_point.security)
+					.unwrap_or("open")
+					.to_owned(),
+				started
+					.key_mgmt
+					.clone()
+					.unwrap_or_else(|| "open".to_owned()),
+			)
+		} else if started.hidden != access_point.hidden {
+			// `ignore_broadcast_ssid` is written only when asked, so its
+			// absence is "not hidden" rather than "not known" and the
+			// comparison needs no guard.
+			(
+				"access_point.hidden",
+				access_point.hidden.to_string(),
+				started.hidden.to_string(),
+			)
+		} else if started.regdom
+			!= access_point
+				.regdom
+				.as_ref()
+				.map(|code| code.to_ascii_uppercase())
+		{
+			// **Uppercased before comparing**, because that is what the
+			// renderer writes. A document saying `"se"` against a file saying
+			// `SE` is the same access point, and comparing them as written
+			// would stop and start it on every reconcile -- which is the
+			// defect the `channel` arm above records having had, arrived at
+			// from a different direction.
+			(
+				"access_point.regdom",
+				access_point
+					.regdom
+					.as_ref()
+					.map_or_else(|| "<absent>".to_owned(), |code| code.to_ascii_uppercase()),
+				started
+					.regdom
+					.clone()
+					.unwrap_or_else(|| "<absent>".to_owned()),
+			)
 		} else if running.secret_matches == Some(false) {
 			// The value is not here and must not be: what the observation
 			// carries is the answer, computed where both halves were already in

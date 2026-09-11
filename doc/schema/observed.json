@@ -596,7 +596,10 @@
       "started_with": {
         "ssid": "686f6d65",
         "band": "2.4",
-        "channel": 6
+        "channel": 6,
+        "key_mgmt": "WPA-PSK SAE",
+        "hidden": true,
+        "regdom": "SE"
       },
       "secret_matches": true
     }

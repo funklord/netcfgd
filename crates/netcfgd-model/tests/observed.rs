@@ -490,6 +490,12 @@ fn backends(observed: &mut Observed) {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
 			band: Some("2.4".to_owned()),
 			channel: Some(6),
+			// All three stated, because the witness is what pins the wire
+			// form: a sample leaving them at their defaults would pin the
+			// `skip_serializing_if` and not the field.
+			key_mgmt: Some("WPA-PSK SAE".to_owned()),
+			hidden: true,
+			regdom: Some("SE".to_owned()),
 		}),
 		// The answer to a question about a secret, which is the only form a
 		// secret takes in an observation (decision 0052).
