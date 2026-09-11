@@ -9461,6 +9461,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.96 Hiding a network is a trade, not a defence -- and two missing tests
+
+The SSID handling is the strongest part of this wifi surface and this audit
+changes none of it. `Ssid` is octets, not a string; lowercase hex is canonical
+and uppercase is *refused*, so one SSID cannot have two spellings; 33 octets is
+refused with the count; two `network` blocks with one name is refused naming
+the first. An empty name is refused with the sentence somebody needs -- *"the
+label is the SSID; a hidden network is `hidden = true` beside its own name, not
+an empty one"* -- which anticipates the exact confusion this audit went looking
+for. SSIDs reach the supplicant as hex always, so a network called
+`"; REMOVE_NETWORK all; "` is a network with a silly name rather than a
+command.
+
+**What was wrong is that the caveat never reached the reader.** The model says
+of an access point's `hidden`:
+
+> Not a security measure and not documented as one: it stops the network
+> appearing in a list and makes every client that knows it broadcast the name
+> while probing, which is worse than the problem.
+
+The shipped reference said none of it -- the access point's `hidden` sat in a
+block with no explanation, and the station side got the mechanism ("has to be
+probed for by name") without the cost. **Probing by name means sending the
+name, in the clear, from wherever the machine is**: a laptop configured for a
+hidden network announces it in every airport it passes through. That is the
+opposite way round from how hiding is usually described.
+
+Documented rather than warned, as `powersave` and the rest are: it is a
+legitimate thing to want, and a warning on every hidden access point would nag
+somebody who has already decided.
+
+Third fault in `netcfgd.conf.example` this session, after the missing `probe`
+block and `mac_policy = "random"`. None of the three was a compile failure, so
+10.93's gate could not have caught any of them.
+
+### Two tests that should have existed
+
+Asked whether every check this session had been made into a script. **The
+answer was no, once**, and looking properly found a second:
+
+- `warn_mac_contradiction` (10.93) was verified by hand and committed on that
+  basis. It now has a fixture test firing on the contradiction and staying
+  quiet on a pinned address alone and a randomising policy alone -- the second
+  and third being exactly the shape the 10.94/10.95 false positive took.
+- `probe_gate.py` had no test at all, and its predicate had just been changed
+  to fix a false positive. It now self-checks on the seven lines that have
+  confused it, including `"$ncfg" plan &`, which looks like a backgrounded
+  netcfgd and is the client.
+
+The order was wrong both times -- the test after the fix, the fix after the
+ship -- and recording that is the point. Decision 0203.
+
 ## 10.95 A station cannot be a bridge port, and the warning I had just shipped
 
 The bridge and VLAN machinery is applied rather than accepted -- `stp`,

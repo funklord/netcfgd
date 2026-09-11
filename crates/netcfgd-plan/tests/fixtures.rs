@@ -8733,3 +8733,67 @@ fn a_bluetooth_block_is_warned_about_rather_than_silently_ignored() {
 		"each warning names its own device: {named:?}"
 	);
 }
+
+/// A fixed address and a policy that replaces it, which 0200 warns about.
+///
+/// **This test is here because the warning shipped without one.** It was
+/// verified by hand at a terminal, committed on that basis, and the gap was
+/// found by being asked whether every check had been made into a script. The
+/// answer was no, once.
+///
+/// Both directions, because a warning that cannot stay quiet is as useless as
+/// one that cannot fire -- and the sibling warning added a commit later did
+/// exactly that, firing on a correct bridged access point (0202).
+#[test]
+fn a_fixed_mac_under_a_randomising_policy_is_warned_about() {
+	let contradiction = document(
+		"device wlan0 {\n\tmac = \"02:00:00:00:00:01\"\n\twifi {\n\t\t\
+		 mac_policy = \"per_connection\"\n\t}\n}\ninterface wlan0 { config = \"dhcp\" }\n",
+	);
+	let warned = plan(
+		&contradiction,
+		&observed_with(&["wlan0"]),
+		&PlanOptions::default(),
+	);
+	assert!(
+		warned
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("which replaces it")),
+		"a fixed mac under a randomising policy is a contradiction netcfgd obeys \
+		 in both directions, and has to say so"
+	);
+
+	// The same device with the policy left at its default. `mac` alone is an
+	// ordinary thing to set and must not be warned about.
+	let pinned = document(
+		"device wlan0 {\n\tmac = \"02:00:00:00:00:01\"\n\twifi {\n\t}\n}\n\
+		 interface wlan0 { config = \"dhcp\" }\n",
+	);
+	let quiet = plan(&pinned, &observed_with(&["wlan0"]), &PlanOptions::default());
+	assert!(
+		!quiet
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("which replaces it")),
+		"a pinned address on its own is not a contradiction"
+	);
+
+	// And the policy alone, which is the other half and equally ordinary.
+	let randomised = document(
+		"device wlan0 {\n\twifi {\n\t\tmac_policy = \"per_connection\"\n\t}\n}\n\
+		 interface wlan0 { config = \"dhcp\" }\n",
+	);
+	let also_quiet = plan(
+		&randomised,
+		&observed_with(&["wlan0"]),
+		&PlanOptions::default(),
+	);
+	assert!(
+		!also_quiet
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("which replaces it")),
+		"a randomising policy on its own is not a contradiction"
+	);
+}

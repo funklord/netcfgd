@@ -560,6 +560,14 @@
 # Sharing an uplink additionally needs `forwarding` on and a `nat` rule, both
 # of which netcfgd does have -- see the sections for them.
 
+# **`hidden` on an access point is not a security measure**, and netcfgd does
+# not treat it as one. It suppresses the name in beacons, which keeps the
+# network out of a list of nearby networks and does nothing else: the name is
+# still in every association, and every client that knows it now broadcasts it
+# while probing, wherever they are. It is worse than the problem for most
+# people, and it is offered because sometimes a network has to be set up to
+# match one that already exists.
+#
 # Who may associate with it. One list or the other, never both, because
 # hostapd reads one file or the other.
 
@@ -641,7 +649,14 @@
 # A network with no `metric` leaves its interface's `preference` alone, which
 # is what every configuration written before this existed does.
 
-# A hidden network has to be probed for by name.
+# A hidden network has to be probed for by name: without `hidden = true` it is
+# never probed for, so it simply never appears and nothing says why.
+#
+# **What `hidden` costs on this end.** Probing by name means sending the name,
+# in the clear, from wherever this machine happens to be -- so a laptop
+# configured for a hidden network announces it in every airport it passes
+# through. That is the trade, and it is the opposite way round from how hiding
+# is usually described.
 
 #network "Backroom" {
 #	wifi {

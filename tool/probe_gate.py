@@ -35,6 +35,58 @@ JOB_SPEC = re.compile(r"\b(kill|wait)\b[^\n#]*\s%\d+")
 DAEMONS = ("netcfgd", "wpa_supplicant", "hostapd", "dhcpcd", "dhclient", "openvpn", "pppd", "dnsmasq")
 
 
+def backgrounds_a_daemon(line: str) -> bool:
+	"""Does this line start a daemon in the background?
+
+	**`&&` is a continuation, not a background job.** Without that test this
+	matched `cmd > file &&` -- a line that starts nothing at all -- and matched
+	it because the path in it contained "netcfgd". Found when a test script
+	rewrote a config file in two steps and this gate refused it.
+
+	A function rather than an expression inside `main` so that
+	`self_check` below can ask it things. It had no test at all until the
+	`&&` fault was fixed, which is the wrong order and is why it has one now.
+	"""
+	stripped = line.rstrip()
+	return (
+		stripped.endswith("&")
+		and not stripped.endswith("&&")
+		and not line.lstrip().startswith("#")
+		and any(daemon in line for daemon in DAEMONS)
+	)
+
+
+def self_check() -> int:
+	"""The predicate, against the lines that have actually confused it.
+
+	**Both halves, because a predicate that cannot say no is as useless as one
+	that cannot say yes** -- and this one's fault was a false yes, which is the
+	direction that stops somebody committing correct work.
+
+	The `$ncfg` case is here because it was got wrong while checking the fix:
+	`"$ncfg" plan &` looks like a backgrounded netcfgd and is the client, which
+	`DAEMONS` deliberately does not list. The gate was right and the
+	expectation was wrong.
+	"""
+	cases = [
+		('netcfgd > "$work/daemon.log" 2>&1 &', True, "a real backgrounded daemon"),
+		("wpa_supplicant -B -i wlan0 &", True, "another"),
+		('"$ncfg" plan &', False, "the client, which is not a daemon"),
+		('sed x > "$work/netcfgd.conf" &&', False, "a continuation whose path says netcfgd"),
+		("grep netcfgd a && grep b", False, "`&&` in the middle"),
+		("# netcfgd &", False, "a comment"),
+		("cat file &", False, "backgrounded, and not a daemon"),
+	]
+	wrong = 0
+	for line, want, why in cases:
+		if backgrounds_a_daemon(line) != want:
+			print(f"probe-gate: self-check: {why}: {line!r}", file=sys.stderr)
+			wrong += 1
+	if wrong:
+		print(f"probe-gate: {wrong} self-check failure(s)", file=sys.stderr)
+	return wrong
+
+
 def main() -> int:
 	if not LIVE.is_dir():
 		print(f"probe-gate: {LIVE} is not there", file=sys.stderr)
@@ -61,19 +113,7 @@ def main() -> int:
 		# The property underneath: a script that starts a daemon in the
 		# background has to hold its pid. Heuristic, and it says so -- what it
 		# cannot see is whether the pid captured is the right one.
-		starts = [
-			line
-			for line in text.splitlines()
-			# `&&` is a continuation, not a background job. Without the second
-			# test this matched `cmd > file &&` on the next line's `mv` -- a
-			# line that starts nothing at all -- and it matched it because the
-			# path in it contained "netcfgd". Found by a test script that
-			# rewrote a config file in two steps.
-			if line.rstrip().endswith("&")
-			and not line.rstrip().endswith("&&")
-			and not line.lstrip().startswith("#")
-			and any(daemon in line for daemon in DAEMONS)
-		]
+		starts = [line for line in text.splitlines() if backgrounds_a_daemon(line)]
 		if starts:
 			backgrounding += 1
 			if "$!" not in text:
@@ -81,6 +121,7 @@ def main() -> int:
 				print("probe-gate:   so nothing in it can stop what it started")
 				failures += 1
 
+	failures += self_check()
 	if failures:
 		print(f"probe-gate: {failures} problem(s)", file=sys.stderr)
 		return 1
