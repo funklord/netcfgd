@@ -62,7 +62,10 @@ pub enum Unsupported {
 	EnterpriseNeedsRadius,
 	/// A `Psk` network with no passphrase resolved for it.
 	MissingPassphrase,
-	/// A passphrase outside WPA's 8..=63 character range.
+	/// A passphrase outside the 8..=63 range `wpa_passphrase` accepts.
+	///
+	/// The field's range and not WPA's: an access point that writes only
+	/// `sae_password` has no such limit and is not checked against it.
 	PassphraseLength {
 		/// How long it was.
 		len: usize,
@@ -106,7 +109,10 @@ impl std::fmt::Display for Unsupported {
 			}
 			Self::PassphraseLength { len } => write!(
 				formatter,
-				"a WPA passphrase is 8 to 63 characters; this one is {len}"
+				"a `wpa_passphrase` is 8 to 63 characters and this one is {len}. \
+				 That limit is the field's rather than WPA's: an access point on \
+				 `proto = \"wpa3\"` alone writes `sae_password`, which hostapd does \
+				 not length-check, so it would take this one"
 			),
 			Self::PassphraseNotWritable => formatter.write_str(
 				"the passphrase contains a newline or NUL, which cannot go in a hostapd \
@@ -312,11 +318,28 @@ fn psk_lines(proto: PskProto, passphrase: &str) -> Result<Vec<Line>, Unsupported
 	if !is_writable(passphrase) {
 		return Err(Unsupported::PassphraseNotWritable);
 	}
-	// hostapd enforces this itself, at parse time, with a clear message. It is
-	// checked here anyway so the operator hears it from netcfgd naming their
-	// `access_point` block, rather than from a daemon naming a line number in a
-	// file under /run that netcfgd wrote.
-	if !(8..=63).contains(&passphrase.chars().count()) {
+	// **The limit belongs to `wpa_passphrase`, not to WPA**, which is
+	// [0205](../../doc/decision/0205-the-length-rule-belongs-to-a-field-not-to-wpa.md)
+	// applied to the other side of the same radio. That record fixed the
+	// station and this was left enforcing 8..=63 for all three, under a comment
+	// saying "hostapd enforces this itself, at parse time, with a clear
+	// message" -- true of the field hostapd checks and not of the one a WPA3
+	// access point is configured with. Asked of hostapd 2.10:
+	//
+	// ```text
+	// wpa_passphrase=<70 chars>  Line 6: invalid WPA passphrase length 70 (expected 8..63)
+	// sae_password=<70 chars>    parsed; the run failed later on the interface
+	// ```
+	//
+	// So a WPA3-only access point is not length-checked here, because nothing
+	// downstream checks it either and netcfgd was refusing a configuration
+	// hostapd accepts. Transition mode *is*, and that is the whole subtlety:
+	// it emits `wpa_passphrase` as well, so the limit genuinely applies to it.
+	//
+	// Checked here at all, for the two arms it applies to, so the operator
+	// hears it from netcfgd naming their `access_point` block rather than from
+	// a daemon naming a line number in a file under /run that netcfgd wrote.
+	if !matches!(proto, PskProto::Wpa3) && !(8..=63).contains(&passphrase.chars().count()) {
 		return Err(Unsupported::PassphraseLength {
 			len: passphrase.chars().count(),
 		});
@@ -564,6 +587,53 @@ mod tests {
 		// client to WPA2, which is the thing transition mode is accused of.
 		assert_eq!(value_of(&lines, "ieee80211w"), Some("1"));
 		assert_eq!(value_of(&lines, "sae_require_mfp"), Some("1"));
+	}
+
+	/// The length limit is `wpa_passphrase`'s, and only two arms emit one.
+	///
+	/// 0205 settled this for the station and left the access point enforcing
+	/// 8..=63 for all three, under a comment saying hostapd checks it anyway.
+	/// It does -- for `wpa_passphrase`. Asked of hostapd 2.10 with 70
+	/// characters, `wpa_passphrase` gives "invalid WPA passphrase length 70
+	/// (expected 8..63)" and `sae_password` is parsed without complaint.
+	///
+	/// So netcfgd was refusing a WPA3 access point that hostapd would have
+	/// run, and telling the operator it was WPA's rule.
+	#[test]
+	fn only_the_arms_that_write_wpa_passphrase_are_length_checked() {
+		let long: String = "a".repeat(70);
+
+		// WPA3 alone writes `sae_password` and nothing else, so nothing
+		// downstream limits it and neither does this.
+		let lines = rendered(&access_point(psk(PskProto::Wpa3)), Some(&long));
+		assert_eq!(value_of(&lines, "sae_password"), Some(long.as_str()));
+		assert!(value_of(&lines, "wpa_passphrase").is_none());
+
+		// **Transition mode keeps the limit**, because it writes
+		// `wpa_passphrase` too -- and a configuration hostapd refuses to parse
+		// is one netcfgd should refuse first, naming the block.
+		let mut point = access_point(psk(PskProto::Wpa2Wpa3));
+		assert_eq!(
+			config(&point, Path::new("/run"), Some(&long)),
+			Err(Unsupported::PassphraseLength { len: 70 })
+		);
+
+		// And plain WPA2, which is the case the rule was written for.
+		point = access_point(psk(PskProto::Wpa2));
+		assert_eq!(
+			config(&point, Path::new("/run"), Some(&long)),
+			Err(Unsupported::PassphraseLength { len: 70 })
+		);
+
+		// The short end is not special-cased either way: SAE has no minimum
+		// in hostapd, and the two arms that carry `wpa_passphrase` do.
+		point = access_point(psk(PskProto::Wpa2Wpa3));
+		assert_eq!(
+			config(&point, Path::new("/run"), Some("short")),
+			Err(Unsupported::PassphraseLength { len: 5 })
+		);
+		let lines = rendered(&access_point(psk(PskProto::Wpa3)), Some("short"));
+		assert_eq!(value_of(&lines, "sae_password"), Some("short"));
 	}
 
 	#[test]

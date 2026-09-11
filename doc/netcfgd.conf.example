@@ -725,6 +725,19 @@
 #}
 
 # Pinning a generation, where a network offers both and one of them misbehaves.
+#
+# `proto` is `"wpa2"`, `"wpa3"` or `"wpa2wpa3"` -- also spelled `"wpa2+wpa3"` --
+# and the default is the last of those: offer both and let the access point
+# choose, which is what joins a network in transition mode without being told
+# about it. Management frame protection follows from the choice and is not a
+# setting: required for `wpa3`, optional for the other two, because requiring
+# it excludes a WPA2 access point and forbidding it excludes SAE.
+#
+# **`wpa3` alone lifts the passphrase length limit**, and that is a property of
+# the field rather than of WPA. A WPA2 passphrase goes in `psk`, which takes 8
+# to 63 characters; WPA3 sends it as `sae_password`, which has no such range.
+# Transition mode keeps the limit, because it has to produce something `psk`
+# will accept as well.
 
 #network "Home" {
 #	wifi {

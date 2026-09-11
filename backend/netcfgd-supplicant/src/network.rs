@@ -76,7 +76,11 @@ pub enum Unsupported {
 	UnresolvedSsid,
 	/// A passphrase containing a character that would end the command.
 	PassphraseNotSendable,
-	/// A passphrase outside WPA's 8..=63 character range.
+	/// A passphrase outside the 8..=63 range the `psk` field accepts.
+	///
+	/// The field's range and not WPA's, which is 0205: a network sent as
+	/// `sae_password` has no such limit. The message says so; this says it
+	/// where somebody reading the variant sees it too.
 	PassphraseLength {
 		/// How long it was.
 		len: usize,

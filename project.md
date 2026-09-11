@@ -9461,6 +9461,53 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.109 The length rule on the other side of the radio
+
+10.96 (0205) established that WPA's 8-to-63 limit belongs to the **field** a
+passphrase is written into rather than to WPA: `psk` has it, `sae_password`
+does not. It fixed the station.
+
+`netcfgd-hostapd` still enforced 8..=63 for all three protocols, under a
+comment saying "hostapd enforces this itself, at parse time, with a clear
+message". True of the field hostapd checks, not of the one a WPA3 access point
+is configured with. Asked of hostapd 2.10 with 70 characters each:
+
+    wpa_passphrase=<70>   Line 6: invalid WPA passphrase length 70 (expected 8..63)
+    sae_password=<70>     parsed; the run failed later, on the interface
+
+The second is the finding; the first is the control that makes it mean
+something. netcfgd was refusing a WPA3 access point hostapd would have run.
+
+### Wrong for one arm of three
+
+`wpa2` writes `wpa_passphrase`, so the limit applies. `wpa3` writes only
+`sae_password`, so nothing limits it. **`wpa2wpa3` writes both**, because a
+WPA2 client needs the first and an SAE client the second -- so the limit
+applies and must, since a value `psk` would refuse is one hostapd will not
+parse. The test pins all three and fails on either mutation.
+
+Both the variant's documentation and the operator-facing message said "WPA's
+8..=63 character range"; 0205 had corrected the station's message and left its
+variant doc, and the access point had neither.
+
+### The transition rendering itself is right
+
+Which is the part most worth getting wrong.
+The access point emits `wpa_key_mgmt=WPA-PSK SAE`, `ieee80211w=1` and
+**`sae_require_mfp=1`** -- the last being what stops transition mode
+downgrading everybody to WPA2. The station offers `WPA-PSK SAE FT-PSK FT-SAE`
+with `ieee80211w=1`, the only value that works against both. `wpa=2` for all
+three, because it selects RSN and there is no `wpa=3`.
+
+**6 GHz cannot reach any of it**, which closes the question it would otherwise
+raise -- transition mode is not permitted there and SAE needs hash-to-element.
+The access point refuses the band outright.
+
+`netcfgd.conf.example` now names the three values, the default, and what
+changes with them.
+
+Decision 0215.
+
 ## 10.108 One network by BSSID voided the record
 
 netcfgd cannot ask a supplicant what it holds -- a passphrase is write-only --
