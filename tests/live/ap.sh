@@ -143,6 +143,62 @@ check "one with no address is" \
 check "and is told netcfgd serves no DHCP, which is the half it cannot fix" \
 	"$(grep -c 'serves no DHCP' "$work/noaddr.log" || true)" "1"
 
+# ------------------------------------------------ a radio on a bridge
+#
+# **Two opposite cases that both involve a radio and a bridge**, and the whole
+# of the difference is which end holds the associations.
+#
+# An `access_point` bridged into a LAN is the ordinary way to put wireless
+# clients on the same subnet as the wired ones. Its address belongs to the
+# bridge, so the "no address" warning above must not fire -- and when that
+# warning was first written it did, calling the correct arrangement broken.
+#
+# A radio *joining* networks cannot be a bridge port at all. A station
+# associates in 802.11's three-address mode, so a frame the bridge forwards
+# from another port reaches the access point sourced from an address that never
+# associated and is dropped. netcfgd sets the master anyway, so it looks
+# configured and carries nothing.
+#
+# `wireless` under the fake `/sys/class/net` is the whole of what makes an
+# interface a radio to netcfgd, which is what lets this run without one.
+mkdir -p "$work/sysnet/ap0/wireless" "$work/sysnet/eth9"
+mkdir -p "$work/bridged"
+cat > "$work/bridged/netcfgd.conf" <<'CONF'
+device ap0 {
+	kind = "dummy"
+	wifi { }
+}
+device br9 {
+	bridge {
+		members = ["ap0"]
+	}
+}
+interface ap0 {
+}
+interface br9 {
+	config = "192.168.9.1/24"
+}
+access_point "guest" {
+	device = "ap0"
+	wifi   { psk = "@secret:guest" }
+}
+CONF
+NCFG_CONFIG_DIR="$work/bridged" NCFG_SYS_CLASS_NET="$work/sysnet" 	"$ncfg" plan > "$work/bridged.log" 2>&1 || true
+check "a bridged access point is not told it has no address" \
+	"$(grep -c 'nothing here to talk to' "$work/bridged.log" || true)" "0"
+check "and is not told a station cannot bridge, because it is not one" \
+	"$(grep -c 'is a radio joining networks' "$work/bridged.log" || true)" "0"
+
+# The same bridge with the access point removed: now it is a station.
+sed '/^access_point/,/^}/d' "$work/bridged/netcfgd.conf" > "$work/bridged/tmp" &&
+	mv "$work/bridged/tmp" "$work/bridged/netcfgd.conf"
+NCFG_CONFIG_DIR="$work/bridged" NCFG_SYS_CLASS_NET="$work/sysnet" \
+	"$ncfg" plan > "$work/station.log" 2>&1 || true
+check "a station radio in a bridge is warned about" \
+	"$(grep -c 'is a radio joining networks' "$work/station.log" || true)" "1"
+check "and is told what does carry it" \
+	"$(grep -c 'four-address mode\|Four-address mode' "$work/station.log" || true)" "1"
+
 # The command that lists who is associated exists, and until 0201 the one place
 # somebody looks to find out what `ncfg wifi` can do was the only place that
 # did not mention it.

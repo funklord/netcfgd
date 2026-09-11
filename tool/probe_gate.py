@@ -64,7 +64,13 @@ def main() -> int:
 		starts = [
 			line
 			for line in text.splitlines()
+			# `&&` is a continuation, not a background job. Without the second
+			# test this matched `cmd > file &&` on the next line's `mv` -- a
+			# line that starts nothing at all -- and it matched it because the
+			# path in it contained "netcfgd". Found by a test script that
+			# rewrote a config file in two steps.
 			if line.rstrip().endswith("&")
+			and not line.rstrip().endswith("&&")
 			and not line.lstrip().startswith("#")
 			and any(daemon in line for daemon in DAEMONS)
 		]

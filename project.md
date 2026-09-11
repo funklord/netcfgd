@@ -9461,6 +9461,68 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.95 A station cannot be a bridge port, and the warning I had just shipped
+
+The bridge and VLAN machinery is applied rather than accepted -- `stp`,
+`forward_delay`, `hello_time`, `ageing_time`, `vlan_filtering` all reach the
+kernel, and per-port VLANs on a bridge without `vlan_filtering = true` is a real
+error naming its own cause. Unchanged here.
+
+**A radio joining networks was planned into a bridge like any other member**,
+with no warning:
+
+    3  link.set_master wlan0  master: br0 (was <absent>)
+
+The kernel accepts it and the radio cannot carry it. A station associates in
+802.11's three-address mode, where a frame has nowhere to say "this came from
+somewhere behind me", so a frame the bridge forwards from another port reaches
+the access point sourced from an address that never associated and is dropped.
+Four-address mode (WDS) carries it and both ends must agree; otherwise route or
+NAT instead of bridging. The bridge comes up, looks configured, and moves
+nothing.
+
+A bridged **access point** is the opposite case and is ordinary -- there the
+radio holds the associations. The planner already knew the difference.
+
+### The warning from 10.94 was wrong about exactly this
+
+10.94 added "an access point with no address serves nobody". A bridged access
+point *has* no address: the bridge holds it, which is correct and usual. So
+that warning called the right arrangement broken -- **the same fault the
+warning is about, made by the warning**: a true statement about one interface
+offered as a verdict on the whole.
+
+An hour between shipping it and catching it, and it was caught only because the
+next audit happened to be about bridges. Worth remembering as the cost of
+adding a warning without a check for the case it should stay quiet on: the
+control I wrote for 10.94 used the existing fixture, which is unbridged, so it
+could not have found this.
+
+### Not claimed
+
+hostapd's own `bridge=` is never set. netcfgd enslaves the interface itself,
+which is enough for the ordinary case; `bridge=` additionally matters for
+`wds_bridge` and per-station VLAN, neither of which netcfgd offers. Not
+asserted as a fault, because there is no radio in the suite to reproduce it on
+and a suspicion recorded as a finding is worse than saying where it stopped.
+
+Four checks in `ap.sh`, staged through `NCFG_SYS_CLASS_NET` -- a `wireless`
+directory is the whole of what makes an interface a radio to netcfgd.
+
+### A third fault, in the gate that caught the second
+
+`probe_gate.py` refused the new test: "backgrounds a daemon and never reads
+`$!`". Wrong -- the line ends in `&&`, a continuation, and the gate tested
+`endswith("&")` which `&&` satisfies; it matched because the path in the line
+contained `netcfgd`. Fixed in the gate, not worked around in the script.
+
+**Both attempts to prove the fix had not blunted it were invalid.** Appending a
+backgrounded command to `ap.sh` changed nothing, because that file already
+reads `$!` so the failing condition was never reached; and exercising the
+predicate directly, the first case asserted `"$ncfg" plan &` should match --
+it should not, `ncfg` being the client. The gate was right and the expectation
+wrong, twice. Decision 0202.
+
 ## 10.94 An access point is not a hotspot
 
 The access-point warnings were already thorough -- no `interface` block, an

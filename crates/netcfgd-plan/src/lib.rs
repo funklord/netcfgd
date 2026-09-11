@@ -644,6 +644,7 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_bluetooth(builder, desired);
 	warn_wifi_device_policy(builder, desired);
 	warn_mac_contradiction(builder, desired);
+	warn_bridged_station(builder, desired);
 	warn_unfired_hooks(builder, desired);
 	warn_inert_devices(builder, desired);
 	// `portal_check` was here, as "recognised and not applied", from 0061 until
@@ -721,6 +722,66 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 /// for anything, and three warnings on every wireless device would be noise
 /// rather than news -- which is the mistake `plan_dns`'s empty-scope guard
 /// records having made once already.
+/// A radio joining networks cannot be a bridge port.
+///
+/// **The kernel accepts it and the radio cannot carry it.** netcfgd plans
+/// `link.set_master wlan0 master: br0` like any other member, the link comes
+/// up, the bridge looks configured -- and nothing from the other ports ever
+/// crosses the wifi.
+///
+/// The reason is in the frame format rather than in anything netcfgd or the
+/// kernel does. A station associates in 802.11's three-address mode, where a
+/// frame carries the access point, the sender and the destination but has
+/// nowhere to say "this came from somewhere behind me". So a frame the bridge
+/// forwards, whose source is some other machine's address, arrives at the
+/// access point sourced from an address that never associated, and is dropped.
+/// Four-address mode (WDS) is what carries it, and both ends have to be
+/// configured for it; where that is not available the answer is to route or
+/// NAT between the radio and the bridge rather than to bridge at all.
+///
+/// **An access point is the opposite case and must not be warned about.**
+/// Bridging a hostapd interface into a LAN is the ordinary way to put wireless
+/// clients on the same subnet as the wired ones, and there the radio is the
+/// one holding the associations. So this asks which of the two the radio is,
+/// and the planner already knows: `radios` is the interfaces that are actually
+/// wireless and netcfgd manages, and an `access_point` naming the device is
+/// what makes it the serving end. Decision 0202.
+fn warn_bridged_station(builder: &mut Builder, desired: &Document) {
+	for device in &desired.devices {
+		let netcfgd_model::interface::InterfaceKind::Bridge(bridge) = &device.kind else {
+			continue;
+		};
+		for member in &bridge.members {
+			if !builder.radios.iter().any(|radio| radio == member) {
+				continue;
+			}
+			if desired
+				.access_points
+				.iter()
+				.any(|access_point| &access_point.device == member)
+			{
+				continue;
+			}
+			builder.warnings.push(Warning {
+				message: format!(
+					"`{member}` is a radio joining networks and a member of the \
+					 `{}` bridge, which cannot work: a station associates in \
+					 802.11's three-address mode, so a frame the bridge forwards \
+					 from another port reaches the access point sourced from an \
+					 address that never associated, and is dropped. netcfgd sets \
+					 the master anyway, so the bridge will look configured and \
+					 carry nothing across the wifi. Four-address mode (WDS) is \
+					 what bridges a station and both ends must agree on it; \
+					 otherwise route or NAT between the two. Bridging an \
+					 `access_point` radio is the other case and is fine",
+					device.name
+				),
+				interface: Some(member.clone()),
+			});
+		}
+	}
+}
+
 /// A fixed address and a policy that replaces it.
 ///
 /// **Both settings are honoured, and they contradict each other.** `mac` is
@@ -932,6 +993,27 @@ fn warn_access_points(builder: &mut Builder, desired: &Document) {
 		// and nothing here hands out leases. So an address on this interface is
 		// necessary and is not sufficient, and both halves are said rather than
 		// the easy one. Decision 0201.
+		// **A bridge port has no address and needs none**, which this warning
+		// got wrong when it was written. Bridging a hostapd radio into a LAN is
+		// the ordinary way to put wireless clients on the same subnet as the
+		// wired ones: the address belongs to the bridge, and whatever serves
+		// that LAN serves the stations. Asking the radio's own interface
+		// whether it is addressed called the correct arrangement broken.
+		//
+		// Caught by the bridge audit that followed, on a plan that should have
+		// been silent and was not (0202). It is the same fault this warning is
+		// about, made by the warning: a true statement about one interface
+		// offered as a verdict on the whole.
+		let bridged = desired.devices.iter().any(|other| {
+			matches!(&other.kind, netcfgd_model::interface::InterfaceKind::Bridge(bridge)
+				if bridge.members.iter().any(|member| member == device))
+		}) || desired
+			.devices
+			.iter()
+			.any(|other| &other.name == device && other.master.is_some());
+		if bridged {
+			continue;
+		}
 		let served = desired
 			.interfaces
 			.iter()
