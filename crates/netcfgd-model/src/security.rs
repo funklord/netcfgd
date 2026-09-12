@@ -103,6 +103,39 @@ pub struct EapConfig {
 	pub phase2: Option<String>,
 }
 
+/// Whether a `phase2` value pins an inner method at all.
+///
+/// **`wpa_supplicant` accepts anything here and acts on almost none of it.**
+/// Asked directly, it answers `OK` to `phase2="nonsense"` and reads the string
+/// straight back; it selects an inner method by scanning for `auth=` and
+/// `autheap=` tokens, so a value carrying neither constrains nothing and the
+/// server proposes whatever it likes.
+///
+/// That is not cosmetic. Pinning `auth=MSCHAPV2` is what stops a server asking
+/// for `GTC`, which sends the password in clear inside the tunnel -- and the
+/// tunnel is only as trustworthy as `ca_cert` and `domain_suffix_match` make
+/// it (0206).
+///
+/// **netcfgd's own example told operators to write the inert form**, `phase2 =
+/// "mschapv2"`, which is why this is a question worth asking of a document
+/// rather than a hypothetical.
+///
+/// The *shape* decides and the key names do not: a token is meaningful if it
+/// is `key=value` with both halves present. Judging by a closed list would
+/// make netcfgd the reason a working configuration started complaining when
+/// `wpa_supplicant` grew a key it had never heard of.
+///
+/// Here beside [`EapConfig`] rather than in the compiler, because the planner
+/// is what says it and must not depend on the compiler to ask.
+#[must_use]
+pub fn phase2_pins_nothing(phase2: &str) -> bool {
+	!phase2.split_whitespace().any(|token| {
+		token
+			.split_once('=')
+			.is_some_and(|(key, value)| !key.is_empty() && !value.is_empty())
+	})
+}
+
 /// WPA protocol generation for a pre-shared key network.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

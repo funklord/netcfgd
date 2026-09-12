@@ -2578,6 +2578,61 @@ access_point "home" {
 	assert!(plan.actions.is_empty(), "got {:?}", names(&plan));
 }
 
+/// A `phase2` that pins no inner method is said, and not refused.
+///
+/// **`wpa_supplicant` accepts anything here.** It answers `OK` to
+/// `phase2="nonsense"` and reads it back; it selects an inner method by
+/// scanning for `auth=` and `autheap=`, so a value carrying neither leaves the
+/// server to propose one -- including a method that sends the password in
+/// clear inside the tunnel.
+///
+/// **A warning and not a refusal, deliberately.** netcfgd's own example told
+/// operators to write `phase2 = "mschapv2"`, which is exactly the inert form;
+/// refusing it would take the wifi off every machine that copied the
+/// documentation, on upgrade, to fix a protection that was never there.
+#[test]
+fn a_phase2_that_pins_nothing_is_warned_about_and_still_compiles() {
+	let with = |value: &str| {
+		document(&format!(
+			"interface eth0 {{\n\tdot1x {{\n\t\teap = \"peap\"\n\t\t\
+			 identity = \"a@b\"\n\t\tpassword = \"@secret:x\"\n\t\t\
+			 phase2 = \"{value}\"\n\t}}\n\tconfig = \"dhcp\"\n}}\n"
+		))
+	};
+	let warnings = |desired: &Document| {
+		let observed = observed_with(&["eth0"]);
+		plan(desired, &observed, &PlanOptions::default())
+			.warnings
+			.iter()
+			.map(|warning| warning.message.clone())
+			.collect::<Vec<String>>()
+			.join("\n")
+	};
+
+	// The example's old value, and the mistake anybody makes.
+	let said = warnings(&with("mschapv2"));
+	assert!(
+		said.contains("pins no inner method"),
+		"a bare method name should be warned about: {said}"
+	);
+	assert!(
+		said.contains("auth=MSCHAPV2"),
+		"and the warning should say what to write: {said}"
+	);
+
+	// **The control from the other side**, without which "it warns" could be
+	// true of everything: a well-formed value says nothing, and so does a
+	// token this build has never heard of -- judging by a closed list would
+	// make netcfgd complain when wpa_supplicant grows a key.
+	for good in ["auth=MSCHAPV2", "autheap=TLS", "auth=PAP", "somethingnew=1"] {
+		let said = warnings(&with(good));
+		assert!(
+			!said.contains("pins no inner method"),
+			"`{good}` is well formed and should be left alone: {said}"
+		);
+	}
+}
+
 /// A renumbered delegation reloads what is being advertised.
 ///
 /// The prefix is the one value in the document that arrives after the document

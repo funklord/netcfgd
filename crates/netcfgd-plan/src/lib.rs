@@ -665,6 +665,7 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_access_points(builder, desired);
 	warn_bluetooth(builder, desired);
 	warn_wifi_device_policy(builder, desired);
+	warn_phase2_that_pins_nothing(builder, desired);
 	warn_mac_contradiction(builder, desired);
 	warn_bridged_station(builder, desired);
 	warn_unfired_hooks(builder, desired);
@@ -859,6 +860,61 @@ fn warn_mac_contradiction(builder: &mut Builder, desired: &Document) {
 			),
 			interface: Some(device.name.clone()),
 		});
+	}
+}
+
+/// A `phase2` that pins no inner method, wherever 802.1X is configured.
+///
+/// **Warned rather than refused, and the asymmetry is the argument.** The
+/// value is inert at the supplicant, not invalid: a network with it works
+/// today, and the protection it looks like it adds was never there. Refusing
+/// it at compile time would take the wifi off every machine carrying one --
+/// netcfgd runs with no document when one will not compile -- to fix something
+/// that was already absent. That is 0189's rule: a feature that stops a
+/// network working teaches an operator to use something else.
+///
+/// **netcfgd's own example told them to write it.** `phase2 = "mschapv2"` is
+/// exactly the inert form, so the configurations carrying one were written by
+/// following the documentation.
+///
+/// Both places 802.1X can live, because the model has two: a wifi `network`'s
+/// `Security::Eap`, and a wired interface's `dot1x` (0008).
+fn warn_phase2_that_pins_nothing(builder: &mut Builder, desired: &Document) {
+	let mut say = |where_: String, phase2: &str, interface: Option<String>| {
+		builder.warnings.push(Warning {
+			message: format!(
+				"`phase2 = \"{phase2}\"` on {where_} pins no inner method: \
+				 wpa_supplicant reads this as `key=value` and ignores anything \
+				 else, so the server proposes the inner method and the supplicant \
+				 accepts it -- including one that sends the password in clear \
+				 inside the tunnel. Write `auth=MSCHAPV2`, or `autheap=` where \
+				 the inner method is itself EAP"
+			),
+			interface,
+		});
+	};
+
+	for network in &desired.networks {
+		let netcfgd_model::Security::Eap(eap) = &network.security else {
+			continue;
+		};
+		let Some(phase2) = &eap.phase2 else { continue };
+		if netcfgd_model::security::phase2_pins_nothing(phase2) {
+			say(format!("network `{}`", network.id), phase2, None);
+		}
+	}
+	for interface in &desired.interfaces {
+		let Some(eap) = &interface.dot1x else {
+			continue;
+		};
+		let Some(phase2) = &eap.phase2 else { continue };
+		if netcfgd_model::security::phase2_pins_nothing(phase2) {
+			say(
+				format!("`{}`", interface.name),
+				phase2,
+				Some(interface.name.clone()),
+			);
+		}
 	}
 }
 

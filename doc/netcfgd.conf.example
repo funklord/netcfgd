@@ -757,10 +757,23 @@
 #		password            = "@secret:eduroam"
 #		ca_cert             = "/etc/netcfgd/certs/example-ac-uk.pem"
 #		domain_suffix_match = "radius.example.ac.uk"
-#		phase2              = "mschapv2"
+#		phase2              = "auth=MSCHAPV2"
 #	}
 #}
 
+# **`phase2` is `key=value`, and a bare method name pins nothing.** This line
+# used to read `phase2 = "mschapv2"` here, which is the inert form: the
+# supplicant stores whatever it is given -- it answers OK to `phase2 =
+# "nonsense"` -- and picks an inner method by looking for `auth=` and
+# `autheap=`. A value with neither leaves the inner method unconstrained, so
+# the server proposes and the supplicant accepts. Pinning `auth=MSCHAPV2` is
+# what stops a server asking for `GTC`, which sends the password in clear
+# inside the tunnel. netcfgd refuses a malformed one now rather than passing it
+# through.
+#
+# `auth=` for a password method carried inside the tunnel, `autheap=` where the
+# inner method is itself EAP.
+#
 # **TWO FIELDS, AND BOTH ARE LOAD BEARING.** `ca_cert` says who signed the
 # server's certificate. `domain_suffix_match` says who that certificate is
 # for. With only the first, every certificate that issuer ever signed is

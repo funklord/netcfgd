@@ -9461,6 +9461,52 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.112 The inner method the example did not pin
+
+`netcfgd.conf.example` told operators to write `phase2 = "mschapv2"`.
+`wpa_supplicant` accepts that and does nothing with it -- asked directly on the
+`none` driver, it answers `OK` to `phase2="nonsense"` too and reads the string
+straight back. It selects an inner method by scanning for `auth=` and
+`autheap=`, so a value carrying neither constrains nothing: **the server
+proposes the inner method and the supplicant accepts it**, including one that
+sends the password in clear inside the tunnel.
+
+That is the layer under 0206. The tunnel is only as trustworthy as `ca_cert`
+and `domain_suffix_match` make it, and the inner method is what travels inside
+it. An operator following netcfgd's own documentation had pinned nothing.
+
+### Warned, not refused, and that was a reversal
+
+The first implementation refused a malformed `phase2` at compile time. Wrong,
+and the asymmetry is the argument: the value is **inert, not invalid**. The
+network works today and the protection it appears to add was never there --
+while refusing takes the whole document out, because netcfgd runs with no
+configuration when one will not compile. An upgrade would have taken the wifi
+off every machine that copied the example, to fix something already absent.
+
+That is 0189's rule. The refusals netcfgd does make at compile time are for
+values that would not work anyway -- a regdom the kernel ignores, an `https`
+portal URL -- where refusing costs nothing that accepting would have bought.
+So: a plan warning, in the shape `scan_randomization` already uses.
+
+The check judges the **shape** and not the key names, and the test pins that
+from both sides: `somethingnew=1` has to stay quiet, or netcfgd becomes the
+reason a working configuration complains the day `wpa_supplicant` grows a key.
+
+### Sound, and one real gap
+
+No `ca_cert=""`, no empty `domain_suffix_match`, `private_key` sent as a path,
+wired 802.1X on `IEEE8021X` rather than `WPA-EAP`, identities quoted like
+passphrases, and a compile-stage warning by name for a network pinning no CA.
+
+**`private_key_passwd` does not exist anywhere.** An encrypted EAP-TLS client
+key -- how key material is usually distributed -- cannot be used, and the
+failure reads as a TLS error rather than a missing field. Named rather than
+fixed: it is a new field carrying a secret across the model, compiler, renderer
+and schema, and this round was an audit.
+
+Decision 0218.
+
 ## 10.111 A stale scan that only one client mentions
 
 0194 made the scan honest: netcfgd attaches to the supplicant's events before

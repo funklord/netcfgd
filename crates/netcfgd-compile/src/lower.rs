@@ -2235,6 +2235,12 @@ fn lower_wifi_key(
 		"anonymous_identity" => keys.anonymous_identity = as_string(&assignment.value, diags),
 		"ca_cert" => keys.ca_cert = as_cert_source(&assignment.value, diags),
 		"client_cert" => keys.client_cert = as_cert_source(&assignment.value, diags),
+		// **Kept as written, and warned about rather than refused.** A
+		// `phase2` that pins no inner method is inert at the supplicant, not
+		// invalid -- and netcfgd's own example told operators to write the
+		// inert form, so refusing it here would take the wifi off every
+		// machine that copied it, on upgrade, to fix a protection that was
+		// never there. `netcfgd-plan` says so on every plan instead. 0218.
 		"phase2" => keys.phase2 = as_string(&assignment.value, diags),
 		"domain_suffix_match" => {
 			keys.domain_suffix_match = as_string(&assignment.value, diags);
