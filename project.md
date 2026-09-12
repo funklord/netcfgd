@@ -9461,6 +9461,79 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.115 Two spellings of one country
+
+The language spells `regdom` twice, and only one of them does anything:
+
+```
+device wlan0 { wifi { regdom = "SE" } }    stored, and not acted on
+access_point "Home" { regdom = "SE" }      written, as hostapd's country_code
+```
+
+hostapd's own documentation calls `country_code` "used to set regulatory
+domain". So the setting written where it reads as belonging to the hardware is
+inert, and the one on the access point is the one with an effect. Decision 0221.
+
+**The plan warned that nothing sets the regulatory domain, in the same pass
+that starts the thing which sets it.** `warn_wifi_device_policy` carried one
+fixed clause -- "nothing sets the regulatory domain or the power-saving mode" --
+whose first half is false whenever an access point on that radio carries a
+`regdom`. The clause is now built beside the name it belongs to, so the sentence
+says only what was written. The recurring shape, again: *a true statement about
+one setting used as a verdict about the machine.*
+
+**Two countries on one radio applied silently.** A radio saying `SE` beside an
+access point saying `US` compiled, planned and applied, and the machine got
+`US`, with nothing to say the radio's line had lost. `warn_regdom` covers that
+and the commoner direction -- the country written once, on the radio, where it
+reaches nothing. It fires only where a radio names one, so the correct
+arrangement stays silent.
+
+**The draft that predicted the radio's behaviour was wrong, and the machine said
+so.** The reasoning was that a machine netcfgd never set a domain on sits in the
+world domain, where 5 GHz is no-IR and an access point cannot beacon. `iw reg
+get` has two stanzas and the theory only read the first:
+
+```text
+global
+country 00: DFS-UNSET
+
+phy#0 (self-managed)
+country SE: DFS-UNSET
+```
+
+The phy is *self-managed* -- iwlwifi holds its domain in firmware, it is `SE`
+while the global one is `00`, and no user-space country code moves it. Channels
+12 and 149 are usable on that radio though the world stanza marks both passive.
+The warning would have been a false alarm on every modern Intel radio. What a
+domain permits is the kernel's answer and netcfgd does not observe it; the
+warning says which `regdom` netcfgd writes and which it drops, which is the part
+netcfgd knows. Observing the phy's real domain needs nl80211 and is the fix that
+would let netcfgd say the rest.
+
+**The two keys were checked by two functions differing in one byte**, so
+`regdom = "se"` compiled as an access point's and was refused as a radio's, in
+the same file, with different help text. One validator now, normalising to upper
+case. The existing test asserted the refusal; its stated reason is an end -- "a
+regulatory domain the kernel ignores is a radio quietly using the world-roaming
+defaults" -- and uppercasing serves that end better than refusing does.
+
+**A third and a fourth doc comment on the wrong function.** 0219 fixed one;
+reading the regulatory code found `warn_access_points`' documentation on
+`warn_unmanaged` (and stale: it said "three things", the body has five), and
+`band_of`'s on `band_of_hw_mode`. Both new ones are **private** items, which is
+why `missing_docs` caught the earlier pair and not these.
+`clippy::missing_docs_in_private_items` is the lint that would, and it reports
+**447** items in this tree -- a piece of work, not a flag to set. The count is
+recorded rather than the class called fixed, because four occurrences in three
+audits is a rate.
+
+**The README contradicted itself.** Its feature table said `powersave`,
+`scan_randomization` and `regdom` "are understood and not acted on yet", four
+rows below an access-point row listing "regulatory domain" as supported --
+and 0220 had implemented `scan_randomization` the day before. Neither row was
+wrong about its own subject, which is how it survived being read.
+
 ## 10.114 The address in a probe request
 
 `mac_policy` works. `scan_randomization` beside it was accepted and inert, and

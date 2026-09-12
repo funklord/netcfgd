@@ -485,6 +485,40 @@
 # other**, and netcfgd does both: the fixed address holds until the radio
 # associates and not after. `ncfg plan` warns.
 #
+# **`regdom` here is not the one that does anything, and that is a trap worth
+# knowing about.** The language spells `regdom` in two places:
+#
+#   device wlan0 { wifi { regdom = "SE" } }    stored, and not acted on
+#   access_point "Home" { regdom = "SE" }      written, as hostapd's country_code
+#
+# The radio's is kept in the document and reaches nothing. The access point's
+# becomes `country_code` in the generated hostapd configuration, which hostapd
+# documents as "used to set regulatory domain". So the setting that reads as
+# belonging to the hardware is the inert one, and a machine whose two blocks
+# disagree gets the access point's. `ncfg plan` warns on both cases.
+#
+# **What the radio is actually permitted to do is the kernel's answer, and
+# netcfgd does not observe it.** `iw reg get` is where to look, and it has two
+# halves that can differ:
+#
+#   global
+#   country 00: DFS-UNSET          <- the world domain, the default
+#
+#   phy#0 (self-managed)
+#   country SE: DFS-UNSET          <- what this radio is actually using
+#
+# A *self-managed* phy carries its own domain from the driver's firmware --
+# iwlwifi does -- and the kernel does not let a user-space country code move
+# it. On such a radio neither `regdom` changes anything at all, and the one
+# that matters was decided before the machine booted. On everything else, the
+# world domain is what a machine gets when nothing sets one, and it marks much
+# of 5 GHz "no IR": the radio may not initiate radiation, which is what a
+# beacon is, so an access point there will not start.
+#
+# `ncfg plan` deliberately does not predict which of those you have. It says
+# which `regdom` netcfgd writes and which it drops, because that is the part
+# netcfgd knows.
+
 # `portal_check` is what notices a captive portal instead of reporting a
 # working network that resolves nothing.
 #
