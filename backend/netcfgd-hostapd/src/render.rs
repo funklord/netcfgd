@@ -242,14 +242,6 @@ fn channel_in(band: (&str, &str), channel: u16) -> bool {
 	}
 }
 
-/// Which band and hardware mode to operate in.
-///
-/// The channel number alone is ambiguous in one direction only: 1..=14 is 2.4
-/// GHz and nothing else, while the numbers above it belong to 5 GHz -- but
-/// channel 6 exists in both 6 GHz and 2.4 GHz, which is exactly why the model
-/// carries `band` at all. So `band` decides when it is present, the channel
-/// decides when it is not, and a channel that belongs to neither band is
-/// refused either way rather than passed to hostapd to fail on later.
 /// The band a `hw_mode` came from, as the document spells it.
 ///
 /// The other direction of [`band_of`], for reading back what an access point
@@ -269,6 +261,14 @@ pub fn band_of_hw_mode(hw_mode: &str) -> Option<String> {
 	}
 }
 
+/// Which band and hardware mode to operate in.
+///
+/// The channel number alone is ambiguous in one direction only: 1..=14 is 2.4
+/// GHz and nothing else, while the numbers above it belong to 5 GHz -- but
+/// channel 6 exists in both 6 GHz and 2.4 GHz, which is exactly why the model
+/// carries `band` at all. So `band` decides when it is present, the channel
+/// decides when it is not, and a channel that belongs to neither band is
+/// refused either way rather than passed to hostapd to fail on later.
 fn band_of(access_point: &AccessPoint) -> Result<(&'static str, &'static str), Unsupported> {
 	let declared = match access_point.band.as_deref() {
 		None => None,
