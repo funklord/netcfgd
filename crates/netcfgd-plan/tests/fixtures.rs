@@ -9002,3 +9002,139 @@ fn a_fixed_mac_under_a_randomising_policy_is_warned_about() {
 		"a randomising policy on its own is not a contradiction"
 	);
 }
+
+/// The two places the language spells `regdom`, and which one wins.
+///
+/// A radio's is stored and not acted on; an access point's becomes hostapd's
+/// `country_code`, which hostapd's own documentation calls "used to set
+/// regulatory domain". So a document can name two countries and get the one
+/// written in the place that looks least authoritative -- 0221.
+///
+/// All four combinations, because the two ways this warning could be wrong are
+/// staying silent on a real contradiction and firing on the ordinary
+/// arrangement, and the sibling warning two tests up records shipping the
+/// second of those.
+#[test]
+fn two_regulatory_domains_on_one_radio_say_which_one_is_written() {
+	const DISAGREE: &str = "name different regulatory";
+	const ORPHAN: &str = "nothing carries it to hostapd";
+
+	let warnings_of = |text: &str| -> Vec<String> {
+		let desired = document(text);
+		plan(
+			&desired,
+			&observed_with(&["wlan0"]),
+			&PlanOptions::default(),
+		)
+		.warnings
+		.into_iter()
+		.map(|warning| warning.message)
+		.collect()
+	};
+
+	// The radio says one country and the access point on it says another.
+	let disagreeing = warnings_of(
+		r#"
+device wlan0 { wifi { regdom = "SE" } }
+access_point "home" { device = "wlan0"; regdom = "US"; wifi { open = true } }
+"#,
+	);
+	let named = disagreeing
+		.iter()
+		.find(|message| message.contains(DISAGREE))
+		.unwrap_or_else(|| panic!("no warning about the disagreement: {disagreeing:?}"));
+	assert!(
+		named.contains("`SE`") && named.contains("`US`"),
+		"says both countries: {named}"
+	);
+	assert!(
+		named.contains("gets `US`"),
+		"and which one the machine actually gets: {named}"
+	);
+
+	// The country written once, on the radio, where it does nothing.
+	let orphaned = warnings_of(
+		r#"
+device wlan0 { wifi { regdom = "SE" } }
+access_point "home" { device = "wlan0"; wifi { open = true } }
+"#,
+	);
+	assert!(
+		orphaned.iter().any(|message| message.contains(ORPHAN)),
+		"a radio's regdom with no access point regdom reaches nothing: {orphaned:?}"
+	);
+
+	// The two agreeing is not a fault, and saying so on every plan would be
+	// the noise this warning is scoped to avoid.
+	let agreeing = warnings_of(
+		r#"
+device wlan0 { wifi { regdom = "SE" } }
+access_point "home" { device = "wlan0"; regdom = "SE"; wifi { open = true } }
+"#,
+	);
+	assert!(
+		!agreeing
+			.iter()
+			.any(|message| message.contains(DISAGREE) || message.contains(ORPHAN)),
+		"two that agree are not a contradiction: {agreeing:?}"
+	);
+
+	// And the ordinary arrangement: the country on the access point only,
+	// which is the one place this build acts on it.
+	let ordinary = warnings_of(
+		r#"
+device wlan0 { wifi { } }
+access_point "home" { device = "wlan0"; regdom = "SE"; wifi { open = true } }
+"#,
+	);
+	assert!(
+		!ordinary
+			.iter()
+			.any(|message| message.contains(DISAGREE) || message.contains(ORPHAN)),
+		"an access point carrying the only regdom is correct and silent: {ordinary:?}"
+	);
+}
+
+/// Case, which the two `regdom` keys used to disagree about.
+///
+/// `regdom = "se"` compiled as an access point's and was refused as a radio's,
+/// because the device block carried a second copy of the check that demanded
+/// `is_ascii_uppercase` where the shared one asks for `is_ascii_alphabetic`.
+/// One validator now, and it uppercases, so the two blocks agree about what a
+/// country code is and the planner compares one spelling. 0221.
+#[test]
+fn a_lower_case_regdom_is_accepted_in_both_blocks_and_normalised() {
+	let desired = document(
+		r#"
+device wlan0 { wifi { regdom = "se" } }
+access_point "home" { device = "wlan0"; regdom = "se"; wifi { open = true } }
+"#,
+	);
+	let radio = desired
+		.devices
+		.iter()
+		.find(|device| device.name == "wlan0")
+		.and_then(|device| device.wifi.as_ref())
+		.and_then(|wifi| wifi.regdom.clone());
+	assert_eq!(radio.as_deref(), Some("SE"), "the radio's, uppercased");
+	assert_eq!(
+		desired.access_points[0].regdom.as_deref(),
+		Some("SE"),
+		"and the access point's, by the same function"
+	);
+
+	// And having agreed, they say nothing.
+	let quiet = plan(
+		&desired,
+		&observed_with(&["wlan0"]),
+		&PlanOptions::default(),
+	);
+	assert!(
+		!quiet
+			.warnings
+			.iter()
+			.any(|warning| warning.message.contains("name different regulatory")),
+		"`se` and `SE` are the same country: {:?}",
+		quiet.warnings
+	);
+}

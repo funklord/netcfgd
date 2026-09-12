@@ -675,6 +675,7 @@ fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_access_points(builder, desired);
 	warn_bluetooth(builder, desired);
 	warn_wifi_device_policy(builder, desired);
+	warn_regdom(builder, desired);
 	warn_phase2_that_pins_nothing(builder, desired);
 	warn_mac_contradiction(builder, desired);
 	warn_bridged_station(builder, desired);
@@ -934,11 +935,26 @@ fn warn_wifi_device_policy(builder: &mut Builder, desired: &Document) {
 			continue;
 		};
 		let mut stated: Vec<&str> = Vec::new();
+		// Why each one does nothing, gathered beside the name so the sentence
+		// says it about the settings that were actually written.
+		//
+		// **It used to be one fixed clause, "nothing sets the regulatory domain
+		// or the power-saving mode", and the first half was false.** hostapd's
+		// own documentation on this machine says `country_code` is "used to set
+		// regulatory domain", and netcfgd writes that from an access point's
+		// `regdom` -- so a plan could warn that nothing sets the domain in the
+		// same breath as starting the thing that sets it. 0221.
+		let mut because: Vec<&str> = Vec::new();
 		if wifi.regdom.is_some() {
 			stated.push("`regdom`");
+			because.push(
+				"a radio's `regdom` reaches nothing, and an access point's is the only \
+				 one this build writes -- as hostapd's `country_code`",
+			);
 		}
 		if wifi.powersave != netcfgd_model::device::Powersave::Default {
 			stated.push("`powersave`");
+			because.push("nothing sets the power-saving mode");
 		}
 		// `scan_randomization` was here and is not any more: it sets the
 		// supplicant's `preassoc_mac_addr`, which is the address in probe
@@ -948,10 +964,9 @@ fn warn_wifi_device_policy(builder: &mut Builder, desired: &Document) {
 		}
 		builder.warnings.push(Warning {
 			message: format!(
-				"{} on {} {} understood and not acted on by this build: nothing sets \
-				 the regulatory domain or the power-saving mode. The setting is kept, \
-				 so a configuration written now still means this when the code \
-				 arrives",
+				"{} on {} {} understood and not acted on by this build: {}. The \
+				 setting is kept, so a configuration written now still means this when \
+				 the code arrives",
 				// "a, b and c" rather than "a and b and c", which is what
 				// joining on " and " gives for three.
 				match stated.as_slice() {
@@ -960,9 +975,99 @@ fn warn_wifi_device_policy(builder: &mut Builder, desired: &Document) {
 					[] => unreachable!("returned above when empty"),
 				},
 				device.name,
-				if stated.len() == 1 { "is" } else { "are" }
+				if stated.len() == 1 { "is" } else { "are" },
+				because.join("; and ")
 			),
 			interface: Some(device.name.clone()),
+		});
+	}
+}
+
+/// Say where a regulatory domain was written and will not arrive.
+///
+/// **The language spells `regdom` twice and only one of them does anything.**
+/// A radio's -- `device { wifi { regdom } }` -- is stored and not acted on, and
+/// `warn_wifi_device_policy` says so. An access point's becomes hostapd's
+/// `country_code`, which hostapd's own documentation describes as "used to set
+/// regulatory domain". So the setting that looks like it belongs to the radio
+/// is the inert one, and the setting an operator adds almost as an afterthought
+/// to an access point is the one that takes effect.
+///
+/// Two ways for that to bite, and this warns about both:
+///
+///   - **They disagree.** `device wlan0 { wifi { regdom = "SE" } }` beside
+///     `access_point "Home" { device = "wlan0" regdom = "US" }` compiles, plans
+///     and applies, and the machine gets `US`. Nothing said the radio's line
+///     lost, because from the device's side it was never in the running.
+///   - **Only the radio has one.** The operator wrote the country down once,
+///     in the place it reads as belonging, and hostapd is started with no
+///     `country_code` at all.
+///
+/// Warned only where a *radio* names one, which is what keeps this quiet.
+/// An access point with a `regdom` and a radio with none is the ordinary
+/// arrangement and asks nothing; an access point with neither is a machine
+/// that has not been told about regulatory domains, and inventing a warning
+/// for it would put a paragraph on every plan that mentions an access point.
+/// That is the noise `plan_dns`'s empty-scope guard records having shipped
+/// once.
+///
+/// **It deliberately does not predict what the radio will do**, which the
+/// first draft did. The reasoning was that a machine netcfgd never set a
+/// domain on sits in the world domain, where most of 5 GHz is marked no-IR
+/// and an access point cannot beacon -- so a 5 GHz access point with no
+/// `regdom` would fail to start. The machine this was written on says
+/// otherwise:
+///
+/// ```text
+/// $ iw reg get
+/// global
+/// country 00: DFS-UNSET
+/// phy#0 (self-managed)
+/// country SE: DFS-UNSET
+/// ```
+///
+/// The phy is *self-managed*: iwlwifi carries its own domain from firmware,
+/// it is `SE` while the global one is `00`, and the kernel does not let a
+/// user-space country code move it. So on that machine a 5 GHz access point
+/// with no `regdom` is fine, and the warning would have been a false alarm on
+/// every modern Intel radio. Which channels a domain permits is the kernel's
+/// answer to give and netcfgd does not observe it, so this says only what it
+/// can see: which of the two settings netcfgd writes, and which it drops.
+fn warn_regdom(builder: &mut Builder, desired: &Document) {
+	for access_point in &desired.access_points {
+		let radio = desired
+			.devices
+			.iter()
+			.find(|device| device.name == access_point.device)
+			.and_then(|device| device.wifi.as_ref())
+			.and_then(|wifi| wifi.regdom.as_deref());
+		let Some(radio) = radio else { continue };
+
+		// Case-insensitively, because the compiler uppercases both and a
+		// document can reach the planner without passing through it -- the same
+		// reason the access point's `country_code` comparison uppercases.
+		let message = match &access_point.regdom {
+			Some(point) if point.eq_ignore_ascii_case(radio) => continue,
+			Some(point) => format!(
+				"`{}` and the access point `{}` running on it name different regulatory \
+				 domains -- the radio says `{radio}` and the access point says `{point}` \
+				 -- and the access point's is the one netcfgd writes, as hostapd's \
+				 `country_code`. The radio's is stored and not acted on, so this machine \
+				 gets `{point}`",
+				access_point.device, access_point.id
+			),
+			None => format!(
+				"`{}` names `regdom = \"{radio}\"` and the access point `{}` running on \
+				 it names none, so nothing carries it to hostapd: a radio's `regdom` is \
+				 stored and not acted on by this build, and an access point's is the \
+				 only one that becomes a `country_code`. Write `regdom = \"{radio}\"` in \
+				 the access point as well",
+				access_point.device, access_point.id
+			),
+		};
+		builder.warnings.push(Warning {
+			message,
+			interface: Some(access_point.device.clone()),
 		});
 	}
 }
@@ -985,12 +1090,6 @@ fn warn_bluetooth(builder: &mut Builder, desired: &Document) {
 	}
 }
 
-/// Say what an access point asks for that will not happen.
-///
-/// Three things, each of which produces an access point that looks configured
-/// and is not -- which is the failure this whole function exists to prevent.
-/// None of them is an error: the document is valid, and a later release or a
-/// second `interface` block makes each one work.
 /// Say which interfaces the configuration describes and netcfgd will not touch.
 ///
 /// Only where a `device` block says `managed = false` *and* an `interface`
@@ -1041,6 +1140,26 @@ fn warn_unmanaged(builder: &mut Builder, desired: &Document) {
 	}
 }
 
+/// Say what an access point asks for that will not happen.
+///
+/// Each arm produces an access point that looks configured and is not, which is
+/// the failure this whole function exists to prevent. None of them is an error:
+/// the document is valid, and a later release or a second `interface` block
+/// makes each one work.
+///
+/// **This documentation was stranded, and this is the third time.** It sat on
+/// `warn_unmanaged` sixty lines above, which it says nothing about -- the same
+/// two-doc-comments-with-no-item-between as `warn_unapplied`'s, and as
+/// `band_of`'s in the hostapd renderer, found in the same pass as this one.
+/// The earlier two were caught by `missing_docs`; these two were not, because
+/// both items are private and that lint covers public ones. The lint that would
+/// have caught them is `clippy::missing_docs_in_private_items`, and it reports
+/// 447 items in this tree today -- so it is a piece of work rather than a flag
+/// to set, and 0221 records the count rather than pretending otherwise.
+///
+/// It had also gone stale where it stood: it said "three things", and the body
+/// below has five. So, as `warn_unapplied` now does: **the list is the body of
+/// this function**, and each arm says for itself what it is about.
 fn warn_access_points(builder: &mut Builder, desired: &Document) {
 	for access_point in &desired.access_points {
 		let device = &access_point.device;
