@@ -515,6 +515,7 @@ void ncfg_wifi_view::scan()
 	}
 
 	QList<ncfg_access_point_row> points;
+	QString stale;
 	QString error;
 
 	/* Blocks for as long as the radio takes. Saying so beforehand is the
@@ -523,7 +524,7 @@ void ncfg_wifi_view::scan()
 	scan_button->setEnabled(false);
 	status->setText(QStringLiteral("scanning %1...").arg(interface));
 	status->repaint();
-	const bool done = connection->wifi_scan(interface, &points, &error);
+	const bool done = connection->wifi_scan(interface, &points, &stale, &error);
 	scan_button->setEnabled(true);
 
 	if (!done) {
@@ -593,14 +594,34 @@ void ncfg_wifi_view::scan()
 	table->resizeColumnsToContents();
 	table->horizontalHeader()->setStretchLastSection(true);
 
-	const QString summary =
-	    points.isEmpty()
-	        ? QStringLiteral("%1 found nothing").arg(interface)
-	        : QStringLiteral("%1: %2 access points, %3 configured -- the rest need a "
-	                 "`network` block before they can be joined")
-	              .arg(interface)
-	              .arg(points.size())
-	              .arg(joinable);
+	/* **"Found nothing" and "could not scan" are different answers**, and an
+	 * empty table shown as the first when it is the second is the whole reason
+	 * the daemon computes this. It attaches to the supplicant's events before
+	 * asking, waits for the completion event, and says here when it did not
+	 * arrive -- the radio was busy, the interface went down, the scan outlasted
+	 * its patience. The list is then the *previous* scan's.
+	 *
+	 * First in the sentence rather than appended, for the reason the command
+	 * line prints it above the table: a caveat read after the rows is one the
+	 * operator has already acted on. */
+	QString summary;
+	if (!stale.isEmpty()) {
+		summary = QStringLiteral("%1: these are the previous scan's results -- %2")
+		                  .arg(interface, stale);
+		if (!points.isEmpty()) {
+			summary += QStringLiteral(" (%1 access points, %2 configured)")
+			                   .arg(points.size())
+			                   .arg(joinable);
+		}
+	} else if (points.isEmpty()) {
+		summary = QStringLiteral("%1 found nothing").arg(interface);
+	} else {
+		summary = QStringLiteral("%1: %2 access points, %3 configured -- the rest need a "
+		                 "`network` block before they can be joined")
+		                  .arg(interface)
+		                  .arg(points.size())
+		                  .arg(joinable);
+	}
 	status->setText(summary);
 	emit reported(summary);
 	selection_changed();

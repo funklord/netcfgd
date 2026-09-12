@@ -974,12 +974,15 @@ bool ncfg_connection::set_radio(const QString &interface, bool activate, QString
 }
 
 bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out,
-                QString *error)
+                QString *stale, QString *error)
 {
 	if (!out) {
 		return false;
 	}
 	out->clear();
+	if (stale) {
+		stale->clear();
+	}
 
 	if (!client) {
 		if (error) {
@@ -997,6 +1000,10 @@ bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_poin
 			*error = QString::fromUtf8(message);
 		}
 		return false;
+	}
+
+	if (stale) {
+		*stale = from_c(scan.stale);
 	}
 
 	for (size_t i = 0; i < scan.count; i++) {

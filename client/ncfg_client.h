@@ -376,6 +376,21 @@ typedef struct {
 	char                *interface;
 	ncfg_access_point_t *items;
 	size_t               count; /* strongest first, as the daemon ordered them */
+	/*
+	 * Why these results are the previous scan's, or empty when they are fresh.
+	 *
+	 * **"Nothing is in range" and "netcfgd could not scan" are different
+	 * answers**, and a client that shows the second as the first is the
+	 * complaint this exists to answer. The daemon attaches to the supplicant's
+	 * events before asking for a scan and waits for the completion event; where
+	 * that did not arrive -- the radio was busy, the interface went down, the
+	 * scan outlasted its patience -- it says so here rather than handing back
+	 * last time's list as though it were this time's.
+	 *
+	 * Empty, never NULL: `member_text` returns an empty string for an absent
+	 * member, so a caller tests the first byte rather than the pointer.
+	 */
+	char                *stale;
 } ncfg_scan_t;
 
 /*

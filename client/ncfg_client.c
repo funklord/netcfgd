@@ -1068,6 +1068,8 @@ void ncfg_scan_free(ncfg_scan_t *scan)
 		free(scan->items[i].configured);
 		free(scan->items[i].display);
 	}
+	free(scan->stale);
+	scan->stale = NULL;
 	free(scan->items);
 	free(scan->interface);
 	memset(scan, 0, sizeof(*scan));
@@ -2217,6 +2219,17 @@ static int convert_scan(const ncfg_json_doc_t *doc, ncfg_scan_t *out, char *err,
 	out->interface = member_text(doc, root, "interface");
 	if (!out->interface) {
 		set_error(err, err_size, "out of memory");
+		return 0;
+	}
+	/* Before the empty-list return below, which is the whole point of it:
+	 * "nothing is in range" and "netcfgd could not scan" are different answers,
+	 * and a scan that failed hands back an empty list with the reason in here.
+	 * Reading it after that return would drop it in exactly the case it exists
+	 * for. */
+	out->stale = member_text(doc, root, "stale");
+	if (!out->stale) {
+		set_error(err, err_size, "out of memory");
+		ncfg_scan_free(out);
 		return 0;
 	}
 	if (!count) {

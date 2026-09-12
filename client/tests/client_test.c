@@ -792,6 +792,9 @@ static void a_scan_becomes_access_points(void)
 	ok("a scan converts to access points", 1, NULL);
 	ok("one row per access point", scan.count == 3u, NULL);
 	equals("the interface comes back with them", scan.interface, "wlan0");
+	/* Fresh results say nothing, which is what makes the stale case below
+	 * mean something rather than being a field that is always set. */
+	equals("a fresh scan is not marked stale", scan.stale, "");
 
 	if (scan.count == 3u) {
 		equals("a text name arrives as text", scan.items[0].name, "home");
@@ -1126,6 +1129,54 @@ static void a_modem_carries_the_card_read_in_each_source(void)
 	memset(&empty, 0, sizeof(empty));
 	ncfg_modems_free(&empty);
 	ok("freeing an empty modem list is nothing", 1, "");
+
+	staged_close(&staged);
+}
+
+/* A scan that could not be taken says so, and says it even with no rows.
+ *
+ * **"Nothing is in range" and "netcfgd could not scan" are different answers.**
+ * The daemon attaches to the supplicant's events before asking for a scan and
+ * waits for the completion event; where that did not arrive it hands back the
+ * previous scan's results with the reason attached. A client that dropped the
+ * reason would show an empty list as "no access points in range" -- which is
+ * the second answer printed as the first, and the whole complaint the daemon
+ * side exists to answer.
+ *
+ * The empty list is the case that matters and is why this is a test of its
+ * own: `convert_scan` returns early when there are no rows, so a reason read
+ * after that return is dropped in exactly the case it was written for.
+ */
+static void a_scan_that_could_not_be_taken_says_so(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_scan_t scan;
+
+	static const char *const answer =
+	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\","
+	    "\"access_points\":[],"
+	    "\"stale\":\"the supplicant could not scan (ret=-16)\"}\n";
+
+	if (!staged_open(&staged, "a stale scan answer can be staged", answer)) {
+		return;
+	}
+	if (!ncfg_client_wifi_scan(staged.client, "wlan0", &scan, err, sizeof(err))) {
+		ok("a stale scan is still an answer", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("a stale scan is still an answer", 1, NULL);
+	ok("with no access points in it", scan.count == 0u, NULL);
+	equals("and the reason it is stale",
+	       scan.stale, "the supplicant could not scan (ret=-16)");
+	ncfg_scan_free(&scan);
+
+	/* Freeing twice is nothing, which is what the NULL above is for: a
+	 * caller that frees on an error path and again at the end must not
+	 * double-free the reason. */
+	ncfg_scan_free(&scan);
+	ok("freeing a scan twice is nothing", 1, NULL);
 
 	staged_close(&staged);
 }
@@ -2041,6 +2092,7 @@ int main(int argc, char **argv)
 	a_plan_becomes_a_model();
 	a_status_becomes_links();
 	a_scan_becomes_access_points();
+	a_scan_that_could_not_be_taken_says_so();
 	joining_names_a_network_and_never_a_secret();
 	adding_a_network_sends_typed_fields_only();
 	an_enterprise_network_sends_a_nested_eap_object();

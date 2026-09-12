@@ -9461,6 +9461,55 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.111 A stale scan that only one client mentions
+
+0194 made the scan honest: netcfgd attaches to the supplicant's events before
+asking, waits for the completion event, and where it did not arrive reports the
+previous scan's results **with the reason attached**. `ncfg wifi scan` prints
+it above the list, under a comment saying why it is above -- "nothing is in
+range" and "netcfgd could not scan" are different answers.
+
+**`ncfg_scan_t` had no field for it.** So the C client could not carry it, the
+Qt client could not show it, and the gui showed the same list with nothing
+said -- including, when the scan failed outright, an empty table summarised as
+"wlan0 found nothing". The second answer printed as the first, in the client an
+operator is most likely to be looking at.
+
+`convert_scan` returns early when there are no access points, which is right --
+a radio that found nothing is a real answer. Reading the reason after that
+return would drop it in **exactly the case it exists for**, since a failed scan
+comes back with an empty list. So it is read before, and the test stages an
+answer with no rows and a reason; moving the read below the return takes it red.
+
+### The rest of the scan path reads correctly
+
+Most of the round was reading rather than changing. `signal` is an `i32` from
+the third field, so a negative dBm survives. The sort is descending on dBm --
+strongest first -- and stable, which is what its comment claims. **No
+dBm-to-percentage conversion exists anywhere**, which is the commonest
+signal-strength defect and there is none to get wrong. `channel_of` handles 2.4
+and 5 GHz, special-cases channel 14, and prints the frequency for 6 GHz rather
+than inventing a third numbering. A hidden access point's empty SSID survives
+`Ssid::new`.
+
+### And the flakes have a cause
+
+`make check` went red once in `netcfgd-sys`, unrelated to this work, and it is
+not environmental. `privilege::shed()` reaching `Shed::Fully` takes **the whole
+process** to uid 65534, and a test calls it. Its own doc says "every test that
+runs after this one in a root run is running as 65534" -- but the harness runs
+tests in parallel threads, so "after" is a race.
+
+That is both unexplained red runs this session. The `chmod: Operation not
+permitted` that would not reproduce was a test making a file executable while
+another thread had already taken the process to 65534.
+
+Not fixed here: containing it means running the shedding test in a child
+process rather than a thread, which is a change to how that crate tests.
+Recorded so the next red run is read as this rather than as the machine.
+
+Decision 0217.
+
 ## 10.110 What a running access point is not asked
 
 Two findings, both in the gap between the file netcfgd writes and what anybody

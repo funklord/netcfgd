@@ -551,7 +551,18 @@ public:
 	 * no hook, no path and no `run_as`. */
 	bool set_radio(const QString &interface, bool activate, QString *error);
 
-	bool wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out, QString *error);
+	/*
+	 * Scan, and say through `stale` why the results are the previous scan's.
+	 *
+	 * **"Nothing is in range" and "netcfgd could not scan" are different
+	 * answers.** The daemon waits for the supplicant's scan-completion event
+	 * and says so when it did not arrive; a view that showed the list without
+	 * the reason would show the second answer as the first, with an empty
+	 * table reading as an empty room. `stale` is empty when the results are
+	 * fresh, which is the ordinary case.
+	 */
+	bool wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out, QString *stale,
+	               QString *error);
 	bool wifi_status(const QString &interface, ncfg_wifi_status_row *out, QString *error);
 	bool wifi_connect(const QString &interface, const QString &network, QString *error);
 	bool wifi_disconnect(const QString &interface, QString *error);
