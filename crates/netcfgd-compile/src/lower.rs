@@ -1560,12 +1560,30 @@ fn lower_ethtool(block: &Block, settings: &mut LinkSettings, diags: &mut Diagnos
 /// The check is the renderer's, moved to where a typo in a config file is
 /// found by reading the config file. The renderer keeps its own, because it is
 /// reachable from a document that did not come through this compiler.
+///
+/// **Both `regdom` keys come here, and until 0221 only one did.** The language
+/// spells the same setting in two places -- `access_point { regdom }` and
+/// `device { wifi { regdom } }` -- and the device's had a second, inline copy
+/// of this check that differed in one byte: `is_ascii_uppercase` rather than
+/// `is_ascii_alphabetic`. So `regdom = "se"` compiled as an access point's and
+/// was refused as a radio's, with a different help string, in the same file.
+///
+/// Neither rule was written down as a decision; the device copy's own comment
+/// justifies "two letters" and says nothing about capitals, which is what
+/// makes it a slip rather than a divergence. Merged towards the permissive one
+/// because widening cannot break a configuration that already compiles.
+///
+/// **Uppercased on the way in**, so the document holds one spelling of a code
+/// that is conventionally capitals and that the renderer capitalises anyway.
+/// This is why the planner may compare an access point's `regdom` to the
+/// `country_code` in a file hostapd was started with; it uppercases there too,
+/// because a document can reach the planner without passing through here.
 fn lower_regdom(regdom: &mut Option<String>, assignment: &Assignment, diags: &mut Diagnostics) {
 	let Some(name) = as_string(&assignment.value, diags) else {
 		return;
 	};
 	if name.len() == 2 && name.bytes().all(|byte| byte.is_ascii_alphabetic()) {
-		*regdom = Some(name);
+		*regdom = Some(name.to_ascii_uppercase());
 		return;
 	}
 	diags.push(
@@ -1684,25 +1702,14 @@ fn lower_wifi_device(block: &Block, diags: &mut Diagnostics) -> WifiDevicePolicy
 						}
 					}
 				}
-				"regdom" => {
-					if let Some(code) = as_string(&assignment.value, diags) {
-						// Two letters, because a regulatory domain that is not
-						// one is silently ignored by the kernel -- and a radio
-						// quietly using the world-roaming defaults is a
-						// difficult thing to notice.
-						if code.len() == 2 && code.bytes().all(|byte| byte.is_ascii_uppercase()) {
-							policy.regdom = Some(code);
-						} else {
-							diags.push(
-								Diagnostic::new(
-									assignment.span,
-									format!("`{code}` is not a regulatory domain"),
-								)
-								.with_help("an ISO 3166-1 alpha-2 code in capitals, such as SE"),
-							);
-						}
-					}
-				}
+				// Two letters, because a regulatory domain that is not one is
+				// silently ignored by the kernel -- and a radio quietly using the
+				// world-roaming defaults is a difficult thing to notice.
+				//
+				// The check itself is `lower_regdom`, shared with the access
+				// point's key of the same name. It used to be a second copy here
+				// that demanded capitals, so the two blocks disagreed about `"se"`.
+				"regdom" => lower_regdom(&mut policy.regdom, assignment, diags),
 				"mac_policy" => lower_mac_policy(&mut policy, assignment, diags),
 				"scan_randomization" => {
 					if let Some(flag) = as_bool(&assignment.value, diags) {

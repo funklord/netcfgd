@@ -930,9 +930,24 @@ fn the_iwd_backend_compiles_so_it_can_be_refused_by_name() {
 
 /// A regulatory domain the kernel ignores is a radio quietly using the
 /// world-roaming defaults, which is not a thing anybody notices.
+///
+/// **`"se"` used to be in this list and is not any more (0221).** The reason
+/// above is the end, and refusing lowercase was one means to it: a code the
+/// kernel compares byte-for-byte against an upper-case database is a hint that
+/// goes nowhere. Uppercasing on the way in serves the same end and serves it
+/// better, because the operator who wrote the country correctly and spelt it in
+/// lower case now gets the radio they asked for instead of a diagnostic.
+///
+/// It also ended a split: `access_point { regdom }` accepted `"se"` the whole
+/// time, through a shared function that this key had a second, stricter copy
+/// of. The same word in the same file compiled in one block and failed in the
+/// other.
+///
+/// What must still be refused is anything that is not two letters, which is
+/// what the rest of this list is.
 #[test]
 fn a_malformed_regulatory_domain_is_refused() {
-	for bad in ["se", "SWE", "S"] {
+	for bad in ["SWE", "S", "S3", "", "SE "] {
 		let message = errors(&format!(
 			r#"device wlan0 {{ wifi {{ regdom = "{bad}" }} }}"#
 		));
@@ -941,6 +956,18 @@ fn a_malformed_regulatory_domain_is_refused() {
 			"`{bad}` should be refused: {message}"
 		);
 	}
+
+	let document = build_ok(r#"device wlan0 { wifi { regdom = "se" } }"#);
+	assert_eq!(
+		document.devices[0]
+			.wifi
+			.as_ref()
+			.expect("policy")
+			.regdom
+			.as_deref(),
+		Some("SE"),
+		"accepted, and held in the spelling the kernel and hostapd use"
+	);
 }
 
 /// Decision 0008: 802.1X lives on the interface, because port-based access
