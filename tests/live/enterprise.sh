@@ -190,6 +190,15 @@ while ! grep -q "SET_NETWORK.*key_mgmt" "$work/daemon.log" 2>/dev/null; do
 done
 sent=$(cat "$work/daemon.log" 2>/dev/null || echo "")
 
+# **The address in probe requests, sent explicitly in both directions.** This
+# is the supplicant's global `preassoc_mac_addr`, not a per-network setting, so
+# it goes with `update_config` at population time -- and it is sent even when
+# the answer is "use the permanent address", because a silent default is not a
+# control (0015): leaving it unset inherits whatever this distribution's
+# supplicant happens to default to. This document asks for nothing, so the
+# value is 0; the digest test beside `fingerprint` covers the other one.
+contains "the scanning address policy is sent" "$sent" "SET preassoc_mac_addr 0"
+
 contains "the supplicant is told this is 802.1X" "$sent" "key_mgmt WPA-EAP FT-EAP"
 contains "and which method" "$sent" "eap PEAP"
 contains "and the inner method" "$sent" "phase2"

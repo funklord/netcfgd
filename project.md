@@ -9461,6 +9461,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.114 The address in a probe request
+
+`mac_policy` works. `scan_randomization` beside it was accepted and inert, and
+`ncfg plan` said so on every apply -- honestly, which is why this round is an
+implementation rather than a correction.
+
+**It is the more exposed half.** `mac_policy` governs the address used once a
+network is joined; this governs the address in *probe requests*, broadcast to
+everyone in range whether or not anything is ever joined. A laptop walking
+through a station announces the same address to every receiver it passes and
+associates with none of them.
+
+It is the supplicant's global `preassoc_mac_addr`, and asked directly on the
+`none` driver it answers `OK` where an unknown global answers `FAIL` -- the
+control that makes the rest mean something. Sent explicitly in both directions,
+for 0015's reason: an unset global inherits whatever this distribution's
+supplicant defaults to, and a privacy property resting on somebody else's
+default is not a property.
+
+### The digest gains a line only when it is on
+
+The same hazard the access point round met from the other side. The networks
+digest decides whether a running supplicant still matches, and a mismatch
+replaces its whole network set -- dropping the association. Encoding the off
+state as a line would change every existing machine's digest, so the first
+apply after an upgrade would disconnect all of them to record a setting none of
+them asked for.
+
+Absence means off, which is what the document means by absence too. Never used
+stays byte-identical; turning it on changes the digest once; turning it off
+changes it back.
+
+### Sound
+
+`use_tempaddr` is written as `2` and `0`, which is the pair that matters --
+`1` generates temporary addresses and then prefers the stable one, so a machine
+set that way would be configured for privacy and not have it. And
+`addr_gen_mode` is left alone deliberately: a stable SLAAC address derives from
+whatever address the interface currently has, so randomising the MAC randomises
+it too. Checked on this machine, where `fe80::2a5:54ff:fe22:3e90` is the EUI-64
+of `00:a5:54:22:3e:90`.
+
+`powersave` and a device `regdom` remain inert, and the plan still says so --
+with `scan_randomization` taken out of that sentence, because it is no longer
+true of it.
+
+Decision 0220.
+
 ## 10.113 A paragraph on the wrong function
 
 **The power and rfkill path is in good order and this round changed almost none

@@ -65,6 +65,44 @@ fn by_bssid(bssid: &str) -> WifiNetwork {
 	network
 }
 
+/// Turning the scanning address on changes the record; leaving it off does not.
+///
+/// **The asymmetry is the migration, not an oversight.** This digest decides
+/// whether a *running* supplicant still matches the document, and a mismatch
+/// replaces its whole network set -- which drops the association. If the off
+/// state were encoded as a line, every machine that has never used this would
+/// get a different digest from the one it has, and the first apply after an
+/// upgrade would disconnect all of them to record a setting none of them asked
+/// for.
+///
+/// So absence means off, which is what the document means by absence too. The
+/// first assertion is the one that protects existing machines and the second is
+/// the one that makes the setting worth having.
+#[test]
+fn the_scanning_address_changes_the_record_only_when_it_is_on() {
+	let resolver = Resolver::with_secrets_dir(std::path::Path::new("/nonexistent"));
+	let networks = [network("Corp", Security::Open)];
+
+	let off = netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, false, &resolver)
+		.expect("an ordinary network fingerprints");
+	let on = netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, true, &resolver)
+		.expect("and still does with the scanning address randomised");
+
+	// **The upgrade case.** Nothing about a machine that never used this may
+	// move, or applying the new build disconnects it.
+	let unchanged =
+		netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, false, &resolver)
+			.expect("fingerprints");
+	assert_eq!(off, unchanged, "the off state must be stable");
+
+	// And the setting is noticed, which is the whole point of putting it in.
+	assert_ne!(
+		off, on,
+		"turning the scanning address on has to change the record, or a running \
+		 supplicant is never told"
+	);
+}
+
 /// **One network named by BSSID must not void the record for all of them.**
 ///
 /// The fingerprint is how netcfgd knows a running supplicant still matches the
@@ -88,6 +126,7 @@ fn a_network_named_by_bssid_does_not_void_the_whole_fingerprint() {
 	let alone = netcfgd_supplicant::fingerprint(
 		std::slice::from_ref(&ordinary),
 		MacPolicy::Permanent,
+		false,
 		&resolver,
 	)
 	.expect("an ordinary network fingerprints");
@@ -95,6 +134,7 @@ fn a_network_named_by_bssid_does_not_void_the_whole_fingerprint() {
 	let together = netcfgd_supplicant::fingerprint(
 		&[ordinary.clone(), by_bssid("02:00:00:00:00:01")],
 		MacPolicy::Permanent,
+		false,
 		&resolver,
 	)
 	.expect("a bssid-named network beside it must still fingerprint");
@@ -112,6 +152,7 @@ fn a_network_named_by_bssid_does_not_void_the_whole_fingerprint() {
 	let moved = netcfgd_supplicant::fingerprint(
 		&[ordinary, by_bssid("02:00:00:00:00:02")],
 		MacPolicy::Permanent,
+		false,
 		&resolver,
 	)
 	.expect("still fingerprints");

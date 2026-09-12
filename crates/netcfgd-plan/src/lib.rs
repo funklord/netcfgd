@@ -940,18 +940,18 @@ fn warn_wifi_device_policy(builder: &mut Builder, desired: &Document) {
 		if wifi.powersave != netcfgd_model::device::Powersave::Default {
 			stated.push("`powersave`");
 		}
-		if wifi.scan_randomization {
-			stated.push("`scan_randomization`");
-		}
+		// `scan_randomization` was here and is not any more: it sets the
+		// supplicant's `preassoc_mac_addr`, which is the address in probe
+		// requests. 0220.
 		if stated.is_empty() {
 			continue;
 		}
 		builder.warnings.push(Warning {
 			message: format!(
 				"{} on {} {} understood and not acted on by this build: nothing sets \
-				 the regulatory domain, the power-saving mode or the scanning address. \
-				 The setting is kept, so a configuration written now still means this \
-				 when the code arrives",
+				 the regulatory domain or the power-saving mode. The setting is kept, \
+				 so a configuration written now still means this when the code \
+				 arrives",
 				// "a, b and c" rather than "a and b and c", which is what
 				// joining on " and " gives for three.
 				match stated.as_slice() {

@@ -468,13 +468,18 @@
 #   per_connection  a fresh address every time, including rejoining the same
 #                   network. Breaks DHCP reservations and portal sessions.
 #
-# **`scan_randomization` is accepted and does nothing yet.** It is the other
-# half -- the address in probe requests, before anything is joined -- and
-# nothing in netcfgd sets it. `ncfg plan` says so about any device that asks
-# for it. It is kept so a configuration written now still means this when the
-# code arrives, and it is named here rather than quietly omitted because a
-# reference that lists only what works cannot be used to find out what does
-# not.
+# **`scan_randomization` is the other half, and the more exposed one.**
+# `mac_policy` governs the address used once a network is joined; this governs
+# the address in *probe requests*, which are broadcast to everyone in range
+# whether or not anything is ever joined -- a laptop walking through a station
+# announcing the same address to every receiver it passes.
+#
+# It sets the supplicant's `preassoc_mac_addr`, and netcfgd sends it in both
+# directions rather than leaving it unset: an unset global inherits whatever
+# this distribution's supplicant defaults to, and a privacy property that
+# depends on somebody else's default is not a property.
+#
+# It was accepted and inert until 0220, and `ncfg plan` said so on every apply.
 #
 # **Setting `mac` on the device and a randomising `mac_policy` contradict each
 # other**, and netcfgd does both: the fixed address holds until the radio

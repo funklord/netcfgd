@@ -357,9 +357,21 @@ fn supplicant_networks_match(
 		.and_then(|device| device.wifi.as_ref())
 		.map_or(netcfgd_model::MacPolicy::Permanent, |wifi| wifi.mac_policy);
 
+	// The same question the executor asked when it populated: a radio that
+	// randomises its scanning address was given `preassoc_mac_addr 1`, and a
+	// digest that left it out would report a match for a document that had
+	// just turned it on.
+	let randomise = document
+		.devices
+		.iter()
+		.find(|device| device.name == interface)
+		.and_then(|device| device.wifi.as_ref())
+		.is_some_and(|wifi| wifi.scan_randomization);
+
 	let wanted = netcfgd_supplicant::fingerprint(
 		&document.networks,
 		policy,
+		randomise,
 		// `secrets_dir()`, not the crate default: this module already has one
 		// spelling for where the secrets are, and using the constant instead
 		// resolved against /etc/netcfgd/secrets on a machine whose store is

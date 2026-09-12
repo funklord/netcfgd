@@ -223,9 +223,25 @@ const UNRESOLVED: &[u8] = b"netcfgd:ssid-from-scan";
 pub fn fingerprint(
 	networks: &[WifiNetwork],
 	policy: MacPolicy,
+	scan_randomization: bool,
 	resolver: &Resolver,
 ) -> Option<String> {
 	let mut text = String::new();
+	// **A line only when it is on, and that asymmetry is deliberate.** This
+	// digest decides whether a *running* supplicant still matches the
+	// document, and a mismatch replaces its whole network set -- which drops
+	// the association. Encoding the off state as a line would change the
+	// digest of every machine that has never used this, so the first apply
+	// after an upgrade would disconnect all of them to record a setting none
+	// of them asked for.
+	//
+	// Absence means off, which is what the document means by absence too. The
+	// three cases that matter all come out right: never used stays
+	// byte-identical, turning it on changes the digest once, and turning it
+	// off changes it back.
+	if scan_randomization {
+		text.push_str("preassoc_mac_addr 1\n");
+	}
 	for network in networks {
 		// The id as well as the settings: two networks that render identically
 		// are still two networks, and one being renamed is a change.

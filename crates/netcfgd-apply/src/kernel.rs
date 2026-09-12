@@ -130,6 +130,15 @@ pub struct KernelExecutor {
 	dot1x: Vec<(String, netcfgd_model::EapConfig)>,
 	/// The MAC policy for each radio the document describes one for.
 	mac_policy: Vec<(String, netcfgd_model::MacPolicy)>,
+	/// Whether each radio randomises the address it scans with.
+	///
+	/// Separate from [`Self::mac_policy`] because it is a different exposure
+	/// and a different setting: `mac_addr` is per network and governs the
+	/// address used once something is joined, while this is the supplicant's
+	/// global `preassoc_mac_addr` and governs the address in probe requests --
+	/// which are broadcast to everyone in range whether or not anything is
+	/// ever joined.
+	scan_randomization: Vec<(String, bool)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
 	/// The bond settings for each interface that is one.
@@ -242,6 +251,7 @@ impl KernelExecutor {
 			bonds: Vec::new(),
 			link_kinds: Vec::new(),
 			mac_policy: Vec::new(),
+			scan_randomization: Vec::new(),
 			pppoe: Vec::new(),
 			delegating: Vec::new(),
 			advertising: Vec::new(),
@@ -373,16 +383,7 @@ impl KernelExecutor {
 				_ => None,
 			})
 			.collect();
-		self.mac_policy = document
-			.devices
-			.iter()
-			.filter_map(|device| {
-				device
-					.wifi
-					.as_ref()
-					.map(|wifi| (device.name.clone(), wifi.mac_policy))
-			})
-			.collect();
+		(self.mac_policy, self.scan_randomization) = wifi_device_policies(document);
 		self
 	}
 
@@ -708,6 +709,33 @@ impl KernelExecutor {
 			.iter()
 			.find(|(name, _)| name == iface)
 			.map_or(netcfgd_model::MacPolicy::Permanent, |(_, policy)| *policy);
+
+		// **The address in probe requests, which is the bigger exposure.**
+		// `mac_addr` beside it governs the address used once a network is
+		// joined; this governs the one broadcast to everyone in range whether
+		// or not anything is ever joined -- a laptop walking through a station
+		// announcing the same address to every receiver it passes.
+		//
+		// A global rather than a per-network setting, so it goes here with
+		// `update_config` rather than into `add_network`. Sent explicitly in
+		// both directions for decision 0015's reason: a silent default is not
+		// a control, and leaving it unset inherits whatever the supplicant's
+		// own default happens to be on this distribution.
+		let randomise = self
+			.scan_randomization
+			.iter()
+			.find(|(name, _)| name == iface)
+			.is_some_and(|(_, on)| *on);
+		client
+			.command(if randomise {
+				"SET preassoc_mac_addr 1"
+			} else {
+				"SET preassoc_mac_addr 0"
+			})
+			.map_err(|error| {
+				format!("could not set the scanning address policy on {iface}: {error}")
+			})?;
+
 		for network in &self.networks {
 			netcfgd_supplicant::add_network(&client, network, policy, &resolver)
 				.map_err(|error| format!("could not give `{}` to {iface}: {error}", network.id))?;
@@ -716,7 +744,7 @@ impl KernelExecutor {
 		// document has moved since. Written after the last `add_network`, so a
 		// population that failed part-way leaves the previous record -- or
 		// none -- rather than claiming a set the supplicant does not hold.
-		self.record_supplicant_networks(iface, policy, &resolver);
+		self.record_supplicant_networks(iface, policy, randomise, &resolver);
 		Ok(())
 	}
 
@@ -731,10 +759,11 @@ impl KernelExecutor {
 		&self,
 		iface: &str,
 		policy: netcfgd_model::MacPolicy,
+		randomise: bool,
 		resolver: &netcfgd_secret::Resolver,
 	) {
 		let path = networks_record_path(&self.run_dir, iface);
-		match netcfgd_supplicant::fingerprint(&self.networks, policy, resolver) {
+		match netcfgd_supplicant::fingerprint(&self.networks, policy, randomise, resolver) {
 			Some(digest) => {
 				// Reported and not returned: 0180's rule, that a record which
 				// could not be kept must not fail an apply that worked. What it
@@ -1737,6 +1766,34 @@ impl Executor for KernelExecutor {
 			other => Err(format!("{} is not implemented in this build", other.name())),
 		}
 	}
+}
+
+/// Which address each radio presents once it has joined something.
+type MacPolicies = Vec<(String, netcfgd_model::MacPolicy)>;
+/// Whether each radio randomises the address it scans with.
+type ScanRandomisation = Vec<(String, bool)>;
+
+/// The two per-radio policies the executor carries, in one walk.
+///
+/// Together because they are read from the same place and used in the same
+/// breath, and separate from the caller because that one is already at
+/// clippy's line limit -- which is the honest reason and is worth saying
+/// rather than pretending to a design motive.
+///
+/// Both are per *device*: `mac_policy` becomes a per-network `mac_addr` and
+/// `scan_randomization` becomes the supplicant's global `preassoc_mac_addr`,
+/// so they part company at the point of use rather than here.
+fn wifi_device_policies(document: &netcfgd_model::Document) -> (MacPolicies, ScanRandomisation) {
+	let mut policies = Vec::new();
+	let mut randomisation = Vec::new();
+	for device in &document.devices {
+		let Some(wifi) = device.wifi.as_ref() else {
+			continue;
+		};
+		policies.push((device.name.clone(), wifi.mac_policy));
+		randomisation.push((device.name.clone(), wifi.scan_randomization));
+	}
+	(policies, randomisation)
 }
 
 /// Where netcfgd records which networks it gave a radio's supplicant.
