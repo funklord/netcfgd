@@ -279,16 +279,6 @@ impl Plan {
 	}
 }
 
-/// Say what the document asks for that this build does not do.
-///
-/// Split out of [`plan`] only for length. The failure mode these guard against
-/// is not that a feature does nothing -- that is intended and recorded -- but
-/// that it does nothing *silently*, so a plan reports "one action" about a
-/// config that asked for several things.
-///
-/// The list has shrunk as the M4 freeze's inert features were built. What is
-/// left is the half of the `ethtool` block that needs a physical NIC, and the
-/// parts of an access point that hostapd can do and the schema cannot say.
 /// Say when a radio the document wants to use is switched off.
 ///
 /// The gap this closes is not a missing feature, it is a missing sentence: a
@@ -660,6 +650,26 @@ fn warn_eap_without_ca(builder: &mut Builder, desired: &Document) {
 	}
 }
 
+/// Say what the document asks for that this build does not do.
+///
+/// Split out of [`plan`] only for length. The failure mode these guard against
+/// is not that a feature does nothing -- that is intended and recorded -- but
+/// that it does nothing *silently*, so a plan reports "one action" about a
+/// config that asked for several things.
+///
+/// **This documentation was stranded.** It sat four hundred lines above, on
+/// `warn_blocked_radios`, which it says nothing about -- two doc comments had
+/// run together with no item between them, so the radio warning was documented
+/// with this prose and the dispatcher with none. It had also gone stale where
+/// it stood: it said the list was down to "the half of the `ethtool` block that
+/// needs a physical NIC, and the parts of an access point that hostapd can do
+/// and the schema cannot say", and by then it also covered a wifi device's
+/// `regdom`, `powersave` and `scan_randomization`, a bluetooth block, a
+/// `phase2` that pins nothing, a MAC contradiction, a bridged station, a hook
+/// that never fires and a device with no interface.
+///
+/// So rather than enumerate again and go stale again: **the list is the body of
+/// this function**, and each arm says for itself what it is about.
 fn warn_unapplied(builder: &mut Builder, desired: &Document) {
 	warn_eap_without_ca(builder, desired);
 	warn_access_points(builder, desired);

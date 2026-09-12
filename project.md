@@ -9461,6 +9461,53 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.113 A paragraph on the wrong function
+
+**The power and rfkill path is in good order and this round changed almost none
+of it.** Worth writing down: a round that finds little is a result rather than a
+gap in the looking, and most of what holds here was established by earlier
+rounds that measured it -- `/dev/rfkill` opened read-only so that 0062's stance
+is a property of the code; one read being one record, with the eight bytes every
+version has read and anything past them ignored; a switch matched to an
+interface by the phy's name, sorted, with `continue` rather than `?`, each of
+which was a measured fault; and a blocked radio warned about by name with the
+remedy differing by switch.
+
+### What it did find
+
+`warn_blocked_radios` was documented with somebody else's prose. Two doc
+comments had run together with no item between them, so everything intended for
+`warn_unapplied` -- the dispatcher for the whole "what this build does not do"
+family -- attached to the radio warning four hundred lines above, and the
+dispatcher had no documentation at all.
+
+The stranded paragraph had gone stale where it stood, too: it said the list was
+down to the `ethtool` half needing a NIC and the access point parts the schema
+cannot say, and by then it also covered `regdom`, `powersave`,
+`scan_randomization`, bluetooth, a `phase2` that pins nothing, a MAC
+contradiction, a bridged station, an unfired hook and a device with no
+interface.
+
+It is back on its function and no longer enumerates: **the list is the body of
+the function**. An enumeration in prose beside a list in code is a second copy
+that goes stale, and this one had.
+
+### Found and not fixed
+
+**Activating a switched-off radio reports plain success.** `ncfg wifi activate`
+writes the drop-in, applies the radio's plan, and answers `Response::Ok` --
+"succeeded and had nothing to return", with no room for a caveat. `activate` is
+the command somebody runs *because* the wifi is not working.
+
+One command away (`ncfg plan`, `ncfg wifi status`), so it is a sentence arriving
+late rather than a fact being lost. Fixing it properly needs a response that can
+carry a caveat beside success: a protocol change across the witness, the C
+client and the gui. Logging it puts it in the journal rather than in front of
+the person who typed the command, and fixing only the command-line client is the
+split 0217 is about.
+
+Decision 0219.
+
 ## 10.112 The inner method the example did not pin
 
 `netcfgd.conf.example` told operators to write `phase2 = "mschapv2"`.
