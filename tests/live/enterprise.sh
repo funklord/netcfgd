@@ -210,6 +210,15 @@ contains "the scanning address policy is sent" "$sent" "SET preassoc_mac_addr 0"
 # Decision 0226.
 contains "hash-to-element is offered" "$sent" "SET sae_pwe 2"
 
+# **What a roam costs on exactly this kind of network.** This file configures
+# an enterprise network, which is the case where opportunistic key caching is
+# the difference between a roam costing a four-way handshake and costing a full
+# EAP exchange with the authentication server. wpa_supplicant leaves it off
+# (`okc=0`), and netcfgd is what turns the roaming on -- a `roam` block becomes
+# a `bgscan`, so it decides how hard the radio looks for somewhere better.
+# Decision 0228.
+contains "key caching across access points is on" "$sent" "SET okc 1"
+
 contains "the supplicant is told this is 802.1X" "$sent" "key_mgmt WPA-EAP FT-EAP"
 contains "and which method" "$sent" "eap PEAP"
 contains "and the inner method" "$sent" "phase2"

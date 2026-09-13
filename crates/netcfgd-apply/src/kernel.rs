@@ -762,6 +762,51 @@ impl KernelExecutor {
 		// nothing to fall back to and nothing worth refusing to populate over.
 		// Every other network on the radio would be lost to make a point about
 		// one that cannot work either way.
+		// **What a roam costs, which netcfgd makes more of and did not make
+		// cheaper.** The `roam` block becomes a `bgscan`, so netcfgd is what
+		// decides how hard the radio looks for a better access point -- and on
+		// an enterprise network every move it causes is a full EAP exchange
+		// unless the pairwise key can be carried across.
+		//
+		// Opportunistic key caching is what carries it. wpa_supplicant's own
+		// documentation: *"By default, OKC is disabled unless enabled with the
+		// global `okc=1` parameter or with the per-network
+		// `proactive_key_caching=1` parameter."* netcfgd set neither, so the
+		// roaming it configured was as expensive as it can be.
+		//
+		// Measured against wpa_supplicant 2.10 on the `none` driver:
+		//
+		// ```text
+		// GET okc                 -> 0     the default
+		// SET okc 1               -> OK    reads back 1
+		// SET not_a_real_global 1 -> FAIL  the control: the key is real
+		// ```
+		//
+		// A weaker control than `sae_pwe`'s, and worth saying so: `SET okc 7`
+		// also answers `OK`, so this parser does not range-check the value.
+		// What the `FAIL` above establishes is that the *key* exists, not that
+		// the value was understood.
+		//
+		// Where the access points do not share a key this changes nothing --
+		// the station offers a `PMKID`, the access point does not recognise it,
+		// and a full authentication happens exactly as before. It cannot leak
+		// the key either: a `PMKID` is derived from the key and both addresses,
+		// so an access point that does not already have the key cannot produce
+		// or use one.
+		//
+		// The global rather than the per-network setting, for the reason the
+		// two above are globals: it is netcfgd's own choice about how to drive
+		// a supplicant rather than anything the document asked for, and a
+		// per-network setting would enter the networks digest and repopulate
+		// every radio on upgrade. Not fatal, for `sae_pwe`'s reason. 0228.
+		if let Err(error) = client.command("SET okc 1") {
+			netcfgd_sys::log_note!(
+				"supplicant",
+				"{iface}: this supplicant does not take `okc` ({error}), so each roam \
+				 on an enterprise network costs a full authentication"
+			);
+		}
+
 		if let Err(error) = client.command("SET sae_pwe 2") {
 			netcfgd_sys::log_note!(
 				"supplicant",
