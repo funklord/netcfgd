@@ -736,6 +736,41 @@ impl KernelExecutor {
 				format!("could not set the scanning address policy on {iface}: {error}")
 			})?;
 
+		// **Hash-to-element, which SAE does not offer by default.** `sae_pwe`
+		// picks how the password element is derived: 0 is hunting-and-pecking
+		// only, 1 is hash-to-element only, 2 is both. Measured against
+		// wpa_supplicant 2.10 on the reporting machine, on the `none` driver so
+		// no radio is involved:
+		//
+		// ```text
+		// GET sae_pwe     -> 0        the default
+		// SET sae_pwe 2   -> OK       reads back 2
+		// SET sae_pwe 99  -> FAIL     the control: the parser does validate
+		// ```
+		//
+		// At 0 this station cannot complete SAE with an access point configured
+		// for hash-to-element only, and nothing anywhere says why -- the
+		// handshake simply does not finish. 2 keeps hunting-and-pecking for
+		// everything that has always worked and adds the other, which is both
+		// daemons' own recommendation: *"the default value is likely to change
+		// from 0 to 2 once the new hash-to-element mechanism has received more
+		// interoperability testing"*. Decision 0226.
+		//
+		// **Not fatal, unlike the setting above.** `sae_pwe` arrived in
+		// wpa_supplicant 2.10, and a `FAIL` here means the supplicant predates
+		// it -- a supplicant that cannot do hash-to-element at all, so there is
+		// nothing to fall back to and nothing worth refusing to populate over.
+		// Every other network on the radio would be lost to make a point about
+		// one that cannot work either way.
+		if let Err(error) = client.command("SET sae_pwe 2") {
+			netcfgd_sys::log_note!(
+				"supplicant",
+				"{iface}: this supplicant does not take `sae_pwe` ({error}), so SAE \
+				 will derive its password element by hunting and pecking only -- an \
+				 access point set to hash-to-element only cannot be joined"
+			);
+		}
+
 		for network in &self.networks {
 			netcfgd_supplicant::add_network(&client, network, policy, &resolver)
 				.map_err(|error| format!("could not give `{}` to {iface}: {error}", network.id))?;

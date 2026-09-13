@@ -199,6 +199,17 @@ sent=$(cat "$work/daemon.log" 2>/dev/null || echo "")
 # value is 0; the digest test beside `fingerprint` covers the other one.
 contains "the scanning address policy is sent" "$sent" "SET preassoc_mac_addr 0"
 
+# **How SAE derives its password element**, which is the other global netcfgd
+# sends at population time and which the supplicant does not offer by default.
+# `sae_pwe=0` -- wpa_supplicant 2.10's default, measured -- is hunting-and-
+# pecking only, and a station on it cannot complete SAE with an access point
+# set to hash-to-element only. Sent for every radio rather than only for a
+# document that names a WPA3 network: it costs one command, it affects nothing
+# but an SAE handshake, and a network added later by `ncfg wifi add` would
+# otherwise be populated into a supplicant that was set up before it existed.
+# Decision 0226.
+contains "hash-to-element is offered" "$sent" "SET sae_pwe 2"
+
 contains "the supplicant is told this is 802.1X" "$sent" "key_mgmt WPA-EAP FT-EAP"
 contains "and which method" "$sent" "eap PEAP"
 contains "and the inner method" "$sent" "phase2"
