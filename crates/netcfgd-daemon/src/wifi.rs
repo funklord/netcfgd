@@ -547,6 +547,7 @@ fn scan_report(
 		.map(|result| ScanEntry {
 			secured: result.is_secured(),
 			enterprise: result.is_enterprise(),
+			owe: result.is_owe(),
 			ssid: result.ssid.to_hex(),
 			name: name_of(&result.ssid),
 			configured: configured_for(document, &result.ssid, &result.bssid)

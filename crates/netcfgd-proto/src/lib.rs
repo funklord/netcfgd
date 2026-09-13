@@ -940,6 +940,15 @@ pub struct ScanEntry {
 	pub signal: i32,
 	/// Whether joining it needs a credential.
 	pub secured: bool,
+	/// Whether it is opportunistic wireless encryption.
+	///
+	/// Encrypted without a credential, so `secured` is false and this is true.
+	/// Sent for the reason `enterprise` below is: the daemon can see it in the
+	/// scan flags, a client cannot, and a client that knows only `secured`
+	/// calls an OWE network open and writes an open profile -- which cannot
+	/// associate, because OWE is its own key management with management frame
+	/// protection required. 0227.
+	pub owe: bool,
 	/// Whether that credential is 802.1X rather than a passphrase.
 	///
 	/// Sent because the daemon knows and a client cannot work it out: the

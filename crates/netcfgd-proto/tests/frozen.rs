@@ -616,7 +616,8 @@ fn wifi_status_absent_sample() -> Response {
 ///
 /// It is the longest sample by a distance, and for a reason worth keeping: the
 /// fields that matter here are the ones where two entries differ, so a
-/// single-entry sample would pin none of them.
+/// single-entry sample would pin none of them. Four entries now, one per
+/// security shape: passphrase, open, 802.1X and OWE.
 fn wifi_scan_sample() -> Response {
 	Response::WifiScan(Box::new(ScanReport {
 		interface: "wlan0".to_owned(),
@@ -627,6 +628,7 @@ fn wifi_scan_sample() -> Response {
 				signal: -40,
 				secured: true,
 				enterprise: false,
+				owe: false,
 				ssid: "686f6d65".to_owned(),
 				name: Some("home".to_owned()),
 				configured: Some("home".to_owned()),
@@ -646,6 +648,7 @@ fn wifi_scan_sample() -> Response {
 				signal: -58,
 				secured: false,
 				enterprise: false,
+				owe: false,
 				ssid: String::new(),
 				name: Some(String::new()),
 				configured: None,
@@ -658,11 +661,29 @@ fn wifi_scan_sample() -> Response {
 				frequency: 2437,
 				signal: -71,
 				secured: true,
-				// The one enterprise entry, so the witness pins all
-				// three combinations: passphrase, open, and 802.1X.
+				// The one enterprise entry.
 				enterprise: true,
+				owe: false,
 				ssid: "ff00ff".to_owned(),
 				name: None,
+				configured: None,
+				mobility_domain: None,
+			},
+			// **Opportunistic wireless encryption, which is the fourth
+			// combination and had no witness (0227).** Encrypted without a
+			// credential, so `secured` is false exactly as it is for the open
+			// entry above -- and the two are a different network to join. A
+			// sample that carried only the other three pinned a shape in which
+			// they are indistinguishable, which is what the clients did.
+			ScanEntry {
+				bssid: "00:11:22:33:44:88".to_owned(),
+				frequency: 5200,
+				signal: -63,
+				secured: false,
+				enterprise: false,
+				owe: true,
+				ssid: "6775657374".to_owned(),
+				name: Some("guest".to_owned()),
 				configured: None,
 				mobility_domain: None,
 			},

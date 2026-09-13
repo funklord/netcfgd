@@ -267,6 +267,23 @@ impl ScanResult {
 		self.flags.contains("EAP")
 	}
 
+	/// Whether it is opportunistic wireless encryption.
+	///
+	/// **Encrypted and unauthenticated, which is neither of the other two.**
+	/// `is_secured` asks whether joining needs a credential and OWE needs none,
+	/// so it answers false -- correctly, and a client that stops there calls the
+	/// network open and writes an open profile for it. That profile cannot
+	/// associate: OWE is `key_mgmt=OWE` with management frame protection
+	/// required, which this tree already renders for a network the document
+	/// names. The scan was the one place that could not say so. 0227.
+	///
+	/// `wpa_supplicant` spells the key management `OWE` in the flags, the same
+	/// word it takes in `SET_NETWORK key_mgmt` and the same one hostapd writes.
+	#[must_use]
+	pub fn is_owe(&self) -> bool {
+		self.flags.contains("OWE")
+	}
+
 	/// Whether it advertises 802.11r fast transition.
 	///
 	/// Read from the flags, which cost nothing because they are already

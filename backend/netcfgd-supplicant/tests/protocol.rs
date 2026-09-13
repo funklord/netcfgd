@@ -956,6 +956,75 @@ fn a_network_named_by_address_learns_its_name() {
 	assert_eq!(learned.as_bytes(), b"lobby");
 }
 
+/// The four security shapes a scan row can be, told apart.
+///
+/// **OWE is the one that had no answer.** `is_secured` asks whether joining
+/// needs a credential, and OWE needs none -- so it answers false, exactly as it
+/// does for a genuinely open network, and every client stopped there and called
+/// it open. They are not the same network to join: OWE is its own key
+/// management with management frame protection required, and an open profile
+/// against one does not associate. 0227.
+#[test]
+fn a_scan_row_says_which_of_the_four_security_shapes_it_is() {
+	let rows = netcfgd_supplicant::protocol::parse_scan_results(
+		"bssid / frequency / signal level / flags / ssid\n\
+		 00:00:00:00:00:01\t2412\t-40\t[WPA2-PSK-CCMP][ESS]\tpsk\n\
+		 00:00:00:00:00:02\t2412\t-40\t[WPA2-EAP-CCMP][ESS]\tcorp\n\
+		 00:00:00:00:00:03\t2412\t-40\t[ESS]\topen\n\
+		 00:00:00:00:00:04\t2412\t-40\t[RSN-OWE-CCMP][ESS]\tguest\n\
+		 00:00:00:00:00:05\t2412\t-40\t[WPA2-PSK+SAE-CCMP][ESS]\ttransition\n\
+		 00:00:00:00:00:06\t2412\t-40\t[WEP][ESS]\told\n",
+	);
+	let shape = |name: &str| {
+		let row = rows
+			.iter()
+			.find(|row| row.ssid.as_bytes() == name.as_bytes())
+			.unwrap_or_else(|| panic!("no row for {name}"));
+		(row.is_secured(), row.is_enterprise(), row.is_owe())
+	};
+
+	assert_eq!(shape("psk"), (true, false, false));
+	assert_eq!(
+		shape("corp"),
+		(true, true, false),
+		"enterprise is secured too"
+	);
+	assert_eq!(shape("open"), (false, false, false));
+	assert_eq!(
+		shape("transition"),
+		(true, false, false),
+		"WPA2+SAE is a passphrase"
+	);
+	assert_eq!(shape("old"), (true, false, false), "WEP needs a credential");
+
+	// The one this test exists for. Not secured -- nothing is asked for -- and
+	// not open either.
+	assert_eq!(shape("guest"), (false, false, true));
+
+	// **A name is not a flag.** There is an access point called
+	// `OWNIT_24GHz_8A41A0` in range of the machine this was written on, and a
+	// check that searched the whole row rather than the flags field would call
+	// it OWE. The fields are separate and this proves the reader keeps them so.
+	let named = netcfgd_supplicant::protocol::parse_scan_results(
+		"bssid / frequency / signal level / flags / ssid\n\
+		 00:00:00:00:00:07\t2412\t-56\t[WPA2-PSK-CCMP][ESS]\tOWNIT_24GHz_8A41A0\n\
+		 00:00:00:00:00:08\t2412\t-56\t[WPA2-PSK-CCMP][ESS]\tOWE guest\n",
+	);
+	for row in &named {
+		assert!(
+			!row.is_owe(),
+			"the name `{}` is not a key management mode",
+			String::from_utf8_lossy(row.ssid.as_bytes())
+		);
+		assert!(row.is_secured(), "and it is still a passphrase network");
+	}
+	assert_ne!(
+		shape("guest"),
+		shape("open"),
+		"an OWE network and an open one must not look alike"
+	);
+}
+
 /// A hidden access point is in range and still cannot say what it is called.
 ///
 /// **It used to resolve to a zero-octet SSID**, which `add_network` then sent

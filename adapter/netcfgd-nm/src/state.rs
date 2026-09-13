@@ -1099,6 +1099,7 @@ mod tests {
 			signal,
 			secured: true,
 			enterprise: false,
+			owe: false,
 			ssid: "686f6d65".to_owned(),
 			name: Some("home".to_owned()),
 			configured: None,
