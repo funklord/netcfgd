@@ -9461,6 +9461,102 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.118 A pid is not a liveness test
+
+The control socket module is careful and most of the classic faults are already
+closed: 0112's reply-socket confusion, event interleaving in `request` (events
+skipped rather than returned as a command's answer), `Drop` sending `DETACH`
+rather than asking for it, a newline refused as a backstop. Two things were
+wrong, and the first had been sitting in `/run/wpa_supplicant` for three days.
+
+**`reap_reply_sockets` asked `/proc/<pid>` whether a socket's creator was
+alive.** A pid is a name that gets reused:
+
+```text
+srwxrwxr-x root root Sep 10 22:43 netcfgd-8-0
+srwxrwxr-x root root Sep 10 22:43 netcfgd-8-1
+$ ps -p 8 -o comm=
+kworker/R-netns
+```
+
+Seven days into a boot, three days old, no owner, skipped by every reap the
+daemon ran in between. The function's own doc had predicted this and filed it as
+acceptable -- "wrong in the direction that costs one stale entry". It is not one
+entry: **the pids most likely to be reused are the low ones, which belong to
+kernel threads that live as long as the boot**, and netcfgd's own live tests run
+it in a pid namespace where it gets exactly those numbers. Such a socket is not
+unlikely to be missed, it is guaranteed to be.
+
+Ask the kernel instead. Connecting to a unix datagram address answers three ways
+and they are all distinguishable:
+
+```text
+netcfgd-8-0          ECONNREFUSED   nobody has it bound     -> remove
+netcfgd-4026892-1    EPERM          bound, connected to a peer
+wlp0s20f3            connects       bound and unconnected
+```
+
+`EPERM` is the kernel refusing a second connect to an already-connected datagram
+socket, which every live reply socket is -- so the live case answers loudly
+rather than by absence of an error. The predicate is `nothing_is_listening`,
+which already existed in the file, already meant this, and was used by two other
+callers and not by the reaper. Decision 0224.
+
+**A datagram is truncated silently.** `recv` keeps what fits and drops the rest,
+with no error and no flag; `MSG_TRUNC` is the only way to learn the real length
+and std does not expose it without the `unsafe` this file promises not to use.
+So an oversized `SCAN_RESULTS` comes back short with its last row cut, and a
+network truncated off the end looks exactly like a network that is not there.
+Real replies measured at 1647 bytes and below against wpa_supplicant 2.10, so
+8192 is comfortable -- but whether the supplicant's own buffer caps first is a
+property of its build that netcfgd cannot know, which argues for detecting the
+case rather than picking a bigger number. A reply that exactly fills the buffer
+is now an error.
+
+**And a third fixture built from the code rather than the thing** (0222 had
+two). The reaper's test bound a socket and called it the dead one, because
+`/proc/0` never exists -- while a socket left by a dead process is a file with
+*nothing bound to it*, the opposite of what was built. It passed against the pid
+proxy and could not have tested the real question. Worth naming as a pattern:
+when a test constructs its subject by reading the implementation, it can only
+confirm the implementation.
+
+**And the gates were reaching into the running machine.** The stale sockets
+were meant to be left in place so the install would test the fix against
+evidence predating it. They were gone before the install. A witness socket --
+bound and closed under pid 1, so only the new reaper could take it -- run past
+each gate in turn found two that could:
+
+```text
+adapters  survived   conformance survived   client-test survived
+footprint survived   linkage     survived
+rss       REAPED IT  gui         REAPED IT
+```
+
+Both start a real `netcfgd` with `--config-dir` and `--run-dir` in a scratch
+directory, which reads as complete isolation and is not: **the wpa_supplicant
+control directory is a third path**, it defaults to the host's
+`/run/wpa_supplicant`, and `NCFG_WPA_CTRL_DIR` exists so a test does not share
+it -- `ctrl_dir`'s own doc says why. Neither gate set it, so both left reply
+sockets in the running machine's directory on every run (the `kill` is a
+SIGTERM and netcfgd installs no handler, so `Drop` never runs) and swept the
+host's entries on startup. The sweep was invisible while the reaper could not
+identify a stale socket; fixing the reaper is what made it visible.
+
+The idiom is written out by hand at each site and every site missed the same
+variable. **Partial isolation that looks total is worse than none, because
+nobody re-checks it.**
+
+Demonstrated on the machine at install:
+
+```text
+netcfgd: [supplicant] !: removed 5 reply socket(s) in /run/wpa_supplicant
+                          left by processes that are gone
+```
+
+Five, including the one planted under pid 1 -- alive, and so untouchable by the
+version this replaces.
+
 ## 10.117 The name a hidden network will not give
 
 Both halves of hiding were already right: a station probes for a hidden network
