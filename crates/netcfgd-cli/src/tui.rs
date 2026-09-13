@@ -1025,10 +1025,11 @@ fn group_scan<'a>(entries: &'a [serde_json::Value]) -> Grouped<'a> {
 		);
 		let secured = entry.get("secured").and_then(serde_json::Value::as_bool) == Some(true);
 		let enterprise = entry.get("enterprise").and_then(serde_json::Value::as_bool) == Some(true);
+		let owe = entry.get("owe").and_then(serde_json::Value::as_bool) == Some(true);
 		// The word itself, not the booleans behind it, so the key and the
 		// heading cannot come apart: a key coarser than what is displayed
 		// merges two networks under a heading describing one of them.
-		let key = (name, crate::access_point_security(secured, enterprise));
+		let key = (name, crate::access_point_security(secured, enterprise, owe));
 		if !groups.contains_key(&key) {
 			order.push(key.clone());
 		}

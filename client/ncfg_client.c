@@ -2268,6 +2268,12 @@ static int convert_scan(const ncfg_json_doc_t *doc, ncfg_scan_t *out, char *err,
 		 * passphrase exactly as it did before rather than showing nothing. */
 		item->enterprise =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "enterprise"), 0);
+		/* Same default and the same reason. A daemon older than this field
+		 * sends nothing, which reads as "not OWE" -- the answer every client
+		 * assumed before the field existed, so nothing gets worse. What it
+		 * buys where it is present: `secured` is 0 for an OWE network exactly
+		 * as it is for an open one, and joining them is not the same thing. */
+		item->owe = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "owe"), 0);
 		if (!item->bssid || !item->ssid || !item->name || !item->configured
 		    || !item->display) {
 			set_error(err, err_size, "out of memory");

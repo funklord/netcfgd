@@ -565,12 +565,17 @@ void ncfg_wifi_view::scan()
 		const QString cells[column_count] = {
 			QStringLiteral("%1 dBm").arg(point.signal),
 			point.display,
-			/* Three words, not two. "secured" on a corporate network
+			/* Four words, not two. "secured" on a corporate network
 			 * tells an operator to look for a passphrase they do not
-			 * have; naming 802.1X says what will be asked for. */
+			 * have; naming 802.1X says what will be asked for. And
+			 * "open" on a network doing opportunistic wireless
+			 * encryption is wrong in the other direction -- it asks
+			 * for nothing and is still encrypted, so it needs its own
+			 * kind of block. 0227. */
 			point.enterprise ? QStringLiteral("enterprise")
 			         : point.secured ? QStringLiteral("secured")
-			                 : QStringLiteral("open"),
+			                 : point.owe ? QStringLiteral("owe")
+			                         : QStringLiteral("open"),
 			/* Empty rather than "no": the column answers "which network
 			 * block is this" and a word invented for the absent case
 			 * would read as a block called "no". */
@@ -747,6 +752,28 @@ void ncfg_wifi_view::add()
 	 * breaks the moment the word changes -- which it just did, when
 	 * `enterprise` became a third value the column can hold. */
 	const ncfg_access_point_row &point = scanned.at(row);
+
+	/* **An OWE network cannot be added from here, and used to be added
+	 * wrongly.** `secured` is false for it, so this dialog asked for nothing
+	 * and wrote an open network block -- which does not associate with an
+	 * access point doing opportunistic wireless encryption, because that is
+	 * `key_mgmt=OWE` with management frame protection required.
+	 *
+	 * netcfgd renders such a block correctly when a document names one; what
+	 * is missing is a way to *say* it over the socket, since `wifi_add`
+	 * carries a passphrase, a generation and an 802.1X arm and has no third
+	 * state between "a credential" and "none". Saying so beats writing a
+	 * block that looks right in the list and never connects. 0227. */
+	if (point.owe) {
+		QMessageBox::information(this, QStringLiteral("netcfgd"),
+		    QStringLiteral("`%1` uses opportunistic wireless encryption, which asks "
+		                   "for no passphrase and is still not an open network.\n\n"
+		                   "netcfgd can join one, but not add it from here yet. Put "
+		                   "this in your configuration:\n\n"
+		                   "network \"%1\" {\n\twifi { owe = true }\n}")
+		        .arg(shown->text()));
+		return;
+	}
 
 	ncfg_add_network_dialog dialog(connection, point.ssid, shown->text(), point.secured,
 	                   point.enterprise, this);

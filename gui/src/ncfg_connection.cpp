@@ -1017,6 +1017,7 @@ bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_poin
 		row.signal = point.signal;
 		row.secured = point.secured != 0;
 		row.enterprise = point.enterprise != 0;
+		row.owe = point.owe != 0;
 		/* Rendered below the seam, not here. The three cases -- text,
 		 * `(hidden)`, `hex:<ssid>` -- are vocabulary every client has to
 		 * share, and this file held a fourth spelling of them until it

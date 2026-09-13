@@ -371,6 +371,12 @@ struct ncfg_access_point_row {
 	 * fields the add dialog shows, so that a corporate network is not met
 	 * with a box asking for a password it does not have. */
 	bool    enterprise = false;
+	/* Encrypted with no credential at all, which is not the same as open and
+	 * is not what `secured` means. An access point doing opportunistic
+	 * wireless encryption asks for nothing, so `secured` is false for it and
+	 * for a genuinely open network alike -- and joining them is not the same
+	 * thing. 0227. */
+	bool    owe = false;
 
 	bool joinable() const { return !configured.isEmpty(); }
 };

@@ -370,6 +370,7 @@ typedef struct {
 	int   signal;     /* dBm, closer to zero is stronger */
 	int   secured;    /* joining it needs a credential */
 	int   enterprise; /* that credential is 802.1X, not a passphrase */
+	int   owe;        /* encrypted with no credential: not the same as open */
 } ncfg_access_point_t;
 
 typedef struct {

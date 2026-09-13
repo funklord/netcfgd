@@ -1253,11 +1253,16 @@ pub(crate) fn is_radio(kind: Option<&str>, name: &str) -> bool {
 /// passphrase network and an enterprise one sharing an SSID stay two rows. A
 /// key coarser than the word displayed would merge them under a heading that
 /// then described only one.
-pub(crate) fn access_point_security(secured: bool, enterprise: bool) -> &'static str {
-	match (secured, enterprise) {
-		(_, true) => "enterprise",
-		(true, false) => "secured",
-		(false, false) => "open",
+pub(crate) fn access_point_security(secured: bool, enterprise: bool, owe: bool) -> &'static str {
+	match (secured, enterprise, owe) {
+		(_, true, _) => "enterprise",
+		(true, false, _) => "secured",
+		// **Encrypted and asking for nothing, which is not "open" (0227).**
+		// `secured` is false for both because neither needs a credential, and
+		// they are different networks to join: an open profile against an OWE
+		// access point does not associate.
+		(false, false, true) => "owe",
+		(false, false, false) => "open",
 	}
 }
 
@@ -1414,7 +1419,7 @@ fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), Str
 	let mut any_unconfigured = false;
 	for entry in &report.access_points {
 		let name = access_point_name(entry.name.as_deref(), &entry.ssid);
-		let security = access_point_security(entry.secured, entry.enterprise);
+		let security = access_point_security(entry.secured, entry.enterprise, entry.owe);
 		let configured = if let Some(id) = &entry.configured {
 			format!("  [{id}]")
 		} else {
@@ -1970,6 +1975,29 @@ fn describe(op: &str, reason: &netcfgd_plan::Reason) -> String {
 
 #[cfg(test)]
 mod tests {
+	use super::access_point_security;
+
+	/// The word a scan row is labelled with, for each shape it can be.
+	///
+	/// **`owe` is the one that had no word.** An access point doing
+	/// opportunistic wireless encryption asks for no credential, so `secured`
+	/// is false for it exactly as for an open network -- and the two are
+	/// different networks to join. The TUI groups rows by this word, with a
+	/// comment saying a key coarser than what is displayed merges two networks
+	/// under a heading describing one of them; that is what it did. 0227.
+	#[test]
+	fn every_security_shape_has_its_own_word() {
+		assert_eq!(access_point_security(true, false, false), "secured");
+		assert_eq!(access_point_security(true, true, false), "enterprise");
+		assert_eq!(access_point_security(false, false, false), "open");
+		assert_eq!(access_point_security(false, false, true), "owe");
+		assert_ne!(
+			access_point_security(false, false, true),
+			access_point_security(false, false, false),
+			"an OWE network and an open one must not share a word"
+		);
+	}
+
 	/// **What "online" means here, and why it is not "every interface".**
 	///
 	/// `network-online.target` is a promise to docker, a mail spool and a

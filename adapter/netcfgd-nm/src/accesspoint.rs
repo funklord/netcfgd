@@ -77,6 +77,7 @@ pub(crate) fn strength(dbm: i32) -> u8 {
 pub(crate) fn security_flags(
 	secured: bool,
 	enterprise: bool,
+	owe: bool,
 	configured: Option<&Security>,
 ) -> (u32, u32, u32) {
 	let ciphers = ap_security::PAIR_CCMP | ap_security::GROUP_CCMP;
@@ -100,6 +101,16 @@ pub(crate) fn security_flags(
 		// flag means "this is not an open network", not "you will be asked for
 		// a passphrase".
 		Some(Security::Owe) => (
+			ap_flag::PRIVACY,
+			ap_security::NONE,
+			ciphers | ap_security::KEY_MGMT_OWE,
+		),
+		// **An OWE network the document does not name (0227).** The arm above
+		// answers for one it does; this is the same network before anybody has
+		// written it down, and it used to fall past `secured` -- which is false
+		// for OWE -- into the open arm below. An applet was told a network that
+		// encrypts is one that does not.
+		None if owe => (
 			ap_flag::PRIVACY,
 			ap_security::NONE,
 			ciphers | ap_security::KEY_MGMT_OWE,
@@ -177,7 +188,12 @@ impl AccessPoint {
 		let Some(entry) = self.entry() else {
 			return (ap_flag::NONE, ap_security::NONE, ap_security::NONE);
 		};
-		security_flags(entry.secured, entry.enterprise, self.configured().as_ref())
+		security_flags(
+			entry.secured,
+			entry.enterprise,
+			entry.owe,
+			self.configured().as_ref(),
+		)
 	}
 }
 
@@ -325,24 +341,49 @@ mod tests {
 	/// 1416.
 	#[test]
 	fn a_transition_network_matches_what_a_real_daemon_reports() {
-		let (flags, wpa, rsn) = security_flags(true, false, Some(&psk(PskProto::Wpa2Wpa3)));
+		let (flags, wpa, rsn) = security_flags(true, false, false, Some(&psk(PskProto::Wpa2Wpa3)));
 		assert_eq!(flags, ap_flag::PRIVACY);
 		assert_eq!(wpa, ap_security::NONE);
 		assert_eq!(rsn, 1416);
 	}
 
+	/// An OWE network nobody has written down yet.
+	///
+	/// **The arm below answers for one the document names; this is the same
+	/// network before it has been named.** `secured` is false for OWE -- it
+	/// asks for no credential -- so it used to fall past that test into the
+	/// open arm, and an applet was told a network that encrypts is one that
+	/// does not. 0227.
+	#[test]
+	fn an_unconfigured_owe_network_is_not_reported_as_open() {
+		let (flags, wpa, rsn) = security_flags(false, false, true, None);
+		assert_eq!(flags, ap_flag::PRIVACY, "it is not an open network");
+		assert_eq!(wpa, ap_security::NONE);
+		assert_eq!(
+			rsn,
+			ap_security::PAIR_CCMP | ap_security::GROUP_CCMP | ap_security::KEY_MGMT_OWE
+		);
+
+		// And a genuinely open one still reports as open, which is the half a
+		// fix like this gets wrong.
+		assert_eq!(
+			security_flags(false, false, false, None),
+			(ap_flag::NONE, ap_security::NONE, ap_security::NONE)
+		);
+	}
+
 	#[test]
 	fn each_generation_asks_for_the_key_management_it_uses() {
 		assert_eq!(
-			security_flags(true, false, Some(&psk(PskProto::Wpa2))).2,
+			security_flags(true, false, false, Some(&psk(PskProto::Wpa2))).2,
 			ap_security::PAIR_CCMP | ap_security::GROUP_CCMP | ap_security::KEY_MGMT_PSK
 		);
 		assert_eq!(
-			security_flags(true, false, Some(&psk(PskProto::Wpa3))).2,
+			security_flags(true, false, false, Some(&psk(PskProto::Wpa3))).2,
 			ap_security::PAIR_CCMP | ap_security::GROUP_CCMP | ap_security::KEY_MGMT_SAE
 		);
 		assert_eq!(
-			security_flags(true, false, Some(&Security::Owe)).2,
+			security_flags(true, false, false, Some(&Security::Owe)).2,
 			ap_security::PAIR_CCMP | ap_security::GROUP_CCMP | ap_security::KEY_MGMT_OWE
 		);
 	}
@@ -354,11 +395,11 @@ mod tests {
 	#[test]
 	fn owe_is_private_without_being_a_prompt() {
 		assert_eq!(
-			security_flags(true, false, Some(&Security::Owe)).0,
+			security_flags(true, false, false, Some(&Security::Owe)).0,
 			ap_flag::PRIVACY
 		);
 		assert_eq!(
-			security_flags(false, false, Some(&Security::Open)).0,
+			security_flags(false, false, false, Some(&Security::Open)).0,
 			ap_flag::NONE
 		);
 	}
@@ -368,11 +409,11 @@ mod tests {
 	/// answering costs the network not being shown at all.
 	#[test]
 	fn an_unconfigured_secured_network_is_assumed_to_want_a_passphrase() {
-		let (flags, _, rsn) = security_flags(true, false, None);
+		let (flags, _, rsn) = security_flags(true, false, false, None);
 		assert_eq!(flags, ap_flag::PRIVACY);
 		assert_eq!(rsn & ap_security::KEY_MGMT_PSK, ap_security::KEY_MGMT_PSK);
 
-		let (open_flags, _, open_rsn) = security_flags(false, false, None);
+		let (open_flags, _, open_rsn) = security_flags(false, false, false, None);
 		assert_eq!(open_flags, ap_flag::NONE);
 		assert_eq!(open_rsn, ap_security::NONE);
 	}
@@ -385,7 +426,7 @@ mod tests {
 	/// make it work. The scan now says which, so nothing is guessed here.
 	#[test]
 	fn an_unconfigured_enterprise_network_is_802_1x() {
-		let (flags, _, rsn) = security_flags(true, true, None);
+		let (flags, _, rsn) = security_flags(true, true, false, None);
 		assert_eq!(flags, ap_flag::PRIVACY);
 		assert_eq!(
 			rsn & ap_security::KEY_MGMT_802_1X,
@@ -404,7 +445,8 @@ mod tests {
 	#[test]
 	fn the_configuration_wins_over_the_boolean() {
 		assert_eq!(
-			security_flags(true, false, Some(&psk(PskProto::Wpa3))).2 & ap_security::KEY_MGMT_SAE,
+			security_flags(true, false, false, Some(&psk(PskProto::Wpa3))).2
+				& ap_security::KEY_MGMT_SAE,
 			ap_security::KEY_MGMT_SAE
 		);
 	}
