@@ -109,7 +109,9 @@ impl std::fmt::Display for Unsupported {
 			}
 			Self::PassphraseLength { len } => write!(
 				formatter,
-				"a `wpa_passphrase` is 8 to 63 characters and this one is {len}. \
+				"a `wpa_passphrase` is 8 to 63 octets and this one is {len} -- a character \
+				 outside ASCII counts as more than one, which is how hostapd counts \
+				 it. \
 				 That limit is the field's rather than WPA's: an access point on \
 				 `proto = \"wpa3\"` alone writes `sae_password`, which hostapd does \
 				 not length-check, so it would take this one"
@@ -346,9 +348,9 @@ fn psk_lines(proto: PskProto, passphrase: &str) -> Result<Vec<Line>, Unsupported
 	// Checked here at all, for the two arms it applies to, so the operator
 	// hears it from netcfgd naming their `access_point` block rather than from
 	// a daemon naming a line number in a file under /run that netcfgd wrote.
-	if !matches!(proto, PskProto::Wpa3) && !(8..=63).contains(&passphrase.chars().count()) {
+	if !matches!(proto, PskProto::Wpa3) && !netcfgd_model::security::passphrase_fits(passphrase) {
 		return Err(Unsupported::PassphraseLength {
-			len: passphrase.chars().count(),
+			len: passphrase.len(),
 		});
 	}
 

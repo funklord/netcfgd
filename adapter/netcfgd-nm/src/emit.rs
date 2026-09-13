@@ -97,7 +97,7 @@ impl std::fmt::Display for Unsupported {
 			),
 			Self::PassphraseLength { len } => write!(
 				formatter,
-				"a WPA passphrase is 8 to 63 characters; this one is {len}"
+				"a WPA passphrase is 8 to 63 octets; this one is {len}"
 			),
 			Self::MalformedId { given } => write!(
 				formatter,
@@ -560,8 +560,9 @@ pub(crate) fn network_block_keeping_secret(
 		Some(mechanism @ ("wpa-psk" | "sae")) => {
 			match string(settings, "802-11-wireless-security", "psk") {
 				Some(passphrase) => {
-					let len = passphrase.chars().count();
-					if !(8..=63).contains(&len) {
+					// Octets, which is the unit both daemons use (0229).
+					let len = passphrase.len();
+					if !netcfgd_model::security::passphrase_fits(&passphrase) {
 						return Err(Unsupported::PassphraseLength { len });
 					}
 					// The secret's name is the profile's, which makes the

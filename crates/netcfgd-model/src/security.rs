@@ -186,6 +186,48 @@ pub fn key_mgmt_of(security: &Security) -> Option<&'static str> {
 	}
 }
 
+/// The range of a passphrase, in octets, that `psk` and `wpa_passphrase` take.
+///
+/// **Octets, not characters, and that is the whole point of writing it down
+/// (0229).** Four places in this tree checked `chars().count()` against this
+/// range and both daemons count bytes, so a passphrase of accented characters
+/// was accepted by netcfgd and refused by the thing it was handed to.
+///
+/// Measured against `wpa_supplicant` 2.10 and `hostapd` 2.10 on the reporting
+/// machine:
+///
+/// ```text
+/// 63 x "a"     63 chars  63 bytes  SET_NETWORK psk -> OK
+/// 64 x "a"     64 chars  64 bytes  SET_NETWORK psk -> FAIL
+/// 32 x "e-acute"  32 chars  64 bytes  SET_NETWORK psk -> FAIL
+/// 31 x "e-acute"  31 chars  62 bytes  SET_NETWORK psk -> OK
+///  4 x "e-acute"   4 chars   8 bytes  SET_NETWORK psk -> OK
+/// ```
+///
+/// ```text
+/// hostapd, wpa_passphrase of 32 accented characters:
+///   Line 8: invalid WPA passphrase length 64 (expected 8..63)
+/// ```
+///
+/// The last row of the first block is the direction people miss: four
+/// characters is a legitimate passphrase to both daemons if they are four
+/// two-octet characters, and netcfgd refused it.
+///
+/// **It is not WPA's range either.** It belongs to the field: a network sent
+/// as `sae_password` has no such limit, which is 0205 and why every caller
+/// asks this only for the generations that use `psk`.
+pub const PASSPHRASE_OCTETS: std::ops::RangeInclusive<usize> = 8..=63;
+
+/// Whether a passphrase fits the field that will carry it.
+///
+/// Counted the way both daemons count it. See [`PASSPHRASE_OCTETS`] for the
+/// measurements, and use `passphrase.len()` for the number to report -- that
+/// is the same count, and it is the one the daemon's own message will use.
+#[must_use]
+pub fn passphrase_fits(passphrase: &str) -> bool {
+	PASSPHRASE_OCTETS.contains(&passphrase.len())
+}
+
 /// A pre-shared key network's parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -214,4 +256,55 @@ pub enum Security {
 	Eap(EapConfig),
 	/// Opportunistic Wireless Encryption.
 	Owe,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{passphrase_fits, PASSPHRASE_OCTETS};
+
+	/// The rule, in the unit both daemons actually count in.
+	///
+	/// **Every case here was measured against the daemon it is about**, not
+	/// derived from the code: `wpa_supplicant` 2.10 over its control socket on
+	/// the `none` driver, and hostapd 2.10 reading a configuration file. Four
+	/// places in this tree counted characters instead, so a passphrase of
+	/// accented letters was accepted here and refused there -- and, at the
+	/// short end, refused here and accepted there. 0229.
+	#[test]
+	fn a_passphrase_is_measured_in_octets_not_characters() {
+		// Pure ASCII, where characters and octets agree and the old check was
+		// right. The boundaries either side of each end.
+		assert!(!passphrase_fits(&"a".repeat(7)), "7 octets: FAIL on both");
+		assert!(passphrase_fits(&"a".repeat(8)), "8 octets: OK on both");
+		assert!(passphrase_fits(&"a".repeat(63)), "63 octets: OK on both");
+		assert!(!passphrase_fits(&"a".repeat(64)), "64 octets: FAIL on both");
+
+		// **Where they disagree.** Each of these is two octets per character.
+		let accented = |n: usize| "\u{e9}".repeat(n);
+
+		// 32 characters, 64 octets. The supplicant answered FAIL and hostapd
+		// said "invalid WPA passphrase length 64 (expected 8..63)"; a check
+		// counting characters saw 32 and let it through.
+		assert_eq!(accented(32).chars().count(), 32);
+		assert_eq!(accented(32).len(), 64);
+		assert!(!passphrase_fits(&accented(32)), "too long, by octets");
+
+		// 31 characters, 62 octets: the supplicant took it.
+		assert!(passphrase_fits(&accented(31)));
+
+		// **And the direction that is easy to miss.** Four characters is a
+		// passphrase both daemons accept when it is eight octets, and a check
+		// counting characters refused it.
+		assert_eq!(accented(4).len(), 8);
+		assert!(passphrase_fits(&accented(4)), "long enough, by octets");
+
+		// Three is seven octets, which neither daemon takes.
+		assert_eq!(accented(3).len(), 6);
+		assert!(!passphrase_fits(&accented(3)));
+
+		// The range itself, so a caller reporting `passphrase.len()` beside
+		// this is quoting the same numbers.
+		assert_eq!(*PASSPHRASE_OCTETS.start(), 8);
+		assert_eq!(*PASSPHRASE_OCTETS.end(), 63);
+	}
 }

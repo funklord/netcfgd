@@ -885,10 +885,12 @@ fn read_credential(id: &str, wanted: &Wanted) -> Result<String, String> {
 /// The length is safe to report and the value is not, which is the rule
 /// `netcfgd-secret` keeps everywhere.
 fn check_passphrase(passphrase: &str) -> Result<(), String> {
-	let length = passphrase.chars().count();
-	if !(8..=63).contains(&length) {
+	// Octets, which is what the supplicant and hostapd both count (0229).
+	let length = passphrase.len();
+	if !netcfgd_model::security::passphrase_fits(passphrase) {
 		return Err(format!(
-			"a WPA passphrase is 8 to 63 characters and that one is {length}. \
+			"a WPA passphrase is 8 to 63 octets and that one is {length} -- a \
+			 character outside ASCII counts as more than one. \
 			 A 64-digit hex key -- a pre-computed PMK rather than a passphrase \
 			 -- is not something netcfgd can send"
 		));

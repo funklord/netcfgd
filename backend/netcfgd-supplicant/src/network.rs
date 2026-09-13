@@ -109,7 +109,9 @@ impl std::fmt::Display for Unsupported {
 			),
 			Self::PassphraseLength { len } => write!(
 				formatter,
-				"a WPA2 passphrase is 8 to 63 characters and this one is {len}. \
+				"a WPA2 passphrase is 8 to 63 octets and this one is {len} -- a character \
+				 outside ASCII counts as more than one, which is how the supplicant \
+				 counts it. \
 				 That is what the `psk` field accepts; WPA3 on its own has no \
 				 such limit, so `proto = \"wpa3\"` would take it"
 			),
@@ -424,9 +426,11 @@ fn psk_settings(passphrase: &Secret, proto: PskProto) -> Result<Vec<Setting>, Un
 	// joined and was told "a WPA passphrase is 8 to 63 characters", which
 	// states a rule SAE does not have. SAE takes a password of any length, and
 	// `sae_password` is the field for it. Decision 0205.
-	let length = text.chars().count();
-	if !matches!(proto, PskProto::Wpa3) && !(8..=63).contains(&length) {
-		return Err(Unsupported::PassphraseLength { len: length });
+	// Octets, because that is what the supplicant counts (0229). The rule is
+	// the model's, shared with the renderer on the other side of the radio and
+	// with the two clients that check before writing a file.
+	if !matches!(proto, PskProto::Wpa3) && !netcfgd_model::security::passphrase_fits(text) {
+		return Err(Unsupported::PassphraseLength { len: text.len() });
 	}
 
 	// **The field differs with the generation**, which is the whole of the fix
