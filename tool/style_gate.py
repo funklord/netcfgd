@@ -1948,6 +1948,53 @@ def check_docs(root: Path, cfg: Config,
 		if parent != root and not parent.is_dir():
 			continue
 		problems.append(Problem(rel, number, 1, f"names a missing file: {token}"))
+	problems.extend(summaryless_docs(root, counts))
+	return problems
+
+
+def summaryless_docs(root: Path, counts: dict[str, int]) -> list[Problem]:
+	"""Find doc comments that open with a bare `///` and so have no summary.
+
+	Rust's convention, and rustdoc's rendering, take the first line of a doc
+	comment as the summary: it is what the module index shows beside the item
+	and what a reader sees first. A comment that opens with an empty `///`
+	has none, so the rendered page for the item begins with a heading --
+	`# Errors`, usually, because that is the section a public function is
+	obliged to carry.
+
+	`missing_docs` cannot see this. The comment is present; it just says
+	nothing before its first section, which is why one sat on a public
+	function in `netcfgd-supplicant` until 0223 went looking.
+
+	**This is worth a gate where the run-together case is not.** That one --
+	two doc comments with no item between them, four occurrences so far --
+	has no exact textual signature, and the lint that would catch it,
+	`clippy::missing_docs_in_private_items`, reports 447 items in this tree
+	(0221). This one is a single unambiguous pattern: a `///` line whose
+	predecessor is not a doc comment, and which carries nothing after the
+	slashes.
+	"""
+	problems: list[Problem] = []
+	scanned = 0
+	for path in sorted(root.rglob("*.rs")):
+		rel = path.relative_to(root)
+		if rel.parts and rel.parts[0] in ("target", "qtty"):
+			continue
+		try:
+			lines = path.read_text(encoding="utf-8").splitlines()
+		except (OSError, UnicodeDecodeError):
+			continue
+		scanned += 1
+		for index, line in enumerate(lines):
+			if line.strip() != "///":
+				continue
+			# A doc comment *opens* here only if the line above is not one.
+			previous = lines[index - 1].strip() if index else ""
+			if previous.startswith("///"):
+				continue
+			problems.append(Problem(rel, index + 1, 1,
+			                        "doc comment has no summary line"))
+	counts["rust"] = scanned
 	return problems
 
 
@@ -2004,7 +2051,8 @@ def main(argv: list[str]) -> int:
 		           + (f", {counts['paths']} path(s)" if "paths" in counts
 		              else ", paths not checked") + ")")
 		print(f"style-gate: {cfg['doc_file']}{scanned} says nothing twice and names no "
-		      f"missing file")
+		      f"missing file; {counts.get('rust', 0)} rust file(s) have a summary "
+		      f"line on every doc comment")
 		return 0
 
 	if mode == "list":
