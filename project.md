@@ -9461,6 +9461,77 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.120 How SAE derives its password element
+
+Most of this area holds up. The station sends `sae_password` for WPA3 and `psk`
+for anything that can still negotiate WPA2; `ieee80211w` is 2 for SAE and 1 for
+transition mode, which is the only workable value there; the access point writes
+`wpa=2` for all three generations and `sae_require_mfp=1` in transition so a
+client that negotiates SAE cannot be downgraded.
+
+Two things checked and found sound that would have been defects elsewhere in
+this campaign. A passphrase is always quoted, so a 64-character hex value
+reaches the supplicant as a passphrase rather than as a pre-computed PMK, which
+SAE could not have used. And `key_mgmt_of` returns hostapd's spelling rather
+than the station's, so the planner compares `SAE` against the file's `SAE`
+rather than against the station's `SAE FT-SAE` -- the mismatch would have been a
+restart loop of the kind 10.116 found twice.
+
+**The mechanism nobody chooses.** SAE derives its password element either by the
+original hunting-and-pecking loop or by hash-to-element, and `sae_pwe` selects
+it. netcfgd set it nowhere. Measured against wpa_supplicant 2.10 on the `none`
+driver, so no radio was involved:
+
+```text
+GET sae_pwe     -> 0        the default
+SET sae_pwe 2   -> OK       reads back 2
+SET sae_pwe 99  -> FAIL     the control: the parser does validate
+```
+
+So a netcfgd station could not complete SAE with an access point configured for
+hash-to-element only, and nothing said why -- the handshake does not finish and
+no event names a cause. Both daemons' own documentation calls 2 "both" and says
+the default "is likely to change from 0 to 2". Sent for every radio, and **not
+fatal**: `sae_pwe` arrived in 2.10, and a `FAIL` means a supplicant that cannot
+do hash-to-element at all, so refusing to populate would lose every network on
+the radio to make a point about one that could not work either way. Decision
+0226.
+
+**An aside worth keeping:** `SET sae_pwe 99` returns `FAIL` and reads back as
+`3` -- the supplicant assigns before validating, and 99 masked to two bits is 3.
+A `FAIL` from that control socket does not mean nothing changed. netcfgd only
+sends constants there, so it costs nothing today.
+
+**The access point does not get the line, deliberately.** A station takes the
+setting over a control socket, where a daemon too old for it answers `FAIL` and
+keeps running; hostapd reads a file, and an unknown key there stops it starting
+at all. Writing it would make every netcfgd access point require hostapd 2.10,
+with nothing able to check the version when the file is written, for a gain that
+is smaller in practice -- hash-to-element-only clients are rare where such
+access points are not. So a netcfgd access point cannot serve one. Asking
+`hostapd -v` at render time is the fix that would let both sides move.
+
+**An unrelated flake, found while verifying and left open.** `make check`
+failed once this round in `netcfgd-daemon --lib`, then passed three times.
+Chased rather than blamed on the known uid race:
+`require_lease_false_runs_the_probe_with_no_lease_at_all` fails about 1 run in
+8, on `assert!(marker.exists())`. Ruled out by reading: not an async spawn race
+(`run_due` waits for the child), not the timeout (5s for one `touch`), not a
+`TestDir` collision (paths carry pid and serial), not 0217's uid race (nothing
+in this crate sheds privilege). The leading hypothesis is a `spawn` failure
+under load -- the test asserts only on the marker, so a probe that never started
+and one that started and failed look the same to it. Confirming that means
+making the test report the `Outcome` it already holds, which is a change outside
+this round's subject. A gate that fails one run in eight is one people learn to
+re-run, which is how a real failure gets waved through.
+
+**The evidence is the weaker half of this round.** The setting is covered by
+`tests/live/enterprise.sh` -- the same place `preassoc_mac_addr` is covered, and
+for the same reason: an executor sending a command is not something a unit test
+can render. That suite is not part of `make check`, so the assertion runs when
+somebody runs it. Sabotage confirmed it fires: changing the command name turns
+`ok hash-to-element is offered` into `FAIL`.
+
 ## 10.119 The log that only said things got worse
 
 The event vocabulary is read from `wpa_supplicant`'s own format strings rather

@@ -788,6 +788,27 @@
 # setting: required for `wpa3`, optional for the other two, because requiring
 # it excludes a WPA2 access point and forbidding it excludes SAE.
 #
+# **How SAE derives its password element is netcfgd's choice, not yours.**
+# There are two mechanisms -- the original hunting-and-pecking loop and the
+# newer hash-to-element -- and wpa_supplicant offers only the first by default
+# (`sae_pwe=0`). A station on that default cannot complete SAE with an access
+# point configured for hash-to-element only, and the handshake simply does not
+# finish: there is no error naming the cause.
+#
+# netcfgd sends `sae_pwe 2`, which is both, for every radio it populates. It
+# costs one command, affects nothing but an SAE handshake, and is the value
+# wpa_supplicant's own documentation expects to become the default. There is no
+# key here to set because there is no reason to want less.
+#
+# **netcfgd's own access points do not offer it**, which is the asymmetry. A
+# station takes it over the control socket, where a supplicant too old to know
+# the setting answers `FAIL` and carries on; hostapd takes its configuration
+# from a file, and an unknown key there stops it from starting at all. Adding
+# the line would make every access point depend on hostapd 2.10 with nothing
+# able to check the version at the time the file is written. So a netcfgd
+# access point cannot serve a client that does hash-to-element only -- rare,
+# and recorded rather than traded for that.
+
 # **`wpa3` alone lifts the passphrase length limit**, and that is a property of
 # the field rather than of WPA. A WPA2 passphrase goes in `psk`, which takes 8
 # to 63 characters; WPA3 sends it as `sae_password`, which has no such range.
