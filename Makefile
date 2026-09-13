@@ -1471,10 +1471,27 @@ footprint:
 # it stays a deliberate edit with the measurement in the commit.
 RSS_LIMIT_KB ?= 5120
 
+# **The control directory is redirected too, and was not (0224).**
+# `--config-dir` and `--run-dir` send this daemon's own state into a scratch
+# directory, which reads as complete isolation and is not: the wpa_supplicant
+# control directory is a third path, it defaults to the host's
+# `/run/wpa_supplicant`, and `NCFG_WPA_CTRL_DIR` exists precisely so a test does
+# not share it -- its own documentation says so.
+#
+# So this gate reached into the running machine's directory twice over. It left
+# two reply sockets there on every run, because the `kill` below is a SIGTERM
+# and netcfgd installs no handler, so nothing runs `Drop`. And on start it ran
+# the reaper across the host's entries -- harmless while that reaper could not
+# identify a stale socket, and no longer harmless now that it can.
+#
+# Found by watching three days of real evidence disappear from
+# `/run/wpa_supplicant` during a `make check` that was only supposed to be
+# measuring how much memory the daemon uses.
 rss:
 	@$(CARGO) build --release --quiet
 	@work=$$(mktemp -d); \
-	cp -r tests/footprint/etc "$$work/etc"; mkdir -p "$$work/run"; \
+	cp -r tests/footprint/etc "$$work/etc"; mkdir -p "$$work/run" "$$work/wpa"; \
+	NCFG_WPA_CTRL_DIR="$$work/wpa" \
 	./target/release/netcfgd --config-dir "$$work/etc" --run-dir "$$work/run" \
 		--no-apply-on-start >/dev/null 2>&1 & \
 	pid=$$!; \

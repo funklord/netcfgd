@@ -68,8 +68,10 @@ static QString start(QProcess *daemon, const QString &work, const QString &body)
 {
 	const QString etc = work + QStringLiteral("/etc");
 	const QString run = work + QStringLiteral("/run");
+	const QString wpa = work + QStringLiteral("/wpa");
 	QDir().mkpath(etc);
 	QDir().mkpath(run);
+	QDir().mkpath(wpa);
 
 	QFile conf(etc + QStringLiteral("/netcfgd.conf"));
 	if (!conf.open(QIODevice::WriteOnly)) {
@@ -81,6 +83,12 @@ static QString start(QProcess *daemon, const QString &work, const QString &body)
 	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
 	environment.insert(QStringLiteral("NCFG_CONFIG_DIR"), etc);
 	environment.insert(QStringLiteral("NCFG_RUN_DIR"), run);
+	// **And the control directory, which is a third path (0224).** Setting the
+	// config and run directories reads as complete isolation and is not:
+	// wpa_supplicant's control directory defaults to the host's
+	// /run/wpa_supplicant, so a daemon started here swept the running machine's
+	// reply sockets on startup and left two of its own behind on the way out.
+	environment.insert(QStringLiteral("NCFG_WPA_CTRL_DIR"), wpa);
 	daemon->setProcessEnvironment(environment);
 	daemon->start(QStringLiteral(NETCFGD_BINARY), { QStringLiteral("--no-apply-on-start") });
 
