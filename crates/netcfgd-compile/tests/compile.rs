@@ -928,6 +928,79 @@ fn the_iwd_backend_compiles_so_it_can_be_refused_by_name() {
 	);
 }
 
+/// A channel and a band that contradict each other, caught by reading the file.
+///
+/// **Each key was checked alone and the pair was checked nowhere.** `band` is
+/// one of a closed set and `channel` is a number, so `band = "2.4"` with
+/// `channel = 36` compiled, planned, and failed at `ncfg apply` with the
+/// interface already up:
+///
+/// ```text
+/// FAIL backend.start ap0  access_point: AccessPoint (was <absent>)
+///      `Home`: channel 36 is not in the 2.4 GHz band
+/// ```
+///
+/// That is the lateness that moved `band` and `regdom` here in the first place,
+/// left behind for the one question needing two keys -- and it kept the example
+/// gate blind, since that gate compiles each block and cannot see a
+/// render-time refusal. 0222.
+#[test]
+fn a_channel_outside_its_band_is_refused_at_compile_time() {
+	let block = |extra: &str| {
+		format!(
+			"access_point \"Home\" {{\n\tdevice = \"ap0\"\n\t{extra}\n\t\
+			 wifi {{ open = true }}\n}}\n"
+		)
+	};
+
+	// Declared band, channel from the other one.
+	let stated = errors(&block("band = \"2.4\"\n\tchannel = 36"));
+	assert!(
+		stated.contains("channel 36 is not in the 2.4 GHz band"),
+		"got {stated}"
+	);
+	assert!(
+		stated.contains("drop `band`"),
+		"says what to do when the band is the wrong half: {stated}"
+	);
+
+	let other_way = errors(&block("band = \"5\"\n\tchannel = 6"));
+	assert!(
+		other_way.contains("channel 6 is not in the 5 GHz band"),
+		"got {other_way}"
+	);
+
+	// No band at all: the channel implies one, and 20 is in neither.
+	let inferred = errors(&block("channel = 20"));
+	assert!(
+		inferred.contains("is not in the 5 GHz band"),
+		"a channel in no band is refused on the band it implies: {inferred}"
+	);
+	assert!(
+		!inferred.contains("drop `band`"),
+		"and is not told to drop a `band` it never wrote: {inferred}"
+	);
+
+	// Channel 0 is hostapd's "survey and choose", which an absent `channel`
+	// already says. Writing it by hand is asking for something the document has
+	// another way to spell.
+	let zero = errors(&block("channel = 0"));
+	assert!(zero.contains("is not in the"), "got {zero}");
+
+	// And the pairs that are right compile, including a band with no channel
+	// and a channel with no band.
+	for good in [
+		"band = \"2.4\"\n\tchannel = 6",
+		"band = \"5\"\n\tchannel = 36",
+		"band = \"5\"",
+		"channel = 149",
+		"",
+	] {
+		let document = build_ok(&block(good));
+		assert_eq!(document.access_points.len(), 1, "`{good}` should compile");
+	}
+}
+
 /// A regulatory domain the kernel ignores is a radio quietly using the
 /// world-roaming defaults, which is not a thing anybody notices.
 ///

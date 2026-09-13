@@ -1292,6 +1292,8 @@ fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPo
 		access_control: None,
 	};
 	let mut security_seen = false;
+	// Where `check_channel_in_band` points, once both keys are in.
+	let mut channel_span = None;
 
 	for item in &block.items {
 		match item {
@@ -1301,6 +1303,7 @@ fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPo
 						as_interface_name(&assignment.value, diags).unwrap_or_default();
 				}
 				"channel" => {
+					channel_span = Some(assignment.span);
 					access_point.channel =
 						as_u32(&assignment.value, diags).and_then(|n| u16::try_from(n).ok());
 				}
@@ -1371,7 +1374,70 @@ fn lower_access_point(block: &Block, diags: &mut Diagnostics) -> Option<AccessPo
 		return None;
 	}
 
+	check_channel_in_band(&access_point, channel_span, block, diags)?;
+
 	Some(access_point)
+}
+
+/// The channel and the band, which only mean anything together.
+///
+/// `None` when they contradict each other: a diagnostic has been pushed and the
+/// access point does not enter the document.
+///
+/// Each key is already checked alone: `band` is one of a closed set, and
+/// `channel` is a number. The pair was checked nowhere until 0222, so
+/// `band = "2.4"` with `channel = 36` compiled, planned, and failed at
+/// `ncfg apply` with the interface already up:
+///
+/// ```text
+/// FAIL backend.start ap0  access_point: AccessPoint (was <absent>)
+///      `Home`: channel 36 is not in the 2.4 GHz band
+/// ```
+///
+/// That is the lateness [`lower_band`] and [`lower_regdom`] were moved here to
+/// end, left behind for the one question that needs two keys. It also kept the
+/// example gate blind, because that gate compiles each block and a render-time
+/// refusal is invisible to it.
+///
+/// The rule itself is the model's, shared with the renderer that writes the
+/// `hw_mode` and with the planner that compares it back. The renderer keeps its
+/// own refusal: it is reachable from a document that did not come through this
+/// compiler.
+///
+/// `channel = 0` is refused here too, and deliberately -- it is hostapd's
+/// spelling of "survey and choose", which an absent `channel` already says.
+fn check_channel_in_band(
+	access_point: &AccessPoint,
+	channel_span: Option<Span>,
+	block: &Block,
+	diags: &mut Diagnostics,
+) -> Option<()> {
+	let Some(channel) = access_point.channel else {
+		return Some(());
+	};
+	let Some(band) =
+		netcfgd_model::device::effective_band(access_point.band.as_deref(), Some(channel))
+	else {
+		// A band this build cannot render, which `lower_band` accepted on
+		// purpose so that the renderer can say so in its own words.
+		return Some(());
+	};
+	if netcfgd_model::device::channel_in_band(band, channel) {
+		return Some(());
+	}
+	diags.push(
+		Diagnostic::new(
+			channel_span.unwrap_or(block.span),
+			format!("channel {channel} is not in the {band} GHz band"),
+		)
+		.with_help(if access_point.band.is_some() {
+			"2.4 GHz is channels 1-14 and 5 GHz is 36-177; drop `band` to let the \
+			 channel number say which"
+		} else {
+			"2.4 GHz is channels 1-14 and 5 GHz is 36-177"
+		}),
+	);
+	None
 }
 
 /// An `access_control` block: which stations an access point talks to.
