@@ -830,9 +830,17 @@
 
 # **`wpa3` alone lifts the passphrase length limit**, and that is a property of
 # the field rather than of WPA. A WPA2 passphrase goes in `psk`, which takes 8
-# to 63 characters; WPA3 sends it as `sae_password`, which has no such range.
+# to 63 **octets**; WPA3 sends it as `sae_password`, which has no such range.
 # Transition mode keeps the limit, because it has to produce something `psk`
 # will accept as well.
+#
+# **Octets, not characters**, and the difference is only visible if your
+# passphrase leaves ASCII. Both wpa_supplicant and hostapd count bytes, so a
+# passphrase of 32 accented letters is 64 octets and is refused -- hostapd says
+# `invalid WPA passphrase length 64 (expected 8..63)` -- while four accented
+# letters is eight octets and is accepted. netcfgd counted characters in four
+# separate places until 0229, so it allowed the first and refused the second,
+# and both mistakes only showed up at the daemon.
 
 #network "Home" {
 #	wifi {

@@ -9461,6 +9461,53 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.123 A passphrase is octets
+
+The careful parts of this area hold up: a passphrase is always quoted on its way
+to the supplicant, so a 64-character hex value arrives as a passphrase and not as
+a pre-computed key; a newline is refused outright because the control protocol
+has no escape for one; the value never reaches a log, a plan or `/run`, only a
+digest.
+
+**The length was wrong, in four places, in both directions.** Every check
+counted `chars().count()` -- the station, the access point, the CLI before it
+writes a file, and the NetworkManager shim -- and both daemons count octets.
+Measured against wpa_supplicant 2.10 on the `none` driver:
+
+```text
+63 x "a"        63 chars  63 bytes   SET_NETWORK psk -> OK
+64 x "a"        64 chars  64 bytes   SET_NETWORK psk -> FAIL
+32 x "e-acute"  32 chars  64 bytes   SET_NETWORK psk -> FAIL
+ 4 x "e-acute"   4 chars   8 bytes   SET_NETWORK psk -> OK
+```
+
+and against hostapd 2.10, which said `invalid WPA passphrase length 64 (expected
+8..63)` for the 32-character case and parsed the four-character one without
+complaint.
+
+So netcfgd **accepted what the daemon refuses** -- 32 accented characters became
+a configuration that failed at apply, naming a line in a file under `/run` that
+netcfgd wrote rather than the operator's own block -- and **refused what the
+daemon takes**, since four accented characters is eight octets. The second
+direction is the easy one to miss: it never produces a broken machine, only a
+configuration somebody could not write. `chars().count()` is never greater than
+`len()`, so the minimum could only ever be wrong by refusing and the maximum
+only by accepting, and both happened. Decision 0229.
+
+One rule now, in `netcfgd-model` as `PASSPHRASE_OCTETS` and `passphrase_fits`,
+asked by all four -- the shape 10.116 established for the band rule. The messages
+said "characters" too, and a message that states a rule in the wrong unit is
+worse than none, because somebody counts on their fingers and gets the answer
+netcfgd already got wrong.
+
+**A measurement I got wrong on the way.** The first sabotage run reported that
+only two of four callers noticed the rule being disabled, which would have meant
+the two renderers were uncovered. That was an artefact: `cargo test --workspace`
+stops after the first failing target, so the list ended at `netcfgd-cli`. Run per
+crate, every caller notices -- 2, 3, 3, 2 and 1 across five crates. **A test run
+that stopped early is not a test run that found nothing**, and reading its output
+as a complete list is how a covered thing gets called uncovered, or the reverse.
+
 ## 10.122 What a roam costs
 
 **Rekeying is not netcfgd's to set, and leaving it alone was right.** Nothing
