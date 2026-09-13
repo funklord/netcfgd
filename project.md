@@ -9461,6 +9461,56 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.117 The name a hidden network will not give
+
+Both halves of hiding were already right: a station probes for a hidden network
+(`scan_ssid=1`), an access point hides one (`ignore_broadcast_ssid=1`, mode 1
+and the reason written down), `ncfg wifi add --hidden` carries the flag end to
+end, and a scan row with an empty name prints `(hidden)` rather than a blank
+cell. The defect is in the one place that has to *read* a name rather than write
+one.
+
+A `network` block may name access points by BSSID and leave the SSID out;
+netcfgd reads the name off the last scan when it hands the network over.
+`pick_ssid` had two failure cases -- none in range, and the ones in range
+disagree -- and was missing the third, which is the one such a block is most
+likely to meet. **A hidden access point is in range and still says nothing.**
+Its beacons carry an empty SSID, so its scan row has a zero-octet name, and
+`pick_ssid` returned it:
+
+```text
+bssid=aa:bb:cc:dd:ee:ff ssid=<> (0 octets)
+RESOLVED to <> (0 octets)
+```
+
+`add_network` then sent `ssid ""`, which matches nothing and, for anything but
+an open network, cannot derive the right key either -- WPA derives it from the
+passphrase *and* the SSID. Nothing said why, which is the same silence
+`scan_ssid`'s own comment exists to prevent, one layer up. `Ssid::new` rejects
+only more than 32 octets, so zero is valid, and it is valid because the standard
+says so.
+
+**Declining to say is not disagreeing.** Rejecting any empty result would be
+wrong for the real mixed case: one network, two radios, one of them hidden.
+Compared the old way that reported "lists access points that are on different
+networks" -- wrong and unactionable. The silent ones are partitioned out before
+the agreement check instead, so a named sibling answers for the hidden one, and
+"not in range" still reads differently from "in range and hidden". Decision 0223.
+
+**A doc comment with no summary, and this one earns a gate.** `add_network`
+opened with a bare `///` and went straight to `# Errors`, so its rendered page
+began with a heading; `missing_docs` cannot see that, because the comment is
+present and merely says nothing. Unlike the run-together class of 0219 and 0221
+-- four occurrences, no exact signature, and a lint that reports 447 items --
+this one is a single unambiguous pattern, and there was exactly one instance in
+the tree. `make style-docs` checks it and prints the 167 files it inspected, for
+the reason that mode already prints its heading count.
+
+**And a lesson from this session's own method.** Re-running the existing
+`pick_ssid` tests after the change, one filter matched zero tests and reported
+no failures -- a pass from a check that inspected nothing, which is exactly what
+§10.116 had just found in the plan fixture. Re-run by exact name, all four hold.
+
 ## 10.116 The channel that was never compared
 
 An access point naming no channel used to be stopped and started on every

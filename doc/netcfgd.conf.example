@@ -901,6 +901,19 @@
 #	bssid = "00:11:22:33:44:55"
 #}
 
+# **A block with `bssid` and no `ssid` learns the name from a scan, and a
+# hidden access point will not tell it.** Naming the radios and leaving the
+# network name out is allowed -- netcfgd reads the name off the last scan when
+# it hands the network to the supplicant. A hidden access point advertises an
+# empty name, which is what hiding is, so there is nothing to read. netcfgd
+# says so rather than joining under the empty name it was given:
+#
+#   the access points `Home` names are in range and hidden, so a scan cannot
+#   say what the network is called: 00:11:22:33:44:55. Write the name in the
+#   block -- `ssid = "..."` -- and keep `bssid` to pin which radios it may use
+#
+# Write both, and set `hidden = true` as well so the radio probes for it.
+
 # ROAMING between access points sharing an SSID. `signal` is the dBm below
 # which it starts looking for something better.
 
