@@ -956,6 +956,73 @@ fn a_network_named_by_address_learns_its_name() {
 	assert_eq!(learned.as_bytes(), b"lobby");
 }
 
+/// A hidden access point is in range and still cannot say what it is called.
+///
+/// **It used to resolve to a zero-octet SSID**, which `add_network` then sent
+/// as `ssid ""`. That matches nothing, and for anything but an open network it
+/// cannot even derive the right key -- WPA derives it from the passphrase *and*
+/// the SSID. No error anywhere said why. 0223.
+#[test]
+fn a_hidden_access_point_is_not_resolved_to_an_empty_name() {
+	let seen = netcfgd_supplicant::protocol::parse_scan_results(
+		"bssid / frequency / signal level / flags / ssid\n\
+		 aa:bb:cc:dd:ee:ff\t2462\t-40\t[WPA2-PSK-CCMP][ESS]\t\n\
+		 11:22:33:44:55:66\t2437\t-55\t[WPA2-PSK-CCMP][ESS]\tlobby\n",
+	);
+	// The scan really does carry an empty name for it, which is the fact the
+	// rest of this rests on.
+	assert_eq!(
+		seen.iter()
+			.find(|result| result.bssid == "aa:bb:cc:dd:ee:ff")
+			.expect("in range")
+			.ssid
+			.as_bytes(),
+		b"",
+		"a hidden access point advertises no name"
+	);
+
+	let mut wanted = network("placeholder", Security::Open);
+	wanted.id = "pinned".to_owned();
+	wanted.ssid = None;
+	wanted.bssid = vec!["aa:bb:cc:dd:ee:ff".to_owned()];
+	let error = netcfgd_supplicant::pick_ssid(&wanted, &seen)
+		.expect_err("a hidden access point cannot name its network");
+	let message = error.to_string();
+	assert!(message.contains("hidden"), "says what is wrong: {message}");
+	assert!(
+		message.contains("aa:bb:cc:dd:ee:ff"),
+		"and which radio it is about: {message}"
+	);
+	assert!(
+		message.contains("ssid = "),
+		"and what to do instead: {message}"
+	);
+
+	// **A hidden one beside a named one does not disagree with it.** It
+	// declines to say, so it is dropped rather than compared -- comparing them
+	// reported "they are on different networks", which is wrong and
+	// unactionable.
+	wanted.bssid = vec![
+		"aa:bb:cc:dd:ee:ff".to_owned(),
+		"11:22:33:44:55:66".to_owned(),
+	];
+	let learned = netcfgd_supplicant::pick_ssid(&wanted, &seen)
+		.expect("the one that does advertise a name answers for both");
+	assert_eq!(learned.as_bytes(), b"lobby");
+
+	// And "not in range" still reads differently from "in range and hidden",
+	// because they need different things done about them.
+	wanted.bssid = vec!["de:ad:be:ef:00:00".to_owned()];
+	let absent = netcfgd_supplicant::pick_ssid(&wanted, &seen)
+		.expect_err("not in range")
+		.to_string();
+	assert!(absent.contains("is in range"), "got {absent}");
+	assert!(
+		!absent.contains("hidden"),
+		"an absent access point is not a hidden one: {absent}"
+	);
+}
+
 /// None of them in range is a failure that names the addresses.
 ///
 /// "Network not found", about a network identified by address, is not a

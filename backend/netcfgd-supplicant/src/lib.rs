@@ -206,7 +206,7 @@ pub fn pick_ssid(
 		}
 	}
 
-	let Some((at_address, advertised)) = found.first().copied() else {
+	if found.is_empty() {
 		return Err(Box::new(io::Error::new(
 			io::ErrorKind::NotFound,
 			format!(
@@ -216,13 +216,45 @@ pub fn pick_ssid(
 				network.bssid.join(", ")
 			),
 		)));
+	}
+
+	// **A hidden access point is in range and still says nothing.** Its beacons
+	// carry an empty SSID -- that is what hiding is -- so a scan result for one
+	// has a zero-octet name, and this used to return it: `add_network` then sent
+	// `ssid ""` to the supplicant, which matches nothing and, for anything but an
+	// open network, cannot even derive the right key, because WPA derives it from
+	// the passphrase *and* the SSID. No error anywhere said why.
+	//
+	// Silent ones are dropped rather than compared. A hidden access point does
+	// not disagree with a named one about what the network is called; it declines
+	// to say. Comparing them produced "they are on different networks", which is
+	// both wrong and unactionable. Decision 0223.
+	let (named, silent): (Vec<_>, Vec<_>) = found
+		.iter()
+		.partition(|(_, ssid)| !ssid.as_bytes().is_empty());
+
+	let Some((at_address, advertised)) = named.first().copied() else {
+		return Err(Box::new(io::Error::new(
+			io::ErrorKind::InvalidData,
+			format!(
+				"the access points `{}` names are in range and hidden, so a scan cannot \
+				 say what the network is called: {}. Write the name in the block -- \
+				 `ssid = \"...\"` -- and keep `bssid` to pin which radios it may use",
+				network.id,
+				silent
+					.iter()
+					.map(|(address, _)| *address)
+					.collect::<Vec<_>>()
+					.join(", ")
+			),
+		)));
 	};
 
-	// Every one that *is* in range has to agree. Two addresses advertising
-	// different names are two networks, and one passphrase cannot be right for
-	// both -- WPA's key is derived per SSID.
+	// Every one that *is* in range and advertising has to agree. Two addresses
+	// advertising different names are two networks, and one passphrase cannot be
+	// right for both -- WPA's key is derived per SSID.
 	if let Some((elsewhere, differently)) =
-		found.iter().find(|(_, name)| *name != advertised).copied()
+		named.iter().find(|(_, name)| *name != advertised).copied()
 	{
 		return Err(Box::new(io::Error::new(
 			io::ErrorKind::InvalidData,
@@ -238,12 +270,25 @@ pub fn pick_ssid(
 	Ok(advertised.clone())
 }
 
+/// Hand one network to the supplicant, and say which slot it took.
+///
+/// **This doc comment had no summary line, and was the only one in the tree
+/// that did not (0223).** `missing_docs` cannot see it: the comment is present,
+/// it simply opens with a bare `///` and goes straight to `# Errors`, so the
+/// rendered page for a public function began with a heading. `make style-docs`
+/// checks for it now, which is affordable in a way the private-items lint 0221
+/// measured at 447 is not -- the signature here is exact.
+///
+/// The SSID is resolved first for a network named by address rather than by
+/// name; see [`pick_ssid`] for what that can and cannot learn from a scan.
 ///
 /// # Errors
 ///
 /// Propagates a control-socket failure, a network `wpa_supplicant` will not
 /// take, and -- for a network named by address rather than by name -- a failure
-/// to read that name off the last scan.
+/// to read that name off the last scan, which is either that none of the
+/// addresses is in range, or that every one that is in range is hidden and
+/// advertising no name at all.
 pub fn add_network(
 	client: &Client,
 	network: &WifiNetwork,
