@@ -9461,6 +9461,62 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.119 The log that only said things got worse
+
+The event vocabulary is read from `wpa_supplicant`'s own format strings rather
+than from documentation that does not give them; `field` runs a quoted value to
+its closing quote because `ssid="Guest Wifi"` is what a router ships with; the
+watcher recovers from a supplicant that goes away. Three things were wrong and
+all three were silences.
+
+**A log that could only report bad news.** Every arm of the event reporter was a
+failure -- a network not tried, a station refused, a scan that could not run, a
+station dropped -- except `CTRL-EVENT-SSID-REENABLED`, which was added with the
+reasoning *"without it the log only ever says things got worse, and a network
+that came back looks exactly like one that is still broken"*. That argument had
+never been applied to the event saying the radio is carrying traffic:
+`CTRL-EVENT-CONNECTED` fell through to `_ => {}` as "the connect the caller goes
+on to read" -- which is true, and the caller reads it to detect roaming, not to
+say anything. A roam fires a hook and logs nothing. So a machine that lost its
+association at three in the morning and got it back had the loss in the log and
+the recovery nowhere. Confirmed against this machine's journal, which carries
+the supplicant's failures and not one line about the association it has held for
+days. Decision 0225.
+
+**A radio nobody could watch, and nothing said so.** The comment beside the
+attach call already knew: *"Without ATTACH this connection gets replies and no
+events, and the loop below would be a silent no-op forever."* The consequence
+was written down and never reported -- `if client.attach().is_ok()` dropped the
+error, so a radio whose supplicant refused `ATTACH` lost roam detection and every
+diagnostic above it, all of which are read through that connection.
+
+**An unreadable event is not a supplicant that left.** `Err(_) => lost.push(..)`
+dropped the connection under a comment asserting the supplicant had gone. Both
+were true until 10.118's reply-too-large check made `InvalidData` reachable the
+day before: a datagram bigger than the buffer says something about the message
+and nothing about the sender. Dropping for it costs the re-attach *and the
+access point the interface last named*, after which the next `CONNECTED` reads
+as a first association and the roam across it goes unreported -- a defect
+introduced by the previous round and found by reading the consumer of what that
+round changed.
+
+**And the reporting could not be checked at all**, because every arm ended in a
+log macro that returns nothing. Split into `supplicant_event_line` (the severity
+and the sentence) and the part that says it; all seven arms are answerable now,
+including two that predate this audit.
+
+**The sabotage that was invisible.** A fourth revert -- never clear the
+complaint list -- passed. `first_complaint` took only the failure and the
+*caller* did the clearing, so the test drove the helper through its whole state
+machine using its own `retain`, and deleting the caller's line broke nothing.
+**A test that simulates the call site is not a test of the call site.**
+Restructured so success goes through the same function, one entry point and one
+state machine; the same sabotage now fails by name. Fourth instance of this
+pattern in four audits, and the first where the faulty test was written in the
+same session as the fix it was holding up -- 10.116 had two fixtures built from
+the code, 10.118 a third, and here the fixture was right and the *seam* was
+wrong.
+
 ## 10.118 A pid is not a liveness test
 
 The control socket module is careful and most of the classic faults are already
