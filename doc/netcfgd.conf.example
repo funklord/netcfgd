@@ -485,6 +485,22 @@
 # other**, and netcfgd does both: the fixed address holds until the radio
 # associates and not after. `ncfg plan` warns.
 #
+# **`band` and `channel` have to agree, and now say so at compile time.**
+# 2.4 GHz is channels 1-14 and 5 GHz is 36-177. `band = "2.4"` with
+# `channel = 36` used to compile and plan cleanly and fail at `ncfg apply`,
+# with the interface already up; it is a config error now, at the line.
+#
+# Leave `channel` out to let hostapd survey the band and choose -- that is
+# written as `channel=0`, which is what "automatic" is spelt as. Leave `band`
+# out as well and the channel number decides; leave out both and it is 2.4 GHz,
+# which every radio has.
+#
+# **What this build does not write is any of `ieee80211n`, `ieee80211ac` or
+# `wmm_enabled`.** hostapd defaults them off, so an access point netcfgd starts
+# runs at 802.11a/g rates -- 54 Mbps -- whichever band it is in. Nothing is
+# wrong with the configuration; it is simply not a fast access point, and the
+# reason is worth knowing before measuring throughput and blaming the radio.
+
 # **`regdom` here is not the one that does anything, and that is a trap worth
 # knowing about.** The language spells `regdom` in two places:
 #

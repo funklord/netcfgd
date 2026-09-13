@@ -9461,6 +9461,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.116 The channel that was never compared
+
+An access point naming no channel used to be stopped and started on every
+reconcile -- the document says `None`, the renderer writes `channel=0`, the
+observation reads `Some(0)`, and a reconcile runs on every netlink event. A
+permanent deauthentication loop for a document nobody had touched. That was
+found and fixed before this audit, with `&& access_point.channel.is_some()`.
+
+**The fix was load bearing and completely unprotected.** Removing the guard
+broke no test in the tree. The plan fixture builds the observed side from the
+document, and its comment said the fields were converted "as the renderer would
+write them, not as the document states them" -- while `band` and `channel`, the
+two fields that sentence was written about, were copied straight across. The
+same experiment on the `band` guard failed a test, and that asymmetry is what
+made it visible: one was protected and the other only looked it.
+
+**And the guard had opened the opposite hole.** "If the document names no
+channel, never restart for a channel" silences the loop and also silences the
+real change: an operator who deletes `channel = 36` to get automatic selection
+back stays pinned to 36 for ever, with nothing in the plan to say the edit had
+not taken. The band arm had the same guard and the same hole. The round's
+recurring shape, and the campaign's: *a true statement about one direction used
+as a fix for both.* The guard was right that an absent channel is not a change
+from `0`, and wrong that it is not a change from `36`.
+
+Comparing `unwrap_or(0)` on both sides needs no guard, because it compares the
+number this build would write against the number in the file it wrote.
+
+**One band rule, because three places need it.** `band` decides when stated,
+the channel decides when it is not with the split at 14, neither means 2.4 GHz.
+That lived in the hostapd renderer, which the planner may not ask -- a planner
+depending on a backend crate is what moving `key_mgmt_of` into the model
+prevented -- and the compiler was not asking it at all. Three copies of a rule
+that decides whether a running access point matches its document is an access
+point that restarts for ever, so it is `effective_band` and `channel_in_band`
+in `netcfgd-model` now, called from all three.
+
+**The pair that was checked nowhere.** `band` is checked against a closed set
+and `channel` is checked as a number; their combination was checked only by the
+renderer, so `band = "2.4"` with `channel = 36` compiled, planned, and failed at
+`ncfg apply` with the interface up. That is the lateness that moved `band` and
+`regdom` into the compiler, left behind for the one question needing two keys --
+and by the example gate's own account it kept that gate blind, since a
+render-time refusal is invisible to a gate that compiles blocks. Decision 0222.
+
+**Fakes built from the code rather than from the thing, again.** Two hand-built
+observations said `band: None, channel: None` for a document stating neither.
+The renderer always emits both keys, so a real observation can never read back
+`None` for them; the tests passed because the planner was comparing the document
+against a copy of itself. The comment three lines up had got exactly this right
+for `key_mgmt` and the reasoning had not been carried to its neighbours.
+
+**Not fixed, and recorded instead:** nothing writes `ieee80211n`,
+`ieee80211ac` or `wmm_enabled`, and hostapd defaults them off, so a netcfgd
+access point runs at 802.11a/g rates in either band. `ieee80211n=1` is one line;
+the `ht_capab` that belongs with it is a function of what the radio reports,
+which netcfgd does not observe. Implementing that against a machine with no
+spare radio to test on is how the fake above gets built again.
+
 ## 10.115 Two spellings of one country
 
 The language spells `regdom` twice, and only one of them does anything:

@@ -59,7 +59,7 @@ netcfgd speaks netlink directly — there is no `ip` invocation anywhere.
 | enterprise (802.1X) | PEAP, TTLS, TLS and PWD, with identity, anonymous identity, CA and client certificates, and a phase-2 method |
 | hidden networks | `hidden = true` |
 | several saved networks | each its own `network` block; the supplicant picks which to join, `priority` biases it |
-| access point | run one with `hostapd`: SSID, channel, band, regulatory domain, hidden, and a MAC allow/deny list |
+| access point | run one with `hostapd`: SSID, channel, band, regulatory domain, hidden, and a MAC allow/deny list — at 802.11a/g rates, since nothing writes `ieee80211n` yet |
 | scanning | `ncfg wifi scan` lists what is in range, with signal and security |
 | joining and leaving | `ncfg wifi connect ID` and `ncfg wifi disconnect`, keeping the configuration either way |
 | radio on/off | over the control socket, which the GUI and the tray use; rfkill state is observed and streamed as events |
