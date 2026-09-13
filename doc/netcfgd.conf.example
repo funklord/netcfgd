@@ -956,6 +956,23 @@
 
 # ROAMING between access points sharing an SSID. `signal` is the dBm below
 # which it starts looking for something better.
+#
+# **What a roam costs is netcfgd's business too, and it used to be left at the
+# supplicant's default.** This block is what makes the radio look for somewhere
+# better, so it is what decides how often a move happens -- and on an
+# enterprise network a move means a full exchange with the authentication
+# server unless the pairwise key can be carried to the new access point.
+#
+# Opportunistic key caching is what carries it, and wpa_supplicant leaves it
+# off. netcfgd turns it on for every radio it populates. Where the access
+# points do not share a key it changes nothing: the station offers a key id,
+# the access point does not recognise it, and a full authentication happens
+# exactly as before. There is no key here to set, because there is no reason
+# to want the expensive answer.
+#
+# Nothing is written about rekeying. hostapd's defaults are already right --
+# the group key is rotated daily with CCMP -- and the pairwise key is the
+# supplicant's and the access point's to manage between them.
 
 #network "Campus" {
 #	wifi {

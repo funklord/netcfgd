@@ -9461,6 +9461,48 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.122 What a roam costs
+
+**Rekeying is not netcfgd's to set, and leaving it alone was right.** Nothing
+writes `wpa_group_rekey`, `wpa_ptk_rekey`, `wpa_gmk_rekey` or
+`disable_pmksa_caching`, and hostapd's own documentation on the reporting
+machine says why that is correct rather than an omission: the group key already
+rotates daily under CCMP, caching of keys made by EAP is already on, and
+upstream warns that "PTK rekeying is buggy with many drivers/devices". hostapd's
+`okc` is moot for the same kind of reason -- it shares a cache between BSSes in
+one hostapd process, and netcfgd runs one BSS per radio.
+
+**The station side is netcfgd's, and it was left expensive.** A `roam` block
+becomes a `bgscan`, so netcfgd decides how hard the radio looks for somewhere
+better. It turned roaming on and did not turn on what makes a roam cheap: on an
+enterprise network a move means a full EAP exchange with the authentication
+server unless the pairwise key can be carried across, and opportunistic key
+caching is what carries it. wpa_supplicant's own documentation: *"By default,
+OKC is disabled unless enabled with the global `okc=1` parameter or with the
+per-network `proactive_key_caching=1` parameter."* netcfgd set neither.
+Decision 0228.
+
+Measured on the `none` driver: `GET okc` is 0, `SET okc 1` is OK and reads back
+1, an unknown global FAILs. **A weaker control than `sae_pwe`'s**, and worth
+saying so: `SET okc 7` also answers OK, so this parser does not range-check the
+value -- the FAIL establishes that the key exists, not that the value was
+understood.
+
+Safe for everybody: where the access points do not share a key the station
+offers a `PMKID`, the access point does not recognise it, and a full
+authentication happens as before. It cannot leak the key, because a `PMKID` is
+derived from the key and both addresses -- an access point that does not already
+hold the key can neither produce nor use one.
+
+**Three settings now share one property, which is worth naming as a class.**
+`preassoc_mac_addr`, `sae_pwe` and now `okc` are netcfgd's own choices rather
+than anything the document asked for, so all three are globals sent at populate
+time and none is in the networks digest. That keeps an upgrade from repopulating
+every radio and dropping every association (10.114), and it costs the same
+thing each time: on a machine whose supplicant is already running, the setting
+lands at the next populate -- a configuration change, a supplicant restart or a
+reboot. Recorded here so it is not rediscovered a fourth time.
+
 ## 10.121 A scan had two words for three things
 
 Most of the scan path holds up: the SSID is taken as the remainder of the line
