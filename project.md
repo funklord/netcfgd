@@ -9461,6 +9461,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.121 A scan had two words for three things
+
+Most of the scan path holds up: the SSID is taken as the remainder of the line
+so a name with a tab survives, entries sort strongest-first with a stable sort,
+the mobility domain costs a `BSS` round trip only where the flags already say
+fast transition, and `configured_for` shares its rule with the observation.
+
+**`is_secured` asks whether joining needs a credential, and OWE needs none.** So
+it answered false -- correctly -- and every client stopped there: `ncfg wifi
+scan` said `open`, the TUI grouped it under open, the GUI offered to add it, and
+the NetworkManager shim set no PRIVACY flag. They are not the same network. OWE
+is its own key management with management frame protection required, and this
+tree already renders exactly that for a document that names one. The scan was
+the one place that could not say so, so netcfgd supported OWE everywhere except
+where somebody would find out a network was OWE.
+
+**The GUI made it worse than a wrong label**: its add dialog reads `secured` to
+decide what to ask for, so it asked nothing and wrote an open block, which does
+not associate. A network in the list that never connects, with nothing naming
+the reason. `ScanEntry` gains `owe`, following the rationale already written for
+`enterprise` -- "the daemon knows and a client cannot work it out" -- and the
+four shapes have four words. Decision 0227.
+
+**The TUI had written down the failure in advance.** It groups rows by
+`(name, security word)` under a comment saying "a key coarser than what is
+displayed merges two networks under a heading describing one of them". An OWE
+network and an open one of the same name shared a word, so they shared a key.
+The comment was right and its vocabulary was one word short.
+
+**Still not possible:** adding an OWE network over the socket. `WifiAdd` carries
+a passphrase, a generation and an 802.1X arm with no third state, and the
+profile writer's `Security` has no `Owe`. That is a second round's work; this one
+stops the GUI writing a block that cannot work and prints the one that does.
+**That printed block was wrong when first written** -- the key is inside
+`wifi { }` -- and compiling it is what found out. A message telling somebody
+what to type is a claim about the language, and it was checked against the
+compiler rather than against memory.
+
+**Two checks that had inspected nothing.** `cargo build --workspace` covers none
+of `adapter/netcfgd-nm`: section 9.2 excludes it so its D-Bus stack stays out of
+the core's dependency graph, so it has its own lockfile and its own `cargo fmt`.
+A missing struct field and a formatting diff were both invisible until `make
+adapters` ran. The gate found them; what was wrong was reading a green
+`cargo build --workspace` as covering the tree. And two of three sabotages
+passed first time -- the CLI label and the NM arm had no tests. Both have one
+now. That is four audits running where a fix went in with nothing holding it
+until the sabotage pass asked.
+
 ## 10.120 How SAE derives its password element
 
 Most of this area holds up. The station sends `sae_password` for WPA3 and `psk`

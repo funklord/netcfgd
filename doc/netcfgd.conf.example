@@ -788,6 +788,25 @@
 # setting: required for `wpa3`, optional for the other two, because requiring
 # it excludes a WPA2 access point and forbidding it excludes SAE.
 #
+# **OWE is a third answer to "is this network secured", and scans used to give
+# two.** Opportunistic wireless encryption asks for no credential and encrypts
+# anyway -- so `ncfg wifi scan` said `open`, which is the word for a network
+# that does neither. Joining them is not the same thing: OWE is its own key
+# management with management frame protection required, and an `open = true`
+# block against such an access point does not associate.
+#
+# The scan says `owe` now, and so do the TUI, the GUI and the NetworkManager
+# shim. Writing one is:
+#
+#   network "guest" {
+#   	wifi { owe = true }
+#   }
+#
+# **`ncfg wifi add` cannot write that yet**, and neither can the GUI's add
+# dialog -- the request carries a passphrase, a generation and an 802.1X arm,
+# with no third state between "a credential" and "none". The GUI says so and
+# prints the block rather than writing an open one that never connects.
+
 # **How SAE derives its password element is netcfgd's choice, not yours.**
 # There are two mechanisms -- the original hunting-and-pecking loop and the
 # newer hash-to-element -- and wpa_supplicant offers only the first by default
