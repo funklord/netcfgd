@@ -5935,14 +5935,14 @@ impl Builder {
 				access_point.ssid.to_hex(),
 				started.ssid.to_hex(),
 			)
-		} else if started.channel != access_point.channel && access_point.channel.is_some() {
-			// **The same guard the `band` arm below carries, for the same
-			// reason, and it was missing here.** An absent `channel` means
-			// "let hostapd choose" -- ACS -- and the renderer writes
-			// `channel=0` to say so, which reads back as `Some(0)`. Comparing
-			// that against the document's `None` is true on every pass, so an
-			// access point that names no channel was stopped and started on
-			// every reconcile, and a reconcile runs on every netlink event.
+		} else if started.channel.unwrap_or(0) != access_point.channel.unwrap_or(0) {
+			// **Compared as the renderer writes them, not as the document
+			// states them.** An absent `channel` means "let hostapd choose" --
+			// ACS -- and the renderer writes `channel=0` to say so, which reads
+			// back as `Some(0)`. Comparing that against the document's `None`
+			// is true on every pass, so an access point that names no channel
+			// was stopped and started on every reconcile, and a reconcile runs
+			// on every netlink event.
 			//
 			// Measured: `backend.stop` + `backend.start` with the reason
 			// `access_point.channel: <absent> (was 0)`, and the plan's own
@@ -5951,19 +5951,53 @@ impl Builder {
 			// backoff, so it is a permanent deauthentication loop for a
 			// document nobody has touched.
 			//
-			// Nothing caught it because the plan fixture hands the document's
-			// `Option` straight back instead of deriving it from the file the
-			// renderer writes, and every live test pins a channel.
+			// **The first fix was `&& access_point.channel.is_some()`, and it
+			// opened the opposite hole (0222).** That guard says "if the
+			// document names no channel, never restart for a channel" -- which
+			// silenced the loop and also silenced the real change: an operator
+			// who deletes `channel = 36` to get automatic selection back was
+			// left pinned to 36 for ever, with nothing in the plan to say the
+			// edit had not taken.
+			//
+			// `unwrap_or(0)` needs no guard because it compares the two things
+			// that are actually in play: the number this build would write, and
+			// the number in the file it wrote. Absent and `0` are the same
+			// statement, and so compare equal; absent against `36` is a change,
+			// and restarts.
+			//
+			// Nothing caught the original because the plan fixture hands the
+			// document's `Option` straight back instead of deriving it from the
+			// file the renderer writes, and every live test pins a channel. That
+			// was still true after the fix: removing the guard broke no test at
+			// all, so the fix for a permanent deauthentication loop was load
+			// bearing and unprotected. The fixture converts it now.
 			(
 				"access_point.channel",
 				render_option(access_point.channel),
 				render_option(started.channel),
 			)
-		} else if started.band != access_point.band && access_point.band.is_some() {
-			// Only where the document states one. An absent `band` means "work
-			// it out from the channel", and the file records what was worked
-			// out -- comparing those would restart the access point on every
+		} else if started.band.as_deref()
+			!= netcfgd_model::device::effective_band(
+				access_point.band.as_deref(),
+				access_point.channel,
+			) {
+			// **Derived before comparing, for the reason the `channel` arm
+			// above is.** An absent `band` means "work it out from the
+			// channel", and the file records what was worked out -- comparing
+			// those as written would restart the access point on every
 			// reconcile for a document that never changed.
+			//
+			// This arm used to carry `&& access_point.band.is_some()`, which
+			// stopped that and left the same hole the channel guard had: an
+			// access point with `band = "5"` and no channel, whose `band` line
+			// is then deleted, means 2.4 GHz from that moment -- every radio
+			// has it, and it is what an undeclared band with no channel to
+			// infer from resolves to. The running access point stayed on 5 GHz
+			// and the plan said nothing. 0222.
+			//
+			// `effective_band` is the model's, shared with the renderer that
+			// writes the `hw_mode` this is compared against, so the two cannot
+			// drift into restarting each other for ever.
 			(
 				"access_point.band",
 				access_point.band.clone().unwrap_or_default(),

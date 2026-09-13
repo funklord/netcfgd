@@ -352,16 +352,21 @@ fn started_backend(
 		access_control: started_access_control(kind, iface, desired),
 		started_with: access_point.map(|point| netcfgd_model::ObservedAccessPoint {
 			ssid: point.ssid.clone(),
-			band: point.band.clone(),
-			channel: point.channel,
+			// Derived and defaulted the way the renderer does, not copied. An
+			// absent `band` becomes the one the channel implies, and an absent
+			// `channel` becomes `0` -- hostapd's spelling of "survey and choose".
+			// Copying the document's `Option` here is why this harness could not
+			// see the channel defect, and why it still could not see it after it
+			// was fixed: removing the fix broke no test in the tree (0222).
+			band: netcfgd_model::device::effective_band(point.band.as_deref(), point.channel)
+				.map(ToOwned::to_owned),
+			channel: Some(point.channel.unwrap_or(0)),
 			// **As the renderer would write them, not as the document states
 			// them.** This harness builds the observed side from the document,
-			// which is why it could not see the `channel` defect -- absent in
-			// the document is `channel=0` in the file. Any field where the two
-			// spellings differ has to be converted here or every reconcile
-			// plans a restart, which is what these three did the moment they
-			// were compared. `regdom` is the one that differs: hostapd's is
-			// upper case.
+			// so any field where the two spellings differ has to be converted
+			// here or every reconcile plans a restart. `regdom` is upper case;
+			// `band` and `channel` are above, and were the two this comment
+			// already claimed were converted while they were being copied.
 			//
 			// What actually holds the renderer and the observation together is
 			// `netcfgd-observe`'s own round trip, which writes a file and reads
@@ -2400,8 +2405,14 @@ access_point "home" {
 		// The identity is unchanged; only the secret moved.
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
-			band: None,
-			channel: None,
+			// What the renderer writes for a document that states neither: it
+			// always emits both keys, `hw_mode=g` and `channel=0`, so a real
+			// observation of a running access point never reads back `None` for
+			// these. Stated for the reason `key_mgmt` below is -- an absent value
+			// here is not "unstated", it is a different value, and it would read
+			// as the band having changed on every pass (0222).
+			band: Some("2.4".to_owned()),
+			channel: Some(0),
 			// `proto = "wpa2"` in the document above, which the renderer
 			// writes as `wpa_key_mgmt=WPA-PSK`. Stated rather than left at
 			// `None`, which is an open access point and would read as the
@@ -2448,8 +2459,14 @@ access_point "home" {
 		access_control: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
-			band: None,
-			channel: None,
+			// What the renderer writes for a document that states neither: it
+			// always emits both keys, `hw_mode=g` and `channel=0`, so a real
+			// observation of a running access point never reads back `None` for
+			// these. Stated for the reason `key_mgmt` below is -- an absent value
+			// here is not "unstated", it is a different value, and it would read
+			// as the band having changed on every pass (0222).
+			band: Some("2.4".to_owned()),
+			channel: Some(0),
 			// `proto = "wpa2"` in the document above, which the renderer
 			// writes as `wpa_key_mgmt=WPA-PSK`. Stated rather than left at
 			// `None`, which is an open access point and would read as the
@@ -9000,6 +9017,100 @@ fn a_fixed_mac_under_a_randomising_policy_is_warned_about() {
 			.iter()
 			.any(|warning| warning.message.contains("which replaces it")),
 		"a randomising policy on its own is not a contradiction"
+	);
+}
+
+/// Deleting a pinned channel or band has to take effect.
+///
+/// **The guards that stopped the deauthentication loop opened the opposite
+/// hole, and nothing noticed for either field.** Removing
+/// `&& access_point.channel.is_some()` from the planner broke no test in the
+/// tree -- so the fix for a permanent deauthentication loop was load bearing
+/// and unprotected, because the harness copied the document's `Option` into
+/// the observation instead of deriving what the renderer writes.
+///
+/// Both directions here, on both fields: the loop must stay fixed, and an edit
+/// that means something must still be applied. 0222.
+#[test]
+fn a_deleted_channel_or_band_is_applied_and_an_absent_one_does_not_loop() {
+	let running =
+		|ssid: &str, band: Option<&str>, channel: Option<u16>| netcfgd_model::ObservedBackend {
+			kind: netcfgd_model::BackendKind::AccessPoint,
+			interface: "wlan0".to_owned(),
+			running: true,
+			answering: None,
+			access_control: None,
+			started_with: Some(netcfgd_model::ObservedAccessPoint {
+				ssid: netcfgd_model::Ssid::new(ssid.as_bytes().to_vec()).expect("an ssid"),
+				band: band.map(ToOwned::to_owned),
+				channel,
+				key_mgmt: None,
+				hidden: false,
+				regdom: None,
+			}),
+			secret_matches: Some(true),
+			networks_match: None,
+			config_matches: None,
+			config_present: None,
+			advertised: Vec::new(),
+		};
+
+	let outcome = |text: &str, backend: netcfgd_model::ObservedBackend| {
+		let desired = document(text);
+		let mut observed = observed_with(&["wlan0"]);
+		observed.links[0].up = true;
+		observed.backends.push(backend);
+		let plan = plan(&desired, &observed, &PlanOptions::default());
+		// The restart's own reason, not the plan's first action -- addressing
+		// this interface is planned too and sorts ahead of it.
+		let stop = plan
+			.actions
+			.iter()
+			.find(|action| action.op.name() == "backend.stop");
+		let field = stop
+			.map(|action| action.reason.field.clone())
+			.unwrap_or_default();
+		(stop.is_some(), field)
+	};
+
+	let open = |extra: &str| {
+		format!(
+			"interface wlan0 {{ config = \"192.168.4.1/24\" }}\n\
+			 access_point \"home\" {{ device = \"wlan0\"; {extra} wifi {{ open = true }} }}\n"
+		)
+	};
+
+	// The loop: no channel in the document, `channel=0` in the file. These say
+	// the same thing and must not restart anything.
+	let (restarted, field) = outcome(&open(""), running("home", Some("2.4"), Some(0)));
+	assert!(
+		!restarted,
+		"an absent channel and `channel=0` are the same statement, got a restart for {field}"
+	);
+
+	// The hole: the operator deletes `channel = 36` to get automatic selection
+	// back. The document now means something else and the radio is still pinned.
+	let (restarted, field) = outcome(&open(""), running("home", Some("2.4"), Some(36)));
+	assert!(
+		restarted && field == "access_point.channel",
+		"deleting a pinned channel has to be applied, got restarted={restarted} field={field}"
+	);
+
+	// And the same for the band: `band = "5"` with no channel, then the band
+	// line is deleted. An undeclared band with no channel to infer from is 2.4
+	// GHz, so the running access point is in the wrong one.
+	let (restarted, field) = outcome(&open(""), running("home", Some("5"), Some(0)));
+	assert!(
+		restarted && field == "access_point.band",
+		"deleting a pinned band has to be applied, got restarted={restarted} field={field}"
+	);
+
+	// The band's own no-loop direction: the document names a channel and no
+	// band, and the file records the band that was worked out from it.
+	let (restarted, field) = outcome(&open("channel = 36;"), running("home", Some("5"), Some(36)));
+	assert!(
+		!restarted,
+		"a derived band matching the file is not a change, got a restart for {field}"
 	);
 }
 
