@@ -479,6 +479,62 @@ pub fn normalize_station(text: &str) -> Result<String, String> {
 	Ok(out)
 }
 
+/// Which band an access point will actually be brought up in.
+///
+/// **The rule is stated once, here, because three places need it and two of
+/// them are not allowed to ask the third.** The hostapd renderer needs it to
+/// pick a `hw_mode`; the planner needs it to decide whether a running access
+/// point is still in the band the document asks for, and must not depend on a
+/// backend crate to ask (the reason [`crate::security::key_mgmt_of`] lives in
+/// this model); the compiler needs it to refuse a channel that is in no band
+/// before the interface is up rather than after.
+///
+/// `band` decides when it is stated. When it is not, the channel decides, and
+/// the split is at 14: 1..=14 is 2.4 GHz and nothing else, while the numbers
+/// above belong to 5 GHz. An access point that states neither is 2.4 GHz,
+/// which every radio has and which automatic channel selection can then choose
+/// within.
+///
+/// `None` for a band this build cannot render -- `6`, which the compiler
+/// accepts deliberately so that "a band this build cannot do" stays a
+/// different answer from "not a band", and anything else that reached the
+/// model without passing the compiler.
+#[must_use]
+pub fn effective_band(band: Option<&str>, channel: Option<u16>) -> Option<&'static str> {
+	match band {
+		Some("2.4") => Some("2.4"),
+		Some("5") => Some("5"),
+		Some(_) => None,
+		None => match channel {
+			None => Some("2.4"),
+			Some(channel) if channel <= 14 => Some("2.4"),
+			Some(_) => Some("5"),
+		},
+	}
+}
+
+/// Whether a channel number exists in a band at all.
+///
+/// The 5 GHz list is a range rather than the exact set because which of those
+/// channels are usable is a regulatory question the kernel answers, not a
+/// spelling question this can answer -- 149 is legal in one country and not in
+/// the next, and hostapd and the regulatory domain settle that between them
+/// (0221 has what the kernel actually reports). What this rejects is a number
+/// that is in no band, which is a typo rather than a regulatory refusal.
+///
+/// Channel 0 is in no band. It is hostapd's spelling of "survey and choose",
+/// which netcfgd writes from an absent `channel` -- so an operator who writes
+/// it out by hand is asking for something the document already has a way to
+/// say, and gets told rather than silently agreed with.
+#[must_use]
+pub fn channel_in_band(band: &str, channel: u16) -> bool {
+	if band == "2.4" {
+		(1..=14).contains(&channel)
+	} else {
+		(36..=177).contains(&channel)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

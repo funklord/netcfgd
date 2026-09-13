@@ -235,11 +235,7 @@ const BAND_5: (&str, &str) = ("5", "a");
 /// What this rejects is a number that is in no band at all, which is a typo
 /// rather than a regulatory refusal.
 fn channel_in(band: (&str, &str), channel: u16) -> bool {
-	if band == BAND_24 {
-		(1..=14).contains(&channel)
-	} else {
-		(36..=177).contains(&channel)
-	}
+	netcfgd_model::device::channel_in_band(band.0, channel)
 }
 
 /// The band a `hw_mode` came from, as the document spells it.
@@ -291,7 +287,18 @@ fn band_of(access_point: &AccessPoint) -> Result<(&'static str, &'static str), U
 	// An undeclared band is inferred from the channel, and then checked the
 	// same way a declared one is. Inferring and skipping the check is how
 	// channel 20 would have become `hw_mode=a`, which is a band it is not in.
-	let band = declared.unwrap_or(if channel <= 14 { BAND_24 } else { BAND_5 });
+	//
+	// The inference itself is `effective_band`, in the model, because the
+	// planner has to reach the same answer and must not depend on this crate to
+	// do it -- an access point whose document and running configuration disagree
+	// about the band gets restarted, so two copies of this rule is an access
+	// point that restarts for ever. 0222.
+	let band = declared.unwrap_or(
+		match netcfgd_model::device::effective_band(None, Some(channel)) {
+			Some("5") => BAND_5,
+			_ => BAND_24,
+		},
+	);
 	if channel_in(band, channel) {
 		Ok(band)
 	} else {
