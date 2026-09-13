@@ -21,6 +21,44 @@ use std::time::{Duration, Instant};
 /// Distinguishes concurrent connections from one process.
 static NEXT_SERIAL: AtomicU32 = AtomicU32::new(0);
 
+/// How much of one reply this will accept.
+///
+/// **A unix datagram is truncated silently.** `recv` into a buffer smaller than
+/// the datagram returns the buffer's worth and discards the rest, with no error
+/// and no flag -- the real length is only available through `MSG_TRUNC`, which
+/// std does not expose and which would cost the `unsafe` this file promises not
+/// to use.
+///
+/// So the size is chosen to be past anything the supplicant sends, and
+/// [`filled_exactly`] catches the case where it was not. Measured against
+/// `wpa_supplicant` 2.10 on the reporting machine, largest reply first:
+///
+/// ```text
+/// GET_CAPABILITY freq       1647 bytes
+/// STATUS                     359
+/// GET_CAPABILITY channels    297
+/// SCAN_RESULTS               110   (one access point in range)
+/// ```
+///
+/// `SCAN_RESULTS` is the only one without a bound: a row is roughly 70 to 110
+/// bytes, so this holds something like seventy-five to a hundred access points.
+/// The supplicant's own reply buffer may well cap it lower first -- that is a
+/// property of its build and netcfgd cannot know it, which is exactly why the
+/// truncation check exists rather than a larger number alone. 0224.
+const REPLY_BUFFER: usize = 8192;
+
+/// Whether a datagram used the whole buffer, and so was probably cut short.
+///
+/// A reply that is exactly [`REPLY_BUFFER`] bytes is possible and a reply that
+/// was truncated to it is far likelier, and the two are indistinguishable from
+/// here. Treated as the truncation, because a scan list quietly missing its
+/// last access points is the failure that does not announce itself -- and an
+/// error that is occasionally wrong about a 8192-byte reply is one somebody can
+/// see and act on.
+fn filled_exactly(read: usize) -> bool {
+	read == REPLY_BUFFER
+}
+
 /// Where `wpa_supplicant` puts its per-interface sockets by default.
 pub const DEFAULT_CTRL_DIR: &str = "/run/wpa_supplicant";
 
@@ -146,33 +184,61 @@ pub fn wait_for_scan(client: &Client, patience: Duration) -> Result<(), String> 
 ///
 /// **This deletes files, so it parses rather than prefix-matches.**
 /// [`is_reply_socket`] is a prefix test and that is right for a reader deciding
-/// what to skip; it is not enough for something removing what it finds. Five
+/// what to skip; it is not enough for something removing what it finds. Three
 /// things must hold, and a candidate failing any of them is left alone:
 ///
 /// 1. the name is exactly `netcfgd-<pid>-<serial>`, both of them digits;
 /// 2. it is a socket, by `symlink_metadata` so a symlink is never followed to
 ///    whatever it points at;
-/// 3. the pid is not this process;
-/// 4. `/proc/<pid>` does not exist, which is how the rest of this tree asks
-///    whether a pid is alive -- and it needs no `unsafe`, so the promise at the
-///    top of this file still holds;
-/// 5. `/proc/self` *does* exist.
+/// 3. **nothing has the address open**, which the kernel is asked directly.
 ///
-/// The last is the one that matters. Without `/proc` mounted, step 4 answers
-/// "dead" for every pid on the machine, including the live ones -- so the
-/// reaper would delete the reply sockets of running clients, which is the
-/// failure it exists to prevent, committed wholesale. Where it cannot tell, it
-/// removes nothing.
+/// **The third used to be `/proc/<pid>`, and that is a proxy for the question
+/// rather than the question (0224).** A pid is a name that gets reused, so a
+/// socket whose creator is gone stays for ever once anything else takes the
+/// number -- and the pids most likely to be taken are the low ones, which on
+/// Linux belong to kernel threads that live as long as the boot. netcfgd's own
+/// live tests run it in a pid namespace, where it gets exactly those low
+/// numbers.
 ///
-/// A pid that has been reused by an unrelated process leaves its socket in
-/// place. Wrong in the direction that costs one stale entry rather than one
-/// live connection.
+/// Found on the reporting machine, seven days into a boot:
 ///
-/// Returns how many were removed, for the caller to say so. Decision 0193.
+/// ```text
+/// srwxrwxr-x root root Sep 10 22:43 netcfgd-8-0
+/// srwxrwxr-x root root Sep 10 22:43 netcfgd-8-1
+/// $ ps -p 8 -o comm=
+/// kworker/R-netns
+/// ```
+///
+/// Three days old, no owner, and skipped by every reap since -- the daemon had
+/// restarted repeatedly and run this function each time.
+///
+/// So ask the kernel, which knows. Connecting to a unix datagram address gives
+/// `ECONNREFUSED` when nobody has it bound, and that is the definition of a
+/// stale socket file rather than a guess at one. The other answers are all
+/// "leave it alone", and they are distinguishable:
+///
+/// ```text
+/// netcfgd-8-0          ECONNREFUSED  nobody has it bound  -> remove
+/// netcfgd-4026892-1    EPERM         bound, and connected to another peer
+/// wlp0s20f3            connects      bound and unconnected
+/// ```
+///
+/// `EPERM` is the kernel refusing to connect a datagram socket to one that is
+/// already connected elsewhere, which every live reply socket is -- so the
+/// live case answers loudly rather than by absence of an error.
+///
+/// The predicate is [`nothing_is_listening`], which already existed and already
+/// meant this. Anything it does not recognise -- a timeout, a permission
+/// failure reading the directory -- leaves the file in place. Wrong in the
+/// direction that costs a stale entry rather than a live connection, which is
+/// the trade the `/proc` version was written for and did not achieve.
+///
+/// Nothing here reads `/proc`, so the reaper now works where it is not mounted
+/// instead of refusing to act. No `unsafe`: `UnixDatagram::connect` is std.
+///
+/// Returns how many were removed, for the caller to say so. Decisions 0193 and
+/// 0224.
 pub fn reap_reply_sockets(dir: &Path) -> usize {
-	if !Path::new("/proc/self").exists() {
-		return 0;
-	}
 	let Ok(entries) = std::fs::read_dir(dir) else {
 		return 0;
 	};
@@ -202,8 +268,13 @@ pub fn reap_reply_sockets(dir: &Path) -> usize {
 		if !std::os::unix::fs::FileTypeExt::is_socket(&metadata.file_type()) {
 			continue;
 		}
-		if Path::new(&format!("/proc/{pid}")).exists() {
-			continue;
+		// The kernel's own answer to "does anyone have this address open".
+		// A successful connect, or any refusal that is not `ECONNREFUSED`,
+		// means leave it alone.
+		match UnixDatagram::unbound().and_then(|probe| probe.connect(&path)) {
+			Ok(()) => continue,
+			Err(error) if !nothing_is_listening(&error) => continue,
+			Err(_) => {}
 		}
 		if std::fs::remove_file(&path).is_ok() {
 			removed += 1;
@@ -465,9 +536,19 @@ impl Client {
 		// the classic bug in a `wpa_supplicant` client -- it produces a status
 		// display that occasionally reports the previous command's outcome.
 		let deadline = Instant::now() + self.timeout;
-		let mut buffer = vec![0_u8; 8192];
+		let mut buffer = vec![0_u8; REPLY_BUFFER];
 		loop {
 			let read = self.socket.recv(&mut buffer)?;
+			if filled_exactly(read) {
+				return Err(io::Error::new(
+					io::ErrorKind::InvalidData,
+					format!(
+						"the reply to `{command}` filled the {REPLY_BUFFER}-byte buffer \
+						 and was probably cut short; a truncated answer is not reported \
+						 as an answer"
+					),
+				));
+			}
 			let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
 			if !is_event(&text) {
 				return Ok(Reply::parse(&text));
@@ -517,8 +598,14 @@ impl Client {
 	/// Returns an error if the socket fails. A timeout is `Ok(None)`.
 	pub fn next_event(&self, timeout: Duration) -> io::Result<Option<Event>> {
 		self.socket.set_read_timeout(Some(timeout))?;
-		let mut buffer = vec![0_u8; 8192];
+		let mut buffer = vec![0_u8; REPLY_BUFFER];
 		match self.socket.recv(&mut buffer) {
+			Ok(read) if filled_exactly(read) => Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				format!(
+					"an event filled the {REPLY_BUFFER}-byte buffer and was probably cut short"
+				),
+			)),
 			Ok(read) => {
 				let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
 				Ok(Event::parse(&text))
@@ -636,7 +723,7 @@ impl Drop for Client {
 
 #[cfg(test)]
 mod tests {
-	use super::{is_reply_socket, nothing_is_listening, reap_reply_sockets, Client};
+	use super::{is_reply_socket, nothing_is_listening, reap_reply_sockets, Client, REPLY_BUFFER};
 	use std::io;
 	use std::os::unix::net::UnixDatagram;
 
@@ -745,6 +832,72 @@ mod tests {
 		);
 	}
 
+	/// A reply that fills the buffer is an error, not an answer.
+	///
+	/// **A unix datagram is truncated silently.** `recv` into a buffer smaller
+	/// than the datagram keeps the buffer's worth and drops the rest, with no
+	/// error and no flag -- so an oversized `SCAN_RESULTS` would come back as a
+	/// shorter list of access points, with the last row cut mid-field, and
+	/// nothing anywhere saying the list was incomplete. A network missing from
+	/// a scan because it was truncated off the end looks exactly like a network
+	/// that is not there.
+	///
+	/// The supplicant's own reply buffer may cap replies below this first --
+	/// that is a property of its build and netcfgd cannot know it, which is why
+	/// the check exists rather than a larger buffer alone. 0224.
+	#[test]
+	fn a_reply_that_fills_the_buffer_is_refused_rather_than_used() {
+		use std::os::unix::net::UnixDatagram;
+		use std::time::Duration;
+
+		let dir = std::env::temp_dir().join(format!("ncfg-trunc-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).expect("a directory to bind in");
+		let server = UnixDatagram::bind(dir.join("wlan0")).expect("a server socket");
+
+		// Answers the PING, then sends more than the client can hold. The
+		// kernel delivers what fits and discards the rest, which is the whole
+		// behaviour under test -- so the send is deliberately larger than
+		// `REPLY_BUFFER` rather than exactly it.
+		let answering = std::thread::spawn(move || {
+			let mut buffer = vec![0_u8; 4096];
+			for _ in 0..2 {
+				let Ok((read, sender)) = server.recv_from(&mut buffer) else {
+					break;
+				};
+				let Some(path) = sender.as_pathname() else {
+					break;
+				};
+				if &buffer[..read] == b"PING" {
+					let _ = server.send_to(b"PONG\n", path);
+				} else {
+					let huge = vec![b'x'; REPLY_BUFFER * 2];
+					let _ = server.send_to(&huge, path);
+				}
+			}
+			std::thread::sleep(Duration::from_millis(500));
+		});
+
+		let client = Client::connect_within(&dir, "wlan0", Duration::from_secs(2))
+			.expect("the PING is answered");
+		let outcome = client.request("SCAN_RESULTS");
+		drop(client);
+		let _ = answering.join();
+		let _ = std::fs::remove_dir_all(&dir);
+
+		let error = outcome.expect_err("a truncated reply is not an answer");
+		assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{error}");
+		let message = error.to_string();
+		assert!(
+			message.contains("cut short"),
+			"says what happened: {message}"
+		);
+		assert!(
+			message.contains("SCAN_RESULTS"),
+			"and which command it was about: {message}"
+		);
+	}
+
 	/// The reply socket a client binds is recognised as netcfgd's own.
 	///
 	/// Observed while a connect is in flight rather than asserted as a literal,
@@ -837,6 +990,43 @@ mod tests {
 		)));
 	}
 
+	/// A pid that has been reused no longer keeps a dead socket alive.
+	///
+	/// **The case that sent 0224 looking.** `/proc/<pid>` answers "alive" for a
+	/// number some unrelated process now holds, and the numbers most likely to
+	/// be held are the low ones -- kernel threads, which live as long as the
+	/// boot. On the reporting machine `netcfgd-8-0` and `netcfgd-8-1` sat in
+	/// `/run/wpa_supplicant` for three days because pid 8 is `kworker/R-netns`,
+	/// skipped by every reap the daemon ran in between.
+	///
+	/// Pid 1 stands in for the reused number here: it is alive on any machine
+	/// this runs on, and is never this process. The socket file is left with
+	/// nothing bound to it, which is what its creator's death leaves behind.
+	#[test]
+	fn a_dead_socket_under_a_live_pid_is_still_reaped() {
+		use std::os::unix::net::UnixDatagram;
+
+		let dir = std::env::temp_dir().join(format!("ncfg-reuse-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).expect("a directory to sweep");
+
+		let orphan = dir.join("netcfgd-1-9");
+		UnixDatagram::bind(&orphan).expect("bound, then dropped");
+		assert!(
+			std::path::Path::new("/proc/1").exists(),
+			"the pid in that name is one the old check called alive"
+		);
+
+		assert_eq!(
+			reap_reply_sockets(&dir),
+			1,
+			"the kernel knows nobody has it"
+		);
+		assert!(!orphan.exists());
+
+		let _ = std::fs::remove_dir_all(&dir);
+	}
+
 	/// The reaper takes the dead and leaves everything else.
 	///
 	/// Written as one directory holding every case at once, because what this
@@ -851,25 +1041,44 @@ mod tests {
 		let _ = std::fs::remove_dir_all(&dir);
 		std::fs::create_dir_all(&dir).expect("a directory to sweep");
 
-		// A pid that cannot be alive. Pid 0 is the scheduler from userspace's
-		// point of view and never appears in /proc, so `/proc/0` is absent on
-		// every Linux -- which is the whole condition being tested, arranged
-		// without having to kill something and race its reaping.
+		// **What a socket left behind by a dead process actually is: a file
+		// with nothing bound to it.** Binding and dropping gives exactly that
+		// -- closing a `UnixDatagram` does not unlink its path -- so this is
+		// the real article rather than a stand-in for one.
+		//
+		// This entry used to be a *bound* socket named `netcfgd-0-7`, chosen
+		// because `/proc/0` never exists, and it passed against the pid proxy
+		// while modelling the opposite of a stale socket. 0224.
 		let dead = dir.join("netcfgd-0-7");
-		let _dead_socket = UnixDatagram::bind(&dead).expect("a socket to leave behind");
+		UnixDatagram::bind(&dead).expect("a socket to leave behind");
+		assert!(dead.exists(), "the file outlives the socket that made it");
 
 		// Ours, and the process holding it is this one.
 		let mine = dir.join(format!("netcfgd-{}-0", std::process::id()));
 		let _mine_socket = UnixDatagram::bind(&mine).expect("a live socket");
 
-		// **Another process' socket, and that process is alive.** This is the
-		// case the whole function turns on, and the first version of this test
-		// did not have it: every other entry here is excluded by its name, its
-		// type, or by being ours, so removing the liveness check entirely left
-		// the test passing. Pid 1 is alive on any machine this runs on and is
-		// never us.
+		// **Another process' socket, and it is open.** This is the case the
+		// whole function turns on, and the first version of this test did not
+		// have it: every other entry here is excluded by its name, its type, or
+		// by being ours, so removing the liveness check entirely left the test
+		// passing. The pid in the name is one that *is* alive, so this still
+		// fails a reaper that went back to asking `/proc`.
 		let live = dir.join("netcfgd-1-3");
 		let _live_socket = UnixDatagram::bind(&live).expect("another client's socket");
+
+		// **And the shape a real reply socket is in: bound, and connected to
+		// the supplicant.** The kernel refuses a second connect to it with
+		// `EPERM` rather than letting it through, so this is a different answer
+		// from the one above and has to be treated the same way. A reaper that
+		// removed anything it could not connect to would take every live client
+		// on the machine.
+		let peer = dir.join("netcfgd-1-4");
+		let _peer_socket = UnixDatagram::bind(&peer).expect("another client's socket");
+		let connected = dir.join("netcfgd-1-5");
+		let connected_socket = UnixDatagram::bind(&connected).expect("a client");
+		connected_socket
+			.connect(&peer)
+			.expect("connected to its peer");
 
 		// A real interface socket, which is what the directory is *for*.
 		let interface = dir.join("wlan0");
@@ -898,6 +1107,14 @@ mod tests {
 		assert!(
 			live.exists(),
 			"a living process' socket is not the reaper's to take"
+		);
+		assert!(
+			peer.exists(),
+			"nor is one that something else is connected to"
+		);
+		assert!(
+			connected.exists(),
+			"nor a connected one, which refuses a second connect with EPERM"
 		);
 		assert!(
 			interface.exists(),
