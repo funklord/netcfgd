@@ -2358,6 +2358,11 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 			// interface -> (attached client, the access point it last named).
 			let mut watching: Vec<(String, netcfgd_supplicant::Client, Option<String>)> =
 				Vec::new();
+			// Radios already complained about, so a supplicant that refuses
+			// `ATTACH` costs one line rather than one per pass for ever. Cleared
+			// when the radio starts working, so a later failure is reported
+			// again rather than swallowed by the first.
+			let mut unwatchable: Vec<String> = Vec::new();
 
 			loop {
 				// Anything with a control socket that is not being watched yet.
@@ -2398,7 +2403,29 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 						// Without ATTACH this connection gets replies and no
 						// events, and the loop below would be a silent
 						// no-op forever.
-						if client.attach().is_ok() {
+						//
+						// **And the failure used to be silent too, which is the
+						// same sentence pointed at netcfgd (0225).** The
+						// consequence was written down here and not reported:
+						// every diagnostic below -- the auth failures, the
+						// access point refusing the station, the scan that
+						// could not run -- is read through this connection, so
+						// a radio that cannot be attached to is a radio netcfgd
+						// has gone quiet about, and nothing said so.
+						let attached = client.attach();
+						if complain_about(&mut unwatchable, &interface, &attached) {
+							netcfgd_sys::log_warning!(
+								"supplicant",
+								"{interface}: cannot watch this radio's events ({}); \
+								 roaming, authentication failures and refused \
+								 associations will go unreported for it",
+								attached
+									.as_ref()
+									.err()
+									.map_or_else(String::new, std::string::ToString::to_string)
+							);
+						}
+						if attached.is_ok() {
 							watching.push((interface, client, None));
 						}
 					}
@@ -2433,6 +2460,23 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 							}
 						}
 						Ok(None) => {}
+						// **An event this could not read is not a supplicant
+						// that went away (0225).** Both arrived here as `Err`
+						// and both dropped the connection, which costs the
+						// re-attach and the access point this interface last
+						// named -- so the next `CONNECTED` reads as a first
+						// association and a roam across it goes unreported.
+						//
+						// `InvalidData` is the reply-too-large check added in
+						// 0224, and the connection is fine: the datagram was
+						// bigger than the buffer, which says nothing about the
+						// process on the other end. Reported and stepped over.
+						Err(error) if !supplicant_is_gone(&error) => {
+							netcfgd_sys::log_note!(
+								"supplicant",
+								"{interface}: an event could not be read ({error})"
+							);
+						}
 						// The supplicant went away. Dropped and picked up again
 						// on a later pass if it comes back, which is what an
 						// `ncfg apply` restarting one looks like from here.
@@ -2472,76 +2516,175 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 /// explanation is in `ncfg wifi status`, which is read once and asked exactly
 /// when somebody wants it.
 fn report_supplicant_event(interface: &str, event: &netcfgd_supplicant::protocol::Event) {
+	if let Some((severity, message)) = supplicant_event_line(interface, event) {
+		netcfgd_sys::log_at!("supplicant", severity, "{message}");
+	}
+}
+
+/// Whether a failed event read means the supplicant is gone.
+///
+/// **Both answers used to arrive as `Err` and both dropped the connection**,
+/// which costs the re-attach and the access point that interface last named --
+/// so the next `CONNECTED` reads as a first association and a roam across it
+/// goes unreported.
+///
+/// `InvalidData` is the reply-too-large check 0224 added, and it says the
+/// datagram was bigger than the buffer. That is a statement about the message,
+/// not about the process that sent it: the socket is fine and the next event
+/// will arrive on it. Everything else -- the socket erroring, the far end gone
+/// -- is the supplicant going away.
+///
+/// Written as "everything except" rather than as a list of the kinds that mean
+/// absence, because the safe direction here is the opposite of
+/// `nothing_is_listening`'s: an unrecognised failure should cost a reconnect,
+/// not a connection held open to a process that is not there.
+fn supplicant_is_gone(error: &std::io::Error) -> bool {
+	error.kind() != std::io::ErrorKind::InvalidData
+}
+
+/// Take an attach outcome, and say whether it is worth a line.
+///
+/// A supplicant that refuses `ATTACH` refuses it on every pass, so the warning
+/// has to be said once rather than several times a second for as long as the
+/// machine is up. `seen` is the radios already complained about.
+///
+/// **Success is passed in here rather than handled at the call site**, and that
+/// is the whole shape of this function. The clearing is the part that can be
+/// wrong: a radio that starts working has to come off the list, or the first
+/// complaint silences every one after it for the life of the process -- which
+/// is the failure mode a de-duplicating log usually ships with.
+///
+/// The first version took only the failure, and the caller did the clearing on
+/// the success path. That split meant a test could cover this function
+/// completely while the clearing was missing from the caller, and it did:
+/// deleting the caller's line broke no test. One entry point, one state
+/// machine, one place for a test to reach it.
+fn complain_about(seen: &mut Vec<String>, interface: &str, outcome: &std::io::Result<()>) -> bool {
+	if outcome.is_ok() {
+		seen.retain(|name| name != interface);
+		return false;
+	}
+	if seen.iter().any(|name| name == interface) {
+		return false;
+	}
+	seen.push(interface.to_owned());
+	true
+}
+
+/// What that line should say, separated from saying it.
+///
+/// **The reporting could not be checked while it was one function.** Every arm
+/// ended in a log macro, which writes to the daemon's log and returns nothing,
+/// so a test could assert that the code compiled and no more -- and the arm 0225
+/// added was the second one in this file to go in with nothing holding it.
+///
+/// Splitting the decision out makes all of them answerable: the severity and the
+/// sentence are a value, and `report_supplicant_event` above is the part that
+/// cannot be tested and no longer has anything in it worth testing.
+///
+/// `None` is "netcfgd has nothing to say about this", which is most of the
+/// stream by volume.
+fn supplicant_event_line(
+	interface: &str,
+	event: &netcfgd_supplicant::protocol::Event,
+) -> Option<(netcfgd_sys::log::Severity, String)> {
+	use netcfgd_sys::log::Severity;
+
 	let field = |key: &str| event.field(key).unwrap_or("?").to_owned();
-	match event.name() {
+	let line = match event.name() {
 		// The one that matters. `reason` is the supplicant's own word for what
 		// gave up -- `CONN_FAILED`, `AUTH_FAILED`, `WRONG_KEY` -- and is worth
 		// more than any sentence written here, so it is passed through.
-		"CTRL-EVENT-SSID-TEMP-DISABLED" => netcfgd_sys::log_warning!(
-			"supplicant",
-			"{interface}: not trying `{}` for {}s -- {} failed attempts so far ({})",
-			field("ssid"),
-			field("duration"),
-			field("auth_failures"),
-			field("reason")
+		"CTRL-EVENT-SSID-TEMP-DISABLED" => (
+			Severity::Warning,
+			format!(
+				"{interface}: not trying `{}` for {}s -- {} failed attempts so far ({})",
+				field("ssid"),
+				field("duration"),
+				field("auth_failures"),
+				field("reason")
+			),
 		),
 		// The recovery half, and it is not decoration: without it the log only
-		// ever says things got worse, and a network that came back looks
-		// exactly like one that is still broken.
-		"CTRL-EVENT-SSID-REENABLED" => netcfgd_sys::log_note!(
-			"supplicant",
-			"{interface}: trying `{}` again",
-			field("ssid")
+		// ever says things got worse, and a network that came back looks exactly
+		// like one that is still broken.
+		"CTRL-EVENT-SSID-REENABLED" => (
+			Severity::Note,
+			format!("{interface}: trying `{}` again", field("ssid")),
 		),
-		// Refused at the 802.11 layer, before any key or credential is
-		// exchanged. A different fault from the one above and worth its own
-		// line: a station refused here is refused by the access point, not by
-		// anything in netcfgd's configuration.
+		// **The other half of that argument, and it was missing (0225).** Every
+		// arm here except the re-enable is bad news: a network not being tried, a
+		// refused station, a scan that failed, a station dropped. A machine that
+		// lost its association at three in the morning and got it back had the
+		// loss in the log and the recovery nowhere, so the record read as an
+		// outage that never ended.
+		//
+		// One line, at note: an association is rare on a desk and one per move on
+		// a laptop, which is the rate somebody reading a day's log wants. A roam
+		// gets no second line -- it is two of these with different addresses, and
+		// the hook the watcher fires is what acts on it.
+		"CTRL-EVENT-CONNECTED" => (
+			Severity::Note,
+			format!(
+				"{interface}: joined {}",
+				event.connected_bssid().unwrap_or("an unnamed access point")
+			),
+		),
+		// Refused at the 802.11 layer, before any key or credential is exchanged.
+		// A different fault from the one above and worth its own line: a station
+		// refused here is refused by the access point, not by anything in
+		// netcfgd's configuration.
 		// **Missed by 0192**, which read the events that say an association is
-		// failing and not the one that says the radio could not even look. 24
-		// of these in three days on the reporting machine, and a scan that
-		// failed is exactly when `SCAN_RESULTS` hands back something old.
-		// `ret=` is the driver's errno, negated: -16 is EBUSY, -100 ENETDOWN.
-		"CTRL-EVENT-SCAN-FAILED" => netcfgd_sys::log_note!(
-			"supplicant",
-			"{interface}: the radio could not scan (ret={})",
-			field("ret")
+		// failing and not the one that says the radio could not even look. 24 of
+		// these in three days on the reporting machine, and a scan that failed is
+		// exactly when `SCAN_RESULTS` hands back something old. `ret=` is the
+		// driver's errno, negated: -16 is EBUSY, -100 ENETDOWN.
+		"CTRL-EVENT-SCAN-FAILED" => (
+			Severity::Note,
+			format!(
+				"{interface}: the radio could not scan (ret={})",
+				field("ret")
+			),
 		),
-		"CTRL-EVENT-AUTH-REJECT" | "CTRL-EVENT-ASSOC-REJECT" => netcfgd_sys::log_warning!(
-			"supplicant",
-			"{interface}: the access point refused this station, status {}",
-			field("status_code")
+		"CTRL-EVENT-AUTH-REJECT" | "CTRL-EVENT-ASSOC-REJECT" => (
+			Severity::Warning,
+			format!(
+				"{interface}: the access point refused this station, status {}",
+				field("status_code")
+			),
 		),
+		// **Who ended it is the whole content of a disconnect.**
+		// `locally_generated=1` is this machine leaving -- netcfgd selecting
+		// another network, a scan, a rekey -- and there are dozens of them on an
+		// ordinary day. The access point dropping the station is the rarer one and
+		// the one somebody would want to know about, so they get different levels
+		// rather than the same line forty-three times.
 		"CTRL-EVENT-DISCONNECTED" => {
-			// **Who ended it is the whole content of a disconnect.**
-			// `locally_generated=1` is this machine leaving -- netcfgd
-			// selecting another network, a scan, a rekey -- and there are
-			// dozens of them on an ordinary day. The access point dropping the
-			// station is the rarer one and the one somebody would want to know
-			// about, so they get different levels rather than the same line
-			// forty-three times.
 			if event.field("locally_generated") == Some("1") {
-				netcfgd_sys::log_at!(
-					"supplicant",
-					netcfgd_sys::log::Severity::Verbose,
-					"{interface}: left {} (reason {})",
-					field("bssid"),
-					field("reason")
-				);
+				(
+					Severity::Verbose,
+					format!(
+						"{interface}: left {} (reason {})",
+						field("bssid"),
+						field("reason")
+					),
+				)
 			} else {
-				netcfgd_sys::log_note!(
-					"supplicant",
-					"{interface}: dropped by {} (reason {})",
-					field("bssid"),
-					field("reason")
-				);
+				(
+					Severity::Note,
+					format!(
+						"{interface}: dropped by {} (reason {})",
+						field("bssid"),
+						field("reason")
+					),
+				)
 			}
 		}
-		// Everything else, including the connect the caller goes on to read,
-		// the scan results, and the DSCP policy traffic that is most of the
-		// stream by volume.
-		_ => {}
-	}
+		// Everything else: the scan results, and the DSCP policy traffic that is
+		// most of the stream by volume.
+		_ => return None,
+	};
+	Some(line)
 }
 
 /// The supplicant's control directory, with the dead sockets taken out of it.
@@ -2645,6 +2788,166 @@ fn spawn_config_watcher(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// An event that could not be read is not a supplicant that went away.
+	///
+	/// The watcher drops the connection for one and not the other, and dropping
+	/// it costs the re-attach and the access point the interface last named --
+	/// after which the next `CONNECTED` reads as a first association and a roam
+	/// across it goes unreported. 0225.
+	#[test]
+	fn only_a_real_failure_drops_the_supplicant_connection() {
+		use std::io::{Error, ErrorKind};
+
+		// The reply-too-large check from 0224. The socket is fine; the message
+		// was bigger than the buffer.
+		assert!(!supplicant_is_gone(&Error::from(ErrorKind::InvalidData)));
+
+		// Everything else costs a reconnect, which is the safe direction here:
+		// an unrecognised failure must not leave this holding a connection to
+		// a process that is not there.
+		for gone in [
+			ErrorKind::BrokenPipe,
+			ErrorKind::ConnectionRefused,
+			ErrorKind::NotFound,
+			ErrorKind::ConnectionReset,
+			ErrorKind::Other,
+		] {
+			assert!(supplicant_is_gone(&Error::from(gone)), "{gone:?}");
+		}
+	}
+
+	/// A radio netcfgd cannot watch is complained about once, and again later.
+	///
+	/// Every diagnostic the watcher reports is read through that connection, so
+	/// a supplicant refusing `ATTACH` silences all of them -- the consequence
+	/// was written in a comment beside the call and never reported. It is said
+	/// once because the attempt repeats every pass; the clearing is what stops
+	/// the first complaint from silencing every one after it. 0225.
+	#[test]
+	fn an_unwatchable_radio_is_named_once_per_spell_of_trouble() {
+		let failed = || Err(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+		let worked = || Ok(());
+		let mut seen: Vec<String> = Vec::new();
+
+		assert!(
+			complain_about(&mut seen, "wlan0", &failed()),
+			"the first is said"
+		);
+		assert!(
+			!complain_about(&mut seen, "wlan0", &failed()),
+			"and not repeated"
+		);
+		assert!(!complain_about(&mut seen, "wlan0", &failed()));
+
+		// A second radio is its own subject.
+		assert!(
+			complain_about(&mut seen, "wlan1", &failed()),
+			"a different radio"
+		);
+
+		// **Recovery goes through the same call**, which is what makes this
+		// test cover the clearing rather than a copy of it. A success is never
+		// itself worth a line.
+		assert!(
+			!complain_about(&mut seen, "wlan0", &worked()),
+			"coming back is not a complaint"
+		);
+		assert!(
+			complain_about(&mut seen, "wlan0", &failed()),
+			"a later failure is news again, not swallowed by the first"
+		);
+		assert!(
+			!complain_about(&mut seen, "wlan1", &failed()),
+			"and the other radio's state was not disturbed"
+		);
+	}
+
+	/// What netcfgd says about each event the supplicant sends it.
+	///
+	/// **Written because the arm that says an association succeeded went in
+	/// without one**, and could not have had one while the whole reporter ended
+	/// in a log macro. Covers every arm, not only the new one: the point of
+	/// separating the decision from the logging was that none of them had ever
+	/// been checkable.
+	#[test]
+	fn every_supplicant_event_says_the_right_thing_at_the_right_level() {
+		use netcfgd_sys::log::Severity;
+
+		let line = |raw: &str| {
+			let event = netcfgd_supplicant::protocol::Event::parse(raw).expect("an event");
+			supplicant_event_line("wlan0", &event)
+		};
+
+		// The one this round added. A machine that got its association back has
+		// to say so, or the log reads as an outage that never ended.
+		let (severity, message) = line(
+			"<3>CTRL-EVENT-CONNECTED - Connection to f0:9f:c2:7e:bd:7d completed [id=0 id_str=]",
+		)
+		.expect("a connect is worth a line");
+		assert_eq!(severity, Severity::Note);
+		assert!(message.contains("joined"), "{message}");
+		assert!(message.contains("f0:9f:c2:7e:bd:7d"), "{message}");
+		assert!(message.starts_with("wlan0:"), "{message}");
+
+		// A connect that named no address must not report joining an empty one.
+		let (_, unnamed) =
+			line("<3>CTRL-EVENT-CONNECTED - Connection completed").expect("still worth a line");
+		assert!(unnamed.contains("unnamed"), "{unnamed}");
+
+		// The failures, which were already here. `ssid` is quoted and contains a
+		// space, which is what a router ships with and what a whitespace split
+		// would truncate.
+		let (severity, message) = line(
+			"<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid=\"Guest Wifi\" auth_failures=45 \
+			 duration=60 reason=CONN_FAILED",
+		)
+		.expect("the one that matters");
+		assert_eq!(severity, Severity::Warning);
+		assert!(message.contains("Guest Wifi"), "the whole name: {message}");
+		assert!(message.contains("45"), "the count: {message}");
+		assert!(message.contains("CONN_FAILED"), "the reason: {message}");
+
+		let (severity, message) =
+			line("<3>CTRL-EVENT-SSID-REENABLED id=0 ssid=\"home\"").expect("the recovery");
+		assert_eq!(severity, Severity::Note);
+		assert!(message.contains("again"), "{message}");
+
+		// **Who ended a disconnect is the whole content of it**, and the two get
+		// different levels so the ordinary one does not bury the rare one.
+		let (severity, message) =
+			line("<3>CTRL-EVENT-DISCONNECTED bssid=a0:a4:7f:23:9a:cf reason=3 locally_generated=1")
+				.expect("a line");
+		assert_eq!(severity, Severity::Verbose, "leaving is the ordinary one");
+		assert!(message.contains("left"), "{message}");
+
+		let (severity, message) =
+			line("<3>CTRL-EVENT-DISCONNECTED bssid=a0:a4:7f:23:9a:cf reason=3").expect("a line");
+		assert_eq!(severity, Severity::Note, "being dropped is the rare one");
+		assert!(message.contains("dropped by"), "{message}");
+
+		let (severity, message) =
+			line("<3>CTRL-EVENT-ASSOC-REJECT bssid=a0:a4:7f:23:9a:cf status_code=17")
+				.expect("a line");
+		assert_eq!(severity, Severity::Warning);
+		assert!(message.contains("17"), "the status code: {message}");
+
+		let (severity, message) =
+			line("<3>CTRL-EVENT-SCAN-FAILED ret=-16 retry=1").expect("a line");
+		assert_eq!(severity, Severity::Note);
+		assert!(message.contains("-16"), "the driver's errno: {message}");
+
+		// And the ones netcfgd has nothing to say about, which are most of the
+		// stream by volume. A reporter that spoke about these would bury the
+		// seven above.
+		for quiet in [
+			"<3>CTRL-EVENT-SCAN-RESULTS ",
+			"<3>CTRL-EVENT-BSS-ADDED 7 a0:a4:7f:23:9a:cf",
+			"<3>CTRL-EVENT-SUBNET-STATUS-UPDATE status=0",
+		] {
+			assert!(line(quiet).is_none(), "should be silent: {quiet}");
+		}
+	}
 
 	/// **Each socket's mode comes from the policy that speaks about it.**
 	///
