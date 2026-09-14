@@ -464,9 +464,26 @@
 # `mac_policy` is the address the radio uses once it has joined something:
 #   permanent       the hardware address. Trackable, and what a network with
 #                   MAC-based admission control needs.
-#   per_network     a fresh address per network, kept for the association.
+#   per_network     a fresh address per network, kept for the association and
+#                   reused if the radio rejoins within a minute.
 #   per_connection  a fresh address every time, including rejoining the same
 #                   network. Breaks DHCP reservations and portal sessions.
+#
+# **Both randomising policies send the same thing to the supplicant**, and what
+# separates them is how long the address is kept. The per-network `mac_addr`
+# key has exactly three values -- the permanent address, a random one per
+# connection, and a random one that keeps the manufacturer prefix -- so there
+# is no value meaning "every time". The freshness comes from the supplicant's
+# `rand_addr_lifetime`, 60 seconds by default, which netcfgd sets from this
+# policy: 60 for `per_network` and 0 for `per_connection`.
+#
+# netcfgd sent the third value for `per_connection` until 0230, which kept the
+# manufacturer prefix -- so the policy documented here as the strongest was the
+# one that said who made the radio.
+#
+# The prefix-keeping value is not offered. Admitting by vendor is a real thing
+# to want, but it is a third policy rather than a stronger second one, and
+# nothing has asked for it.
 #
 # **`scan_randomization` is the other half, and the more exposed one.**
 # `mac_policy` governs the address used once a network is joined; this governs

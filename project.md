@@ -9461,6 +9461,51 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.124 The privacy option that named the vendor
+
+10.114 audited this area and implemented `scan_randomization`. What it did not
+do was check the numbers `mac_policy` turns into against the daemon that reads
+them, because a test already asserted them -- and that test was written from the
+mapping rather than from `wpa_supplicant.conf`. Its own doc comment names the
+risk: *"the numbers are not guessable from the names, and getting one wrong is a
+privacy setting that silently does something else."* It then asserted the wrong
+number.
+
+**Two is not "more random", it is "keeps the vendor".** The daemon documents the
+three values of `mac_addr`, per-network and global alike, as: 0 the permanent
+address, 1 a random one for each ESS connection, and **2 like 1 but maintaining
+the OUI** -- the first three octets, which say who made the radio. netcfgd's
+table called 2 "a random address per association" and mapped `per_connection` to
+it. So for the policy documented as the strongest, netcfgd sent the one value
+that identifies the hardware. Decision 0230.
+
+Checked against a real supplicant: `mac_addr` takes 0, 1 and 2 and refuses 3 and
+4, so there is no number that ever meant "per association". The distinction the
+model offers is not one that key makes.
+
+**What separates them is `rand_addr_lifetime`**, a global at 60 seconds by
+default: a random address is reused while it is still in date, so rejoining
+inside a minute comes back on the same one. That is exactly `per_network`'s
+documented meaning and zero is exactly `per_connection`'s. Both policies now
+send `mac_addr 1` and differ in the lifetime, sent in both directions for 0015's
+reason. A global costs nothing here, which usually it would: `mac_policy` is a
+property of the *device*, so there is one policy per radio and one supplicant
+per radio, and no second network to disagree.
+
+Nothing gets weaker for a machine already running: `per_connection` moves from 2
+to 1, which stops the address carrying the manufacturer prefix. The
+prefix-keeping value is now unreachable from the model -- admitting by vendor is
+a real thing to want, but it is a third policy rather than a stronger second
+one.
+
+**The fifth fixture written from the code, and the clearest.** A test that
+stated the hazard in prose, in the same paragraph as the assertion that embodied
+it. 10.116 had two, 10.118 a third, 10.119 a seam that simulated its own call
+site. What separates this one is that the correct source was a file on the same
+machine the whole time: `wpa_supplicant.conf` is installed under
+`/usr/share/doc/wpasupplicant/examples/`, it documents the key in two places,
+and both say the same thing. Nobody opened it.
+
 ## 10.123 A passphrase is octets
 
 The careful parts of this area hold up: a passphrase is always quoted on its way
