@@ -502,6 +502,26 @@
 # other**, and netcfgd does both: the fixed address holds until the radio
 # associates and not after. `ncfg plan` warns.
 #
+# **Half of 5 GHz is shared with radar, and costs a wait.** Channels 52 to 64
+# and 100 to 144 need a channel availability check before an access point may
+# beacon on them: the radio listens first, typically for a minute and longer on
+# some channels, and sends nothing until it is done. `ncfg apply` returns as
+# soon as hostapd is started, so an access point on one of those channels is
+# configured, running and silent for a while -- which looks exactly like one
+# that is broken. `ncfg plan` says so.
+#
+# They are worth using anyway: they are the half of 5 GHz that is usually
+# empty. Channels 36 to 48 and 149 upwards need no wait.
+#
+# netcfgd writes `ieee80211h=1` beside the country code, which is what enables
+# radar detection at all -- hostapd defaults it off and documents DFS support
+# as "required on outdoor 5 GHz channels in most countries of the world". It
+# did not until 0232, so a DFS channel was configurable and could not work.
+# Both lines go together because hostapd says `ieee80211h` "can be used only
+# with ieee80211d=1", and that is written from `regdom` -- so **an access point
+# with no `regdom` has no radar detection either**, which is one more reason to
+# set one.
+
 # **`band` and `channel` have to agree, and now say so at compile time.**
 # 2.4 GHz is channels 1-14 and 5 GHz is 36-177. `band = "2.4"` with
 # `channel = 36` used to compile and plan cleanly and fail at `ncfg apply`,

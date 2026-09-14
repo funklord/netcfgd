@@ -9461,6 +9461,51 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.126 A country without radar detection
+
+0221 covered the country code, and 10.124's lesson was that an existing
+assertion is not a source -- so this round went back over what that one
+*assumed* rather than what it concluded. `ieee80211h` had been raised during it
+and set aside as unverifiable. It is verifiable, from a file on the same
+machine.
+
+netcfgd writes `country_code` and `ieee80211d=1` when an access point names a
+`regdom`, and never wrote `ieee80211h`. hostapd's own documentation: *"This
+enables radar detection and DFS support if available. DFS support is required on
+outdoor 5 GHz channels in most countries of the world. This can be used only
+with ieee80211d=1. (default: 0 = disabled)"* The radio here marks **fifteen** of
+its 5 GHz channels `radar detection` -- 52 to 64 and 100 to 144 -- and
+`channel_in_band` accepts the whole 36..=177 range, so every one of them
+compiled, planned and rendered into a configuration with DFS support switched
+off. Written now, in the same branch, because hostapd says the two go together.
+Decision 0232.
+
+**What is measured and what is not.** Measured: hostapd documents the flag and
+defaults it off; the radio marks fifteen channels; the reference test hands
+every rendered variant to the real hostapd 2.10, which accepts the new line --
+and its companion test proves that check can fail. Not measured: what hostapd
+does on a DFS channel *without* the flag. That needs a radio, and the only way
+to get one here is `mac80211_hwsim` on a machine whose netcfgd enumerates
+radios, which would hand the running daemon two interfaces it did not have a
+moment ago.
+
+**And the wait nothing mentioned.** A DFS channel needs a channel availability
+check before the access point may beacon: the radio listens, typically a minute,
+and sends nothing meanwhile. `ncfg apply` returns as soon as hostapd starts, so
+the access point is configured, running and silent -- which looks exactly like
+one that is broken. Warned rather than refused: a DFS channel is a legitimate
+and often deliberate choice, being the half of 5 GHz that is usually empty. The
+range lives in the model despite `channel_in_band`'s rule against channel
+tables, and the exception is earned by it driving a warning rather than a
+refusal -- being wrong costs a sentence, not an access point.
+
+**Channel width is not a defect yet.** Nothing writes `ht_capab` or
+`vht_oper_chwidth`, and 10.116 recorded why: no `ieee80211n` either, so an
+access point runs at 802.11a/g rates and 20 MHz is the only width it has. Width
+becomes a question when that changes and not before. The station sets none of
+`disable_ht`/`disable_ht40`/`disable_vht`, which is right -- those exist to work
+around broken access points.
+
 ## 10.125 A radio detected by a compatibility layer
 
 `is_wireless` decides whether netcfgd treats an interface as a radio, and five
