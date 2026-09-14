@@ -9630,10 +9630,17 @@ with time left, a slept-through machine, and a moved clock.
 
 **Threads are still not supervised**, and that is recorded rather than fixed.
 The two whose work has a deadline now have backstops that do not depend on them
--- the loop's own tick (10.127) and the window's. `roam` and `rfkill` have none
-and would go quiet; both report rather than drive, so the cost is diagnosis, but
-it is a real cost. Restarting a dead watcher needs somewhere to decide when to
-give up, which is a design question rather than a patch.
+-- the loop's own tick (10.127) and the window's. `roam` and `rfkill` cost
+promptness rather than detection: the tick re-observes, so a flipped kill switch
+is noticed within five seconds instead of as it happens, and a roam is read from
+the associated address on the observation's own path -- what a dead `roam`
+thread loses is the hooks and 10.122's diagnostics. Restarting a dead watcher
+needs somewhere to decide when to give up, which is a design question rather
+than a patch.
+
+*(This paragraph said "`roam` and `rfkill` have none and would go quiet" when it
+was written, which is wrong in both halves. Corrected here and in 0234; 10.132
+has why it was wrong and what it says about writing these.)*
 
 **And the second sabotage passed on its first run**, against a fix written
 minutes earlier -- the seventh time in this campaign that a change went in with

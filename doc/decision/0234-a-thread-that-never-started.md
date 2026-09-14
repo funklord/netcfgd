@@ -106,6 +106,24 @@ configuration -- but it is a real cost and it is recorded here rather than
 fixed. Restarting a watcher that died needs somewhere to decide *when to give
 up*, and that is a design question rather than a patch.
 
+**That paragraph is wrong about `rfkill` and too broad about `roam` (0238).**
+The loop re-observes on a tick -- `if kernel_changed || config_changed ||
+probe_changed || ticked` -- so a dead rfkill watcher costs promptness and not
+detection: a flipped switch is noticed within the tick instead of as it
+happens. `spawn_rfkill_watcher`'s own documentation says exactly that, in the
+file this decision was written from: *"an observation runs on a netlink event or
+on the loop's five-second backstop"*, and the watcher exists to make the report
+**prompt**, not to make it possible.
+
+`roam` is narrower than "goes quiet" too. `Command::Roamed` drives the roam
+hooks and nothing else, and the observation reads the associated address on its
+own path, so a dead roam watcher costs the hooks and the supplicant diagnostics
+of 0225 -- not netcfgd's knowledge of which access point it is on.
+
+Asserted rather than checked, one round after 0233 gave the loop the tick that
+makes the first half untrue. The line to have read was three hundred above the
+one being edited.
+
 ## Sabotage
 
 | reverted | test | result |
