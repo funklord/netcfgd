@@ -2,11 +2,34 @@
 
 //! `netcfgd`: watch, reconcile, and answer the control socket.
 //!
-//! The shape is three watcher threads feeding one `mpsc` receiver, and a
-//! single-threaded loop that owns all the state. No locks, because nothing is
-//! shared; no async runtime, because a daemon whose steady state is "asleep on
-//! a channel" does not need one; no epoll, because that would mean `unsafe`
-//! outside the one crate allowed it.
+//! The shape is four watcher threads -- netlink, the config directory, rfkill
+//! and the supplicants -- plus a one-shot timer for a commit-confirm window,
+//! all feeding one `mpsc` receiver, and a single-threaded loop that owns all
+//! the state. No locks, because nothing is shared. No async runtime, because a
+//! daemon whose steady state is "asleep on a channel" does not need one.
+//!
+//! **This used to say "no epoll, because that would mean `unsafe` outside the
+//! one crate allowed it", and that was not true (0235).** Every one of those
+//! watchers is already a safe wrapper in `netcfgd-sys` over a blocking syscall,
+//! and `netcfgd_sys::signals::wait` is already a two-descriptor `libc::poll`
+//! with the `unsafe` contained exactly where constraint 4 puts it. A `poll` or
+//! `epoll` over several descriptors would live in the same place. The
+//! constraint is "`unsafe` lives in one crate", and multiplexing does not touch
+//! it.
+//!
+//! So the real reason is preference, and it should be read as one: a blocking
+//! call per source is easier to follow than a readiness loop with a state
+//! machine per descriptor, and this daemon's sources are few and slow. What it
+//! costs is a class of fault that a single loop does not have -- 0233 lost the
+//! reconcile loop's heartbeat when a thread returned, and 0234 found five
+//! spawns whose failure nothing would have reported. Both are fixed and neither
+//! could have happened without the threads.
+//!
+//! Every watcher source is a pollable descriptor, so collapsing them is
+//! available whenever it is wanted. The **workers** are not the same question:
+//! a client connection blocks on a reader that may stop reading, and a scan
+//! takes seconds, so those are threads for a reason that survives any shape the
+//! watchers take.
 
 mod authorize;
 mod confirm;
@@ -277,7 +300,22 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		// read and cannot be fooled by an extra timer: a window with time left
 		// is not one that closed. A stale timer now finds nothing to do, which
 		// is what `spawn_expiry_timer`'s comment always claimed happened.
-		if confirm_expired {
+		//
+		// **On the tick as well, because a timer that never started closes
+		// nothing (0234).** `spawn_expiry_timer` discarded the result of
+		// `spawn`, so a thread that could not start left the window open for
+		// ever -- and this call was the only thing that closed one, so the
+		// change an operator did not confirm stayed applied. That is the
+		// failure commit-confirm exists to prevent, arriving through the
+		// mechanism meant to prevent it.
+		//
+		// The timer stays, for the reason its own comment gives: a safety
+		// mechanism that fires up to five seconds late is one whose window is
+		// not the length it says. What the tick adds is that a *missing* timer
+		// costs seconds rather than the window. The check above is what makes
+		// this free -- a window with time left is not one that closed, so
+		// asking on every pass costs one clock read and can do nothing else.
+		if should_resolve_window(confirm_expired, ticked) {
 			resolve_expired_window(&mut state, &mut subscribers);
 		}
 
@@ -1058,7 +1096,7 @@ pub fn probe_helper_main() -> std::process::ExitCode {
 /// nothing, because "this laptop has no wifi" is not a warning.
 fn spawn_rfkill_watcher(commands: &Sender<Command>, device: PathBuf) {
 	let commands = commands.clone();
-	let _ = std::thread::Builder::new()
+	let started = std::thread::Builder::new()
 		.name("rfkill".to_owned())
 		.spawn(move || {
 			// **A machine with no radio has no `/dev/rfkill`, and that is not a
@@ -1113,6 +1151,10 @@ fn spawn_rfkill_watcher(commands: &Sender<Command>, device: PathBuf) {
 				}
 			}
 		});
+	note_spawn(
+		"kill-switch changes on this radio will not be noticed",
+		started,
+	);
 }
 
 /// Probe for a captive portal on an interface that has just become addressed.
@@ -2325,12 +2367,16 @@ fn add_network_request(state: &mut State, wanted: &wifi::Wanted<'_>) -> Response
 /// fires and the loop finds no window to close, which costs nothing.
 fn spawn_expiry_timer(commands: &Sender<Command>, seconds: u32) {
 	let commands = commands.clone();
-	let _ = std::thread::Builder::new()
+	let started = std::thread::Builder::new()
 		.name("confirm".to_owned())
 		.spawn(move || {
 			std::thread::sleep(std::time::Duration::from_secs(u64::from(seconds)));
 			let _ = commands.send(Command::ConfirmExpired);
 		});
+	note_spawn(
+		"a commit-confirm window will not close on time; the loop's tick closes it within five seconds instead",
+		started,
+	);
 }
 
 /// Watch every radio's control socket for the one event an observation cannot
@@ -2354,7 +2400,7 @@ fn spawn_expiry_timer(commands: &Sender<Command>, seconds: u32) {
 /// firing then would run the hook on every boot.
 fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 	let commands = commands.clone();
-	let _ = std::thread::Builder::new()
+	let started = std::thread::Builder::new()
 		.name("roam".to_owned())
 		.spawn(move || {
 			// interface -> (attached client, the access point it last named).
@@ -2488,6 +2534,10 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 				watching.retain(|(interface, _, _)| !lost.contains(interface));
 			}
 		});
+	note_spawn(
+		"roaming, authentication failures and refused associations will go unreported",
+		started,
+	);
 }
 
 /// Say, in netcfgd's own log, what the supplicant just said about the link.
@@ -2713,6 +2763,60 @@ fn swept_ctrl_dir() -> PathBuf {
 	ctrl_dir
 }
 
+/// Whether this pass should ask the confirm window whether it closed.
+///
+/// A named decision rather than an inline `||`, because the second half is a
+/// policy that reads like an accident and was absent (0234): **a tick must
+/// check, not only the timer's own message.** `spawn_expiry_timer` discarded
+/// the result of `spawn`, so a timer that could not start left the window open
+/// for ever -- and this was the only thing that closed one, which made the
+/// silent failure of a safety mechanism into a change that never reverted.
+///
+/// The timer stays for the reason its own comment gives: a safety mechanism
+/// that fires up to five seconds late is one whose window is not the length it
+/// says. What the tick adds is that a *missing* timer costs seconds rather than
+/// the window.
+///
+/// Safe to ask on every pass because the resolver asks the window whether it
+/// has really expired, and `Window::expired_at` is tested against a window with
+/// time left, a machine that slept through one, and a clock somebody moved.
+fn should_resolve_window(confirm_expired: bool, ticked: bool) -> bool {
+	confirm_expired || ticked
+}
+
+/// Note that a thread the daemon depends on could not be started.
+///
+/// **Five spawns discarded their result with `let _ =` (0234).** A thread that
+/// never started is indistinguishable from one that is running: the process
+/// comes up, systemd calls it active, and whatever that thread was for simply
+/// never happens. `serve` already does this correctly for the control thread --
+/// `.spawn(...)?`, so a daemon that cannot accept connections fails to start
+/// rather than pretending -- and the five here did not.
+///
+/// Returns whether it started, and says what was lost when it did not. `lost`
+/// is a sentence about the consequence rather than the thread's name, because
+/// the name is what netcfgd calls it and the consequence is what the operator
+/// will see.
+///
+/// The handle is dropped, which detaches the thread: that is what `let _ =`
+/// did, and it is right. None of these is joined -- the daemon outlives them or
+/// exits without waiting.
+fn note_spawn(lost: &str, outcome: std::io::Result<std::thread::JoinHandle<()>>) -> bool {
+	match outcome {
+		Ok(handle) => {
+			drop(handle);
+			true
+		}
+		Err(error) => {
+			netcfgd_sys::log_error!(
+				"daemon",
+				"a watcher thread could not start ({error}): {lost}"
+			);
+			false
+		}
+	}
+}
+
 /// The next command, or a tick if nothing arrives in time.
 ///
 /// **The loop's heartbeat used to be a gift from another thread, and one
@@ -2743,7 +2847,7 @@ fn next_command(incoming: &std::sync::mpsc::Receiver<Command>) -> Option<Command
 
 fn spawn_kernel_watcher(commands: &Sender<Command>) {
 	let commands = commands.clone();
-	let _ = std::thread::Builder::new()
+	let started = std::thread::Builder::new()
 		.name("netlink".to_owned())
 		.spawn(move || {
 			let Ok(socket) = Netlink::open_with_groups(groups::OBSERVED) else {
@@ -2775,6 +2879,10 @@ fn spawn_kernel_watcher(commands: &Sender<Command>) {
 				}
 			}
 		});
+	note_spawn(
+		"kernel changes will be noticed only on the loop's own tick, not as they happen",
+		started,
+	);
 }
 
 fn spawn_config_watcher(
@@ -2796,7 +2904,7 @@ fn spawn_config_watcher(
 	let mechanism = watcher.mechanism().name();
 
 	let commands = commands.clone();
-	let _ = std::thread::Builder::new()
+	let started = std::thread::Builder::new()
 		.name("config".to_owned())
 		.spawn(move || loop {
 			match watcher.wait(TICK_MS) {
@@ -2812,6 +2920,10 @@ fn spawn_config_watcher(
 				}
 			}
 		});
+	note_spawn(
+		"a configuration change will not be noticed until something else wakes the loop",
+		started,
+	);
 	mechanism
 }
 
@@ -2890,6 +3002,60 @@ mod tests {
 		assert!(
 			!complain_about(&mut seen, "wlan1", &failed()),
 			"and the other radio's state was not disturbed"
+		);
+	}
+
+	/// A tick asks the confirm window whether it closed, not only the timer.
+	///
+	/// **The timer was the only thing that asked, and its spawn result was
+	/// discarded (0234).** A timer that could not start left the window open
+	/// for ever, so a change the operator never confirmed stayed applied --
+	/// which is the failure commit-confirm exists to prevent, arriving through
+	/// the mechanism meant to prevent it.
+	#[test]
+	fn a_tick_also_asks_whether_the_window_closed() {
+		// The timer fired: ask, obviously.
+		assert!(should_resolve_window(true, false));
+		// **The one this test exists for.** No timer message, just the loop's
+		// own heartbeat -- and it must still ask.
+		assert!(
+			should_resolve_window(false, true),
+			"a tick has to ask, or a timer that never started loses the window"
+		);
+		// Both, which is the ordinary case once a timer exists.
+		assert!(should_resolve_window(true, true));
+		// And a pass woken by something else entirely -- a netlink event, a
+		// client request -- has no reason to read the clock.
+		assert!(!should_resolve_window(false, false));
+	}
+
+	/// A thread that cannot start is reported, not discarded.
+	///
+	/// **Five spawns dropped their result with `let _ =` (0234).** A thread
+	/// that never started is indistinguishable from one that is running: the
+	/// process comes up, systemd calls it active, and whatever that thread was
+	/// for never happens. The sharpest was the commit-confirm timer, whose
+	/// failure to start left the window open for ever -- the safety mechanism
+	/// failing through the mechanism meant to be the safety.
+	#[test]
+	fn a_thread_that_cannot_start_is_reported() {
+		// The ordinary case: it started, and the answer is yes.
+		let started = std::thread::Builder::new()
+			.name("test-watcher".to_owned())
+			.spawn(|| {});
+		assert!(note_spawn("nothing is lost", started));
+
+		// And the case that was silent. A synthetic failure, because a real
+		// one needs the machine to be out of threads -- and what can be wrong
+		// here is the handling, not the detection.
+		// EAGAIN is what a thread spawn fails with when the process or the
+		// user is at its limit. Written as the number rather than through
+		// `libc`, which this crate does not depend on and should not start
+		// depending on for a test.
+		let failed = Err(std::io::Error::from_raw_os_error(11));
+		assert!(
+			!note_spawn("the thing this thread does will not happen", failed),
+			"a spawn that failed is not a thread that is running"
 		);
 	}
 

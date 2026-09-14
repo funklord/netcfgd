@@ -2,9 +2,19 @@
 //!
 //! No epoll, no async runtime. A blocking accept and a blocking read per
 //! connection, with `mpsc` carrying the work to a single-threaded state
-//! machine. That keeps every crate but `netcfgd-sys` free of `unsafe`
-//! (constraint 4), keeps the daemon's state free of locks, and costs a thread
-//! per client on a socket that will normally have one or two.
+//! machine. That keeps the daemon's state free of locks and costs a thread per
+//! client on a socket that will normally have one or two.
+//!
+//! **The thread per connection is the part with a reason.** A client that stops
+//! reading blocks only itself; a readiness loop would need a parser that can be
+//! suspended mid-message for every connection, which is a great deal of machinery
+//! for a socket with two clients on it.
+//!
+//! This used to add "that keeps every crate but `netcfgd-sys` free of `unsafe`
+//! (constraint 4)", which does not follow and is removed (0235): a poll-based
+//! server would keep `unsafe` in that crate too, exactly as
+//! `netcfgd_sys::signals::wait` already does. Constraint 4 is about where
+//! `unsafe` lives, not about which I/O shape is allowed.
 
 use crate::authorize::Origin;
 use netcfgd_model::control::named_groups;
