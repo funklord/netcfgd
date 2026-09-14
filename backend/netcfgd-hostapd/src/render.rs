@@ -440,6 +440,28 @@ pub fn config(
 		// clients never learn which regulatory domain they are in. hostapd
 		// accepts the one without the other; it is not useful.
 		lines.push(Line::plain("ieee80211d", "1"));
+		// **And radar detection, without which half of 5 GHz cannot be used
+		// (0232).** hostapd's own documentation:
+		//
+		// ```text
+		// # Enable IEEE 802.11h. This enables radar detection and DFS support
+		// # if available. DFS support is required on outdoor 5 GHz channels in
+		// # most countries of the world. This can be used only with
+		// # ieee80211d=1.
+		// # (default: 0 = disabled)
+		// ```
+		//
+		// The radio on the reporting machine marks fifteen of its 5 GHz
+		// channels "radar detection" -- 52 through 64 and 100 through 144 --
+		// and netcfgd would write a configuration for any of them with DFS
+		// support switched off. `channel_in_band` accepts the whole 36..=177
+		// range, so they compile and plan like any other.
+		//
+		// Written in this branch and not unconditionally, because hostapd says
+		// it "can be used only with ieee80211d=1" and that is exactly the line
+		// above. An access point with no `regdom` gets neither, which is the
+		// same answer it already had.
+		lines.push(Line::plain("ieee80211h", "1"));
 	}
 
 	if access_point.hidden {
@@ -749,6 +771,24 @@ mod tests {
 		let lines = rendered(&point, None);
 		assert_eq!(value_of(&lines, "country_code"), Some("SE"));
 		assert_eq!(value_of(&lines, "ieee80211d"), Some("1"));
+		// **Radar detection, without which half of 5 GHz is unusable (0232).**
+		// hostapd defaults it off and documents DFS support as "required on
+		// outdoor 5 GHz channels in most countries of the world". The radio on
+		// the reporting machine marks fifteen of its channels as needing it.
+		assert_eq!(
+			value_of(&lines, "ieee80211h"),
+			Some("1"),
+			"a country without radar detection cannot use the DFS channels"
+		);
+
+		// Neither line without a country, because hostapd says `ieee80211h`
+		// "can be used only with ieee80211d=1" -- so the pair travels together
+		// or not at all.
+		let mut bare = access_point(Security::Open);
+		bare.regdom = None;
+		let without = rendered(&bare, None);
+		assert_eq!(value_of(&without, "ieee80211d"), None);
+		assert_eq!(value_of(&without, "ieee80211h"), None);
 
 		point.regdom = Some("SWE".to_owned());
 		assert_eq!(
