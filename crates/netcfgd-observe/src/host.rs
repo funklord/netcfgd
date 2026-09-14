@@ -336,6 +336,35 @@ fn carried(state: &netcfgd_sys::wg::DeviceState) -> netcfgd_model::ObservedWireG
 /// window says the machine is associated with. A backend that is not
 /// `wpa_supplicant` leaves the field `None`, and `None` means the interface's
 /// own preference stands.
+/// Whether a supplicant has lost every network netcfgd gave it.
+///
+/// **A record of what netcfgd did is not a statement about what is (0237).**
+/// The digest comparison below asks netcfgd's own memory, so a supplicant that
+/// was emptied afterwards -- while staying reachable, so nothing else notices --
+/// compares equal and is left alone. The machine has no wifi and netcfgd reports
+/// it as matching.
+///
+/// The mechanism is ordinary. `RECONFIGURE` makes the supplicant re-read its
+/// configuration file, and the file netcfgd writes names no networks: every
+/// network netcfgd holds was added over the control socket. `REMOVE_NETWORK
+/// all` does the same more directly, and so does anything that restarts the
+/// supplicant without netcfgd noticing.
+///
+/// **Emptiness rather than a count**, deliberately. `LIST_NETWORKS` cannot
+/// confirm a set -- it returns ids and SSIDs, not settings -- but it can refute
+/// one, and "none at all where the document asks for some" is the refutation
+/// that cannot be argued with. A count comparison would be finer and would also
+/// have to be right about every case where the two legitimately differ, and
+/// being wrong there is a supplicant repopulated on every pass: the restart
+/// loop 0222 records twice.
+///
+/// So a population that failed part-way through is **not** caught by this,
+/// because it leaves some networks behind. That is recorded in 0237 rather than
+/// claimed.
+fn supplicant_was_emptied(listed: usize, wanted: usize) -> bool {
+	listed == 0 && wanted > 0
+}
+
 /// Whether the supplicant on `interface` still holds the document's networks.
 ///
 /// Compares a digest of what netcfgd recorded handing over against a digest of
@@ -469,7 +498,32 @@ fn ask_supplicants(
 		//
 		// The answer travels, not the values -- the same trade `secret_matches`
 		// makes, and for the same reason: this is serialised into `/run`.
-		let matches = supplicant_networks_match(&interface, run_dir, document);
+		//
+		// **The record is what netcfgd did, not what is (0237).** It cannot see
+		// a supplicant that lost the networks afterwards while staying
+		// reachable, and that is not hypothetical -- `RECONFIGURE` re-reads a
+		// configuration file which, for the one netcfgd writes, names no
+		// networks. Measured against wpa_supplicant 2.10 on the `none` driver:
+		//
+		// ```text
+		// LIST_NETWORKS  ->  0  probe  any
+		// RECONFIGURE    ->  OK
+		// LIST_NETWORKS  ->  (empty)
+		// PING           ->  PONG
+		// ```
+		//
+		// So the coarse question is asked of the supplicant, on the connection
+		// already open, and it overrides the record. `LIST_NETWORKS` cannot
+		// confirm a set but it can refute one.
+		let listed = client
+			.ask("LIST_NETWORKS")
+			.map(|body| netcfgd_supplicant::protocol::parse_network_list(&body).len());
+		let matches =
+			if listed.is_ok_and(|count| supplicant_was_emptied(count, document.networks.len())) {
+				Some(false)
+			} else {
+				supplicant_networks_match(&interface, run_dir, document)
+			};
 		if let Some(backend) = observed.backends.iter_mut().find(|backend| {
 			backend.interface == interface && backend.kind == netcfgd_model::BackendKind::Supplicant
 		}) {
@@ -1038,6 +1092,43 @@ fn read_netfilter(observed: &mut Observed) {
 
 #[cfg(test)]
 mod tests {
+	/// A supplicant that lost its networks is not one that matches.
+	///
+	/// **The digest compares netcfgd's record against the document, and neither
+	/// side asks the supplicant (0237).** So a supplicant emptied afterwards --
+	/// while staying reachable, so nothing else notices -- compares equal and is
+	/// left alone: no wifi, and netcfgd reporting a match.
+	///
+	/// Measured against `wpa_supplicant` 2.10 on the `none` driver, which is where
+	/// the mechanism came from rather than from reasoning about it:
+	///
+	/// ```text
+	/// LIST_NETWORKS -> 0 probe any      RECONFIGURE -> OK
+	/// LIST_NETWORKS -> (empty)          PING        -> PONG
+	/// ```
+	#[test]
+	fn an_emptied_supplicant_is_refuted_whatever_the_record_says() {
+		// Nothing asked for and nothing held: not a fault, and the case that
+		// would repopulate for ever if this were written the other way round.
+		assert!(!super::supplicant_was_emptied(0, 0));
+
+		// **The one this exists for.** The document names a network and the
+		// supplicant holds none.
+		assert!(
+			super::supplicant_was_emptied(0, 1),
+			"a supplicant with nothing in it does not hold the document's networks"
+		);
+		assert!(super::supplicant_was_emptied(0, 4));
+
+		// And a supplicant that holds something is left to the digest, which is
+		// the only thing that can tell whether it holds the *right* something --
+		// including a count that disagrees, which this deliberately does not
+		// judge.
+		assert!(!super::supplicant_was_emptied(1, 1));
+		assert!(!super::supplicant_was_emptied(1, 5));
+		assert!(!super::supplicant_was_emptied(5, 1));
+	}
+
 	use super::*;
 
 	/// Everything the planner compares comes back out of the file unchanged.
@@ -1229,6 +1320,7 @@ mod tests {
 
 #[cfg(test)]
 mod bluetooth_tests {
+
 	use super::*;
 	use netcfgd_testdir::TestDir;
 
