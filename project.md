@@ -9461,6 +9461,46 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.130 The setting that decided nothing
+
+The disconnect path is sound. `ncfg wifi disconnect` sends `DISCONNECT` rather
+than `REMOVE_NETWORK`, with the reason beside it -- the network stays configured
+and in the supplicant, so reconnecting resolves no credential again and the next
+reconcile does not see one missing and put it back. `ncfg wifi connect` uses
+`SELECT_NETWORK` rather than `ENABLE_NETWORK`, which disables the others: the
+difference between joining one network and adding one to the set. The
+per-network `autoconnect` is acted on, with a comment saying why.
+
+**The radio's `autoconnect` was read nowhere.** The model documents it as
+"whether to connect to known networks without being asked"; it is parsed, kept,
+rendered back by `ncfg profile save`, carried in the frozen schema, and read by
+nothing -- a radio told `autoconnect = false` joined networks anyway. The
+planner did not warn either: `warn_wifi_device_policy` lists `regdom` and
+`powersave` and not this, so nothing said the setting was inert. That is 0061's
+shape inside the function written to prevent it. Acted on now: a radio that does
+not join by itself is sent `DISABLE_NETWORK all` after its networks -- after,
+because `add_network` enables each one it adds. Asked of a real supplicant:
+`DISABLE_NETWORK all` is OK, `99` is FAIL, and `LIST_NETWORKS` then shows
+`[DISABLED]`. Decision 0236.
+
+**And neither flag reached the digest.** `autoconnect` drives `ENABLE_NETWORK`,
+which is not a `SET_NETWORK`, and the digest is built from rendered settings --
+so changing it left the digest identical, the planner saw no drift, the
+supplicant was never repopulated, and the edit did nothing. A network the
+operator had just marked automatic stayed disabled. Both are in the digest now,
+each adding a line **only when the answer is not the default**, so a machine
+where everything joins automatically is byte-identical to the previous build and
+an upgrade repopulates nothing -- 10.114's asymmetry, for its reason.
+
+**What is not covered, stated rather than claimed.** That the disable is *sent*
+when a radio says `autoconnect = false` has no end-to-end test: no existing live
+script writes that document, and reshaping `privacy.sh` (IPv6 temporary
+addresses) or `select.sh` (the manager switcher) to carry it would make either a
+test of two things. That half rests on a named predicate with its own test plus
+a one-line guard. The opposite half -- that an ordinary radio is *not* sent the
+command -- is covered live, because the half of a new behaviour most likely to
+be wrong is the one that fires when it should not.
+
 ## 10.129 A reason that was not one
 
 Asked, after two rounds had fixed faults that exist only because the watchers

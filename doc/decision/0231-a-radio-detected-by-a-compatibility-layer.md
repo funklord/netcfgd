@@ -149,3 +149,30 @@ debhelper strips the packaged one and splits the symbols into
 unchanged sources the shim is byte-identical, so the build is reproducible and
 only the comparison was wrong.
 
+## The explanation above is incomplete, and 0236 showed it
+
+That section concluded that the shim's binary changed because it links
+`netcfgd-sys` at depth four. 0236 changed `netcfgd-supplicant` -- reachable by
+the same path, `cargo tree --edges normal` confirms it is a real dependency and
+not a dev one -- and the shim's binary came out **byte-identical**.
+
+So "links the changed crate" does not predict "the binary changes", and the
+rule this section stated is not the rule. Two observations stand and no model
+covers both:
+
+```text
+0231  netcfgd-sys changed        shim binary changed
+0236  netcfgd-supplicant changed shim binary unchanged
+```
+
+The obvious hypothesis is reachability -- the changed code is dropped when
+nothing in the shim calls it -- and it was tested and came back
+**inconclusive**: `nm` sees 14801 symbols in that binary and none matching
+`fingerprint`, `is_wireless`, `add_network`, `netcfgd_supplicant` or
+`netcfgd_sys::radio`, so it cannot separate the two cases. Generics and inlining
+have left nothing under those names to look for.
+
+Recorded as unresolved rather than replaced with a guess. What it costs in the
+meantime is a prediction: whether that binary moves is not something to assert
+confidently before an install.
+
