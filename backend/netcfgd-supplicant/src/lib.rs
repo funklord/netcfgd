@@ -21,7 +21,10 @@ pub use client::{
 	is_reply_socket, nothing_is_listening, reap_reply_sockets, wait_for_connect, wait_for_scan,
 	Client, CONNECT_PATIENCE, DEFAULT_CTRL_DIR, IMPATIENT, SCAN_PATIENCE,
 };
-pub use network::{fingerprint, mac_addr_value, settings, wired_settings, Setting, Unsupported};
+pub use network::{
+	fingerprint, mac_addr_value, rand_addr_lifetime_value, settings, wired_settings, Setting,
+	Unsupported,
+};
 pub use protocol::{Event, NetworkEntry, Reply, ScanResult};
 
 use netcfgd_model::WifiNetwork;

@@ -738,13 +738,48 @@ fn a_network_that_pins_a_ca_certificate_still_names_the_file() {
 /// The `mac_addr` mapping, which is the whole of the MAC randomization
 /// feature at this layer. The numbers are not guessable from the names, and
 /// getting one wrong is a privacy setting that silently does something else.
+///
+/// **That is what happened, and this test held the wrong number in place
+/// (0230).** `PerConnection` asserted 2, and `wpa_supplicant.conf` documents
+/// the three values -- per-network and global alike -- as:
+///
+/// ```text
+/// 0 = use permanent MAC address
+/// 1 = use random MAC address for each ESS connection
+/// 2 = like 1, but maintain OUI (with local admin bit set)
+/// ```
+///
+/// So 2 keeps the manufacturer prefix: for the policy netcfgd documents as the
+/// strongest, it was sending the one value that says who made the radio. The
+/// sentence above was written and then not acted on, because the assertion was
+/// copied from the mapping rather than read out of the daemon's own
+/// documentation.
+///
+/// Checked against a real supplicant as well: `SET_NETWORK 0 mac_addr` takes 0,
+/// 1 and 2 and refuses 3 and 4, so the value space is the three documented ones
+/// and there is no fourth that would have meant "per association".
 #[test]
 fn the_mac_policy_maps_to_the_documented_numbers() {
-	use netcfgd_supplicant::mac_addr_value;
+	use netcfgd_supplicant::{mac_addr_value, rand_addr_lifetime_value};
 
 	assert_eq!(mac_addr_value(MacPolicy::Permanent), "0");
 	assert_eq!(mac_addr_value(MacPolicy::PerNetwork), "1");
-	assert_eq!(mac_addr_value(MacPolicy::PerConnection), "2");
+	assert_eq!(
+		mac_addr_value(MacPolicy::PerConnection),
+		"1",
+		"not 2, which would keep the manufacturer prefix"
+	);
+
+	// **What actually separates the two randomising policies**, since both are
+	// `mac_addr 1`: whether the previous address is still in date when the
+	// radio rejoins. The supplicant's default is 60 seconds.
+	assert_eq!(rand_addr_lifetime_value(MacPolicy::PerConnection), "0");
+	assert_eq!(rand_addr_lifetime_value(MacPolicy::PerNetwork), "60");
+	assert_ne!(
+		rand_addr_lifetime_value(MacPolicy::PerConnection),
+		rand_addr_lifetime_value(MacPolicy::PerNetwork),
+		"the two policies have to differ somewhere, and this is the only place left"
+	);
 }
 
 /// It is sent for every policy including `Permanent`, because leaving it unset
@@ -756,7 +791,7 @@ fn the_mac_policy_is_always_sent() {
 	for (policy, expected) in [
 		(MacPolicy::Permanent, "0"),
 		(MacPolicy::PerNetwork, "1"),
-		(MacPolicy::PerConnection, "2"),
+		(MacPolicy::PerConnection, "1"),
 	] {
 		let rendered: Vec<String> = settings(&network("home", Security::Open), policy, &resolver)
 			.expect("settings")

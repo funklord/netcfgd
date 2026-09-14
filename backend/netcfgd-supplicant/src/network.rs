@@ -152,22 +152,75 @@ fn is_bssid(text: &str) -> bool {
 /// | Model | `mac_addr` | What the supplicant does |
 /// |---|---|---|
 /// | `Permanent` | 0 | uses the hardware address |
-/// | `PerNetwork` | 1 | a random address per ESS |
-/// | `PerConnection` | 2 | a random address per association |
+/// | `PerNetwork` | 1 | a random address for each ESS connection |
+/// | `PerConnection` | 1 | the same, with [`RAND_ADDR_LIFETIME_FRESH`] |
 ///
-/// The values match `wpa_supplicant.conf`'s documented meanings for the
-/// per-network `mac_addr` key. There is a global of the same name; netcfgd
-/// sets the per-network one, so that a single network can be exempted -- which
-/// is the case that matters, since MAC-based admission control is the usual
-/// reason to need the permanent address on exactly one network.
+/// **`PerConnection` sent 2 until 0230, and 2 is a different axis.**
+/// `wpa_supplicant.conf` documents the three values for this key, per-network
+/// and global alike, as:
+///
+/// ```text
+/// 0 = use permanent MAC address
+/// 1 = use random MAC address for each ESS connection
+/// 2 = like 1, but maintain OUI (with local admin bit set)
+/// ```
+///
+/// So 2 is not "a random address per association" -- it is 1 with the
+/// manufacturer prefix preserved. netcfgd was sending, for the policy it
+/// documents as the strongest, the one value that keeps the part of the
+/// address that says who made the radio. The privacy option was the less
+/// private one.
+///
+/// **What actually separates the two policies is how long a random address is
+/// kept**, which is the global `rand_addr_lifetime` -- 60 seconds by default,
+/// so rejoining the same network inside a minute reuses the address. That is
+/// exactly `PerNetwork`'s documented meaning, and setting it to zero is
+/// exactly `PerConnection`'s. A global rather than a per-network key, which
+/// costs nothing here: `mac_policy` is a property of the *device*, so there is
+/// one policy per radio and one supplicant per radio.
+///
+/// 2 is now unreachable from the model. Keeping the manufacturer prefix is a
+/// real thing to want -- some networks admit by vendor -- but it is a third
+/// policy rather than a stronger version of the second, and nothing has asked
+/// for it.
+///
+/// netcfgd sets the per-network key rather than the global of the same name, so
+/// that a single network can be exempted -- which is the case that matters,
+/// since MAC-based admission control is the usual reason to need the permanent
+/// address on exactly one network.
 #[must_use]
 pub fn mac_addr_value(policy: MacPolicy) -> &'static str {
 	match policy {
 		MacPolicy::Permanent => "0",
-		MacPolicy::PerNetwork => "1",
-		MacPolicy::PerConnection => "2",
+		MacPolicy::PerNetwork | MacPolicy::PerConnection => "1",
 	}
 }
+
+/// How long a random address is kept, in seconds, for each policy.
+///
+/// The half of `mac_policy` that the per-network key cannot express. See
+/// [`mac_addr_value`] for why: both randomising policies are `mac_addr 1`, and
+/// what separates "a fresh address per network" from "a fresh address every
+/// time" is whether the previous one is still in date when the radio rejoins.
+///
+/// Sent in both directions rather than left at the supplicant's own 60, for
+/// decision 0015's reason: a privacy property that depends on somebody else's
+/// default is not a property. `Permanent` gets the same number as `PerNetwork`
+/// because no random address exists for it to govern, and a value that means
+/// nothing is better sent than branched on.
+#[must_use]
+pub fn rand_addr_lifetime_value(policy: MacPolicy) -> &'static str {
+	match policy {
+		MacPolicy::PerConnection => RAND_ADDR_LIFETIME_FRESH,
+		MacPolicy::Permanent | MacPolicy::PerNetwork => RAND_ADDR_LIFETIME_KEEP,
+	}
+}
+
+/// A random address that is never reused: a fresh one on every association.
+pub const RAND_ADDR_LIFETIME_FRESH: &str = "0";
+
+/// The supplicant's own default, stated rather than inherited.
+pub const RAND_ADDR_LIFETIME_KEEP: &str = "60";
 
 /// The SSID a network named by its access points is fingerprinted against.
 ///

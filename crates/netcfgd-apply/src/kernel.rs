@@ -710,6 +710,27 @@ impl KernelExecutor {
 			.find(|(name, _)| name == iface)
 			.map_or(netcfgd_model::MacPolicy::Permanent, |(_, policy)| *policy);
 
+		// **How long a random address is kept, which is the other half of
+		// `mac_policy` (0230).** Both randomising policies are the same
+		// per-network `mac_addr 1`; what separates "a fresh address per
+		// network" from "a fresh address every time" is whether the previous
+		// one is still in date when the radio rejoins. The supplicant's own
+		// default is 60 seconds, so rejoining inside a minute reuses the
+		// address -- which is `per_network`'s meaning and not
+		// `per_connection`'s.
+		//
+		// A global, which costs nothing: `mac_policy` is a property of the
+		// device, so there is one policy per radio and one supplicant per
+		// radio. Sent in both directions for 0015's reason.
+		client
+			.command(&format!(
+				"SET rand_addr_lifetime {}",
+				netcfgd_supplicant::rand_addr_lifetime_value(policy)
+			))
+			.map_err(|error| {
+				format!("could not set the random address lifetime on {iface}: {error}")
+			})?;
+
 		// **The address in probe requests, which is the bigger exposure.**
 		// `mac_addr` beside it governs the address used once a network is
 		// joined; this governs the one broadcast to everyone in range whether

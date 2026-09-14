@@ -219,6 +219,15 @@ contains "hash-to-element is offered" "$sent" "SET sae_pwe 2"
 # Decision 0228.
 contains "key caching across access points is on" "$sent" "SET okc 1"
 
+# **The other half of `mac_policy`.** Both randomising policies send the same
+# per-network `mac_addr 1`; what tells "a fresh address per network" from "a
+# fresh address every time" is whether the previous address is still in date
+# when the radio rejoins, which is this global. The supplicant's own default is
+# 60, and this document asks for no randomisation, so 60 is what is sent --
+# stated rather than inherited, because a privacy property that depends on
+# somebody else's default is not a property. Decision 0230.
+contains "the random address lifetime is sent" "$sent" "SET rand_addr_lifetime 60"
+
 contains "the supplicant is told this is 802.1X" "$sent" "key_mgmt WPA-EAP FT-EAP"
 contains "and which method" "$sent" "eap PEAP"
 contains "and the inner method" "$sent" "phase2"
