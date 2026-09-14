@@ -62,7 +62,7 @@ netcfgd speaks netlink directly — there is no `ip` invocation anywhere.
 | access point | run one with `hostapd`: SSID, channel, band, regulatory domain, hidden, and a MAC allow/deny list — at 802.11a/g rates, since nothing writes `ieee80211n` yet |
 | scanning | `ncfg wifi scan` lists what is in range, with signal and security |
 | joining and leaving | `ncfg wifi connect ID` and `ncfg wifi disconnect`, keeping the configuration either way |
-| radio on/off | over the control socket, which the GUI and the tray use; rfkill state is observed and streamed as events |
+| which radio netcfgd manages | `ncfg wifi activate`/`deactivate`, over the control socket the GUI and the tray use. A kill switch is a different thing: its state is observed and streamed as events, and netcfgd never sets it — a blocked radio is reported, with the remedy, and left blocked |
 | privacy | `mac_policy` gives each network a fresh hardware address, or keeps the permanent one; `scan_randomization` randomises the address in probe requests, which go out whether or not anything is ever joined |
 | power and regulatory domain | an access point's `regdom` is written, as hostapd's `country_code`; a radio's `regdom` and `powersave` are understood and **not acted on yet** — `ncfg plan` says so where a config sets them, and says which of the two a document is relying on |
 | joining without an editor | `ncfg wifi add SSID` writes the block and stores the credential |
