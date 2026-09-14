@@ -9461,6 +9461,69 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.125 A radio detected by a compatibility layer
+
+`is_wireless` decides whether netcfgd treats an interface as a radio, and five
+things hang off it: which driver `start_supplicant` passes, whether `radios_of`
+plans a supplicant at all, what `ObservedLink` reports, whether `ncfg wifi` will
+discuss the interface, and which radios `ncfg wifi add` offers. It asked one
+question -- does `/sys/class/net/<name>/wireless` exist.
+
+**That attribute is a kernel option.** `wireless` is the Wireless Extensions
+attribute, and on a cfg80211 radio it exists because the kernel was built with
+`CONFIG_CFG80211_WEXT`, a separate symbol from `CONFIG_CFG80211`. On the
+reporting machine both it and `phy80211` are present, and the option is on:
+that is *why* both are present. It is on by default in the large distributions
+and routinely off in small ones -- the kind of kernel netcfgd is aimed at on a
+board.
+
+On such a kernel a working radio answers "not a radio" and everything follows
+quietly: the supplicant gets `-Dwired`, the planner leaves the interface out,
+the observation says not wireless, `ncfg wifi` declines to discuss it. No
+message names a cause, because from netcfgd's side there is no radio to have a
+problem with. `phy80211` is created by cfg80211 for every device it registers,
+with no option in front of it. Decision 0231.
+
+**What is measured and what is inferred, because they differ here.** Measured:
+the option is a distinct symbol, it is on here, both attributes are present
+here. Inferred: that turning it off removes `wireless`. That follows from what
+the option is for, but it was not tested, because testing it means building a
+kernel. The fix does not depend on the inference -- asking `phy80211` *or*
+`wireless` is strictly more permissive than asking `wireless` alone, so every
+interface that was a radio still is. If the inference is wrong nothing changes;
+if it is right a class of machine starts working.
+
+`wireless` is still asked, second, and is not dead weight: a driver too old to
+register a cfg80211 device has that attribute and nothing else, which is the
+case `-Dnl80211,wext` exists for. The fallback in the driver list and the second
+half of the predicate are the same case and now agree about it.
+
+**The sixth fixture built from the implementation.** The existing test made a
+fake sysfs containing `wlan9/wireless` and asserted `wlan9` was a radio -- the
+attribute the predicate asked for, so it could not have failed for the reason
+the predicate was wrong. The kernel configuration it implicitly assumed was the
+only one it could describe. The new test describes three machines: a radio with
+only `phy80211`, one with both, and one with only `wireless`.
+
+**And a prediction about the build that was wrong the same way.** Installing
+this, the NetworkManager shim was predicted byte-identical, because its
+`Cargo.toml` declares only `netcfgd-proto` and `netcfgd-model` and neither
+changed. It changed: `cargo tree` shows `netcfgd-proto` declaring
+`netcfgd-apply`, which pulls in the planner, every backend and `netcfgd-sys` --
+the crate this round changed -- so the shim links it at depth four. The
+manifest's direct dependencies were read as a proxy for what the binary links.
+Worth keeping for its own sake too: the shim is a separate workspace to keep its
+D-Bus stack out of the core's graph (9.2), and that separation runs one way --
+the core does not gain the shim's dependencies, the shim links nearly all of the
+core. A second half of the same confusion is not a defect: a local
+`cargo build --release` and the packaged binary never match, because debhelper
+strips the packaged one into `netcfgd-nm-dbgsym`.
+
+Also confirmed from the other side while reading `STATUS` on the running radio:
+`key_mgmt=SAE pmf=1 sae_h2e=0`. Hunting-and-pecking, because this supplicant has
+not been repopulated since `sae_pwe` was added -- the populate-time class 10.122
+recorded, visible on the machine.
+
 ## 10.124 The privacy option that named the vendor
 
 10.114 audited this area and implemented `scan_randomization`. What it did not
