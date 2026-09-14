@@ -368,10 +368,23 @@ fn supplicant_networks_match(
 		.and_then(|device| device.wifi.as_ref())
 		.is_some_and(|wifi| wifi.scan_randomization);
 
+	// The same question again for the device's `autoconnect`: a radio told not
+	// to join anything by itself had `DISABLE_NETWORK all` sent after its
+	// networks, and a digest that left that out would report a match for a
+	// document that had just changed its mind (0236). Absent means true, which
+	// is the model's default and the answer for almost every machine.
+	let autoconnect = document
+		.devices
+		.iter()
+		.find(|device| device.name == interface)
+		.and_then(|device| device.wifi.as_ref())
+		.is_none_or(|wifi| wifi.autoconnect);
+
 	let wanted = netcfgd_supplicant::fingerprint(
 		&document.networks,
 		policy,
 		randomise,
+		autoconnect,
 		// `secrets_dir()`, not the crate default: this module already has one
 		// spelling for where the secrets are, and using the constant instead
 		// resolved against /etc/netcfgd/secrets on a machine whose store is

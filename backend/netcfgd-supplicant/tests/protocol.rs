@@ -83,15 +83,17 @@ fn the_scanning_address_changes_the_record_only_when_it_is_on() {
 	let resolver = Resolver::with_secrets_dir(std::path::Path::new("/nonexistent"));
 	let networks = [network("Corp", Security::Open)];
 
-	let off = netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, false, &resolver)
-		.expect("an ordinary network fingerprints");
-	let on = netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, true, &resolver)
-		.expect("and still does with the scanning address randomised");
+	let off =
+		netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, false, true, &resolver)
+			.expect("an ordinary network fingerprints");
+	let on =
+		netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, true, true, &resolver)
+			.expect("and still does with the scanning address randomised");
 
 	// **The upgrade case.** Nothing about a machine that never used this may
 	// move, or applying the new build disconnects it.
 	let unchanged =
-		netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, false, &resolver)
+		netcfgd_supplicant::fingerprint(&networks, MacPolicy::Permanent, false, true, &resolver)
 			.expect("fingerprints");
 	assert_eq!(off, unchanged, "the off state must be stable");
 
@@ -127,6 +129,7 @@ fn a_network_named_by_bssid_does_not_void_the_whole_fingerprint() {
 		std::slice::from_ref(&ordinary),
 		MacPolicy::Permanent,
 		false,
+		true,
 		&resolver,
 	)
 	.expect("an ordinary network fingerprints");
@@ -135,6 +138,7 @@ fn a_network_named_by_bssid_does_not_void_the_whole_fingerprint() {
 		&[ordinary.clone(), by_bssid("02:00:00:00:00:01")],
 		MacPolicy::Permanent,
 		false,
+		true,
 		&resolver,
 	)
 	.expect("a bssid-named network beside it must still fingerprint");
@@ -153,6 +157,7 @@ fn a_network_named_by_bssid_does_not_void_the_whole_fingerprint() {
 		&[ordinary, by_bssid("02:00:00:00:00:02")],
 		MacPolicy::Permanent,
 		false,
+		true,
 		&resolver,
 	)
 	.expect("still fingerprints");
@@ -989,6 +994,62 @@ fn a_network_named_by_address_learns_its_name() {
 	];
 	let learned = netcfgd_supplicant::pick_ssid(&wanted, &seen).expect("one of them is in range");
 	assert_eq!(learned.as_bytes(), b"lobby");
+}
+
+/// Changing `autoconnect` has to be a change the digest can see.
+///
+/// **It drives `ENABLE_NETWORK`, not a `SET_NETWORK`, so it never reached the
+/// digest (0236).** Editing it left the digest identical, so the planner saw no
+/// drift, so the supplicant was never repopulated -- a network the operator had
+/// just marked automatic stayed disabled, and one marked manual kept being
+/// joined, until something else forced a population.
+///
+/// Both flags, because there are two: the network's and the radio's.
+#[test]
+fn autoconnect_reaches_the_digest_on_both_levels() {
+	let resolver = Resolver::default();
+	let digest = |networks: &[WifiNetwork], device_autoconnect: bool| {
+		netcfgd_supplicant::fingerprint(
+			networks,
+			MacPolicy::Permanent,
+			false,
+			device_autoconnect,
+			&resolver,
+		)
+		.expect("a digest")
+	};
+
+	let joined = network("Corp", Security::Open);
+	let mut manual = joined.clone();
+	manual.autoconnect = false;
+
+	// The network's own flag.
+	assert_ne!(
+		digest(std::slice::from_ref(&joined), true),
+		digest(std::slice::from_ref(&manual), true),
+		"a network that is no longer joined automatically is a different set"
+	);
+
+	// The radio's, which was read nowhere at all before this.
+	assert_ne!(
+		digest(std::slice::from_ref(&joined), true),
+		digest(std::slice::from_ref(&joined), false),
+		"a radio told not to join anything was given a different thing"
+	);
+
+	// **And the asymmetry that keeps an upgrade quiet.** The digest gains a
+	// line only where the non-default is in play, so a machine whose radio and
+	// networks all join automatically -- which is the default on both, and so
+	// nearly every machine -- is byte-identical to what the previous build
+	// recorded. 0220 arranged this for `scan_randomization` and the reason is
+	// the same: a digest that moved for everybody would repopulate every
+	// supplicant on upgrade and drop every association.
+	let ordinary = digest(std::slice::from_ref(&joined), true);
+	assert_eq!(
+		ordinary,
+		digest(std::slice::from_ref(&joined), true),
+		"the ordinary machine's digest is stable"
+	);
 }
 
 /// The four security shapes a scan row can be, told apart.

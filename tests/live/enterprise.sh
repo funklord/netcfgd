@@ -228,6 +228,13 @@ contains "key caching across access points is on" "$sent" "SET okc 1"
 # somebody else's default is not a property. Decision 0230.
 contains "the random address lifetime is sent" "$sent" "SET rand_addr_lifetime 60"
 
+# **A radio that joins its networks does not get told not to.** The device-level
+# `autoconnect` was read nowhere until 0236, so a radio told not to join
+# anything joined anyway. This document says nothing, which means the model's
+# default -- true -- so the disable must NOT be sent. The half of a new
+# behaviour most likely to be wrong is the one that fires when it should not.
+lacks "a radio that joins is not told to stop" "$sent" "DISABLE_NETWORK all"
+
 contains "the supplicant is told this is 802.1X" "$sent" "key_mgmt WPA-EAP FT-EAP"
 contains "and which method" "$sent" "eap PEAP"
 contains "and the inner method" "$sent" "phase2"

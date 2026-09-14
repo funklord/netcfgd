@@ -279,6 +279,7 @@ pub fn fingerprint(
 	networks: &[WifiNetwork],
 	policy: MacPolicy,
 	scan_randomization: bool,
+	device_autoconnect: bool,
 	resolver: &Resolver,
 ) -> Option<String> {
 	let mut text = String::new();
@@ -296,6 +297,15 @@ pub fn fingerprint(
 	// off changes it back.
 	if scan_randomization {
 		text.push_str("preassoc_mac_addr 1\n");
+	}
+	// **Whether this radio joins anything by itself (0236).** A line only when
+	// it does not, for the reason the one above is conditional: a digest that
+	// gained a line for every machine would repopulate every supplicant on
+	// upgrade and drop every association, which 0220 arranged the asymmetry to
+	// avoid. `autoconnect` defaults to true, so the overwhelming majority of
+	// machines are unchanged by this and the ones that are not asked for it.
+	if !device_autoconnect {
+		text.push_str("device manual\n");
 	}
 	for network in networks {
 		// The id as well as the settings: two networks that render identically
@@ -319,6 +329,17 @@ pub fn fingerprint(
 			&stood_in
 		};
 
+		// **`autoconnect` drives `ENABLE_NETWORK`, not a `SET_NETWORK`, so it
+		// never reached this digest (0236).** Changing it in a document left
+		// the digest identical, so the planner saw no drift, so the supplicant
+		// was never repopulated and the edit did nothing -- a network the
+		// operator had just marked automatic stayed disabled until something
+		// else forced a population.
+		//
+		// A line only when it is off, for the same reason as the two above.
+		if !network.autoconnect {
+			text.push_str("manual\n");
+		}
 		for setting in settings(network, policy, resolver).ok()? {
 			text.push_str(&setting.variable);
 			text.push(' ');

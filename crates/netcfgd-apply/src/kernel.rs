@@ -139,6 +139,12 @@ pub struct KernelExecutor {
 	/// which are broadcast to everyone in range whether or not anything is
 	/// ever joined.
 	scan_randomization: Vec<(String, bool)>,
+	/// Whether each radio joins known networks without being asked.
+	///
+	/// The device-level `autoconnect`, which was read nowhere until 0236: it
+	/// compiled, was kept in the document and rendered back by `ncfg profile
+	/// save`, and a radio told not to join anything joined anyway.
+	autoconnect: Vec<(String, bool)>,
 	/// The `PPPoE` session on each interface that has one.
 	pppoe: Vec<(String, netcfgd_model::interface::PppoeConfig)>,
 	/// The bond settings for each interface that is one.
@@ -252,6 +258,7 @@ impl KernelExecutor {
 			link_kinds: Vec::new(),
 			mac_policy: Vec::new(),
 			scan_randomization: Vec::new(),
+			autoconnect: Vec::new(),
 			pppoe: Vec::new(),
 			delegating: Vec::new(),
 			advertising: Vec::new(),
@@ -383,7 +390,8 @@ impl KernelExecutor {
 				_ => None,
 			})
 			.collect();
-		(self.mac_policy, self.scan_randomization) = wifi_device_policies(document);
+		(self.mac_policy, self.scan_randomization, self.autoconnect) =
+			wifi_device_policies(document);
 		self
 	}
 
@@ -837,15 +845,41 @@ impl KernelExecutor {
 			);
 		}
 
+		// **Whether this radio joins anything by itself (0236).** The
+		// device-level `autoconnect` was read nowhere: it compiled, was kept in
+		// the document, rendered back by `ncfg profile save`, and a radio told
+		// not to join anything joined anyway. The planner did not warn either,
+		// so nothing anywhere said the setting was inert.
+		//
+		// Defaults to true, so this is the answer for almost every machine and
+		// the command below is not sent.
+		let joins = radio_joins_by_itself(&self.autoconnect, iface);
+
 		for network in &self.networks {
 			netcfgd_supplicant::add_network(&client, network, policy, &resolver)
 				.map_err(|error| format!("could not give `{}` to {iface}: {error}", network.id))?;
+		}
+
+		// After the networks rather than before: `add_network` enables each one
+		// it adds, so a disable sent first would be undone by the next
+		// addition. `all` is the supplicant's own word and was asked of
+		// wpa_supplicant 2.10 on the `none` driver -- `DISABLE_NETWORK all`
+		// answers OK and `DISABLE_NETWORK 99` answers FAIL, which is the
+		// control that makes the first mean something.
+		//
+		// The networks stay configured and stay in the supplicant, so
+		// `ncfg wifi connect` joins one without resolving a credential again.
+		// That is the same distinction `ncfg wifi disconnect` draws.
+		if !joins {
+			client.command("DISABLE_NETWORK all").map_err(|error| {
+				format!("could not leave {iface}'s networks unselected: {error}")
+			})?;
 		}
 		// What was handed over, so the next observation can tell whether the
 		// document has moved since. Written after the last `add_network`, so a
 		// population that failed part-way leaves the previous record -- or
 		// none -- rather than claiming a set the supplicant does not hold.
-		self.record_supplicant_networks(iface, policy, randomise, &resolver);
+		self.record_supplicant_networks(iface, policy, randomise, joins, &resolver);
 		Ok(())
 	}
 
@@ -861,10 +895,17 @@ impl KernelExecutor {
 		iface: &str,
 		policy: netcfgd_model::MacPolicy,
 		randomise: bool,
+		autoconnect: bool,
 		resolver: &netcfgd_secret::Resolver,
 	) {
 		let path = networks_record_path(&self.run_dir, iface);
-		match netcfgd_supplicant::fingerprint(&self.networks, policy, randomise, resolver) {
+		match netcfgd_supplicant::fingerprint(
+			&self.networks,
+			policy,
+			randomise,
+			autoconnect,
+			resolver,
+		) {
 			Some(digest) => {
 				// Reported and not returned: 0180's rule, that a record which
 				// could not be kept must not fail an apply that worked. What it
@@ -1884,17 +1925,39 @@ type ScanRandomisation = Vec<(String, bool)>;
 /// Both are per *device*: `mac_policy` becomes a per-network `mac_addr` and
 /// `scan_randomization` becomes the supplicant's global `preassoc_mac_addr`,
 /// so they part company at the point of use rather than here.
-fn wifi_device_policies(document: &netcfgd_model::Document) -> (MacPolicies, ScanRandomisation) {
+/// Whether a radio joins its known networks without being asked.
+///
+/// **Absent means yes**, which is the model's default and the answer for almost
+/// every machine -- a device with no `wifi` block at all never reaches this
+/// list, and neither does one that left `autoconnect` alone.
+///
+/// A named lookup rather than an inline chain because the default is the part
+/// that can be wrong: reading an absent entry as "no" would send
+/// `DISABLE_NETWORK all` to every radio nobody had configured, which is the
+/// opposite of the setting's meaning and would leave a machine with no wifi at
+/// all. 0236.
+fn radio_joins_by_itself(policies: &[(String, bool)], iface: &str) -> bool {
+	policies
+		.iter()
+		.find(|(name, _)| name == iface)
+		.is_none_or(|(_, on)| *on)
+}
+
+fn wifi_device_policies(
+	document: &netcfgd_model::Document,
+) -> (MacPolicies, ScanRandomisation, ScanRandomisation) {
 	let mut policies = Vec::new();
 	let mut randomisation = Vec::new();
+	let mut autoconnect = Vec::new();
 	for device in &document.devices {
 		let Some(wifi) = device.wifi.as_ref() else {
 			continue;
 		};
 		policies.push((device.name.clone(), wifi.mac_policy));
 		randomisation.push((device.name.clone(), wifi.scan_randomization));
+		autoconnect.push((device.name.clone(), wifi.autoconnect));
 	}
-	(policies, randomisation)
+	(policies, randomisation, autoconnect)
 }
 
 /// Where netcfgd records which networks it gave a radio's supplicant.
@@ -4342,6 +4405,41 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 #[cfg(test)]
 mod tests {
 	use super::dhcp6_client;
+
+	/// Whether a radio joins its networks by itself, and what absence means.
+	///
+	/// **The device-level `autoconnect` was read nowhere until 0236**: it
+	/// compiled, was kept in the document, was rendered back by `ncfg profile
+	/// save`, and a radio told not to join anything joined anyway. The planner
+	/// did not warn either, so nothing said the setting was inert.
+	///
+	/// The default is the part that can be wrong. Reading an absent entry as
+	/// "no" would send a disable to every radio nobody had configured -- the
+	/// opposite of the setting's meaning, and a machine with no wifi at all.
+	#[test]
+	fn a_radio_joins_by_itself_unless_it_was_told_not_to() {
+		let policies = vec![("wlan0".to_owned(), true), ("wlan1".to_owned(), false)];
+
+		assert!(super::radio_joins_by_itself(&policies, "wlan0"));
+		assert!(
+			!super::radio_joins_by_itself(&policies, "wlan1"),
+			"a radio told not to join anything must not be joined for"
+		);
+
+		// Absent means yes. A device with no `wifi` block never reaches this
+		// list, and neither does one that left `autoconnect` alone.
+		assert!(
+			super::radio_joins_by_itself(&policies, "wlan2"),
+			"a radio nobody configured joins, as it always has"
+		);
+		assert!(super::radio_joins_by_itself(&[], "wlan0"));
+
+		// And one radio's answer is not another's.
+		assert_ne!(
+			super::radio_joins_by_itself(&policies, "wlan0"),
+			super::radio_joins_by_itself(&policies, "wlan1")
+		);
+	}
 
 	/// **A record netcfgd cannot keep says which file, and why.**
 	///
