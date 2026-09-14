@@ -9461,6 +9461,97 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.129 A reason that was not one
+
+Asked, after two rounds had fixed faults that exist only because the watchers
+are threads: why are these threads rather than one epoll loop? The daemon's
+header answered -- *"no epoll, because that would mean `unsafe` outside the one
+crate allowed it"* -- and that is not true.
+
+`netcfgd_sys::signals::wait` is already a two-descriptor `libc::poll` with the
+`unsafe` inside `netcfgd-sys` behind a safe signature, which is exactly what
+constraint 4 asks. `Watcher::wait` is a poll as well -- the config thread shows
+up in `do_sys_poll` in a thread dump of the running daemon. The daemon already
+depends on polling, through safe wrappers, on the very threads the comment was
+justifying. **Constraint 4 is about where `unsafe` lives, not which I/O shape is
+allowed.** `server.rs` carried the same non-sequitur attached to a choice that
+has a real reason of its own. Decision 0235.
+
+Worth a decision rather than a quiet edit, because a comment recording a
+technical impossibility stops the next reader considering the alternative --
+nobody re-examines a door marked "cannot be opened" -- and the shape being
+defended is the one that produced 10.127 and 10.128. Neither of those faults is
+reachable in a single loop: there is no thread to return and no spawn to fail.
+`EINTR` is not fixed by changing shape, but there would be one place to get it
+right instead of four, and the evidence that the number matters is in this tree:
+`signals::wait`, `inotify` and `lock` all handle it and the netlink socket did
+not, which is the one that broke.
+
+Not restructuring now. The watchers could be one loop -- every source is a
+pollable descriptor and the tick is the timeout -- but the **workers** are a
+different question with a different answer: a client connection blocks on a
+reader that may stop reading, and a scan takes seconds. The comment is corrected
+to say what is true, and the restructure is left as a design question rather
+than begun as a footnote to a bug fix.
+
+**And a note about comments in this tree.** They are unusually load-bearing --
+this campaign has repeatedly used them as evidence -- and twice that has cut the
+other way: 10.124 found a test whose doc stated the hazard in the same paragraph
+as the assertion embodying it, and this is a header stating a constraint the
+code beside it does not have. A comment that gives a reason is a claim, and
+claims are checkable. This one was never checked because it sounded like a rule.
+
+## 10.128 A thread that never started
+
+10.127 ended by naming the audit that would have found it -- *which threads must
+stay alive for this daemon to keep working, and what happens to each if it
+returns?* This is that audit.
+
+```text
+thread    spawn result   ends on                          says what is lost
+control   checked (?)    nothing: incoming() is endless    n/a
+client    handled        the request finishing             n/a
+netlink   DISCARDED      a fatal error, or shutdown        yes
+config    DISCARDED      any watch error, or shutdown      no, only the error
+roam      DISCARDED      shutdown only                     n/a
+rfkill    DISCARDED      an absent device, a read error    yes
+confirm   DISCARDED      one-shot: sleep, send, end        n/a
+```
+
+**`serve` already does it correctly**, which is what makes the rest a defect
+rather than a gap: the control thread is `.spawn(...)?`, so a daemon that cannot
+accept connections fails to start instead of pretending, and a client thread
+that cannot spawn is handled deliberately. The idiom is in the file most likely
+to be read first, and five spawns in `lib.rs` do not use it. `let _ = spawn(..)`
+discards the handle, which is right -- none is joined -- and the `Result`, which
+is not: the process comes up, systemd calls it active, and whatever that thread
+was for never happens. Decision 0234.
+
+**The one that is a safety mechanism.** `spawn_expiry_timer` closes a
+commit-confirm window -- the mechanism that reverts a change the operator did
+not confirm, used when applying a configuration over the very link it might
+break. `resolve_expired_window` was called from exactly one place, guarded by a
+command that only that thread sends. A spawn that failed left the window open
+for ever: the change stayed applied, no revert happened, and nothing said the
+timer had not started. The safety mechanism failing silently through the
+mechanism meant to be the safety. The tick asks now as well; the timer stays,
+for the reason its own comment gives, and a missing timer costs seconds rather
+than the window. Free to ask on every pass because the resolver already asks
+whether the window *really* expired, and `expired_at` is tested against a window
+with time left, a slept-through machine, and a moved clock.
+
+**Threads are still not supervised**, and that is recorded rather than fixed.
+The two whose work has a deadline now have backstops that do not depend on them
+-- the loop's own tick (10.127) and the window's. `roam` and `rfkill` have none
+and would go quiet; both report rather than drive, so the cost is diagnosis, but
+it is a real cost. Restarting a dead watcher needs somewhere to decide when to
+give up, which is a design question rather than a patch.
+
+**And the second sabotage passed on its first run**, against a fix written
+minutes earlier -- the seventh time in this campaign that a change went in with
+nothing holding it until the sabotage pass asked. That is the reason the pass
+exists.
+
 ## 10.127 A signal that stopped the daemon
 
 Reported: a machine switched wifi networks, `/etc/resolv.conf` kept the previous
