@@ -513,6 +513,34 @@ pub fn effective_band(band: Option<&str>, channel: Option<u16>) -> Option<&'stat
 	}
 }
 
+/// Whether a channel is one the radio must listen on before it may beacon.
+///
+/// **Radar detection, and what it costs an operator (0232).** The 5 GHz
+/// channels between 52 and 64 and between 100 and 144 are shared with radar in
+/// most regulatory domains, so an access point on one has to perform a channel
+/// availability check -- listening, not transmitting -- before it may send a
+/// beacon. `ncfg apply` returns as soon as hostapd is started, and the access
+/// point is silent for the whole of that wait.
+///
+/// Read from the radio on the reporting machine, which marks fifteen channels:
+///
+/// ```text
+/// * 5260.0 MHz [52] (22.0 dBm) (no IR, radar detection)
+/// * 5180.0 MHz [36] (22.0 dBm) (no IR)
+/// ```
+///
+/// **The kernel is the authority and this is not it.** `channel_in_band`'s
+/// documentation says why a channel table does not belong in this tree: which
+/// channels are usable is a regulatory question the kernel answers. The same
+/// applies here, with one difference that makes this worth writing down anyway
+/// -- it drives a warning rather than a refusal, so being wrong about a channel
+/// costs a sentence rather than an access point. The range is the one that is
+/// DFS in every domain netcfgd is likely to meet.
+#[must_use]
+pub fn channel_needs_radar_detection(channel: u16) -> bool {
+	(52..=64).contains(&channel) || (100..=144).contains(&channel)
+}
+
 /// Whether a channel number exists in a band at all.
 ///
 /// The 5 GHz list is a range rather than the exact set because which of those

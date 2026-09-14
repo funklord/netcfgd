@@ -9020,6 +9020,74 @@ fn a_fixed_mac_under_a_randomising_policy_is_warned_about() {
 	);
 }
 
+/// A channel the radio must listen on before it may speak.
+///
+/// **The access point is configured, running, and silent**, which looks exactly
+/// like one that is broken -- and `ncfg apply` returns as soon as hostapd is
+/// started, so nothing in its output suggests waiting. The 5 GHz channels
+/// shared with radar need a channel availability check first; the radio on the
+/// reporting machine marks fifteen of them.
+///
+/// Both directions, because a warning on every access point would be noise and
+/// this one has to stay quiet on the channels that need no wait. 0232.
+#[test]
+fn a_radar_channel_says_the_access_point_will_be_silent_first() {
+	let warnings_of = |channel: &str| -> Vec<String> {
+		let desired = document(&format!(
+			"interface wlan0 {{ config = \"192.168.4.1/24\" }}\n\
+			 access_point \"home\" {{ device = \"wlan0\"; band = \"5\"; {channel} \
+			 wifi {{ open = true }} }}\n"
+		));
+		plan(
+			&desired,
+			&observed_with(&["wlan0"]),
+			&PlanOptions::default(),
+		)
+		.warnings
+		.into_iter()
+		.map(|warning| warning.message)
+		.collect()
+	};
+	let waits = |messages: &[String]| messages.iter().any(|m| m.contains("listen on it"));
+
+	// The DFS block: 52 through 64, and 100 through 144.
+	for channel in [
+		"channel = 52;",
+		"channel = 64;",
+		"channel = 100;",
+		"channel = 144;",
+	] {
+		let messages = warnings_of(channel);
+		assert!(
+			waits(&messages),
+			"{channel} is a radar channel: {messages:?}"
+		);
+	}
+
+	// One of them, in full, so the sentence is checked and not just its
+	// presence: the number, the silence, and where to go instead.
+	let messages = warnings_of("channel = 52;");
+	let named = messages
+		.iter()
+		.find(|m| m.contains("listen on it"))
+		.expect("a warning");
+	assert!(named.contains("channel 52"), "{named}");
+	assert!(named.contains("silent"), "{named}");
+	assert!(
+		named.contains("36 to 48"),
+		"says where needs no wait: {named}"
+	);
+
+	// And the channels either side of the block, which must stay quiet.
+	for channel in ["channel = 48;", "channel = 149;", "channel = 165;", ""] {
+		let messages = warnings_of(channel);
+		assert!(
+			!waits(&messages),
+			"`{channel}` needs no wait and must not be warned about: {messages:?}"
+		);
+	}
+}
+
 /// Deleting a pinned channel or band has to take effect.
 ///
 /// **The guards that stopped the deauthentication loop opened the opposite

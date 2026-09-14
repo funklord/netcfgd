@@ -1245,6 +1245,8 @@ fn warn_access_points(builder: &mut Builder, desired: &Document) {
 			});
 		}
 
+		warn_radar_channel(builder, access_point, device);
+
 		// An empty allow list is a legitimate thing to write -- it is how an
 		// access point is closed without taking it down -- and an easy thing to
 		// arrive at by deleting the last station from a list. It compiles
@@ -1306,6 +1308,43 @@ fn warn_access_points(builder: &mut Builder, desired: &Document) {
 			});
 		}
 	}
+}
+
+/// Say that an access point on a radar channel will be silent at first.
+///
+/// The 5 GHz channels shared with radar need a channel availability check
+/// before an access point may beacon: the radio listens, typically for a
+/// minute and longer on some channels, and sends nothing until it is done.
+///
+/// `ncfg apply` returns as soon as hostapd is started, so such an access point
+/// is configured, running and silent -- which looks exactly like one that is
+/// broken, and is the failure this file's warnings exist for.
+///
+/// Said rather than refused: a DFS channel is a legitimate and often deliberate
+/// choice, being the half of 5 GHz that is usually empty. What is worth saying
+/// is that the silence is expected and roughly how long it lasts. 0232.
+fn warn_radar_channel(
+	builder: &mut Builder,
+	access_point: &netcfgd_model::AccessPoint,
+	device: &str,
+) {
+	let Some(channel) = access_point.channel else {
+		return;
+	};
+	if !netcfgd_model::device::channel_needs_radar_detection(channel) {
+		return;
+	}
+	builder.warnings.push(Warning {
+		message: format!(
+			"access point `{}` is on channel {channel}, which is shared with radar in \
+			 most regulatory domains: the radio has to listen on it before it may \
+			 beacon, so the access point will be silent for a minute or so after this \
+			 apply returns -- longer on some channels. Channels 36 to 48 and 149 \
+			 upwards need no such wait",
+			access_point.id
+		),
+		interface: Some(device.to_owned()),
+	});
 }
 
 /// The interfaces that are radios netcfgd manages.
