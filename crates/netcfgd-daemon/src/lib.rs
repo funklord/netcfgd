@@ -219,8 +219,10 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 
 	let mut subscribers: Vec<SyncSender<Event>> = Vec::new();
 	// `recv` rather than `for .. in incoming`, because the burst-collapsing
-	// below needs the receiver again inside the loop body.
-	while let Ok(command) = incoming.recv() {
+	// below needs the receiver again inside the loop body -- and with a
+	// deadline, because the loop's heartbeat has to be the loop's own. See
+	// [`next_command`].
+	while let Some(command) = next_command(&incoming) {
 		// Collapse a burst into one pass. Bringing an interface up produces a
 		// run of netlink messages, and re-reading once per message would make
 		// the daemon's cost scale with the kernel's chattiness.
@@ -2711,6 +2713,34 @@ fn swept_ctrl_dir() -> PathBuf {
 	ctrl_dir
 }
 
+/// The next command, or a tick if nothing arrives in time.
+///
+/// **The loop's heartbeat used to be a gift from another thread, and one
+/// afternoon it stopped arriving (0233).** `Command::Tick` is sent by the
+/// netlink watcher, whose socket timeout produces it -- so when that thread
+/// returned on an error, the daemon lost the kernel's events *and* the backstop
+/// that exists to catch what the kernel's events miss. It sat in `recv` for
+/// fifty-two minutes, answering client requests and reconciling nothing, while
+/// `/etc/resolv.conf` kept a previous network's search domain.
+///
+/// `TICK_MS`'s own comment says the tick "catches anything neither netlink nor
+/// the config watcher reports, and it is what makes a missed event cost seconds
+/// rather than forever". A backstop that can be switched off by the thing it is
+/// backing up is not one, so it is taken from the wait itself here: this loop
+/// ticks whether or not anything else in the process is alive.
+///
+/// `None` only when every sender is gone, which is the daemon shutting down.
+/// A timeout is a `Tick`, which is what the senders would have produced.
+fn next_command(incoming: &std::sync::mpsc::Receiver<Command>) -> Option<Command> {
+	match incoming.recv_timeout(std::time::Duration::from_millis(u64::from(
+		TICK_MS.unsigned_abs(),
+	))) {
+		Ok(command) => Some(command),
+		Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Some(Command::Tick),
+		Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => None,
+	}
+}
+
 fn spawn_kernel_watcher(commands: &Sender<Command>) {
 	let commands = commands.clone();
 	let _ = std::thread::Builder::new()
@@ -2860,6 +2890,55 @@ mod tests {
 		assert!(
 			!complain_about(&mut seen, "wlan1", &failed()),
 			"and the other radio's state was not disturbed"
+		);
+	}
+
+	/// The loop ticks even when nothing else in the process is alive.
+	///
+	/// **This is the property that was missing (0233).** `Command::Tick` came
+	/// from the netlink watcher, so when that thread returned on an `EINTR` the
+	/// daemon lost the kernel's events and the backstop meant to catch what
+	/// those events miss. It waited in `recv` for fifty-two minutes across a
+	/// network change, answering client requests and reconciling nothing.
+	///
+	/// A backstop that can be switched off by the thing it is backing up is not
+	/// one. The wait produces the tick now, so no thread can take it away.
+	#[test]
+	fn the_loop_keeps_its_own_time() {
+		use std::sync::mpsc;
+		use std::time::Instant;
+
+		// A channel with a live sender that never sends: exactly the daemon
+		// with its watcher threads gone and its control socket idle.
+		let (sender, receiver) = mpsc::channel::<Command>();
+
+		let started = Instant::now();
+		let command = next_command(&receiver).expect("a tick, not a wait for ever");
+		let waited = started.elapsed();
+
+		assert!(
+			matches!(command, Command::Tick),
+			"an empty wait is a tick, so the loop verifies rather than sleeping"
+		);
+		// It waited rather than spinning: the tick is a deadline, not a poll.
+		assert!(
+			waited >= std::time::Duration::from_millis(u64::from(TICK_MS.unsigned_abs()) / 2),
+			"returned after {waited:?}, which is too fast to have been the deadline"
+		);
+
+		// Anything actually sent still arrives, and arrives first.
+		sender.send(Command::ConfigChanged).expect("send");
+		assert!(matches!(
+			next_command(&receiver).expect("the real command"),
+			Command::ConfigChanged
+		));
+
+		// And when every sender is gone the loop ends, which is the shutdown
+		// path -- not another tick for ever.
+		drop(sender);
+		assert!(
+			next_command(&receiver).is_none(),
+			"a disconnected channel ends the loop"
 		);
 	}
 
