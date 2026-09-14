@@ -9461,6 +9461,55 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.132 The switch that is watched and not touched
+
+A second pass over 0219's ground. Its three findings were re-checked rather than
+inherited -- the 64-byte buffer accepting any record at least `RECORD` long, the
+phy-name match that `continue`s past an unreadable entry, the warning whose
+remedy differs between a hard switch ("nothing in software can clear") and a
+soft one (`rfkill unblock wifi`). All three hold, and `/dev/rfkill` is still
+opened read-only so the write path cannot be reached at all.
+
+**The code is sound and what is said about it was not, in two places.**
+
+The README's feature table said "radio on/off" for the row covering `ncfg wifi
+activate` and `deactivate`. That is the one thing netcfgd deliberately does not
+do: 0062 decided a blocked radio is reported and never unblocked, and the
+read-only open is how that decision is enforced rather than merely stated. What
+`activate` decides is *which radio netcfgd manages*. Putting a kill switch and a
+selection in one cell invites the reader to conclude netcfgd can do the first
+because it can do the second.
+
+**The clients got this right and only the README did not**, which is the reverse
+of the usual direction. The GUI's button says "activate radio", the tray says
+"Disconnect wifi", and the table people read to decide whether netcfgd does what
+they need was the single place that overclaimed. Fixed.
+
+### The second one was mine, one round old
+
+10.128 above said `roam` and `rfkill` "have no backstop and would go quiet". The
+loop re-observes on a tick -- `kernel_changed || config_changed || probe_changed
+|| ticked` -- so a dead rfkill watcher costs promptness, not detection.
+`spawn_rfkill_watcher`'s own documentation says it: *an observation runs on a
+netlink event or on the loop's five-second backstop*. The watcher exists to make
+the report prompt, not possible.
+
+10.127 is the round that gave the loop that tick. 10.128 was written immediately
+after, by the same pass, and asserted two watchers had no backstop one round
+after the backstop was added -- from a doc comment three hundred lines above the
+line being edited.
+
+**That is three decision records in this campaign found to state something the
+code contradicts**: 0231's account of the NM binary, 0235's reason for threads
+instead of epoll, and now 0234. The shape is the same one the code keeps
+showing -- *a record of what was done used as a statement about what is* -- with
+the record being prose rather than a digest. The useful part is that all three
+were caught by reading the code while writing the *next* record, which is an
+argument for the campaign's own cycle and not for trusting any single pass.
+
+Decision 0238. Nothing to sabotage: both fixes are sentences, and the check is
+that the cited code says what they now say.
+
 ## 10.131 A record of what was done
 
 Two states were handled. An adopted supplicant has no record, and the observer
