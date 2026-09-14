@@ -274,21 +274,37 @@ impl Netlink {
 	/// stop watching precisely when the most was happening. Since the daemon
 	/// re-reads rather than applying deltas, a gap costs nothing.
 	///
+	/// **`EINTR` is not a failure either**, and treating it as one cost a
+	/// machine its network configuration for fifty-two minutes (0233). A
+	/// signal arriving while this is blocked returns `Interrupted`, which means
+	/// "call it again" and nothing else -- and netcfgd spawns children, so
+	/// `SIGCHLD` can land on this syscall at any moment. On the reporting
+	/// machine one did, two seconds before a network change:
+	///
+	/// ```text
+	/// 11:11:35  netcfgd: [netlink] Error: netlink watch failed:
+	///                    Interrupted system call (os error 4)
+	/// 11:11:37  wpa_supplicant: CTRL-EVENT-CONNECTED ... EMP-XYLEM
+	/// ```
+	///
+	/// The caller treated the error as fatal and its thread returned, so the
+	/// daemon stopped seeing kernel changes -- and, because the same thread
+	/// sent the loop's tick, stopped reconciling at all. It answered client
+	/// requests for another fifty minutes while `/etc/resolv.conf` kept the
+	/// previous network's search domain.
+	///
+	/// Reported as "nothing yet" rather than retried in a loop here, which is
+	/// the same answer a timeout gets and is what the caller already knows how
+	/// to do. It costs one extra observation per signal and cannot spin: every
+	/// `Interrupted` corresponds to a signal that really arrived.
+	///
 	/// # Errors
 	///
-	/// Returns the underlying `io::Error` for anything other than a timeout or
-	/// a dropped-message notification.
+	/// Returns the underlying `io::Error` for anything other than a timeout, a
+	/// signal, or a dropped-message notification.
 	pub fn wait_for_change(&self) -> io::Result<bool> {
 		let mut buffer = vec![0_u8; 8192];
-		match self.receive(&mut buffer) {
-			Ok(_) => Ok(true),
-			Err(error) => match error.kind() {
-				// SO_RCVTIMEO expiring.
-				io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => Ok(false),
-				_ if error.raw_os_error() == Some(libc::ENOBUFS) => Ok(true),
-				_ => Err(error),
-			},
-		}
+		change_from(self.receive(&mut buffer))
 	}
 
 	/// Send a pre-built buffer and collect replies until `last_acked` is
@@ -455,6 +471,41 @@ impl Drop for Netlink {
 	}
 }
 
+/// What a netlink receive means: a change, nothing yet, or a real failure.
+///
+/// Split from [`Netlink::wait_for_change`] so it can be asked without a socket.
+/// Three outcomes are not failures and the difference between them is the whole
+/// content of this function:
+///
+/// - a receive that returned anything is a change;
+/// - `WouldBlock` or `TimedOut` is `SO_RCVTIMEO` expiring, which the caller uses
+///   as its own tick;
+/// - `Interrupted` is a signal arriving mid-syscall, which means call it again
+///   -- reported as "nothing yet" so the caller's existing loop does exactly
+///   that (0233);
+/// - `ENOBUFS` is the socket's buffer overflowing and messages being dropped,
+///   reported as a *change* because the daemon re-reads rather than applying
+///   deltas, so a gap costs nothing and a watcher that stopped here would stop
+///   precisely when the most was happening.
+///
+/// Everything else is a failure and is returned as one.
+///
+/// # Errors
+///
+/// Propagates anything that is not one of the four cases above.
+fn change_from(outcome: io::Result<usize>) -> io::Result<bool> {
+	match outcome {
+		Ok(_) => Ok(true),
+		Err(error) => match error.kind() {
+			io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted => {
+				Ok(false)
+			}
+			_ if error.raw_os_error() == Some(libc::ENOBUFS) => Ok(true),
+			_ => Err(error),
+		},
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::{flags, msg_type, wire, Netlink};
@@ -518,5 +569,58 @@ mod tests {
 			roomy.len(),
 			"the same dump, whatever it was read into"
 		);
+	}
+}
+
+#[cfg(test)]
+mod change_tests {
+	use super::change_from;
+	use std::io;
+
+	/// Which receive outcomes are failures, and which three are not.
+	///
+	/// **`Interrupted` was, and it cost a machine its network configuration for
+	/// fifty-two minutes (0233).** A signal arriving while the socket is
+	/// blocked means "call it again"; netcfgd spawns children, so `SIGCHLD` can
+	/// land on that syscall at any time, and on the reporting machine one did
+	/// two seconds before a network change. The watcher thread treated it as
+	/// fatal and returned, taking the daemon's reconcile loop with it.
+	#[test]
+	fn only_a_real_failure_is_reported_as_one() {
+		// Something arrived.
+		assert!(change_from(Ok(120)).expect("a change"));
+		// A zero-length message is still a message.
+		assert!(change_from(Ok(0)).expect("a change"));
+
+		// SO_RCVTIMEO expiring, which the caller uses as its own tick. Both
+		// kinds, because which one a platform returns is not fixed.
+		for kind in [io::ErrorKind::WouldBlock, io::ErrorKind::TimedOut] {
+			assert!(
+				!change_from(Err(io::Error::from(kind))).expect("not a failure"),
+				"{kind:?}"
+			);
+		}
+
+		// **The one this test exists for.** Not a failure, and not a change
+		// either: nothing has been read yet and the caller should ask again.
+		assert!(
+			!change_from(Err(io::Error::from(io::ErrorKind::Interrupted)))
+				.expect("a signal is not a failure"),
+			"a signal means call it again, not give up"
+		);
+
+		// The buffer overflowed and messages were dropped. Reported as a
+		// change, because the daemon re-reads rather than applying deltas -- a
+		// watcher that stopped here would stop when the most was happening.
+		assert!(
+			change_from(Err(io::Error::from_raw_os_error(libc::ENOBUFS)))
+				.expect("dropped messages are still news"),
+			"a dropped message is a change, not a quiet moment"
+		);
+
+		// And something that really is a failure.
+		let fatal = change_from(Err(io::Error::from_raw_os_error(libc::EBADF)))
+			.expect_err("a bad descriptor is a failure");
+		assert_eq!(fatal.raw_os_error(), Some(libc::EBADF));
 	}
 }
