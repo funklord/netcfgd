@@ -43,6 +43,39 @@ pub fn class_net() -> PathBuf {
 /// False for an interface that does not exist, which is the same answer as
 /// "not a radio" for every caller here: none of them can do anything with a
 /// name the kernel does not know.
+///
+/// **Two attributes, and the obvious one is the wrong one (0231).** This asked
+/// only for `wireless`, which is the Wireless Extensions attribute -- and on a
+/// cfg80211 radio that attribute exists only when the kernel was built with
+/// `CONFIG_CFG80211_WEXT`. It is a config option, on by default in the big
+/// distributions and routinely off in the small ones, which is exactly the kind
+/// of kernel netcfgd is aimed at on a board.
+///
+/// On such a kernel a working radio answered "not a radio", and everything
+/// downstream followed: `start_supplicant` chose `-Dwired` for it, `radios_of`
+/// left it out of the plan, `ObservedLink::wireless` said false, and
+/// `ncfg wifi` refused to talk about it. No message anywhere named a cause,
+/// because from netcfgd's side there was no radio to have a problem with.
+///
+/// `phy80211` is the one to ask. cfg80211 creates it for every device it
+/// registers, with no config option in front of it. Read from the machine this
+/// was written on:
+///
+/// ```text
+/// /sys/class/net/wlp0s20f3/wireless   present
+/// /sys/class/net/wlp0s20f3/phy80211   present
+/// $ grep CFG80211_WEXT /boot/config-$(uname -r)
+/// CONFIG_CFG80211_WEXT=y
+/// ```
+///
+/// Both are present here *because* that option is on; the fixture that tested
+/// this made a `wireless` directory and so could only ever have agreed.
+///
+/// **`wireless` is still asked, second**, and it is not dead weight: a driver
+/// old enough to have no cfg80211 device at all has that attribute and nothing
+/// else. That is also why `start_supplicant` passes `-Dnl80211,wext` rather
+/// than `-Dnl80211` -- the fallback in the driver list and the second test here
+/// are the same case, and they should agree about whether it exists.
 #[must_use]
 pub fn is_wireless(root: &std::path::Path, name: &str) -> bool {
 	// Rejected rather than joined. A name with a separator in it would escape
@@ -52,7 +85,8 @@ pub fn is_wireless(root: &std::path::Path, name: &str) -> bool {
 	if name.is_empty() || name.contains('/') || name.contains("..") {
 		return false;
 	}
-	root.join(name).join("wireless").exists()
+	let interface = root.join(name);
+	interface.join("phy80211").exists() || interface.join("wireless").exists()
 }
 
 /// Every radio the kernel reports, in the order it lists them.
@@ -132,5 +166,46 @@ mod tests {
 		assert!(super::is_wireless(root, "wlan9"));
 		assert!(!super::is_wireless(root, "eth9"));
 		assert_eq!(super::wireless_links(root), vec!["wlan9".to_owned()]);
+	}
+
+	/// A radio on a kernel built without the Wireless Extensions layer.
+	///
+	/// **The case the old fixture could not produce.** It made a `wireless`
+	/// directory, which is what `CONFIG_CFG80211_WEXT` provides -- so it agreed
+	/// with a test that asked for exactly that, and a kernel without the option
+	/// was outside what it could describe. cfg80211 creates `phy80211`
+	/// unconditionally, and that is the one to ask. 0231.
+	#[test]
+	fn a_radio_is_one_whether_or_not_the_kernel_has_wireless_extensions() {
+		let dir = netcfgd_testdir::TestDir::new("radio-phy");
+		let root = dir.path();
+
+		// A modern kernel with the compatibility layer off: cfg80211's own
+		// attribute and nothing else.
+		std::fs::create_dir_all(dir.join("wlan0/phy80211")).expect("a radio");
+		assert!(
+			super::is_wireless(root, "wlan0"),
+			"a radio with no wext attribute is still a radio"
+		);
+
+		// The same kernel with the option on, which is what the reporting
+		// machine has: both attributes.
+		std::fs::create_dir_all(dir.join("wlan1/phy80211")).expect("a radio");
+		std::fs::create_dir_all(dir.join("wlan1/wireless")).expect("and wext");
+		assert!(super::is_wireless(root, "wlan1"));
+
+		// A driver too old to have a cfg80211 device at all. This is the case
+		// `-Dnl80211,wext` exists for, and the two have to agree that it is a
+		// radio.
+		std::fs::create_dir_all(dir.join("wlan2/wireless")).expect("wext only");
+		assert!(super::is_wireless(root, "wlan2"));
+
+		// And a wired port, which has neither.
+		std::fs::create_dir_all(dir.join("eth0")).expect("a wired port");
+		assert!(!super::is_wireless(root, "eth0"));
+
+		let mut found = super::wireless_links(root);
+		found.sort();
+		assert_eq!(found, vec!["wlan0", "wlan1", "wlan2"]);
 	}
 }
