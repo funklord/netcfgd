@@ -9461,6 +9461,55 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.127 A signal that stopped the daemon
+
+Reported: a machine switched wifi networks, `/etc/resolv.conf` kept the previous
+network's settings, and the GUI kept showing the previous network.
+
+```text
+11:11:35  netcfgd: [netlink] Error: netlink watch failed:
+                   Interrupted system call (os error 4)
+11:11:37  wpa_supplicant: CTRL-EVENT-CONNECTED ... EMP-XYLEM
+```
+
+Two seconds before the new association a signal arrived while the netlink socket
+was blocked in `recv`. `EINTR` means "call it again"; the watcher treated it as
+fatal and returned. **Two things went, not one**: netcfgd stopped seeing kernel
+changes, and because that same thread produced `Command::Tick`, it stopped
+reconciling at all. Fifty-two minutes later the process was still `active`, had
+used no measurable CPU, and sat in `futex_wait`; `observed.json` was frozen at
+10:26 and `/run/netcfgd/dns/` still held values written on 10 September. A plan
+run by hand was not empty -- netcfgd knew what to do and had no way left to
+notice it should. Decision 0233.
+
+`ncfg wifi status` looked correct throughout, because it asks the supplicant
+over the control socket rather than reading the observation. The command that
+looked healthiest was the one that did not depend on the broken part.
+
+The signal itself is ordinary: netcfgd spawns `wpa_supplicant`, `dhcpcd` and
+hooks, and `SIGCHLD` can interrupt a blocking syscall in any thread whenever a
+child exits.
+
+**Two fixes, because there were two faults.** `EINTR` is classified where a
+timeout and `ENOBUFS` already were -- that function's own comment says a watcher
+treating `ENOBUFS` as failure "would stop watching precisely when the most was
+happening", and a signal belongs in the same company. And the loop takes its
+heartbeat from its own wait now: a backstop the thing it backs up can switch off
+is not a backstop. That also covers the case this fault never reached -- if the
+netlink socket cannot be opened at startup, the daemon would never have ticked
+at all.
+
+**What it says about eleven rounds of wifi audits.** The netlink watcher is not
+wifi. Every round took a subject and read the code implementing it; this is the
+loop those subjects are delivered *to*, and no list of wifi topics names it. The
+closest was 10.118, which found the same shape one layer over -- `Err(_)` read
+as "the supplicant went away" when it could also mean "this message was too
+big" -- and 10.119 split that for the supplicant's socket without asking the
+same of the kernel's. The question that would have found it is not about wifi:
+**which threads must stay alive for this daemon to keep working, and what
+happens to each if it returns?** That is a subject in its own right and has not
+been audited.
+
 ## 10.126 A country without radar detection
 
 0221 covered the country code, and 10.124's lesson was that an existing
