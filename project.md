@@ -9461,6 +9461,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.131 A record of what was done
+
+Two states were handled. An adopted supplicant has no record, and the observer
+treats that as a reason to act -- "a set netcfgd cannot account for is a set that
+should be replaced with the document's". A supplicant that is gone is noticed,
+because its control socket is. **The hole is between them**: a supplicant still
+reachable that no longer holds anything is neither absent nor unaccounted for.
+
+`supplicant_networks_match` compares netcfgd's record of what it handed over
+against what the document would produce now, and neither side asks the
+supplicant. The comment says why -- `LIST_NETWORKS` returns ids and SSIDs, a
+passphrase is write-only -- and that is true and not the whole question. It
+cannot confirm a set. It can refute one. Measured on the `none` driver:
+
+```text
+LIST_NETWORKS  ->  0  probe  any
+RECONFIGURE    ->  OK
+LIST_NETWORKS  ->  (empty)
+PING           ->  PONG
+```
+
+`RECONFIGURE` makes the supplicant re-read its configuration file, and the file
+netcfgd writes names no networks -- every one it holds arrived over the control
+socket. One command empties it and it stays reachable, so the record still
+matches, and nothing acts: **the machine has no wifi and netcfgd reports it as
+fine.** A record of what netcfgd *did*, used as a statement about what *is*.
+Decision 0237.
+
+The observer already opens a connection for this pass and makes another round
+trip straight afterwards, so the question costs one more command -- which is why
+it does not meet the objection that rejected a `STATUS` round trip per radio per
+netlink event. What it asks is deliberately coarse: none at all where the
+document asks for some. That cannot loop, because repopulating makes the next
+pass non-empty. A count would be finer and would have to be right about every
+legitimate difference; being wrong there is the restart loop 10.116 records
+having had twice.
+
+**Still not caught:** a population that failed part-way leaves some networks
+behind, and the record is not written on failure, so the previous one remains --
+if it matches the current document, netcfgd believes a half-populated supplicant
+is correct. Recorded rather than fixed; the better shape, if wanted, is
+recording the count beside the digest and comparing both.
+
+**Not tested on the reporting machine, deliberately.** `RECONFIGURE` against its
+own radio would have shown the fault end to end and, before this fix, left that
+machine without wifi until somebody noticed -- which is the fault. The mechanism
+came from a throwaway supplicant instead.
+
 ## 10.130 The setting that decided nothing
 
 The disconnect path is sound. `ncfg wifi disconnect` sends `DISCONNECT` rather
