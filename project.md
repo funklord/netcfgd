@@ -9461,6 +9461,110 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.134 Why it took twenty rounds, answered with the tools that were already here
+
+Asked directly: why did this take so long, and what changes so it does not
+happen again. The answer is uncomfortable and cheap to act on -- almost every
+question that cost a one-off experiment had a standing harness in this tree, and
+the rounds did not reach for it.
+
+**`backend/netcfgd-supplicant/tests/live.rs` drives a real `wpa_supplicant` and
+asserts read-back, and has since M6.** This campaign hand-rolled a throwaway
+`-Dnone` probe for `bgscan` and `bssid_accept` in 10.133, two settings that file
+already covers. Worse, of the four globals netcfgd sends -- `sae_pwe` (0226),
+`okc` (0228), `rand_addr_lifetime` (0230), `preassoc_mac_addr` -- **none was in
+it**. Each was measured by hand in the round that added it, written up as prose,
+and the script deleted, so the next round had no way to know and measured again.
+That is what the "time-consuming experiments" were.
+
+**`tests/live/hwsim.sh` produces real associations on simulated radios, and half
+of it had been dead since 0154.** That decision replaced `priority` with
+`metric`; the script still wrote `priority`, so every run got two compile
+diagnostics and `did not move to the preferred network (on: none)`. The only
+test in the tree that makes a radio associate, failing silently for months,
+because live scripts are not in `make check` and nobody read the output.
+
+### What that cost, measured by fixing it
+
+The script already loads three radios and stands up two access points. Pointing
+them at a roam -- one access point joining the network the station is on, the
+other taken away -- found **two defects in an afternoon**, neither of them
+0239's:
+
+- **A dead connection reads as a quiet one.** `next_event` only receives, and a
+  connected datagram socket whose peer has exited reports that by timing out,
+  which is what a quiet radio does. A restarted supplicant left the watcher
+  holding a dead entry, the rescan skipped the interface because it had one, and
+  the radio went deaf for the life of the process. `ncfg apply` restarts
+  supplicants.
+- **Falling behind is not merely late.** The watcher took one event per pass.
+  The 250ms is a timeout rather than a delay, so one busy radio drains fast --
+  but a *second, quiet* radio makes every pass wait it out, and then the busy one
+  yields about four events a second. Every modern driver provides that second
+  radio: `p2p-dev-wlan0`, silent, beside `wlan0`. A supplicant losing an access
+  point emits a burst, the queue fills, and `wpa_supplicant` drops a monitor it
+  cannot send to -- silently, from netcfgd's side.
+
+Both are decision 0240. Both are the campaign's own recurring shape: an
+available signal (an entry exists; a read timed out) standing in for the
+question (is this connection receiving?).
+
+### The ninth sabotage to pass, and the best one
+
+The drain went in with a burst test that reverting the drain **passed**. The
+test's premise was wrong in the same way the old code was accidentally right:
+with one radio, one-per-pass drains as fast as draining. The pacing needs the
+quiet second radio, which `roam.sh` now starts -- and the same sabotage then gets
+15 of 33 in three seconds.
+
+Eight previous first-run passes revealed a missing assertion. This one corrected
+what the test believed, which is a better argument for the pass than all eight.
+
+### The four changes
+
+- **`tool/supplicant_coverage_gate.py`**, in `make check`. Every setting netcfgd
+  hands a supplicant must have a real one behind it: 21 settings, all driven,
+  including an enterprise network whose seven EAP settings had never met the
+  real parser. A measurement cannot be thrown away again.
+- **`tool/cited_quote_gate.py`**, as `make claims`. A record may mark a
+  quotation with the file it came from; the gate checks the words are still
+  there. It catches quotations and not paraphrases, and says so -- what caught
+  0231, 0234 and 0235 was reading the code while writing the next record, which
+  is a practice and not a tool.
+- **`tool/prove-red.sh`.** Runs a new test against the parent commit in a
+  throwaway worktree, so the "sabotage" is what the code did before rather than a
+  mutation chosen by whoever wrote the bug. Nothing is stashed and nothing in the
+  working tree is touched, which matters in a tree several sessions share. It
+  separates an assertion-failure red from a compile-failure red and says the
+  second proves less; it cannot separate a test from its fix when they share a
+  file, and says that too.
+- **`make installed-diff`.** Twenty-one of this campaign's forty-five commits
+  touched only documents, and each still paid a full build, install and live
+  verification decided by unpacking the `.deb` by hand.
+
+### Audit by shape, not by subject
+
+Twenty rounds indexed by subject, and every subject had defects -- which means
+they were never subject-specific. Four shapes did the work: a record of what was
+done read as what is; a proxy for the real question; a true statement about one
+direction used to fix both; a fixture built from the reader rather than from the
+thing modelled.
+
+Swept three of them across the whole tree. One finding -- the handle held across
+time, which is the watcher above. The `/proc/<pid>` uses all read `cmdline` or
+`comm` rather than existence, which is 0143 already applied; the two
+absence-becomes-a-value sites that matter are deliberate and documented where
+they are. A useful result both ways: the shapes are worth sweeping, and this
+tree is not full of them.
+
+### What was irreducible, and what was not
+
+No second real radio, no enterprise authentication server, no real `resolvconf`
+here. Those are real. But `mac80211_hwsim` was installed, loaded by a script in
+a make target, and standing up two access points already -- so "a roam needs a
+radio" was true of the hardware and false of this machine, for the whole
+campaign.
+
 ## 10.133 A different address is not a roam
 
 0122 audited the roam *policy*. This is the other half: how netcfgd decides a
