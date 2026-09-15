@@ -488,6 +488,30 @@ if [ "$state" = COMPLETED ]; then
 
 	scan=$(innc "$ncfg" wifi scan 2>&1 || true)
 	contains "a scan finds the access point" "$scan" "netcfgd-test"
+
+	# **And says what kind it is, which nothing checked against a real
+	# beacon.** `is_secured`, `is_enterprise` and `is_owe` read the flag
+	# string `wpa_supplicant` builds from the RSN element, and those words
+	# are assembled at run time -- they are not literals anybody can read
+	# out of the binary the way `CTRL-EVENT-CONNECTED`'s format string was.
+	# So the only way to know netcfgd reads them right is an access point
+	# that is really beaconing.
+	#
+	# This one is `key_mgmt=SAE WPA-PSK` with `proto=RSN`, so the answer is
+	# `secured`: it needs a credential, it is not 802.1X, and it is not
+	# opportunistic wireless encryption. A client showing any of the other
+	# three asks the operator for the wrong thing, or for nothing.
+	kind=$(printf '%s\n' "$scan" | grep "netcfgd-test" | head -1)
+	case "$kind" in
+	*secured*) echo "ok   and calls it secured, which is what it is" ;;
+	*)
+		echo "FAIL the scan misreads what kind of network it found"
+		echo "       the row: $kind"
+		echo "       every row:"
+		printf '%s\n' "$scan" | sed 's/^/         /'
+		failures=$((failures + 1))
+		;;
+	esac
 fi
 
 # --------------------------------------------------------- and then an address
