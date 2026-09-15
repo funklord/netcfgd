@@ -480,6 +480,7 @@ void ncfg_links_free(ncfg_links_t *links)
 		free(links->items[i].mac);
 		free(links->items[i].addresses);
 		free(links->items[i].network);
+		free(links->items[i].category);
 	}
 	free(links->items);
 	memset(links, 0, sizeof(*links));
@@ -690,8 +691,11 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		 * member_text gives "" for both -- which is what a screen wants, since
 		 * neither has a network to name. */
 		item->network = member_text(doc, link, "network");
+		/* "" from a daemon that does not report one, which a caller renders as
+		 * an unfiltered row rather than as a fault. */
+		item->category = member_text(doc, link, "category");
 		if (!item->name || !item->kind || !item->mac || !item->addresses ||
-		    !item->network) {
+		    !item->network || !item->category) {
 			set_error(err, err_size, "out of memory");
 			ncfg_links_free(out);
 			return 0;

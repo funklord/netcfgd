@@ -160,6 +160,20 @@ typedef struct {
 	 */
 	int   wireless;
 	/*
+	 * What kind of thing this link is, as the daemon decided it: "ethernet",
+	 * "wifi", "loopback", "bridge", "bond", "vlan", "wireguard", "tunnel",
+	 * "virtual", "modem", or "other". "" from a daemon older than this client.
+	 *
+	 * **A filter cannot be built from `kind`.** The kernel reports an empty
+	 * kind for every real card, so wired, wireless and loopback are one value
+	 * there -- and `wireless` above answers only half of it. The rule also
+	 * needs the *document*, since nothing on a link says modem. So the daemon
+	 * decides and this carries the answer, rather than three front ends each
+	 * writing the rule and the wrong one silently dropping rows from a
+	 * filtered list.
+	 */
+	char *category;
+	/*
 	 * The configured network this radio is associated to, "" where there is
 	 * none.
 	 *
