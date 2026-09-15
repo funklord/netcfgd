@@ -502,6 +502,17 @@ fn lower_global_block(document: &mut Document, block: &Block, diags: &mut Diagno
 					}
 				}
 			}
+			Item::Block(inner) if inner.head == "connectivity" => {
+				for item in &inner.items {
+					if let Item::Assignment(assignment) = item {
+						lower_connectivity_key(
+							&mut document.globals.connectivity,
+							assignment,
+							diags,
+						);
+					}
+				}
+			}
 			Item::Block(inner) if inner.head == "remote" => {
 				for item in &inner.items {
 					if let Item::Assignment(assignment) = item {
@@ -522,6 +533,71 @@ fn lower_global_block(document: &mut Document, block: &Block, diags: &mut Diagno
 				"include was not resolved before compiling",
 			)),
 		}
+	}
+}
+
+/// What a word in `requires` means, or `None` if it means nothing.
+///
+/// **A separate function, and the reason is the privilege gate.** That gate
+/// reads the keys the compiler accepts out of `match ....key.as_str()` blocks,
+/// and it collects every arm until the `unknown ... key` line -- so a nested
+/// `match` on a *value* puts its arms in the key list. `on` and `off` are in
+/// `tool/privilege-ordinary.txt` for exactly that reason.
+///
+/// Two of these words are `probe` and `route`, which are plausible future keys
+/// in a way `on` and `off` are not. Classifying them as ordinary now would
+/// pre-approve a key nobody has written yet, which is the one thing that gate
+/// exists to prevent. Moving the match out of the window keeps it honest.
+fn connectivity_requires(word: &str) -> Option<netcfgd_model::connectivity::Requires> {
+	use netcfgd_model::connectivity::Requires;
+	match word {
+		"route" => Some(Requires::Route),
+		"probe" => Some(Requires::Probe),
+		"address" => Some(Requires::Address),
+		_ => None,
+	}
+}
+
+/// `connectivity { requires = "..."; ignore = [...] }` inside `global`.
+///
+/// **Host-wide, because the question is about the machine.** A tray icon says
+/// whether *this computer* is on the network; an answer assembled per interface
+/// is what four clients were each assembling differently (0243).
+fn lower_connectivity_key(
+	policy: &mut netcfgd_model::connectivity::Policy,
+	assignment: &Assignment,
+	diags: &mut Diagnostics,
+) {
+	match assignment.key.as_str() {
+		"requires" => {
+			if let Some(word) = as_string(&assignment.value, diags) {
+				if let Some(requires) = connectivity_requires(&word) {
+					policy.requires = requires;
+				} else {
+					diags.push(
+						Diagnostic::new(
+							assignment.span,
+							format!("`{word}` is not something to require for connectivity"),
+						)
+						.with_help(
+							"one of: route (a default route, the default), \
+							 probe (a probe that answered, for a captive portal), \
+							 address (an address is enough, for a machine on its own subnet)",
+						),
+					);
+				}
+			}
+		}
+		"ignore" => {
+			policy.ignore.clear();
+			for word in as_words(&assignment.value, diags) {
+				policy.ignore.push(word.node);
+			}
+		}
+		other => diags.push(Diagnostic::new(
+			assignment.span,
+			format!("unknown connectivity key `{other}`"),
+		)),
 	}
 }
 

@@ -219,3 +219,11 @@ profile
 # control character, since the APN is interpolated into a quoted AT command.
 apn
 sim
+
+# `global { connectivity { ... } }`: what this machine means by connected, and
+# which links never count towards it (0243). Neither grants anything -- they
+# decide what a tray icon says, not what netcfgd may touch -- and a client that
+# can already write an interface's `preference` can already change which link
+# carries traffic, which is the stronger power of the two.
+ignore
+requires
