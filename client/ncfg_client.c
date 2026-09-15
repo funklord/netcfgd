@@ -1141,6 +1141,77 @@ int ncfg_client_connectivity(ncfg_client_t *client, ncfg_connectivity_t *out, ch
 	return done;
 }
 
+static int convert_inventory(const ncfg_json_doc_t *doc, ncfg_inventory_t *out, char *err,
+                             size_t err_size)
+{
+	uint32_t root = ncfg_json_root(doc);
+	uint32_t list = ncfg_json_member(doc, root, "inventory");
+	uint32_t count = ncfg_json_count(doc, list);
+
+	if (!count) {
+		/* A daemon that reports none is one older than this client, and an
+		 * empty list is the honest answer: the caller falls back to the
+		 * kernel's links rather than showing nothing. */
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, list, i);
+		ncfg_inventory_item_t *item = &out->items[i];
+
+		item->name = member_text(doc, entry, "name");
+		item->category = member_text(doc, entry, "category");
+		item->presence = member_text(doc, entry, "presence");
+		item->configured = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "configured"), 0);
+		if (!item->name || !item->category || !item->presence) {
+			set_error(err, err_size, "out of memory");
+			return 0;
+		}
+	}
+	return 1;
+}
+
+void ncfg_inventory_free(ncfg_inventory_t *inventory)
+{
+	if (!inventory) {
+		return;
+	}
+	for (size_t i = 0; i < inventory->count; i++) {
+		free(inventory->items[i].name);
+		free(inventory->items[i].category);
+		free(inventory->items[i].presence);
+	}
+	free(inventory->items);
+	memset(inventory, 0, sizeof(*inventory));
+}
+
+int ncfg_client_inventory(ncfg_client_t *client, ncfg_inventory_t *out, char *err,
+                          size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_status(client, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size) && convert_inventory(doc, out, err, err_size);
+	if (!done) {
+		ncfg_inventory_free(out);
+	}
+	ncfg_json_free(doc);
+	return done;
+}
+
 int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size_t err_size)
 {
 	if (!out) {

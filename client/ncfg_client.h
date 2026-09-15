@@ -200,6 +200,39 @@ typedef struct {
 } ncfg_links_t;
 
 /*
+ * One row of the link list: what netcfgd knows about one link.
+ *
+ * **A union of two sets that do not coincide**, which is why this is not the
+ * same list as `ncfg_links_t`. That one is the kernel's table; this adds the
+ * links the document names and the kernel does not have -- a saved wifi
+ * network, an interface whose card is not plugged in.
+ */
+typedef struct {
+	char *name;     /* an interface's name, or a `network` block's id */
+	char *category; /* as ncfg_link_t::category */
+	/*
+	 * "present", "absent", or "unknown".
+	 *
+	 * **Three values, and the third is the point.** A hidden network cannot be
+	 * found by looking: a hidden access point beacons with an empty name, so a
+	 * scan sees its address and not its name, and on a channel where probing
+	 * is forbidden nothing can resolve it. The only evidence is an attempt to
+	 * associate.
+	 *
+	 * So "unknown" must never be drawn as absent. A hidden network shown as
+	 * not present looks permanently gone, and the operator's correct response
+	 * -- try it -- is the one thing that display argues against.
+	 */
+	char *presence;
+	int   configured; /* whether the document names it */
+} ncfg_inventory_item_t;
+
+typedef struct {
+	ncfg_inventory_item_t *items;
+	size_t                 count;
+} ncfg_inventory_t;
+
+/*
  * How far this machine has got towards carrying traffic.
  *
  * **One answer, from the daemon.** Four clients used to work this out for
@@ -489,6 +522,7 @@ int ncfg_link_is_wireless(const char *kind, const char *name);
 char *ncfg_access_point_display(int named, const char *name, const char *ssid);
 
 void ncfg_links_free(ncfg_links_t *links);
+void ncfg_inventory_free(ncfg_inventory_t *inventory);
 void ncfg_connectivity_free(ncfg_connectivity_t *connectivity);
 void ncfg_plan_free(ncfg_plan_t *plan);
 void ncfg_journal_free(ncfg_journal_t *journal);
@@ -505,6 +539,14 @@ void ncfg_wifi_status_free(ncfg_wifi_status_t *status);
  * own would throw away the sentence that says what to do about it.
  */
 int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_t err_size);
+/*
+ * Every link this machine has or has been told about.
+ *
+ * Empty from a daemon older than this client, which a caller renders by
+ * falling back to `ncfg_client_links` rather than showing nothing.
+ */
+int ncfg_client_inventory(ncfg_client_t *client, ncfg_inventory_t *out, char *err,
+                          size_t err_size);
 /*
  * Ask the daemon how far this machine has got, and through what.
  *
