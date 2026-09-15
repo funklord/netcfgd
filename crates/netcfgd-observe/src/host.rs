@@ -76,6 +76,10 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 			desired,
 		));
 	}
+	// After the categories, which it reads, and after `ask_supplicants`, which
+	// is what puts a radio's network on its link and so decides whether a
+	// configured network counts as associated.
+	observed.inventory = netcfgd_model::link::inventory(desired, observed);
 	observed.connectivity = Some(netcfgd_model::connectivity::overall(
 		observed,
 		&desired.map_or_else(netcfgd_model::connectivity::Policy::default, |document| {
