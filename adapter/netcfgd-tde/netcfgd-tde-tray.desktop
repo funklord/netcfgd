@@ -1,6 +1,6 @@
 [Desktop Entry]
 Exec=netcfgd-tde-tray
-Icon=network
+Icon=netcfgd
 Type=Application
 Terminal=false
 

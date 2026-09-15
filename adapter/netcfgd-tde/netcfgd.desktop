@@ -1,7 +1,7 @@
 [Desktop Entry]
 Exec=tdecmshell netcfgd
 Type=Application
-Icon=network
+Icon=netcfgd
 X-TDE-Library=netcfgd
 X-TDE-FactoryName=netcfgd
 X-TDE-ParentApp=kcontrol

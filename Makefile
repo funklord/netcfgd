@@ -72,7 +72,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance claims installed-diff FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
+.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -562,6 +562,7 @@ install-gui:
 	install -m 0755 $(GUI_BUILD_DIR)/netcfgd-gui $(DESTDIR)$(BINDIR)/netcfgd-gui
 	install -m 0644 gui/packaging/netcfgd-gui.desktop \
 		$(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	@$(MAKE) --no-print-directory install-icons ICON_PREFIX=$(DATADIR)
 	@# **One binary, two names**, the way `ncfg` is the daemon's second name.
 	@# The program reads argv[0] and a name ending `-tui` selects the terminal
 	@# frontend, so this costs a symlink and buys a real command rather than
@@ -1048,10 +1049,80 @@ from what is installed"; \
 		echo "installed-diff: $$found packaged file(s), $$changed of them different"; \
 	fi
 
+# The program icon, from one master.
+#
+# **Every size is committed**, so a machine building netcfgd needs no image
+# tooling -- only whoever replaces the master does. Same bargain `doc/schema`
+# makes: the generated artifact is in the tree so that building and shipping
+# need none of what produced it.
+#
+# 16 for a menu, 22 and 32 for the TDE panel, 24 for a toolbar, 48 for a
+# desktop file, and the rest because hicolor is asked for them and an absent
+# size is scaled from the nearest one by whoever is drawing, usually badly.
+ICON_SIZES = 16 22 24 32 48 64 128 256
+ICON_MASTER = art/netcfgd-master.png
+
+icons:
+	@command -v convert >/dev/null 2>&1 || { \
+		echo "icons: ImageMagick is not installed (apt install imagemagick)"; \
+		exit 1; \
+	}
+	@test -f $(ICON_MASTER) || { echo "icons: $(ICON_MASTER) is missing"; exit 1; }
+	@# Square and big enough, checked rather than assumed: a master smaller
+	@# than the largest render would be scaled *up*, which is the one thing
+	@# this pipeline must never do quietly.
+	@geom=$$(identify -format '%w %h' $(ICON_MASTER)); \
+	w=$${geom% *}; h=$${geom#* }; \
+	[ "$$w" = "$$h" ] || { echo "icons: the master is $${w}x$${h}, not square"; exit 1; }; \
+	[ "$$w" -ge 256 ] || { echo "icons: the master is $${w}px, smaller than the largest render"; exit 1; }
+	@mkdir -p art/icon
+	@for size in $(ICON_SIZES); do \
+		convert $(ICON_MASTER) -filter Lanczos -resize $${size}x$${size} \
+			-strip art/icon/netcfgd-$${size}.png || exit 1; \
+	done
+	@echo "icons: rendered $(words $(ICON_SIZES)) size(s) from $(ICON_MASTER)"
+	@echo "icons:   commit art/icon/ -- the build installs these and never rasterises"
+
+# What the gate checks: the renders exist, and every shipped `Icon=` names this
+# icon rather than borrowing somebody else's from the theme.
+icon-check:
+	@python3 tool/icon_gate.py
+
+# Put the rendered icons where a toolkit will look for them.
+#
+# `hicolor` and not a themed directory, because hicolor is the one theme every
+# toolkit falls back to and the only one both front ends agree on -- the Qt
+# window under `/usr` and the TDE tray under `/opt/trinity`, which looks in its
+# own prefix first. Same files, two prefixes, one name.
+#
+# `ICON_PREFIX` is the share directory to install under, so the TDE package can
+# pass its own without this target knowing anything about TDE.
+ICON_PREFIX ?= $(DATADIR)
+
+install-icons:
+	@for size in $(ICON_SIZES); do \
+		test -f art/icon/netcfgd-$$size.png || { \
+			echo "install-icons: art/icon/netcfgd-$$size.png is missing"; \
+			echo "install-icons:   run \`make icons\` and commit the result"; \
+			exit 1; \
+		}; \
+		install -d $(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps; \
+		install -m 0644 art/icon/netcfgd-$$size.png \
+			$(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps/netcfgd.png; \
+	done
+
+uninstall-icons:
+	@for size in $(ICON_SIZES); do \
+		rm -f $(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps/netcfgd.png; \
+	done
+
 packaging:
 	@# install and uninstall must agree, checked statically so it runs
 	@# everywhere rather than only where a full install works.
 	@python3 tool/uninstall_gate.py
+	@# One program icon, and every front end naming it rather than borrowing
+	@# a generic one from whatever theme is installed.
+	@python3 tool/icon_gate.py
 	@# Every setting netcfgd hands a supplicant has a real one behind it.
 	@# The measurements kept being made by hand and thrown away; this is
 	@# what stops the next round having to make them again. 0240.
@@ -2124,6 +2195,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-gui
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-tui
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	@$(MAKE) --no-print-directory uninstall-icons ICON_PREFIX=$(DATADIR)
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-at
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-umbim

@@ -69,3 +69,18 @@ install( FILES netcfgd-tde-tray.desktop DESTINATION ${XDG_APPS_INSTALL_DIR} )
 # the package ship the entry without deciding for the operator.
 install( FILES netcfgd-tde-tray-autostart.desktop
          DESTINATION ${AUTOSTART_INSTALL_DIR} )
+
+##### the program icon ##########################
+
+# The same renders the Qt front end installs under /usr, installed again under
+# TDE's own prefix. TDE looks in its prefix first, and hicolor is the one theme
+# both toolkits fall back to -- so this is the same eight files under a second
+# root rather than a second icon.
+#
+# Committed rather than rasterised: see art/README.md. Nothing here needs
+# ImageMagick, only whoever replaces the master does.
+foreach( size 16 22 24 32 48 64 128 256 )
+  install( FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../art/icon/netcfgd-${size}.png
+           DESTINATION ${SHARE_INSTALL_PREFIX}/icons/hicolor/${size}x${size}/apps
+           RENAME netcfgd.png )
+endforeach()
