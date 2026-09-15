@@ -1206,7 +1206,21 @@ ASCII_PATHS  = crates backend adapter helper tests Cargo.toml Makefile
 # `--exclude-dir=target` because that pattern also matches a *compiled* binary,
 # and an adapter builds one into its own tree. Widening the gate found it
 # immediately, which is the gate working -- on the wrong file.
-ASCII_KINDS  = --include='*.rs' --include='*.toml' --include='*.sh' \
+#
+# **And `-I`, because the line above named a directory when it meant a
+# property.** `target` is where *cargo* puts a binary. The TDE adapter builds
+# with cmake, into `adapter/netcfgd-tde/build/`, and `netcfgd-tde-tray` is an
+# ELF that matches `netcfgd-*` -- so the same fault came back the moment a
+# second build system arrived, and `make ascii` failed for anybody who had
+# built that adapter. Excluding `build` as well would be the same mistake a
+# third time: the question is not which directory a file is in, it is whether
+# it is text.
+#
+# `-I` asks that directly, and it costs the gate nothing it was doing. grep
+# calls a file binary when it holds NUL bytes, and a source file with an em
+# dash in it holds none -- so exactly the files this gate exists to catch are
+# still read.
+ASCII_KINDS  = -I --include='*.rs' --include='*.toml' --include='*.sh' \
 	--include='netcfgd-*' --exclude-dir=target
 
 ascii:
