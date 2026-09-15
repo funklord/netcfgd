@@ -35,6 +35,20 @@ Steps 1 to 6 are `ncfg` from a root shell and need no access policy at all.
 Step 7 is for when you want a client that is *not* run as root -- the TUI in
 your own terminal, or the GUI -- which a default install refuses.
 
+**This guide assumes netcfgd was installed from source** -- `make install`
+and `make install-systemd` -- which installs the unit and selects nothing, so
+NetworkManager is still running and still owns every interface. That is what
+makes the gradual handover in steps 3 to 6 possible: NetworkManager keeps the
+wifi, and it is your way back while you hand over the wire.
+
+**The Debian package does not leave the machine in that state.** Its
+`postinst` runs `netcfgd_select.sh netcfgd` on a fresh install, which stops,
+disables and **masks** NetworkManager, systemd-networkd, connman,
+wpa_supplicant, ModemManager and systemd-resolved before you have written a
+config. It prints what it did and how to undo it. If that is how you
+installed, netcfgd already owns the machine: read section 8 first, and treat
+steps 3 to 6 as a description of the other route rather than as instructions.
+
 ## 1. Write a config
 
 `/etc/netcfgd/netcfgd.conf`:
@@ -294,10 +308,18 @@ cp /usr/share/doc/netcfgd/netcfgd-exclusive.conf \
 systemctl daemon-reload
 ```
 
-It adds `Conflicts=` for NetworkManager, systemd-networkd and connman, so
-starting netcfgd stops them. It is not installed into place by the package,
-deliberately: installing netcfgd must not decide that this machine's other
-network daemons stop.
+It adds `Conflicts=` for six units -- NetworkManager, systemd-networkd,
+connman, wpa_supplicant, ModemManager and systemd-resolved -- so starting
+netcfgd stops them. The file is the authority on that list rather than this
+sentence, which has already been wrong: read
+`/usr/share/doc/netcfgd/netcfgd-exclusive.conf`, which says beside each one
+why it is there.
+
+The drop-in is not installed into place by the package. That is not the same
+as the package leaving your other daemons alone, and this section used to say
+it was: `postinst` stops, disables and masks the competitors on a fresh
+install. What the drop-in adds on top is that they stay stood down every time
+netcfgd starts, rather than once at install time.
 
 **The D-Bus interface**, if you want `nmcli`, `nmtui`, `nm-applet` or
 `plasma-nm` to keep working against netcfgd. That is the `netcfgd-nm` package:
@@ -313,14 +335,45 @@ carries the conflict itself rather than as an opt-in.
 
 ### Getting NetworkManager back
 
-**This is the important half, and it is two commands that need no network:**
+**This is the important half, and it needs no network.** If you installed
+the package, one command does it:
+
+```
+netcfgd_select.sh networkmanager
+```
+
+**Use that rather than the two `systemctl` lines below if the units are
+masked, because on a masked unit `systemctl enable --now` fails outright**
+with `Unit NetworkManager.service is masked.` -- and masked is what a package
+install leaves them. The script unmasks first, and then does three things the
+two commands do not:
+
+- **Removes the stale runtime claims.** A stopped NetworkManager leaves
+  `/run/NetworkManager/devices/<ifindex>` behind, and networkd leaves
+  `/run/systemd/netif/links/<ifindex>`. netcfgd reads those to decide whether
+  somebody else holds an interface, so they strand interfaces in both
+  directions.
+- **Clears the orphaned children.** A supplicant or DHCP client started by the
+  outgoing daemon outlives it -- `KillMode=process` -- so the radio stays held
+  by a process whose parent is gone.
+- **Waits for a default route** and says whether one arrived, up to 30 seconds
+  (`--no-wait` to skip, `--dry-run` to see what it would do first).
+
+**`systemd-resolved` and `ModemManager` are stood down too, and nothing
+starts them again.** If this machine resolved names through `systemd-resolved`
+before netcfgd, it has no resolver until you start it:
+`systemctl unmask --now systemd-resolved`. The same for `ModemManager` if a
+modem applet was how you used cellular.
+
+**From a source install, where nothing is masked**, the two commands are
+still the whole of it:
 
 ```
 systemctl disable --now netcfgd netcfgd-nm
 systemctl enable --now NetworkManager
 ```
 
-Why it works, and why each part is there:
+Why that works, and why each part is there:
 
 - **`Conflicts=` is symmetric.** `systemctl start NetworkManager` stops
   netcfgd by itself, so you do not have to get the order right.

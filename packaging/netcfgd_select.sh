@@ -8,8 +8,9 @@
 # whatever was already fighting for the interfaces.
 #
 # WHY THIS IS A SCRIPT AND NOT A LINE IN postinst
-#   Because it has to run in the other direction too. `postrm` calls it with
-#   `none` to unmask everything on the way out -- without that, removing
+#   Because it has to run in the other direction too. `prerm` calls it with
+#   `none` to unmask everything on the way out -- prerm and not postrm, because
+#   dpkg deletes this script before postrm runs, as debian/postrm records -- without that, removing
 #   netcfgd would leave a machine whose every network daemon is masked and no
 #   way back onto the network. And an operator who wants NetworkManager back
 #   for an afternoon runs `netcfgd_select.sh networkmanager` rather than
@@ -59,7 +60,7 @@ usage: $me [netcfgd|networkmanager|networkd|none]
   netcfgd         stand the others down and run netcfgd  (the default)
   networkmanager  stand the others down and run NetworkManager
   networkd        stand the others down and run systemd-networkd
-  none            unmask everything and start nothing -- what postrm uses
+  none            unmask everything and start nothing -- what prerm uses
 
   --dry-run       say what would happen and change nothing
   --wait-online N wait up to N seconds for a default route (default 30)
