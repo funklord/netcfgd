@@ -157,6 +157,7 @@ fn observed_link(
 		// The same predicate `start_supplicant` uses to choose a driver and
 		// `ncfg wifi add` uses to pick a radio, shared rather than repeated:
 		// three copies of one fact is how they end up disagreeing.
+		category: None,
 		wireless: netcfgd_sys::radio::is_wireless(&netcfgd_sys::radio::class_net(), &link.name),
 		// Filled by `host::read_wifi_association` during `augment`, not here:
 		// the kernel knows the link is a radio, but only the supplicant knows

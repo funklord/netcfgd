@@ -172,6 +172,12 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 		name: name.to_owned(),
 		index: 7,
 		kind: "veth".to_owned(),
+		// Set rather than absent, so the witness pins the field: it carries
+		// `skip_serializing_if`, and a field absent from the witness is the one
+		// that can go quiet unnoticed. A veth is `virtual`, which is also the
+		// answer this sample's own `kind` implies -- the two agreeing is the
+		// point, not a coincidence.
+		category: Some(netcfgd_model::link::Category::Virtual),
 		// False even in the maximal sample, because this one is a `veth` and
 		// a veth is not a radio. The field still appears in the witness: it
 		// carries `serde(default)` for reading an older observation back, not
@@ -559,6 +565,7 @@ fn witness() -> Observed {
 			links.push(ObservedLink {
 				name: "wlan0".to_owned(),
 				kind: "wlan".to_owned(),
+				category: None,
 				wireless: true,
 				network: Some("n-office".to_owned()),
 				..maximal_link("wlan0", Ownership::Ours)

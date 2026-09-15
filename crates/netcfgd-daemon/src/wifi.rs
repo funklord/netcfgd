@@ -1092,6 +1092,7 @@ mod tests {
 				name: "wlan0".to_owned(),
 				index: 2,
 				kind: String::new(),
+				category: None,
 				wireless: true,
 				network: None,
 				up: false,

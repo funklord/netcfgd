@@ -1023,6 +1023,7 @@ mod tests {
 			// Whether a link is a radio is netcfgd's to say and the shim only
 			// relays it; these fixtures are about how a device is projected
 			// onto NetworkManager's bus.
+			category: None,
 			wireless: false,
 			network: None,
 			up: true,

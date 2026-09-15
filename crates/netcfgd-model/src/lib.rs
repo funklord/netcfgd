@@ -45,6 +45,7 @@ pub mod hash;
 pub mod hook;
 pub mod interface;
 pub mod key;
+pub mod link;
 pub mod observed;
 pub mod route;
 pub mod rule;

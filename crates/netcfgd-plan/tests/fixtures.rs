@@ -35,6 +35,7 @@ fn link(name: &str) -> ObservedLink {
 		// in this file is called `wlan0`. It has to be a property of the link
 		// rather than of the `device` block, because a `wifi { }` section
 		// carries things like `portal_check` that are meaningful on anything.
+		category: None,
 		wireless: name.starts_with("wlan"),
 		network: None,
 		up: false,

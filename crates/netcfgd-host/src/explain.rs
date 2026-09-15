@@ -745,6 +745,7 @@ mod tests {
 				name: "eth0".to_owned(),
 				index: 2,
 				kind: String::new(),
+				category: None,
 				wireless: false,
 				network: None,
 				up: true,

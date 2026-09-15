@@ -90,6 +90,21 @@ pub struct ObservedLink {
 	/// interfaces do not exist.
 	#[serde(default)]
 	pub wireless: bool,
+	/// What kind of thing this link is, for filtering a list or choosing an
+	/// icon.
+	///
+	/// **Carried rather than derived, before four clients derive it.** The
+	/// kernel's `kind` is empty for every real card, so wired, wireless and
+	/// loopback are indistinguishable by it -- the field above exists for
+	/// exactly that reason and answers only half the question. See
+	/// [`crate::link`] for the rule. No client classifies links today, which is
+	/// what makes putting it here cheap now and expensive later.
+	///
+	/// `None` where nothing has computed it: a bare netlink snapshot that
+	/// `augment` has not been over. Absent when it serialises, so an
+	/// observation written by an older netcfgd still parses.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub category: Option<crate::link::Category>,
 	/// The configured network this link is associated to, where it is one.
 	///
 	/// **The id from the document, not the SSID**, so the planner can look the

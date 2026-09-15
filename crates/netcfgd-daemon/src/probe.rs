@@ -659,6 +659,7 @@ mod probe_detail_tests {
 			name: name.to_owned(),
 			index: 2,
 			kind: String::new(),
+			category: None,
 			wireless: false,
 			network: None,
 			up: true,
