@@ -1039,6 +1039,104 @@ int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_
 	return done;
 }
 
+/*
+ * The rung word the daemon sends, as the enum.
+ *
+ * An unrecognised word is a daemon newer than this client, which is a real
+ * possibility -- the GUI is its own package. It reads as the highest rung this
+ * client understands *below* the unknown one rather than as an error, because
+ * a new rung will be added above `online` before it is added below `offline`,
+ * and refusing to draw an icon is worse than drawing a slightly conservative
+ * one. Returns -1 for a missing or non-string value, which the caller reports.
+ */
+static int rung_of(const ncfg_json_doc_t *doc, uint32_t object)
+{
+	uint32_t rung = ncfg_json_member(doc, object, "rung");
+	if (ncfg_json_type(doc, rung) != NCFG_JSON_STRING) {
+		return -1;
+	}
+	if (ncfg_json_string_equals(doc, rung, "offline")) return ncfg_rung_offline;
+	if (ncfg_json_string_equals(doc, rung, "local")) return ncfg_rung_local;
+	if (ncfg_json_string_equals(doc, rung, "routed")) return ncfg_rung_routed;
+	if (ncfg_json_string_equals(doc, rung, "online")) return ncfg_rung_online;
+	return ncfg_rung_routed;
+}
+
+static int convert_connectivity(const ncfg_json_doc_t *doc, ncfg_connectivity_t *out, char *err,
+                                size_t err_size)
+{
+	uint32_t root = ncfg_json_root(doc);
+	uint32_t object = ncfg_json_member(doc, root, "connectivity");
+	if (ncfg_json_type(doc, object) != NCFG_JSON_OBJECT) {
+		set_error(err, err_size,
+		          "this netcfgd does not report connectivity; it is older than this client");
+		return 0;
+	}
+	int rung = rung_of(doc, object);
+	if (rung < 0) {
+		set_error(err, err_size, "netcfgd reported connectivity with no rung");
+		return 0;
+	}
+	out->rung = (ncfg_rung_t)rung;
+	/* Spelled once, here, so no caller gets to decide what connected means
+	 * -- which is the whole of what went wrong before 0243. */
+	out->connected = rung >= ncfg_rung_routed;
+
+	uint32_t primary = ncfg_json_member(doc, object, "primary");
+	if (ncfg_json_type(doc, primary) == NCFG_JSON_OBJECT) {
+		out->interface = member_text(doc, primary, "interface");
+		out->label = member_text(doc, primary, "label");
+		out->wireless = ncfg_json_bool(doc, ncfg_json_member(doc, primary, "wireless"), 0);
+		if (!out->interface || !out->label) {
+			set_error(err, err_size, "out of memory");
+			return 0;
+		}
+	} else {
+		/* Nothing is carrying traffic, so there is no main link to name.
+		 * Empty strings rather than NULL, for the reason every other text
+		 * field in this header is: a caller that forgets to check gets a
+		 * harmless empty string rather than a crash. */
+		out->interface = strdup("");
+		out->label = strdup("");
+		if (!out->interface || !out->label) {
+			set_error(err, err_size, "out of memory");
+			return 0;
+		}
+	}
+	return 1;
+}
+
+void ncfg_connectivity_free(ncfg_connectivity_t *connectivity)
+{
+	if (!connectivity) {
+		return;
+	}
+	free(connectivity->interface);
+	free(connectivity->label);
+	memset(connectivity, 0, sizeof(*connectivity));
+}
+
+int ncfg_client_connectivity(ncfg_client_t *client, ncfg_connectivity_t *out, char *err,
+                             size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_status(client, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size) && convert_connectivity(doc, out, err, err_size);
+	if (!done) {
+		ncfg_connectivity_free(out);
+	}
+	ncfg_json_free(doc);
+	return done;
+}
+
 int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size_t err_size)
 {
 	if (!out) {

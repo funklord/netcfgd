@@ -186,6 +186,42 @@ typedef struct {
 } ncfg_links_t;
 
 /*
+ * How far this machine has got towards carrying traffic.
+ *
+ * **One answer, from the daemon.** Four clients used to work this out for
+ * themselves -- this library's two callers, the NetworkManager shim and
+ * nothing at all in the text interface -- and no two agreed. 0146 settled what
+ * the rungs mean; what it did not settle was where they are computed, so each
+ * client transcribed the rule and the transcriptions drifted. 0243 puts it in
+ * the daemon and leaves clients to render it.
+ *
+ * Ordered: each rung implies the ones below it, so `>= ncfg_rung_routed` is the
+ * plain yes-or-no and `connected` below is exactly that test, spelled once.
+ */
+typedef enum {
+	ncfg_rung_offline = 0, /* nothing that counts holds an address */
+	ncfg_rung_local,       /* addressed, and nothing to route through */
+	ncfg_rung_routed,      /* a default route exists */
+	ncfg_rung_online,      /* a probe confirmed traffic actually arrives */
+} ncfg_rung_t;
+
+/*
+ * The whole answer: how far, and through what.
+ *
+ * `interface` and `label` are "" where the machine got nowhere -- there is no
+ * main link when nothing is carrying anything. `label` is the `network`
+ * block's id for an associated radio and the interface's own name otherwise,
+ * which is the string to put in a tray tooltip.
+ */
+typedef struct {
+	ncfg_rung_t rung;
+	int         connected; /* rung >= ncfg_rung_routed */
+	char       *interface;
+	char       *label;
+	int         wireless;
+} ncfg_connectivity_t;
+
+/*
  * One action in a plan.
  *
  * The reason is the half that matters. netcfgd's whole product claim is that
@@ -439,6 +475,7 @@ int ncfg_link_is_wireless(const char *kind, const char *name);
 char *ncfg_access_point_display(int named, const char *name, const char *ssid);
 
 void ncfg_links_free(ncfg_links_t *links);
+void ncfg_connectivity_free(ncfg_connectivity_t *connectivity);
 void ncfg_plan_free(ncfg_plan_t *plan);
 void ncfg_journal_free(ncfg_journal_t *journal);
 void ncfg_event_free(ncfg_event_t *event);
@@ -454,6 +491,16 @@ void ncfg_wifi_status_free(ncfg_wifi_status_t *status);
  * own would throw away the sentence that says what to do about it.
  */
 int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_t err_size);
+/*
+ * Ask the daemon how far this machine has got, and through what.
+ *
+ * Fails with a message when the daemon reports nothing -- which means a netcfgd
+ * older than the client asking. Said rather than guessed: a client that
+ * silently fell back to working it out itself would be the four divergent
+ * copies 0243 removed, with one of them hidden.
+ */
+int ncfg_client_connectivity(ncfg_client_t *client, ncfg_connectivity_t *out, char *err,
+                             size_t err_size);
 int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size_t err_size);
 
 /*
