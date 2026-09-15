@@ -67,6 +67,15 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	// particular `ask_supplicants`, which is what puts a radio's `network` on
 	// its link and therefore what gives the primary link the name an operator
 	// recognises rather than `wlan0`. 0243.
+	// Before the verdict, which does not use it, but after everything that
+	// fills in what it reads. One rule, in the model, so the Qt window's
+	// filter, the text interface and the TDE module cannot each invent one.
+	for index in 0..observed.links.len() {
+		observed.links[index].category = Some(netcfgd_model::link::category_of(
+			&observed.links[index],
+			desired,
+		));
+	}
 	observed.connectivity = Some(netcfgd_model::connectivity::overall(
 		observed,
 		&desired.map_or_else(netcfgd_model::connectivity::Policy::default, |document| {
