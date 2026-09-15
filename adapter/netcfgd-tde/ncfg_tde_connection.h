@@ -50,6 +50,10 @@ public:
 	 */
 	enum reach { reach_no_daemon, reach_offline, reach_local, reach_routed };
 
+	/* The daemon's own verdict, falling back to what the caller derived when
+	 * it is talking to a netcfgd older than itself (0243). */
+	reach daemon_reach( reach derived );
+
 	TQString state_line( reach &out );
 
 	//! profiles on this machine, and which is in effect

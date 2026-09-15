@@ -169,6 +169,55 @@ bool ncfg_tde_connection::profile_set( const TQString &name )
  * ncfg_client.h refuses to do with the supplicant's own vocabulary, for the
  * same reason. Where this composes a line it composes gui/src/tray.cpp's.
  */
+/*
+ * The rung, from the daemon rather than worked out here.
+ *
+ * **The words this file builds stay this file's.** What moves is only the
+ * verdict: netcfgd computes it once and four clients render it, because 0146
+ * settled what the rungs mean and never settled where they are computed --
+ * this tray, the Qt tray and the NetworkManager shim each had a copy, and the
+ * shim's did not look at routes at all. Decision 0243.
+ *
+ * Two faults went with the local reading, and both are gone with it: an
+ * interface that is administratively down counted as addressed, so a machine
+ * with docker installed and no network reported itself locally connected; and
+ * the probe verdict netcfgd already computes was consulted by nothing, so a
+ * captive portal read as connected.
+ *
+ * Falls back to what the caller worked out when the daemon says nothing, which
+ * means a netcfgd older than this build. Reporting the old answer beats
+ * reporting none, and it is the only place in this tree where the derivation
+ * is kept -- deliberately, as the compatibility path rather than as a second
+ * opinion.
+ */
+ncfg_tde_connection::reach ncfg_tde_connection::daemon_reach( reach derived )
+{
+	ncfg_connectivity_t answer;
+	char err[256];
+	err[0] = '\0';
+
+	if (!m_client || !ncfg_client_connectivity(m_client, &answer, err, sizeof(err)))
+		return derived;
+
+	const ncfg_rung_t rung = answer.rung;
+	ncfg_connectivity_free(&answer);
+
+	switch (rung) {
+	/*
+	 * `online` and `routed` draw one picture. The difference between them is
+	 * whether a probe confirmed traffic arrives, and this tray has no glyph
+	 * for that; the Qt one says it in words instead.
+	 */
+	case ncfg_rung_online:
+	case ncfg_rung_routed:
+		return reach_routed;
+	case ncfg_rung_local:
+		return reach_local;
+	default:
+		return reach_offline;
+	}
+}
+
 TQString ncfg_tde_connection::state_line( reach &out )
 {
 	out = reach_no_daemon;
@@ -212,8 +261,8 @@ TQString ncfg_tde_connection::state_line( reach &out )
 		}
 		ncfg_links_free(&links);
 
-		out = routed ? reach_routed
-		    : (!addressed.isEmpty() ? reach_local : reach_offline);
+		out = daemon_reach(routed ? reach_routed
+		                          : (!addressed.isEmpty() ? reach_local : reach_offline));
 
 		TQString line = addressed.isEmpty()
 		    ? i18n("no addressed interface")
@@ -271,8 +320,8 @@ TQString ncfg_tde_connection::state_line( reach &out )
 	 * a radio that never got a lease.
 	 */
 	const bool joined = !network.isEmpty() || !display.isEmpty();
-	out = routed ? reach_routed
-	    : ((joined || addressed) ? reach_local : reach_offline);
+	out = daemon_reach(routed ? reach_routed
+	                          : ((joined || addressed) ? reach_local : reach_offline));
 
 	if (out == reach_local)
 		line += addressed ? i18n(" -- no default route")
