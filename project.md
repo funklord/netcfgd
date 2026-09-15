@@ -528,6 +528,8 @@ netcfgd/
                                 # excluded from the root, so its D-Bus stack
                                 # cannot reach the core's twelve dependencies
     netcfgd-restconf/           # milestone M9 — LAST
+    netcfgd-tde/                # TQt3 control module and tray. C++, not a
+                                # cargo workspace, and it links the C client
   tests/
     fixtures/                   # config + observed snapshots -> expected plans
     footprint/                  # §6 filesystem-footprint fixture
@@ -535,6 +537,16 @@ netcfgd/
 ```
 
 `netcfgd-host` is not in the original list and was added in M2. Both binaries need to read the config directory in the same order, write the same `/run` files and materialise hooks the same way; two copies of "which files are the config" is how `ncfg` and `netcfgd` come to disagree about what the config says. Keeping the filesystem side in one crate is also what lets the pure crates stay pure.
+
+`netcfgd-tde` is not in the original list either, and it is the one entry under
+`adapter/` that is not a cargo workspace. It is C++ against TQt3, it links
+`client/`'s static library the way the Qt window does, and it depends on nothing
+in `crates/`. The containment argument is therefore satisfied by construction
+rather than by `deny.toml`: there is no lockfile through which a TDE dependency
+could reach the core. It sits under `adapter/` because that is what it is -- a
+projection of netcfgd onto somebody else's desktop, bound by the one-way rule in
+§1.6 exactly as the NM shim is. `doc/tde-integration.md` carries why it is a
+second front end rather than the Qt one repackaged.
 
 The critical property: `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` are **pure and hardware-free**. The entire planner is unit-testable by feeding fixture configs plus fake observed snapshots and asserting on the action list. Build that harness first; it is what makes the rest safe to write.
 
@@ -9460,6 +9472,86 @@ Proven both ways: the count reports a real number (asserting 2 gives
 failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
+
+## 10.136 A scan that never said what it found
+
+The scan path re-reads sound, and 0121 and 0227's conclusions hold: `SCAN`
+queues and `SCAN_RESULTS` reads a cache, so the wait is on
+`CTRL-EVENT-SCAN-RESULTS` rather than on the previous scan's list; a blocked
+radio answers with its cached results and the reason; the mobility domain costs
+a round trip only where the flags already say fast transition.
+
+The probe-request settings are sound as well, and one deserves naming because
+the rest of this section is about not following its example.
+`preassoc_mac_addr` is sent **in both directions** -- `1` when the document asks
+for scan randomisation, `0` when it does not -- for 0015's reason that a silent
+default is not a control; the digest carries a line only when it is on, which is
+0220's asymmetry; and the observation asks the question the executor asked.
+Three places, consistent.
+
+### The classification had never met a real beacon
+
+`ncfg wifi scan` calls every access point open, secured, enterprise or OWE, and
+every client shows that word -- the list, the TUI's grouping, the GUI's add
+dialog, the NetworkManager shim's PRIVACY flag. 0227 is entirely about getting
+that vocabulary right. **Nothing had checked it against an access point that was
+really beaconing**; `hwsim.sh` asked only whether the SSID appeared.
+
+The usual way out is closed here. `CONNECTED`'s shape could be pinned against
+`wpa_supplicant`'s own format string read out of the binary; these words are
+assembled at run time from the RSN element and are not literals in anything. A
+real beacon is the only source, and this tree has one.
+
+`hwsim.sh` now asserts that an access point running `key_mgmt=SAE WPA-PSK` with
+`proto=RSN` is called `secured`. **It is.** The claim was right and untested,
+which is the outcome to expect from most of these -- the value is that the next
+change to the flag parsing has something real to fail against. Decision 0242.
+
+### Two of the new gate's first four claims were false
+
+10.134's coverage gate takes a `// covers:` line as a promise that a test drives
+those settings through `add_network`, and cannot check it. Two of the first four
+were wrong, written by the pass that built the gate, and both the same way: the
+helper every test in that suite uses builds a network with `hidden: false` and
+`metric: None`, so `scan_ssid` and `priority` are exactly the two settings it
+never sends. Both were claimed.
+
+`scan_ssid` is this round's subject -- the probe-request setting, without which
+a hidden network is never probed for and simply never appears, with no error to
+say why. Declared as tested; not tested.
+
+Both are named in `GET_NETWORK` strings now, so the gate reads them from a
+literal and the promise became a check. The tool says what the episode proved:
+every `covers:` line is somewhere it trusts a sentence, and a setting that can
+be named should be.
+
+### And the sabotage found the campaign's own shape, again
+
+The `scan_ssid` half was caught by its sabotage. The `priority` half passed: the
+assertion compared what the supplicant stored against `join_rank(Some(100))` --
+the function under test -- so a sabotage that flipped the sign moved both sides
+of the comparison together. **A test built from the code rather than from the
+thing modelled**, which is the sixth instance of that shape here and was
+produced by the pass cataloguing it, two rounds after writing that a fixture
+must not be derived from the document it is compared against. The literal
+`3996` is what it asserts now.
+
+### What a supplicant says for a field nobody set
+
+Measured, because the controls depended on it and the first version guessed
+wrong. On wpa_supplicant 2.10 an integer field never set reads back the default
+the supplicant would use and a string field refuses: `scan_ssid` 0, `priority`
+0, `mac_addr` **-1**, `bgscan` FAIL.
+
+`mac_addr` is the one to carry forward. Unset is `-1` and netcfgd sends `0` for
+a permanent address, so those are different values -- 0015's "both directions"
+is doing real work there rather than restating a default, which 10.124's table
+would lead a reader to assume.
+
+### Nothing was fixed, and that is the finding
+
+No behaviour changed. The classification was correct and undertested; the two
+coverage claims were tests that did not exist rather than code that was wrong.
 
 ## 10.135 The lease that was taken and thrown away
 
