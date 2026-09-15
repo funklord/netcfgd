@@ -9473,6 +9473,43 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.138 One program icon, with one source
+
+Asked for a single source for a program icon, to be generated later, usable by
+everything that needs one.
+
+**There were four `Icon=` lines and none of them named netcfgd.** Three said
+`network` and one said `network-wireless`, so the Qt window and the TDE tray
+showed different pictures for one program and both showed a generic one from
+whatever theme happened to be installed. Nothing noticed and nothing could: a
+themed icon that does not exist falls back silently, so an icon name is never
+wrong, only absent. That is why this ends in a gate rather than a test.
+
+`art/netcfgd-master.png` is the only thing anybody replaces; every render comes
+down from it into `art/icon/` and **the renders are committed**, which is
+`doc/schema`'s bargain applied to pictures -- the generated artifact is in the
+tree so that building and shipping need none of what produced it. Installed into
+`hicolor` under two prefixes, `/usr` for Qt and `/opt/trinity` for TDE, because
+TDE looks in its own prefix first and hicolor is the one theme both toolkits
+fall back to. Decision 0244.
+
+**A raster master rather than an SVG, which is a choice.** Nothing here can
+rasterise one -- no `rsvg-convert`, no `inkscape`, and ImageMagick's own SVG
+renderer is not something to trust with the thing people recognise the program
+by -- and the art is likely to arrive from an image generator, which produces
+rasters. `make icons` refuses a master that is not square or is smaller than the
+largest render, because scaling *up* is the one thing the pipeline must never do
+quietly.
+
+The gate checks two things and says what it cannot check: every declared size is
+rendered, and every shipped `Icon=` names `netcfgd`. It does not look at the
+pictures, so a blank square passes and so does one illegible at 16 pixels --
+`art/README.md` carries that requirement and no gate can enforce it.
+
+The master in the tree now is a placeholder, and 0244 says so in prose rather
+than only in a comment, because "temporary" artwork nobody wrote down is how a
+placeholder ships.
+
 ## 10.137 One answer to "are we connected"
 
 Asked whether netcfgd has a main connected/not-connected status and a string for
