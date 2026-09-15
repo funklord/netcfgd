@@ -48,6 +48,10 @@
 
 #include <QIcon>
 
+/* For `ncfg_rung_t` and `ncfg_connectivity_row`: the tray renders the daemon's
+ * answer and does not compute one (0243). */
+#include "ncfg_connection.h"
+
 class QAction;
 class QMenu;
 class QSystemTrayIcon;
@@ -91,6 +95,8 @@ public:
 	 * gui/tests/tray_icon.cpp. Not otherwise called from outside. */
 	static QIcon painted_icon(ncfg_reach reach);
 	static QIcon state_icon(ncfg_reach reach);
+	static ncfg_reach reach_of(ncfg_rung_t rung);
+	static QString line_for(const ncfg_connectivity_row &state);
 
 	void refresh();
 

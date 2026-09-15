@@ -153,45 +153,21 @@ void ncfg_tray::refresh()
 		}
 	}
 
-	if (radio.isEmpty()) {
-		/* Wired-only machines are ordinary, so this is a state and not a
-		 * complaint. The addresses are what the operator wants to know. */
-		QStringList addressed;
-		bool routed = false;
-		for (const ncfg_link_row &link : links) {
-			if (link.name == QStringLiteral("lo")) {
-				continue;
-			}
-			if (!link.addresses.isEmpty()) {
-				addressed << QStringLiteral("%1 %2").arg(link.name, link.addresses);
-			}
-			/* Any link with a default route will do: which one carries the
-			 * traffic is the kernel's business and a metric's, and an icon
-			 * that picked one would be answering a question nobody asked. */
-			routed = routed || link.default_route;
-		}
-		const ncfg_reach reach = routed      ? ncfg_reach::routed
-		                     : !addressed.isEmpty() ? ncfg_reach::local
-		                                    : ncfg_reach::offline;
-		QString line = addressed.isEmpty()
-		           ? QStringLiteral("no addressed interface")
-		           : addressed.join(QStringLiteral(", "));
-		if (reach == ncfg_reach::local) {
-			/* Said outright, because this is the state that used to be
-			 * drawn as connected: an address with nothing to route
-			 * through is a machine that will fail every request and look
-			 * configured while it does. */
-			line += QStringLiteral(" -- no default route");
-		}
-		state_action->setText(line);
-		icon->setToolTip(line);
-		icon->setIcon(state_icon(reach));
-		disconnect_action->setEnabled(false);
-		return;
-	}
-
-	ncfg_wifi_status_row state;
-	if (!connection->wifi_status(radio, &state, &error)) {
+	/* **Asked, not worked out.** This function used to derive the rung from
+	 * the links -- an address here, a default route there, a radio's
+	 * association somewhere else -- and so did the TDE tray, in its own
+	 * transcription, and the NetworkManager shim in a coarser vocabulary.
+	 * 0146 settled what the rungs mean; it did not settle where they are
+	 * computed, and four copies drifted. The daemon answers now (0243).
+	 *
+	 * Two faults went with the derivation and are gone with it. Every
+	 * addressed interface that was not `lo` counted, including one that is
+	 * administratively down -- so a wired-only machine with docker installed
+	 * reported itself locally connected and named a bridge to nowhere. And
+	 * the probe verdict netcfgd already computes was consulted by nothing, so
+	 * a captive portal read as connected here. */
+	ncfg_connectivity_row state;
+	if (!connection->connectivity(&state, &error)) {
 		state_action->setText(error);
 		icon->setToolTip(error);
 		icon->setIcon(state_icon(ncfg_reach::offline));
@@ -199,38 +175,61 @@ void ncfg_tray::refresh()
 		return;
 	}
 
-	/* **Association is not connectivity, and this icon used to say it was.**
-	 * `state.network` non-empty means the supplicant has joined something --
-	 * the earliest step, and true of a radio that never got a lease. What the
-	 * operator wants from a tray is whether traffic can leave, so the radio's
-	 * own link row is consulted for an address and a default route, and the
-	 * icon reports the furthest rung actually reached. */
-	bool addressed = false;
-	bool routed = false;
-	for (const ncfg_link_row &link : links) {
-		if (link.name != radio) {
-			continue;
-		}
-		addressed = !link.addresses.isEmpty();
-		routed = link.default_route;
-		break;
-	}
-	const bool joined = !state.network.isEmpty() || !state.display.isEmpty();
-	const ncfg_reach reach = routed ? ncfg_reach::routed
-	                     : (joined || addressed) ? ncfg_reach::local
-	                                     : ncfg_reach::offline;
-
-	/* One spelling, composed on the row, so this and the wifi tab cannot
-	 * drift into two descriptions of one radio. */
-	QString line = state.summary();
-	if (reach == ncfg_reach::local) {
-		line += addressed ? QStringLiteral(" -- no default route")
-		            : QStringLiteral(" -- joined, no address");
-	}
+	const ncfg_reach reach = reach_of(state.rung);
+	QString line = line_for(state);
 	state_action->setText(line);
 	icon->setToolTip(line);
 	icon->setIcon(state_icon(reach));
-	disconnect_action->setEnabled(true);
+	/* Only a radio can be disconnected, and only when there is one. */
+	disconnect_action->setEnabled(!radio.isEmpty());
+}
+
+/*
+ * The daemon's rung as the three the icon draws.
+ *
+ * `online` and `routed` are one picture: both mean traffic can leave, and the
+ * difference between them is whether anybody checked. An operator who wants
+ * that difference reads the tooltip, which says it in words.
+ */
+ncfg_reach ncfg_tray::reach_of(ncfg_rung_t rung)
+{
+	switch (rung) {
+	case ncfg_rung_online:
+	case ncfg_rung_routed:
+		return ncfg_reach::routed;
+	case ncfg_rung_local:
+		return ncfg_reach::local;
+	case ncfg_rung_offline:
+	default:
+		return ncfg_reach::offline;
+	}
+}
+
+/*
+ * What the tooltip says.
+ *
+ * The label first, because it is what somebody opened the menu to read -- the
+ * network's name where the machine is on a radio, the interface otherwise. The
+ * rung is spelled out after it rather than left to the icon's colour, since
+ * the two states that share a picture are exactly the ones worth telling
+ * apart in words.
+ */
+QString ncfg_tray::line_for(const ncfg_connectivity_row &state)
+{
+	if (state.label.isEmpty()) {
+		return QStringLiteral("offline");
+	}
+	switch (state.rung) {
+	case ncfg_rung_online:
+		return QStringLiteral("%1 -- reachable").arg(state.label);
+	case ncfg_rung_routed:
+		return state.label;
+	case ncfg_rung_local:
+		return QStringLiteral("%1 -- no default route").arg(state.label);
+	case ncfg_rung_offline:
+	default:
+		return QStringLiteral("offline");
+	}
 }
 
 void ncfg_tray::activated(int reason)

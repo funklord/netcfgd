@@ -36,6 +36,24 @@ extern "C" {
 /* One row of the devices table. Qt types because it is on this side of the
  * seam; the names are netcfgd's own so that a reader of both sees one word per
  * concept. */
+/*
+ * The daemon's own answer to "are we connected, and to what".
+ *
+ * Rendered, never recomputed: `rung` and `connected` are the daemon's, and a
+ * screen that second-guessed either would be the fifth copy of a rule 0243
+ * exists to have one of.
+ */
+struct ncfg_connectivity_row {
+	ncfg_rung_t rung = ncfg_rung_offline;
+	bool        connected = false;
+	/* Empty where nothing is carrying traffic: there is no main link then. */
+	QString     interface;
+	/* The `network` block's id for an associated radio, the interface's own
+	 * name otherwise. What to put in a tooltip. */
+	QString     label;
+	bool        wireless = false;
+};
+
 struct ncfg_link_row {
 	QString name;
 	QString kind;
@@ -464,6 +482,7 @@ public:
 	 * to do about it.
 	 */
 	bool links(QList<ncfg_link_row> *out, QString *error);
+	bool connectivity(ncfg_connectivity_row *out, QString *error);
 	bool plan(ncfg_plan_data *out, QString *error);
 
 	/*

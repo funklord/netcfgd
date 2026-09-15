@@ -126,6 +126,48 @@ QString ncfg_connection::where() const
 	return path;
 }
 
+/*
+ * How far this machine has got, and through what -- asked rather than derived.
+ *
+ * **This screen used to work it out.** So did the TDE tray, in its own
+ * transcription; so did the NetworkManager shim, in a coarser vocabulary; and
+ * the text interface had no notion at all. 0146 settled what the rungs mean and
+ * did not settle where they are computed, so four copies drifted. 0243 moved
+ * the rule into the daemon and left this to render it.
+ */
+bool ncfg_connection::connectivity(ncfg_connectivity_row *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	*out = ncfg_connectivity_row();
+
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_connectivity_t answer = {};
+	char message[NCFG_ERROR_MAX];
+
+	if (!ncfg_client_connectivity(client, &answer, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	out->rung = answer.rung;
+	out->connected = answer.connected;
+	out->interface = from_c(answer.interface);
+	out->label = from_c(answer.label);
+	out->wireless = answer.wireless;
+	ncfg_connectivity_free(&answer);
+	return true;
+}
+
 bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 {
 	if (!out) {
