@@ -670,4 +670,17 @@ netcfgd
 # past it. Recorded at the measured size for the reason the file gives at the
 # top: spending the 3% on real features means the next real feature fails the
 # gate for the wrong reason.
-total 2906656
+# The connectivity verdict, +12,288 bytes to 2,918,944.
+#
+# Three pages for `netcfgd_model::connectivity`, the `Globals` field and its
+# compiler arm, the observation pass that fills it in, and the strings -- the
+# rung names, the `requires` words and the diagnostic that lists them.
+#
+# Attributable without a second build: the only change since the total above.
+#
+# Recorded rather than left to ride the tolerance, which it was doing -- the
+# gate passed at 2,918,944 against a 2,993,855 ceiling. That is what the note at
+# the top of this file warns against: the 3% is for compiler-version noise, and
+# spending it on a real feature means the next real feature fails for the wrong
+# reason and somebody goes looking in the wrong place.
+total 2918944
