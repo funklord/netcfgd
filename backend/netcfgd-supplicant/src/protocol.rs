@@ -123,6 +123,43 @@ impl Event {
 		looks_right.then_some(bssid)
 	}
 
+	/// Which configured network a `CTRL-EVENT-CONNECTED` says the station is on.
+	///
+	/// The same format string [`Event::connected_bssid`] reads, one field
+	/// along:
+	///
+	/// ```text
+	/// CTRL-EVENT-CONNECTED - Connection to %02x:...:%02x completed [id=%d id_str=%s%s]
+	/// ```
+	///
+	/// So the id is the seventh word, carrying the opening bracket. Positional
+	/// for the same reason the address is, and **not** [`Event::field`]: that
+	/// one requires a key at a field boundary, and this key is preceded by `[`
+	/// rather than by a space, so it would find nothing here and say so by
+	/// returning the same `None` a missing field does.
+	///
+	/// **This is what tells a roam from a network change**, which is the whole
+	/// reason it is read. A station moving between access points on one network
+	/// keeps this id; a station leaving for a network it also holds credentials
+	/// for does not, and both arrive as a `CONNECTED` naming an address that is
+	/// not the last one.
+	///
+	/// `None` where there is no id to have: the supplicant writes `-1` when the
+	/// association has no configured network behind it, which does not parse as
+	/// a `u32` and needs no separate case.
+	#[must_use]
+	pub fn connected_network_id(&self) -> Option<u32> {
+		if self.name() != "CTRL-EVENT-CONNECTED" {
+			return None;
+		}
+		self.text
+			.split_whitespace()
+			.nth(6)?
+			.strip_prefix("[id=")?
+			.parse()
+			.ok()
+	}
+
 	/// A `key=value` field of the event text, with any quotes taken off.
 	///
 	/// Most of the events worth reading are shaped this way and the shape is

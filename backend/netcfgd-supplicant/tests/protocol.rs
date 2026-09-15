@@ -1272,6 +1272,46 @@ fn a_connected_event_names_the_access_point() {
 	}
 }
 
+/// And it names which configured network, which is what tells a roam apart.
+///
+/// The same format string, one field along: `completed [id=%d id_str=%s%s]`.
+/// A station moving between access points on one network keeps this id and a
+/// station leaving for another network does not -- and both arrive as a
+/// `CONNECTED` naming an address that is not the last one. 0239.
+#[test]
+fn a_connected_event_names_the_network_as_well() {
+	let event = netcfgd_supplicant::protocol::Event::parse(
+		"<3>CTRL-EVENT-CONNECTED - Connection to aa:bb:cc:dd:ee:ff completed [id=7 id_str=]",
+	)
+	.expect("an event");
+	assert_eq!(event.connected_network_id(), Some(7));
+
+	// The id is not always a single digit, and reading one character would
+	// have passed every test above.
+	let event = netcfgd_supplicant::protocol::Event::parse(
+		"<3>CTRL-EVENT-CONNECTED - Connection to aa:bb:cc:dd:ee:ff completed [id=12 id_str=home]",
+	)
+	.expect("an event");
+	assert_eq!(event.connected_network_id(), Some(12));
+
+	for absent in [
+		// `-1` is what the supplicant writes when the association has no
+		// configured network behind it. Not a number this returns, and not a
+		// separate case in the code either: it does not parse as a `u32`.
+		"<3>CTRL-EVENT-CONNECTED - Connection to aa:bb:cc:dd:ee:ff completed [id=-1 id_str=]",
+		// Every other event, including the disconnect that carries an `id=` of
+		// its own -- a reader that took any id it found would compare the
+		// wrong networks.
+		"<3>CTRL-EVENT-SSID-TEMP-DISABLED id=3 ssid=\"home\" auth_failures=1",
+		"<3>CTRL-EVENT-DISCONNECTED bssid=aa:bb:cc:dd:ee:ff reason=3",
+		// A connect whose shape is not the format string's.
+		"<3>CTRL-EVENT-CONNECTED - Connection to aa:bb:cc:dd:ee:ff completed",
+	] {
+		let event = netcfgd_supplicant::protocol::Event::parse(absent).expect("an event");
+		assert_eq!(event.connected_network_id(), None, "{absent}");
+	}
+}
+
 /// Stored certificates and a stored key become real files, and paths.
 ///
 /// The point of the whole change. `wpa_supplicant` opens all three as files, so
