@@ -62,3 +62,6 @@ debian/debhelper-build-stamp
 # make writes its own build output under build/ instead.
 .fmake/
 /netcfgd-gui
+
+# The TDE adapter builds with CMake, which wants its own binary directory.
+adapter/netcfgd-tde/build/

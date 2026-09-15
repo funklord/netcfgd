@@ -1,0 +1,11 @@
+[Desktop Entry]
+Exec=netcfgd-tde-tray
+Icon=network
+Type=Application
+Terminal=false
+
+Name=netcfgd Monitor
+GenericName=Network Configuration Monitor
+Comment=Shows netcfgd's state in the system tray
+
+Categories=Qt;TDE;System;Monitor;
