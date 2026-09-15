@@ -989,6 +989,7 @@ mod tests {
 			});
 
 		let observed = netcfgd_model::Observed {
+			connectivity: None,
 			links: vec![radio_link("wlan0")],
 			..Default::default()
 		};

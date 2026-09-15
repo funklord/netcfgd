@@ -1212,6 +1212,18 @@ pub struct AppliedDns {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Observed {
+	/// How far this machine has got towards carrying traffic, and through what.
+	///
+	/// **One answer, because four clients were each working one out.** See
+	/// [`crate::connectivity`] for what each of them did instead and why the
+	/// rule is not as simple as it looks.
+	///
+	/// `None` where nothing has computed it -- a bare netlink snapshot that
+	/// `augment` has not been over, and an observation written by a netcfgd
+	/// from before this existed. Absent when it serialises, so the `/run`
+	/// record of such a machine still parses.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub connectivity: Option<crate::connectivity::Connectivity>,
 	/// Links, sorted by name.
 	pub links: Vec<ObservedLink>,
 	/// Bluetooth adapters, sorted by name.

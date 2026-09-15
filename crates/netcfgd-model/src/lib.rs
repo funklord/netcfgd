@@ -37,6 +37,7 @@ pub const COPYRIGHT: &str = "Copyright (C) 2026 Nabeel Sowan <nabeel@vibes.se>";
 pub mod address;
 pub mod bluetooth;
 pub mod canonical;
+pub mod connectivity;
 pub mod control;
 pub mod device;
 pub mod dns;
@@ -85,6 +86,16 @@ pub use wifi::{RoamPolicy, Ssid, WifiNetwork};
 use serde::{Deserialize, Serialize};
 
 /// `#[serde(default)]` needs a function, and several fields default to true.
+/// Whether the connectivity policy is the one a document that says nothing gets.
+///
+/// Kept out of the serialised document when it is, so a machine that has never
+/// written a `connectivity` block has the same bytes it had before the block
+/// existed -- the rule every optional field in this tree follows, and the one
+/// that keeps an upgrade from looking like a configuration change.
+fn is_default_connectivity(policy: &connectivity::Policy) -> bool {
+	*policy == connectivity::Policy::default()
+}
+
 pub(crate) fn default_true() -> bool {
 	true
 }
@@ -228,6 +239,14 @@ pub struct Globals {
 	/// local policy is principals checked against peer credentials, and a
 	/// remote caller has none the daemon can see.
 	pub remote: RemotePolicy,
+	/// What this machine means by "connected", and which links count.
+	///
+	/// Host-wide rather than per-interface, because the question is about the
+	/// machine: a tray icon says whether *this computer* is on the network,
+	/// and an answer assembled per interface is the thing four clients were
+	/// each assembling differently. See [`connectivity`].
+	#[serde(default, skip_serializing_if = "is_default_connectivity")]
+	pub connectivity: connectivity::Policy,
 }
 
 /// The whole-host desired state.

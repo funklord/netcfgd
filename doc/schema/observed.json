@@ -1,4 +1,12 @@
 {
+  "connectivity": {
+    "rung": "online",
+    "primary": {
+      "interface": "wlan0",
+      "label": "n-office",
+      "wireless": true
+    }
+  },
   "links": [
     {
       "name": "eth0",

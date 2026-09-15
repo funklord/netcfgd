@@ -6447,6 +6447,7 @@ fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
 		.map(|link| link.index)
 		.collect();
 	Some(Observed {
+		connectivity: None,
 		bluetooth: Vec::new(),
 		links: observed
 			.links

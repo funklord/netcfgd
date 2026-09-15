@@ -707,6 +707,14 @@ fn witness() -> Document {
 		// field itself cannot vanish unnoticed.
 		generated_by: Some("witness".to_owned()),
 		globals: Globals {
+			// Set to something other than the default, so the witness pins the
+			// field's serialisation: it carries `skip_serializing_if`, and a
+			// field absent from the witness is exactly the one that can go
+			// quiet unnoticed.
+			connectivity: netcfgd_model::connectivity::Policy {
+				requires: netcfgd_model::connectivity::Requires::Probe,
+				ignore: vec!["docker0".to_owned()],
+			},
 			dns: dns_policy(DnsMode::Dnsmasq),
 			on_drift_default: DriftPolicy::Report,
 			confirm_default: Some(90),

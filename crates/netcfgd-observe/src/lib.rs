@@ -353,6 +353,7 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 		.collect();
 
 	let mut observed = Observed {
+		connectivity: None,
 		// Filled in by `host::augment`, which reads /sys. The netlink pass
 		// this belongs to knows nothing about Bluetooth: an adapter is not a
 		// link and never appears in a dump.

@@ -521,6 +521,19 @@ fn backends(observed: &mut Observed) {
 /// The whole observed surface, in one value.
 fn witness() -> Observed {
 	let mut observed = Observed {
+		// Set rather than absent, so the witness pins the shape: the field
+		// carries `skip_serializing_if`, and a field absent from the witness is
+		// exactly the one that can go quiet unnoticed -- which is what this
+		// file exists to stop. The probe rung and a named primary, because
+		// those are the two halves a reader of the schema needs to see.
+		connectivity: Some(netcfgd_model::connectivity::Connectivity {
+			rung: netcfgd_model::connectivity::Rung::Online,
+			primary: Some(netcfgd_model::connectivity::Primary {
+				interface: "wlan0".to_owned(),
+				label: "n-office".to_owned(),
+				wireless: true,
+			}),
+		}),
 		// One adapter, blocked. The witness exists to pin a shape, and an
 		// empty list would pin nothing about this one.
 		bluetooth: vec![netcfgd_model::ObservedBluetooth {

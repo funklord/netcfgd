@@ -52,6 +52,12 @@
       "agent": {
         "group": "netcfgd-agent"
       }
+    },
+    "connectivity": {
+      "requires": "probe",
+      "ignore": [
+        "docker0"
+      ]
     }
   },
   "devices": [

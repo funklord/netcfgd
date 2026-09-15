@@ -1087,6 +1087,7 @@ mod tests {
 		// rather than the document's -- a `wifi { }` section is not a claim
 		// that the interface is one.
 		let observed = netcfgd_model::Observed {
+			connectivity: None,
 			links: vec![netcfgd_model::ObservedLink {
 				name: "wlan0".to_owned(),
 				index: 2,
