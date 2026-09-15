@@ -9461,6 +9461,89 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.133 A different address is not a roam
+
+0122 audited the roam *policy*. This is the other half: how netcfgd decides a
+move happened, and which configured network an association belongs to.
+
+**What netcfgd writes was re-measured rather than inherited**, because every one
+of these is a field it sends and never reads back. Against wpa_supplicant 2.10
+on the `none` driver, `SET_NETWORK n bgscan "simple:30:-70:300"` is OK and reads
+back verbatim; `bssid_accept` takes the masked form and reads back without the
+masks, which is the parser having understood them; a single `bssid` pin is taken
+unquoted and a malformed one FAILs. `bssid_accept` is the 2.10 spelling of what
+used to be `bssid_whitelist` -- both names are in this machine's binary, and
+netcfgd sends the new one.
+
+### The watcher answered a different question from the one it was asked
+
+`HookPhase::Roam` says "a station moved to a different access point **on the
+same network**". What the watcher did was `last != bssid`: a different address
+than the one it saw before. Those are not the same question, and the gap is
+ordinary rather than exotic -- **a machine leaving one network for another it
+also holds credentials for satisfies the address test and contradicts the
+sentence**. Switching from home wifi to the office ran the `roam` hooks, telling
+the script the station had moved to an access point on a network it had left.
+This machine switched networks three times during this campaign.
+
+The event already carries the answer. `CTRL-EVENT-CONNECTED` names the
+configured network's id beside the address, so the pair decides it: the same id
+with a different address is a roam and nothing else is. Decision 0239.
+
+That also makes the reconcile loop's comment true rather than lucky. It declines
+to re-plan on a roam because "a station moving within its own network changes no
+desired state" -- which a network change does not satisfy, since the network
+carries the metric, the addressing and the DNS scope. It was harmless only
+because the kernel announces the carrier change separately.
+
+### The fixture had written down the defect as a justification
+
+`fake_supplicant.py` hard-coded `id=0` in all three places it emits a
+`CONNECTED`, with a comment saying netcfgd could not tell a roam from a network
+change because "from netcfgd's side" the two "arrive identically". True of the
+fake; false of a supplicant. Eleven lines above, the same file says `ROAM` is
+"the *same* network under a different access point and is a different thing
+entirely". **A fixture built from the reader rather than from the thing
+modelled** -- the sixth in this campaign, and the first that argued for itself.
+
+### And the rule for "which network is this" had no test at all
+
+`network_for` is shared between the socket and the observation deliberately,
+and its documentation says a disagreement between copies "would show up as a
+route metric that does not match what the window says". Nothing called it from
+a test, and the single copy could produce that outcome alone: first match on
+*either* rule, in `id` order, so two blocks sharing an SSID and pinned to
+different access points both answered with whichever sorted earlier. Checked on
+this machine before the fix -- it compiles, and `ncfg plan` says `nothing to
+do`. The address is what separates such blocks, so it is asked first.
+
+### Three live scripts fail, and none of them because of this
+
+`wifi_journey.sh` ("and the machine then converges", 2 outstanding actions
+where it wants 0), `wifi.sh` (`HomeFiber` does not join within 20s on the fake
+radio) and `wifi_trouble.sh` ("and one from a living process is left where it
+is") were failing before this round. Confirmed rather than assumed: the six
+changed files were stashed, the tree rebuilt, and all three fail identically on
+`9dad858`. Recorded here because a round that touches the roam watcher and the
+supplicant fixture is exactly the one that would be blamed for them, and because
+nothing in this document had noticed them.
+
+`roam.sh`, `switch_network.sh` and `select.sh` pass. So does `association.sh`
+against this machine's own radio, which is the only check of the `network_for`
+change against real hardware: `wlp0s20f3` is still attributed to `EMP-XYLEM` by
+both the socket and the observation.
+
+### The sabotage that could not be written
+
+Six sabotages, five caught. The sixth was not of the code but of a sentence
+about it: a draft comment claimed `is_roam` guarded against `None == None`
+treating two unknown networks as one. No sabotage could prove it, because the
+watcher stores an `Option<(u32, String)>` and there is no room in it for an
+address without a network -- the representation forecloses the case, and the
+comment was taking credit for a check. Eighth first-run sabotage pass of this
+campaign, and the first whose answer was to fix the claim rather than add a
+test.
+
 ## 10.132 The switch that is watched and not touched
 
 A second pass over 0219's ground. Its three findings were re-checked rather than
@@ -10098,6 +10181,12 @@ and one that started and failed look the same to it. Confirming that means
 making the test report the `Outcome` it already holds, which is a change outside
 this round's subject. A gate that fails one run in eight is one people learn to
 re-run, which is how a real failure gets waved through.
+
+*(10.133 saw the same flake in a sibling:
+`an_interface_with_a_lease_runs_the_probe`, once, with the eight probe tests
+then passing six runs in a row. Same module, same `assert!(marker.exists())`
+shape, which makes the spawn-failure hypothesis above more likely and rules out
+anything specific to `require_lease`.)*
 
 **The evidence is the weaker half of this round.** The setting is covered by
 `tests/live/enterprise.sh` -- the same place `preassoc_mac_addr` is covered, and
