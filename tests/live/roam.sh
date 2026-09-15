@@ -216,6 +216,33 @@ check "re-associating with the same one is not a roam" "$(runs)" 2
 check "and it stayed attached throughout" \
 	"$(grep -c '^ATTACH' "$work/fake.log" || true)" 1
 
+# ------------------------------- leaving for another network is not a roam
+
+# **The case this file did not have, and the fault it hid.** `HookPhase::Roam`
+# says "a station moved to a different access point *on the same network*", and
+# the watcher compared addresses -- so switching from home wifi to the office
+# ran the `roam` hooks, telling the script the station had moved to an access
+# point on a network it had left. Decision 0239.
+#
+# `JOIN` is the fake's way of saying the station went to a different network,
+# and the event it emits is the same `CTRL-EVENT-CONNECTED` a real supplicant
+# sends for both. What separates them is the configured network's id inside it,
+# which the fake hard-coded to 0 until this check needed it to be real.
+before=$(runs)
+send_event "JOIN Cafe"
+sleep 1
+check "leaving for another network is not a roam" "$(runs)" "$before"
+
+# And roaming still works afterwards: the watcher has to have taken the new
+# network as where it now is, or every later move is measured against the one
+# the station left. Without this the check above passes for a watcher that
+# stopped reporting roams altogether.
+send_event "ROAM 77:88:99:aa:bb:cc"
+sleep 1
+check "and a move within the new network still is" "$(runs)" "$((before + 1))"
+check "with the access point it moved to" \
+	"$(grep -c 'bssid=77:88:99:aa:bb:cc' "$log" || true)" 1
+
 # ------------------------------- not everything in the directory is a radio
 
 # A datagram client has to bind an address of its own to be replied to, and it

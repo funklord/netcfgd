@@ -62,6 +62,22 @@ NETWORKS = [
 # thing entirely.
 ASSOCIATED = [NETWORKS[0]]
 
+
+def network_id(entry):
+	"""The configured-network id a real supplicant would put in an event.
+
+	**Every event here said `id=0` and that was a fixture built from the
+	reader rather than from the thing modelled**: netcfgd never read the
+	field, so nothing noticed that a `JOIN` to a different network announced
+	itself with the first network's id. It is the field that separates a roam
+	from a network change (decision 0239), so a fake that hard-codes it cannot
+	tell the two apart and neither can anything tested against it.
+
+	The index into `NETWORKS` is the id, which is what a supplicant populated
+	in order would hand out.
+	"""
+	return NETWORKS.index(entry)
+
 # What `LIST_NETWORKS` reports, as `(id, ssid, flags)`.
 #
 # **Empty by default, which is the answer every other test needs**: with no
@@ -317,10 +333,14 @@ def serve(ctrl_dir, interface, pidfile):
 			# new one from here on and netcfgd sees what it would see.
 			#
 			# The event is the same `CTRL-EVENT-CONNECTED` a real supplicant
-			# sends, because from netcfgd's side a network change and a roam
-			# arrive identically and it is `STATUS` that tells them apart. A
-			# fake that sent something special here would be testing a protocol
-			# no supplicant speaks.
+			# sends in both cases. A fake that sent something special here
+			# would be testing a protocol no supplicant speaks.
+			#
+			# **What differs is the id inside it**, and this file used to say
+			# the two "arrive identically and it is `STATUS` that tells them
+			# apart" -- which was true of the fake and not of a supplicant.
+			# `CONNECTED` carries the configured network's id, so a `JOIN`
+			# names a different one and a `ROAM` names the same one.
 			elif command.startswith("JOIN "):
 				wanted = command.split(None, 1)[1]
 				match = [n for n in NETWORKS if n[4] == wanted]
@@ -331,7 +351,7 @@ def serve(ctrl_dir, interface, pidfile):
 				ASSOCIATED[0] = match[0]
 				event = (
 				    "<3>CTRL-EVENT-CONNECTED - Connection to "
-				    f"{match[0][0]} completed [id=0 id_str=]"
+				    f"{match[0][0]} completed [id={network_id(match[0])} id_str=]"
 				)
 				for listener in attached:
 					try:
@@ -386,7 +406,8 @@ def serve(ctrl_dir, interface, pidfile):
 					         + why)
 				else:
 					event = ("<3>CTRL-EVENT-CONNECTED - Connection to "
-					         + ASSOCIATED[0][0] + " completed [id=0 id_str=]")
+					         + ASSOCIATED[0][0]
+					         + f" completed [id={network_id(ASSOCIATED[0])} id_str=]")
 				reply(server, sender, b"OK\n")
 				for listener in attached:
 					try:
@@ -452,9 +473,12 @@ def serve(ctrl_dir, interface, pidfile):
 				continue
 			elif command.startswith("ROAM "):
 				bssid = command.split(None, 1)[1]
+				# The id stays: this is the *same* network under a different
+				# access point, which is the whole difference between `ROAM`
+				# and `JOIN`.
 				event = (
 				    "<3>CTRL-EVENT-CONNECTED - Connection to "
-				    f"{bssid} completed [id=0 id_str=]"
+				    f"{bssid} completed [id={network_id(ASSOCIATED[0])} id_str=]"
 				)
 				for listener in attached:
 					try:

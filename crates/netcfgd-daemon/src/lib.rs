@@ -323,6 +323,14 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 		// the move left it. Nothing here re-plans: a station moving within its
 		// own network changes no desired state, which is why this is a hook and
 		// not drift.
+		//
+		// **That premise is now checked rather than assumed (0239).** The
+		// watcher compared addresses alone, so a station leaving for another
+		// network arrived here too -- and a network change does alter desired
+		// state, since the network carries the metric, the addressing and the
+		// DNS scope. It was harmless only because the kernel announces the
+		// carrier change separately, which is luck and not the reason written
+		// above. Only moves within one network reach this now.
 		for (interface, bssid) in &roamed {
 			run_roam_hooks(&state, interface, bssid);
 		}
@@ -2394,18 +2402,67 @@ fn spawn_expiry_timer(commands: &Sender<Command>, seconds: u32) {
 /// and a supplicant that goes away is reconnected on the next pass rather than
 /// taking a thread with it.
 ///
+/// One radio the roam watcher is holding open: its name, the attached
+/// connection, and the network and access point it last reported being on.
+///
+/// Named because the last element became a pair -- it used to be the address
+/// alone, and an address is not enough to tell a roam from a network change
+/// (0239). Clippy asks for a name at exactly that point, which is fair: the
+/// tuple stopped being readable when the thing it remembers stopped being one
+/// value.
+type Watched = (String, netcfgd_supplicant::Client, Option<(u32, String)>);
+
+/// Whether a `CONNECTED` is a roam, given what this interface last reported.
+///
+/// **A different address is not a roam, and that used to be the whole test.**
+/// [`netcfgd_model::HookPhase::Roam`] promises "a station moved to a different
+/// access point *on the same network*", and a machine leaving one network for
+/// another it also holds credentials for satisfies the address half while
+/// contradicting the network half. Switching from home wifi to the office fired
+/// the `roam` hooks, with `NCFG_REASON` saying the station had moved to an
+/// access point it had not moved to at all. Decision 0239.
+///
+/// The event answers it. `CONNECTED` carries the configured network's id beside
+/// the address, so the pair decides what the address alone was standing in for.
+///
+/// **An unreadable id is not a network established as the same one**, so it
+/// answers no rather than falling back to comparing addresses. The cost of
+/// erring this way is a hook that does not fire, which is the direction the
+/// first association already errs in.
+///
+/// It cannot arise the other way round -- an unknown id is never *stored*,
+/// because what the caller keeps is an `Option<(u32, String)>` and there is no
+/// room in it for an address without a network. That is the representation
+/// doing the work rather than a check: `None == None` is the trap an
+/// `Option<Option<u32>>` would have invited, and it is not reachable from
+/// here. Said this way because the first draft claimed the code guarded
+/// against it, and a sabotage that made two unknowns compare equal could not
+/// be written.
+///
+/// Separate from the thread so the rule can be checked without a supplicant,
+/// which is the only way any of these five cases gets exercised at all.
+fn is_roam(last: Option<&(u32, String)>, now: Option<u32>, bssid: &str) -> bool {
+	match (last, now) {
+		(Some((was_on, was_at)), Some(is_on)) => *was_on == is_on && was_at != bssid,
+		_ => false,
+	}
+}
+
 /// A **roam** is a `CONNECTED` naming a different access point than the last one
-/// this interface reported. The first one after netcfgd started is an
-/// association rather than a roam -- there is nothing to have moved from, and
+/// this interface reported *on the same configured network* -- the id the event
+/// carries beside the address, which is what separates a move within a network
+/// from a move to another one. The first `CONNECTED` after netcfgd started is an
+/// association rather than a roam: there is nothing to have moved from, and
 /// firing then would run the hook on every boot.
 fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 	let commands = commands.clone();
 	let started = std::thread::Builder::new()
 		.name("roam".to_owned())
 		.spawn(move || {
-			// interface -> (attached client, the access point it last named).
-			let mut watching: Vec<(String, netcfgd_supplicant::Client, Option<String>)> =
-				Vec::new();
+			// interface -> (attached client, the network and access point it
+			// last named). Both halves, because a roam is defined by the pair:
+			// see the `moved` check below.
+			let mut watching: Vec<Watched> = Vec::new();
 			// Radios already complained about, so a supplicant that refuses
 			// `ATTACH` costs one line rather than one per pass for ever. Cleared
 			// when the radio starts working, so a later failure is reported
@@ -2494,8 +2551,9 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 							let Some(bssid) = event.connected_bssid() else {
 								continue;
 							};
-							let moved = last.as_deref().is_some_and(|was| was != bssid);
-							*last = Some(bssid.to_owned());
+							let now = event.connected_network_id();
+							let moved = is_roam(last.as_ref(), now, bssid);
+							*last = now.map(|id| (id, bssid.to_owned()));
 							if moved
 								&& commands
 									.send(Command::Roamed {
@@ -3303,5 +3361,41 @@ mod tests {
 		assert!(!a_window_is_requested(
 			[Request::Status, apply(None)].iter()
 		));
+	}
+
+	/// A roam is a different access point on the *same* network.
+	///
+	/// `HookPhase::Roam`'s own words, which the watcher did not check: it
+	/// compared addresses, so leaving one network for another fired the hooks
+	/// with a reason that was not true. 0239.
+	#[test]
+	fn a_roam_stays_on_one_network() {
+		let on_home = (
+			"2".parse().expect("a number"),
+			"aa:bb:cc:dd:ee:01".to_owned(),
+		);
+
+		// The thing the hook is for: same network, different access point.
+		assert!(is_roam(Some(&on_home), Some(2), "aa:bb:cc:dd:ee:02"));
+
+		// The thing it is not for, and the whole reason for this change. A
+		// station that left for another network it also holds credentials for
+		// reports a `CONNECTED` naming an address that is not the last one --
+		// which is every check above satisfied, and no roam.
+		assert!(!is_roam(Some(&on_home), Some(5), "aa:bb:cc:dd:ee:02"));
+
+		// The same access point again is not a move, on either network.
+		assert!(!is_roam(Some(&on_home), Some(2), "aa:bb:cc:dd:ee:01"));
+
+		// The first association after netcfgd starts has nothing to have moved
+		// from, so the hook does not run on every boot.
+		assert!(!is_roam(None, Some(2), "aa:bb:cc:dd:ee:01"));
+
+		// An id that could not be read is not a network established as the
+		// same one, so it is not a roam even where the address moved. This is
+		// the case a fallback to comparing addresses would get wrong, and the
+		// sabotage that adds one fails here.
+		assert!(!is_roam(Some(&on_home), None, "aa:bb:cc:dd:ee:02"));
+		assert!(!is_roam(None, None, "aa:bb:cc:dd:ee:02"));
 	}
 }
