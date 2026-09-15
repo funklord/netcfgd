@@ -9473,6 +9473,64 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.140 The link list is a union, and presence is its own column
+
+10.139 settled the shape and changed none of it. This is that, built.
+
+`netcfgd_model::link::inventory` joins the document and the observation into
+every link this machine has or has been told about, with all three provenances
+present: configured and present, configured and not present (a saved network out
+of range, an `interface` whose card is out), and present and not configured
+(`docker0`, `wg-test`). Dropping either half loses something real -- the first
+has no kernel link at all, and the second is demonstrably on the machine.
+
+**Beside `observed.links` rather than replacing it**, and that is not tidiness:
+the planner iterates `links` as "what the kernel has", so a synthetic row for
+something that does not exist would be read as one that does. Two lists, one a
+superset, is the smaller risk. Decision 0246.
+
+### The asymmetry is the rule
+
+**An interface is present or absent and never unknown.** The kernel's link table
+is complete, so an interface netcfgd cannot find is one that does not exist --
+there is no third answer because there was no question it could not ask.
+
+**A network can be unknown, and usually is.** Associated wins outright and
+outranks a stale scan; hidden is `Unknown` *even when a scan has been read and
+did not find it*; otherwise seen / not-seen / nobody-looked map onto present /
+absent / unknown. The hidden case is what the enum exists for: a hidden access
+point beacons with an empty name, so a scan sees its address and not its name --
+which is what `pick_ssid` refuses over -- and on a `no IR` channel the probe
+that would resolve it is forbidden.
+
+**An enum rather than `Option<bool>`, deliberately.** The tree states this
+convention twice already, on `ObservedLink::reachable` and
+`ObservedBackend::networks_match`, and both need a paragraph warning the reader
+not to conflate `None` with `Some(false)`. Here the type does that work, because
+the rendering rule -- unknown must never be drawn as absent -- is exactly the
+collapse a `None` invites at the point of display.
+
+A configured network nothing is associated with reads `Unknown` today, since the
+observation carries no scan. **Honest rather than unfinished**: narrowing it
+needs a scan, and for a hidden network no scan could settle it. The rule takes
+its evidence as arguments rather than reaching for it, so a caller holding scan
+results can ask directly.
+
+### Two rows that looked wrong and were not
+
+The machine's own inventory showed `EMP-XYLEM` as `unknown` and `OpenPC.se` as
+`present`, which contradicted what this session last knew. Checked rather than
+explained away: the radio had moved networks since, and `EMP-XYLEM` is unknown
+because nothing has scanned for it rather than because it is hidden. Both
+correct. It is recorded because the reflex to trust a remembered state over the
+machine is the one this campaign keeps punishing.
+
+### Five sabotages, all caught
+
+A hidden network treated as scannable; no scan read as absent; an interface's
+absence read as unknown; the union dropping unconfigured links; the union
+dropping absent interfaces.
+
 ## 10.139 A link has a kind, and presence is three-valued
 
 The first GUI tab was named `devices` and showed `ncfg_client_links()`. It was
