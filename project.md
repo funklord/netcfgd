@@ -9473,6 +9473,102 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.137 One answer to "are we connected"
+
+Asked whether netcfgd has a main connected/not-connected status and a string for
+what it is mainly connected to. **It did not.** `Request::Status` returns the raw
+observation and no verdict, so four clients each invented one: the Qt tray's
+`ncfg_reach`, the TDE tray's transcription of it into TQt3, the
+`NetworkManager` shim's coarser `any_connected`, and nothing at all in the text
+interface.
+
+0146 had already decided what the rungs mean. What it never decided was **where
+they are computed** -- which is the argument `network_for` makes for living in
+the model, with four callers in three languages instead of two in one.
+
+### Three faults the copies were hiding
+
+**The shim was not a fourth copy, it was a weaker rule.** Any link up, with
+carrier, holding a non-link-local address -- no route anywhere in the test. That
+is the claim 0146 removed from the tray, still live on the D-Bus surface every
+desktop reads, announcing `CONNECTED_GLOBAL` for machines that fail every
+request.
+
+**Both trays counted interfaces that are administratively down.** The wired path
+skipped `lo` and nothing else, so a wired-only machine with docker installed and
+no network drew the amber icon and named a bridge to nowhere -- measured here,
+where `docker0` is down holding `172.17.0.1/16`.
+
+**None consulted the probe.** `ObservedLink::reachable` is netcfgd's own verdict
+on whether traffic arrives, and a captive portal read as connected in all four.
+
+### What replaced them
+
+`connectivity::overall` answers both halves. Four rungs rather than a boolean --
+0146's three plus the one a probe establishes -- with `connected()` derived in
+one place, because collapsing them per caller is how the middle rung got lost
+the first time. The primary is the lowest-metric default route, labelled with the
+`network` block's id where the link is an associated radio. Configurable as
+`global { connectivity { requires, ignore } }`. Decision 0243.
+
+The default group is every link but the absurd ones: `docker*`, `br-*`,
+`veth*`, `virbr*`, `vnet*`, prefix-matched, with `lo` hardcoded because it is
+not a policy question. WireGuard, `tun` and `tap` are deliberately absent -- a
+laptop whose real uplink is a VPN is ordinary. Writing `ignore` replaces the
+list rather than adding to it.
+
+### A sabotage that passed because an assertion stopped being one
+
+Six sabotages, five caught, and the sixth is a variant this campaign has not
+recorded before.
+
+`Policy::counts` requires a link to be `up`, and the test covering that used
+`docker0` -- the machine's real example. Then the default ignore list gained
+`docker*`, and from that moment the assertion was carried by the *name* instead:
+deleting the `up` check entirely changed nothing, and the test passed.
+
+**Not a missing test. A test that stopped testing what it said, because
+something else changed in the same session.** Nothing announces that -- it still
+passes and still reads as though it covers the rule. The nine first-run passes
+before this were fixes that went in with nothing holding them; this was a fix
+that *had* something holding it until a later change quietly took it away.
+
+### The grouping this is the first piece of
+
+Settled while building it, and the shape here was chosen to fit rather than be
+redone. The generic thing is a **`linkset`**: a named set of links, one in use
+at a time, chosen on probe and metric, several coexisting for different
+networks. Ordinary failover and redundancy; what netcfgd offers is that it is
+scripted and visualised rather than automation-first. **`uplink`** is a linkset
+with more assumptions -- it carries the default route, there is at most one, and
+it is what `connected` means. That word is already the tree's: 114 occurrences
+across the docs and source, in ten decision records, always meaning this.
+
+**The list is self-referential -- a linkset is itself a link**, so it composes
+into bonds and into other linksets, and being a group should usually disable a
+link from ordinary link operations, with exceptions. The consequence recorded
+now rather than rediscovered: `overall` must not count both a group and its
+active member, since both hold the default route.
+
+What exists is the reporting half of the default linkset, unnamed. The acting
+half is a separate round.
+
+### And the TDE tray kept its words
+
+Nearly done the other way, which is why it is here. A second session was writing
+that file while this was being built -- `adapter/tde: report reachability`
+landed forty minutes in, adding 120 lines that derive the three rungs, for this
+decision's own reason and by transcribing the Qt tray.
+
+The first attempt replaced that function and removed 95 of those lines,
+including a tooltip richer than anything here. **A gain in correctness paid for
+with a loss in what the operator reads, decided unilaterally on somebody else's
+work an hour after they wrote it.** The edit is additive instead: `daemon_reach`
+takes the rung the caller derived and returns the daemon's, so the verdict is
+centralised and the words stay where they were written. That derivation is also
+the one copy deliberately kept, as the fallback for a netcfgd older than the
+tray -- they are separate packages, and the previous answer beats none.
+
 ## 10.136 A scan that never said what it found
 
 The scan path re-reads sound, and 0121 and 0227's conclusions hold: `SCAN`
