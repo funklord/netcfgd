@@ -39,7 +39,12 @@ for a daemon whose core has none:
   selection is the default rather than a profile named none. Greyed when the
   connection lacks the admin tier, so the operator can see that profiles
   exist and that they may not change them.
-- **Open netcfgd Window**, which runs `netcfgd-gui`.
+- **Open netcfgd Window**, which runs `netcfgd-gui`. It starts one every
+  time rather than raising an existing window, and **that is intended**:
+  netcfgd's clients are meant to run in unlimited instances, which matters
+  more once they reach more than one machine. Do not add a
+  raise-don't-spawn check; this reads like a defect from the outside, and
+  a session testing the menu duly reported it as one.
 - **Open netcfgd in a Terminal**, which runs `netcfgd-tui` in whatever
   terminal TDE is configured to use.
 - **Open netcfgd in a Terminal as Root**, which runs `tdesu -t netcfgd-tui`
