@@ -61,6 +61,18 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	read_wireguard_keys(observed);
 	read_wireguard_currency(observed, run_dir, desired);
 	read_resolv_currency(observed);
+	// **Last, because it reads what everything above filled in.** The verdict
+	// is a function of the links, the addresses, the routes and the probe
+	// results, so it has to come after the passes that supply them -- in
+	// particular `ask_supplicants`, which is what puts a radio's `network` on
+	// its link and therefore what gives the primary link the name an operator
+	// recognises rather than `wlan0`. 0243.
+	observed.connectivity = Some(netcfgd_model::connectivity::overall(
+		observed,
+		&desired.map_or_else(netcfgd_model::connectivity::Policy::default, |document| {
+			document.globals.connectivity.clone()
+		}),
+	));
 }
 
 /// Whether the `resolv.conf` netcfgd wrote is still the one on disk.
