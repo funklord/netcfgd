@@ -221,4 +221,12 @@ Description: Trinity control module and tray applet for netcfgd
  .
  or `make deb-tde`. A plain build produces the daemon and needs neither.
  .
- Installing this package configures nothing and starts nothing.
+ It installs a TDE autostart entry, so the tray appears at the next login.
+ That is conditional on `netcfgdrc:General:Autostart` and the control module
+ has the checkbox for it -- TDE's own mechanism, the one tdepowersave and
+ korgac use. The default is true, which is the one place a package built
+ from this source does start something: a tray holds no authority of its
+ own and changes nothing about the machine's network, so the sentence the
+ other packages carry is narrowed here rather than quietly dropped.
+ .
+ Installing this package configures nothing, and starts no daemon.

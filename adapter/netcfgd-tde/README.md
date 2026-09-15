@@ -7,6 +7,13 @@ socket protocol.
     kcm_netcfgd.so        the control centre module
     netcfgd-tde-tray      the tray monitor
 
+An autostart entry is installed, conditional on
+`netcfgdrc:General:Autostart`, which defaults to true. That is TDE's own
+mechanism and the same shape tdepowersave, korgac and irkick use, so the
+package can ship the entry without deciding for the operator. The control
+module carries the checkbox that writes the key -- without somewhere to
+turn it off, the condition would be a file to hand-edit.
+
 ## Why TQt3 rather than reusing the Qt window
 
 A control-centre module, a panel applet and a kded service are shared
@@ -33,7 +40,14 @@ for a daemon whose core has none:
 
 ## What the tray does
 
-- **Status**, as the first, disabled menu item, the way tdepowersave's is.
+- **Status**, as the first, disabled menu item, the way tdepowersave's is,
+  and the same line as the tooltip: what the radio is doing and which
+  network it is on, or the addressed interfaces on a wired machine.
+- **The icon reports the furthest rung actually reached** -- routed,
+  addressed-but-not-routed, or offline -- and not whether the daemon
+  answers. It read `is_open()` once, so a machine with no network at all
+  drew the connected glyph as long as netcfgd was running, which is the
+  single case somebody looks at a tray to find out about.
 - **Profile**, an exclusive submenu -- the same mode switcher the Qt tray
   offers, with "this machine's own configuration" at the top because a null
   selection is the default rather than a profile named none. Greyed when the

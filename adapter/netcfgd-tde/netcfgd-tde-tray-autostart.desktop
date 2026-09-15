@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=netcfgd
+GenericName=Network Monitor
+Comment=Network status and profile switching for netcfgd
+Icon=network
+Exec=netcfgd-tde-tray
+Categories=System;Applet;
+Encoding=UTF-8
+X-TDE-autostart-after=panel
+X-TDE-autostart-condition=netcfgdrc:General:Autostart:true
+X-TDE-StartupNotify=false

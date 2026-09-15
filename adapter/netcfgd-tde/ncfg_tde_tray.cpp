@@ -97,17 +97,33 @@ void ncfg_tde_tray::refresh()
 	if (!m_connection->is_open())
 		m_connection->open();
 
-	const TQString line = m_connection->status_line();
+	ncfg_tde_connection::reach reach;
+	const TQString line = m_connection->state_line(reach);
 	m_menu->changeItem(m_status_id, line);
 	TQToolTip::remove(this);
 	TQToolTip::add(this, line);
 
 	/*
-	 * The icon says reachable or not, and nothing finer. A tray glyph has
-	 * no room to be honest about a partial state, and being wrong there is
-	 * worse than being coarse.
+	 * Three rungs, not two, and the icon reports the furthest one actually
+	 * reached.
+	 *
+	 * This used to read `is_open()`, which answers whether the DAEMON is
+	 * reachable -- so a machine with no network at all drew the connected
+	 * glyph as long as netcfgd was running, which is the one case an
+	 * operator looks at a tray to find out about. The rungs are netcfgd's
+	 * own and the reasoning is in ncfg_client.h beside `default_route`.
+	 *
+	 * `connect_creating` for the middle rung because that is what it means:
+	 * addressed, or joined, and not yet able to send anything anywhere.
 	 */
-	setPixmap(loadIcon(m_connection->is_open() ? "network" : "network-disconnect"));
+	const char *glyph = "connect_no";
+	switch (reach) {
+	case ncfg_tde_connection::reach_routed:    glyph = "connect_established"; break;
+	case ncfg_tde_connection::reach_local:     glyph = "connect_creating";    break;
+	case ncfg_tde_connection::reach_offline:   glyph = "connect_no";          break;
+	case ncfg_tde_connection::reach_no_daemon: glyph = "network-disconnect";  break;
+	}
+	setPixmap(loadIcon(TQString::fromLatin1(glyph)));
 
 	rebuild_profiles();
 }

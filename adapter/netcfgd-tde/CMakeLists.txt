@@ -63,3 +63,9 @@ tde_add_executable( netcfgd-tde-tray AUTOMOC
 # application entry.
 install( FILES netcfgd.desktop DESTINATION ${XDG_APPS_INSTALL_DIR} )
 install( FILES netcfgd-tde-tray.desktop DESTINATION ${XDG_APPS_INSTALL_DIR} )
+
+# The autostart entry, conditional on netcfgdrc:General:Autostart. TDE reads
+# that key at login and starts nothing when it is false, which is what lets
+# the package ship the entry without deciding for the operator.
+install( FILES netcfgd-tde-tray-autostart.desktop
+         DESTINATION ${AUTOSTART_INSTALL_DIR} )

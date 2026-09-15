@@ -15,6 +15,7 @@
 #include <tqlabel.h>
 #include <tqcombobox.h>
 #include <tqpushbutton.h>
+#include <tqcheckbox.h>
 #include <tqgroupbox.h>
 
 typedef KGenericFactory<ncfg_tde_kcm, TQWidget> ncfg_tde_kcm_factory;
@@ -60,6 +61,24 @@ ncfg_tde_kcm::ncfg_tde_kcm( TQWidget *parent, const char *name, const TQStringLi
 	TQPushButton *root = new TQPushButton(i18n("In a Terminal as &Root..."), tools);
 	connect(root, TQ_SIGNAL(clicked()), this, TQ_SLOT(open_terminal_as_root()));
 
+	/*
+	 * The autostart entry this package ships is conditional on
+	 * netcfgdrc:General:Autostart, which is TDE's own mechanism -- the same
+	 * shape tdepowersave, korgac and irkick use. Shipping the entry without
+	 * somewhere to turn it off would leave a key that can only be edited by
+	 * hand, so the checkbox is not a convenience: it is the other half of
+	 * the entry.
+	 *
+	 * Unlike the profile switch above, this follows the module's Apply
+	 * button rather than acting immediately. It changes what happens at the
+	 * next login and nothing about the running machine, so there is no
+	 * reason for it to be the exception.
+	 */
+	m_autostart = new TQCheckBox(
+	    i18n("&Start in the system tray on login"), this);
+	top->addWidget(m_autostart);
+	connect(m_autostart, TQ_SIGNAL(toggled(bool)), this, TQ_SLOT(setting_changed()));
+
 	top->addStretch(1);
 
 	setAboutData(new TDEAboutData("kcm_netcfgd", I18N_NOOP("netcfgd"), "0.1"));
@@ -84,7 +103,13 @@ void ncfg_tde_kcm::load()
 	if (!m_connection->is_open())
 		m_connection->open();
 
-	m_status->setText(m_connection->status_line());
+	/*
+	 * The same line the tray's tooltip carries, so a person who looks in
+	 * both places is told one thing. The interface count status_line()
+	 * returns says nothing about whether traffic can leave.
+	 */
+	ncfg_tde_connection::reach reach;
+	m_status->setText(m_connection->state_line(reach));
 
 	/*
 	 * Three independent grants, not a level, so they are listed rather than
@@ -118,6 +143,28 @@ void ncfg_tde_kcm::load()
 
 	m_profile->setEnabled(m_connection->may_admin());
 	m_switch->setEnabled(m_connection->may_admin());
+
+	/*
+	 * Default true, matching the condition in the autostart file. The two
+	 * defaults have to agree: if they disagree the box shows one thing and
+	 * the desktop does another, and nothing would report it.
+	 */
+	TDEConfig config("netcfgdrc");
+	config.setGroup("General");
+	m_autostart->setChecked(config.readBoolEntry("Autostart", true));
+}
+
+void ncfg_tde_kcm::save()
+{
+	TDEConfig config("netcfgdrc");
+	config.setGroup("General");
+	config.writeEntry("Autostart", m_autostart->isChecked());
+	config.sync();
+}
+
+void ncfg_tde_kcm::setting_changed()
+{
+	emit changed(true);
 }
 
 void ncfg_tde_kcm::apply_profile()

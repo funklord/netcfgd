@@ -13,6 +13,7 @@
 class TQLabel;
 class TQComboBox;
 class TQPushButton;
+class TQCheckBox;
 class ncfg_tde_connection;
 
 class ncfg_tde_kcm : public TDECModule
@@ -25,10 +26,12 @@ public:
 	~ncfg_tde_kcm();
 
 	virtual void load();
+	virtual void save();
 	virtual TQString quickHelp() const;
 
 private slots:
 	void apply_profile();
+	void setting_changed();
 	void open_window();
 	void open_terminal();
 	void open_terminal_as_root();
@@ -39,6 +42,7 @@ private:
 	TQLabel      *m_tiers;
 	TQComboBox   *m_profile;
 	TQPushButton *m_switch;
+	TQCheckBox   *m_autostart;
 
 	void run_in_terminal( const TQString &command, bool as_root );
 };

@@ -37,6 +37,21 @@ public:
 	//! one line for the tray tooltip and the module's header
 	TQString status_line();
 
+	/*
+	 * How far this machine actually got, which is a different question from
+	 * whether the daemon answers -- and the one a tray icon is asked.
+	 *
+	 * The rungs are netcfgd's own, from ncfg_client.h: a link can be up with
+	 * no carrier, carry traffic with no address, and hold an address with
+	 * nothing to route through, so "connected" is none of up, carrier or a
+	 * non-empty addresses. A default route is the last thing observable
+	 * without putting a packet on the wire, which makes it the honest
+	 * ceiling for an icon.
+	 */
+	enum reach { reach_no_daemon, reach_offline, reach_local, reach_routed };
+
+	TQString state_line( reach &out );
+
 	//! profiles on this machine, and which is in effect
 	bool profiles( TQStringList &names, TQString &chosen );
 	//! switch; an empty name stops using a profile altogether
