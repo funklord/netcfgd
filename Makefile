@@ -70,7 +70,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance claims FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
+.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance claims installed-diff FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -948,6 +948,49 @@ FILLED = @VERSION@ @ARCH@ @DEPENDS@ @MAINTAINER@ @PKGVER@
 # rather than a gate.
 claims:
 	@python3 tool/cited_quote_gate.py
+
+# What the packages would actually change on this machine.
+#
+# Twenty-one of the forty-five commits in the M9 wifi audit touched only
+# documents, and every round still paid a full build, install and live
+# verification -- decided each time by unpacking the .deb by hand and comparing
+# checksums. That is the artifact answering the question, which is the right
+# way round; this is it written down so it is one command rather than five.
+#
+# Reads only. It unpacks into a temporary directory and compares; nothing is
+# installed and nothing under /usr is touched.
+installed-diff:
+	@set -e; \
+	found=0; changed=0; \
+	tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/ncfg-installed.XXXXXX"); \
+	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
+	for deb in $(DIST)/*.deb; do \
+		[ -e "$$deb" ] || { echo "installed-diff: no packages; run make deb first"; exit 1; }; \
+		case "$$deb" in *-dbgsym_*) continue ;; esac; \
+		rm -rf "$$tmp/x"; mkdir -p "$$tmp/x"; \
+		dpkg-deb -x "$$deb" "$$tmp/x"; \
+		cd "$$tmp/x"; \
+		for file in $$(find . -type f | sed 's|^\./||'); do \
+			found=$$(( found + 1 )); \
+			if [ ! -e "/$$file" ]; then \
+				echo "new      /$$file"; changed=$$(( changed + 1 )); \
+			elif ! cmp -s "$$file" "/$$file"; then \
+				echo "changed  /$$file"; changed=$$(( changed + 1 )); \
+			fi; \
+		done; \
+		cd $(CURDIR); \
+	done; \
+	if [ "$$found" -eq 0 ]; then \
+		echo "installed-diff: the packages hold no files, which is not a clean result"; \
+		exit 1; \
+	fi; \
+	if [ "$$changed" -eq 0 ]; then \
+		echo "installed-diff: $$found packaged file(s), none of them different \
+from what is installed"; \
+		echo "installed-diff:   nothing to install; the round changed no shipped file"; \
+	else \
+		echo "installed-diff: $$found packaged file(s), $$changed of them different"; \
+	fi
 
 packaging:
 	@# install and uninstall must agree, checked statically so it runs
