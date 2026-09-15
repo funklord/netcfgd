@@ -2173,6 +2173,49 @@ impl Builder {
 	/// Bounded by `RESTART_LIMIT` on the same counter the wedged path uses: a
 	/// client that ignores `-m`, or a kernel that reports a metric netcfgd did
 	/// not ask for, costs five restarts and a warning rather than a loop.
+	/// **Compared against the client's own `argv` first, and the route second
+	/// (0241).**
+	///
+	/// The route was the only comparison until a wakeup was measured. It is the
+	/// right thing to check and it is available too late: the route cannot
+	/// exist until the exchange that installs it has finished, so netcfgd waited
+	/// out a solicit, an offer and an ARP probe -- eight seconds on the
+	/// reporting machine -- and then stopped the client nineteen milliseconds
+	/// after it succeeded and made a new one do all of it again. Measured on a
+	/// resume: leased at 8.5 seconds, restarted at 8.5, leased again at 14.7.
+	///
+	/// The running client says what it was started with from the moment it
+	/// starts. That is the same fact without the wait, and it is the process
+	/// itself rather than a record netcfgd would have to keep true -- which is
+	/// why this does not reintroduce what 10.131 is about.
+	///
+	/// **Both, not one.** `argv` says what the client was *told*; the route says
+	/// what it *did*, and a client that ignored `-m` is only visible in the
+	/// second. Neither subsumes the other, and `RESTART_LIMIT` bounds them
+	/// together on the same counter.
+	///
+	/// Returns the metric it *was* told, so the caller has one value and no
+	/// second way to spell "nothing to report". The first draft returned a
+	/// `bool` and the caller reached back for the number with
+	/// `unwrap_or(wanted)`, which made the unreadable case right twice -- and a
+	/// sabotage of the explicit half passed, because the accident covered it.
+	fn started_for_another_network(
+		interface: &Interface,
+		observed: &Observed,
+		wanted: u32,
+	) -> Option<u32> {
+		observed
+			.backends
+			.iter()
+			.find(|backend| {
+				backend.kind == BackendKind::Dhcp4
+					&& backend.interface == interface.name
+					&& backend.running
+			})
+			.and_then(|backend| backend.started_metric)
+			.filter(|started| *started != wanted)
+	}
+
 	fn restart_for_metric(&mut self, interface: &Interface, observed: &Observed) {
 		let name = &interface.name;
 		let Some(wanted) = self.effective_metric(interface, observed) else {
@@ -2186,16 +2229,23 @@ impl Builder {
 		{
 			return;
 		}
-		let Some(seen) = observed
+		// The client's own `argv` answers before any route exists; the route
+		// answers for a client that ignored what it was told. `seen` is what
+		// the message reports, so it names whichever noticed.
+		let installed = observed
 			.routes_on(name)
 			.filter(|route| route.destination == "default" && route.proto == Some(DHCP_ROUTE_PROTO))
-			.find_map(|route| route.metric)
+			.find_map(|route| route.metric);
+		// Whichever noticed, and `seen` is what the message reports. Neither
+		// subsumes the other: `argv` says what the client was told and is there
+		// at once, the route says what it did and catches a client that ignored
+		// what it was told.
+		let Some(seen) = installed
+			.filter(|seen| *seen != wanted)
+			.or_else(|| Self::started_for_another_network(interface, observed, wanted))
 		else {
 			return;
 		};
-		if seen == wanted {
-			return;
-		}
 		let restarts = observed.backend_restarts(BackendKind::Dhcp4, name);
 		if restarts >= RESTART_LIMIT {
 			self.warn(

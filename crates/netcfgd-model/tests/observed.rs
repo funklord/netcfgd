@@ -399,6 +399,12 @@ fn backends(observed: &mut Observed) {
 			running: true,
 			answering: None,
 			access_control: None,
+			// The kind the field is real for, set here for the same reason
+			// `access_control` is set on the access point below: a witness that
+			// leaves an `Option` empty everywhere pins nothing, so the field
+			// could be renamed or dropped and the schema would not move. Only
+			// a DHCP client is ever started with `-m` (0241).
+			started_metric: (kind == BackendKind::Dhcp4).then_some(200),
 			started_with: None,
 			secret_matches: None,
 			networks_match: None,
@@ -421,6 +427,7 @@ fn backends(observed: &mut Observed) {
 				denied: vec!["02:00:00:00:00:aa".to_owned()],
 				accepted: vec!["02:00:00:00:00:bb".to_owned()],
 			}),
+			started_metric: None,
 			started_with: None,
 			secret_matches: None,
 			networks_match: None,
@@ -439,6 +446,7 @@ fn backends(observed: &mut Observed) {
 		running: true,
 		answering: Some(false),
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -454,6 +462,7 @@ fn backends(observed: &mut Observed) {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -473,6 +482,7 @@ fn backends(observed: &mut Observed) {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -486,6 +496,7 @@ fn backends(observed: &mut Observed) {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
 			band: Some("2.4".to_owned()),

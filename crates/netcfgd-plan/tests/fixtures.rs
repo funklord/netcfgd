@@ -350,6 +350,15 @@ fn started_backend(
 		running: true,
 		answering: None,
 		access_control: started_access_control(kind, iface, desired),
+		// **`None`, and deliberately not the document's metric.** The warning
+		// at the head of this function applies exactly here: deriving what the
+		// client was started with from the document it is being compared
+		// against makes the comparison agree by construction, and 0241's whole
+		// point is a comparison that has to be capable of disagreeing. `None`
+		// is "netcfgd cannot tell", which plans no restart -- a converged
+		// machine, which is what this harness builds. The tests that care about
+		// the mismatch state a value.
+		started_metric: None,
 		started_with: access_point.map(|point| netcfgd_model::ObservedAccessPoint {
 			ssid: point.ssid.clone(),
 			// Derived and defaulted the way the renderer does, not copied. An
@@ -1164,6 +1173,7 @@ fn a_lease_address_is_left_to_its_backend() {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -1188,6 +1198,89 @@ fn a_lease_address_is_left_to_its_backend() {
 	);
 }
 
+/// A DHCP client started for another network is replaced before it leases.
+///
+/// **The metric reaches the client once, as `-m`, when it starts.** A radio
+/// that moves to a network asking for a different one keeps the old metric on
+/// its lease's default route, so the client has to be replaced -- and until
+/// 0241 the only thing netcfgd compared was that installed route, which cannot
+/// exist until the exchange that installs it has finished. Measured on a
+/// wakeup: leased at 8.5 seconds, restarted at 8.5, leased again at 14.7. Six
+/// seconds of work done twice, every time.
+///
+/// Nothing tested this rule in either direction before this test.
+#[test]
+fn a_dhcp_client_told_the_wrong_metric_is_replaced_without_waiting_for_a_route() {
+	let desired = document("interface eth0 { config = \"dhcp\"; preference = 200 }");
+	let mut observed = observed_with(&["eth0"]);
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::Dhcp4,
+		interface: "eth0".to_owned(),
+		running: true,
+		answering: None,
+		access_control: None,
+		// What the running client says it was started with -- the previous
+		// network's metric. There is no route yet and there will not be one
+		// for seconds: that is the whole point.
+		started_metric: Some(100),
+		started_with: None,
+		secret_matches: None,
+		networks_match: None,
+		config_matches: None,
+		config_present: None,
+		advertised: Vec::new(),
+	});
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let acted = names(&plan);
+	assert!(
+		acted.contains(&"backend.stop") && acted.contains(&"backend.start"),
+		"a client started for another network should be replaced at once: {acted:?}"
+	);
+}
+
+/// And one started for this network is left alone.
+///
+/// The control, and it is what stops the check above passing for a planner that
+/// restarts a DHCP client on every pass -- which is the failure this whole area
+/// is bounded by `RESTART_LIMIT` against.
+#[test]
+fn a_dhcp_client_told_the_right_metric_is_left_alone() {
+	let desired = document("interface eth0 { config = \"dhcp\"; preference = 200 }");
+	let mut observed = observed_with(&["eth0"]);
+	observed.backends.push(ObservedBackend {
+		kind: BackendKind::Dhcp4,
+		interface: "eth0".to_owned(),
+		running: true,
+		answering: None,
+		access_control: None,
+		started_metric: Some(200),
+		started_with: None,
+		secret_matches: None,
+		networks_match: None,
+		config_matches: None,
+		config_present: None,
+		advertised: Vec::new(),
+	});
+
+	let acted = names(&plan(&desired, &observed, &PlanOptions::default()));
+	assert!(
+		!acted.contains(&"backend.stop"),
+		"nothing should be restarted when the client has the metric it wants: {acted:?}"
+	);
+
+	// And "netcfgd cannot tell" is not "the wrong metric". A client started
+	// before this field existed, or one whose network asks for no metric at
+	// all, has nothing to differ from -- reading that as a mismatch would
+	// restart every DHCP client on every machine, five times, and then warn.
+	observed.backends[0].started_metric = None;
+	let acted = names(&plan(&desired, &observed, &PlanOptions::default()));
+	assert!(
+		!acted.contains(&"backend.stop"),
+		"an unreadable metric is not a wrong one: {acted:?}"
+	);
+}
+
 /// Dropping DHCP from the config stops the backend.
 #[test]
 fn removing_dhcp_stops_the_backend() {
@@ -1199,6 +1292,7 @@ fn removing_dhcp_stops_the_backend() {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -1588,6 +1682,7 @@ fn removing_dot1x_stops_the_supplicant() {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -1791,6 +1886,7 @@ fn a_running_tunnel_is_left_alone() {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -1823,6 +1919,7 @@ interface vpn0 { config = "null" }"#,
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -2281,6 +2378,7 @@ access_point "after" {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"before".to_vec()).expect("an ssid"),
 			band: None,
@@ -2329,6 +2427,7 @@ fn an_edited_ovpn_restarts_the_tunnel() {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -2363,6 +2462,7 @@ fn a_tunnel_whose_file_is_unchanged_or_unreadable_is_left_alone() {
 			running: true,
 			answering: None,
 			access_control: None,
+			started_metric: None,
 			started_with: None,
 			secret_matches: None,
 			networks_match: None,
@@ -2402,6 +2502,7 @@ access_point "home" {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		// The identity is unchanged; only the secret moved.
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
@@ -2457,6 +2558,7 @@ access_point "home" {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
 			// What the renderer writes for a document that states neither: it
@@ -2514,6 +2616,7 @@ access_point "home" {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
 			band: Some("2.4".to_owned()),
@@ -2569,6 +2672,7 @@ access_point "home" {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: Some(netcfgd_model::ObservedAccessPoint {
 			ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
 			// The band the file records is the one netcfgd worked out from the
@@ -2684,6 +2788,7 @@ interface lan0 {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -2735,6 +2840,7 @@ interface lan0 {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -3426,6 +3532,7 @@ interface wg0 {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -3494,6 +3601,7 @@ fn running_access_point(
 			denied: owned(denied),
 			accepted: owned(accepted),
 		}),
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -3707,6 +3815,7 @@ fn an_unreachable_access_point_is_not_converged_against() {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -3745,6 +3854,7 @@ fn an_access_point_stops_when_its_block_goes() {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -3842,6 +3952,7 @@ interface wlan0 { config = "null" }
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -4387,6 +4498,7 @@ interface ppp0 {
 		running: true,
 		answering: None,
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -6098,6 +6210,7 @@ fn an_unreadable_openvpn_config_is_reported_without_dropping_the_tunnel() {
 			running: true,
 			answering: None,
 			access_control: None,
+			started_metric: None,
 			started_with: None,
 			secret_matches: None,
 			networks_match: None,
@@ -8141,6 +8254,7 @@ fn a_wedged_daemon_is_named_and_a_silent_one_is_not() {
 			running: true,
 			answering,
 			access_control: None,
+			started_metric: None,
 			started_with: None,
 			secret_matches: None,
 			networks_match: None,
@@ -8244,6 +8358,7 @@ fn a_daemon_that_is_not_running_is_not_called_wedged() {
 		running: false,
 		answering: Some(false),
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -8689,6 +8804,7 @@ fn a_wedged_supplicant_is_called_a_supplicant() {
 		running: true,
 		answering: Some(false),
 		access_control: None,
+		started_metric: None,
 		started_with: None,
 		secret_matches: None,
 		networks_match: None,
@@ -9108,6 +9224,7 @@ fn a_deleted_channel_or_band_is_applied_and_an_absent_one_does_not_loop() {
 			running: true,
 			answering: None,
 			access_control: None,
+			started_metric: None,
 			started_with: Some(netcfgd_model::ObservedAccessPoint {
 				ssid: netcfgd_model::Ssid::new(ssid.as_bytes().to_vec()).expect("an ssid"),
 				band: band.map(ToOwned::to_owned),

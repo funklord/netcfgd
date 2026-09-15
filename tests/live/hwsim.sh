@@ -543,6 +543,10 @@ device $sta_dev {
 
 network "netcfgd-test" {
 	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3" }
+	# So there is an `-m` for netcfgd to pass and to record. Without one it
+	# starts the client with no metric at all, which is the ordinary machine
+	# and exercises nothing of 0241.
+	metric = 300
 	config = "null"
 }
 
@@ -576,6 +580,23 @@ CONF
 
 		if [ -n "$addr" ]; then
 			echo "ok   took a DHCP lease over the radio ($addr)"
+			# **What netcfgd started the client with, read back (0241).**
+			# The first version of that change took it out of
+			# `/proc/<pid>/cmdline`, where `pid_by_marker` finds a
+			# supplicant -- and dhcpcd rewrites its command line to
+			# `dhcpcd: <iface> [ip4]`, so it read nothing on every machine
+			# and changed nothing at all. A silent absence is this record's
+			# failure mode and looks exactly like a tree with no fault in
+			# it, so it is checked here against a real dhcpcd rather than
+			# only in a unit test against a directory.
+			recorded=$(cat "$work/run/dhcpcd/$sta_dev.metric" 2>/dev/null || true)
+			check "and recorded the metric it started the client with" \
+				"$recorded" "300"
+			# And the client used it, which is the other half: a record of
+			# a metric the client ignored would be worse than none.
+			installed=$(inns ip -4 route show dev "$sta_dev" 2>/dev/null |
+				sed -n 's/.*metric \([0-9]*\).*/\1/p' | head -1)
+			check "and the lease route carries it" "$installed" "300"
 			# The server's own record has to agree. An address on the
 			# interface with no lease behind it is what a link-local
 			# autoconfiguration looks like, and it would pass the check above.

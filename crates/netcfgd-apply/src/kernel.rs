@@ -2781,7 +2781,16 @@ fn start_backend(
 				.collect();
 			for (program, args) in [("dhcpcd", dhcpcd), ("udhcpc", udhcpc), ("busybox", busybox)] {
 				match Command::new(program).args(&args).status() {
-					Ok(status) if status.success() => return Ok(()),
+					Ok(status) if status.success() => {
+						// Written after the client is up and only here, so the
+						// record names what was actually started rather than
+						// what netcfgd meant to start. Best effort: a metric
+						// netcfgd cannot write is one the planner reads as
+						// "cannot tell", which is the old behaviour and not a
+						// wrong answer. 0241.
+						record_started_metric(&run_dir_path(), iface, metric.as_deref());
+						return Ok(());
+					}
 					Ok(status) => return Err(format!("{program} on {iface} exited with {status}")),
 					// Not installed: try the next one.
 					Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -3103,6 +3112,81 @@ fn client_pid_path(program: &str, iface: &str) -> Result<std::path::PathBuf, Str
 	std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
 	Ok(dir.join(format!("{iface}.pid")))
 }
+/// Where netcfgd records the route metric it started a DHCP client with.
+///
+/// **Beside the pid file and written only at start, which is the whole point.**
+/// The metric reaches the client once, as `-m`, so a radio that moves to a
+/// network asking for a different one keeps the old metric on its lease's
+/// default route and the client has to be replaced. Noticing that by comparing
+/// the *installed route* means waiting out the entire exchange that installs it
+/// -- eight seconds on the reporting machine -- and then throwing the result
+/// away (0241).
+///
+/// **The client cannot be asked.** `pid_by_marker` finds a supplicant by the
+/// `-P` path in its own `argv`, and the first draft of this reached for the
+/// same trick: read `-m` back out of `/proc/<pid>/cmdline`. dhcpcd rewrites its
+/// command line to `dhcpcd: <iface> [ip4]` as soon as it starts, so nothing
+/// netcfgd passed survives there -- which `backend_pid_file` already says, in
+/// the comment calling the interface name "the weakest marker netcfgd uses" for
+/// exactly these two clients. Measured on the reporting machine: no dhcpcd
+/// process carries `-m` in its `argv` at all.
+///
+/// So this is the same shape hostapd and radvd already use -- the file netcfgd
+/// wrote is its account of what it started the daemon with -- with one
+/// difference that matters. Those read back a *rendered configuration*, which
+/// an apply may rewrite without restarting anything; this is written only on
+/// the path that actually spawns a client, so it cannot drift into agreeing
+/// with a document the running client never saw.
+/// **One function, so the writer and the reader cannot disagree.** They used to
+/// build this path separately, and a mismatch would have been invisible: every
+/// client would read `None`, the planner would fall back to the route
+/// comparison, and nothing would look wrong. That silent `None` is this
+/// record's failure mode -- it is what the first draft did on every machine --
+/// so the two sides share the construction rather than share a test.
+fn client_metric_path(run: &std::path::Path, iface: &str) -> std::path::PathBuf {
+	run.join("dhcpcd").join(format!("{iface}.metric"))
+}
+
+/// Write down the metric a DHCP client was just started with, or clear it.
+///
+/// Best effort in both directions. A record netcfgd cannot write leaves the
+/// planner reading "cannot tell", which is what it did before this existed; a
+/// stale one left behind by a failed removal is caught by the route comparison,
+/// which is still there for exactly that reason.
+fn record_started_metric(run: &std::path::Path, iface: &str, metric: Option<&str>) {
+	let path = client_metric_path(run, iface);
+	match metric {
+		Some(value) => {
+			if let Some(dir) = path.parent() {
+				let _ = std::fs::create_dir_all(dir);
+			}
+			let _ = std::fs::write(&path, value);
+		}
+		// **Removed rather than left, and that is not tidiness.** A network
+		// that asks for no metric starts a client with no `-m`, and a record
+		// left over from the previous network would then say the running
+		// client carries a metric it was never given -- which is a restart on
+		// every pass until `RESTART_LIMIT` gives up.
+		None => {
+			let _ = std::fs::remove_file(&path);
+		}
+	}
+}
+
+/// Read back what a DHCP client on this interface was started with.
+///
+/// `None` where netcfgd cannot tell: no file, an unreadable one, or a client
+/// started before this record existed. Not a metric of zero and not a
+/// disagreement -- see [`crate::kernel::client_metric_path`].
+#[must_use]
+pub fn dhcp_started_metric(run: &std::path::Path, iface: &str) -> Option<u32> {
+	std::fs::read_to_string(client_metric_path(run, iface))
+		.ok()?
+		.trim()
+		.parse()
+		.ok()
+}
+
 /// Whether a backend of this kind can actually be talked to on this interface.
 ///
 /// **The question adoption has to ask and did not.** `backend_pid_file` says
@@ -4404,6 +4488,43 @@ fn stop_backend(kind: netcfgd_model::BackendKind, iface: &str) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
+
+	/// The writer and the reader agree on where the record lives.
+	///
+	/// **Two functions build that path separately** -- the writer from
+	/// `run_dir_path()`, the reader from the run directory it is handed -- and
+	/// a disagreement between them is invisible: the planner would read `None`
+	/// for every client on every machine and fall back to the route comparison,
+	/// which is exactly the behaviour this record exists to improve on. It
+	/// would look like nothing was wrong.
+	///
+	/// That is not hypothetical here. The first version of 0241 read the metric
+	/// out of `/proc/<pid>/cmdline`, which is where `pid_by_marker` finds a
+	/// supplicant -- and dhcpcd rewrites its command line, so it read `None`
+	/// every time and changed nothing. A silent `None` is this feature's
+	/// failure mode, so it gets a test rather than an assumption.
+	#[test]
+	fn the_started_metric_is_written_where_it_is_read() {
+		let run = netcfgd_testdir::TestDir::new("metric");
+
+		super::record_started_metric(&run, "wlan0", Some("200"));
+		assert_eq!(
+			super::dhcp_started_metric(&run, "wlan0"),
+			Some(200),
+			"the reader did not find what the writer wrote"
+		);
+
+		// A network that asks for no metric starts a client with no `-m`, and
+		// the record has to go with it. Left behind, it says the running client
+		// carries a metric it was never given -- a restart every pass until
+		// `RESTART_LIMIT` gives up.
+		super::record_started_metric(&run, "wlan0", None);
+		assert_eq!(super::dhcp_started_metric(&run, "wlan0"), None);
+
+		// And an interface nobody wrote a record for is "cannot tell", not
+		// zero.
+		assert_eq!(super::dhcp_started_metric(&run, "wlan9"), None);
+	}
 	use super::dhcp6_client;
 
 	/// Whether a radio joins its networks by itself, and what absence means.

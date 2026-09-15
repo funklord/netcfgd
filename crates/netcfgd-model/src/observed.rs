@@ -971,6 +971,31 @@ pub struct ObservedBackend {
 	/// written by an older netcfgd still parses.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub access_control: Option<ObservedAccessControl>,
+	/// The route metric a running DHCP client was started with, read from its
+	/// own `argv`.
+	///
+	/// **The metric is read once, when the client starts**, and netcfgd passes
+	/// it as `-m`. A radio that moves to a network asking for a different one
+	/// keeps the old metric on its lease's default route, so the client has to
+	/// be replaced -- and until 0241 the only way netcfgd noticed was by
+	/// comparing the *installed route*, which cannot exist until the exchange
+	/// that installs it has finished. On this machine that is a solicit, an
+	/// offer and an ARP probe: five to eight seconds of work, completed and
+	/// then thrown away.
+	///
+	/// This is the same fact available at once. `/proc/<pid>/cmdline` is the
+	/// running client saying what it was started with, which is not a record
+	/// netcfgd has to keep true -- the distinction 10.131 is about, on the
+	/// right side of it for once.
+	///
+	/// `None` where netcfgd cannot tell: not a DHCP client, not running, no
+	/// pid, or a client started without `-m` because its network asks for no
+	/// metric. Read live rather than recorded, and absent when it serialises,
+	/// so the `/run` record is byte-for-byte what it was before this field
+	/// existed and a file written by an older netcfgd still parses.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub started_metric: Option<u32>,
+
 	/// What a running access point was started with, as netcfgd names it.
 	///
 	/// The second half of the question [`ObservedAccessControl`] answers. That

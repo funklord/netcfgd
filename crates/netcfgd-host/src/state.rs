@@ -538,6 +538,7 @@ impl OwnedState {
 					running: true,
 					answering: None,
 					access_control: None,
+					started_metric: None,
 					started_with: None,
 					secret_matches: None,
 					networks_match: None,

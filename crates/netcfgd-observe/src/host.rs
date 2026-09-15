@@ -1030,8 +1030,23 @@ fn read_backend_liveness(observed: &mut Observed, run_dir: &Path) {
 		if !path.exists() {
 			continue;
 		}
-		if netcfgd_sys::process::pid_of(&path, &marker).is_none() {
+		let Some(pid) = netcfgd_sys::process::pid_of(&path, &marker) else {
 			backend.running = false;
+			continue;
+		};
+		// **What this client was started with (0241).** Read only while it is
+		// running and only for a DHCP client, because `-m` is only ever given
+		// to one -- a record read for a process that has exited is not an
+		// observation of anything, which is why this is inside the liveness
+		// pass rather than beside it.
+		//
+		// Absent where the network asks for no metric, which is the ordinary
+		// machine: netcfgd passes no `-m` at all and there is nothing for a
+		// later network to differ from.
+		let _ = pid;
+		if backend.kind == netcfgd_model::BackendKind::Dhcp4 {
+			backend.started_metric =
+				netcfgd_apply::dhcp_started_metric(run_dir, &backend.interface);
 		}
 	}
 }

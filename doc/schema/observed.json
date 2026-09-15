@@ -463,7 +463,8 @@
     {
       "kind": "dhcp4",
       "interface": "eth0",
-      "running": true
+      "running": true,
+      "started_metric": 200
     },
     {
       "kind": "dhcp6",

@@ -941,6 +941,7 @@ mod tests {
 			running: true,
 			answering: None,
 			access_control: None,
+			started_metric: None,
 			started_with: Some(netcfgd_model::ObservedAccessPoint {
 				ssid: netcfgd_model::Ssid::new(b"home".to_vec()).expect("an ssid"),
 				band: None,
