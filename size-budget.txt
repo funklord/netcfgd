@@ -683,4 +683,16 @@ netcfgd
 # the top of this file warns against: the 3% is for compiler-version noise, and
 # spending it on a real feature means the next real feature fails for the wrong
 # reason and somebody goes looking in the wrong place.
-total 2918944
+# The link inventory and its presence, +12,288 bytes to 2,931,232.
+#
+# Three pages for `netcfgd_model::link`'s union and the `Presence` enum, the
+# `Observed` field that carries it, the pass that fills it in, and the words --
+# every category name and every presence name is a string in the binary.
+#
+# Attributable without a second build: the only change since the total above.
+#
+# Recorded rather than left to ride the tolerance, which it was doing: the gate
+# passed at 2,931,232 against a 3,006,512 ceiling. Same reason as the entry
+# above -- the 3% is for compiler-version noise, and a feature living inside it
+# means the next feature fails for a reason that is not its own.
+total 2931232
