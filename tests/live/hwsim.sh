@@ -272,6 +272,13 @@ network={
 }
 CONF
 
+# Where the `roam` hook writes. Every document below carries the hook, so the
+# count is meaningful from the moment the daemon starts: a roam that fires when
+# nothing moved would show up as a line here, and one that should have fired and
+# did not shows up as its absence.
+roamlog=$work/roams
+: > "$roamlog"
+
 cat > "$work/etc/netcfgd.conf" <<CONF
 device $sta_dev {
 	wifi { backend = "wpa_supplicant"; autoconnect = true }
@@ -282,7 +289,12 @@ network "netcfgd-test" {
 	config = "null"
 }
 
-interface $sta_dev { config = "null" }
+interface $sta_dev {
+	config = "null"
+	on roam {
+	echo "roam bssid=\$NCFG_BSSID" >> $roamlog
+	}
+}
 CONF
 printf '%s' "$passphrase" > "$work/etc/secrets/test"
 chmod 600 "$work/etc/secrets/test"
@@ -520,8 +532,27 @@ if [ "$state" = COMPLETED ]; then
 		# Ask for a lease on the interface that is already associated. The
 		# document is rewritten rather than written this way from the start,
 		# so that a DHCP failure cannot take the association checks with it.
-		sed -i "s|^interface $sta_dev { config = \"null\" }|interface $sta_dev { config = \"dhcp\" }|" \
-			"$work/etc/netcfgd.conf"
+		# Rewritten whole rather than patched with `sed`. The interface
+		# block carries the `roam` hook now, so it is no longer one line and
+		# a substitution keyed on its shape silently matched nothing -- which
+		# the guard below caught on the first run after the hook went in.
+		cat > "$work/etc/netcfgd.conf" <<CONF
+device $sta_dev {
+	wifi { backend = "wpa_supplicant"; autoconnect = true }
+}
+
+network "netcfgd-test" {
+	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3" }
+	config = "null"
+}
+
+interface $sta_dev {
+	config = "dhcp"
+	on roam {
+	echo "roam bssid=\$NCFG_BSSID" >> $roamlog
+	}
+}
+CONF
 		grep -q "config = \"dhcp\"" "$work/etc/netcfgd.conf" ||
 			die "the document was not rewritten, so this would test nothing"
 
@@ -605,7 +636,8 @@ fi
 # no supplicant, and `did not move to the preferred network (on: none)` after
 # forty seconds of polling. It is the only test in this tree that produces a
 # real association, and half of it was dead: live scripts are not in `make
-# check`, so nothing read the output.
+# check`, so nothing read the output. That is the argument for the coverage
+# gate this round adds, made by the file the gate is protecting.
 #
 # Deliberately after the checks above and on a rewritten document, so that a
 # failure to prefer cannot take the association and lease results with it.
@@ -665,7 +697,12 @@ network "netcfgd-better" {
 	config = "null"
 }
 
-interface $sta_dev { config = "dhcp" }
+interface $sta_dev {
+	config = "dhcp"
+	on roam {
+	echo "roam bssid=\$NCFG_BSSID" >> $roamlog
+	}
+}
 CONF
 		# **The supplicant is stopped first, and that is a finding rather
 		# than a convenience.** `populate_supplicant` has one caller: the
@@ -775,6 +812,175 @@ CONF
 				failures=$((failures + 1))
 				;;
 			esac
+		fi
+	fi
+fi
+
+# --------------------------------------------------- a roam, and what is not one
+#
+# **The thing no fixture could ever tell us, on radios this file already had.**
+# A roam is `wpa_supplicant` picking a different access point *on the same
+# network*, and until 0239 netcfgd called any `CONNECTED` naming a different
+# address a roam -- so leaving one network for another fired the `roam` hooks
+# with a reason that was not true.
+#
+# Nothing could catch that. `roam.sh` drives a fake whose events netcfgd's own
+# author wrote, and it hard-coded the network id the real protocol carries. The
+# machinery to produce the real thing was already here: three radios, two of
+# them access points, loaded by this script since it was written. Both halves
+# below are checks nobody asked these radios for.
+#
+# Order matters. The negative runs first, on the supplicant the block above left
+# running, because a network change made by restarting the supplicant would pass
+# it for the wrong reason -- a fresh supplicant has nothing to have moved from,
+# so no roam fires whatever the rule says.
+roams() {
+	grep -c '^roam ' "$roamlog" 2>/dev/null || true
+}
+
+bssid_now() {
+	inns "$cli" -p "$work/ctrl" -i "$sta_dev" status 2>/dev/null |
+		sed -n 's/^bssid=//p'
+}
+
+ssid_now() {
+	inns "$cli" -p "$work/ctrl" -i "$sta_dev" status 2>/dev/null |
+		sed -n 's/^ssid=//p'
+}
+
+state_now() {
+	inns "$cli" -p "$work/ctrl" -i "$sta_dev" status 2>/dev/null |
+		sed -n 's/^wpa_state=//p'
+}
+
+if [ "${chosen:-}" = netcfgd-better ]; then
+	before_roams=$(roams)
+	left_bssid=$(bssid_now)
+
+	# `ncfg wifi connect` is `SELECT_NETWORK` on the running supplicant, so
+	# the station leaves one network for another without the connection the
+	# roam watcher is attached to going anywhere. A different access point and
+	# a different network: every test the old rule applied, and no roam.
+	innc "$ncfg" wifi connect netcfgd-test "$sta_dev" > "$work/connect.log" 2>&1 ||
+		echo "note: ncfg wifi connect said $(cat "$work/connect.log")"
+
+	waited=0
+	moved=
+	until [ "$moved" = netcfgd-test ]; do
+		moved=$(ssid_now)
+		waited=$((waited + 1))
+		[ "$waited" -gt 400 ] && break
+		sleep 0.1
+	done
+
+	if [ "$moved" = netcfgd-test ]; then
+		echo "ok   moved to the other network on a running supplicant"
+		# The watcher runs on its own thread and the hook runs on the
+		# loop, so give both a tick to have fired if they were going to.
+		# Waiting is what makes the absence below mean something.
+		sleep 3
+		check "and leaving one network for another is not a roam" \
+			"$(roams)" "$before_roams"
+		[ "$(bssid_now)" = "$left_bssid" ] &&
+			echo "note: the two access points share an address, so the \
+negative above proves less than it looks"
+	else
+		echo "FAIL never moved to the other network (on: ${moved:-none})"
+		failures=$((failures + 1))
+	fi
+
+	# And now a real one: the second access point joins the network the
+	# station is on, and the one it is associated with goes away. Same
+	# network, different access point, which is the sentence the hook's
+	# documentation uses.
+	if [ "$moved" = netcfgd-test ]; then
+		inns "$cli" -p "$work/ap2/ctrl" -i "$ap2_dev" terminate > /dev/null 2>&1 || true
+		sleep 1
+		cat > "$work/ap2/ap.conf" <<CONF
+ctrl_interface=$work/ap2/ctrl
+update_config=0
+
+network={
+	ssid="netcfgd-test"
+	mode=2
+	frequency=2412
+	key_mgmt=SAE WPA-PSK
+	proto=RSN
+	ieee80211w=1
+	psk="$passphrase"
+}
+CONF
+		inns "$supplicant" -B -Dnl80211 -i "$ap2_dev" -c "$work/ap2/ap.conf" \
+			> "$work/ap2/log2" 2>&1 || die "could not restart the second access point"
+		waited=0
+		ap2_state=
+		until [ "$ap2_state" = COMPLETED ]; do
+			ap2_state=$(inns "$cli" -p "$work/ap2/ctrl" -i "$ap2_dev" status 2>/dev/null |
+				sed -n 's/^wpa_state=//p')
+			waited=$((waited + 1))
+			[ "$waited" -gt 200 ] && break
+			sleep 0.1
+		done
+
+		if [ "$ap2_state" != COMPLETED ]; then
+			echo "FAIL the second access point never rejoined the first network"
+			failures=$((failures + 1))
+		else
+			echo "ok   two access points are beaconing one network"
+			was_on=$(bssid_now)
+			before_roams=$(roams)
+
+			# Taking the current one away is the trigger. hwsim radios
+			# all hear each other equally, so there is no "louder" access
+			# point to move towards and no signal to attenuate; what is
+			# left is the honest case the hook exists for, which is the
+			# access point you were on going off the air.
+			inns "$cli" -p "$work/ap/ctrl" -i "$ap_dev" terminate > /dev/null 2>&1 || true
+
+			# **`wpa_state` as well as the address, because the address
+			# alone is a proxy.** `STATUS` reports a `bssid` while the
+			# station is still *trying* one, so the first version of this
+			# read an association that had not happened -- and then failed
+			# on the roam count, which is the confusing way round. The
+			# supplicant on this machine was refused by the second access
+			# point with status 53 (`INVALID_PMKID`) and retried, so there
+			# is a real window where the address has moved and the station
+			# is not on it.
+			waited=0
+			landed=
+			until [ -n "$landed" ] && [ "$landed" != "$was_on" ]; do
+				if [ "$(ssid_now)" = netcfgd-test ] &&
+					[ "$(state_now)" = COMPLETED ]; then
+					landed=$(bssid_now)
+				fi
+				waited=$((waited + 1))
+				[ "$waited" -gt 1800 ] && break
+				sleep 0.1
+			done
+
+			if [ -n "$landed" ] && [ "$landed" != "$was_on" ]; then
+				echo "ok   reassociated to the other access point on the same network"
+				sleep 3
+				if [ "$(roams)" != "$((before_roams + 1))" ]; then
+					echo "       was on $was_on, landed on $landed"
+					echo "       the roam log holds:"
+					sed 's/^/         /' "$roamlog"
+					echo "       what the daemon saw, in full:"
+					sed 's/^/         /' "$work/daemon.log"
+					echo "       and the supplicant's own view now:"
+					inns "$cli" -p "$work/ctrl" -i "$sta_dev" status 2>&1 |
+						sed 's/^/         /'
+					echo "       the document it was running:"
+					sed 's/^/         /' "$work/etc/netcfgd.conf"
+				fi
+				check "and that is a roam" "$(roams)" "$((before_roams + 1))"
+				check "named by the access point it moved to" \
+					"$(grep -c "bssid=$landed" "$roamlog" || true)" 1
+			else
+				echo "FAIL never moved to the other access point \
+(was ${was_on:-none}, now ${landed:-none})"
+				failures=$((failures + 1))
+			fi
 		fi
 	fi
 fi

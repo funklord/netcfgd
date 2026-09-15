@@ -37,8 +37,9 @@ command -v python3 >/dev/null 2>&1 || skip "no python3"
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-roam.XXXXXX")
 daemon=
 fake=
+quiet=
 cleanup() {
-	for pid in $daemon $fake; do
+	for pid in $daemon $fake $quiet; do
 		kill "$pid" 2>/dev/null || true
 		wait "$pid" 2>/dev/null || true
 	done
@@ -242,6 +243,140 @@ sleep 1
 check "and a move within the new network still is" "$(runs)" "$((before + 1))"
 check "with the access point it moved to" \
 	"$(grep -c 'bssid=77:88:99:aa:bb:cc' "$log" || true)" 1
+
+# --------------------------------------------- keeping up with a burst
+
+# **The watcher used to take one event per pass**, and with a 250ms wait per
+# radio that is about four a second. A supplicant does not emit at that rate: a
+# lost access point produces the disconnect, a scan, its results, an
+# assoc-reject, a temporary disable and the reconnect, back to back.
+#
+# Falling behind is not merely late. The events queue in the socket's receive
+# buffer, and when it fills `wpa_supplicant` drops the monitor rather than
+# blocking -- `CTRL_IFACE: Detach monitor that cannot receive messages`, in its
+# own binary. After that nothing arrives ever again, and nothing says so: the
+# socket is open and the path unchanged. Decision 0240.
+#
+# Thirty in one process, so they are actually in flight together rather than
+# paced by python's start-up. Alternating addresses, so every one after the
+# first is a move and the count is exact.
+cat > "$work/burst.py" <<'BURSTPY'
+import socket, sys, os, tempfile
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+staging = tempfile.mkdtemp()
+local = os.path.join(staging, "c")
+# **The reply is read, and that is not politeness.** The fake answers every
+# command, and a sender that never reads fills its own receive queue -- at
+# which point the fake blocks writing to it, stops reading, and the sender
+# blocks in turn. A deadlock at about the twenty-fourth datagram, which is what
+# the first version of this did.
+sock.settimeout(5)
+try:
+	sock.bind(local)
+	for n in range(int(sys.argv[2])):
+		where = "aa:bb:cc:dd:ee:%02x" % (n % 2)
+		sock.sendto(("ROAM " + where).encode(), sys.argv[1])
+		sock.recv(256)
+finally:
+	sock.close()
+	os.unlink(local)
+	os.rmdir(staging)
+BURSTPY
+
+burst() {
+	python3 "$work/burst.py" "$work/ctrl/wlan0" "$1"
+}
+
+
+# **A second radio, and it says nothing.** This is what makes the check below
+# mean anything, and it took a sabotage passing to find out.
+#
+# The watcher polls each radio in turn with a 250ms timeout. That timeout is
+# not a delay: where events are already queued the read returns at once, so a
+# single radio drains fast whether the loop takes one event per pass or all of
+# them. Add a radio with nothing to say and every pass waits the full quarter
+# second on it -- so one-per-pass becomes about four events a second on the
+# busy one, and a burst takes the better part of ten seconds to arrive.
+#
+# Every machine with a modern wifi driver has exactly this: `p2p-dev-wlan0`
+# sits in the control directory beside `wlan0` and is silent. The fault was
+# found on simulated radios where it was `p2p-dev-wlan2`, and reproduced here
+# by putting a quiet one in the directory.
+ip link add wlan1 type dummy 2>/dev/null || true
+python3 "$repo/tests/live/fake_supplicant.py" "$work/ctrl" wlan1 > "$work/quiet.log" 2>&1 &
+quiet=$!
+waited=0
+while ! grep -q ready "$work/quiet.log" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+waited=0
+while ! grep -q '^ATTACH' "$work/quiet.log" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 100 ] && break
+	sleep 0.1
+done
+check "the quiet radio is watched too" \
+	"$(grep -c '^ATTACH' "$work/quiet.log" || true)" 1
+
+before=$(runs)
+burst 30
+# Three seconds is the discrimination. Draining, every one of them is in by
+# now; one per pass, four a second gets through about twelve.
+#
+# All thirty, not twenty-nine: the address alternates, so the first one differs
+# from whatever the section above left the watcher on and is a move like the
+# rest. Counted from a run rather than reasoned about, which is why it is
+# written down.
+sleep 3
+check "a burst of events is drained rather than paced" \
+	"$(runs)" "$((before + 30))"
+
+# ------------------------------------- and a supplicant that came back
+
+# **The case that made netcfgd deaf, and nothing in this file produced it.**
+# `next_event` only receives, and a connected unix datagram socket whose peer
+# has exited reports that by timing out -- which is what a quiet radio does. So
+# the watcher held the entry, the rescan skipped the interface because it
+# already had one, and every event after a supplicant restart went nowhere:
+# roams, authentication failures, refused associations. Decision 0240.
+#
+# Found by `hwsim.sh`, which restarts a supplicant on real radios and then moved
+# the station between two access points. Reproduced here because a fake restarts
+# in a second and hwsim takes four minutes.
+kill "$fake" 2>/dev/null || true
+wait "$fake" 2>/dev/null || true
+rm -f "$work/ctrl/wlan0"
+python3 "$repo/tests/live/fake_supplicant.py" "$work/ctrl" wlan0 > "$work/fake2.log" 2>&1 &
+fake=$!
+waited=0
+while ! grep -q ready "$work/fake2.log" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 50 ] && break
+	sleep 0.1
+done
+
+# The watcher rescans every pass, so it has to find the new socket and attach
+# to it. Bounded on the fake's own log rather than on a guess.
+waited=0
+while ! grep -q '^ATTACH' "$work/fake2.log" 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 100 ] && break
+	sleep 0.1
+done
+check "a restarted supplicant is attached to again" \
+	"$(grep -c '^ATTACH' "$work/fake2.log" || true)" 1
+
+# And the events reach the hooks, which is the half that was lost. The first
+# CONNECTED on a new connection is an association, so two are needed to show a
+# move: the watcher has nothing to have moved from until it has seen one.
+before=$(runs)
+send_event "ROAM aa:bb:cc:dd:ee:ff"
+sleep 1
+send_event "ROAM 11:22:33:44:55:66"
+sleep 1
+check "and its roams are reported again" "$(runs)" "$((before + 1))"
 
 # ------------------------------- not everything in the directory is a radio
 

@@ -2402,15 +2402,176 @@ fn spawn_expiry_timer(commands: &Sender<Command>, seconds: u32) {
 /// and a supplicant that goes away is reconnected on the next pass rather than
 /// taking a thread with it.
 ///
-/// One radio the roam watcher is holding open: its name, the attached
-/// connection, and the network and access point it last reported being on.
+/// One radio the roam watcher is holding open.
 ///
-/// Named because the last element became a pair -- it used to be the address
-/// alone, and an address is not enough to tell a roam from a network change
-/// (0239). Clippy asks for a name at exactly that point, which is fair: the
-/// tuple stopped being readable when the thing it remembers stopped being one
-/// value.
-type Watched = (String, netcfgd_supplicant::Client, Option<(u32, String)>);
+/// A struct rather than the tuple this was, because it grew a third thing to
+/// remember and a four-tuple of `(String, Client, (u64, u64), Option<(u32,
+/// String)>)` is not something anybody can read.
+struct Watched {
+	/// The radio's interface name, which is also its control socket's.
+	interface: String,
+	/// The attached connection events arrive on.
+	client: netcfgd_supplicant::Client,
+	/// The control socket this connection was made to, as `(device, inode)`.
+	///
+	/// **Because a dead connection is silent (0240).** `next_event` only ever
+	/// receives, and a connected unix datagram socket whose peer has exited
+	/// does not report that: the read times out, which is indistinguishable
+	/// from a quiet radio. So the entry stayed in the watch list, the rescan
+	/// below skipped the interface because it already had one, and the radio
+	/// went deaf for the life of the process -- roam hooks, authentication
+	/// failures and refused associations with it.
+	///
+	/// A restarted supplicant unlinks its socket and binds a new one at the
+	/// same path, so the path existing is not the question and the *identity*
+	/// is. One `stat` per radio per pass, no round trip, and nothing to
+	/// mistake for an event.
+	socket: (u64, u64),
+	/// The network and access point this radio last reported being on.
+	last: Option<(u32, String)>,
+}
+
+/// Which socket a path names right now, if it names one.
+///
+/// `(device, inode)` rather than a modification time: a supplicant that
+/// restarts within the same second gets a new inode and might not get a new
+/// timestamp.
+fn socket_identity(path: &std::path::Path) -> Option<(u64, u64)> {
+	use std::os::unix::fs::MetadataExt;
+	let meta = std::fs::metadata(path).ok()?;
+	Some((meta.dev(), meta.ino()))
+}
+
+/// Whether a watched connection is still attached to the supplicant it attached to.
+///
+/// Separate from the thread so the rule can be checked without one, which is
+/// how every other rule in this file earned its test. `None` is "there is no
+/// socket at that path now", which is a supplicant that has gone and not come
+/// back; a different pair is one that went and returned, which is the case that
+/// used to be missed because the path looks identical either way.
+fn still_the_same_socket(recorded: (u64, u64), current: Option<(u64, u64)>) -> bool {
+	current == Some(recorded)
+}
+
+/// Attach to every radio in the control directory that is not watched already.
+///
+/// Run every pass, because a radio appears when netcfgd starts a supplicant for
+/// it, which is after this thread exists -- and because a connection dropped
+/// above has to be remade.
+///
+/// Separate from the loop so the watcher reads as the three things it does:
+/// find radios, check the connections are still live, drain what they have to
+/// say.
+fn attach_new_radios(
+	ctrl_dir: &std::path::Path,
+	watching: &mut Vec<Watched>,
+	unwatchable: &mut Vec<String>,
+) {
+	// Anything with a control socket that is not being watched yet.
+	// Read every pass, because a radio appears when netcfgd starts
+	// a supplicant for it, which is after this thread exists.
+	if let Ok(entries) = std::fs::read_dir(ctrl_dir) {
+		for entry in entries.flatten() {
+			let Some(interface) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+				continue;
+			};
+			// Not every entry here is an interface. A datagram client
+			// binds its own reply socket in this directory, so the
+			// daemon's own in-flight connections appear beside the
+			// supplicants -- and connecting to one waits out the
+			// full timeout against a process that will never answer,
+			// while delivering the `PING` into that client's reply
+			// queue where it can be read as the answer to a command
+			// it actually sent. Decision 0112.
+			if netcfgd_supplicant::is_reply_socket(&interface) {
+				continue;
+			}
+			if watching.iter().any(|held| held.interface == interface) {
+				continue;
+			}
+			// Impatiently, for the reason every other control-socket
+			// deadline in this tree exists: what is left after the
+			// filter above is a real supplicant, and a wedged one
+			// would otherwise cost this thread ten seconds a pass and
+			// starve the radios that are working of their events.
+			let Ok(client) = netcfgd_supplicant::Client::connect_within(
+				ctrl_dir,
+				&interface,
+				netcfgd_supplicant::IMPATIENT,
+			) else {
+				continue;
+			};
+			// Without ATTACH this connection gets replies and no
+			// events, and the loop below would be a silent
+			// no-op forever.
+			//
+			// **And the failure used to be silent too, which is the
+			// same sentence pointed at netcfgd (0225).** The
+			// consequence was written down here and not reported:
+			// every diagnostic below -- the auth failures, the
+			// access point refusing the station, the scan that
+			// could not run -- is read through this connection, so
+			// a radio that cannot be attached to is a radio netcfgd
+			// has gone quiet about, and nothing said so.
+			let attached = client.attach();
+			if complain_about(unwatchable, &interface, &attached) {
+				netcfgd_sys::log_warning!(
+					"supplicant",
+					"{interface}: cannot watch this radio's events ({}); \
+					 roaming, authentication failures and refused \
+					 associations will go unreported for it",
+					attached
+						.as_ref()
+						.err()
+						.map_or_else(String::new, std::string::ToString::to_string)
+				);
+			}
+			if attached.is_ok() {
+				// Recorded after attaching rather than before, so
+				// a supplicant that restarts in between costs one
+				// extra reconnect rather than leaving a stale
+				// identity recorded as current.
+				let Some(socket) = socket_identity(&entry.path()) else {
+					continue;
+				};
+				watching.push(Watched {
+					interface,
+					client,
+					socket,
+					last: None,
+				});
+			}
+		}
+	}
+}
+
+/// Take one event from a watched radio, and say whether it was a roam.
+///
+/// Split out of the watcher's loop because that loop grew past what anybody
+/// reads in one sitting: it now scans the directory, verifies each connection
+/// is still the one it attached to, and drains each radio. The part that
+/// decides what an event *means* is this, and it is the part with a rule in it.
+fn absorb_event(
+	interface: &str,
+	event: &netcfgd_supplicant::protocol::Event,
+	last: &mut Option<(u32, String)>,
+) -> bool {
+	report_supplicant_event(interface, event);
+	let Some(bssid) = event.connected_bssid() else {
+		return false;
+	};
+	let now = event.connected_network_id();
+	let moved = is_roam(last.as_ref(), now, bssid);
+	*last = now.map(|id| (id, bssid.to_owned()));
+	moved
+}
+
+/// How many events one radio may hand over before the others get a turn.
+///
+/// A burst is a dozen or so -- a disconnect, a scan, its results, a reconnect
+/// -- so this is well clear of one and still bounds what a radio stuck in a
+/// loop can cost the rest. Whatever is left is read on the next pass.
+const EVENT_BURST: u32 = 64;
 
 /// Whether a `CONNECTED` is a roam, given what this interface last reported.
 ///
@@ -2470,71 +2631,7 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 			let mut unwatchable: Vec<String> = Vec::new();
 
 			loop {
-				// Anything with a control socket that is not being watched yet.
-				// Read every pass, because a radio appears when netcfgd starts
-				// a supplicant for it, which is after this thread exists.
-				if let Ok(entries) = std::fs::read_dir(&ctrl_dir) {
-					for entry in entries.flatten() {
-						let Some(interface) = entry.file_name().to_str().map(ToOwned::to_owned)
-						else {
-							continue;
-						};
-						// Not every entry here is an interface. A datagram client
-						// binds its own reply socket in this directory, so the
-						// daemon's own in-flight connections appear beside the
-						// supplicants -- and connecting to one waits out the
-						// full timeout against a process that will never answer,
-						// while delivering the `PING` into that client's reply
-						// queue where it can be read as the answer to a command
-						// it actually sent. Decision 0112.
-						if netcfgd_supplicant::is_reply_socket(&interface) {
-							continue;
-						}
-						if watching.iter().any(|(known, _, _)| *known == interface) {
-							continue;
-						}
-						// Impatiently, for the reason every other control-socket
-						// deadline in this tree exists: what is left after the
-						// filter above is a real supplicant, and a wedged one
-						// would otherwise cost this thread ten seconds a pass and
-						// starve the radios that are working of their events.
-						let Ok(client) = netcfgd_supplicant::Client::connect_within(
-							&ctrl_dir,
-							&interface,
-							netcfgd_supplicant::IMPATIENT,
-						) else {
-							continue;
-						};
-						// Without ATTACH this connection gets replies and no
-						// events, and the loop below would be a silent
-						// no-op forever.
-						//
-						// **And the failure used to be silent too, which is the
-						// same sentence pointed at netcfgd (0225).** The
-						// consequence was written down here and not reported:
-						// every diagnostic below -- the auth failures, the
-						// access point refusing the station, the scan that
-						// could not run -- is read through this connection, so
-						// a radio that cannot be attached to is a radio netcfgd
-						// has gone quiet about, and nothing said so.
-						let attached = client.attach();
-						if complain_about(&mut unwatchable, &interface, &attached) {
-							netcfgd_sys::log_warning!(
-								"supplicant",
-								"{interface}: cannot watch this radio's events ({}); \
-								 roaming, authentication failures and refused \
-								 associations will go unreported for it",
-								attached
-									.as_ref()
-									.err()
-									.map_or_else(String::new, std::string::ToString::to_string)
-							);
-						}
-						if attached.is_ok() {
-							watching.push((interface, client, None));
-						}
-					}
-				}
+				attach_new_radios(&ctrl_dir, &mut watching, &mut unwatchable);
 
 				if watching.is_empty() {
 					// Nothing to watch. Sleeping rather than spinning on an
@@ -2543,53 +2640,119 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 					continue;
 				}
 
+				// **Before reading, because a dead connection reads as a quiet
+				// one (0240).** Dropped here so the rescan above picks the
+				// radio up on the next pass and attaches to the socket that is
+				// actually there.
+				watching.retain(|held| {
+					let now = socket_identity(&ctrl_dir.join(&held.interface));
+					if still_the_same_socket(held.socket, now) {
+						return true;
+					}
+					netcfgd_sys::log_note!(
+						"supplicant",
+						"{}: the control socket was replaced, so this radio's events \
+						 were going nowhere; re-attaching",
+						held.interface
+					);
+					false
+				});
+
 				let mut lost: Vec<String> = Vec::new();
-				for (interface, client, last) in &mut watching {
-					match client.next_event(std::time::Duration::from_millis(250)) {
-						Ok(Some(event)) => {
-							report_supplicant_event(interface, &event);
-							let Some(bssid) = event.connected_bssid() else {
-								continue;
-							};
-							let now = event.connected_network_id();
-							let moved = is_roam(last.as_ref(), now, bssid);
-							*last = now.map(|id| (id, bssid.to_owned()));
-							if moved
-								&& commands
-									.send(Command::Roamed {
+				for Watched {
+					interface,
+					client,
+					last,
+					..
+				} in &mut watching
+				{
+					// **Drained, rather than one event per pass (0240).**
+					//
+					// This used to take a single event and move on, so with a
+					// 250ms wait per radio it consumed about two a second. A
+					// supplicant does not emit events at that rate: losing an
+					// access point produces a burst -- the disconnect, the
+					// scan, its results, an assoc-reject, a temporary disable,
+					// the reconnect -- and the watcher fell behind on every one
+					// of them.
+					//
+					// Falling behind is not merely late. The events queue in
+					// the socket's receive buffer, and when that fills the
+					// supplicant's send fails; `wpa_supplicant` answers a
+					// monitor it cannot send to by dropping it, which its own
+					// binary spells `CTRL_IFACE: Detach monitor that cannot
+					// receive messages`. Nothing reaches netcfgd from that
+					// moment on, and nothing says so: the socket is open, the
+					// path is unchanged, the inode is unchanged, and the radio
+					// is simply quiet for ever.
+					//
+					// Measured on simulated radios, which is the only place
+					// this could be seen: after an access point was taken away,
+					// `STATUS` showed the station COMPLETED on the other one
+					// and netcfgd's last event was the assoc-reject before it.
+					//
+					// Bounded, so one chatty radio cannot starve the others on
+					// a machine with several. What is left over is read on the
+					// next pass, which is milliseconds away.
+					let mut drained = 0_u32;
+					loop {
+						// The first read is the pass's wait; the rest are
+						// "anything else already here?". Not zero, which
+						// `set_read_timeout` refuses because the syscall reads
+						// it as "no timeout at all".
+						let patience = if drained == 0 { 250 } else { 1 };
+						match client.next_event(std::time::Duration::from_millis(patience)) {
+							Ok(Some(event)) => {
+								drained += 1;
+								if absorb_event(interface, &event, last) {
+									let moved = Command::Roamed {
 										interface: interface.clone(),
-										bssid: bssid.to_owned(),
-									})
-									.is_err()
-							{
-								return;
+										bssid: event
+											.connected_bssid()
+											.unwrap_or_default()
+											.to_owned(),
+									};
+									if commands.send(moved).is_err() {
+										return;
+									}
+								}
+								if drained >= EVENT_BURST {
+									break;
+								}
+							}
+							Ok(None) => break,
+							// **An event this could not read is not a
+							// supplicant that went away (0225).** Both arrived
+							// here as `Err` and both dropped the connection,
+							// which costs the re-attach and the access point
+							// this interface last named -- so the next
+							// `CONNECTED` reads as a first association and a
+							// roam across it goes unreported.
+							//
+							// `InvalidData` is the reply-too-large check added
+							// in 0224, and the connection is fine: the datagram
+							// was bigger than the buffer, which says nothing
+							// about the process on the other end. Reported and
+							// stepped over -- and the drain continues, because
+							// whatever is behind it is still worth reading.
+							Err(error) if !supplicant_is_gone(&error) => {
+								netcfgd_sys::log_note!(
+									"supplicant",
+									"{interface}: an event could not be read ({error})"
+								);
+							}
+							// The supplicant went away. Dropped and picked up
+							// again on a later pass if it comes back, which is
+							// what an `ncfg apply` restarting one looks like
+							// from here.
+							Err(_) => {
+								lost.push(interface.clone());
+								break;
 							}
 						}
-						Ok(None) => {}
-						// **An event this could not read is not a supplicant
-						// that went away (0225).** Both arrived here as `Err`
-						// and both dropped the connection, which costs the
-						// re-attach and the access point this interface last
-						// named -- so the next `CONNECTED` reads as a first
-						// association and a roam across it goes unreported.
-						//
-						// `InvalidData` is the reply-too-large check added in
-						// 0224, and the connection is fine: the datagram was
-						// bigger than the buffer, which says nothing about the
-						// process on the other end. Reported and stepped over.
-						Err(error) if !supplicant_is_gone(&error) => {
-							netcfgd_sys::log_note!(
-								"supplicant",
-								"{interface}: an event could not be read ({error})"
-							);
-						}
-						// The supplicant went away. Dropped and picked up again
-						// on a later pass if it comes back, which is what an
-						// `ncfg apply` restarting one looks like from here.
-						Err(_) => lost.push(interface.clone()),
 					}
 				}
-				watching.retain(|(interface, _, _)| !lost.contains(interface));
+				watching.retain(|held| !lost.contains(&held.interface));
 			}
 		});
 	note_spawn(
@@ -3397,5 +3560,36 @@ mod tests {
 		// sabotage that adds one fails here.
 		assert!(!is_roam(Some(&on_home), None, "aa:bb:cc:dd:ee:02"));
 		assert!(!is_roam(None, None, "aa:bb:cc:dd:ee:02"));
+	}
+
+	/// A restarted supplicant is a connection that has to be remade.
+	///
+	/// **A dead connection reads as a quiet one.** `next_event` only receives,
+	/// and a connected unix datagram socket whose peer has exited reports that
+	/// by timing out -- which is exactly what a radio with nothing happening on
+	/// it does. So the watcher kept the entry, the rescan skipped the interface
+	/// because it already had one, and the radio went deaf for the life of the
+	/// process. 0240.
+	///
+	/// The identity is the question and the path is not: a restarted supplicant
+	/// unlinks its socket and binds a new one at the same name.
+	#[test]
+	fn a_replaced_control_socket_is_not_the_one_we_attached_to() {
+		let attached = (66, 1234);
+
+		// Nothing happened: same device, same inode, keep the connection.
+		assert!(still_the_same_socket(attached, Some((66, 1234))));
+
+		// The supplicant restarted. Same path, new socket, and this is the
+		// case that used to be missed -- everything observable about the path
+		// is unchanged.
+		assert!(!still_the_same_socket(attached, Some((66, 9999))));
+
+		// Gone and not come back.
+		assert!(!still_the_same_socket(attached, None));
+
+		// A different filesystem with a colliding inode number is a different
+		// socket. Comparing inodes alone would call this the same one.
+		assert!(!still_the_same_socket(attached, Some((67, 1234))));
 	}
 }
