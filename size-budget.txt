@@ -653,4 +653,21 @@ netcfgd
 #
 # Attributable without a second build: the only change since the total above,
 # and the previous total plus two pages exactly.
-total 2820632
+#
+# The wifi audit of M9, +86,024 bytes to 2,906,656.
+#
+# Twenty rounds of them, and the total is not attributable to one change the
+# way every entry above is -- this is the first raise recorded against a
+# campaign rather than a feature, and it is worth saying so rather than
+# pretending to arithmetic nobody did. What is in it, largest first as far as
+# anyone can tell without a second build: the supplicant event reader and its
+# roam rule (0225, 0239, 0240), regulatory and channel checks with their
+# warnings (0221, 0222, 0232), SAE, OWE, MAC randomisation and key-caching
+# settings (0223, 0226, 0228, 0230), and the strings for all of it -- netcfgd's
+# warnings are sentences, and sentences are bytes.
+#
+# The tolerance was carrying part of this already and the last change pushed
+# past it. Recorded at the measured size for the reason the file gives at the
+# top: spending the 3% on real features means the next real feature fails the
+# gate for the wrong reason.
+total 2906656
