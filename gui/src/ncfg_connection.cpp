@@ -191,6 +191,47 @@ bool ncfg_connection::connectivity(ncfg_connectivity_row *out, QString *error)
 	return true;
 }
 
+/* Every link this machine has or has been told about.
+ *
+ * An empty answer is a daemon older than this window, not a machine with no
+ * links -- the caller falls back to `links()` rather than drawing nothing.
+ */
+bool ncfg_connection::inventory(QList<ncfg_inventory_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_inventory_t found = {};
+	char message[NCFG_ERROR_MAX];
+
+	if (!ncfg_client_inventory(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_inventory_row row;
+		row.name = from_c(found.items[i].name);
+		row.category = from_c(found.items[i].category);
+		row.presence = from_c(found.items[i].presence);
+		row.configured = found.items[i].configured != 0;
+		*out << row;
+	}
+	ncfg_inventory_free(&found);
+	return true;
+}
+
 bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 {
 	if (!out) {

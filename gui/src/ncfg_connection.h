@@ -49,6 +49,18 @@ extern "C" {
  * so it can be checked without a daemon, a window or a row -- which is the
  * only way its two awkward cases get exercised at all. See the definition.
  */
+/* One row of the link list: the union of what the machine has and what the
+ * document names. See ncfg_client.h for why that is two sets and not one. */
+struct ncfg_inventory_row {
+	QString name;
+	QString category;
+	/* "present", "absent" or "unknown". Three values: a hidden network cannot
+	 * be found by looking, so "not in the scan" is not evidence about one, and
+	 * unknown must never be drawn as absent. */
+	QString presence;
+	bool    configured = false;
+};
+
 bool ncfg_link_shows(const QString &category, const QString &wanted);
 
 struct ncfg_connectivity_row {
@@ -501,6 +513,7 @@ public:
 	 */
 	bool links(QList<ncfg_link_row> *out, QString *error);
 	bool connectivity(ncfg_connectivity_row *out, QString *error);
+	bool inventory(QList<ncfg_inventory_row> *out, QString *error);
 	bool plan(ncfg_plan_data *out, QString *error);
 
 	/*

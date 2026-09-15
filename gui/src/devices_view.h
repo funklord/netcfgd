@@ -65,6 +65,10 @@ private:
 	/* Every link the daemon reported, unfiltered: the filter draws from this
 	 * rather than re-asking, so changing it costs no round trip. */
 	QList<ncfg_link_row> links;
+	/* The union the daemon reports: every link this machine has or has been
+	 * told about. Empty from a daemon that does not report one, which the
+	 * drawing treats as "fall back to `links`". */
+	QList<ncfg_inventory_row> rows_known;
 	QPushButton     *configure_button;
 	QPushButton     *explain_button;
 };

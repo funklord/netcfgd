@@ -32,7 +32,7 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	 * column is the honest rendering, since a cable has no network to be on. */
 	QStringList columns;
 	columns << QStringLiteral("interface") << QStringLiteral("category")
-	        << QStringLiteral("kind")
+	        << QStringLiteral("presence") << QStringLiteral("kind")
 	        << QStringLiteral("state") << QStringLiteral("network")
 	        << QStringLiteral("addresses") << QStringLiteral("mtu")
 	        << QStringLiteral("mac");
@@ -104,6 +104,19 @@ void ncfg_devices_view::refresh()
 	}
 
 	links = found;
+	/* **The union, not the kernel's table.** `links()` is what the machine
+	 * has; this adds what the document names and the machine does not have --
+	 * a saved wifi network, an interface whose card is out. A row can be in
+	 * either set or both, and dropping either half loses something real: the
+	 * first would hide a configured network that is out of range, the second
+	 * would hide `docker0`.
+	 *
+	 * A daemon that reports no inventory is one older than this window, and
+	 * the list falls back to the kernel's links rather than going blank. */
+	QString ignored;
+	if (!connection->inventory(&rows_known, &ignored)) {
+		rows_known.clear();
+	}
 	rebuild_filter();
 	redraw();
 }
@@ -121,6 +134,11 @@ void ncfg_devices_view::refresh()
 void ncfg_devices_view::rebuild_filter()
 {
 	QStringList present;
+	for (const ncfg_inventory_row &row : rows_known) {
+		if (!row.category.isEmpty() && !present.contains(row.category)) {
+			present << row.category;
+		}
+	}
 	for (const ncfg_link_row &link : links) {
 		if (!link.category.isEmpty() && !present.contains(link.category)) {
 			present << link.category;
@@ -142,24 +160,57 @@ void ncfg_devices_view::redraw()
 	const QString wanted = filter->currentText();
 	QList<QStringList> rows;
 	int hidden = 0;
-	for (const ncfg_link_row &link : links) {
-		/* An empty category is a daemon older than this window, and it shows
-		 * in every filter rather than in none: a row that vanishes because
-		 * two programs disagree about its kind is the worst outcome here. */
-		if (!ncfg_link_shows(link.category, wanted)) {
-			hidden++;
-			continue;
+
+	/* Drawn from the union where the daemon reports one, and from the
+	 * kernel's links otherwise. The detail columns come from the observed
+	 * link, looked up by name -- a row with no observed link is one that is
+	 * not there, and its cells are blank rather than invented. */
+	if (!rows_known.isEmpty()) {
+		for (const ncfg_inventory_row &known : rows_known) {
+			if (!ncfg_link_shows(known.category, wanted)) {
+				hidden++;
+				continue;
+			}
+			const ncfg_link_row *seen = nullptr;
+			for (const ncfg_link_row &link : links) {
+				if (link.name == known.name) {
+					seen = &link;
+					break;
+				}
+			}
+			QStringList cells;
+			cells << known.name;
+			cells << known.category;
+			cells << known.presence;
+			cells << (seen ? seen->kind : QString());
+			cells << (seen ? seen->state : QString());
+			cells << (seen ? seen->network : QString());
+			cells << (seen ? seen->addresses : QString());
+			cells << (seen && seen->mtu ? QString::number(seen->mtu) : QString());
+			cells << (seen ? seen->mac : QString());
+			rows << cells;
 		}
-		QStringList cells;
-		cells << link.name;
-		cells << link.category;
-		cells << link.kind;
-		cells << link.state;
-		cells << link.network;
-		cells << link.addresses;
-		cells << (link.mtu ? QString::number(link.mtu) : QString());
-		cells << link.mac;
-		rows << cells;
+	} else {
+		for (const ncfg_link_row &link : links) {
+			if (!ncfg_link_shows(link.category, wanted)) {
+				hidden++;
+				continue;
+			}
+			QStringList cells;
+			cells << link.name;
+			cells << link.category;
+			/* No inventory to ask, so nothing is claimed: this is a daemon
+			 * older than the window, and the kernel has the link, so it is
+			 * there. */
+			cells << QStringLiteral("present");
+			cells << link.kind;
+			cells << link.state;
+			cells << link.network;
+			cells << link.addresses;
+			cells << (link.mtu ? QString::number(link.mtu) : QString());
+			cells << link.mac;
+			rows << cells;
+		}
 	}
 	table->show_rows(rows);
 
@@ -168,11 +219,11 @@ void ncfg_devices_view::redraw()
 	 * interface has gone away. */
 	if (rows.isEmpty()) {
 		emit reported(hidden ? QStringLiteral("no %1 links (%2 hidden)").arg(wanted).arg(hidden)
-		                     : QStringLiteral("no interfaces reported"));
+		                     : QStringLiteral("no links reported"));
 	} else if (hidden) {
 		emit reported(QStringLiteral("%1 links, %2 hidden").arg(rows.size()).arg(hidden));
 	} else {
-		emit reported(QStringLiteral("%1 interfaces").arg(rows.size()));
+		emit reported(QStringLiteral("%1 links").arg(rows.size()));
 	}
 }
 
