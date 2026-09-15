@@ -16,20 +16,44 @@ judgement is mine and says so.
 
 ## 1. The one-line answer
 
-**TDE cannot load netcfgd's Qt Widgets GUI as a control-centre module, a
-panel applet or a background service.** Those three are TQt3 shared
-libraries loaded into a TQt3 host process, and a Qt6 binary cannot be one
-however it is packaged.
+**The barrier is not that the APIs differ.** They are the same family --
+`QWidget`, layouts, signals and slots, the Qt Widgets model throughout --
+and TQt3 is Qt 3 with the types renamed. Somebody fluent in Qt6 Widgets
+reads TQt3 code without a dictionary. This section said otherwise in its
+first version and was wrong.
 
-But `client/ncfg_client.h` is a C API, and TQt3 C++ links C without
-ceremony. So the native route is **a small TQt3 front end over the existing
-client library** -- not a port of the GUI, and not a second implementation
-of anything netcfgd already knows how to do. The GUI stays exactly as
-`gui/project.md` describes it, desktop and Android from one source, and TDE
-gets its own thin shell.
+**The barrier is one process, two toolkits.** A control-centre module, a
+panel applet and a kded service are shared libraries `dlopen`ed into a host
+that is already running TQt3: `tdecmshell`, `kicker`, `kded`. The factory
+contract makes it explicit --
 
-That split is what "as if the KDE people wrote it" actually costs. Anything
-short of it leaves a Qt6 window that TDE launches but does not contain.
+    typedef KGenericFactory<KCMNic, TQWidget> KCMNicFactory;
+    K_EXPORT_COMPONENT_FACTORY( kcm_nic, KCMNicFactory("kcmnic") )
+
+-- the library must hand back a `TDECModule *`, which is a TQt3 object. Two
+Qt-family toolkits cannot both own one process's event loop, X connection,
+widget hierarchy and metaobject system. That part is absolute and no
+packaging changes it.
+
+**But a window can be embedded even when a library cannot be loaded**, and
+this softens the conclusion considerably. TDE ships `QXEmbed`, and
+`kicker/applets/swallow` uses it to launch an *arbitrary* program and
+embed its window into the panel -- `xclock` and anything else, with no
+cooperation from the embedded program. A TQt3 container embedding the Qt6
+GUI's window is therefore available.
+
+So three separable questions, and conflating them is what produced the
+wrong answer above:
+
+| question | answer |
+|---|---|
+| Load the Qt6 GUI into a TDE host process | **No**, and never |
+| Put it inside the control centre | **Yes**, by embedding its window |
+| Make it *look* like TDE wrote it | **Partly** -- see section 4.1 |
+
+`client/ncfg_client.h` being a C API is what keeps the third option open:
+TQt3 C++ links C without ceremony, so a native front end can reuse the
+client library rather than reimplementing the protocol.
 
 ## 2. The four surfaces TDE offers, and what each one is
 
@@ -120,7 +144,33 @@ matched beyond TDE's own.
 One naming caution: the existing module's library is `nic` and its factory
 `kcmnic`. Do not collide with it. `kcm_netcfgd` / `netcfgd` is free.
 
-## 4. What "seamless" actually consists of
+## 4. What embedding buys, and what it does not
+
+Embedding solves **placement**, not **appearance**. Inside the embedded
+window it is still a Qt6 application drawing with a Qt6 style, and on this
+machine Qt6 has no TDE style to use: the installed styles are `breeze6`
+and the platform themes are `KDEPlasmaPlatformTheme6` and `libqgtk3`.
+There is no TQt3 or TDE style plugin for Qt6 anywhere in the archive, and
+writing one means reimplementing TDE's widget drawing against Qt6's style
+API -- a large job with no other beneficiary.
+
+What *is* cheap is the palette. A Qt6 program can read TDE's colours out of
+`kdeglobals` and set its own palette to match, which is exactly what the
+sibling desktop projects already do for dark-mode detection. So:
+
+    colours            matchable cheaply, and already solved next door
+    widget metrics     not matchable without a Qt6 style plugin
+    decorations        the window manager's, so free
+    icons              matchable by using TDE icon names via the theme
+
+A window that matches TDE's colours and icons but draws Qt6's buttons is
+noticeably closer than the default and still not indistinguishable. Whether
+that clears the "as if the KDE people wrote it" bar is a judgement for
+whoever set it -- my own reading is that it clears it for a configuration
+window and does not for a tray icon, where the thing is small enough that
+its drawing is most of what you see.
+
+## 5. What "seamless" actually consists of
 
 The parts that make something feel native in TDE are mostly not the widget
 code. In rough order of how much they matter:
@@ -144,7 +194,16 @@ code. In rough order of how much they matter:
   in the factory, as the lockout applet does. Untranslated strings in a
   translated desktop are conspicuous.
 
-## 5. Three shapes, with what each costs
+## 6. Three shapes, with what each costs
+
+**A0. Qt6 GUI embedded in a TQt3 control-centre shell.** A `kcm_netcfgd`
+that launches the existing GUI and embeds its window, as `swallow` does.
+One GUI, and it appears where a TDE user looks for it. What it does not buy
+is appearance: section 4. Worth knowing this exists -- it was missing from
+the first version of this report -- but I would not lead with it, because
+an embedded foreign window is a thing people notice and the failure modes
+(focus, modal dialogs escaping as separate windows, resizing) are fiddly in
+ways that read as bugs rather than as a style difference.
 
 **A. Qt6 GUI only, with a TDE menu entry.** Cheapest. The existing GUI
 gets a `.desktop` file in the right category. It will not match TDE's
@@ -157,14 +216,14 @@ A `kcm_netcfgd` control module and a `KSystemTray` monitor, both TQt3, both
 linking the C client library directly. They cover status, per-interface
 state, connect and disconnect, and the tray's context menu. The Qt6 GUI
 stays for anything elaborate, launched from the module when wanted. My
-recommendation, and section 6 says why.
+recommendation, and section 7 says why.
 
 **C. Full TQt3 reimplementation.** Everything native, nothing shared with
 Android, two GUIs to maintain against one daemon. I would not, and
 `gui/project.md`'s insistence on one source for desktop and Android is the
 reason.
 
-## 6. Why B
+## 7. Why B
 
 The work splits along a line that already exists in netcfgd rather than a
 new one. `project.md` records that the daemon's remote path is "an ordinary
@@ -182,7 +241,7 @@ through the same code.
 And it keeps the expensive half -- the configuration editor, the wifi tab,
 the Android build -- in one place.
 
-## 7. The privilege question, which is yours and already open
+## 8. The privilege question, which is yours and already open
 
 `project.md` records the blocker plainly: what stands between the GUI and a
 network manager is "adding a network -- which is a security decision rather
@@ -208,7 +267,7 @@ carry their own. A TDE front end is an adapter by that rule, so the
 dependency would sit in the right place, but that is an inference about
 netcfgd's intent and not something I measured.
 
-## 8. What I did not check
+## 9. What I did not check
 
 - **Whether tdehw is worth using.** TDE has its own hardware layer,
   `TDEHardwareDevices`, and tdepowersave uses it for device events. A
