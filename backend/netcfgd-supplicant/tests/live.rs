@@ -244,7 +244,7 @@ fn every_security_mode_is_accepted_by_the_real_parser() {
 		// `tool/supplicant_coverage_gate.py`, which otherwise reads a setting
 		// it cannot see in a string literal as one no supplicant was asked
 		// about.
-		// covers: ssid key_mgmt psk sae_password proto ieee80211w priority
+		// covers: ssid key_mgmt psk sae_password proto ieee80211w
 		for (name, security) in [
 			("open", Security::Open),
 			("wpa2", psk(PskProto::Wpa2)),
@@ -328,7 +328,7 @@ fn every_mac_policy_is_accepted_by_the_real_supplicant() {
 		let client = supplicant.connect();
 		clear_networks(&client).expect("REMOVE_NETWORK all");
 
-		// covers: mac_addr scan_ssid
+		// covers: mac_addr
 		for policy in [
 			MacPolicy::Permanent,
 			MacPolicy::PerNetwork,
@@ -625,6 +625,103 @@ fn an_enterprise_network_is_accepted_by_the_real_parser() {
 			flags.trim(),
 			"0",
 			"the supplicant stored different eapol_flags"
+		);
+	});
+}
+
+/// A hidden network is probed for, and a ranked one is ordered.
+///
+/// **Two settings whose coverage was claimed and was not real.** 0240's gate
+/// takes a `// covers:` line beside a test as a promise that the test drives
+/// those settings through `add_network`, and it cannot check that promise. Two
+/// of the first four lines written against it were wrong: the helper every
+/// test uses builds a network with `hidden: false` and `metric: None`, so
+/// `scan_ssid` and `priority` are precisely the two settings it never sends.
+///
+/// They are named here rather than promised, so the gate reads them out of the
+/// control-socket strings below and the claim is a check.
+///
+/// `scan_ssid` is the probe-request setting and the reason this matters beyond
+/// tidiness: without it a hidden network is never probed for, so it simply
+/// never appears, with no error anywhere to say why.
+#[test]
+fn a_hidden_network_is_probed_for_and_a_ranked_one_is_ordered() {
+	with_supplicant(|supplicant| {
+		let client = supplicant.connect();
+		let (resolver, _secrets) = secrets_with("hunter2hunter2");
+		clear_networks(&client).expect("REMOVE_NETWORK all");
+
+		let mut wanted = network("lobby", "lobby", psk(PskProto::Wpa2));
+		wanted.hidden = true;
+		wanted.metric = Some(100);
+
+		let id = add_network(&client, &wanted, MacPolicy::Permanent, &resolver)
+			.expect("the hidden network was refused");
+
+		let probing = client
+			.ask(&format!("GET_NETWORK {id} scan_ssid"))
+			.expect("GET_NETWORK scan_ssid");
+		assert_eq!(
+			probing.trim(),
+			"1",
+			"a hidden network that is not probed for never appears at all"
+		);
+
+		// The supplicant still orders networks and still gets told; what it is
+		// told is derived from the document's `metric`, which runs the other
+		// way up (0154). A rank with the sign flipped is silent -- the machine
+		// simply prefers the wrong network -- so the number is asserted rather
+		// than its presence.
+		//
+		// **The literal is the point.** The first version compared against
+		// `join_rank(Some(100))`, which is the function being checked: a
+		// sabotage that made `join_rank` return the metric unchanged passed,
+		// because both sides of the comparison moved together. That is a test
+		// built from the code rather than from the thing modelled, which is
+		// the shape this campaign keeps finding in fixtures and which this
+		// test reproduced on its first run. 4096 - 100, written out.
+		let rank = client
+			.ask(&format!("GET_NETWORK {id} priority"))
+			.expect("GET_NETWORK priority");
+		assert_eq!(
+			rank.trim(),
+			"3996",
+			"the supplicant stored a different join order than netcfgd derived"
+		);
+
+		// And an ordinary network is told neither, which is the control:
+		// without it both assertions above pass for a renderer that sends
+		// these unconditionally.
+		//
+		// **The unset answer is the default, not a refusal**, and that was
+		// measured rather than assumed -- the first version of this asserted
+		// `FAIL` and it is only string fields that answer so. On
+		// wpa_supplicant 2.10, an integer field never set reads back what the
+		// supplicant would use: `scan_ssid` 0, `priority` 0, and `mac_addr`
+		// **-1**, which is worth knowing because netcfgd sends `mac_addr 0`
+		// for a permanent address and that is a different value from unset.
+		let plain = add_network(
+			&client,
+			&network("open", "open", Security::Open),
+			MacPolicy::Permanent,
+			&resolver,
+		)
+		.expect("the plain network was refused");
+		assert_eq!(
+			client
+				.ask(&format!("GET_NETWORK {plain} scan_ssid"))
+				.expect("GET_NETWORK scan_ssid")
+				.trim(),
+			"0",
+			"a network that is not hidden should not be probed for by name"
+		);
+		assert_eq!(
+			client
+				.ask(&format!("GET_NETWORK {plain} priority"))
+				.expect("GET_NETWORK priority")
+				.trim(),
+			"0",
+			"a network with no metric should not be given a join order"
 		);
 	});
 }

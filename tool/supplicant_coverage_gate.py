@@ -22,6 +22,19 @@ So this ties two things together:
 A setting in neither fails the build, unless it is named in
 `tool/supplicant-unexercised.txt` with a reason.
 
+**A `// covers:` line is a promise this cannot check**, and the promises are
+worth less than they look. Two of the first four written against this gate were
+wrong, by the person who wrote the gate, on the day it went in: the helper every
+test in that suite uses builds a network with `hidden: false` and `metric:
+None`, so `scan_ssid` and `priority` are exactly the two settings it never
+sends. Both were claimed. Both now have a test that names them in a
+`GET_NETWORK` and reads the value back, so the gate sees them in a string
+literal and the claim is a check.
+
+So: **name a setting in the control-socket string where you can**, and keep
+`covers:` for the ones a test genuinely drives through `add_network` or a table
+it builds. Every `covers:` line is somewhere this gate is trusting a sentence.
+
 WHAT THIS DOES NOT PROMISE. It proves every setting is *driven* against a real
 supplicant. It does not prove the value is right -- `SET okc 7` also answers
 OK, as 10.122 records, so acceptance establishes that the key exists and not
