@@ -740,6 +740,7 @@ mod tests {
 
 	fn observed_with(address: ObservedAddress, proto_supported: bool) -> Observed {
 		Observed {
+			inventory: Vec::new(),
 			connectivity: None,
 			links: vec![ObservedLink {
 				name: "eth0".to_owned(),

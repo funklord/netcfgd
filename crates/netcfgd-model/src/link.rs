@@ -28,7 +28,7 @@
 //! rules, and the one that is wrong would be wrong quietly: a link in no
 //! category is a row that simply does not appear.
 
-use crate::observed::ObservedLink;
+use crate::observed::{Observed, ObservedLink};
 use serde::{Deserialize, Serialize};
 
 /// What kind of thing a link is, for choosing an icon or filtering a list.
@@ -100,6 +100,92 @@ impl Category {
 	}
 }
 
+/// Whether a link is there, with a third answer for when nobody can say.
+///
+/// **Not a boolean, and the third value is the point.** A hidden network, or
+/// any network on a radio that is not allowed to probe actively, cannot be
+/// found by looking: a hidden access point beacons with an empty name, so its
+/// *address* is observable and the name-to-address mapping is not.
+/// `scan_ssid=1` sends the directed probe that would resolve it, and on a
+/// `no IR` channel -- 5180 and 5260 among them, see [`crate::device`] -- that
+/// probe is forbidden. The only evidence left is an attempt to associate.
+///
+/// This tree already states the convention twice, on
+/// [`crate::observed::ObservedLink::reachable`] and on
+/// `ObservedBackend::networks_match`: `None` is not `Some(false)`, and a thing
+/// nobody could ask about keeps its standing. 0245.
+///
+/// **The rendering rule follows and is the reason this is an enum rather than
+/// an `Option<bool>`:** unknown must never be drawn as absent. A hidden network
+/// shown as "not present" looks permanently gone, and the operator's correct
+/// response -- try it -- is the one thing that display argues against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Presence {
+	/// Seen.
+	Present,
+	/// Looked for, with a method that would have found it, and not there.
+	Absent,
+	/// No method available that could have found it.
+	Unknown,
+}
+
+impl Presence {
+	/// The word a column or a status line uses.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::Present => "present",
+			Self::Absent => "absent",
+			Self::Unknown => "unknown",
+		}
+	}
+}
+
+/// Whether an interface named by the document is there.
+///
+/// **Two-valued, unlike a network's, and that asymmetry is the whole rule.**
+/// The kernel's link table is complete: netcfgd has seen every interface there
+/// is, so one it cannot find is one that does not exist. There is no third
+/// answer here because there is no question netcfgd was unable to ask.
+#[must_use]
+pub fn presence_of_interface(name: &str, observed: &Observed) -> Presence {
+	if observed.link(name).is_some() {
+		Presence::Present
+	} else {
+		Presence::Absent
+	}
+}
+
+/// Whether a configured wifi network is within reach.
+///
+/// `associated` is whether some radio is on it now, which settles the question
+/// outright. `seen` is what a scan said: `Some(true)` found it, `Some(false)`
+/// looked and did not, `None` means no scan has been read.
+///
+/// **A hidden network is `Unknown` even when a scan has been read**, and that
+/// is the case this function exists for. A scan cannot name a hidden access
+/// point -- `pick_ssid` refuses for exactly this reason -- so "not in the scan"
+/// is not evidence of absence for one. Treating it as evidence would report a
+/// network that is right there as gone.
+#[must_use]
+pub fn presence_of_network(hidden: bool, associated: bool, seen: Option<bool>) -> Presence {
+	if associated {
+		// The strongest evidence there is, and it outranks a stale scan.
+		return Presence::Present;
+	}
+	if hidden {
+		return Presence::Unknown;
+	}
+	match seen {
+		Some(true) => Presence::Present,
+		Some(false) => Presence::Absent,
+		// Nobody looked. Not the same as looking and finding nothing, which is
+		// the distinction every `Option<bool>` in this tree is about.
+		None => Presence::Unknown,
+	}
+}
+
 /// The loopback, which no `kind` distinguishes from a wired card.
 const LOOPBACK: &str = "lo";
 
@@ -146,6 +232,114 @@ fn is_modem(link: &ObservedLink, document: &crate::Document) -> bool {
 		.devices
 		.iter()
 		.any(|device| device.name == link.name && device.modem.is_some())
+}
+
+/// One row of the link list: what netcfgd knows about one link.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Entry {
+	/// What to call it.
+	///
+	/// An interface's name, or a `network` block's id for a wifi network --
+	/// which is the identity a wifi link has, since the operator names every
+	/// block and one name can cover a whole set of access points (0245).
+	pub name: String,
+	/// What kind of thing it is.
+	pub category: Category,
+	/// Whether it is there.
+	pub presence: Presence,
+	/// Whether the document names it.
+	///
+	/// False for a link the machine has and nobody configured -- a container
+	/// bridge, a card another manager owns. Those are in the list because
+	/// hiding something demonstrably on the machine is worse than showing
+	/// something netcfgd does not manage.
+	pub configured: bool,
+}
+
+/// Every link this machine has or has been told about.
+///
+/// **A union of two sets that do not coincide**, which is why neither half
+/// alone will do. Three provenances (0245):
+///
+/// * configured and present -- the ordinary case;
+/// * configured and not present -- a saved network out of range, an
+///   `interface` whose card is not plugged in. These have no kernel link at
+///   all, so an observation-only list cannot show them;
+/// * present and not configured -- `docker0`, a card another manager owns. A
+///   document-only list would hide something demonstrably on the machine.
+///
+/// Sorted by name, so two calls on one machine compare equal and a list does
+/// not reorder itself under somebody reading it.
+///
+/// **Wifi presence is `Unknown` here unless a radio is on the network**, and
+/// that is honest rather than lazy: narrowing it to `Absent` needs a scan, the
+/// observation carries none, and for a hidden network no scan could settle it
+/// anyway. A caller holding scan results can ask
+/// [`presence_of_network`] directly.
+#[must_use]
+pub fn inventory(document: Option<&crate::Document>, observed: &Observed) -> Vec<Entry> {
+	let mut entries: Vec<Entry> = Vec::new();
+
+	for link in &observed.links {
+		let configured = document.is_some_and(|document| {
+			document
+				.interfaces
+				.iter()
+				.any(|interface| interface.name == link.name)
+		});
+		entries.push(Entry {
+			name: link.name.clone(),
+			// The link's own category where the observation has worked one
+			// out, and the rule again where it has not -- a bare netlink
+			// snapshot has no category, and a row with no kind is a row that
+			// falls out of every filter.
+			category: link.category.unwrap_or_else(|| category_of(link, document)),
+			presence: Presence::Present,
+			configured,
+		});
+	}
+
+	let Some(document) = document else {
+		entries.sort_by(|left, right| left.name.cmp(&right.name));
+		return entries;
+	};
+
+	// An interface the document names and the kernel does not have.
+	for interface in &document.interfaces {
+		if observed.link(&interface.name).is_some() {
+			continue;
+		}
+		entries.push(Entry {
+			name: interface.name.clone(),
+			// Nothing to read a kind from: the link does not exist, so there
+			// is no kernel kind and no `wireless` flag. `Other` rather than a
+			// guess from the name, which is the convention `eth0` is not a
+			// fact.
+			category: Category::Other,
+			presence: presence_of_interface(&interface.name, observed),
+			configured: true,
+		});
+	}
+
+	// Every configured network, which is a link whether or not a radio is on
+	// it. A radio that is associated already appears above as its interface;
+	// this row is the *network*, which is the thing an operator configured and
+	// the thing a linkset would hold.
+	for network in &document.networks {
+		let associated = observed
+			.links
+			.iter()
+			.any(|link| link.network.as_deref() == Some(network.id.as_str()));
+		entries.push(Entry {
+			name: network.id.clone(),
+			category: Category::Wifi,
+			presence: presence_of_network(network.hidden, associated, None),
+			configured: true,
+		});
+	}
+
+	entries.sort_by(|left, right| left.name.cmp(&right.name));
+	entries
 }
 
 #[cfg(test)]
@@ -228,6 +422,121 @@ mod tests {
 			category_of(&link("x0", "a-kind-from-2031", false), None),
 			Category::Other
 		);
+	}
+
+	/// The whole reason presence is not a boolean.
+	///
+	/// A hidden network is `Unknown` even when a scan has been read and did
+	/// not find it, because a scan *cannot* find one: a hidden access point
+	/// beacons with an empty name, which is what `pick_ssid` refuses over. A
+	/// network that is right there would otherwise be reported gone.
+	#[test]
+	fn a_hidden_network_is_unknown_and_not_absent() {
+		use super::{presence_of_network, Presence};
+
+		// Looked, with a method that would have worked, and it was not there.
+		assert_eq!(
+			presence_of_network(false, false, Some(false)),
+			Presence::Absent
+		);
+		// The same evidence about a hidden network is not evidence at all.
+		assert_eq!(
+			presence_of_network(true, false, Some(false)),
+			Presence::Unknown
+		);
+
+		// Nobody looked. Not the same as looking and finding nothing, which is
+		// what every `Option<bool>` in this tree is about.
+		assert_eq!(presence_of_network(false, false, None), Presence::Unknown);
+
+		// Association settles it either way, and outranks a stale scan that
+		// disagrees.
+		assert_eq!(presence_of_network(false, true, None), Presence::Present);
+		assert_eq!(
+			presence_of_network(true, true, Some(false)),
+			Presence::Present
+		);
+		assert_eq!(
+			presence_of_network(false, false, Some(true)),
+			Presence::Present
+		);
+	}
+
+	/// An interface has no third answer, and that asymmetry is deliberate.
+	#[test]
+	fn an_interface_is_present_or_absent_and_never_unknown() {
+		use super::{presence_of_interface, Presence};
+
+		let mut observed = crate::observed::Observed::default();
+		observed.links.push(link("eth0", "", false));
+
+		assert_eq!(presence_of_interface("eth0", &observed), Presence::Present);
+		// The kernel's link table is complete: an interface netcfgd cannot
+		// find is one that does not exist, so there is no question it was
+		// unable to ask.
+		assert_eq!(presence_of_interface("eth1", &observed), Presence::Absent);
+	}
+
+	/// The row set is a union, and each of its three provenances appears.
+	#[test]
+	fn the_inventory_is_a_union_of_two_sets_that_do_not_coincide() {
+		use super::{inventory, Presence};
+
+		let mut observed = crate::observed::Observed::default();
+		observed.links.push(link("eth0", "", false));
+		// Present and not configured: hiding something demonstrably on the
+		// machine is worse than showing something netcfgd does not manage.
+		observed.links.push(link("docker0", "bridge", false));
+
+		let mut document = crate::Document::default();
+		document.interfaces.push(
+			serde_json::from_value(serde_json::json!({ "name": "eth0" })).expect("an interface"),
+		);
+		// Configured and not present: no kernel link exists for it at all, so
+		// an observation-only list could not show this row.
+		document.interfaces.push(
+			serde_json::from_value(serde_json::json!({ "name": "eth1" })).expect("an interface"),
+		);
+		document.networks.push(
+			serde_json::from_value(serde_json::json!({
+				"id": "office",
+				"ssid": "6f6666696365",
+				"security": { "type": "open" },
+				"hidden": true,
+			}))
+			.expect("a network"),
+		);
+
+		let rows = inventory(Some(&document), &observed);
+		let find = |name: &str| {
+			rows.iter()
+				.find(|entry| entry.name == name)
+				.unwrap_or_else(|| panic!("no row for {name}"))
+		};
+
+		assert_eq!(find("eth0").presence, Presence::Present);
+		assert!(find("eth0").configured);
+
+		assert_eq!(find("docker0").presence, Presence::Present);
+		assert!(!find("docker0").configured, "nobody configured docker0");
+
+		assert_eq!(find("eth1").presence, Presence::Absent);
+		assert!(find("eth1").configured);
+
+		// A configured network is a link whether or not a radio is on it, and
+		// this one is hidden, so no scan could settle it.
+		assert_eq!(find("office").presence, Presence::Unknown);
+		assert_eq!(find("office").category, super::Category::Wifi);
+
+		// Sorted, so a list does not reorder itself under somebody reading it.
+		let mut sorted = rows.clone();
+		sorted.sort_by(|left, right| left.name.cmp(&right.name));
+		assert_eq!(rows, sorted);
+
+		// And with no document the union is just what the machine has.
+		let bare = inventory(None, &observed);
+		assert_eq!(bare.len(), 2);
+		assert!(bare.iter().all(|entry| !entry.configured));
 	}
 
 	/// A modem is the one category the link cannot answer for itself.

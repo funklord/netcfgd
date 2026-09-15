@@ -527,6 +527,32 @@ fn backends(observed: &mut Observed) {
 /// The whole observed surface, in one value.
 fn witness() -> Observed {
 	let mut observed = Observed {
+		// Set rather than empty, so the witness pins the shape: it carries
+		// `skip_serializing_if`, and a field absent from the witness is the one
+		// that can go quiet unnoticed. All three provenances and all three
+		// presences, because those are what a reader of the schema needs to
+		// see -- especially `unknown`, which is the value that must never be
+		// rendered as absent.
+		inventory: vec![
+			netcfgd_model::link::Entry {
+				name: "eth0".to_owned(),
+				category: netcfgd_model::link::Category::Ethernet,
+				presence: netcfgd_model::link::Presence::Present,
+				configured: true,
+			},
+			netcfgd_model::link::Entry {
+				name: "eth1".to_owned(),
+				category: netcfgd_model::link::Category::Other,
+				presence: netcfgd_model::link::Presence::Absent,
+				configured: true,
+			},
+			netcfgd_model::link::Entry {
+				name: "n-office".to_owned(),
+				category: netcfgd_model::link::Category::Wifi,
+				presence: netcfgd_model::link::Presence::Unknown,
+				configured: true,
+			},
+		],
 		// Set rather than absent, so the witness pins the shape: the field
 		// carries `skip_serializing_if`, and a field absent from the witness is
 		// exactly the one that can go quiet unnoticed -- which is what this

@@ -7,6 +7,26 @@
       "wireless": true
     }
   },
+  "inventory": [
+    {
+      "name": "eth0",
+      "category": "ethernet",
+      "presence": "present",
+      "configured": true
+    },
+    {
+      "name": "eth1",
+      "category": "other",
+      "presence": "absent",
+      "configured": true
+    },
+    {
+      "name": "n-office",
+      "category": "wifi",
+      "presence": "unknown",
+      "configured": true
+    }
+  ],
   "links": [
     {
       "name": "eth0",

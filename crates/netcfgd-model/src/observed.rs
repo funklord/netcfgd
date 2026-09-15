@@ -1239,6 +1239,24 @@ pub struct Observed {
 	/// record of such a machine still parses.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub connectivity: Option<crate::connectivity::Connectivity>,
+	/// Every link this machine has or has been told about, sorted by name.
+	///
+	/// **A union, and `links` above is only half of it.** That field is the
+	/// kernel's table; this one adds the links the document names and the
+	/// kernel does not have -- a saved wifi network, an `interface` whose card
+	/// is not plugged in -- each with whether it is there and whether anybody
+	/// could tell. See [`crate::link::inventory`] for the three provenances and
+	/// [`crate::link::Presence`] for why that last question has three answers.
+	///
+	/// Beside `links` rather than replacing it, deliberately: the planner
+	/// iterates `links` as "what the kernel has", and a synthetic row for
+	/// something that does not exist would be read as one that does.
+	///
+	/// Empty where nothing has computed it -- a bare netlink snapshot that
+	/// `augment` has not been over. Absent when it serialises, so an
+	/// observation written by an older netcfgd still parses.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub inventory: Vec<crate::link::Entry>,
 	/// Links, sorted by name.
 	pub links: Vec<ObservedLink>,
 	/// Bluetooth adapters, sorted by name.
