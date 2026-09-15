@@ -9461,6 +9461,114 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.135 The lease that was taken and thrown away
+
+Reported: *"on wakeup we need to be faster in detecting that networks have
+changed, it took almost 30 seconds"*. Measured from the machine's own journal
+rather than reasoned about -- the resume at 11:03:49 on 2026-09-15, moving from
+`OpenPC.se` (`metric = 100`) to `EMP-XYLEM` (`metric = 200`):
+
+```text
++2.3s   associated; carrier acquired
++8.5s   dhcpcd leases, installs its route with metric 100
++8.5s   netcfgd stops that client and starts another
++14.7s  the replacement leases, having redone the solicit and the ARP probe
++18.7s  netcfgd logs the association the supplicant reported at +2.3s
+```
+
+**Nineteen milliseconds** between the client succeeding and netcfgd killing it.
+The rebind, the offer and the probe were done, discarded, and done again.
+
+### The trigger was the one thing that could not exist yet
+
+`restart_for_metric` is right about what it is for: the metric reaches a DHCP
+client once, as `-m`, so a radio moving to a network that asks for a different
+one keeps the old metric on its route and the client has to be replaced. What
+it compared was the **installed route** -- and its own comment explains that
+choice, reasonably, as avoiding "a record of what the client was started with
+[which] would be a second thing to keep true".
+
+The route cannot exist until the exchange that installs it has finished. So the
+only signal netcfgd watched was guaranteed to arrive after the expensive work
+was complete, and the cost is a whole DHCP exchange, doubled, every time a radio
+moves between networks with different metrics.
+
+**And the first way out was wrong, in this campaign's own shape.** The draft
+asked the client: `/proc/<pid>/cmdline` is where `pid_by_marker` finds a
+supplicant, so read `-m` back from there -- the process describing itself rather
+than netcfgd remembering, which looked like the right side of 10.131. **dhcpcd
+rewrites its command line** to `dhcpcd: <iface> [ip4]`, so nothing netcfgd
+passed survives; measured here, no dhcpcd carries `-m` at all. The change would
+have read `None` on every machine, fallen back to the route, and been inert
+while looking like a clean tree.
+
+It passed unit tests against a directory and `make check`, and was one command
+from being installed. What caught it was checking the live machine first,
+because the one thing that could disturb it was netcfgd deciding the running
+client had the wrong metric. **The repository already said so** --
+`backend_pid_file` calls the interface name "the weakest marker netcfgd uses"
+for exactly these two clients, "neither ... invoked with a path netcfgd chose
+that ends up in its command line" -- and the evidence went unread. A proxy for
+the real question, committed by the pass auditing for proxies.
+
+What it is instead is the record netcfgd already keeps for hostapd and radvd,
+with one difference: those read back a *rendered configuration*, which an apply
+may rewrite without restarting anything, so the record could drift into agreeing
+with a document the running client never saw. This one is written on the path
+that actually spawns a client and nowhere else, and one function builds the path
+for both sides rather than two a test proves agree -- a silent absence is this
+record's failure mode and it has already happened once. Decision 0241.
+
+### And eighteen of the seconds were 10.134's defect, in the wild
+
+`joined a0:a4:7f:23:6a:6f` reached the log 16.4 seconds after the supplicant
+emitted it. That is the one-event-per-pass watcher meeting a resume burst, with
+`p2p-dev-wlp0s20f3` sitting quiet in the control directory making every pass
+wait out its timeout -- four events a second through thirty. Found on simulated
+radios a day earlier; this is what it cost on the real one.
+
+### Nothing needed to detect the suspend, and that was the first idea
+
+netcfgd was awake and reconciling throughout: it acted nineteen milliseconds
+after the route appeared, which is not a daemon that had not noticed. Netlink
+delivers the carrier change at +2.3s and the loop's own tick is five seconds, so
+the observation was never further behind than that. A `PrepareForSleep`
+subscription or a `CLOCK_BOOTTIME` jump detector would have added a dependency
+and bought nothing. Written down because it was the obvious move and it was the
+wrong one.
+
+### The tenth sabotage to pass, and it corrected the code's shape again
+
+`restart_for_metric` had no test, in either direction, before this. Three cases
+now, and the third -- "netcfgd cannot read the metric" is not "the metric is
+wrong" -- passed its sabotage. The rule had been written as a `bool` and the
+caller reached back for the number with `unwrap_or(wanted)`, so the unreadable
+case was handled twice, once deliberately and once by accident, and breaking the
+deliberate half changed nothing. Rewritten to return the offending metric: one
+expression, no second way to spell "nothing to report", and all three sabotages
+then fail.
+
+Tenth first-run pass of the campaign, and the second in a row where the answer
+was to change the shape of the code rather than to add an assertion.
+
+### Two harnesses that could not have seen it, handled
+
+`started_backend` in the planner's fixtures builds the observed side from the
+document, which is 0222's trap; `started_metric` is `None` there -- "cannot
+tell", which plans nothing, and is what a converged machine looks like -- and the
+tests that care state a value. The schema witness does carry one, on the DHCP
+kind alone, because an `Option` left empty in every sample pins nothing and the
+field could be renamed without the schema moving. Additive: a minor bump.
+
+### The size ratchet fired, and it is the campaign's
+
+`make size` refused the build at 1,406 bytes over. The entry raising it is the
+first in `size-budget.txt` that is attributed to a campaign rather than to one
+change, and says so rather than inventing arithmetic nobody did: +86,024 bytes
+across twenty rounds of supplicant event handling, regulatory and channel
+checks, SAE and randomisation settings, and the sentences netcfgd prints about
+all of them.
+
 ## 10.134 Why it took twenty rounds, answered with the tools that were already here
 
 Asked directly: why did this take so long, and what changes so it does not
