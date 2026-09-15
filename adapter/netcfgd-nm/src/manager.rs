@@ -248,16 +248,19 @@ impl Manager {
 
 	#[zbus(property, name = "State")]
 	fn state_property(&self) -> u32 {
-		if self.state.any_connected() {
-			// `CONNECTED_GLOBAL` rather than `_SITE`: netcfgd does not run a
-			// connectivity check unless a device's config asks for a portal
-			// check, so it cannot tell the two apart. Claiming the lesser one
-			// would make every desktop show a permanent warning triangle on a
-			// working connection, which is a worse lie than the optimistic
+		match self.state.connectivity() {
+			// `CONNECTED_GLOBAL` rather than `_SITE`: netcfgd distinguishes
+			// the two only where a probe is configured, and a machine with one
+			// that answered has reached `Online` -- which is `_GLOBAL` by any
+			// reading. Without a probe it cannot tell, and claiming the lesser
+			// one would put a permanent warning triangle on every desktop with
+			// a working connection, which is a worse lie than the optimistic
 			// answer.
-			state::CONNECTED_GLOBAL
-		} else {
-			state::DISCONNECTED
+			Some(answer) if answer.connected() => state::CONNECTED_GLOBAL,
+			Some(_) => state::DISCONNECTED,
+			// A netcfgd that reports nothing is one older than this shim. NM's
+			// own word for having no answer, rather than a confident wrong one.
+			None => state::UNKNOWN,
 		}
 	}
 
@@ -363,10 +366,15 @@ impl Manager {
 
 	#[zbus(property)]
 	fn connectivity(&self) -> u32 {
-		if self.state.any_connected() {
-			connectivity::FULL
-		} else {
-			connectivity::UNKNOWN
+		// `FULL` only where something actually checked. A default route is
+		// where a captive portal lives, and NM has a word for that state --
+		// saying `FULL` on the strength of a route is the claim this shim used
+		// to make about every machine.
+		match self.state.connectivity() {
+			Some(answer) if answer.rung == netcfgd_model::connectivity::Rung::Online => {
+				connectivity::FULL
+			}
+			_ => connectivity::UNKNOWN,
 		}
 	}
 

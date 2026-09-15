@@ -1032,19 +1032,25 @@ impl State {
 	}
 
 	/// Whether anything is carrying traffic, for the daemon's own state.
+	///
+	/// **The daemon's answer, not a fourth one (0243).** This used to ask
+	/// whether any link was up, had carrier and held a non-link-local address
+	/// -- no route anywhere in it. That is the claim 0146 removed from the
+	/// tray: an address with nothing to route through is a machine that fails
+	/// every request while looking configured, and this shim was still telling
+	/// every desktop on the bus that such a machine was `CONNECTED_GLOBAL`.
+	///
+	/// `None` is a netcfgd older than this shim, which is possible because
+	/// they are separate packages. It reads as not connected, and the caller
+	/// turns that into `UNKNOWN` rather than `DISCONNECTED`: NM's own idiom for
+	/// "no answer", and a better thing to show than a confident wrong one.
 	#[must_use]
-	pub(crate) fn any_connected(&self) -> bool {
+	pub(crate) fn connectivity(&self) -> Option<netcfgd_model::connectivity::Connectivity> {
 		let inner = self
 			.inner
 			.lock()
 			.unwrap_or_else(std::sync::PoisonError::into_inner);
-		inner.observed.links.iter().any(|link| {
-			link.name != "lo"
-				&& link.up && link.carrier
-				&& inner.observed.addresses.iter().any(|address| {
-					address.interface == link.name && !is_link_local(&address.address)
-				})
-		})
+		inner.observed.connectivity.clone()
 	}
 }
 
@@ -1238,30 +1244,50 @@ mod tests {
 		assert_eq!(state.access_points("wlan1").len(), 1);
 	}
 
+	/// The shim reports the daemon's verdict and does not invent one.
+	///
+	/// **It used to invent one, and it was the claim 0146 removed from the
+	/// tray**: any link that was up, had carrier and held a non-link-local
+	/// address counted as connected, with no route anywhere in the test. So a
+	/// machine that fails every request was announced to every desktop on the
+	/// bus as `CONNECTED_GLOBAL`. 0243.
 	#[test]
-	fn connectedness_ignores_the_loopback_and_needs_an_address() {
+	fn connectedness_is_the_daemons_answer_and_not_an_address() {
+		use netcfgd_model::connectivity::{Connectivity, Rung};
+
 		let state = State::new(PathBuf::from("/nowhere"));
-		state.adopt(observed(&["lo"]));
-		assert!(!state.any_connected(), "loopback alone is not connected");
 
-		let mut with_address = observed(&["lo", "eth0"]);
-		assert!(
-			!state.adopt(with_address.clone()).added.is_empty(),
-			"eth0 should have been added"
-		);
-		assert!(
-			!state.any_connected(),
-			"a link with no address is not connected"
-		);
+		// A daemon that says nothing is not a daemon saying "no". The caller
+		// turns this into NM's `UNKNOWN`.
+		let mut snapshot = observed(&["lo", "eth0"]);
+		snapshot.connectivity = None;
+		state.adopt(snapshot.clone());
+		assert!(state.connectivity().is_none());
 
-		with_address.addresses.push(netcfgd_model::ObservedAddress {
+		// Addressed with nothing to route through. This is the case that used
+		// to answer yes.
+		snapshot.addresses.push(netcfgd_model::ObservedAddress {
 			interface: "eth0".to_owned(),
 			address: "192.0.2.5/24".to_owned(),
 			proto: None,
 			ownership: netcfgd_model::Ownership::Unknown,
 			origin: None,
 		});
-		state.adopt(with_address);
-		assert!(state.any_connected());
+		snapshot.connectivity = Some(Connectivity {
+			rung: Rung::Local,
+			primary: None,
+		});
+		state.adopt(snapshot.clone());
+		assert!(
+			!state.connectivity().expect("an answer").connected(),
+			"an address with no route is not a connection"
+		);
+
+		snapshot.connectivity = Some(Connectivity {
+			rung: Rung::Routed,
+			primary: None,
+		});
+		state.adopt(snapshot);
+		assert!(state.connectivity().expect("an answer").connected());
 	}
 }

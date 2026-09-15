@@ -21,6 +21,13 @@
 
 /// `NMState`: what the whole daemon is doing.
 pub(crate) mod state {
+	/// Nothing is known.
+	///
+	/// NM's own word for having no answer, and what this shim reports when the
+	/// netcfgd it is talking to is older than itself and says nothing about
+	/// connectivity (0243). Better than a confident `DISCONNECTED` on a
+	/// machine that is working.
+	pub(crate) const UNKNOWN: u32 = 0;
 	/// Networking is disabled.
 	pub(crate) const ASLEEP: u32 = 10;
 	/// No device is connected.
