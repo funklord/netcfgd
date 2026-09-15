@@ -43,6 +43,7 @@ debian/netcfgd/
 debian/netcfgd-nm/
 debian/netcfgd-gui/
 debian/netcfgd-modem/
+debian/netcfgd-trinity/
 
 # Python's own, beside whatever ran. `tools/` holds three gates now and
 # importing one leaves this; it is not build output anybody named, which is

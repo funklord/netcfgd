@@ -18,6 +18,15 @@
 # A plain build produces the daemon and the shim and needs no Qt.
 GUI_PROFILE := $(filter pkg.netcfgd.gui,$(DEB_BUILD_PROFILES))
 
+# The TDE front end is behind its own profile for the same reason and one
+# more: it is TQt3, so it cannot share a process with the Qt client, and a
+# build machine with TDE's development packages is a stronger assumption than
+# one with Qt's. It installs into /opt/trinity, which is where Debian's
+# Trinity packages live and where the control centre and the panel look --
+# so, unlike every other package built from this source, PREFIX does not
+# reach it.
+TDE_PROFILE := $(filter pkg.netcfgd.tde,$(DEB_BUILD_PROFILES))
+
 %:
 	dh $@
 
@@ -29,6 +38,27 @@ ifneq (,$(GUI_PROFILE))
 	@# suite. dh_auto_test is a no-op here for the same reason: `make check`
 	@# is the gate, and a package build is not the place to discover it.
 	$(MAKE) -C gui
+endif
+ifneq (,$(TDE_PROFILE))
+	@# Debian's hardening flags, which nothing else would pass: this build
+	@# does not go through dh_auto_configure. A kpart is a cmake MODULE
+	@# rather than a SHARED library, so it needs its own variable -- naming
+	@# only SHARED leaves the control module unflagged while the tray looks
+	@# fixed.
+	@#
+	@# lintian will report hardening-no-relro anyway, and the package is not
+	@# at fault. The flag reaches the link line -- it is in
+	@# CMakeFiles/netcfgd-tde-tray.dir/link.txt -- and running that exact
+	@# command by hand produces a binary with a GNU_RELRO segment. TDE's
+	@# post-link step, the one that prints "Storing SCM metadata", rewrites
+	@# the ELF and the segment does not survive it. Every Trinity binary on
+	@# this machine is the same, tdesu and tdepowersave included, so this is
+	@# not something the packaging can fix. It is passed so that the build is
+	@# right and so that a fixed TDE tool starts working here for free.
+	$(MAKE) tde TDE_CMAKE_ARGS='\
+		-DCMAKE_EXE_LINKER_FLAGS=$(shell dpkg-buildflags --get LDFLAGS) \
+		-DCMAKE_MODULE_LINKER_FLAGS=$(shell dpkg-buildflags --get LDFLAGS) \
+		-DCMAKE_SHARED_LINKER_FLAGS=$(shell dpkg-buildflags --get LDFLAGS)'
 endif
 
 override_dh_auto_install:
@@ -57,6 +87,9 @@ override_dh_auto_install:
 	$(MAKE) install-modem DESTDIR=$(CURDIR)/debian/netcfgd-modem PREFIX=/usr
 ifneq (,$(GUI_PROFILE))
 	$(MAKE) install-gui DESTDIR=$(CURDIR)/debian/netcfgd-gui PREFIX=/usr
+endif
+ifneq (,$(TDE_PROFILE))
+	$(MAKE) install-tde DESTDIR=$(CURDIR)/debian/netcfgd-trinity
 endif
 
 # dh_installsystemd enables the unit and starts it, on first install, unless

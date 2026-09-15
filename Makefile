@@ -7,6 +7,7 @@
 # TARGETS
 #   make               -- build the workspace and link the `ncfg` name
 #   make gui           -- the Qt client, which nothing else builds
+#   make tde           -- the TDE control module and tray, likewise
 #   make cross         -- the cross-compilation check
 #   make test          -- the test suite alone
 #   make check         -- every gate; the one to run before a commit
@@ -38,6 +39,7 @@
 #   make install-systemd, install-openrc, install-procd
 #                      -- the init glue for one system, chosen deliberately
 #   make install-gui   -- the Qt client, opt-in; not part of install
+#   make install-tde   -- the TDE front end, into TDE's own prefix
 #   make install-modem
 #                      -- the reference modem helper; optional on purpose
 #   make uninstall     -- remove what install put there
@@ -70,7 +72,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance claims installed-diff FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
+.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance claims installed-diff FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -404,6 +406,12 @@ LIBEXECDIR ?= $(PREFIX)/libexec
 # Where gui/Makefile leaves its binary. Its own BUILD_DIR defaults to `build`
 # and is not visible here, so this tracks it and is overridable the same way.
 GUI_BUILD_DIR ?= gui/build
+# The TDE front end is CMake, so its binary directory is its own rather than
+# in-place, and it installs into TDE's prefix and not this one. /opt/trinity
+# is where Debian's Trinity packages put everything, which is what the
+# control centre and the panel search.
+TDE_BUILD_DIR ?= adapter/netcfgd-tde/build
+TDE_PREFIX    ?= /opt/trinity
 SYSCONFDIR ?= /etc
 
 # Two binaries and a config directory. Nothing else, and nothing that makes
@@ -614,6 +622,40 @@ install-systemd:
 # checks. Kept out of `install` for the reason `install-gui` is: the shim is
 # eighty-odd crates of D-Bus that constraint 3 keeps off the daemon's path, and
 # a machine installing netcfgd is not thereby asking for them.
+# The TDE front end: a control centre module and a tray, TQt3, over the same
+# client/ library the Qt window uses.
+#
+# Kept out of the default build and out of `install` for the reason `gui` and
+# `nm` are: a daemon whose core links no toolkit must build on a machine that
+# has none, and a TDE desktop is a stronger assumption still.
+#
+# `-C client` first, because the CMake project links libncfg_client.a out of
+# that directory and cmake will not build it -- the same shape as gui.pro's
+# PRE_TARGETDEPS, which requires the archive to exist without producing it.
+# TDE_CMAKE_ARGS is how the packaging passes Debian's hardening flags in.
+# This build does not go through dh_auto_configure, so nothing else would.
+TDE_CMAKE_ARGS ?=
+
+tde:
+	$(MAKE) -C client
+	cmake -S adapter/netcfgd-tde -B $(TDE_BUILD_DIR) \
+		-DCMAKE_INSTALL_PREFIX=$(TDE_PREFIX) $(TDE_CMAKE_ARGS)
+	$(MAKE) -C $(TDE_BUILD_DIR)
+
+# cmake's own install step rather than a list of `install -D` lines, because
+# where a kpart and a control-centre desktop file go is TDE's answer and not
+# this tree's: PLUGIN_INSTALL_DIR and XDG_APPS_INSTALL_DIR come from
+# TDESetupPaths, and hard-coding them here would be a second copy of a layout
+# TDE is entitled to change.
+install-tde:
+	@[ -x $(TDE_BUILD_DIR)/netcfgd-tde-tray ] || { \
+		echo "install-tde: $(TDE_BUILD_DIR) is not built -- run \`make tde\` first"; \
+		exit 1; \
+	}
+	$(MAKE) -C $(TDE_BUILD_DIR) install DESTDIR=$(DESTDIR)
+	@echo "install-tde: installed into $(TDE_PREFIX); run tdebuildsycoca"
+	@echo "install-tde:   as the desktop user before the module appears"
+
 nm:
 	cd adapter/netcfgd-nm && $(CARGO) build --release
 
@@ -703,6 +745,18 @@ deb-gui:
 		exit 1; }
 	$(MAKE) deb DEB_BUILD_PROFILES="pkg.netcfgd.gui"
 
+# The presence of the module is a stand-in for "cmake can configure this",
+# which only the configure step actually answers -- it is here to fail in one
+# second with the package name rather than after dpkg-buildpackage has built
+# the daemon. find_package(TDE) is the real test and runs either way.
+deb-tde:
+	@find /usr/share/cmake*/Modules -name TDEMacros.cmake 2>/dev/null | \
+		grep -q . || { \
+		echo "deb-tde: TDE's cmake modules are not installed"; \
+		echo "deb-tde:   apt install tde-cmake tdelibs14-trinity-dev"; \
+		exit 1; }
+	$(MAKE) deb DEB_BUILD_PROFILES="pkg.netcfgd.tde"
+
 deb: version-check
 	@test -n "$(DIST)" || { echo "deb: DIST is empty, refusing" >&2; exit 1; }
 	DEB_BUILD_PROFILES="$(DEB_BUILD_PROFILES)" dpkg-buildpackage -b -us -uc
@@ -718,6 +772,8 @@ deb: version-check
 	          ../netcfgd-nm_$(VERSION)_*.deb ../netcfgd-nm-dbgsym_$(VERSION)_*.deb \
 	          ../netcfgd-modem_$(VERSION)_*.deb \
 	          ../netcfgd-gui_$(VERSION)_*.deb ../netcfgd-gui-dbgsym_$(VERSION)_*.deb \
+	          ../netcfgd-trinity_$(VERSION)_*.deb \
+	          ../netcfgd-trinity-dbgsym_$(VERSION)_*.deb \
 	          ../netcfgd_$(VERSION)_*.buildinfo ../netcfgd_$(VERSION)_*.changes; do \
 		[ -e "$$f" ] && mv -f "$$f" $(DIST)/ || true; \
 	done

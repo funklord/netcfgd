@@ -5,7 +5,15 @@ Maintainer: Nabeel Sowan <nabeel@vibes.se>
 Homepage: https://github.com/netcfgd/netcfgd
 Build-Depends: debhelper-compat (= 13), cargo (>= 1.85), rustc (>= 1.85),
  libncurses-dev, pkgconf,
- qt6-base-dev <pkg.netcfgd.gui>
+ qt6-base-dev <pkg.netcfgd.gui>,
+# TDE's CMake modules are a package of their own: tde-cmake carries
+# TDEMacros, TDEVersion and TDESetupPaths, which is what decides where a
+# kpart and a control-centre desktop file go. tdelibs14-trinity-dev brings
+# the headers and dcopidl, and depends on libtqtinterface-dev, which is where
+# tmoc comes from -- so TQt3 is not named here despite being what this is
+# written against.
+ cmake <pkg.netcfgd.tde>, tde-cmake <pkg.netcfgd.tde>,
+ tdelibs14-trinity-dev <pkg.netcfgd.tde>
 Rules-Requires-Root: no
 
 Package: netcfgd
@@ -163,3 +171,54 @@ Description: desktop client and tray applet for netcfgd
  .
  or `make deb-gui`, which does the same. A plain build produces the daemon
  and needs no Qt.
+
+Package: netcfgd-trinity
+Architecture: any
+Section: tde
+Build-Profiles: <pkg.netcfgd.tde>
+# `netcfgd-gui` is where both terminal launchers actually live: netcfgd-tui is
+# a symlink to that binary, which reads argv[0] and renders on a character
+# grid. Three of the four launchers are therefore that package, and a
+# Recommends installs it by default while leaving a machine that wants only
+# the control module and the profile switcher able to decline. It is not a
+# Depends because the module, the status line and profile switching all work
+# without it, over the socket, through this package's own code.
+#
+# `tdebase-trinity-bin` for tdesu, which only the root terminal entry uses.
+# A TDE desktop has it; a machine that installed tdelibs for something else
+# may not, and the other three entries do not care.
+Depends: ${shlibs:Depends}, ${misc:Depends}, netcfgd (= ${binary:Version})
+Recommends: netcfgd-gui, tdebase-trinity-bin
+Description: Trinity control module and tray applet for netcfgd
+ A TDE Control Center module and a system tray monitor for netcfgd, both
+ TQt3, both speaking the same unix socket `ncfg` uses. The tray shows what
+ the daemon is doing, switches between configuration profiles, and starts
+ the desktop client, the terminal client, or the terminal client as root.
+ .
+ It is a second front end rather than the Qt one repackaged, and the reason
+ is not the toolkit APIs -- TQt3 is Qt 3 with the types renamed and reads
+ like Qt Widgets throughout. A control-centre module is a shared library
+ loaded into a host process that is already running TQt3, and the factory
+ contract hands back a TDECModule. Two Qt-family toolkits cannot share one
+ process's event loop, X connection and metaobject system, so the Qt window
+ could not be that object however it were packaged.
+ .
+ Nothing here reimplements the protocol: both artifacts link the same C
+ client library under client/ that the Qt window and the daemon's own
+ conformance gate build, so the permission tiers are read from the daemon
+ rather than guessed.
+ .
+ Switching a profile asks first. The daemon reconciles as soon as the
+ selection is written, so there is no later step at which anybody gets to
+ look, and a profile switch can take the link down on a machine being
+ administered over it.
+ .
+ It is behind a build profile for the same reason netcfgd-gui is, and more
+ so: the daemon must build on machines with no toolkit at all, and a TDE
+ desktop is a stronger assumption than a Qt one. Build it with:
+ .
+   DEB_BUILD_PROFILES=pkg.netcfgd.tde dpkg-buildpackage -b -us -uc
+ .
+ or `make deb-tde`. A plain build produces the daemon and needs neither.
+ .
+ Installing this package configures nothing and starts nothing.
