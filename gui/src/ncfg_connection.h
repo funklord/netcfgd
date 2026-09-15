@@ -43,6 +43,14 @@ extern "C" {
  * screen that second-guessed either would be the fifth copy of a rule 0243
  * exists to have one of.
  */
+/* Whether a link of this category survives a filter set to `wanted`.
+ *
+ * Beside the row type it is about, and a free function rather than a member,
+ * so it can be checked without a daemon, a window or a row -- which is the
+ * only way its two awkward cases get exercised at all. See the definition.
+ */
+bool ncfg_link_shows(const QString &category, const QString &wanted);
+
 struct ncfg_connectivity_row {
 	ncfg_rung_t rung = ncfg_rung_offline;
 	bool        connected = false;
@@ -64,6 +72,16 @@ struct ncfg_link_row {
 	/* Whether the wifi tab should offer this one. Answered below the seam so
 	 * that the rule lives with the other models rather than in a table. */
 	bool    wireless = false;
+	/* What kind of thing this link is, as the daemon decided: "ethernet",
+	 * "wifi", "bridge", "tunnel", ... Empty from a daemon that does not report
+	 * one, which the filter treats as "show it" rather than as a fault.
+	 *
+	 * Not worked out here, and that is the point: `kind` is empty for every
+	 * real card, so wired, wireless and loopback are one value there, and the
+	 * rule also needs the document to know a modem. One rule in the daemon
+	 * beats three in three front ends, where the wrong one drops rows from a
+	 * filtered list without saying so. */
+	QString category;
 	/* Whether a default route in the main table leaves through this link.
 	 * The last thing observable without sending a packet, and the reason the
 	 * tray can say "connected" rather than "associated". */

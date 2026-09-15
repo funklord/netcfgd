@@ -72,7 +72,15 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	wifi = new ncfg_wifi_view(connection, machine);
 	modems = new ncfg_modems_view(connection, machine);
 	bluetooth = new ncfg_bluetooth_view(connection, machine);
-	machine->addTab(devices, QStringLiteral("devices"));
+	/* **`links`, not `devices`, and the rename is the model's own vocabulary.**
+	 * This tab has always shown `ncfg_client_links()` -- interface, kind,
+	 * state, network, addresses -- while a `device` in the document is the
+	 * other thing entirely: hardware identity, mtu, mac policy, regulatory
+	 * domain, which backend drives a radio. A device is what has to exist
+	 * before a link can; a link is where the networking is configured. The
+	 * GUI had one list wearing the other noun, and no view of devices at all.
+	 */
+	machine->addTab(devices, QStringLiteral("links"));
 	machine->addTab(wifi, QStringLiteral("wifi"));
 	/* Beside wifi: a modem is the other way this machine reaches a network,
 	 * and an operator looking for one looks where the radios are. */

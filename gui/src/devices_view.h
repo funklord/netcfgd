@@ -13,8 +13,12 @@
 #ifndef NCFG_DEVICES_VIEW_H
 #define NCFG_DEVICES_VIEW_H
 
+#include "ncfg_connection.h"
+
+#include <QList>
 #include <QWidget>
 
+class QComboBox;
 class QPushButton;
 
 class ncfg_connection;
@@ -28,6 +32,13 @@ public:
 
 public slots:
 	void refresh();
+
+private:
+	/* Offer every category the rows contain, and keep the operator's choice
+	 * across a refresh where it is still offered. */
+	void rebuild_filter();
+	/* Draw the rows the filter allows, and say how many it hid. */
+	void redraw();
 
 signals:
 	void reported(const QString &summary);
@@ -50,6 +61,10 @@ private slots:
 private:
 	ncfg_connection *connection;
 	ncfg_table_view *table;
+	QComboBox       *filter;
+	/* Every link the daemon reported, unfiltered: the filter draws from this
+	 * rather than re-asking, so changing it costs no round trip. */
+	QList<ncfg_link_row> links;
 	QPushButton     *configure_button;
 	QPushButton     *explain_button;
 };

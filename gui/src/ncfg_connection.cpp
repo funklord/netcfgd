@@ -135,6 +135,29 @@ QString ncfg_connection::where() const
  * did not settle where they are computed, so four copies drifted. 0243 moved
  * the rule into the daemon and left this to render it.
  */
+/* Whether a row survives the filter.
+ *
+ * Split from the drawing so the rule can be checked without a daemon, a
+ * window or a row -- which is the only way its two awkward cases get
+ * exercised at all.
+ *
+ * **An empty category shows in every filter, not in none.** It means a daemon
+ * older than this window, and a row that vanishes because two programs
+ * disagree about its kind is the worst outcome here: an operator concludes an
+ * interface has gone away. Erring towards showing it costs one row in a
+ * filtered list and nothing else.
+ */
+bool ncfg_link_shows(const QString &category, const QString &wanted)
+{
+	if (wanted.isEmpty() || wanted == QStringLiteral("all")) {
+		return true;
+	}
+	if (category.isEmpty()) {
+		return true;
+	}
+	return category == wanted;
+}
+
 bool ncfg_connection::connectivity(ncfg_connectivity_row *out, QString *error)
 {
 	if (!out) {
@@ -201,6 +224,7 @@ bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 		 * the shim already learned not to guess from the name -- `eth0`
 		 * is a convention, not a fact. */
 		row.kind = from_c(link.kind);
+		row.category = from_c(link.category);
 		if (row.kind.isEmpty()) {
 			row.kind = QStringLiteral("device");
 		}
