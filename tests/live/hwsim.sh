@@ -596,10 +596,16 @@ fi
 # ------------------------------------------------------ choosing between them
 #
 # **Two saved networks in range, and the document says which one to prefer.**
-# `priority` is written into the supplicant's network block -- higher wins,
-# which is wpa_supplicant's convention rather than netcfgd's -- and until now
-# nothing exercised it with a radio. The code path was read and believed, which
-# is the state every other wireless claim was in this morning.
+# `metric` decides it -- *lower* wins, which is a route metric's convention --
+# and netcfgd derives the supplicant's own `priority` from it, which runs the
+# other way up (0154).
+#
+# **This block said `priority` and had been failing since that rename.** The
+# document stopped accepting the key, so every run got two compile diagnostics,
+# no supplicant, and `did not move to the preferred network (on: none)` after
+# forty seconds of polling. It is the only test in this tree that produces a
+# real association, and half of it was dead: live scripts are not in `make
+# check`, so nothing read the output.
 #
 # Deliberately after the checks above and on a rewritten document, so that a
 # failure to prefer cannot take the association and lease results with it.
@@ -648,12 +654,14 @@ device $sta_dev {
 }
 
 network "netcfgd-test" {
-	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3"; priority = 1 }
+	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3" }
+	metric = 100
 	config = "null"
 }
 
 network "netcfgd-better" {
-	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3"; priority = 100 }
+	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3" }
+	metric = 1
 	config = "null"
 }
 
@@ -748,7 +756,7 @@ CONF
 		done
 
 		if [ "$chosen" = netcfgd-better ]; then
-			echo "ok   preferred the higher-priority network of the two"
+			echo "ok   preferred the better-metric network of the two"
 			echo "note: proved on a freshly started supplicant. A network"
 			echo "note:   added to the document under a running one is not"
 			echo "note:   pushed at all -- see the comment above."
