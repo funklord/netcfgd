@@ -9473,6 +9473,84 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.139 A link has a kind, and presence is three-valued
+
+The first GUI tab was named `devices` and showed `ncfg_client_links()`. It was
+the **link** list wearing the other noun, and there was no view of `device`
+blocks at all. The document has had the split since the beginning -- a `Device`
+is what must be true before a link can exist, an `Interface` is the networking
+-- so the two-list shape is the model's own and the GUI was what was out of
+step. Renamed to `links`.
+
+Collapsing the two was considered and is wrong on cardinality rather than taste:
+one device carries many links (a trunk with VLANs, a radio with networks) and
+one link spans devices (a bond).
+
+### A filter cannot be built from `kind`
+
+Measured here: `enp0s31f6`, `wlp0s20f3` and `lo` all report an empty `kind`. The
+kernel gives every real card one, so wired, wireless and loopback are a single
+value there; `wireless` separates the radio, the name separates the loopback,
+and **nothing on a link says modem** -- that lives in a `device` block, so the
+rule needs the document too.
+
+`netcfgd_model::link::category_of` is where it lives, carried on `ObservedLink`
+through the C client into the row type. **Not a consolidation, which makes it
+unusual here**: 0243 and `network_for` each pulled a rule back after several
+clients had written their own, and no client classifies links today. The same
+mistake declined in advance, against a failure that would have been quiet -- a
+link in no category is a row that does not appear. Decision 0245.
+
+### A configured wifi network is a link
+
+A `network` block already carries `addressing`, `routes`, `dns`, `metric`,
+`hooks`; an `Interface` carries `addressing`, `routes`, `dns`, `preference`,
+`hooks`. **A wifi network is already a link in all but name**, with `metric`
+against `preference` the same number under two spellings 0154 reconciled once.
+Unifying removes a duplicate rather than adding a concept, and it is what makes
+a linkset expressible at all.
+
+Identity is the block's label, which settles the case that was open: `network
+"office" { ssid = "@bssid"; bssid = [...] }` gives one name to a whole set of
+access points, and the ssid/bssid scheme only describes how a *default* label is
+chosen.
+
+### Presence is three-valued, and that is the sharpest point
+
+Calling the links view observation-driven was a statement about today's code,
+not about the design, and it read as an objection it was not. What survives is
+that the row set is a union of two sets that do not coincide -- configured and
+present, configured and not present, present and not configured -- so it can be
+neither observation-only nor document-only.
+
+**And presence is not a boolean.** A hidden network, or any network on a radio
+not allowed to probe actively, cannot be found by looking. netcfgd says so
+already, in `pick_ssid`: the access points are "in range and hidden, so a scan
+cannot say what the network is called". A hidden access point still beacons, so
+its *address* is observable and the name-to-address mapping is not; `scan_ssid`
+sends the directed probe that would resolve it, and on a `no IR` channel that
+probe is forbidden. The only evidence left is an attempt to associate.
+
+So: present, absent, unknown. The tree already states that convention twice --
+`ObservedLink::reachable` ("`None` is **not** the same as `Some(false)`") and
+`ObservedBackend::networks_match` -- with 10.135's `started_metric` a third.
+**Unknown must never be drawn as absent**: a hidden network shown as "not
+present" looks permanently gone, and trying it, which is the right response, is
+what that display argues against.
+
+Recorded for the linkset round rather than rediscovered there: a group picking
+one member cannot conclude "absent" from "I did not see it", so selection may
+have to *try* -- which makes a failover decision cost an association attempt
+rather than nothing.
+
+### Two sabotages
+
+Hiding an uncategorised row, and `all` ceasing to mean all. Both caught. The
+rule with the trap is the first: an empty category means a daemon older than the
+window, and such a row shows in **every** filter rather than none, because a row
+that vanishes when two programs disagree about its kind is how somebody
+concludes an interface has gone away.
+
 ## 10.138 One program icon, with one source
 
 Asked for a single source for a program icon, to be generated later, usable by
