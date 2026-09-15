@@ -94,9 +94,11 @@ roams altogether.
 `network_for` is shared between the socket and the observation, deliberately,
 and its own documentation says why:
 
-> Two copies of this rule could disagree, and the disagreement would show up as
-> a route metric that does not match what the window says the machine is
-> associated with.
+```quote from=crates/netcfgd-model/src/wifi.rs
+Two copies of this rule could disagree, and the disagreement would show up as a
+route metric that does not match what the window says the machine is associated
+with.
+```
 
 Nothing anywhere called it in a test. The single copy could produce exactly that
 outcome on its own: it took the first block matching on *either* rule, in `id`

@@ -63,9 +63,12 @@ The loop re-observes on a tick -- `if kernel_changed || config_changed ||
 probe_changed || ticked` -- so a dead rfkill watcher costs promptness and not
 detection. A flipped switch is noticed within the tick rather than as it
 happens, which is what the watcher exists to improve, not to enable.
-`spawn_rfkill_watcher`'s own documentation says so in the file 0234 was written
-from: *"an observation runs on a netlink event or on the loop's five-second
-backstop"*.
+`spawn_rfkill_watcher`'s own documentation says so, in the file 0234 was
+written from:
+
+```quote from=crates/netcfgd-daemon/src/lib.rs
+An observation runs on a netlink event or on the loop's five-second backstop
+```
 
 `roam` was too broad as well. `Command::Roamed` drives the roam hooks and
 nothing else; the observation reads the associated address on its own path. So a

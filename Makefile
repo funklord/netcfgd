@@ -70,7 +70,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
+.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance claims FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -107,8 +107,8 @@ ncfg-link:
 # can build the tree. BUDGET_GATES measure *this* machine, and running them
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
-                 nm-containment packaging client-test conformance test example \
-                 adapters gui linkage
+                 nm-containment packaging claims client-test conformance test \
+                 example adapters gui linkage
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -934,6 +934,21 @@ FILLED = @VERSION@ @ARCH@ @DEPENDS@ @MAINTAINER@ @PKGVER@
 # and an operator hit it. The check is keyed on the code rather than on a
 # remembered rule: if the chown goes away the requirement goes with it, and
 # if the grep stops matching it says so instead of passing.
+# A decision record that quotes the tree must quote something the tree still
+# says.
+#
+# Three records in the M9 wifi audit were found asserting what the code
+# contradicts, and one of them was falsified by the round immediately before it
+# and stood for a week. Prose does not compile, so nothing noticed.
+#
+# This is the half that can be mechanised: a marked quotation. It catches
+# quotations and not paraphrases, which is the honest limit and is written on
+# the tool. What catches a paraphrase is somebody reading the code while
+# writing the next record -- which is what caught all three, and is a practice
+# rather than a gate.
+claims:
+	@python3 tool/cited_quote_gate.py
+
 packaging:
 	@# install and uninstall must agree, checked statically so it runs
 	@# everywhere rather than only where a full install works.
