@@ -246,22 +246,38 @@ pub struct WifiNetwork {
 /// interface's `preference`. Two copies of this rule could disagree, and the
 /// disagreement would show up as a route metric that does not match what the
 /// window says the machine is associated with.
+///
+/// **A block that names this access point answers first (0239).** This used to
+/// take the first block matching on *either* rule, in `id` order, so two blocks
+/// sharing an SSID and pinned to different access points -- which compiles with
+/// no diagnostic, writing the name as hex in both -- were both answered with
+/// whichever sorted earlier. The station on the second one was reported as
+/// being on the first and took the first one's `metric`, which is the exact
+/// mismatch the paragraph above says this function exists to prevent, one level
+/// down. The address is the more specific statement and the only thing that
+/// separates such blocks, so it is asked first.
+///
+/// A block that states no SSID is matched on its addresses alone, because it
+/// has nothing else; one that states an SSID must agree on both, so a listed
+/// address that has moved to a different network is not answered with the block
+/// that used to name it.
 #[must_use]
 pub fn network_for<'a>(
 	networks: &'a [WifiNetwork],
 	ssid: &Ssid,
 	bssid: &str,
 ) -> Option<&'a WifiNetwork> {
-	networks.iter().find(|network| {
-		network.ssid.as_ref().map_or_else(
-			|| {
-				network
-					.bssid
-					.iter()
-					.any(|listed| listed.eq_ignore_ascii_case(bssid))
-			},
-			|stated| stated == ssid,
-		)
+	let names_this_access_point = |network: &&WifiNetwork| {
+		network
+			.bssid
+			.iter()
+			.any(|listed| listed.eq_ignore_ascii_case(bssid))
+			&& network.ssid.as_ref().is_none_or(|stated| stated == ssid)
+	};
+	networks.iter().find(names_this_access_point).or_else(|| {
+		networks
+			.iter()
+			.find(|network| network.ssid.as_ref().is_some_and(|stated| stated == ssid))
 	})
 }
 
@@ -359,7 +375,7 @@ pub fn join_rank(metric: Option<u32>) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-	use super::{join_rank, RANK_CEILING};
+	use super::{join_rank, Ssid, WifiNetwork, RANK_CEILING};
 
 	/// The inversion, which had nothing checking its sign.
 	///
@@ -396,5 +412,94 @@ mod tests {
 		// No metric means the backend is told nothing, rather than being told
 		// a number the document did not ask for.
 		assert_eq!(join_rank(None), None);
+	}
+
+	/// Which block an association belongs to, when more than one could claim it.
+	///
+	/// **This rule was shared between two callers and checked by neither.** Its
+	/// own documentation says a disagreement between copies "would show up as a
+	/// route metric that does not match what the window says the machine is
+	/// associated with" -- and the single copy could produce exactly that on its
+	/// own. Decision 0239.
+	#[test]
+	fn the_block_that_names_the_access_point_answers_first() {
+		use super::network_for;
+
+		let corp = Ssid::new(b"CORP".to_vec()).expect("short enough");
+		let cafe = Ssid::new(b"Cafe".to_vec()).expect("short enough");
+		let pinned = |id: &str, at: &str| WifiNetwork {
+			bssid: vec![at.to_owned()],
+			..plain(id, &corp)
+		};
+
+		// Two blocks sharing an SSID and pinned to different access points.
+		// This compiles with no diagnostic -- the name goes in as hex in both
+		// -- and before 0239 the station on either was answered with whichever
+		// sorted earlier by `id`.
+		let networks = vec![
+			pinned("north", "aa:bb:cc:dd:ee:01"),
+			pinned("south", "aa:bb:cc:dd:ee:02"),
+		];
+		assert_eq!(
+			network_for(&networks, &corp, "aa:bb:cc:dd:ee:02").map(|n| n.id.as_str()),
+			Some("south")
+		);
+		assert_eq!(
+			network_for(&networks, &corp, "aa:bb:cc:dd:ee:01").map(|n| n.id.as_str()),
+			Some("north")
+		);
+
+		// An ordinary block -- a name and no addresses -- still answers for
+		// whatever access point is advertising it. This is every machine that
+		// has never written a `bssid`, and the fallback is what keeps it
+		// working.
+		let networks = vec![plain("home", &corp)];
+		assert_eq!(
+			network_for(&networks, &corp, "aa:bb:cc:dd:ee:09").map(|n| n.id.as_str()),
+			Some("home")
+		);
+
+		// A block naming access points and no name at all is matched on the
+		// address alone, because it has nothing else: that is the whole of
+		// `ssid = "@bssid"`.
+		let networks = vec![WifiNetwork {
+			ssid: None,
+			bssid: vec!["aa:bb:cc:dd:ee:01".to_owned()],
+			..plain("lobby", &corp)
+		}];
+		assert_eq!(
+			network_for(&networks, &corp, "AA:BB:CC:DD:EE:01").map(|n| n.id.as_str()),
+			Some("lobby"),
+			"an address is not case sensitive"
+		);
+
+		// A block that names this address but a different network does not
+		// answer for it. The access point moved to another SSID, or the
+		// document is stale; either way the block is not what the station is
+		// on, and answering with it would apply that block's metric.
+		let networks = vec![pinned("north", "aa:bb:cc:dd:ee:01")];
+		assert_eq!(network_for(&networks, &cafe, "aa:bb:cc:dd:ee:01"), None);
+
+		// And nothing at all is nothing, rather than the first block.
+		assert_eq!(network_for(&[], &corp, "aa:bb:cc:dd:ee:01"), None);
+	}
+
+	/// A network block with nothing optional set, named and unpinned.
+	fn plain(id: &str, ssid: &Ssid) -> WifiNetwork {
+		WifiNetwork {
+			id: id.to_owned(),
+			ssid: Some(ssid.clone()),
+			hidden: false,
+			security: crate::Security::Open,
+			metric: None,
+			autoconnect: true,
+			metered: false,
+			bssid: Vec::new(),
+			roam: None,
+			addressing: Vec::new(),
+			routes: Vec::new(),
+			dns: None,
+			hooks: Vec::new(),
+		}
 	}
 }
