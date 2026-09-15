@@ -1,0 +1,13 @@
+[Desktop Entry]
+Exec=tdecmshell netcfgd
+Type=Application
+Icon=network
+X-TDE-Library=netcfgd
+X-TDE-FactoryName=netcfgd
+X-TDE-ParentApp=kcontrol
+
+Name=Network Configuration
+Comment=netcfgd: daemon status, permissions and profile
+
+Categories=Qt;TDE;X-TDE-settings-network;
+Keywords=network,netcfgd,interface,profile,wifi
