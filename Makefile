@@ -938,6 +938,10 @@ packaging:
 	@# install and uninstall must agree, checked statically so it runs
 	@# everywhere rather than only where a full install works.
 	@python3 tool/uninstall_gate.py
+	@# Every setting netcfgd hands a supplicant has a real one behind it.
+	@# The measurements kept being made by hand and thrown away; this is
+	@# what stops the next round having to make them again. 0240.
+	@python3 tool/supplicant_coverage_gate.py
 	@# Every config key the compiler accepts is classified, so that a key
 	@# added later cannot default to "a client may send this". 0127.
 	@python3 tool/privilege_gate.py

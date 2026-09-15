@@ -239,6 +239,12 @@ fn every_security_mode_is_accepted_by_the_real_parser() {
 
 		clear_networks(&client).expect("REMOVE_NETWORK all");
 
+		// `add_network` renders the whole block, so these reach the real
+		// parser without this test naming any of them. Declared for
+		// `tool/supplicant_coverage_gate.py`, which otherwise reads a setting
+		// it cannot see in a string literal as one no supplicant was asked
+		// about.
+		// covers: ssid key_mgmt psk sae_password proto ieee80211w priority
 		for (name, security) in [
 			("open", Security::Open),
 			("wpa2", psk(PskProto::Wpa2)),
@@ -322,6 +328,7 @@ fn every_mac_policy_is_accepted_by_the_real_supplicant() {
 		let client = supplicant.connect();
 		clear_networks(&client).expect("REMOVE_NETWORK all");
 
+		// covers: mac_addr scan_ssid
 		for policy in [
 			MacPolicy::Permanent,
 			MacPolicy::PerNetwork,
@@ -531,6 +538,199 @@ fn a_real_supplicant_accepts_a_list_of_access_points() {
 		assert!(
 			stored.contains("aa:bb:cc:dd:ee:ff") && stored.contains("11:22:33:44:55:66"),
 			"wpa_supplicant took the list and did not keep it: {stored:?}"
+		);
+	});
+}
+
+/// An enterprise network, rendered whole and handed to the real parser.
+///
+/// **Seven settings had no real supplicant behind them**, and the enterprise
+/// path is where M8's worst fault was: `private_key` was sent as the key's
+/// *content*, putting a newline in the middle of a line-based protocol and
+/// corrupting every command after it. `enterprise.sh` covers the certificate
+/// half against netcfgd's own fake; this is the parser question, which only the
+/// real binary can answer.
+///
+/// PEAP with a password, so no certificate has to exist for this to run. The
+/// certificate sources have their own coverage; what is new here is that `eap`,
+/// `identity`, `password`, `anonymous_identity`, `phase2` and
+/// `domain_suffix_match` are values this `wpa_supplicant` takes.
+#[test]
+fn an_enterprise_network_is_accepted_by_the_real_parser() {
+	use netcfgd_model::security::{EapConfig, EapMethod};
+
+	with_supplicant(|supplicant| {
+		let client = supplicant.connect();
+		let (resolver, _secrets) = secrets_with("hunter2hunter2");
+		clear_networks(&client).expect("REMOVE_NETWORK all");
+
+		// Rendered by `add_network` and `configure_wired` rather than named
+		// here, so the coverage gate is told which. A plain comment and not a
+		// doc one: `doc_markdown` wants backticks on every identifier in a
+		// `///`, and the gate reads words.
+		// covers: eap identity password anonymous_identity phase2 domain_suffix_match eapol_flags
+		let eap = EapConfig {
+			method: EapMethod::Peap,
+			identity: "someone@example.test".to_owned(),
+			anonymous_identity: Some("anonymous@example.test".to_owned()),
+			password: Some(SecretRef {
+				provider: SecretProvider::File,
+				name: "pass".to_owned(),
+			}),
+			domain_suffix_match: Some("example.test".to_owned()),
+			ca_cert: None,
+			client_cert: None,
+			private_key: None,
+			phase2: Some("auth=MSCHAPV2".to_owned()),
+		};
+
+		let id = add_network(
+			&client,
+			&network("corp", "corp", Security::Eap(eap.clone())),
+			MacPolicy::Permanent,
+			&resolver,
+		)
+		.unwrap_or_else(|error| panic!("the enterprise network was refused: {error}"));
+
+		// Read back the two that are not secrets. `password` is write-only on
+		// this protocol -- `GET_NETWORK` answers `FAIL` for it, which is the
+		// supplicant being careful rather than a failure -- so the assertion
+		// that it arrived is `add_network` having succeeded at all.
+		let method = client
+			.ask(&format!("GET_NETWORK {id} eap"))
+			.expect("GET_NETWORK eap");
+		assert_eq!(
+			method.trim(),
+			"PEAP",
+			"the supplicant stored a different method"
+		);
+		let who = client
+			.ask(&format!("GET_NETWORK {id} identity"))
+			.expect("GET_NETWORK identity");
+		assert!(
+			who.contains("someone@example.test"),
+			"the supplicant took the identity and did not keep it: {who:?}"
+		);
+
+		// The wired form differs in two settings and is rendered separately,
+		// so it is driven separately: `key_mgmt` becomes `IEEE8021X` and
+		// `eapol_flags` goes to 0, without which the supplicant waits for WEP
+		// keys a switch never sends.
+		let wired = netcfgd_supplicant::configure_wired(&client, &eap, &resolver)
+			.expect("the wired 802.1X port was refused");
+		let flags = client
+			.ask(&format!("GET_NETWORK {wired} eapol_flags"))
+			.expect("GET_NETWORK eapol_flags");
+		assert_eq!(
+			flags.trim(),
+			"0",
+			"the supplicant stored different eapol_flags"
+		);
+	});
+}
+
+/// The four globals netcfgd chooses for itself, against the real parser.
+///
+/// **These were measured by hand, one per round, and the script thrown away
+/// each time.** `sae_pwe` (0226), `okc` (0228), `rand_addr_lifetime` (0230) and
+/// `preassoc_mac_addr` (0212) each got a throwaway `wpa_supplicant` and a
+/// transcript pasted into a decision record, and none of them ended up here --
+/// so the next round had no way to know the question had been settled and asked
+/// it again. `tool/supplicant_coverage_gate.py` now fails the build for a
+/// setting in that state; this is the test that answers it for these four.
+///
+/// They are *globals*, which is why they are separate from the per-network
+/// tests above: netcfgd sends them at populate time rather than in a network
+/// block, because a setting in the networks digest would repopulate every radio
+/// on upgrade and drop every association (10.114).
+///
+/// **Acceptance is a weaker claim here than for a network key**, and 10.122
+/// measured how weak: `SET okc 7` also answers OK, so a refusal proves the key
+/// exists and an acceptance does not prove the value was understood. The
+/// read-back is what makes it worth asserting -- a global taken and dropped
+/// reads back as something else.
+#[test]
+fn the_globals_netcfgd_chooses_are_accepted_and_kept() {
+	with_supplicant(|supplicant| {
+		let client = supplicant.connect();
+
+		// Driven from a table rather than by name, so the gate is told which.
+		// covers: sae_pwe okc rand_addr_lifetime preassoc_mac_addr
+		for (key, value) in [
+			// Both password-element derivation methods, so an access point
+			// that offers only hash-to-element can still be joined (0226).
+			("sae_pwe", "2"),
+			// Opportunistic key caching, so a roam on an enterprise network
+			// does not mean a full exchange with the authentication server
+			// (0228).
+			("okc", "1"),
+			// How long a randomised address is kept, in minutes (0230).
+			("rand_addr_lifetime", "60"),
+			// A random address in probe requests, which go out whether or not
+			// anything is ever joined.
+			("preassoc_mac_addr", "1"),
+		] {
+			client
+				.command(&format!("SET {key} {value}"))
+				.unwrap_or_else(|error| panic!("this wpa_supplicant refuses `{key}`: {error}"));
+
+			let stored = client
+				.ask(&format!("GET {key}"))
+				.unwrap_or_else(|error| panic!("GET {key}: {error}"));
+			assert_eq!(
+				stored.trim(),
+				value,
+				"the supplicant took `{key}` and did not keep it"
+			);
+		}
+
+		// The control, and it is not decoration: every assertion above passes
+		// against a supplicant that answers OK to anything, which is what a
+		// reader has to rule out before an acceptance means something.
+		assert!(
+			client.command("SET not_a_real_global 1").is_err(),
+			"this supplicant accepts unknown globals, so the four above prove nothing"
+		);
+	});
+}
+
+/// A single access point, pinned, and a malformed one refused.
+///
+/// The list form is next door; this is the other half of the same key. One
+/// entry is a pin -- `bssid` refuses every other access point outright -- and
+/// the two are spelled differently in the protocol, so a test of the list says
+/// nothing about the pin.
+#[test]
+fn a_real_supplicant_accepts_a_pinned_access_point() {
+	with_supplicant(|supplicant| {
+		let client = supplicant.connect();
+		let id = client.ask("ADD_NETWORK").expect("ADD_NETWORK");
+		let id = id.trim();
+		client
+			.command(&format!("SET_NETWORK {id} ssid \"lobby\""))
+			.expect("the ssid is accepted");
+
+		// Unquoted, which is what `network::settings` renders.
+		client
+			.command(&format!("SET_NETWORK {id} bssid a0:a4:7f:23:9a:cf"))
+			.expect("wpa_supplicant refused the pin netcfgd sends");
+		let stored = client
+			.ask(&format!("GET_NETWORK {id} bssid"))
+			.expect("GET_NETWORK bssid");
+		assert!(
+			stored.contains("a0:a4:7f:23:9a:cf"),
+			"wpa_supplicant took the pin and did not keep it: {stored:?}"
+		);
+
+		// And the parser is capable of refusing one, which is what makes the
+		// acceptance above evidence. `is_bssid` in `network.rs` rejects this
+		// before it reaches the socket; the point here is that the far end
+		// would too.
+		assert!(
+			client
+				.command(&format!("SET_NETWORK {id} bssid zz:zz:zz:zz:zz:zz"))
+				.is_err(),
+			"this supplicant accepts anything as an address"
 		);
 	});
 }
