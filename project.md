@@ -9489,6 +9489,69 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.146 WireGuard from the window, and a kind that was never refused
+
+0251 made every virtual link but four; `wireguard` was one of them, refused
+because a form with no fields for the peers and the key would empty the block.
+It has fields now -- a private key, a listen port, a firewall mark and a table
+of peers -- and so does the last of the tunnel's, `ttl` and `key`. Decision
+0252.
+
+**The private key is a reference and the form says so.** netcfgd's document type
+cannot hold key material at all, which is what makes a document safe to write to
+`/run`, so the field holds `@secret:wg0` and a key pasted into it is refused
+beside the field. A peer's *public* key is not a secret -- it is that peer's
+identity -- which is why it is text in the table while the two keys beside it
+are references; a peer's preshared key rides on the row rather than in a column,
+so a save cannot drop it.
+
+### The kind that was never actually refused
+
+The refusal list named `wireguard`. **The document spells the kind `wire_guard`**
+-- serde's snake case -- **and the language spells it `wireguard`**, so the name
+never matched: the kind combo found no such entry, sat at `physical`, and saving
+would have written a `device` block with no tunnel in it. The editor would have
+deleted the tunnel while reporting success. A gap of exactly one round,
+introduced by 0251 and closed here, found by compiling a real block and reading
+what came back rather than by any test.
+
+### A refusal test has to name whose refusal it is
+
+The live probe asserts a pasted private key is refused *by the dialog*. Written
+as "the note mentions `reference`" it passed with the check removed, because
+netcfgd refuses a pasted key too and says so with that word. **Second time in
+two rounds** -- 0251's VLAN-parent check was the same shape -- so the rule is
+worth stating rather than discovering a third time. Both assert the dialog's own
+sentence now.
+
+### And one flake, left open with a better message
+
+`probe::tests::require_lease_false_runs_the_probe_with_no_lease_at_all` failed
+once during this round's `make check` and passed thirteen runs either side of
+it. Its message was *"the probe was skipped despite being told not to"* -- which
+is the one thing that cannot have happened: with `require_lease = false` the
+skip is unreachable.
+
+So the message was wrong about its own failure, and that is what got fixed: it
+now prints the tally -- the verdict, the started-failure count and the probe's
+own detail -- which separates "the program ran and failed" from "the program
+could not be started at all". The likeliest cause is the second: the test writes
+a shell script and execs it immediately, and a concurrent fork elsewhere in the
+suite can hold the write descriptor open long enough for `execve` to answer
+`ETXTBSY`. Unproven, which is why it is recorded rather than fixed.
+
+Nothing in netcfgd does what the test does -- it runs an operator's script, it
+does not write one -- so this is a harness flake and not a daemon one. Reported
+rather than chased, with the evidence the next occurrence will carry.
+
+### Five sabotages, and the one in costume
+
+The peers dropped from the block; a tunnel key of zero read as no key; a
+preshared key dropped on save; a pasted private key accepted; the document's
+`wire_guard` handed to the form untranslated. All caught. The second is `None`
+versus `Some(0)` wearing a tunnel key: zero is a legal one and `none` is not
+zero, which is why the absent value is -1.
+
 ## 10.145 A window that makes links
 
 0250 gave the window a device tab and an editor for the hardware; what it could

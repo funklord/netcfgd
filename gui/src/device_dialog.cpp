@@ -19,6 +19,9 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QTableWidget>
 #include <QVBoxLayout>
 
 namespace {
@@ -50,6 +53,7 @@ const choice kinds[] = {
 	{ "vrf", "vrf" },
 	{ "vxlan", "vxlan" },
 	{ "tunnel", "tunnel" },
+	{ "wireguard", "wireguard" },
 	{ "dummy", "dummy" },
 };
 
@@ -307,6 +311,47 @@ QStringList ncfg_device_kind_body(const ncfg_device_config &settings)
 		if (!settings.parent.isEmpty()) {
 			body << QStringLiteral("\t\tparent = \"%1\"").arg(settings.parent);
 		}
+		if (settings.ttl > 0) {
+			body << QStringLiteral("\t\tttl = %1").arg(settings.ttl);
+		}
+		if (settings.tunnel_key >= 0) {
+			body << QStringLiteral("\t\tkey = %1").arg(settings.tunnel_key);
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("wireguard")) {
+		body << QStringLiteral("\twireguard {");
+		body << QStringLiteral("\t\tprivate_key = \"%1\"").arg(settings.private_key);
+		if (settings.listen_port > 0) {
+			body << QStringLiteral("\t\tlisten_port = %1").arg(settings.listen_port);
+		}
+		if (settings.fwmark > 0) {
+			body << QStringLiteral("\t\tfwmark = %1").arg(settings.fwmark);
+		}
+		for (const ncfg_wg_peer_row &peer : settings.peers) {
+			body << QStringLiteral("\t\tpeer \"%1\" {").arg(peer.name);
+			body << QStringLiteral("\t\t\tpublic_key = \"%1\"").arg(peer.public_key);
+			if (!peer.endpoint.isEmpty()) {
+				body << QStringLiteral("\t\t\tendpoint = \"%1\"").arg(peer.endpoint);
+			}
+			const QStringList allowed =
+			    peer.allowed_ips.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+			if (!allowed.isEmpty()) {
+				QStringList quoted_ips;
+				for (const QString &one : allowed) {
+					quoted_ips << QStringLiteral("\"%1\"").arg(one);
+				}
+				body << QStringLiteral("\t\t\tallowed_ips = [%1]")
+				        .arg(quoted_ips.join(QStringLiteral(", ")));
+			}
+			if (peer.keepalive > 0) {
+				body << QStringLiteral("\t\t\tkeepalive = %1").arg(peer.keepalive);
+			}
+			if (!peer.preshared_key.isEmpty()) {
+				body << QStringLiteral("\t\t\tpreshared_key = \"%1\"")
+				        .arg(peer.preshared_key);
+			}
+			body << QStringLiteral("\t\t}");
+		}
 		body << QStringLiteral("\t}");
 	} else if (kind == QLatin1String("dummy")) {
 		body << QStringLiteral("\tkind = \"dummy\"");
@@ -543,6 +588,72 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	port->setSpecialValueText(QStringLiteral("default"));
 	form->addRow(QStringLiteral("port"), port);
 
+	ttl = new QSpinBox(this);
+	ttl->setObjectName(QStringLiteral("device_ttl"));
+	ttl->setRange(0, 255);
+	ttl->setSpecialValueText(QStringLiteral("inherit"));
+	form->addRow(QStringLiteral("ttl"), ttl);
+
+	tunnel_key = new QSpinBox(this);
+	tunnel_key->setObjectName(QStringLiteral("device_tunnel_key"));
+	tunnel_key->setRange(-1, 2147483647);
+	tunnel_key->setSpecialValueText(QStringLiteral("none"));
+	tunnel_key->setValue(-1);
+	form->addRow(QStringLiteral("tunnel key"), tunnel_key);
+
+	/* **The private key is a reference, not a key.** netcfgd's document type
+	 * cannot hold key material at all (0042's rule, and the reason a document
+	 * is safe to write to /run), so what this field holds is `@secret:wg0` --
+	 * the name of something the secret store keeps. A password box here would
+	 * be inviting somebody to paste a key into a configuration file. */
+	private_key = new QLineEdit(this);
+	private_key->setObjectName(QStringLiteral("device_private_key"));
+	private_key->setPlaceholderText(QStringLiteral("@secret:wg0 -- `ncfg secret set wg0` "
+	            "puts one there"));
+	form->addRow(QStringLiteral("private key"), private_key);
+
+	listen_port = new QSpinBox(this);
+	listen_port->setObjectName(QStringLiteral("device_listen_port"));
+	listen_port->setRange(0, 65535);
+	listen_port->setSpecialValueText(QStringLiteral("any"));
+	form->addRow(QStringLiteral("listen port"), listen_port);
+
+	fwmark = new QSpinBox(this);
+	fwmark->setObjectName(QStringLiteral("device_fwmark"));
+	fwmark->setRange(0, 2147483647);
+	fwmark->setSpecialValueText(QStringLiteral("none"));
+	form->addRow(QStringLiteral("firewall mark"), fwmark);
+
+	peers = new QTableWidget(0, 5, this);
+	peers->setObjectName(QStringLiteral("device_peers"));
+	QStringList peer_columns;
+	peer_columns << QStringLiteral("name") << QStringLiteral("public key")
+	             << QStringLiteral("endpoint") << QStringLiteral("allowed ips")
+	             << QStringLiteral("keepalive");
+	peers->setHorizontalHeaderLabels(peer_columns);
+	peers->verticalHeader()->setVisible(false);
+	peers->horizontalHeader()->setStretchLastSection(true);
+	peers->setSelectionBehavior(QAbstractItemView::SelectRows);
+	peers->setSelectionMode(QAbstractItemView::SingleSelection);
+	peers->setMaximumHeight(140);
+	form->addRow(QStringLiteral("peers"), peers);
+
+	/* The two buttons in a widget rather than a bare layout, so the row can be
+	 * hidden with the rest of the `WireGuard` fields: a form row made of a
+	 * layout is not a row `setRowVisible` can be given a widget for, and the
+	 * buttons would have sat under a bridge's fields. */
+	peer_buttons = new QWidget(this);
+	auto *peer_row = new QHBoxLayout(peer_buttons);
+	peer_row->setContentsMargins(0, 0, 0, 0);
+	peer_add = new QPushButton(QStringLiteral("add peer"), this);
+	peer_add->setObjectName(QStringLiteral("device_peer_add"));
+	peer_drop = new QPushButton(QStringLiteral("remove peer"), this);
+	peer_drop->setObjectName(QStringLiteral("device_peer_drop"));
+	peer_row->addWidget(peer_add);
+	peer_row->addWidget(peer_drop);
+	peer_row->addStretch(1);
+	form->addRow(QString(), peer_buttons);
+
 	managed = new QCheckBox(QStringLiteral("netcfgd configures this device"), this);
 	managed->setObjectName(QStringLiteral("device_managed"));
 	managed->setChecked(true);
@@ -687,11 +798,34 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 	connect(save_button, &QPushButton::clicked, this, &ncfg_device_dialog::submit);
 	connect(kind, &QComboBox::currentIndexChanged, this, &ncfg_device_dialog::kind_changed);
+	connect(peer_add, &QPushButton::clicked, this, &ncfg_device_dialog::add_peer);
+	connect(peer_drop, &QPushButton::clicked, this, &ncfg_device_dialog::drop_peer);
 	layout->addWidget(buttons);
 	resize(560, 680);
 
 	load();
 	kind_changed();
+}
+
+/* One peer row, with the value in the cells: a table an operator types into,
+ * because a peer is five short strings and a dialog per peer would be a dialog
+ * inside a dialog. */
+void ncfg_device_dialog::add_peer()
+{
+	const int row = peers->rowCount();
+	peers->insertRow(row);
+	for (int column = 0; column < peers->columnCount(); column++) {
+		peers->setItem(row, column, new QTableWidgetItem(QString()));
+	}
+	peers->setCurrentCell(row, 0);
+}
+
+void ncfg_device_dialog::drop_peer()
+{
+	const int row = peers->currentRow();
+	if (row >= 0) {
+		peers->removeRow(row);
+	}
 }
 
 void ncfg_device_dialog::kind_changed()
@@ -725,6 +859,13 @@ void ncfg_device_dialog::kind_changed()
 		{ local, "vxlan tunnel" },
 		{ remote, "vxlan tunnel" },
 		{ port, "vxlan" },
+		{ ttl, "tunnel" },
+		{ tunnel_key, "tunnel" },
+		{ private_key, "wireguard" },
+		{ listen_port, "wireguard" },
+		{ fwmark, "wireguard" },
+		{ peers, "wireguard" },
+		{ peer_buttons, "wireguard" },
 	};
 	for (const auto &row : rows) {
 		const QString wanted = QString::fromLatin1(row.kinds);
@@ -773,6 +914,26 @@ void ncfg_device_dialog::load()
 	remote->setText(existing.remote);
 	vxlan_id->setValue(existing.vxlan_id < 0 ? 0 : existing.vxlan_id);
 	port->setValue(existing.port);
+	ttl->setValue(existing.ttl);
+	tunnel_key->setValue(existing.tunnel_key);
+	private_key->setText(existing.private_key);
+	listen_port->setValue(existing.listen_port);
+	fwmark->setValue(existing.fwmark);
+	for (const ncfg_wg_peer_row &known : existing.peers) {
+		const int row = peers->rowCount();
+		peers->insertRow(row);
+		peers->setItem(row, 0, new QTableWidgetItem(known.name));
+		peers->setItem(row, 1, new QTableWidgetItem(known.public_key));
+		peers->setItem(row, 2, new QTableWidgetItem(known.endpoint));
+		peers->setItem(row, 3, new QTableWidgetItem(known.allowed_ips));
+		peers->setItem(row, 4, new QTableWidgetItem(
+		    known.keepalive > 0 ? QString::number(known.keepalive) : QString()));
+		/* The preshared key is kept on the row rather than shown: it is a
+		 * reference and not material, but a sixth column of `@secret:` names
+		 * on a table an operator scans for endpoints is noise. Carried so a
+		 * save does not drop it, which is the whole rule this editor follows. */
+		peers->item(row, 0)->setData(Qt::UserRole, known.preshared_key);
+	}
 
 	managed->setChecked(existing.managed);
 	select(on_unmanage, existing.on_unmanage.isEmpty() ? QStringLiteral("leave")
@@ -833,6 +994,13 @@ void ncfg_device_dialog::load()
 	}
 }
 
+/* One cell of the peers table, trimmed, empty where there is none. */
+QString ncfg_device_dialog::peer_cell(int row, int column) const
+{
+	const QTableWidgetItem *item = peers->item(row, column);
+	return item ? item->text().trimmed() : QString();
+}
+
 QString ncfg_device_dialog::block_text() const
 {
 	ncfg_device_config settings;
@@ -853,6 +1021,23 @@ QString ncfg_device_dialog::block_text() const
 	settings.remote = remote->text().trimmed();
 	settings.vxlan_id = vxlan_id->value();
 	settings.port = port->value();
+	settings.ttl = ttl->value();
+	settings.tunnel_key = tunnel_key->value();
+	settings.private_key = private_key->text().trimmed();
+	settings.listen_port = listen_port->value();
+	settings.fwmark = fwmark->value();
+	for (int row = 0; row < peers->rowCount(); row++) {
+		ncfg_wg_peer_row peer;
+		peer.name = peer_cell(row, 0);
+		peer.public_key = peer_cell(row, 1);
+		peer.endpoint = peer_cell(row, 2);
+		peer.allowed_ips = peer_cell(row, 3);
+		peer.keepalive = peer_cell(row, 4).toInt();
+		peer.preshared_key = peers->item(row, 0)
+		    ? peers->item(row, 0)->data(Qt::UserRole).toString()
+		    : QString();
+		settings.peers << peer;
+	}
 	settings.managed = managed->isChecked();
 	settings.on_unmanage = on_unmanage->currentData().toString();
 	settings.mtu = mtu->value();
@@ -916,9 +1101,26 @@ void ncfg_device_dialog::submit()
 		note->setText(QStringLiteral("a vrf needs the routing table it owns"));
 		return;
 	}
+	if (chosen == QLatin1String("wireguard")) {
+		/* **A reference, and it has to look like one.** The document type
+		 * cannot hold key material at all, so a key pasted here would be
+		 * refused by the compiler with a message about a secret name -- said
+		 * beside the field instead, where the mistake is. */
+		if (!private_key->text().trimmed().startsWith(QLatin1String("@secret:"))) {
+			note->setText(QStringLiteral("the private key is a reference, not the key: "
+			              "`@secret:wg0`, with `ncfg secret set wg0` to put one there"));
+			return;
+		}
+		for (int row = 0; row < peers->rowCount(); row++) {
+			if (peer_cell(row, 0).isEmpty() || peer_cell(row, 1).isEmpty()) {
+				note->setText(QStringLiteral("every peer needs a name and a public key"));
+				return;
+			}
+		}
+	}
 
 	const QLineEdit *values[] = { mac, regdom, portal_check, sim, apn, members, parent_link,
-		peer, local, remote };
+		peer, local, remote, private_key };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "

@@ -40,6 +40,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QSpinBox;
+class QTableWidget;
 
 class ncfg_device_dialog : public QDialog {
 	Q_OBJECT
@@ -62,11 +63,18 @@ private slots:
 	 * members and a VLAN's id are not alternatives an operator should have to
 	 * read past each other. */
 	void kind_changed();
+	/* Add an empty peer row, or drop the selected one. A peer is a name, a
+	 * public key and a set of allowed prefixes; a device with one is as
+	 * ordinary as one with six, so they are a table rather than a form. */
+	void add_peer();
+	void drop_peer();
 
 private:
 	/* The block this dialog would write, as configuration text. */
 	QString block_text() const;
 	void    load();
+	/* One cell of the peers table, trimmed. */
+	QString peer_cell(int row, int column) const;
 
 	ncfg_connection *connection;
 	QString          device;
@@ -98,6 +106,17 @@ private:
 	QLineEdit *remote;
 	QSpinBox  *vxlan_id;
 	QSpinBox  *port;
+	QSpinBox  *ttl;
+	QSpinBox  *tunnel_key;
+	/* wireguard. The private key is a reference and never the material, so
+	 * this is a line edit holding `@secret:wg0` rather than a password box. */
+	QLineEdit    *private_key;
+	QSpinBox     *listen_port;
+	QSpinBox     *fwmark;
+	QTableWidget *peers;
+	QWidget      *peer_buttons;
+	QPushButton  *peer_add;
+	QPushButton  *peer_drop;
 
 	QCheckBox *managed;
 	QComboBox *on_unmanage;

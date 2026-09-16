@@ -2246,6 +2246,41 @@ void ncfg_devices_free(ncfg_devices_t *devices)
 	memset(devices, 0, sizeof(*devices));
 }
 
+/*
+ * A secret reference, as the config language spells it.
+ *
+ * `@secret:name` for the ordinary file provider and `@secret:<provider>:name`
+ * for the rest, which is exactly what the renderer writes -- so a caller can
+ * show this and write it back without ever holding key material.
+ */
+static char *secret_reference(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
+{
+	uint32_t reference = ncfg_json_member(doc, object, name);
+
+	if (reference == NCFG_JSON_NONE || ncfg_json_type(doc, reference) != NCFG_JSON_OBJECT) {
+		return dup_string("");
+	}
+	char *provider = member_text(doc, reference, "provider");
+	char *secret = member_text(doc, reference, "name");
+	if (!provider || !secret) {
+		free(provider);
+		free(secret);
+		return NULL;
+	}
+	size_t length = strlen(provider) + strlen(secret) + sizeof("@secret::");
+	char *spelled = malloc(length);
+	if (spelled) {
+		if (strcmp(provider, "file") == 0) {
+			snprintf(spelled, length, "@secret:%s", secret);
+		} else {
+			snprintf(spelled, length, "@secret:%s:%s", provider, secret);
+		}
+	}
+	free(provider);
+	free(secret);
+	return spelled;
+}
+
 /* The `kind` word out of a device block, whose shape is `{"kind": "..."}`. */
 static char *device_kind(const ncfg_json_doc_t *doc, uint32_t device)
 {
@@ -2254,10 +2289,22 @@ static char *device_kind(const ncfg_json_doc_t *doc, uint32_t device)
 	if (kind == NCFG_JSON_NONE) {
 		return dup_string("");
 	}
-	if (ncfg_json_type(doc, kind) == NCFG_JSON_STRING) {
-		return member_text(doc, device, "kind");
+	char *word = ncfg_json_type(doc, kind) == NCFG_JSON_STRING
+	    ? member_text(doc, device, "kind")
+	    : member_text(doc, kind, "kind");
+	/*
+	 * **`wire_guard` in the document, `wireguard` in the language.** The model
+	 * spells the variant in snake case and the config file spells it as one
+	 * word, and a caller that passed the document's spelling to a form found
+	 * no such kind -- which left a `WireGuard` device looking like a physical
+	 * one, and a save would have written a `device` block with no tunnel in
+	 * it at all. Translated here, once, rather than in each caller.
+	 */
+	if (word && strcmp(word, "wire_guard") == 0) {
+		free(word);
+		return dup_string("wireguard");
 	}
-	return member_text(doc, kind, "kind");
+	return word;
 }
 
 /* Which extra policy block a device carries, as one word. */
@@ -2406,6 +2453,15 @@ void ncfg_device_config_free(ncfg_device_config_t *config)
 	free(config->tunnel_mode);
 	free(config->local);
 	free(config->remote);
+	free(config->private_key);
+	for (size_t i = 0; i < config->peer_count; i++) {
+		free(config->peers[i].name);
+		free(config->peers[i].public_key);
+		free(config->peers[i].endpoint);
+		free(config->peers[i].allowed_ips);
+		free(config->peers[i].preshared_key);
+	}
+	free(config->peers);
 	free(config->mac);
 	free(config->duplex);
 	free(config->wol);
@@ -2457,9 +2513,11 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 		out->tunnel_mode = dup_string("");
 		out->local = dup_string("");
 		out->remote = dup_string("");
+		out->private_key = dup_string("");
+		out->tunnel_key = -1;
 		return out->members && out->bond_mode && out->parent && out->vlan_protocol
 		    && out->peer && out->macvlan_mode && out->tunnel_mode && out->local
-		    && out->remote;
+		    && out->remote && out->private_key;
 	}
 
 	out->members = joined_words(doc, ncfg_json_member(doc, kind, "members"));
@@ -2474,6 +2532,43 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 	out->local = member_text(doc, kind, "local");
 	out->remote = member_text(doc, kind, "remote");
 	out->port = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "port"), 0);
+	out->ttl = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "ttl"), 0);
+	out->tunnel_key = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "key"), -1);
+	out->listen_port = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "listen_port"), 0);
+	out->fwmark = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "fwmark"), 0);
+	out->private_key = secret_reference(doc, kind, "private_key");
+	if (!out->private_key) {
+		return 0;
+	}
+	uint32_t peers = ncfg_json_member(doc, kind, "peers");
+	uint32_t peer_count = ncfg_json_count(doc, peers);
+	if (peer_count) {
+		out->peers = calloc(peer_count, sizeof(*out->peers));
+		if (!out->peers) {
+			return 0;
+		}
+		out->peer_count = peer_count;
+		for (uint32_t i = 0; i < peer_count; i++) {
+			uint32_t peer = ncfg_json_at(doc, peers, i);
+
+			out->peers[i].name = member_text(doc, peer, "name");
+			/* Not a secret: a peer's public key is its identity and goes in
+			 * the file as itself, which is why it is text here and the two
+			 * keys beside it are references. */
+			out->peers[i].public_key = member_text(doc, peer, "public_key");
+			out->peers[i].endpoint = member_text(doc, peer, "endpoint");
+			out->peers[i].allowed_ips =
+			    joined_words(doc, ncfg_json_member(doc, peer, "allowed_ips"));
+			out->peers[i].preshared_key = secret_reference(doc, peer, "preshared_key");
+			out->peers[i].keepalive =
+			    (int)ncfg_json_int(doc, ncfg_json_member(doc, peer, "keepalive"), 0);
+			if (!out->peers[i].name || !out->peers[i].public_key
+			    || !out->peers[i].endpoint || !out->peers[i].allowed_ips
+			    || !out->peers[i].preshared_key) {
+				return 0;
+			}
+		}
+	}
 
 	/* `mode` and `id` are two words doing three jobs between them: a bond's
 	 * mode and a macvlan's and a tunnel's are all `mode`, and a VLAN's id and
@@ -2624,7 +2719,7 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 	 * and keys, a PPPoE session's credentials, an `OpenVPN` link's own config
 	 * file -- and `ifb`, which netcfgd synthesises and nobody writes.
 	 */
-	static const char *const unheld[] = { "wireguard", "pppoe", "openvpn", "tun", "ifb" };
+	static const char *const unheld[] = { "pppoe", "openvpn", "tun", "ifb" };
 	for (size_t i = 0; i < sizeof(unheld) / sizeof(unheld[0]); i++) {
 		if (out->kind && strcmp(out->kind, unheld[i]) == 0) {
 			note_unmodelled(&out->unmodelled, out->kind);

@@ -1148,6 +1148,22 @@ void ncfg_devices_free(ncfg_devices_t *devices);
  */
 int ncfg_client_devices(ncfg_client_t *client, ncfg_devices_t *out, char *err, size_t err_size);
 
+/*
+ * One `WireGuard` peer, as a form carries it.
+ *
+ * The public key is not a secret -- it is a peer's identity and goes in the
+ * file as itself. The preshared key is, so it is a `@secret:` reference like
+ * the private key; `allowed_ips` is space-joined the way the form takes it.
+ */
+typedef struct {
+	char *name;
+	char *public_key;
+	char *endpoint;
+	char *allowed_ips;
+	char *preshared_key;
+	int   keepalive; /* 0 where the document states none */
+} ncfg_wg_peer_t;
+
 /* An ethtool-style tunable, as three states rather than two. */
 typedef enum {
 	ncfg_toggle_unmanaged = 0, /* netcfgd does not touch it */
@@ -1209,6 +1225,23 @@ typedef struct {
 	/* vxlan. */
 	int   vxlan_id; /* -1 where there is none */
 	int   port;
+	/* tunnel, again: the two a `gre` or `sit` link may pin. */
+	int   ttl;         /* 0 where the document states none */
+	int   tunnel_key;  /* -1 where there is none; 0 is a legal key */
+	/*
+	 * wireguard.
+	 *
+	 * `private_key` is a reference and never the material: `@secret:wg0` as
+	 * the config language spells it, so a caller shows it and writes it back
+	 * without ever holding a key. Peers are their own list because each is a
+	 * public key, an endpoint and a set of allowed prefixes -- and a device
+	 * with one peer is as ordinary as one with six.
+	 */
+	char *private_key;
+	int   listen_port; /* 0 where the document states none */
+	int   fwmark;      /* 0 where the document states none */
+	ncfg_wg_peer_t *peers;
+	size_t          peer_count;
 	int   mtu;         /* 0 where the document states none */
 	char *mac;         /* "" where the document states none */
 	/* ethtool. `speed` 0 and `duplex`/`wol` "" mean the document states none. */

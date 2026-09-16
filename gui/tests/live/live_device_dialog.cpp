@@ -30,6 +30,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QSpinBox>
+#include <QTableWidget>
 
 #include <cstdio>
 
@@ -259,8 +260,92 @@ int main(int argc, char **argv)
 		    QString::number(vlan.vlan_id));
 	}
 
+	/* **WireGuard, which is the kind that carries a credential and a list.**
+	 * It was refused outright until this round -- and refused by a name that
+	 * never matched, because the document spells the kind `wire_guard` and the
+	 * language spells it `wireguard`: a WireGuard device therefore looked like
+	 * a physical one to the editor, and saving would have written a `device`
+	 * block with no tunnel in it. */
+	{
+		ncfg_device_dialog dialog(&connection, QString());
+		auto *made = dialog.findChild<QLineEdit *>(QStringLiteral("device_name"));
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		auto *key = dialog.findChild<QLineEdit *>(QStringLiteral("device_private_key"));
+		auto *listen = dialog.findChild<QSpinBox *>(QStringLiteral("device_listen_port"));
+		auto *peers = dialog.findChild<QTableWidget *>(QStringLiteral("device_peers"));
+		auto *add = dialog.findChild<QPushButton *>(QStringLiteral("device_peer_add"));
+		auto *note = dialog.findChild<QLabel *>(QStringLiteral("device_note"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("device_save"));
+		if (!made || !kind || !key || !listen || !peers || !add || !save) {
+			check("the wireguard fields are there", false);
+			return 1;
+		}
+		check("the wireguard fields are there", true);
+
+		made->setText(QStringLiteral("gui-wg0"));
+		kind->setCurrentIndex(kind->findData(QStringLiteral("wireguard")));
+		listen->setValue(51820);
+
+		/* A key pasted where a reference belongs: refused here, beside the
+		 * field, because the document type cannot hold key material at all. */
+		key->setText(QStringLiteral("QF4lQ0Iw6cP7f0cQDZQwqz0m0h2wJ3vJ7l5b1kR9Umc="));
+		save->click();
+		/* **The dialog's own sentence, not the word "reference".** netcfgd
+		 * refuses a pasted key too and says so with that word in it, so an
+		 * assertion on the word passes whether this check exists or not --
+		 * which is exactly how the vlan-parent check above was found to be
+		 * vacuous. Twice in one campaign is a pattern, not an accident: a
+		 * refusal test has to name whose refusal it is. */
+		check("a private key pasted instead of a reference is refused here",
+		    note && note->text().startsWith(
+		                QStringLiteral("the private key is a reference, not the key")),
+		    note ? note->text() : QString());
+
+		key->setText(QStringLiteral("@secret:gui-wg0"));
+		add->click();
+		peers->setItem(0, 0, new QTableWidgetItem(QStringLiteral("office")));
+		peers->setItem(0, 1, new QTableWidgetItem(
+		    QStringLiteral("xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=")));
+		peers->setItem(0, 2, new QTableWidgetItem(QStringLiteral("vpn.example.com:51820")));
+		peers->setItem(0, 3, new QTableWidgetItem(QStringLiteral("10.9.0.0/24")));
+		peers->setItem(0, 4, new QTableWidgetItem(QStringLiteral("25")));
+		save->click();
+		check("and a whole one is written", dialog.outcome().contains(QStringLiteral("gui-wg0")),
+		    QStringLiteral("%1 / %2").arg(dialog.outcome(),
+		        note ? note->text() : QString()));
+	}
+
+	{
+		ncfg_device_config wg;
+		check("netcfgd compiled the wireguard device",
+		    connection.device_config(QStringLiteral("gui-wg0"), &wg, &error), error);
+		check("as wireguard, spelled as the language spells it",
+		    wg.kind == QStringLiteral("wireguard"), wg.kind);
+		check("with the private key as a reference",
+		    wg.private_key == QStringLiteral("@secret:gui-wg0"), wg.private_key);
+		check("and its listen port", wg.listen_port == 51820,
+		    QString::number(wg.listen_port));
+		check("and the peer", wg.peers.size() == 1,
+		    QString::number(wg.peers.size()));
+		if (wg.peers.size() == 1) {
+			check("named", wg.peers[0].name == QStringLiteral("office"), wg.peers[0].name);
+			check("with its public key and endpoint",
+			    wg.peers[0].public_key.startsWith(QStringLiteral("xTIBA5")) &&
+			        wg.peers[0].endpoint == QStringLiteral("vpn.example.com:51820"),
+			    wg.peers[0].endpoint);
+			check("and its allowed prefixes",
+			    wg.peers[0].allowed_ips == QStringLiteral("10.9.0.0/24"),
+			    wg.peers[0].allowed_ips);
+		}
+		/* And it is editable rather than refused, which is the whole of what
+		 * changed for this kind. */
+		check("and the block is editable rather than refused", wg.unmodelled.isEmpty(),
+		    wg.unmodelled);
+	}
+
 	{
 		QString removed;
+		connection.config_delete(QStringLiteral("device-gui-wg0"), &removed);
 		check("the block can be removed again",
 		    connection.config_delete(QStringLiteral("device-%1").arg(name), &removed),
 		    removed);

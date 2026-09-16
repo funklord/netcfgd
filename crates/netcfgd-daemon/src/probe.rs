@@ -578,7 +578,8 @@ mod tests {
 
 		assert!(
 			marker.exists(),
-			"the probe was skipped despite being told not to"
+			"the probe left no marker: {}",
+			detail_of(&probes, "eth0")
 		);
 	}
 
@@ -593,6 +594,28 @@ mod tests {
 			.tallies
 			.get(interface)
 			.and_then(|tally| tally.verdict)
+	}
+
+	/// What the probe reported, for a failure message that explains itself.
+	///
+	/// **Added after a flake nobody could read.** `require_lease_false...`
+	/// failed once in ten full-suite runs with "the probe was skipped despite
+	/// being told not to", which is the one thing the code cannot do -- the
+	/// skip is unreachable with `require_lease = false`. The real answer is in
+	/// the tally: a probe that was started and failed says so, and a program
+	/// that could not be started at all says that instead. Which of the two it
+	/// is decides whether this is a test bug or a real one, and the assertion
+	/// said neither.
+	fn detail_of(probes: &Probes, interface: &str) -> String {
+		probes.tallies.get(interface).map_or_else(
+			|| "no tally at all".to_owned(),
+			|tally| {
+				format!(
+					"verdict {:?}, started-failures {}, detail {:?}",
+					tally.verdict, tally.start_failures, tally.detail
+				)
+			},
+		)
 	}
 
 	fn make_executable(path: &std::path::Path) {

@@ -346,6 +346,17 @@ struct ncfg_device_row {
 	QString policy;
 };
 
+/* One `WireGuard` peer, as a form carries it. A public key is a peer's
+ * identity rather than a secret; a preshared key is a `@secret:` reference. */
+struct ncfg_wg_peer_row {
+	QString name;
+	QString public_key;
+	QString endpoint;
+	QString allowed_ips;
+	QString preshared_key;
+	int     keepalive = 0;
+};
+
 /* One device's configuration, as far as a form can show it. */
 struct ncfg_device_config {
 	bool    present = false;
@@ -370,6 +381,15 @@ struct ncfg_device_config {
 	QString remote;
 	int     vxlan_id = -1;
 	int     port = 0;
+	int     ttl = 0;
+	int     tunnel_key = -1;
+	/* wireguard. `private_key` is a reference -- `@secret:wg0` -- and never
+	 * the material, so this window shows and rewrites it without holding a
+	 * key. */
+	QString private_key;
+	int     listen_port = 0;
+	int     fwmark = 0;
+	QList<ncfg_wg_peer_row> peers;
 	int     mtu = 0;
 	QString mac;
 	/* ethtool. A toggle is three-valued: unmanaged, on, off. */

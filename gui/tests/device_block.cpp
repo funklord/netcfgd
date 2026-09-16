@@ -211,6 +211,79 @@ int main(int argc, char **argv)
 		    "a created link can carry hardware settings too");
 	}
 
+	/* WIREGUARD, which is the kind that carries a credential and a list.
+	 *
+	 * **The private key is a reference and never the material.** netcfgd's
+	 * document type cannot hold key material at all -- that is what makes a
+	 * document safe to write to /run -- so what the block carries is the name
+	 * of something the secret store keeps. A block with a key in it would be
+	 * the one thing this whole design forbids. */
+	{
+		ncfg_device_config wg;
+		wg.kind = QStringLiteral("wireguard");
+		wg.private_key = QStringLiteral("@secret:wg0");
+		wg.listen_port = 51820;
+		ncfg_wg_peer_row office;
+		office.name = QStringLiteral("office");
+		office.public_key = QStringLiteral("xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=");
+		office.endpoint = QStringLiteral("vpn.example.com:51820");
+		office.allowed_ips = QStringLiteral("10.9.0.0/24 192.168.50.0/24");
+		office.keepalive = 25;
+		office.preshared_key = QStringLiteral("@secret:wg0-psk");
+		ncfg_wg_peer_row home;
+		home.name = QStringLiteral("home");
+		home.public_key = QStringLiteral("aTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=");
+		home.allowed_ips = QStringLiteral("10.9.1.0/24");
+		wg.peers << office << home;
+		const QString block = ncfg_device_block(QStringLiteral("wg0"), wg);
+
+		check(block.contains(QStringLiteral("wireguard {")), "a wireguard device gets a block");
+		check(block.contains(QStringLiteral("private_key = \"@secret:wg0\"")),
+		    "whose private key is a reference, not a key");
+		check(block.contains(QStringLiteral("listen_port = 51820")), "and its listen port");
+		check(block.contains(QStringLiteral("peer \"office\" {")) &&
+		        block.contains(QStringLiteral("peer \"home\" {")),
+		    "with a block per peer");
+		check(block.contains(QStringLiteral("public_key = \"xTIBA5rboUvnH4htodjb6e697Qj"
+		                                "LERt1NAB4mZqp8Dg=\"")),
+		    "each carrying its public key, which is an identity and not a secret");
+		check(block.contains(QStringLiteral("allowed_ips = [\"10.9.0.0/24\", "
+		                                "\"192.168.50.0/24\"]")),
+		    "and its allowed prefixes as a list");
+		check(block.contains(QStringLiteral("endpoint = \"vpn.example.com:51820\"")) &&
+		        block.contains(QStringLiteral("keepalive = 25")),
+		    "and an endpoint and keepalive where it has them");
+		check(block.contains(QStringLiteral("preshared_key = \"@secret:wg0-psk\"")),
+		    "and a preshared key as a reference too");
+		/* The peer without them writes neither: a block restating every
+		 * default is one nobody can read for what is unusual. */
+		check(block.count(QStringLiteral("endpoint")) == 1,
+		    "while the peer with no endpoint writes none");
+	}
+
+	/* A tunnel's two pinned values, which had no field until now. */
+	{
+		ncfg_device_config tunnel;
+		tunnel.kind = QStringLiteral("tunnel");
+		tunnel.tunnel_mode = QStringLiteral("sit");
+		tunnel.ttl = 64;
+		tunnel.tunnel_key = 7;
+		const QString block = ncfg_device_block(QStringLiteral("sit0"), tunnel);
+		check(block.contains(QStringLiteral("ttl = 64")), "a tunnel can pin its ttl");
+		check(block.contains(QStringLiteral("key = 7")), "and its key");
+
+		/* Zero is a legal tunnel key and `none` is not zero, which is why the
+		 * absent value is -1 and not 0. */
+		tunnel.tunnel_key = 0;
+		check(ncfg_device_block(QStringLiteral("sit0"), tunnel)
+		          .contains(QStringLiteral("key = 0")),
+		    "and a key of zero, which is a key and not an absence");
+		tunnel.tunnel_key = -1;
+		check(!ncfg_device_block(QStringLiteral("sit0"), tunnel)
+		           .contains(QStringLiteral("key =")),
+		    "while no key at all writes nothing");
+	}
+
 	/* THE NAME, which is the link's name and the drop-in's filename. */
 	{
 		check(ncfg_device_name_refusal(QStringLiteral("br0")).isEmpty(),

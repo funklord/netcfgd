@@ -959,6 +959,21 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->remote = from_c(found.remote);
 	out->vxlan_id = found.vxlan_id;
 	out->port = found.port;
+	out->ttl = found.ttl;
+	out->tunnel_key = found.tunnel_key;
+	out->private_key = from_c(found.private_key);
+	out->listen_port = found.listen_port;
+	out->fwmark = found.fwmark;
+	for (size_t i = 0; i < found.peer_count; i++) {
+		ncfg_wg_peer_row peer;
+		peer.name = from_c(found.peers[i].name);
+		peer.public_key = from_c(found.peers[i].public_key);
+		peer.endpoint = from_c(found.peers[i].endpoint);
+		peer.allowed_ips = from_c(found.peers[i].allowed_ips);
+		peer.preshared_key = from_c(found.peers[i].preshared_key);
+		peer.keepalive = found.peers[i].keepalive;
+		out->peers << peer;
+	}
 	out->mtu = found.mtu;
 	out->mac = from_c(found.mac);
 	out->autoneg = static_cast<int>(found.autoneg);
