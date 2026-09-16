@@ -43,12 +43,17 @@ signals:
 private slots:
 	/* Open the hardware editor on the selected device. */
 	void configure_selected();
+	/* Make a virtual link: a bridge, a bond, a VLAN, a veth pair. The one
+	 * control here that needs no row selected, because the device being made
+	 * is not in the list yet. */
+	void new_device();
 
 private:
 	ncfg_connection *connection;
 	ncfg_table_view *table;
 	QList<ncfg_device_row> rows;
 	QPushButton *configure_button;
+	QPushButton *new_button;
 };
 
 #endif /* NCFG_DEVICES_VIEW_H */

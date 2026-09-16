@@ -2397,6 +2397,15 @@ void ncfg_device_config_free(ncfg_device_config_t *config)
 	}
 	free(config->on_unmanage);
 	free(config->kind);
+	free(config->members);
+	free(config->bond_mode);
+	free(config->parent);
+	free(config->vlan_protocol);
+	free(config->peer);
+	free(config->macvlan_mode);
+	free(config->tunnel_mode);
+	free(config->local);
+	free(config->remote);
 	free(config->mac);
 	free(config->duplex);
 	free(config->wol);
@@ -2424,6 +2433,72 @@ static ncfg_toggle_t read_toggle(const ncfg_json_doc_t *doc, uint32_t object, co
 	}
 	free(word);
 	return answer;
+}
+
+/*
+ * The fields one kind of link needs, out of the document's `kind` object.
+ *
+ * Internally tagged -- `{"kind": "bridge", "members": [...]}` -- so the fields
+ * sit beside the word rather than under it. Every field is read whatever the
+ * kind says: a member list on a VLAN is not there to read, and asking for it
+ * costs nothing and keeps this one pass rather than eight.
+ */
+static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_config_t *out)
+{
+	out->vlan_id = -1;
+	out->vxlan_id = -1;
+	if (kind == NCFG_JSON_NONE || ncfg_json_type(doc, kind) != NCFG_JSON_OBJECT) {
+		out->members = dup_string("");
+		out->bond_mode = dup_string("");
+		out->parent = dup_string("");
+		out->vlan_protocol = dup_string("");
+		out->peer = dup_string("");
+		out->macvlan_mode = dup_string("");
+		out->tunnel_mode = dup_string("");
+		out->local = dup_string("");
+		out->remote = dup_string("");
+		return out->members && out->bond_mode && out->parent && out->vlan_protocol
+		    && out->peer && out->macvlan_mode && out->tunnel_mode && out->local
+		    && out->remote;
+	}
+
+	out->members = joined_words(doc, ncfg_json_member(doc, kind, "members"));
+	out->stp = ncfg_json_bool(doc, ncfg_json_member(doc, kind, "stp"), 0);
+	out->vlan_filtering = ncfg_json_bool(doc, ncfg_json_member(doc, kind, "vlan_filtering"), 0);
+	out->bond_mode = member_text(doc, kind, "mode");
+	out->miimon = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "miimon"), 0);
+	out->parent = member_text(doc, kind, "parent");
+	out->vlan_protocol = member_text(doc, kind, "protocol");
+	out->peer = member_text(doc, kind, "peer");
+	out->vrf_table = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "table"), 0);
+	out->local = member_text(doc, kind, "local");
+	out->remote = member_text(doc, kind, "remote");
+	out->port = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "port"), 0);
+
+	/* `mode` and `id` are two words doing three jobs between them: a bond's
+	 * mode and a macvlan's and a tunnel's are all `mode`, and a VLAN's id and
+	 * a VXLAN's are both `id`. Told apart by the kind, which is the only thing
+	 * that can tell them apart. */
+	char *word = member_text(doc, kind, "kind");
+	if (word && strcmp(word, "macvlan") == 0) {
+		out->macvlan_mode = member_text(doc, kind, "mode");
+		out->tunnel_mode = dup_string("");
+	} else if (word && strcmp(word, "tunnel") == 0) {
+		out->tunnel_mode = member_text(doc, kind, "mode");
+		out->macvlan_mode = dup_string("");
+	} else {
+		out->macvlan_mode = dup_string("");
+		out->tunnel_mode = dup_string("");
+	}
+	if (word && strcmp(word, "vlan") == 0) {
+		out->vlan_id = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "id"), -1);
+	} else if (word && strcmp(word, "vxlan") == 0) {
+		out->vxlan_id = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "id"), -1);
+	}
+	free(word);
+
+	return out->members && out->bond_mode && out->parent && out->vlan_protocol && out->peer
+	    && out->macvlan_mode && out->tunnel_mode && out->local && out->remote;
 }
 
 int ncfg_client_device_config(ncfg_client_t *client, const char *device,
@@ -2464,14 +2539,27 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		out->duplex = dup_string("");
 		out->wol = dup_string("");
 		out->unmodelled = dup_string("");
+		out->wifi_backend = dup_string("");
+		out->powersave = dup_string("");
+		out->mac_policy = dup_string("");
+		out->regdom = dup_string("");
+		out->portal_check = dup_string("");
+		out->sim = dup_string("");
+		out->apn = dup_string("");
+		int whole = read_kind(doc, NCFG_JSON_NONE, out) && out->on_unmanage && out->kind
+		    && out->mac && out->duplex && out->wol && out->unmodelled;
 		ncfg_json_free(doc);
-		return out->on_unmanage && out->kind && out->mac && out->duplex && out->wol
-		    && out->unmodelled;
+		return whole;
 	}
 	out->present = 1;
 	out->managed = ncfg_json_bool(doc, ncfg_json_member(doc, found, "managed"), 1);
 	out->on_unmanage = member_text(doc, found, "on_unmanage");
 	out->kind = device_kind(doc, found);
+	if (!read_kind(doc, ncfg_json_member(doc, found, "kind"), out)) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
 	out->mac = member_text(doc, found, "mac");
 	out->mtu = (int)ncfg_json_int(doc, ncfg_json_member(doc, found, "mtu"), 0);
 
@@ -2528,8 +2616,19 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 	 * `physical` is the important one -- a bridge or a bond carries members,
 	 * and a form that wrote the block back without them would empty it.
 	 */
-	if (out->kind && out->kind[0] && strcmp(out->kind, "physical") != 0) {
-		note_unmodelled(&out->unmodelled, out->kind);
+	/*
+	 * **Only the kinds a form cannot hold.** It used to be every kind but
+	 * `physical`, because no screen could express one; a bridge's members, a
+	 * VLAN's parent and id and the rest are fields now. What is left is the
+	 * kinds that carry something else entirely -- a `WireGuard` tunnel's peers
+	 * and keys, a PPPoE session's credentials, an `OpenVPN` link's own config
+	 * file -- and `ifb`, which netcfgd synthesises and nobody writes.
+	 */
+	static const char *const unheld[] = { "wireguard", "pppoe", "openvpn", "tun", "ifb" };
+	for (size_t i = 0; i < sizeof(unheld) / sizeof(unheld[0]); i++) {
+		if (out->kind && strcmp(out->kind, unheld[i]) == 0) {
+			note_unmodelled(&out->unmodelled, out->kind);
+		}
 	}
 	if (ncfg_json_count(doc, ncfg_json_member(doc, found, "bridge_vlans"))) {
 		note_unmodelled(&out->unmodelled, "bridge_vlans");

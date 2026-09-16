@@ -27,6 +27,8 @@
 #include <QComboBox>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QGroupBox>
+#include <QLabel>
 #include <QSpinBox>
 
 #include <cstdio>
@@ -148,11 +150,131 @@ int main(int argc, char **argv)
 		check("and one the kernel has", hardware);
 	}
 
+	/* **Making a link, which is the other half of a device.** A bridge is not
+	 * hardware netcfgd finds: it is a link netcfgd creates, and until the form
+	 * carried a kind there was no way to ask for one except by writing the
+	 * block. What this asserts is the compiled document afterwards -- a
+	 * `bridge` block netcfgd could not parse fails here. */
+	{
+		ncfg_device_dialog dialog(&connection, QString());
+		auto *made = dialog.findChild<QLineEdit *>(QStringLiteral("device_name"));
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		auto *members = dialog.findChild<QLineEdit *>(QStringLiteral("device_members"));
+		auto *stp = dialog.findChild<QCheckBox *>(QStringLiteral("device_stp"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("device_save"));
+		if (!made || !kind || !members || !stp || !save) {
+			check("the new-device dialog has the fields it needs", false);
+			return 1;
+		}
+		check("the new-device dialog has the fields it needs", true);
+		check("and lets the name be typed, unlike an existing device's",
+		    !made->isReadOnly());
+		/* **And offers no radio or modem policy for a link being made.** Those
+		 * groups belong to a device the daemon says has one; a bridge being
+		 * invented has no block to read, so nothing had hidden them and the
+		 * form offered a regulatory domain for a bridge. */
+		auto *radio = dialog.findChild<QGroupBox *>(QStringLiteral("device_wifi"));
+		auto *modem = dialog.findChild<QGroupBox *>(QStringLiteral("device_modem"));
+		check("and offers no radio policy for a link being made",
+		    radio && radio->isHidden());
+		check("nor a modem one", modem && modem->isHidden());
+
+		made->setText(QStringLiteral("gui-br0"));
+		kind->setCurrentIndex(kind->findData(QStringLiteral("bridge")));
+		members->setText(QStringLiteral("gui-set-a gui-set-b"));
+		stp->setChecked(true);
+		save->click();
+		check("saving says where it went", dialog.outcome().contains(QStringLiteral("gui-br0")),
+		    dialog.outcome());
+
+		ncfg_device_config bridge;
+		check("netcfgd compiled the bridge",
+		    connection.device_config(QStringLiteral("gui-br0"), &bridge, &error), error);
+		check("as a bridge", bridge.kind == QStringLiteral("bridge"), bridge.kind);
+		check("with both members", bridge.members == QStringLiteral("gui-set-a gui-set-b"),
+		    bridge.members);
+		check("and spanning tree on", bridge.stp);
+		/* And it is editable afterwards: the refusal that used to fire for
+		 * every kind but `physical` was "a form of these fields would delete
+		 * the members", which is only true while the form has no members. */
+		check("and the block is editable rather than refused",
+		    bridge.unmodelled.isEmpty(), bridge.unmodelled);
+	}
+
+	/* And re-opening the bridge loads its kind and its members.
+	 *
+	 * **A form that saved a kind and did not load it would quietly unmake the
+	 * link**: every field back at its default is `physical`, and saving that
+	 * over a bridge deletes the bridge. The same fault `interface_load` exists
+	 * for, one block along. */
+	{
+		ncfg_device_dialog dialog(&connection, QStringLiteral("gui-br0"));
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		auto *members = dialog.findChild<QLineEdit *>(QStringLiteral("device_members"));
+		check("re-opening a bridge says it is a bridge",
+		    kind && kind->currentData().toString() == QStringLiteral("bridge"),
+		    kind ? kind->currentData().toString() : QString());
+		check("and loads its members",
+		    members && members->text() == QStringLiteral("gui-set-a gui-set-b"),
+		    members ? members->text() : QString());
+	}
+
+	/* A VLAN, because it is the kind whose fields are two and whose absence is
+	 * a refusal rather than a bad block: netcfgd requires a parent and an id. */
+	{
+		ncfg_device_dialog dialog(&connection, QString());
+		auto *made = dialog.findChild<QLineEdit *>(QStringLiteral("device_name"));
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		auto *parent = dialog.findChild<QLineEdit *>(QStringLiteral("device_parent"));
+		auto *id = dialog.findChild<QSpinBox *>(QStringLiteral("device_vlan_id"));
+		auto *note = dialog.findChild<QLabel *>(QStringLiteral("device_note"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("device_save"));
+
+		made->setText(QStringLiteral("gui-br0.42"));
+		kind->setCurrentIndex(kind->findData(QStringLiteral("vlan")));
+		id->setValue(42);
+		/* No parent: refused here, beside the field, rather than by the daemon
+		 * after a round trip.
+		 *
+		 * **The dialog's own sentence, not the word "parent".** netcfgd
+		 * refuses a parentless vlan too and says so with that word in it, so
+		 * an assertion on the word passed whether the check here existed or
+		 * not -- measured, by removing the check and watching this stay
+		 * green. What separates them is whose sentence it is. */
+		save->click();
+		check("a vlan with no parent is refused before anything is sent",
+		    note && note->text() == QStringLiteral("a vlan needs a parent link"),
+		    note ? note->text() : QString());
+
+		parent->setText(QStringLiteral("gui-br0"));
+		save->click();
+
+		ncfg_device_config vlan;
+		check("netcfgd compiled the vlan",
+		    connection.device_config(QStringLiteral("gui-br0.42"), &vlan, &error), error);
+		check("as a vlan on its parent", vlan.kind == QStringLiteral("vlan") &&
+		        vlan.parent == QStringLiteral("gui-br0"),
+		    QStringLiteral("%1 on %2").arg(vlan.kind, vlan.parent));
+		check("with the tag it was given", vlan.vlan_id == 42,
+		    QString::number(vlan.vlan_id));
+	}
+
 	{
 		QString removed;
 		check("the block can be removed again",
 		    connection.config_delete(QStringLiteral("device-%1").arg(name), &removed),
 		    removed);
+		/* The made links go too: these probes share one daemon, and a bridge
+		 * left behind is a link every probe after this one would see. The
+		 * vlan first -- it names the bridge, and a configuration naming a
+		 * parent that is not there does not compile. */
+		connection.config_delete(QStringLiteral("device-gui-br0.42"), &removed);
+		connection.config_delete(QStringLiteral("device-gui-br0"), &removed);
+		ncfg_device_config gone;
+		check("and the bridge with it",
+		    connection.device_config(QStringLiteral("gui-br0"), &gone, &error)
+		        && !gone.present,
+		    error);
 	}
 
 	if (failures == 0) {

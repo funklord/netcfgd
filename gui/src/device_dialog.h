@@ -9,12 +9,18 @@
  * one; the only key any screen reached was the MTU, which the interface editor
  * smuggled out as a second block in its own file.
  *
- * What it does not do, and says so rather than approximating: a device's
- * `kind` is read-only here. A bridge or a bond carries members, a VLAN carries
- * a parent and an id, and a form that wrote the block back without them would
- * empty it -- so a device that is anything but `physical` refuses to save for
- * the same reason the interface editor refuses a block carrying what it has no
- * field for. Making virtual links from the window is its own round.
+ * **It makes virtual links, which is the other half of `device`.** A bridge, a
+ * bond, a VLAN, a veth pair, a macvlan, a VRF, a VXLAN or a tunnel is a link
+ * netcfgd creates rather than finds, and until this carried the fields there
+ * was no way to ask for one except by writing the block by hand. The kind and
+ * the fields it needs are the top of this form; a device with no block at all
+ * opens on `physical`, which asks for nothing.
+ *
+ * What it still does not hold is the kinds that carry something else entirely:
+ * a `WireGuard` tunnel's peers and keys, a PPPoE session's credentials, an
+ * `OpenVPN` link's own configuration file. Each refuses to save for the reason
+ * the interface editor refuses a block carrying what it has no field for --
+ * saving would delete it.
  *
  * `admin`, because it writes configuration. The refusal comes from the daemon
  * with the tier it needed in it, and is shown as it arrives.
@@ -39,6 +45,12 @@ class ncfg_device_dialog : public QDialog {
 	Q_OBJECT
 
 public:
+	/*
+	 * `name` empty means a device being made: the name is asked for and the
+	 * kind starts at `physical`. Otherwise the name is fixed -- it is the
+	 * block's name and the drop-in's filename, and changing it would be
+	 * writing a second device rather than editing this one.
+	 */
 	ncfg_device_dialog(ncfg_connection *connection, const QString &name,
 	    QWidget *parent = nullptr);
 
@@ -46,6 +58,10 @@ public:
 
 private slots:
 	void submit();
+	/* Show the fields the chosen kind needs and hide the rest. A bridge's
+	 * members and a VLAN's id are not alternatives an operator should have to
+	 * read past each other. */
+	void kind_changed();
 
 private:
 	/* The block this dialog would write, as configuration text. */
@@ -60,6 +76,28 @@ private:
 	 * reason the interface editor refuses: what is on the machine is unknown,
 	 * so overwriting it is not something to do quietly. */
 	bool unknown = false;
+
+	/* Empty for an existing device, which is what makes the name read-only. */
+	QLineEdit  *name;
+	QComboBox  *kind;
+	/* bridge and bond */
+	QLineEdit *members;
+	QCheckBox *stp;
+	QCheckBox *vlan_filtering;
+	QComboBox *bond_mode;
+	QSpinBox  *miimon;
+	/* vlan, macvlan, vxlan, tunnel */
+	QLineEdit *parent_link;
+	QSpinBox  *vlan_id;
+	QComboBox *vlan_protocol;
+	QLineEdit *peer;
+	QComboBox *macvlan_mode;
+	QSpinBox  *vrf_table;
+	QComboBox *tunnel_mode;
+	QLineEdit *local;
+	QLineEdit *remote;
+	QSpinBox  *vxlan_id;
+	QSpinBox  *port;
 
 	QCheckBox *managed;
 	QComboBox *on_unmanage;
@@ -105,5 +143,14 @@ private:
  * emitted empty -- are invisible in a screenshot.
  */
 QString ncfg_device_block(const QString &name, const ncfg_device_config &settings);
+
+/*
+ * Whether this text can be a device's name, and what to say when it cannot.
+ *
+ * Empty for a name that is fine. netcfgd uses the name for the link and for
+ * every file it keeps about it, so the answer is the kernel's: at most fifteen
+ * characters, no slash, no whitespace, and not `.` or `..`.
+ */
+QString ncfg_device_name_refusal(const QString &name);
 
 #endif /* NCFG_DEVICE_DIALOG_H */

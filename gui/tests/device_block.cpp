@@ -124,6 +124,108 @@ int main(int argc, char **argv)
 		    "and the rest of the radio policy");
 	}
 
+	/* THE KINDS, which is what makes a link exist at all.
+	 *
+	 * A bridge, a bond, a VLAN, a veth pair: each is a link netcfgd creates
+	 * rather than finds. The block has to name the kind's own sub-block and
+	 * the fields that kind needs, and `physical` has to write nothing --
+	 * a real adapter is not a creation. */
+	{
+		ncfg_device_config physical;
+		physical.kind = QStringLiteral("physical");
+		check(!ncfg_device_block(QStringLiteral("eth0"), physical)
+		           .contains(QStringLiteral("kind")),
+		    "a physical device asks for nothing to be created");
+
+		ncfg_device_config bridge;
+		bridge.kind = QStringLiteral("bridge");
+		bridge.members = QStringLiteral("eth0 eth1");
+		bridge.stp = true;
+		const QString made = ncfg_device_block(QStringLiteral("br0"), bridge);
+		check(made.contains(QStringLiteral("bridge {")), "a bridge gets a bridge block");
+		check(made.contains(QStringLiteral("members = [\"eth0\", \"eth1\"]")),
+		    "with its members as a list");
+		check(made.contains(QStringLiteral("stp = true")), "and spanning tree when asked");
+
+		ncfg_device_config bond;
+		bond.kind = QStringLiteral("bond");
+		bond.members = QStringLiteral("eth2");
+		bond.bond_mode = QStringLiteral("802.3ad");
+		bond.miimon = 100;
+		const QString bonded = ncfg_device_block(QStringLiteral("bond0"), bond);
+		check(bonded.contains(QStringLiteral("mode = \"802.3ad\"")),
+		    "a bond names its mode, hyphens and dots as the kernel spells them");
+		check(bonded.contains(QStringLiteral("miimon = 100")), "and its link check");
+
+		ncfg_device_config vlan;
+		vlan.kind = QStringLiteral("vlan");
+		vlan.parent = QStringLiteral("eth0");
+		vlan.vlan_id = 42;
+		const QString tagged = ncfg_device_block(QStringLiteral("eth0.42"), vlan);
+		check(tagged.contains(QStringLiteral("parent = \"eth0\"")) &&
+		        tagged.contains(QStringLiteral("id = 42")),
+		    "a vlan names its parent and its id");
+		/* 802.1Q is the default, so it is not written: the block says what is
+		 * unusual. */
+		check(!tagged.contains(QStringLiteral("protocol")),
+		    "and not the protocol when it is the ordinary one");
+
+		ncfg_device_config veth;
+		veth.kind = QStringLiteral("veth");
+		veth.peer = QStringLiteral("vv-peer");
+		check(ncfg_device_block(QStringLiteral("vv"), veth)
+		          .contains(QStringLiteral("veth { peer = \"vv-peer\" }")),
+		    "a veth names the other end");
+
+		ncfg_device_config vrf;
+		vrf.kind = QStringLiteral("vrf");
+		vrf.vrf_table = 100;
+		check(ncfg_device_block(QStringLiteral("vrf0"), vrf)
+		          .contains(QStringLiteral("vrf { table = 100 }")),
+		    "a vrf names the table it owns");
+
+		ncfg_device_config tunnel;
+		tunnel.kind = QStringLiteral("tunnel");
+		tunnel.tunnel_mode = QStringLiteral("gre");
+		tunnel.local = QStringLiteral("192.0.2.1");
+		tunnel.remote = QStringLiteral("198.51.100.1");
+		const QString piped = ncfg_device_block(QStringLiteral("gre0"), tunnel);
+		check(piped.contains(QStringLiteral("mode = \"gre\"")) &&
+		        piped.contains(QStringLiteral("local = \"192.0.2.1\"")) &&
+		        piped.contains(QStringLiteral("remote = \"198.51.100.1\"")),
+		    "a tunnel names its encapsulation and both ends");
+
+		ncfg_device_config dummy;
+		dummy.kind = QStringLiteral("dummy");
+		check(ncfg_device_block(QStringLiteral("d0"), dummy)
+		          .contains(QStringLiteral("kind = \"dummy\"")),
+		    "and a dummy says so with the key rather than a block");
+
+		/* **The hardware keys are written beside the kind, not instead of
+		 * it.** A bridge with an MTU is ordinary, and a block that dropped one
+		 * for the other would be half a device. */
+		bridge.mtu = 9000;
+		const QString both = ncfg_device_block(QStringLiteral("br0"), bridge);
+		check(both.contains(QStringLiteral("bridge {")) &&
+		        both.contains(QStringLiteral("mtu = 9000")),
+		    "a created link can carry hardware settings too");
+	}
+
+	/* THE NAME, which is the link's name and the drop-in's filename. */
+	{
+		check(ncfg_device_name_refusal(QStringLiteral("br0")).isEmpty(),
+		    "an ordinary name is accepted");
+		check(ncfg_device_name_refusal(QStringLiteral("eth0.42")).isEmpty(),
+		    "and so is a vlan's dotted one");
+		check(!ncfg_device_name_refusal(QString()).isEmpty(), "an empty name is refused");
+		check(!ncfg_device_name_refusal(QStringLiteral("a-very-long-name0")).isEmpty(),
+		    "a name past the kernel's fifteen characters is refused");
+		check(!ncfg_device_name_refusal(QStringLiteral("two words")).isEmpty(),
+		    "a name with a space is refused");
+		check(!ncfg_device_name_refusal(QStringLiteral("../etc/x")).isEmpty(),
+		    "and one that would make the drop-in's name a path");
+	}
+
 	if (failures == 0) {
 		fprintf(stderr, "device_block: all checks passed\n");
 	} else {

@@ -36,6 +36,57 @@ const choice toggles[] = {
 	{ "off", "off" },
 };
 
+/* The kinds this form can hold. `physical` is a real card and asks for
+ * nothing; the rest are links netcfgd creates. What is deliberately absent --
+ * `wireguard`, `pppoe`, `openvpn`, `tun` -- carries keys, credentials or a
+ * foreign config file, and a form of these fields would delete them. */
+const choice kinds[] = {
+	{ "physical -- a real adapter", "physical" },
+	{ "bridge", "bridge" },
+	{ "bond", "bond" },
+	{ "vlan", "vlan" },
+	{ "veth pair", "veth" },
+	{ "macvlan", "macvlan" },
+	{ "vrf", "vrf" },
+	{ "vxlan", "vxlan" },
+	{ "tunnel", "tunnel" },
+	{ "dummy", "dummy" },
+};
+
+/* The kernel's bonding modes, spelled as the config language spells them --
+ * which is how `ip` spells them, hyphens and all. */
+const choice bond_modes[] = {
+	{ "active-backup -- one link, the rest standing by", "active-backup" },
+	{ "balance-rr -- round robin", "balance-rr" },
+	{ "balance-xor", "balance-xor" },
+	{ "broadcast", "broadcast" },
+	{ "802.3ad -- LACP", "802.3ad" },
+	{ "balance-tlb", "balance-tlb" },
+	{ "balance-alb", "balance-alb" },
+};
+
+const choice macvlan_modes[] = {
+	{ "private", "private" },
+	{ "vepa", "vepa" },
+	{ "bridge", "bridge" },
+	{ "passthru", "passthru" },
+};
+
+const choice tunnel_modes[] = {
+	{ "gre", "gre" },
+	{ "gretap", "gretap" },
+	{ "ip6gre", "ip6gre" },
+	{ "ipip", "ipip" },
+	{ "sit", "sit" },
+	{ "ip6tnl", "ip6tnl" },
+	{ "geneve", "geneve" },
+};
+
+const choice vlan_protocols[] = {
+	{ "802.1Q", "dot1q" },
+	{ "802.1ad -- QinQ", "dot1ad" },
+};
+
 const choice unmanages[] = {
 	{ "leave -- change nothing on the way out", "leave" },
 	{ "clear -- remove what netcfgd owns first", "clear" },
@@ -132,9 +183,144 @@ int toggle_value(const QComboBox *box)
 
 } // namespace
 
+QString ncfg_device_name_refusal(const QString &name)
+{
+	const QString trimmed = name.trimmed();
+
+	if (trimmed.isEmpty()) {
+		return QStringLiteral("a device needs a name; it is the link's name too");
+	}
+	/* The kernel's limit, which netcfgd's model states as IFNAMSIZ_MAX: 16 in
+	 * `linux/if.h` including the terminator, so fifteen characters. A longer
+	 * name is refused by netlink at apply time, by which point the name has
+	 * been joined into half a dozen paths. */
+	if (trimmed.size() > 15) {
+		return QStringLiteral("a device name is at most 15 characters, which is what "
+		              "the kernel takes");
+	}
+	if (trimmed == QLatin1String(".") || trimmed == QLatin1String("..")) {
+		return QStringLiteral("`%1` is a directory, not a name").arg(trimmed);
+	}
+	for (const QChar &character : trimmed) {
+		if (character.isSpace() || character == QLatin1Char('/')) {
+			return QStringLiteral("a device name cannot contain a space or a slash: "
+			              "netcfgd uses it for the files it keeps about the link");
+		}
+		if (character == QLatin1Char('"') || character == QLatin1Char('\\')) {
+			return QStringLiteral("a device name cannot contain %1").arg(character);
+		}
+	}
+	return QString();
+}
+
+namespace {
+
+/* The `kind` sub-block, where the kind needs one.
+ *
+ * **`physical` writes nothing at all**, and that is not a shortcut: a real
+ * adapter is a link the kernel already has, and `kind = "physical"` is the
+ * absence of a creation rather than a creation of its own. Every other kind
+ * here is a link netcfgd makes, so its fields are what the making needs. */
+QStringList ncfg_device_kind_body(const ncfg_device_config &settings)
+{
+	QStringList body;
+	const QString kind = settings.kind;
+	const QStringList members =
+	    settings.members.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+	QStringList quoted;
+	for (const QString &one : members) {
+		quoted << QStringLiteral("\"%1\"").arg(one);
+	}
+
+	if (kind == QLatin1String("bridge")) {
+		body << QStringLiteral("\tbridge {");
+		if (!quoted.isEmpty()) {
+			body << QStringLiteral("\t\tmembers = [%1]").arg(quoted.join(QStringLiteral(", ")));
+		}
+		if (settings.stp) {
+			body << QStringLiteral("\t\tstp = true");
+		}
+		if (settings.vlan_filtering) {
+			body << QStringLiteral("\t\tvlan_filtering = true");
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("bond")) {
+		body << QStringLiteral("\tbond {");
+		if (!quoted.isEmpty()) {
+			body << QStringLiteral("\t\tmembers = [%1]").arg(quoted.join(QStringLiteral(", ")));
+		}
+		body << QStringLiteral("\t\tmode = \"%1\"")
+		        .arg(settings.bond_mode.isEmpty() ? QStringLiteral("active-backup")
+		                                          : settings.bond_mode);
+		if (settings.miimon > 0) {
+			body << QStringLiteral("\t\tmiimon = %1").arg(settings.miimon);
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("vlan")) {
+		body << QStringLiteral("\tvlan {");
+		body << QStringLiteral("\t\tparent = \"%1\"").arg(settings.parent);
+		body << QStringLiteral("\t\tid = %1").arg(settings.vlan_id < 0 ? 0 : settings.vlan_id);
+		if (!settings.vlan_protocol.isEmpty()
+		    && settings.vlan_protocol != QLatin1String("dot1q")) {
+			body << QStringLiteral("\t\tprotocol = \"%1\"").arg(settings.vlan_protocol);
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("veth")) {
+		body << QStringLiteral("\tveth { peer = \"%1\" }").arg(settings.peer);
+	} else if (kind == QLatin1String("macvlan")) {
+		body << QStringLiteral("\tmacvlan {");
+		body << QStringLiteral("\t\tparent = \"%1\"").arg(settings.parent);
+		if (!settings.macvlan_mode.isEmpty()
+		    && settings.macvlan_mode != QLatin1String("private")) {
+			body << QStringLiteral("\t\tmode = \"%1\"").arg(settings.macvlan_mode);
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("vrf")) {
+		body << QStringLiteral("\tvrf { table = %1 }").arg(settings.vrf_table);
+	} else if (kind == QLatin1String("vxlan")) {
+		body << QStringLiteral("\tvxlan {");
+		body << QStringLiteral("\t\tid = %1").arg(settings.vxlan_id < 0 ? 0 : settings.vxlan_id);
+		if (!settings.parent.isEmpty()) {
+			body << QStringLiteral("\t\tparent = \"%1\"").arg(settings.parent);
+		}
+		if (!settings.local.isEmpty()) {
+			body << QStringLiteral("\t\tlocal = \"%1\"").arg(settings.local);
+		}
+		if (!settings.remote.isEmpty()) {
+			body << QStringLiteral("\t\tremote = \"%1\"").arg(settings.remote);
+		}
+		if (settings.port > 0) {
+			body << QStringLiteral("\t\tport = %1").arg(settings.port);
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("tunnel")) {
+		body << QStringLiteral("\ttunnel {");
+		body << QStringLiteral("\t\tmode = \"%1\"")
+		        .arg(settings.tunnel_mode.isEmpty() ? QStringLiteral("gre")
+		                                            : settings.tunnel_mode);
+		if (!settings.local.isEmpty()) {
+			body << QStringLiteral("\t\tlocal = \"%1\"").arg(settings.local);
+		}
+		if (!settings.remote.isEmpty()) {
+			body << QStringLiteral("\t\tremote = \"%1\"").arg(settings.remote);
+		}
+		if (!settings.parent.isEmpty()) {
+			body << QStringLiteral("\t\tparent = \"%1\"").arg(settings.parent);
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("dummy")) {
+		body << QStringLiteral("\tkind = \"dummy\"");
+	}
+	return body;
+}
+
+} // namespace
+
 QString ncfg_device_block(const QString &name, const ncfg_device_config &settings)
 {
 	QStringList body;
+
+	body << ncfg_device_kind_body(settings);
 
 	/* **Only what is not the default.** A block that restated every default
 	 * would be a block nobody can read for what is unusual -- and `managed`
@@ -252,11 +438,110 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
     QWidget *parent)
     : QDialog(parent), connection(connection), device(name)
 {
-	setWindowTitle(QStringLiteral("device: %1").arg(name));
+	setWindowTitle(name.isEmpty() ? QStringLiteral("new device")
+	                              : QStringLiteral("device: %1").arg(name));
 	setObjectName(QStringLiteral("device_dialog"));
 
 	auto *layout = new QVBoxLayout(this);
 	auto *form = new QFormLayout();
+
+	this->name = new QLineEdit(name, this);
+	this->name->setObjectName(QStringLiteral("device_name"));
+	/* Fixed once there is something to edit: the name is the block's and the
+	 * drop-in's filename, so changing it would write a second device and leave
+	 * the first. */
+	this->name->setReadOnly(!name.isEmpty());
+	this->name->setPlaceholderText(QStringLiteral("br0, bond0, eth0.42"));
+	form->addRow(QStringLiteral("name"), this->name);
+
+	/* **The kind, which is what makes a link exist.** A bridge, a bond, a
+	 * VLAN, a veth pair: each is a link netcfgd creates rather than finds, and
+	 * this is where a machine's virtual topology is asked for. */
+	kind = new QComboBox(this);
+	kind->setObjectName(QStringLiteral("device_kind"));
+	fill(kind, kinds, sizeof(kinds) / sizeof(kinds[0]));
+	form->addRow(QStringLiteral("kind"), kind);
+
+	/* **One form, with the rows the kind needs shown.** A stack of pages was
+	 * written first and thrown away: `members` belongs to a bridge and a bond
+	 * and `parent` to four kinds, so a field would have had to live on two
+	 * pages or be explained away with a label pointing at another one. Rows
+	 * that appear and disappear keep one field in one place. */
+	members = new QLineEdit(this);
+	members->setObjectName(QStringLiteral("device_members"));
+	members->setPlaceholderText(QStringLiteral("eth0 eth1 -- the links that join it"));
+	form->addRow(QStringLiteral("members"), members);
+
+	parent_link = new QLineEdit(this);
+	parent_link->setObjectName(QStringLiteral("device_parent"));
+	parent_link->setPlaceholderText(QStringLiteral("eth0 -- the link it sits on"));
+	form->addRow(QStringLiteral("parent"), parent_link);
+
+	stp = new QCheckBox(QStringLiteral("spanning tree"), this);
+	stp->setObjectName(QStringLiteral("device_stp"));
+	form->addRow(QString(), stp);
+	vlan_filtering = new QCheckBox(QStringLiteral("vlan filtering"), this);
+	vlan_filtering->setObjectName(QStringLiteral("device_vlan_filtering"));
+	form->addRow(QString(), vlan_filtering);
+
+	bond_mode = new QComboBox(this);
+	bond_mode->setObjectName(QStringLiteral("device_bond_mode"));
+	fill(bond_mode, bond_modes, sizeof(bond_modes) / sizeof(bond_modes[0]));
+	form->addRow(QStringLiteral("bonding mode"), bond_mode);
+	miimon = new QSpinBox(this);
+	miimon->setObjectName(QStringLiteral("device_miimon"));
+	miimon->setRange(0, 60000);
+	miimon->setSpecialValueText(QStringLiteral("unset"));
+	form->addRow(QStringLiteral("link check, ms"), miimon);
+
+	vlan_id = new QSpinBox(this);
+	vlan_id->setObjectName(QStringLiteral("device_vlan_id"));
+	vlan_id->setRange(0, 4094);
+	form->addRow(QStringLiteral("vlan id"), vlan_id);
+	vlan_protocol = new QComboBox(this);
+	vlan_protocol->setObjectName(QStringLiteral("device_vlan_protocol"));
+	fill(vlan_protocol, vlan_protocols, sizeof(vlan_protocols) / sizeof(vlan_protocols[0]));
+	form->addRow(QStringLiteral("vlan protocol"), vlan_protocol);
+
+	peer = new QLineEdit(this);
+	peer->setObjectName(QStringLiteral("device_peer"));
+	peer->setPlaceholderText(QStringLiteral("the other end's name"));
+	form->addRow(QStringLiteral("peer"), peer);
+
+	macvlan_mode = new QComboBox(this);
+	macvlan_mode->setObjectName(QStringLiteral("device_macvlan_mode"));
+	fill(macvlan_mode, macvlan_modes, sizeof(macvlan_modes) / sizeof(macvlan_modes[0]));
+	form->addRow(QStringLiteral("macvlan mode"), macvlan_mode);
+
+	vrf_table = new QSpinBox(this);
+	vrf_table->setObjectName(QStringLiteral("device_vrf_table"));
+	vrf_table->setRange(0, 4294967);
+	form->addRow(QStringLiteral("routing table"), vrf_table);
+
+	tunnel_mode = new QComboBox(this);
+	tunnel_mode->setObjectName(QStringLiteral("device_tunnel_mode"));
+	fill(tunnel_mode, tunnel_modes, sizeof(tunnel_modes) / sizeof(tunnel_modes[0]));
+	form->addRow(QStringLiteral("encapsulation"), tunnel_mode);
+
+	vxlan_id = new QSpinBox(this);
+	vxlan_id->setObjectName(QStringLiteral("device_vxlan_id"));
+	vxlan_id->setRange(0, 16777215);
+	form->addRow(QStringLiteral("vxlan id"), vxlan_id);
+
+	local = new QLineEdit(this);
+	local->setObjectName(QStringLiteral("device_local"));
+	local->setPlaceholderText(QStringLiteral("this end's address"));
+	form->addRow(QStringLiteral("local"), local);
+	remote = new QLineEdit(this);
+	remote->setObjectName(QStringLiteral("device_remote"));
+	remote->setPlaceholderText(QStringLiteral("the other end's address"));
+	form->addRow(QStringLiteral("remote"), remote);
+
+	port = new QSpinBox(this);
+	port->setObjectName(QStringLiteral("device_port"));
+	port->setRange(0, 65535);
+	port->setSpecialValueText(QStringLiteral("default"));
+	form->addRow(QStringLiteral("port"), port);
 
 	managed = new QCheckBox(QStringLiteral("netcfgd configures this device"), this);
 	managed->setObjectName(QStringLiteral("device_managed"));
@@ -335,6 +620,13 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 
 	wifi_box = new QGroupBox(QStringLiteral("radio"), this);
 	wifi_box->setObjectName(QStringLiteral("device_wifi"));
+	/* **Hidden until the daemon says this device has one**, and hidden here
+	 * rather than only in `load()`: a device being made has no block to read,
+	 * so `load()` returns before it can hide anything -- and the new-device
+	 * dialog showed a radio policy and a modem policy for a bridge. Found by
+	 * looking at the window after the install rather than by any test, which
+	 * is the half a screenshot is for. */
+	wifi_box->setVisible(false);
 	auto *radio = new QFormLayout(wifi_box);
 	wifi_backend = new QComboBox(this);
 	wifi_backend->setObjectName(QStringLiteral("device_wifi_backend"));
@@ -372,6 +664,7 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 
 	modem_box = new QGroupBox(QStringLiteral("modem"), this);
 	modem_box->setObjectName(QStringLiteral("device_modem"));
+	modem_box->setVisible(false);
 	auto *cellular = new QFormLayout(modem_box);
 	sim = new QLineEdit(this);
 	sim->setObjectName(QStringLiteral("device_sim"));
@@ -393,14 +686,63 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	save_button->setObjectName(QStringLiteral("device_save"));
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 	connect(save_button, &QPushButton::clicked, this, &ncfg_device_dialog::submit);
+	connect(kind, &QComboBox::currentIndexChanged, this, &ncfg_device_dialog::kind_changed);
 	layout->addWidget(buttons);
-	resize(560, 640);
+	resize(560, 680);
 
 	load();
+	kind_changed();
+}
+
+void ncfg_device_dialog::kind_changed()
+{
+	const QString chosen = kind->currentData().toString();
+	auto *form = qobject_cast<QFormLayout *>(layout()->itemAt(0)->layout());
+	if (!form) {
+		return;
+	}
+
+	/* Which kinds want which field, written as the table it is. A bridge and a
+	 * bond share `members`; four kinds share `parent`; a tunnel and a VXLAN
+	 * share the two addresses. */
+	const struct {
+		QWidget    *field;
+		const char *kinds;
+	} rows[] = {
+		{ members, "bridge bond" },
+		{ parent_link, "vlan macvlan vxlan tunnel" },
+		{ stp, "bridge" },
+		{ vlan_filtering, "bridge" },
+		{ bond_mode, "bond" },
+		{ miimon, "bond" },
+		{ vlan_id, "vlan" },
+		{ vlan_protocol, "vlan" },
+		{ peer, "veth" },
+		{ macvlan_mode, "macvlan" },
+		{ vrf_table, "vrf" },
+		{ tunnel_mode, "tunnel" },
+		{ vxlan_id, "vxlan" },
+		{ local, "vxlan tunnel" },
+		{ remote, "vxlan tunnel" },
+		{ port, "vxlan" },
+	};
+	for (const auto &row : rows) {
+		const QString wanted = QString::fromLatin1(row.kinds);
+		form->setRowVisible(row.field,
+		    wanted.split(QLatin1Char(' ')).contains(chosen));
+	}
 }
 
 void ncfg_device_dialog::load()
 {
+	if (device.isEmpty()) {
+		/* A device being made: there is nothing to read, and asking would
+		 * answer about a name the operator has not typed yet. */
+		note->setText(QStringLiteral("a new device. netcfgd creates the link this "
+		              "describes; give it addresses in `links`."));
+		return;
+	}
+
 	QString error;
 	if (!connection->device_config(device, &existing, &error)) {
 		/* No daemon, or it would not answer. The form stays at its defaults
@@ -411,6 +753,26 @@ void ncfg_device_dialog::load()
 		note->setText(error);
 		return;
 	}
+
+	/* A device with no block opens on `physical`, which asks for nothing: an
+	 * adapter the kernel has is not a link netcfgd creates. */
+	select(kind, existing.kind.isEmpty() ? QStringLiteral("physical") : existing.kind);
+	members->setText(existing.members);
+	stp->setChecked(existing.stp);
+	vlan_filtering->setChecked(existing.vlan_filtering);
+	select(bond_mode, existing.bond_mode);
+	miimon->setValue(existing.miimon);
+	parent_link->setText(existing.parent);
+	vlan_id->setValue(existing.vlan_id < 0 ? 0 : existing.vlan_id);
+	select(vlan_protocol, existing.vlan_protocol);
+	peer->setText(existing.peer);
+	select(macvlan_mode, existing.macvlan_mode);
+	vrf_table->setValue(existing.vrf_table);
+	select(tunnel_mode, existing.tunnel_mode);
+	local->setText(existing.local);
+	remote->setText(existing.remote);
+	vxlan_id->setValue(existing.vxlan_id < 0 ? 0 : existing.vxlan_id);
+	port->setValue(existing.port);
 
 	managed->setChecked(existing.managed);
 	select(on_unmanage, existing.on_unmanage.isEmpty() ? QStringLiteral("leave")
@@ -474,6 +836,23 @@ void ncfg_device_dialog::load()
 QString ncfg_device_dialog::block_text() const
 {
 	ncfg_device_config settings;
+	settings.kind = kind->currentData().toString();
+	settings.members = members->text().trimmed();
+	settings.stp = stp->isChecked();
+	settings.vlan_filtering = vlan_filtering->isChecked();
+	settings.bond_mode = bond_mode->currentData().toString();
+	settings.miimon = miimon->value();
+	settings.parent = parent_link->text().trimmed();
+	settings.vlan_id = vlan_id->value();
+	settings.vlan_protocol = vlan_protocol->currentData().toString();
+	settings.peer = peer->text().trimmed();
+	settings.macvlan_mode = macvlan_mode->currentData().toString();
+	settings.vrf_table = vrf_table->value();
+	settings.tunnel_mode = tunnel_mode->currentData().toString();
+	settings.local = local->text().trimmed();
+	settings.remote = remote->text().trimmed();
+	settings.vxlan_id = vxlan_id->value();
+	settings.port = port->value();
 	settings.managed = managed->isChecked();
 	settings.on_unmanage = on_unmanage->currentData().toString();
 	settings.mtu = mtu->value();
@@ -503,12 +882,43 @@ QString ncfg_device_dialog::block_text() const
 	settings.has_modem = existing.has_modem;
 	settings.sim = sim->text().trimmed();
 	settings.apn = apn->text().trimmed();
-	return ncfg_device_block(device, settings);
+	return ncfg_device_block(name->text().trimmed(), settings);
 }
 
 void ncfg_device_dialog::submit()
 {
-	const QLineEdit *values[] = { mac, regdom, portal_check, sim, apn };
+	const QString refusal = ncfg_device_name_refusal(name->text());
+	if (!refusal.isEmpty()) {
+		note->setText(refusal);
+		return;
+	}
+	const QString chosen = kind->currentData().toString();
+	/* **The fields a kind cannot do without.** netcfgd would refuse these too,
+	 * and saying it here puts the sentence beside the field it is about --
+	 * which is the difference between "this dialog is wrong" and "this line is
+	 * wrong". */
+	const struct {
+		const char *kind;
+		QString     value;
+		const char *said;
+	} required[] = {
+		{ "vlan", parent_link->text().trimmed(), "a vlan needs a parent link" },
+		{ "macvlan", parent_link->text().trimmed(), "a macvlan needs a parent link" },
+		{ "veth", peer->text().trimmed(), "a veth pair needs the other end's name" },
+	};
+	for (const auto &one : required) {
+		if (chosen == QLatin1String(one.kind) && one.value.isEmpty()) {
+			note->setText(QString::fromLatin1(one.said));
+			return;
+		}
+	}
+	if (chosen == QLatin1String("vrf") && vrf_table->value() == 0) {
+		note->setText(QStringLiteral("a vrf needs the routing table it owns"));
+		return;
+	}
+
+	const QLineEdit *values[] = { mac, regdom, portal_check, sim, apn, members, parent_link,
+		peer, local, remote };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
@@ -538,13 +948,14 @@ void ncfg_device_dialog::submit()
 	}
 
 	QString error;
-	if (!connection->config_put(QStringLiteral("device-%1").arg(device), block_text(), true,
+	const QString written = name->text().trimmed();
+	if (!connection->config_put(QStringLiteral("device-%1").arg(written), block_text(), true,
 	        &error)) {
 		note->setText(error);
 		return;
 	}
 	summary = QStringLiteral("wrote device-%1: netcfgd re-read its configuration. "
 	              "Run apply to make the machine match it.")
-	          .arg(device);
+	          .arg(written);
 	accept();
 }

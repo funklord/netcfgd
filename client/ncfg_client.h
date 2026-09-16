@@ -1166,7 +1166,49 @@ typedef struct {
 	int   present;
 	int   managed;
 	char *on_unmanage; /* "leave" or "down" */
-	char *kind;        /* read-only here: a bridge is not made into a bond by a form */
+	/*
+	 * What kind of link this device is, and the fields that kind needs.
+	 *
+	 * **A virtual link is made here or it is made by hand.** A bridge, a bond,
+	 * a VLAN, a veth pair, a macvlan, a VRF, a VXLAN or a tunnel is a device
+	 * netcfgd creates rather than finds, and until this carried the fields
+	 * there was no way to ask for one except by writing the block.
+	 *
+	 * Which fields mean anything depends on `kind`, and the ones that do not
+	 * are empty or zero: a bridge has `members`, a VLAN has `parent` and
+	 * `vlan_id`, a veth has `peer`. A kind this list does not name -- a
+	 * `WireGuard` tunnel, a PPPoE session, an `OpenVPN` link -- is reported
+	 * through `unmodelled`, because each carries something a form of these
+	 * fields would delete.
+	 */
+	char *kind;
+	/* bridge and bond: the links that join it, space-joined. */
+	char *members;
+	/* bridge. */
+	int   stp;
+	int   vlan_filtering;
+	/* bond. */
+	char *bond_mode;
+	int   miimon; /* 0 where the document states none */
+	/* vlan and macvlan and vxlan and tunnel: what it sits on. */
+	char *parent;
+	/* vlan. */
+	int   vlan_id; /* -1 where there is none; 0 is a legal id */
+	char *vlan_protocol;
+	/* veth. */
+	char *peer;
+	/* macvlan. */
+	char *macvlan_mode;
+	/* vrf. */
+	int   vrf_table;
+	/* tunnel. */
+	char *tunnel_mode;
+	/* tunnel and vxlan. */
+	char *local;
+	char *remote;
+	/* vxlan. */
+	int   vxlan_id; /* -1 where there is none */
+	int   port;
 	int   mtu;         /* 0 where the document states none */
 	char *mac;         /* "" where the document states none */
 	/* ethtool. `speed` 0 and `duplex`/`wol` "" mean the document states none. */

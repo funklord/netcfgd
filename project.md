@@ -1011,6 +1011,22 @@ Put by the holder 2026-09-02. The core turns out to be portable already and the
 `Op` enum carries no platform in it -- what is unmeasured is RAM, which is the
 wall. *Asked: could this run on a microcontroller?* below has the numbers.
 
+**And a question for later research: could netcfgd cooperate with a UniFi
+controller for wifi handover?** Put by the holder 2026-09-16. Nothing has been
+investigated; what is known today is only the shape of where the answer would
+have to come from. Handover between access points is decided between the station
+and the APs, not by a controller: 802.11k gives the station a neighbour report,
+802.11v lets an AP ask it to move, and 802.11r makes the move fast enough not to
+drop a call -- all three are `wpa_supplicant` features netcfgd already drives,
+and a UniFi controller's part is enabling them on its APs. So the interesting
+question is not whether netcfgd can be handed a station by a controller (it
+cannot; there is no such protocol), but whether the controller's API can tell
+netcfgd anything the radio cannot see for itself -- which APs belong to one
+network, which band and channel each is on, which are about to be taken down for
+an upgrade. That is a roaming *policy* input, and 0239's `network_for` and the
+roam watcher are where it would land. Worth an hour of reading their API before
+anybody decides it is impossible.
+
 **Three things open that a worker should not settle alone.**
 
 - **The generated profile's header contradicts the renderer.** It tells its
@@ -9472,6 +9488,54 @@ Proven both ways: the count reports a real number (asserting 2 gives
 failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
+
+## 10.145 A window that makes links
+
+0250 gave the window a device tab and an editor for the hardware; what it could
+not do was the other half of what a `device` block is for. **A bridge, a bond, a
+VLAN, a veth pair, a macvlan, a VRF, a VXLAN or a tunnel is a link netcfgd
+creates rather than finds**, and the only way to ask for one was to write the
+block by hand -- the editor refused every kind but `physical`, on the honest
+grounds that a form without the fields would empty the block.
+
+The kind is a field now, with the fields each kind needs beside it: members and
+spanning tree for a bridge, mode and link check for a bond, parent and id for a
+VLAN, the other end for a veth, the table for a VRF, the two addresses for a
+tunnel. `new device...` in the devices tab is where one is made. Decision 0251.
+
+**`physical` writes nothing, and that is the rule.** A real adapter is a link
+the kernel already has; `kind = "physical"` is the absence of a creation, and a
+block stating it would claim netcfgd makes the card.
+
+**One form with rows that appear, not a stack of pages.** A stack was written
+first and thrown away: `members` belongs to two kinds and `parent` to four, so a
+field would have had to live on two pages or be replaced by a label pointing at
+another one.
+
+What still refuses is four kinds rather than every kind: `wireguard`, `pppoe`,
+`openvpn` and `tun`, each of which carries keys, credentials or a foreign config
+file that no field here holds -- plus `ifb`, which netcfgd synthesises and nobody
+writes.
+
+### The check that could not fail
+
+The live probe asserts that a VLAN with no parent is refused *by the dialog*,
+before anything is sent. Written as "the note mentions `parent`" it passed with
+the check removed, because netcfgd refuses a parentless VLAN too and its refusal
+has that word in it -- measured, by deleting the check and watching the test stay
+green. The assertion is the dialog's own sentence now.
+
+**The fifth vacuous fixture this campaign has found**, and the second where the
+wrong answer and the right one were the same string.
+
+### Seven sabotages, and the one worth naming
+
+A physical device writing a creation; a bridge's members dropped; the VLAN
+protocol written when it is the default; any device name accepted; a VLAN with no
+parent sent anyway; the kind not loaded back on reopen; every kind but
+`physical` refused again. The sixth: a form that saves a kind and does not load
+it puts every field back at its default on the next open, and `physical` saved
+over a bridge deletes the bridge.
 
 ## 10.144 The device tab, and the refusal that never lifted
 

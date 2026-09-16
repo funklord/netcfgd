@@ -28,6 +28,12 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	configure_button->setObjectName(QStringLiteral("configure_device"));
 	configure_button->setEnabled(false);
 	table->add_control(configure_button);
+	/* **Where a virtual link is made.** A bridge, a bond, a VLAN, a veth pair:
+	 * each is a link netcfgd creates rather than finds, and until this existed
+	 * the only way to ask for one was to write the block by hand. */
+	new_button = new QPushButton(QStringLiteral("new device..."), this);
+	new_button->setObjectName(QStringLiteral("new_device"));
+	table->add_control(new_button);
 
 	auto *layout = new QVBoxLayout(this);
 	layout->setContentsMargins(0, 0, 0, 0);
@@ -35,6 +41,7 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 
 	connect(configure_button, &QPushButton::clicked, this,
 	    &ncfg_devices_view::configure_selected);
+	connect(new_button, &QPushButton::clicked, this, &ncfg_devices_view::new_device);
 	connect(table, &ncfg_table_view::activated, this,
 	    &ncfg_devices_view::configure_selected);
 	connect(table, &ncfg_table_view::selection_changed, this,
@@ -83,6 +90,17 @@ void ncfg_devices_view::refresh()
 	            "A device is the hardware; what it carries is in `links`.")
 	        .arg(drawn.size())
 	        .arg(described));
+}
+
+void ncfg_devices_view::new_device()
+{
+	ncfg_device_dialog dialog(connection, QString(), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	emit changed();
+	refresh();
 }
 
 void ncfg_devices_view::configure_selected()

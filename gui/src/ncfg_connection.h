@@ -351,7 +351,25 @@ struct ncfg_device_config {
 	bool    present = false;
 	bool    managed = true;
 	QString on_unmanage;
+	/* What kind of link this device is, and the fields that kind needs. A
+	 * virtual link is made here or it is made by hand. */
 	QString kind;
+	QString members;
+	bool    stp = false;
+	bool    vlan_filtering = false;
+	QString bond_mode;
+	int     miimon = 0;
+	QString parent;
+	int     vlan_id = -1;
+	QString vlan_protocol;
+	QString peer;
+	QString macvlan_mode;
+	int     vrf_table = 0;
+	QString tunnel_mode;
+	QString local;
+	QString remote;
+	int     vxlan_id = -1;
+	int     port = 0;
 	int     mtu = 0;
 	QString mac;
 	/* ethtool. A toggle is three-valued: unmanaged, on, off. */
