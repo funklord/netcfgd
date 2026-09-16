@@ -1869,6 +1869,14 @@ live:
 	@# The same journey through the GUI's own buttons, which is the client the
 	@# "buttons don't work properly" report was about. Skips without Qt, which
 	@# is a dependency a machine may reasonably not have.
+	@#
+	@# **Built here rather than inside the namespace.** `unshare -rn` as root
+	@# leaves the tree's own files owned by an unmapped user, so every write
+	@# into it is refused -- and the script's build step failed on that and
+	@# skipped, which meant the GUI's live probes had never run under
+	@# `make live` on this machine. The build belongs outside the namespace;
+	@# the script checks the artifacts.
+	@if command -v qmake6 >/dev/null 2>&1; then 		$(MAKE) --no-print-directory -C client >/dev/null; 		for project in gui/tests/live/*.pro; do 			name=$$(basename $$project .pro); 			mkdir -p gui/tests/live/build/$$name; 			( cd gui/tests/live/build/$$name && qmake6 ../../$$name.pro >/dev/null && 			  $(MAKE) --no-print-directory >/dev/null ) || 				{ echo "live: $$name does not build against this tree" >&2; exit 1; }; 		done; 	fi
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/gui_wifi.sh"
 	@# The profile verbs against a running daemon. The gui's tray lists and
 	@# switches profiles over the socket rather than off its own disk, so what

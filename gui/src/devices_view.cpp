@@ -5,6 +5,7 @@
 
 #include "explain_dialog.h"
 #include "interface_dialog.h"
+#include "linkset_dialog.h"
 #include "ncfg_connection.h"
 #include "network_dialog.h"
 #include "table_view.h"
@@ -94,6 +95,13 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	explain_button->setObjectName(QStringLiteral("explain_interface"));
 	explain_button->setEnabled(false);
 	table->add_control(explain_button);
+	/* **The one control here that needs no row**, because a group being made
+	 * has nothing to select. Without it a linkset could be edited and deleted
+	 * from this window and never created in it, which is the shape every
+	 * feature in this program has had to be rescued from in turn. */
+	group_button = new QPushButton(QStringLiteral("new group..."), this);
+	group_button->setObjectName(QStringLiteral("new_linkset"));
+	table->add_control(group_button);
 
 	auto *layout = new QVBoxLayout(this);
 	layout->setContentsMargins(0, 0, 0, 0);
@@ -104,6 +112,7 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	    &ncfg_devices_view::configure_selected);
 	connect(table, &ncfg_table_view::activated, this, &ncfg_devices_view::configure_selected);
 	connect(explain_button, &QPushButton::clicked, this, &ncfg_devices_view::explain_selected);
+	connect(group_button, &QPushButton::clicked, this, &ncfg_devices_view::new_linkset);
 	connect(table, &ncfg_table_view::selection_changed, this, [this]() {
 		const bool chosen = table->selected_row() >= 0;
 		configure_button->setEnabled(chosen);
@@ -138,6 +147,13 @@ void ncfg_devices_view::refresh()
 	QString ignored;
 	if (!connection->inventory(&rows_known, &ignored)) {
 		rows_known.clear();
+	}
+	/* The daemon's answer about each group, for the rows that are groups. A
+	 * daemon older than this window reports none, and so does a configuration
+	 * with no group in it -- neither is a failure, and both draw the same
+	 * empty column. */
+	if (!connection->linksets(&sets, &ignored)) {
+		sets.clear();
 	}
 	rebuild_filter();
 	redraw();
@@ -228,7 +244,16 @@ void ncfg_devices_view::redraw()
 			cells << known.presence;
 			cells << configured_word(known.configured);
 			cells << known.sets;
-			cells << (seen ? seen->state : QString());
+			/* **A group's row says which member it is using**, where every
+			 * other row says what the kernel reports about the link. A group
+			 * is not a kernel device -- it has no state of its own -- and
+			 * borrowing its chosen member's `up` would tell an operator
+			 * nothing they could not see one row down. */
+			if (known.subject == QLatin1String("linkset")) {
+				cells << ncfg_linkset_standing(sets, known.name);
+			} else {
+				cells << (seen ? seen->state : QString());
+			}
 			/* Which hardware is carrying it, for a network. Blank for an
 			 * interface, which carries itself and would only repeat column
 			 * one. */
@@ -292,9 +317,22 @@ void ncfg_devices_view::explain_selected()
 		return;
 	}
 
+	/* **A group is explained by its members, and the daemon's `explain` is
+	 * about interfaces.** Asking it about `uplink` gets the honest answer
+	 * "netcfgd has nothing to say about uplink", which is true of that request
+	 * and false of the daemon -- it has plenty to say, in the standing it
+	 * already published. Said here rather than opening a dialog that would be
+	 * wrong. */
+	if (ncfg_link_subject(rows_known, name) == QLatin1String("linkset")) {
+		emit reported(ncfg_linkset_why(sets, name));
+		return;
+	}
+
 	ncfg_explain_dialog dialog(connection, name, this);
 	dialog.exec();
 }
+
+
 
 void ncfg_devices_view::configure_selected()
 {
@@ -316,14 +354,8 @@ void ncfg_devices_view::configure_selected()
 		configure_network(name);
 		return;
 	}
-	/* **A linkset has no editor yet, and says so rather than opening one for
-	 * something else.** It is a `linkset` block in the configuration, which
-	 * the files tab edits; offering the interface dialog for a group would be
-	 * exactly the fault 0247 fixed, one kind of row later. */
 	if (subject == QLatin1String("linkset")) {
-		emit reported(QStringLiteral("`%1` is a linkset: a group of links, edited as a "
-		         "`linkset` block under configuration > files")
-		             .arg(name));
+		configure_linkset(name);
 		return;
 	}
 
@@ -333,6 +365,24 @@ void ncfg_devices_view::configure_selected()
 	}
 	emit reported(dialog.outcome());
 	emit changed();
+}
+
+void ncfg_devices_view::new_linkset()
+{
+	configure_linkset(QString());
+}
+
+void ncfg_devices_view::configure_linkset(const QString &name)
+{
+	ncfg_linkset_dialog dialog(connection, name, this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	emit changed();
+	/* The list itself changed -- a group is a row in it -- so this one is
+	 * redrawn rather than left until something else asks. */
+	refresh();
 }
 
 void ncfg_devices_view::configure_network(const QString &id)

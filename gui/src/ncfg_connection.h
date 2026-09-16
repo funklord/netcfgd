@@ -73,6 +73,34 @@ struct ncfg_inventory_row {
 
 bool ncfg_link_shows(const QString &category, const QString &wanted);
 
+/* Where one member of a linkset stands, as a view draws it. */
+struct ncfg_linkset_member_row {
+	QString name;
+	/* What carries it: itself for an interface, the radio for a wifi network,
+	 * the inner winner for a nested set. Empty where nothing does. */
+	QString interface;
+	/* Empty for a member that could be used, and otherwise the daemon's own
+	 * word for why it cannot: "no carrier", "unjoined", "probe failed". */
+	QString ineligible;
+	/* Lower wins; negative where the document ranks this member against
+	 * nothing. 0 is a legal metric and the strongest one. */
+	int     metric = -1;
+};
+
+/* One linkset: a named group of links with one of them in use.
+ *
+ * The members are in the document's order, which is their ranking where two
+ * metrics cannot tell them apart -- so a view redraws the list as it arrives
+ * and never sorts it. */
+struct ncfg_linkset_row {
+	QString name;
+	/* The member in use, and the link it is running on. Both empty for a set
+	 * with nothing usable in it. */
+	QString active;
+	QString interface;
+	QList<ncfg_linkset_member_row> members;
+};
+
 /* Which editor the row called `name` calls for: "network" or "interface".
  *
  * Beside `ncfg_link_shows` and for the same reason -- the decision is one
@@ -80,6 +108,24 @@ bool ncfg_link_shows(const QString &category, const QString &wanted);
  * show you. See the definition.
  */
 QString ncfg_link_subject(const QList<ncfg_inventory_row> &rows, const QString &name);
+
+/* What a group's row says in place of a link state: which member it is using.
+ *
+ * Beside `ncfg_link_subject` and for the same reason -- a group is not a
+ * kernel device and has no state of its own, so what this cell says is a
+ * judgement rather than a field, and both of its wrong answers ("blank" and
+ * "using something that lost") are invisible in a screenshot.
+ */
+QString ncfg_linkset_standing(const QList<ncfg_linkset_row> &sets, const QString &name);
+
+/* One sentence naming what a group chose and what is wrong with the members it
+ * did not choose.
+ *
+ * **The losers are the answer.** Which member is in use is in the row already;
+ * "why am I on the modem" is answered by what is wrong with everything better,
+ * and that is the sentence this builds.
+ */
+QString ncfg_linkset_why(const QList<ncfg_linkset_row> &sets, const QString &name);
 
 struct ncfg_connectivity_row {
 	ncfg_rung_t rung = ncfg_rung_offline;
@@ -532,6 +578,13 @@ public:
 	bool links(QList<ncfg_link_row> *out, QString *error);
 	bool connectivity(ncfg_connectivity_row *out, QString *error);
 	bool inventory(QList<ncfg_inventory_row> *out, QString *error);
+	/* What each linkset chose, and what it chose it from.
+	 *
+	 * Empty where the configuration declares no set. **The daemon's answer,
+	 * not this window's**: a failover two programs work out separately is one
+	 * they can disagree about, and the disagreement looks like a machine that
+	 * cannot decide which link it is on (0248). */
+	bool linksets(QList<ncfg_linkset_row> *out, QString *error);
 	bool plan(ncfg_plan_data *out, QString *error);
 
 	/*

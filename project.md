@@ -9473,6 +9473,61 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.143 The group editor, and a suite that had never run
+
+0248 left a linkset that could be written, compiled, chosen and acted on, and no
+way to make one except by hand. `ncfg_linkset_dialog` is the editor: a name, an
+ordered member list with add, remove, up and down, a delete, and the standing
+shown beside each member -- `in use on wlan0`, `no carrier`, `unjoined`.
+Decision 0249.
+
+**The order is the ranking, so nothing sorts it**, and `ncfg_linkset_block` is a
+free function for the reason `ncfg_link_shows` is: what it produces is
+configuration text, and both ways it can be wrong -- a reordered list, a name
+that ends the string it is written into -- are invisible in a screenshot. In the
+table a group's row says `using <member>` where every other row says what the
+kernel reports, and `why` names the members that lost.
+
+### The suite that had never run
+
+**`make live` has never once run the GUI's live probes on this machine.**
+`gui_wifi.sh` builds the C client before it starts; under `unshare -rn` as root
+every file in the tree belongs to an unmapped user, so the build is refused --
+`cannot create .build-flags.candidate: Permission denied` -- and the script
+skipped on it and exited 0. The build moved to the Makefile, outside the
+namespace, and the script now checks the artifacts rather than the build's exit
+status.
+
+Running them turned up three faults, none of them a linkset:
+
+* `live_wifi` asserted that forgetting one network left the list non-empty, on
+  the strength of a network **another probe** adds -- while its own comment
+  three lines above says to name the network rather than count them. It adds and
+  names its own now.
+* Two of its checks were about the contention banner being hidden when they are
+  about NetworkManager not holding the radio. They passed alone and failed in
+  the suite.
+* **A real defect in the window.** The banner took the *first* warning for the
+  radio and stopped, so on a machine with anything else to say the claim it
+  exists for was hidden behind an unrelated line. It shows every warning about
+  that radio now.
+
+**And one of mine, found the same way.** The new probe grouped whatever links it
+found, which on a shared daemon meant the radio the next probe activates -- so
+`live_wifi` failed four checks about this probe's leftovers. It writes two
+`interface` blocks of its own now and removes all three. `live_interface_dialog`
+records the identical hazard and answers it the same way: the file next door had
+already paid for the lesson, and the probe was written without reading it.
+
+### Six sabotages
+
+Sorting the member list; accepting any name; drawing a blank cell for a group
+with nothing usable; explaining a group by its winner rather than by its losers;
+moving a member down doing nothing; writing the block without replacing the old
+one. The last two are caught only by the live probe, which is the argument for
+having one: each produces a dialog that looks right and a machine that fails
+over the other way round.
+
 ## 10.142 The linkset, and two things it found on the way
 
 10.140 recorded what this would be: a named set of links, one in use at a time,

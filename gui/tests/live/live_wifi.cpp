@@ -263,7 +263,16 @@ int main(int argc, char **argv)
 	 * Invented here rather than requiring a real NetworkManager: what
 	 * `contention.rs` reads is a file, and writing one is the whole of what a
 	 * running NM contributes to this question. */
-	check("with no other manager, nothing is claimed", !contention_shown(&view));
+	/* **The claim, not the banner.** The banner carries whatever the planner
+	 * warns about this radio, and by this point in a full `gui_wifi.sh` run
+	 * other probes have configured wifi networks -- which warns about a radio
+	 * with no supplicant on it. Asserting the banner is hidden therefore
+	 * depended on which probes had run first: it passed alone and failed in
+	 * the suite, which is the wrong way round for a check about NetworkManager
+	 * to behave. */
+	check("with no other manager, nothing is claimed",
+	    !contention_text(&view).contains(QStringLiteral("NetworkManager")),
+	    contention_text(&view));
 
 	const QByteArray index = qgetenv("NCFG_TEST_RADIO_INDEX");
 	const QString run_root = QString::fromUtf8(qgetenv("NCFG_RUN_ROOT"));
@@ -305,7 +314,8 @@ int main(int argc, char **argv)
 	QFile::remove(devices + "/" + QString::fromUtf8(index));
 	view.refresh();
 	check("and the banner goes when the other manager does",
-	    !contention_shown(&view));
+	    !contention_text(&view).contains(QStringLiteral("NetworkManager")),
+	    contention_text(&view));
 
 	/* 6. A daemon that goes away leaves nothing enabled.
 	 *
@@ -357,6 +367,20 @@ int main(int argc, char **argv)
 	    connection.wifi_add(QStringLiteral("466f7267657454686973"),
 	        QStringLiteral("ForgetThis"), QStringLiteral("hunter2hunter2"), QString(), false,
 	        nullptr, &add_why),
+	    add_why);
+	/* **A second one of this probe's own, to be left alone.**
+	 *
+	 * The check below used to assert that the saved list was non-empty
+	 * afterwards, on the strength of a network another probe leaves behind --
+	 * the comment said "the sections above leave `HomeFiber` configured" and
+	 * the sections above are in `live_add_dialog.cpp`, a different program
+	 * against the same daemon. So the assertion held only in the order
+	 * `gui_wifi.sh` happens to run them in, and failed the moment this probe
+	 * ran on its own. Named and added here, which is what the comment three
+	 * lines further down already asks for. */
+	check("and a second one that forgetting must not touch",
+	    connection.wifi_add(QStringLiteral("4b65657054686973"), QStringLiteral("KeepThis"),
+	        QStringLiteral("hunter2hunter2"), QString(), false, nullptr, &add_why),
 	    add_why);
 	view.refresh();
 
@@ -438,7 +462,15 @@ int main(int argc, char **argv)
 		    settles([&] {
 			    QList<ncfg_saved_network_row> rows;
 			    QString why;
-			    return connection.saved_networks(&rows, &why) && !rows.isEmpty();
+			    if (!connection.saved_networks(&rows, &why)) {
+				    return false;
+			    }
+			    for (const ncfg_saved_network_row &entry : rows) {
+				    if (entry.id == QStringLiteral("KeepThis")) {
+					    return true;
+				    }
+			    }
+			    return false;
 		    }, 2000));
 		check("and the status line says so",
 		    reported.contains(QStringLiteral("forgot")),

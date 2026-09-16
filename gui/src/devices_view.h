@@ -41,6 +41,8 @@ private:
 	void redraw();
 	/* Open the network editor on a saved wifi network, by block id. */
 	void configure_network(const QString &id);
+	/* Open the group editor, on an existing group or on a new one. */
+	void configure_linkset(const QString &name);
 
 signals:
 	void reported(const QString &summary);
@@ -53,6 +55,9 @@ private slots:
 	 * `preference` -- which uplink wins -- and a wired port's addressing are
 	 * set, neither of which the program could reach before. */
 	void configure_selected();
+	/* Make a new group of links. The one thing in this tab that needs no row
+	 * selected: there is nothing to select yet. */
+	void new_linkset();
 	/* Ask netcfgd why the selected interface is the way it is.
 	 *
 	 * **The tab answers "what" and could not answer "why".** `ncfg explain`
@@ -72,8 +77,13 @@ private:
 	 * told about. Empty from a daemon that does not report one, which the
 	 * drawing treats as "fall back to `links`". */
 	QList<ncfg_inventory_row> rows_known;
+	/* What each group chose, from the same observation. Kept beside the rows
+	 * so a group's row can say which member it is using without a second
+	 * round trip, and empty where the configuration declares no group. */
+	QList<ncfg_linkset_row> sets;
 	QPushButton     *configure_button;
 	QPushButton     *explain_button;
+	QPushButton     *group_button;
 };
 
 #endif /* NCFG_DEVICES_VIEW_H */

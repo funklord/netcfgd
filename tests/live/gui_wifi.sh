@@ -38,9 +38,28 @@ command -v qmake6 >/dev/null 2>&1 || skip "qmake6 is not installed (apt install 
 command -v python3 >/dev/null 2>&1 || skip "python3 is not installed"
 command -v ip >/dev/null 2>&1 || skip "iproute2 is not installed"
 
-# The C client the view links. Built here rather than assumed, because a live
-# run does not otherwise build it.
-make -C "$repo/client" >/dev/null 2>&1 || skip "the C client will not build"
+# The C client the view links, and the probes that link it.
+#
+# **Built before the namespace, by the Makefile, not here.** Under
+# `unshare -rn` as root the tree's own files belong to an unmapped user, so
+# every write into it is refused -- `make -C client` fails with "cannot create
+# .build-flags.candidate: Permission denied", and this script skipped on it.
+# Measured: on the machine this was written on, that skip meant the GUI's live
+# probes had never once run under `make live`. A test that cannot run is a test
+# that cannot disagree, which is the same fault this file's own comments
+# record about the tests it contains.
+#
+# So the build is attempted and its failure is not fatal by itself: what is
+# fatal is a probe that is not there afterwards. Run through `make live` the
+# Makefile has just built both outside the namespace, and this attempt is a
+# no-op; run by hand outside one it does the building.
+build_log=$(mktemp "${TMPDIR:-/tmp}/ncfg-guiw-build.XXXXXX")
+make -C "$repo/client" > "$build_log" 2>&1 || true
+[ -f "$repo/client/libncfg_client.a" ] || {
+	cat "$build_log" >&2
+	rm -f "$build_log"
+	skip "the C client is not built (make -C client)"
+}
 
 # Found rather than listed, the way `gui/Makefile` finds the headless probes,
 # so a fourth needs no edit here. Each gets its own build directory: two qmake
@@ -61,17 +80,21 @@ for project in $probes; do
 	#
 	# The two are told apart by asking whether Qt is there, once, above. Past
 	# that point a build failure is the tree's fault and says so.
-	if ! (cd "$build" && qmake6 "$project" >/dev/null && make >/dev/null 2>&1); then
-		echo "gui_wifi.sh: FAIL: $name does not build against this tree" >&2
+	(cd "$build" && qmake6 "$project" >/dev/null 2>&1 && make >> "$build_log" 2>&1) || true
+	# **The artifact, not the build's exit status.** The build is refused
+	# outright inside the namespace (see above), so its failure says nothing;
+	# a probe that is missing afterwards says everything, and a probe that is
+	# present was built by the Makefile a moment ago.
+	[ -x "$build/$name" ] || {
+		cat "$build_log" >&2
+		echo "gui_wifi.sh: FAIL: $name is not built" >&2
 		echo "gui_wifi.sh:   qt6 is present, so this is a stale probe rather" >&2
 		echo "gui_wifi.sh:   than a missing dependency; build it by hand to see" >&2
 		exit 1
-	fi
-	[ -x "$build/$name" ] || {
-		echo "gui_wifi.sh: FAIL: $name built nothing" >&2
-		exit 1
 	}
 done
+
+rm -f "$build_log"
 
 # Short, because a unix socket path has to fit in SUN_LEN.
 work=$(mktemp -d /tmp/ncfg-guiw.XXXXXX)

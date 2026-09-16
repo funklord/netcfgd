@@ -266,6 +266,51 @@ typedef struct {
 } ncfg_inventory_t;
 
 /*
+ * Where one member of a linkset stands.
+ *
+ * `interface` is what carries it -- itself for an interface, the radio for a
+ * wifi network, the inner winner for a nested set -- and is "" when nothing
+ * does. `ineligible` is "" for a member that could be used and otherwise the
+ * daemon's own word for why it cannot: "no carrier", "unjoined", "probe
+ * failed", "absent", "empty", "cycle".
+ *
+ * **The reasons are the point.** Which member is in use is visible from the
+ * routing table; why the other three are not is visible nowhere else, and it
+ * is the whole of what somebody asking "why am I on the modem" wants.
+ */
+typedef struct {
+	char *name;
+	char *interface;
+	char *ineligible;
+	/* Lower wins. Negative where the document ranks this member against
+	 * nothing -- 0 is a legal metric and the strongest one, so an absent
+	 * metric must not arrive as 0. The same spelling `ncfg_saved_network_t`
+	 * uses, and for the same reason. */
+	int metric;
+} ncfg_linkset_member_t;
+
+/*
+ * One linkset: a named group of links with one of them in use.
+ *
+ * `active` is the member carrying traffic and `interface` the link it is
+ * running on; both are "" for a set with nothing usable in it. The members are
+ * in the order the document lists them, which is their ranking where metrics
+ * cannot tell two apart.
+ */
+typedef struct {
+	char                  *name;
+	char                  *active;
+	char                  *interface;
+	ncfg_linkset_member_t *members;
+	size_t                 count;
+} ncfg_linkset_t;
+
+typedef struct {
+	ncfg_linkset_t *items;
+	size_t          count;
+} ncfg_linksets_t;
+
+/*
  * How far this machine has got towards carrying traffic.
  *
  * **One answer, from the daemon.** Four clients used to work this out for
@@ -556,6 +601,7 @@ char *ncfg_access_point_display(int named, const char *name, const char *ssid);
 
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_inventory_free(ncfg_inventory_t *inventory);
+void ncfg_linksets_free(ncfg_linksets_t *linksets);
 void ncfg_connectivity_free(ncfg_connectivity_t *connectivity);
 void ncfg_plan_free(ncfg_plan_t *plan);
 void ncfg_journal_free(ncfg_journal_t *journal);
@@ -578,6 +624,15 @@ int ncfg_client_links(ncfg_client_t *client, ncfg_links_t *out, char *err, size_
  * Empty from a daemon older than this client, which a caller renders by
  * falling back to `ncfg_client_links` rather than showing nothing.
  */
+/*
+ * What each linkset chose, and what it chose it from.
+ *
+ * Empty where the configuration declares no set, and from a daemon older than
+ * this client -- which are the same answer to a caller: there is no group to
+ * draw.
+ */
+int ncfg_client_linksets(ncfg_client_t *client, ncfg_linksets_t *out, char *err,
+                         size_t err_size);
 int ncfg_client_inventory(ncfg_client_t *client, ncfg_inventory_t *out, char *err,
                           size_t err_size);
 /*

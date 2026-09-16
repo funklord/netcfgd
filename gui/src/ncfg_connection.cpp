@@ -180,6 +180,50 @@ QString ncfg_link_subject(const QList<ncfg_inventory_row> &rows, const QString &
 	return QStringLiteral("interface");
 }
 
+QString ncfg_linkset_standing(const QList<ncfg_linkset_row> &sets, const QString &name)
+{
+	for (const ncfg_linkset_row &known : sets) {
+		if (known.name != name) {
+			continue;
+		}
+		/* **"nothing usable" rather than blank.** A group whose members have
+		 * all failed is the state an operator most needs to see, and an empty
+		 * cell reads as a value the program failed to fetch. */
+		return known.active.isEmpty()
+		    ? QStringLiteral("nothing usable")
+		    : QStringLiteral("using %1").arg(known.active);
+	}
+	/* A group the daemon did not report on: older than this window, or a row
+	 * drawn from a configuration the daemon has not read yet. Nothing is
+	 * claimed, which is not the same as nothing being usable. */
+	return QString();
+}
+
+QString ncfg_linkset_why(const QList<ncfg_linkset_row> &sets, const QString &name)
+{
+	for (const ncfg_linkset_row &known : sets) {
+		if (known.name != name) {
+			continue;
+		}
+		QStringList lost;
+		for (const ncfg_linkset_member_row &member : known.members) {
+			if (member.name == known.active || member.ineligible.isEmpty()) {
+				continue;
+			}
+			lost << QStringLiteral("%1 %2").arg(member.name, member.ineligible);
+		}
+		const QString because = lost.isEmpty()
+		    ? QStringLiteral("every other member is ready")
+		    : lost.join(QStringLiteral(", "));
+		return known.active.isEmpty()
+		    ? QStringLiteral("`%1` has nothing it can use: %2").arg(name, because)
+		    : QStringLiteral("`%1` is using %2; %3").arg(name, known.active, because);
+	}
+	return QStringLiteral("netcfgd reports nothing about `%1`. A group it has not read "
+	              "yet, or a daemon older than this window.")
+	    .arg(name);
+}
+
 bool ncfg_connection::connectivity(ncfg_connectivity_row *out, QString *error)
 {
 	if (!out) {
@@ -254,6 +298,49 @@ bool ncfg_connection::inventory(QList<ncfg_inventory_row> *out, QString *error)
 		*out << row;
 	}
 	ncfg_inventory_free(&found);
+	return true;
+}
+
+bool ncfg_connection::linksets(QList<ncfg_linkset_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_linksets_t found = {};
+	char message[NCFG_ERROR_MAX];
+
+	if (!ncfg_client_linksets(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_linkset_row row;
+		row.name = from_c(found.items[i].name);
+		row.active = from_c(found.items[i].active);
+		row.interface = from_c(found.items[i].interface);
+		for (size_t j = 0; j < found.items[i].count; j++) {
+			ncfg_linkset_member_row member;
+			member.name = from_c(found.items[i].members[j].name);
+			member.interface = from_c(found.items[i].members[j].interface);
+			member.ineligible = from_c(found.items[i].members[j].ineligible);
+			member.metric = found.items[i].members[j].metric;
+			row.members << member;
+		}
+		*out << row;
+	}
+	ncfg_linksets_free(&found);
 	return true;
 }
 

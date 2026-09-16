@@ -467,22 +467,32 @@ void ncfg_wifi_view::update_contention()
 		return;
 	}
 
+	/* **Every warning about this radio, not the first one.**
+	 *
+	 * This took whichever warning came first and stopped. On a machine with
+	 * anything else to say about the radio -- a configured network and no
+	 * supplicant running is enough -- the claim this banner exists for was
+	 * therefore hidden behind an unrelated line, and the one message that
+	 * explains every other thing on the tab behaving oddly was the one an
+	 * operator could not see. Found by `live_wifi` failing once the GUI's live
+	 * probes could run at all.
+	 *
+	 * The planner's own sentences, in its order, and its remedy after each.
+	 * Rewording either would put a second description of one condition in a
+	 * second place. */
+	QStringList said;
 	for (const ncfg_note_row &warning : plan.warnings) {
 		if (warning.interface != interface) {
 			continue;
 		}
-		/* The planner's own sentence, and its remedy after it. Rewording
-		 * either would put a second description of one condition in a second
-		 * place, and the remedy is the half an operator acts on. */
 		QString text = warning.message;
 		if (!warning.remedy.isEmpty()) {
 			text += QStringLiteral("\n\nTo hand it over: %1").arg(warning.remedy);
 		}
-		contention->setText(text);
-		contention->setVisible(true);
-		return;
+		said << text;
 	}
-	contention->setVisible(false);
+	contention->setText(said.join(QStringLiteral("\n\n")));
+	contention->setVisible(!said.isEmpty());
 }
 
 void ncfg_wifi_view::update_status()
