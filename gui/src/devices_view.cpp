@@ -29,10 +29,22 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	 * of the same answer for a radio: a wireless link that is up is up *on*
 	 * something, and which network that is decides the link's route metric
 	 * (0153). Blank for every wired link, which is most of them -- and a blank
-	 * column is the honest rendering, since a cable has no network to be on. */
+	 * column is the honest rendering, since a cable has no network to be on.
+	 *
+	 * **`kind` was here and is not, and the reason was visible rather than
+	 * argued.** With `configured` added the table stopped fitting: a
+	 * horizontal scrollbar appeared and the MAC was truncated mid-address.
+	 * `kind` is the column that had stopped paying for itself -- it reads
+	 * `device` for a real card and for the loopback, which is the client's
+	 * substitute for the empty string the kernel reports, while `category`
+	 * already says `ethernet` and `loopback`; and where the kernel does give a
+	 * kind -- `bridge`, `wireguard` -- `category` says the same word. On this
+	 * machine it added nothing to any row and cost the width that truncated
+	 * the MAC. The kernel's own kind is still in `ncfg_link_row` for anything
+	 * that wants it. */
 	QStringList columns;
 	columns << QStringLiteral("interface") << QStringLiteral("category")
-	        << QStringLiteral("presence") << QStringLiteral("kind")
+	        << QStringLiteral("presence") << QStringLiteral("configured")
 	        << QStringLiteral("state") << QStringLiteral("network")
 	        << QStringLiteral("addresses") << QStringLiteral("mtu")
 	        << QStringLiteral("mac");
@@ -155,6 +167,21 @@ void ncfg_devices_view::rebuild_filter()
 	filter->setCurrentIndex(again >= 0 ? again : 0);
 }
 
+/* How the `configured` flag reads in a cell.
+ *
+ * **Words rather than a tick or a blank**, because the column has three states
+ * and only two of them are the flag. "yes" is a link the document names, "no"
+ * is one the machine has that nobody asked for -- a container bridge, a card
+ * another manager owns -- and an *empty* cell is a daemon too old to say. A
+ * blank standing for "no" would make the third indistinguishable from the
+ * second, which is the same collapse `presence` exists to avoid one column
+ * over.
+ */
+static QString configured_word(bool configured)
+{
+	return configured ? QStringLiteral("yes") : QStringLiteral("no");
+}
+
 void ncfg_devices_view::redraw()
 {
 	const QString wanted = filter->currentText();
@@ -182,7 +209,7 @@ void ncfg_devices_view::redraw()
 			cells << known.name;
 			cells << known.category;
 			cells << known.presence;
-			cells << (seen ? seen->kind : QString());
+			cells << configured_word(known.configured);
 			cells << (seen ? seen->state : QString());
 			cells << (seen ? seen->network : QString());
 			cells << (seen ? seen->addresses : QString());
@@ -203,7 +230,10 @@ void ncfg_devices_view::redraw()
 			 * older than the window, and the kernel has the link, so it is
 			 * there. */
 			cells << QStringLiteral("present");
-			cells << link.kind;
+			/* No inventory to ask, so this is not claimed either way. An
+			 * older daemon does not say which links the document names, and
+			 * writing "no" would assert something nobody was told. */
+			cells << QString();
 			cells << link.state;
 			cells << link.network;
 			cells << link.addresses;
